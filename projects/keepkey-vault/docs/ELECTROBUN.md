@@ -1,0 +1,75 @@
+# Electrobun Development Notes
+
+## How Electrobun Works
+
+Electrobun is a desktop app framework that uses **Bun** as the runtime and **system WebViews** (not bundled Chromium). This means:
+
+- ~14MB app bundles (vs ~150MB+ for Electron)
+- <50ms startup time
+- Delta updates ~14KB
+- Native WebView performance
+
+## Two-Process Model
+
+1. **Main process** (`src/bun/index.ts`): Runs in Bun runtime. Handles window management, file I/O, system APIs, and RPC bridge.
+2. **View process** (`src/mainview/`): Runs in the system WebView. Standard web app (React, Vite).
+
+Communication between processes uses Electrobun's typed RPC system (`electrobun/bun` + `electrobun/view`).
+
+## Development Modes
+
+### Standard Dev (`make dev`)
+1. Vite compiles React app to `dist/`
+2. `electrobun build` packages it into the native app bundle
+3. `electrobun dev` launches the app loading from `views://mainview/index.html`
+
+### HMR Dev (`make dev-hmr`)
+1. Vite dev server starts on port 5173
+2. Electrobun app detects the running Vite server
+3. WebView loads from `http://localhost:5173` instead of bundled assets
+4. Code changes reflect instantly without rebuilding
+
+## Build Pipeline
+
+```
+src/mainview/ ──[vite build]──> dist/ ──[electrobun build]──> build/dev-macos-arm64/keepkey-vault-dev.app
+```
+
+### Production
+```bash
+make build-prod   # Creates production-signed app bundle
+```
+
+## Config Files
+
+- `electrobun.config.ts` - App identity, build copy rules, platform config
+- `vite.config.ts` - Vite build settings (root, outDir, dev server port)
+- `package.json` - Dependencies and script definitions
+
+## Key Differences from Electron
+
+| Feature | Electron | Electrobun |
+|---------|----------|------------|
+| Runtime | Node.js + Chromium | Bun + System WebView |
+| IPC | `ipcMain`/`ipcRenderer` | Typed RPC (`electrobun/bun` + `electrobun/view`) |
+| Bundle size | ~150MB+ | ~14MB |
+| Startup | 500ms+ | <50ms |
+| Updates | Full app download | Delta patches (~14KB) |
+| Config | electron-builder/forge | `electrobun.config.ts` |
+| Asset loading | `file://` protocol | `views://` protocol |
+
+## Troubleshooting
+
+### ENOENT launcher error
+The `electrobun build` step must run before `electrobun dev`. The dev script handles this:
+```json
+"dev": "vite build && electrobun build && electrobun dev"
+```
+
+### HMR not working
+Ensure Vite dev server is running on port 5173. Use `make dev-hmr` which starts both concurrently.
+
+### WebView blank/white
+Check browser console in the WebView. Common causes:
+- Missing `dist/` output (run `vite build` first)
+- Build copy paths wrong in `electrobun.config.ts`

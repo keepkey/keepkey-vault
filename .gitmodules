@@ -1,0 +1,3 @@
+[submodule "hdwallet"]
+	path = hdwallet
+	url = https://github.com/keepkey/hdwallet

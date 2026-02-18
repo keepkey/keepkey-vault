@@ -1,0 +1,31 @@
+{
+	"name": "keepkey-vault",
+	"version": "0.1.0",
+	"description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
+	"scripts": {
+		"dev": "vite build && electrobun build && electrobun dev",
+		"dev:hmr": "concurrently \"bun run hmr\" \"bun run dev\"",
+		"hmr": "vite --port 5173",
+		"build": "vite build && electrobun build",
+		"build:prod": "vite build && electrobun build --channel prod",
+		"start": "bun run dev"
+	},
+	"dependencies": {
+		"electrobun": "latest",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"@chakra-ui/react": "^3.33.0",
+		"@emotion/react": "^11.14.0",
+		"react-router-dom": "^7.0.0",
+		"react-icons": "^5.5.0"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/react": "^18.3.12",
+		"@types/react-dom": "^18.3.1",
+		"@vitejs/plugin-react": "^4.3.4",
+		"concurrently": "^9.1.0",
+		"typescript": "^5.7.2",
+		"vite": "^6.0.3"
+	}
+}

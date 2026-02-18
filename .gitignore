@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+bun.lock
+*.log
+.DS_Store
+.env
+.env.local
