@@ -144,6 +144,20 @@ export function startRestApi(engine: EngineController, port = 1646): Server {
           return json({ address })
         }
 
+        // ── PIN Management ────────────────────────────────────────────
+
+        if (path === '/api/device/pin/prompt' && req.method === 'POST') {
+          const result = await engine.promptPin()
+          return json(result)
+        }
+
+        if (path === '/api/device/pin/submit' && req.method === 'POST') {
+          const body = await req.json() as any
+          if (!body.pin) return json({ error: 'Missing pin field' }, 400)
+          await engine.sendPin(body.pin)
+          return json({ success: true, message: 'PIN accepted' })
+        }
+
         // ── Device Management ──────────────────────────────────────────
 
         if (path === '/api/device/wipe' && req.method === 'POST') {

@@ -133,6 +133,13 @@ export class EngineController extends EventEmitter {
     this.lastState = state
     console.log(`[Engine] State → ${state}`)
     this.emit('state-change', this.getDeviceState())
+
+    // Auto-trigger PIN matrix on device OLED when state becomes needs_pin
+    if (state === 'needs_pin') {
+      this.promptPin().catch(err => {
+        console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
+      })
+    }
   }
 
   // ── Firmware Manifest ──────────────────────────────────────────────────
@@ -557,6 +564,37 @@ export class EngineController extends EventEmitter {
     await this.wallet.applySettings({ label: opts.label })
     this.cachedFeatures = await this.wallet.getFeatures()
     this.emit('state-change', this.getDeviceState())
+  }
+
+  /**
+   * Trigger the PIN matrix on a locked device by requesting a public key.
+   * GetPublicKey accesses the seed, which requires PIN on locked devices.
+   * The transport PIN_REQUEST event will fire, prompting the UI overlay.
+   */
+  async promptPin() {
+    if (!this.wallet) throw new Error('No device connected')
+    // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device
+    // The transport PIN_REQUEST listener (line 70) will emit 'pin-request' to the UI
+    // We intentionally don't await the result — the PIN_REQUEST event fires mid-call
+    // and we need to let the UI handle it before the operation can complete
+    const promise = this.wallet.getPublicKeys([{
+      addressNList: [0x8000002C, 0x80000000, 0x80000000], // m/44'/0'/0'
+      curve: 'secp256k1',
+      showDisplay: false,
+      coin: 'Bitcoin',
+    }])
+    // If device is already unlocked, getPublicKeys completes immediately
+    // If locked, PIN_REQUEST fires and we wait for sendPin() to resolve it
+    try {
+      await promise
+      // If we get here, device was already unlocked
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.updateState(this.deriveState(this.cachedFeatures))
+      return { status: 'unlocked', message: 'Device already unlocked' }
+    } catch (err: any) {
+      // PIN flow interruption is expected — the UI handles PIN entry
+      throw err
+    }
   }
 
   async sendPin(pin: string) {
