@@ -3,7 +3,7 @@ import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
 import splashBg from '../assets/splash-bg.png'
 
-export function SplashScreen({ statusText, children }: { statusText: string; children?: React.ReactNode }) {
+export function SplashScreen({ statusText, hintText, children }: { statusText: string; hintText?: string; children?: React.ReactNode }) {
   return (
     <Box
       height="100vh"
@@ -47,6 +47,11 @@ export function SplashScreen({ statusText, children }: { statusText: string; chi
           </Text>
           <EllipsisDots interval={300} />
         </Flex>
+        {hintText && (
+          <Text fontSize="xs" color="gray.500" mt={2} maxW="340px" textAlign="center">
+            {hintText}
+          </Text>
+        )}
       </Box>
       {children}
     </Box>

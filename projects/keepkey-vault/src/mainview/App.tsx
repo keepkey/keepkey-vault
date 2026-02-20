@@ -26,15 +26,29 @@ function App() {
 
 	// 3-phase state machine
 	const phase: AppPhase =
-		deviceState.state === 'disconnected'
+		(deviceState.state === 'disconnected' || deviceState.state === 'connected_unpaired' || deviceState.state === 'error')
 			? 'splash'
 			: !wizardComplete && ['bootloader', 'needs_firmware', 'needs_init'].includes(deviceState.state)
 				? 'setup'
 				: 'ready'
 
-	// Phase 1: Splash — searching for device
+	// Phase 1: Splash — searching/connecting to device
 	if (phase === 'splash') {
-		return <SplashScreen statusText="Searching for KeepKey" />
+		const splashText =
+			deviceState.state === 'connected_unpaired'
+				? 'KeepKey detected — connecting'
+				: deviceState.state === 'error'
+					? `Connection error: ${deviceState.error || 'Unknown'}`
+					: 'Searching for KeepKey'
+
+		const hintText =
+			deviceState.state === 'connected_unpaired'
+				? 'If this takes too long, try: close other apps using KeepKey, or unplug and replug the device.'
+				: deviceState.state === 'error'
+					? 'Try unplugging and replugging your KeepKey, or close other apps that may be using it.'
+					: undefined
+
+		return <SplashScreen statusText={splashText} hintText={hintText} />
 	}
 
 	// Phase 2: Setup — OOB wizard for bootloader/firmware/init

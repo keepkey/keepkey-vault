@@ -1,5 +1,5 @@
 // Device state types
-export type DeviceState = 'disconnected' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
+export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
 export type ActiveTransport = 'hid' | 'webusb' | null
 
@@ -19,11 +19,28 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  error?: string | null
 }
 
 export interface FirmwareProgress {
   percent: number
   message: string
+}
+
+// Remote firmware manifest (from GitHub)
+export interface FirmwareManifest {
+  latest: {
+    firmware: { version: string; url: string; hash: string }
+    bootloader: { version: string; url: string; hash: string }
+  }
+  beta: {
+    firmware: { version: string; url: string; hash: string }
+    bootloader: { version: string; url: string; hash: string }
+  }
+  hashes: {
+    bootloader: Record<string, string>
+    firmware: Record<string, string>
+  }
 }
 
 // Electrobun RPC Schema

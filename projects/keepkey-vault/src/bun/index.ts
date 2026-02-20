@@ -1,14 +1,19 @@
 import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun"
 import { EngineController } from "./engine-controller"
+import { startRestApi } from "./rest-api"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`
+const REST_API_PORT = 1646
 
 // ── Engine Controller ─────────────────────────────────────────────────
 const engine = new EngineController()
 
-// ── RPC Bridge ────────────────────────────────────────────────────────
+// ── REST API Server (port 1646 — kkapi:// protocol) ───────────────────
+const restServer = startRestApi(engine, REST_API_PORT)
+
+// ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 30000, // firmware ops can be slow
 	handlers: {
@@ -64,12 +69,13 @@ const mainWindow = new BrowserWindow({
 	},
 })
 
-// Start device polling after window is created
-engine.startPolling()
+// Start engine (USB event listeners + initial device sync)
+await engine.start()
 
 // Quit the app when the main window is closed
 mainWindow.on("close", () => {
-	engine.stopPolling()
+	engine.stop()
+	restServer.stop()
 	Utils.quit()
 })
 
