@@ -11,6 +11,7 @@ import { DeviceStatus } from "./components/device/DeviceStatus"
 import { DeviceSettings } from "./components/device/DeviceSettings"
 import { useKeepKey } from "./hooks/useKeepKey"
 import { SplashScreen } from "./components/SplashScreen"
+import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { useDeviceState } from "./hooks/useDeviceState"
 
@@ -18,37 +19,52 @@ const SIDEBAR_WIDTH = "220px"
 const HEADER_HEIGHT = "56px"
 const STATUSBAR_HEIGHT = "32px"
 
-type AppPhase = 'splash' | 'setup' | 'ready'
+type AppPhase = 'splash' | 'claimed' | 'setup' | 'ready'
 
 function App() {
 	const deviceState = useDeviceState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 
-	// 3-phase state machine
+	// Detect "claimed by another app" — device seen but pair failed with timeout/access error
+	const isClaimed = deviceState.state === 'connected_unpaired' && !!deviceState.error
+
+	// 4-phase state machine
 	const phase: AppPhase =
-		(deviceState.state === 'disconnected' || deviceState.state === 'connected_unpaired' || deviceState.state === 'error')
-			? 'splash'
-			: !wizardComplete && ['bootloader', 'needs_firmware', 'needs_init'].includes(deviceState.state)
-				? 'setup'
-				: 'ready'
+		isClaimed
+			? 'claimed'
+			: (deviceState.state === 'disconnected' || deviceState.state === 'connected_unpaired' || deviceState.state === 'error')
+				? 'splash'
+				: !wizardComplete && ['bootloader', 'needs_firmware', 'needs_init'].includes(deviceState.state)
+					? 'setup'
+					: 'ready'
+
+	// Phase: Claimed — device in use by another application
+	if (phase === 'claimed') {
+		return (
+			<SplashScreen statusText="KeepKey detected" variant="claimed">
+				<DeviceClaimedDialog error={deviceState.error || 'Device claimed by another process'} />
+			</SplashScreen>
+		)
+	}
 
 	// Phase 1: Splash — searching/connecting to device
 	if (phase === 'splash') {
-		const splashText =
-			deviceState.state === 'connected_unpaired'
-				? 'KeepKey detected — connecting'
-				: deviceState.state === 'error'
-					? `Connection error: ${deviceState.error || 'Unknown'}`
-					: 'Searching for KeepKey'
+		const isConnecting = deviceState.state === 'connected_unpaired'
+		const isError = deviceState.state === 'error'
 
-		const hintText =
-			deviceState.state === 'connected_unpaired'
-				? 'If this takes too long, try: close other apps using KeepKey, or unplug and replug the device.'
-				: deviceState.state === 'error'
-					? 'Try unplugging and replugging your KeepKey, or close other apps that may be using it.'
-					: undefined
+		const splashText = isConnecting
+			? 'KeepKey detected — connecting'
+			: isError
+				? `Connection error: ${deviceState.error || 'Unknown'}`
+				: 'Searching for KeepKey'
 
-		return <SplashScreen statusText={splashText} hintText={hintText} />
+		const variant = isConnecting ? 'connecting' : isError ? 'error' : 'searching'
+
+		const hintText = isError
+			? 'Try unplugging and replugging your KeepKey, or close other apps that may be using it.'
+			: undefined
+
+		return <SplashScreen statusText={splashText} hintText={hintText} variant={variant} />
 	}
 
 	// Phase 2: Setup — OOB wizard for bootloader/firmware/init
@@ -57,7 +73,6 @@ function App() {
 	}
 
 	// Phase 3: Ready — show dashboard
-	// For needs_pin / needs_passphrase, show splash with message for now
 	if (deviceState.state === 'needs_pin') {
 		return <SplashScreen statusText="Device is locked — enter PIN on the device" />
 	}

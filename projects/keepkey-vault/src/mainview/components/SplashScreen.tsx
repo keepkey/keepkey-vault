@@ -3,7 +3,23 @@ import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
 import splashBg from '../assets/splash-bg.png'
 
-export function SplashScreen({ statusText, hintText, children }: { statusText: string; hintText?: string; children?: React.ReactNode }) {
+interface SplashScreenProps {
+  statusText: string
+  hintText?: string
+  children?: React.ReactNode
+  variant?: 'searching' | 'connecting' | 'error' | 'claimed'
+}
+
+const STATUS_DOT_COLORS: Record<string, string> = {
+  searching: 'gray.500',
+  connecting: 'yellow.400',
+  error: 'red.400',
+  claimed: 'orange.400',
+}
+
+export function SplashScreen({ statusText, hintText, children, variant = 'searching' }: SplashScreenProps) {
+  const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
+
   return (
     <Box
       height="100vh"
@@ -41,11 +57,17 @@ export function SplashScreen({ statusText, hintText, children }: { statusText: s
         bg="rgba(0, 0, 0, 0.5)"
       >
         <Flex gap="2" justifyContent="center" alignItems="center">
-          <Spinner size="xs" color="gray.400" />
+          {variant === 'searching' ? (
+            <Spinner size="xs" color="gray.400" />
+          ) : (
+            <Box w="8px" h="8px" borderRadius="full" bg={dotColor} flexShrink={0}
+              style={{ animation: variant === 'connecting' ? 'pulse 1.5s infinite' : undefined }}
+            />
+          )}
           <Text fontSize="xs" color="gray.300">
             {statusText}
           </Text>
-          <EllipsisDots interval={300} />
+          {(variant === 'searching' || variant === 'connecting') && <EllipsisDots interval={300} />}
         </Flex>
         {hintText && (
           <Text fontSize="xs" color="gray.500" mt={2} maxW="340px" textAlign="center">
@@ -54,6 +76,12 @@ export function SplashScreen({ statusText, hintText, children }: { statusText: s
         )}
       </Box>
       {children}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+      `}</style>
     </Box>
   )
 }

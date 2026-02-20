@@ -13,9 +13,22 @@ const FALLBACK_BOOTLOADER = '2.1.4'
 
 // Delay before trying to pair after USB attach — device needs time to enumerate
 const ATTACH_DELAY_MS = 1500
+// Timeout for pairRawDevice — it can hang if device is in a bad state
+const PAIR_TIMEOUT_MS = 10000
+// Retry interval when device is claimed by another app
+const CLAIMED_RETRY_MS = 5000
 
 const WORD_COUNT_TO_ENTROPY: Record<number, 128 | 192 | 256> = {
   12: 128, 18: 192, 24: 256,
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ])
 }
 
 export class EngineController extends EventEmitter {
@@ -32,6 +45,7 @@ export class EngineController extends EventEmitter {
   private manifest: FirmwareManifest | null = null
   private syncing = false
   private lastError: string | null = null
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
     super()
@@ -48,17 +62,14 @@ export class EngineController extends EventEmitter {
     usb.on('attach', (device) => {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB attached')
-
-      // Immediately tell UI we see it
       this.updateState('connected_unpaired')
-
-      // Give device time to enumerate USB interfaces before pairing
       setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
     })
 
     usb.on('detach', (device) => {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB detached')
+      this.clearRetry()
       this.wallet = null
       this.activeTransport = null
       this.cachedFeatures = null
@@ -66,17 +77,19 @@ export class EngineController extends EventEmitter {
       this.updateState('disconnected')
     })
 
-    // Device may already be plugged in — try after a short delay for startup
+    // Device may already be plugged in
     await this.syncState()
   }
 
   stop() {
+    this.clearRetry()
     usb.removeAllListeners('attach')
     usb.removeAllListeners('detach')
   }
 
   private updateState(state: DeviceState) {
     this.lastState = state
+    console.log(`[Engine] State → ${state}`)
     this.emit('state-change', this.getDeviceState())
   }
 
@@ -126,7 +139,12 @@ export class EngineController extends EventEmitter {
         this.wallet = result.wallet
         this.lastError = null
         try {
-          this.cachedFeatures = await result.wallet.getFeatures()
+          console.log('[Engine] Getting features...')
+          this.cachedFeatures = await withTimeout(
+            result.wallet.getFeatures(),
+            PAIR_TIMEOUT_MS,
+            'getFeatures'
+          )
           console.log('[Engine] Features:', JSON.stringify({
             initialized: this.cachedFeatures?.initialized,
             firmwareVersion: this.extractVersion(this.cachedFeatures),
@@ -142,7 +160,6 @@ export class EngineController extends EventEmitter {
           this.updateState('error')
         }
       } else if (result.usbDetected) {
-        // Device is on USB bus but we can't pair it
         this.lastError = result.error || 'Device detected but cannot be claimed'
         console.warn(`[Engine] Device seen but not paired: ${this.lastError}`)
         this.updateState('connected_unpaired')
@@ -154,6 +171,26 @@ export class EngineController extends EventEmitter {
       console.error('[Engine] syncState error:', err)
     } finally {
       this.syncing = false
+      // Auto-retry when device is claimed — other app may release it
+      if (this.lastState === 'connected_unpaired' && this.lastError) {
+        this.scheduleRetry()
+      }
+    }
+  }
+
+  private scheduleRetry() {
+    this.clearRetry()
+    console.log(`[Engine] Will retry pairing in ${CLAIMED_RETRY_MS / 1000}s...`)
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      this.syncState()
+    }, CLAIMED_RETRY_MS)
+  }
+
+  private clearRetry() {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
     }
   }
 
@@ -172,18 +209,31 @@ export class EngineController extends EventEmitter {
     let lastError: string | null = null
 
     // Try WebUSB first (modern firmware, PID 0x0002)
+    console.log('[Engine] Scanning for WebUSB device...')
     try {
-      const webUsbDevice = await this.webUsbAdapter.getDevice().catch(() => undefined)
+      const webUsbDevice = await this.webUsbAdapter.getDevice().catch((err: any) => {
+        console.log('[Engine] WebUSB getDevice() returned nothing:', err?.message || 'no device')
+        return undefined
+      })
       if (webUsbDevice) {
         usbDetected = true
-        console.log('[Engine] WebUSB device found, pairing...')
+        // Tell UI we found it before the potentially-hanging pair call
+        if (this.lastState === 'disconnected') {
+          this.updateState('connected_unpaired')
+        }
+        console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
         try {
-          const wallet = await this.webUsbAdapter.pairRawDevice(webUsbDevice)
+          const wallet = await withTimeout(
+            this.webUsbAdapter.pairRawDevice(webUsbDevice),
+            PAIR_TIMEOUT_MS,
+            'WebUSB pairRawDevice'
+          )
           if (wallet) {
             this.activeTransport = 'webusb'
             console.log('[Engine] Paired via WebUSB')
             return { wallet, usbDetected: true, error: null }
           }
+          console.warn('[Engine] WebUSB pairRawDevice returned falsy')
         } catch (err: any) {
           lastError = err?.message || String(err)
           console.warn('[Engine] WebUSB pair failed:', lastError)
@@ -191,37 +241,46 @@ export class EngineController extends EventEmitter {
             console.warn('[Engine] Device claimed by another process, trying HID...')
           }
         }
-      } else {
-        console.log('[Engine] No WebUSB device found')
       }
     } catch (err: any) {
       console.warn('[Engine] WebUSB getDevice error:', err?.message || err)
     }
 
     // Fallback to HID (bootloader, legacy, or OS-blocked USB)
+    console.log('[Engine] Scanning for HID device...')
     try {
-      const hidDevice = await this.hidAdapter.getDevice().catch(() => undefined)
+      const hidDevice = await this.hidAdapter.getDevice().catch((err: any) => {
+        console.log('[Engine] HID getDevice() returned nothing:', err?.message || 'no device')
+        return undefined
+      })
       if (hidDevice) {
         usbDetected = true
-        console.log('[Engine] HID device found, pairing...')
+        if (this.lastState === 'disconnected') {
+          this.updateState('connected_unpaired')
+        }
+        console.log('[Engine] HID device found, attempting pairRawDevice...')
         try {
-          const wallet = await this.hidAdapter.pairRawDevice(hidDevice)
+          const wallet = await withTimeout(
+            this.hidAdapter.pairRawDevice(hidDevice),
+            PAIR_TIMEOUT_MS,
+            'HID pairRawDevice'
+          )
           if (wallet) {
             this.activeTransport = 'hid'
             console.log('[Engine] Paired via HID')
             return { wallet, usbDetected: true, error: null }
           }
+          console.warn('[Engine] HID pairRawDevice returned falsy')
         } catch (err: any) {
           lastError = err?.message || String(err)
           console.warn('[Engine] HID pair failed:', lastError)
         }
-      } else {
-        console.log('[Engine] No HID device found')
       }
     } catch (err: any) {
       console.warn('[Engine] HID getDevice error:', err?.message || err)
     }
 
+    console.log(`[Engine] initializeWallet done — usbDetected=${usbDetected}, error=${lastError}`)
     return { wallet: undefined, usbDetected, error: lastError }
   }
 
