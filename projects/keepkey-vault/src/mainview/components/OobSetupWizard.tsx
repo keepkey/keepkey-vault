@@ -277,6 +277,9 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
 
   // ── Init: Create / Recover ─────────────────────────────────────────────
 
+  // Device-interactive ops need 10 min timeout — user enters seed words on device
+  const DEVICE_INTERACTION_TIMEOUT = 600000
+
   const handleCreateWallet = async () => {
     setSetupType('create')
     setStep('init-progress')
@@ -287,7 +290,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
         wordCount: 12,
         pin: true,
         passphrase: false,
-      })
+      }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
       setSetupError(err instanceof Error ? err.message : 'Failed to create wallet')
@@ -307,7 +310,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
         wordCount: 12,
         pin: true,
         passphrase: false,
-      })
+      }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
       setSetupError(err instanceof Error ? err.message : 'Failed to recover wallet')

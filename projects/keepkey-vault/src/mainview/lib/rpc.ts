@@ -124,8 +124,11 @@ initTransport()
 
 /**
  * Make an RPC request to the Bun main process.
+ * @param method - RPC method name
+ * @param params - Optional parameters
+ * @param timeoutMs - Timeout in ms (default 30s, use longer for device-interactive ops)
  */
-export function rpcRequest<T = any>(method: string, params?: any): Promise<T> {
+export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000): Promise<T> {
   return new Promise((resolve, reject) => {
     if (!sendPacket) {
       reject(new Error(`RPC not available (no Electrobun transport) — cannot call ${method}`))
@@ -135,13 +138,12 @@ export function rpcRequest<T = any>(method: string, params?: any): Promise<T> {
     const id = ++nextRequestId
     pendingRequests.set(id, { resolve, reject })
 
-    // Timeout after 30s
     setTimeout(() => {
       if (pendingRequests.has(id)) {
         pendingRequests.delete(id)
         reject(new Error(`RPC request timed out: ${method}`))
       }
-    }, 30000)
+    }, timeoutMs)
 
     sendPacket({ type: 'request', id, method, params })
   })

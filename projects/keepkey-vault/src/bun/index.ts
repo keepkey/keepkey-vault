@@ -15,7 +15,7 @@ const restServer = startRestApi(engine, REST_API_PORT)
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
-	maxRequestTime: 30000, // firmware ops can be slow
+	maxRequestTime: 600000, // device-interactive ops (recovery, create) can take 5-10 minutes
 	handlers: {
 		requests: {
 			getDeviceState: async () => engine.getDeviceState(),
@@ -38,6 +38,9 @@ engine.on('state-change', (state) => {
 })
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
+})
+engine.on('pin-request', (req) => {
+	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
 })
 
 // ── Window Setup ──────────────────────────────────────────────────────

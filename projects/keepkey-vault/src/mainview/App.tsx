@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Routes, Route } from "react-router-dom"
 import { Box, Flex } from "@chakra-ui/react"
 import { Header } from "./components/layout/Header"
@@ -9,11 +9,14 @@ import { AddressPanel } from "./components/addresses/AddressPanel"
 import { SignTransaction } from "./components/signing/SignTransaction"
 import { DeviceStatus } from "./components/device/DeviceStatus"
 import { DeviceSettings } from "./components/device/DeviceSettings"
+import { PinEntry } from "./components/device/PinEntry"
 import { useKeepKey } from "./hooks/useKeepKey"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { useDeviceState } from "./hooks/useDeviceState"
+import { rpcRequest, onRpcMessage } from "./lib/rpc"
+import type { PinRequestType } from "../shared/types"
 
 const SIDEBAR_WIDTH = "220px"
 const HEADER_HEIGHT = "56px"
@@ -24,6 +27,44 @@ type AppPhase = 'splash' | 'claimed' | 'setup' | 'ready'
 function App() {
 	const deviceState = useDeviceState()
 	const [wizardComplete, setWizardComplete] = useState(false)
+
+	// ── PIN overlay state ───────────────────────────────────────────────
+	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
+
+	// Listen for pin-request messages from Bun (device asking for PIN mid-operation)
+	useEffect(() => {
+		return onRpcMessage('pin-request', (payload) => {
+			console.log('[App] pin-request received:', payload)
+			setPinRequestType(payload.type as PinRequestType)
+		})
+	}, [])
+
+	const handlePinSubmit = useCallback(async (pin: string) => {
+		try {
+			await rpcRequest('sendPin', { pin })
+		} catch (err) {
+			console.error('[App] sendPin failed:', err)
+		}
+		setPinRequestType(null)
+	}, [])
+
+	const handlePinCancel = useCallback(() => {
+		setPinRequestType(null)
+	}, [])
+
+	// Also handle needs_pin state (device locked on boot) by showing PinEntry
+	useEffect(() => {
+		if (deviceState.state === 'needs_pin' && !pinRequestType) {
+			setPinRequestType('current')
+		}
+	}, [deviceState.state, pinRequestType])
+
+	// Clear PIN overlay when device transitions to ready
+	useEffect(() => {
+		if (deviceState.state === 'ready') {
+			setPinRequestType(null)
+		}
+	}, [deviceState.state])
 
 	// Detect "claimed by another app" — device seen but pair failed with timeout/access error
 	const isClaimed = deviceState.state === 'connected_unpaired' && !!deviceState.error
@@ -38,12 +79,24 @@ function App() {
 					? 'setup'
 					: 'ready'
 
+	// PIN overlay — renders on top of ANY phase (setup wizard, splash, dashboard)
+	const pinOverlay = pinRequestType ? (
+		<PinEntry
+			type={pinRequestType}
+			onSubmit={handlePinSubmit}
+			onCancel={handlePinCancel}
+		/>
+	) : null
+
 	// Phase: Claimed — device in use by another application
 	if (phase === 'claimed') {
 		return (
-			<SplashScreen statusText="KeepKey detected" variant="claimed">
-				<DeviceClaimedDialog error={deviceState.error || 'Device claimed by another process'} />
-			</SplashScreen>
+			<>
+				{pinOverlay}
+				<SplashScreen statusText="KeepKey detected" variant="claimed">
+					<DeviceClaimedDialog error={deviceState.error || 'Device claimed by another process'} />
+				</SplashScreen>
+			</>
 		)
 	}
 
@@ -64,23 +117,35 @@ function App() {
 			? 'Try unplugging and replugging your KeepKey, or close other apps that may be using it.'
 			: undefined
 
-		return <SplashScreen statusText={splashText} hintText={hintText} variant={variant} />
+		return (
+			<>
+				{pinOverlay}
+				<SplashScreen statusText={splashText} hintText={hintText} variant={variant} />
+			</>
+		)
 	}
 
 	// Phase 2: Setup — OOB wizard for bootloader/firmware/init
 	if (phase === 'setup') {
-		return <OobSetupWizard onComplete={() => setWizardComplete(true)} />
+		return (
+			<>
+				{pinOverlay}
+				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
+			</>
+		)
 	}
 
-	// Phase 3: Ready — show dashboard
-	if (deviceState.state === 'needs_pin') {
-		return <SplashScreen statusText="Device is locked — enter PIN on the device" />
-	}
+	// Phase 3: Ready — show dashboard (needs_pin handled by PIN overlay above)
 	if (deviceState.state === 'needs_passphrase') {
 		return <SplashScreen statusText="Passphrase entry required" />
 	}
 
-	return <ReadyPhase />
+	return (
+		<>
+			{pinOverlay}
+			<ReadyPhase />
+		</>
+	)
 }
 
 function ReadyPhase() {

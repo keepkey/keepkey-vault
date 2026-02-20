@@ -3,6 +3,13 @@ export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'boo
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
 export type ActiveTransport = 'hid' | 'webusb' | null
 
+// PIN request types — maps to KeepKey PinMatrixRequestType
+export type PinRequestType = 'current' | 'new-first' | 'new-second'
+
+export interface PinRequest {
+  type: PinRequestType
+}
+
 export interface DeviceStateInfo {
   state: DeviceState
   activeTransport: ActiveTransport
@@ -59,4 +66,5 @@ export interface BunRPCRequests {
 export interface BunRPCMessages {
   'device-state': DeviceStateInfo
   'firmware-progress': FirmwareProgress
+  'pin-request': PinRequest
 }

@@ -3,7 +3,7 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest } from '../shared/types'
+import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType } from '../shared/types'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -47,11 +47,43 @@ export class EngineController extends EventEmitter {
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
+  // PIN flow tracking — device sends PIN_REQUEST mid-operation
+  private setupInProgress = false
+  private pinRequestCount = 0
+
   constructor() {
     super()
     this.keyring = new core.Keyring()
     this.hidAdapter = HIDKeepKeyAdapter.useKeyring(this.keyring)
     this.webUsbAdapter = NodeWebUSBKeepKeyAdapter.useKeyring(this.keyring)
+  }
+
+  /**
+   * Attach transport event listeners to catch PIN_REQUEST / BUTTON_REQUEST
+   * events emitted mid-operation by the hdwallet transport layer.
+   */
+  private attachTransportListeners() {
+    if (!this.wallet?.transport) return
+
+    const transport = this.wallet.transport
+
+    transport.on(String(core.Events.PIN_REQUEST), () => {
+      this.pinRequestCount++
+      let type: PinRequestType = 'current'
+      if (this.setupInProgress) {
+        type = this.pinRequestCount === 1 ? 'new-first' : 'new-second'
+      }
+      console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
+      this.emit('pin-request', { type })
+    })
+
+    transport.on(String(core.Events.BUTTON_REQUEST), () => {
+      console.log('[Engine] BUTTON_REQUEST — confirm on device')
+    })
+
+    transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
+      console.log('[Engine] PASSPHRASE_REQUEST')
+    })
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -137,6 +169,7 @@ export class EngineController extends EventEmitter {
 
       if (result.wallet) {
         this.wallet = result.wallet
+        this.attachTransportListeners()
         this.lastError = null
         try {
           console.log('[Engine] Getting features...')
@@ -436,26 +469,42 @@ export class EngineController extends EventEmitter {
 
   async resetDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
-    await this.wallet.reset({
-      entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
-      label: 'KeepKey',
-      pin: opts.pin,
-      passphrase: opts.passphrase,
-    })
-    this.cachedFeatures = await this.wallet.getFeatures()
-    this.updateState(this.deriveState(this.cachedFeatures))
+    this.setupInProgress = true
+    this.pinRequestCount = 0
+    try {
+      await this.wallet.reset({
+        entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
+        label: 'KeepKey',
+        pin: opts.pin,
+        passphrase: opts.passphrase,
+        autoLockDelayMs: 600000, // 10 min — user writes down seed words on device
+      })
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.updateState(this.deriveState(this.cachedFeatures))
+    } finally {
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+    }
   }
 
   async recoverDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
-    await this.wallet.recover({
-      entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
-      label: 'KeepKey',
-      pin: opts.pin,
-      passphrase: opts.passphrase,
-    })
-    this.cachedFeatures = await this.wallet.getFeatures()
-    this.updateState(this.deriveState(this.cachedFeatures))
+    this.setupInProgress = true
+    this.pinRequestCount = 0
+    try {
+      await this.wallet.recover({
+        entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
+        label: 'KeepKey',
+        pin: opts.pin,
+        passphrase: opts.passphrase,
+        autoLockDelayMs: 600000, // 10 min — recovery requires extended user interaction
+      })
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.updateState(this.deriveState(this.cachedFeatures))
+    } finally {
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+    }
   }
 
   async applySettings(opts: { label?: string }) {
@@ -468,8 +517,13 @@ export class EngineController extends EventEmitter {
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
     await this.wallet.sendPin(pin)
-    this.cachedFeatures = await this.wallet.getFeatures()
-    this.updateState(this.deriveState(this.cachedFeatures))
+    // During setup (reset/recover), don't call getFeatures — the main operation
+    // is still running and the transport is locked. Features refresh happens
+    // when the setup operation completes.
+    if (!this.setupInProgress) {
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.updateState(this.deriveState(this.cachedFeatures))
+    }
   }
 
   async sendPassphrase(passphrase: string) {

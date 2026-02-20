@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -25,6 +25,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
     messages: {
       'device-state': DeviceStateInfo
       'firmware-progress': FirmwareProgress
+      'pin-request': PinRequest
     }
   }
   webview: {
