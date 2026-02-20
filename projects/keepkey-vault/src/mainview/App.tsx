@@ -10,6 +10,7 @@ import { SignTransaction } from "./components/signing/SignTransaction"
 import { DeviceStatus } from "./components/device/DeviceStatus"
 import { DeviceSettings } from "./components/device/DeviceSettings"
 import { PinEntry } from "./components/device/PinEntry"
+import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
 import { useKeepKey } from "./hooks/useKeepKey"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -52,6 +53,54 @@ function App() {
 		setPinRequestType(null)
 	}, [])
 
+	// ── Character request overlay state (cipher recovery) ──────────────
+	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
+	const [recoveryError, setRecoveryError] = useState<{ message: string; errorType: string } | null>(null)
+
+	useEffect(() => {
+		return onRpcMessage('character-request', (payload) => {
+			console.log('[App] character-request received:', payload)
+			setRecoveryError(null)
+			setCharRequest({ wordPos: payload.wordPos, characterPos: payload.characterPos })
+		})
+	}, [])
+
+	useEffect(() => {
+		return onRpcMessage('recovery-error', (payload) => {
+			console.log('[App] recovery-error received:', payload)
+			setRecoveryError({ message: payload.message || 'Recovery failed', errorType: payload.errorType || 'unknown' })
+		})
+	}, [])
+
+	const handleCharacter = useCallback(async (char: string) => {
+		try { await rpcRequest('sendCharacter', { character: char }) } catch (err) { console.error('[App] sendCharacter failed:', err) }
+	}, [])
+
+	const handleCharDelete = useCallback(async () => {
+		try { await rpcRequest('sendCharacterDelete') } catch (err) { console.error('[App] sendCharacterDelete failed:', err) }
+	}, [])
+
+	const handleCharDone = useCallback(async () => {
+		try { await rpcRequest('sendCharacterDone') } catch (err) { console.error('[App] sendCharacterDone failed:', err) }
+		setCharRequest(null)
+	}, [])
+
+	const handleRecoveryDismiss = useCallback(() => {
+		setCharRequest(null)
+		setRecoveryError(null)
+	}, [])
+
+	// Auto-retry recovery — clears error overlay and immediately re-starts recoverDevice
+	const handleRecoveryRetry = useCallback(async () => {
+		setCharRequest(null)
+		setRecoveryError(null)
+		try {
+			await rpcRequest('recoverDevice', { wordCount: 12, pin: true, passphrase: false }, 600000)
+		} catch {
+			// Errors arrive via recovery-error RPC message — no action needed here
+		}
+	}, [])
+
 	// Also handle needs_pin state (device locked on boot) by showing PinEntry
 	useEffect(() => {
 		if (deviceState.state === 'needs_pin' && !pinRequestType) {
@@ -59,10 +108,11 @@ function App() {
 		}
 	}, [deviceState.state, pinRequestType])
 
-	// Clear PIN overlay when device transitions to ready
+	// Clear overlays when device transitions to ready
 	useEffect(() => {
 		if (deviceState.state === 'ready') {
 			setPinRequestType(null)
+			setCharRequest(null)
 		}
 	}, [deviceState.state])
 
@@ -88,10 +138,27 @@ function App() {
 		/>
 	) : null
 
+	// Character request overlay — cipher recovery word entry (also shows recovery errors)
+	const charOverlay = (charRequest || recoveryError) ? (
+		<RecoveryWordEntry
+			wordPos={charRequest?.wordPos ?? 0}
+			characterPos={charRequest?.characterPos ?? 0}
+			totalWords={12}
+			onCharacter={handleCharacter}
+			onDelete={handleCharDelete}
+			onDone={handleCharDone}
+			onCancel={handleRecoveryDismiss}
+			onRetry={handleRecoveryRetry}
+			error={recoveryError?.message}
+			errorType={recoveryError?.errorType}
+		/>
+	) : null
+
 	// Phase: Claimed — device in use by another application
 	if (phase === 'claimed') {
 		return (
 			<>
+				{charOverlay}
 				{pinOverlay}
 				<SplashScreen statusText="KeepKey detected" variant="claimed">
 					<DeviceClaimedDialog error={deviceState.error || 'Device claimed by another process'} />
@@ -119,6 +186,7 @@ function App() {
 
 		return (
 			<>
+				{charOverlay}
 				{pinOverlay}
 				<SplashScreen statusText={splashText} hintText={hintText} variant={variant} />
 			</>
@@ -129,6 +197,7 @@ function App() {
 	if (phase === 'setup') {
 		return (
 			<>
+				{charOverlay}
 				{pinOverlay}
 				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
 			</>
@@ -142,6 +211,7 @@ function App() {
 
 	return (
 		<>
+			{charOverlay}
 			{pinOverlay}
 			<ReadyPhase />
 		</>

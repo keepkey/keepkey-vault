@@ -84,6 +84,16 @@ export class EngineController extends EventEmitter {
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
       console.log('[Engine] PASSPHRASE_REQUEST')
     })
+
+    // CHARACTER_REQUEST — raw numeric event (80) contains wordPos/characterPos
+    // The named "CHARACTER_REQUEST" event lacks this positional data
+    transport.on("80", (event: any) => {
+      if (event.message) {
+        const { wordPos, characterPos } = event.message
+        console.log(`[Engine] CHARACTER_REQUEST → word=${wordPos} char=${characterPos}`)
+        this.emit('character-request', { wordPos: wordPos ?? 0, characterPos: characterPos ?? 0 })
+      }
+    })
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -501,6 +511,41 @@ export class EngineController extends EventEmitter {
       })
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+    } catch (err: any) {
+      // hdwallet rejects with raw protobuf FAILURE objects like:
+      // { message_type: "FAILURE", message: { code: 3, message: "..." }, from_wallet: true }
+      // — NOT standard Error instances. Extract the string safely.
+      const rawMessage: string =
+        typeof err?.message === 'string' ? err.message
+        : typeof err?.message?.message === 'string' ? err.message.message
+        : String(err)
+      console.error('[Engine] Recovery failed:', rawMessage)
+
+      // Classify the failure for user-friendly messaging
+      let message = rawMessage
+      let errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' = 'unknown'
+      if (rawMessage.includes('Action cancelled') && this.pinRequestCount >= 2) {
+        message = 'PINs did not match. Both entries must be identical.'
+        errorType = 'pin-mismatch'
+      } else if (rawMessage.includes('Action cancelled')) {
+        errorType = 'cancelled'
+      } else if (rawMessage.includes('Invalid mnemonic')) {
+        errorType = 'invalid-mnemonic'
+      } else if (rawMessage.includes('Words were not entered correctly') || rawMessage.includes('substition cipher') || rawMessage.includes('substitution cipher')) {
+        errorType = 'bad-words'
+      }
+
+      this.emit('recovery-error', { message, errorType })
+
+      // Refresh device state after failure — device may now be in needs_init or needs_pin
+      try {
+        this.cachedFeatures = await this.wallet.getFeatures()
+        this.updateState(this.deriveState(this.cachedFeatures))
+      } catch {
+        // Device may be unresponsive after failure, state will sync on next USB event
+      }
+
+      throw err
     } finally {
       this.setupInProgress = false
       this.pinRequestCount = 0
@@ -531,6 +576,24 @@ export class EngineController extends EventEmitter {
     await this.wallet.sendPassphrase(passphrase)
     this.cachedFeatures = await this.wallet.getFeatures()
     this.updateState(this.deriveState(this.cachedFeatures))
+  }
+
+  async sendCharacter(character: string) {
+    if (!this.wallet) throw new Error('No device connected')
+    if (!this.setupInProgress) return // Recovery already ended, ignore stale input
+    await this.wallet.sendCharacter(character)
+  }
+
+  async sendCharacterDelete() {
+    if (!this.wallet) throw new Error('No device connected')
+    if (!this.setupInProgress) return
+    await this.wallet.sendCharacterDelete()
+  }
+
+  async sendCharacterDone() {
+    if (!this.wallet) throw new Error('No device connected')
+    if (!this.setupInProgress) return
+    await this.wallet.sendCharacterDone()
   }
 
   resetUpdatePhase() {

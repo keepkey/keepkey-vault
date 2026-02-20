@@ -27,6 +27,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			applySettings: async (params) => { await engine.applySettings(params) },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
 			sendPassphrase: async (params) => { await engine.sendPassphrase(params.passphrase) },
+			sendCharacter: async (params) => { await engine.sendCharacter(params.character) },
+			sendCharacterDelete: async () => { await engine.sendCharacterDelete() },
+			sendCharacterDone: async () => { await engine.sendCharacterDone() },
 		},
 		messages: {},
 	},
@@ -41,6 +44,12 @@ engine.on('firmware-progress', (progress) => {
 })
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
+})
+engine.on('character-request', (req) => {
+	try { rpc.send['character-request'](req) } catch { /* webview not ready yet */ }
+})
+engine.on('recovery-error', (err) => {
+	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }
 })
 
 // ── Window Setup ──────────────────────────────────────────────────────

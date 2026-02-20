@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -21,11 +21,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applySettings: { params: { label?: string }; response: void }
       sendPin: { params: { pin: string }; response: void }
       sendPassphrase: { params: { passphrase: string }; response: void }
+      sendCharacter: { params: { character: string }; response: void }
+      sendCharacterDelete: { params: void; response: void }
+      sendCharacterDone: { params: void; response: void }
     }
     messages: {
       'device-state': DeviceStateInfo
       'firmware-progress': FirmwareProgress
       'pin-request': PinRequest
+      'character-request': CharacterRequest
+      'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
     }
   }
   webview: {

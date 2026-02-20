@@ -10,6 +10,11 @@ export interface PinRequest {
   type: PinRequestType
 }
 
+export interface CharacterRequest {
+  wordPos: number      // 0-indexed word position (0 = first word)
+  characterPos: number // 0-indexed character position within current word
+}
+
 export interface DeviceStateInfo {
   state: DeviceState
   activeTransport: ActiveTransport
@@ -61,10 +66,15 @@ export interface BunRPCRequests {
   applySettings: { params: { label?: string }; response: void }
   sendPin: { params: { pin: string }; response: void }
   sendPassphrase: { params: { passphrase: string }; response: void }
+  sendCharacter: { params: { character: string }; response: void }
+  sendCharacterDelete: { params: void; response: void }
+  sendCharacterDone: { params: void; response: void }
 }
 
 export interface BunRPCMessages {
   'device-state': DeviceStateInfo
   'firmware-progress': FirmwareProgress
   'pin-request': PinRequest
+  'character-request': CharacterRequest
+  'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
 }
