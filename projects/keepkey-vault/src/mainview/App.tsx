@@ -1,21 +1,61 @@
-import { Routes, Route } from "react-router-dom";
-import { Box, Flex } from "@chakra-ui/react";
-import { Header } from "./components/layout/Header";
-import { Sidebar } from "./components/layout/Sidebar";
-import { StatusBar } from "./components/layout/StatusBar";
-import { Dashboard } from "./components/dashboard/Dashboard";
-import { AddressPanel } from "./components/addresses/AddressPanel";
-import { SignTransaction } from "./components/signing/SignTransaction";
-import { DeviceStatus } from "./components/device/DeviceStatus";
-import { DeviceSettings } from "./components/device/DeviceSettings";
-import { useKeepKey } from "./hooks/useKeepKey";
+import { useState } from "react"
+import { Routes, Route } from "react-router-dom"
+import { Box, Flex } from "@chakra-ui/react"
+import { Header } from "./components/layout/Header"
+import { Sidebar } from "./components/layout/Sidebar"
+import { StatusBar } from "./components/layout/StatusBar"
+import { Dashboard } from "./components/dashboard/Dashboard"
+import { AddressPanel } from "./components/addresses/AddressPanel"
+import { SignTransaction } from "./components/signing/SignTransaction"
+import { DeviceStatus } from "./components/device/DeviceStatus"
+import { DeviceSettings } from "./components/device/DeviceSettings"
+import { useKeepKey } from "./hooks/useKeepKey"
+import { SplashScreen } from "./components/SplashScreen"
+import { OobSetupWizard } from "./components/OobSetupWizard"
+import { useDeviceState } from "./hooks/useDeviceState"
 
-const SIDEBAR_WIDTH = "220px";
-const HEADER_HEIGHT = "56px";
-const STATUSBAR_HEIGHT = "32px";
+const SIDEBAR_WIDTH = "220px"
+const HEADER_HEIGHT = "56px"
+const STATUSBAR_HEIGHT = "32px"
+
+type AppPhase = 'splash' | 'setup' | 'ready'
 
 function App() {
-	const keepkey = useKeepKey();
+	const deviceState = useDeviceState()
+	const [wizardComplete, setWizardComplete] = useState(false)
+
+	// 3-phase state machine
+	const phase: AppPhase =
+		deviceState.state === 'disconnected'
+			? 'splash'
+			: !wizardComplete && ['bootloader', 'needs_firmware', 'needs_init'].includes(deviceState.state)
+				? 'setup'
+				: 'ready'
+
+	// Phase 1: Splash — searching for device
+	if (phase === 'splash') {
+		return <SplashScreen statusText="Searching for KeepKey" />
+	}
+
+	// Phase 2: Setup — OOB wizard for bootloader/firmware/init
+	if (phase === 'setup') {
+		return <OobSetupWizard onComplete={() => setWizardComplete(true)} />
+	}
+
+	// Phase 3: Ready — show dashboard
+	// For needs_pin / needs_passphrase, show splash with message for now
+	if (deviceState.state === 'needs_pin') {
+		return <SplashScreen statusText="Device is locked — enter PIN on the device" />
+	}
+	if (deviceState.state === 'needs_passphrase') {
+		return <SplashScreen statusText="Passphrase entry required" />
+	}
+
+	return <ReadyPhase />
+}
+
+function ReadyPhase() {
+	const keepkey = useKeepKey()
 
 	return (
 		<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary">
@@ -66,7 +106,7 @@ function App() {
 
 			<StatusBar status={keepkey.status} />
 		</Flex>
-	);
+	)
 }
 
-export default App;
+export default App
