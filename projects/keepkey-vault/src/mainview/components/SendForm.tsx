@@ -1,21 +1,41 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, Fragment } from "react"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
-import { parseQrValue } from "../lib/qr-parse"
-import { QrScannerOverlay } from "./QrScannerOverlay"
+import { getAsset } from "../../shared/assetLookup"
 import type { ChainDef } from "../../shared/chains"
-import type { ChainBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
+import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
+
+// ── Confetti ────────────────────────────────────────────────────────────────
+const CONFETTI_COLORS = ['#4CAF50', '#FFD700', '#23DCC8', '#3b82f6', '#8b5cf6', '#ec4899']
+const confettiPieces = Array.from({ length: 40 }, (_, i) => ({
+  id: i,
+  color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+  left: `${Math.random() * 100}%`,
+  delay: `${Math.random() * 2}s`,
+  duration: `${2.5 + Math.random() * 2}s`,
+}))
+
+const CONFETTI_CSS = `
+  @keyframes kkSendConfetti {
+    0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(300px) rotate(720deg); opacity: 0; }
+  }
+`
 
 interface SendFormProps {
 	chain: ChainDef
 	address: string | null
 	balance?: ChainBalance
+	token?: TokenBalance | null
+	onClearToken?: () => void
+	xpubOverride?: string         // BTC multi-account: use this xpub for buildTx
+	scriptTypeOverride?: string   // BTC multi-account: use this scriptType for buildTx
 }
 
-export function SendForm({ chain, address, balance }: SendFormProps) {
+export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride }: SendFormProps) {
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState("")
@@ -26,24 +46,20 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 
-	const [scannerOpen, setScannerOpen] = useState(false)
-
 	const [buildResult, setBuildResult] = useState<BuildTxResult | null>(null)
 	const [signedTx, setSignedTx] = useState<any>(null)
 	const [txid, setTxid] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
+	const [showPayload, setShowPayload] = useState(false)
 
-	const handleQrScan = useCallback((raw: string) => {
-		setScannerOpen(false)
-		const parsed = parseQrValue(raw)
-		setRecipient(parsed.address)
-		if (parsed.amount) { setAmount(parsed.amount); setIsMax(false) }
-		if (parsed.memo) setMemo(parsed.memo)
-	}, [])
+	// Derived display values — token mode vs native mode
+	const isTokenSend = !!(token && token.caip?.includes('erc20'))
+	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
+	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
 
 	// Basic client-side validation
 	const amountNum = parseFloat(amount)
-	const balanceNum = parseFloat(balance?.balance || '0')
+	const balanceNum = parseFloat(displayBalance)
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
 	const recipientTooShort = useMemo(() => {
@@ -67,6 +83,11 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 				memo: memo || undefined,
 				feeLevel,
 				isMax,
+				caip: isTokenSend ? token!.caip : undefined,
+				tokenBalance: isTokenSend ? token!.balance : undefined,
+				tokenDecimals: isTokenSend && token!.decimals != null ? token!.decimals : undefined,
+				xpubOverride: xpubOverride || undefined,
+				scriptTypeOverride: scriptTypeOverride || undefined,
 			}, 60000)
 
 			setBuildResult(result)
@@ -129,16 +150,56 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 			.catch(() => console.warn('[SendForm] Clipboard not available'))
 	}, [txid])
 
-	const needsMemo = chain.chainFamily === 'cosmos' || chain.chainFamily === 'binance' || chain.chainFamily === 'xrp'
+	// Build explorer URL from assetData
+	const explorerUrl = useMemo(() => {
+		if (!txid) return null
+		const caip = isTokenSend && token?.caip ? token.caip : chain.caip
+		const asset = getAsset(caip)
+		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', txid)
+		// Fallback: try the chain's native CAIP
+		const chainAsset = getAsset(chain.caip)
+		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', txid)
+		return null
+	}, [txid, chain, token, isTokenSend])
+
+	const truncatedTxid = useMemo(() => {
+		if (!txid) return ''
+		return txid
+	}, [txid])
+
+	const needsMemo = !isTokenSend && (chain.chainFamily === 'cosmos' || chain.chainFamily === 'binance' || chain.chainFamily === 'xrp')
 
 	return (
-		<VStack gap="4" align="stretch" py="2">
+		<VStack gap="4" align="stretch" py="2" px="2">
+			{/* Token badge — shown when sending a token */}
+			{isTokenSend && (
+				<Flex align="center" justify="space-between" bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" px="3" py="2" borderRadius="lg">
+					<Flex align="center" gap="2">
+						<Text fontSize="xs" color="kk.gold" fontWeight="600">Sending Token:</Text>
+						<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{token!.symbol}</Text>
+						<Text fontSize="10px" color="kk.textMuted">{token!.name}</Text>
+					</Flex>
+					{onClearToken && (
+						<Button size="xs" variant="ghost" color="kk.textMuted" _hover={{ color: "kk.textPrimary" }} onClick={onClearToken} px="1" minW="auto">
+							&times;
+						</Button>
+					)}
+				</Flex>
+			)}
+
 			{/* Balance display */}
-			{balance && (
-				<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
-					<Text fontSize="xs" color="kk.textMuted">Available</Text>
-					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
-						{balance.balance} {chain.symbol}
+			<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
+				<Text fontSize="xs" color="kk.textMuted">Available</Text>
+				<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
+					{formatBalance(displayBalance)} {displaySymbol}
+				</Text>
+			</Flex>
+			{/* Gas balance hint for token sends */}
+			{isTokenSend && balance && (
+				<Flex justify="space-between" align="center" px="3">
+					<Text fontSize="10px" color="kk.textMuted">Gas ({chain.symbol})</Text>
+					<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+						{formatBalance(balance.balance)} {chain.symbol}
 					</Text>
 				</Flex>
 			)}
@@ -146,43 +207,11 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 			{/* Phase: Input */}
 			{phase === 'input' && (
 				<>
-					<Box>
-					<Text fontSize="xs" color="kk.textMuted" mb="1">Recipient</Text>
-					<Flex gap="1.5">
-						<Input
-							value={recipient}
-							onChange={(e) => setRecipient(e.target.value)}
-							placeholder="Address"
-							bg="kk.bg"
-							border="1px solid"
-							borderColor="kk.border"
-							color="kk.textPrimary"
-							size="sm"
-							fontFamily="mono"
-							flex="1"
-						/>
-						<Button
-							size="sm"
-							variant="outline"
-							borderColor="kk.border"
-							color="kk.textSecondary"
-							_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
-							onClick={() => setScannerOpen(true)}
-							px="2"
-							minW="auto"
-							title="Scan QR code"
-						>
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-								<circle cx="12" cy="13" r="4"/>
-							</svg>
-						</Button>
-					</Flex>
-				</Box>
+					<Field label="Recipient" value={recipient} onChange={setRecipient} placeholder="Address" />
 					<Flex gap="2" align="end">
 						<Box flex="1">
 							<Field
-								label={`Amount (${chain.symbol})`}
+								label={`Amount (${displaySymbol})`}
 								value={isMax ? 'MAX' : amount}
 								onChange={(v) => { setIsMax(false); setAmount(v) }}
 								placeholder="0.00"
@@ -236,7 +265,7 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 					)}
 
 					{exceedsBalance && (
-						<Text fontSize="xs" color="kk.error">Amount exceeds available balance ({formatBalance(balance?.balance || '0')} {chain.symbol})</Text>
+						<Text fontSize="xs" color="kk.error">Amount exceeds available balance ({formatBalance(displayBalance)} {displaySymbol})</Text>
 					)}
 
 					<Button
@@ -264,12 +293,30 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">Amount</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {chain.symbol}</Text>
+							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
 						</Flex>
 						<Flex justify="space-between">
 							<Text fontSize="xs" color="kk.textSecondary">Fee</Text>
 							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
 						</Flex>
+					</Box>
+
+					{/* Debug: hdwallet payload */}
+					<Box>
+						<Button
+							size="xs" variant="ghost" color="kk.textMuted" w="full"
+							onClick={() => setShowPayload(!showPayload)}
+							_hover={{ color: "kk.textSecondary" }}
+						>
+							{showPayload ? 'Hide' : 'Show'} hdwallet payload
+						</Button>
+						{showPayload && buildResult.unsignedTx && (
+							<Box bg="rgba(0,0,0,0.3)" borderRadius="md" p="2" mt="1" maxH="300px" overflow="auto">
+								<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
+									{JSON.stringify(buildResult.unsignedTx, null, 2)}
+								</Text>
+							</Box>
+						)}
 					</Box>
 
 					<Flex gap="2">
@@ -305,7 +352,7 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 					<Box bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="#23DCC8" borderRadius="lg" p="4">
 						<Text fontSize="xs" color="#23DCC8" mb="1">Transaction Signed</Text>
 						<Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" maxH="80px" overflow="auto" wordBreak="break-all">
-							{typeof signedTx === 'string' ? signedTx : (signedTx?.serializedTx || signedTx?.serialized || JSON.stringify(signedTx)).slice(0, 200)}...
+							{typeof signedTx === 'string' ? signedTx : (signedTx?.value?.signatures?.[0]?.serializedTx || signedTx?.serializedTx || signedTx?.serialized || JSON.stringify(signedTx))}
 						</Text>
 					</Box>
 
@@ -336,33 +383,54 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 				</>
 			)}
 
-			{/* Phase: Broadcast — show txid */}
+			{/* Phase: Broadcast — success with confetti */}
 			{phase === 'broadcast' && txid && (
-				<>
-					<Box bg="rgba(76,175,80,0.08)" border="1px solid" borderColor="#4CAF50" borderRadius="lg" p="4">
-						<Text fontSize="xs" color="#4CAF50" mb="2">Transaction Broadcast Successfully</Text>
-						<Flex justify="space-between" align="center">
-							<Text fontSize="xs" color="kk.textMuted">TX ID</Text>
-							<Button size="xs" variant="ghost" color="kk.textSecondary" onClick={copyTxid}>
-								{copied ? "Copied!" : "Copy"}
+				<Box position="relative" overflow="hidden" borderRadius="lg">
+					<style>{CONFETTI_CSS}</style>
+					{confettiPieces.map(p => (
+						<Box
+							key={p.id} position="absolute" w="6px" h="6px" bg={p.color}
+							left={p.left} top="-6px" borderRadius="1px" transform="rotate(45deg)"
+							style={{ animation: `kkSendConfetti ${p.duration} linear ${p.delay} 1 forwards` }}
+						/>
+					))}
+
+					<VStack gap="3" position="relative" zIndex={1}>
+						<Box bg="rgba(76,175,80,0.08)" border="1px solid" borderColor="#4CAF50" borderRadius="lg" p="3" w="full">
+							<Text fontSize="xs" color="#4CAF50" fontWeight="600" mb="2">Sent!</Text>
+							<Flex justify="space-between" align="center" gap="2">
+								<Flex align="center" gap="1" minW="0" flex="1">
+									<Text fontSize="10px" color="kk.textMuted" flexShrink={0}>TX</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textPrimary" truncate title={txid}>
+										{truncatedTxid}
+									</Text>
+								</Flex>
+								<Button size="xs" variant="ghost" color="kk.textSecondary" onClick={copyTxid} px="1" minW="auto" h="auto" py="0.5">
+									{copied ? "Copied" : "Copy"}
+								</Button>
+							</Flex>
+						</Box>
+
+						<Flex gap="2" w="full">
+							{explorerUrl && (
+								<Button
+									size="sm" flex="1" bg="#23DCC8" color="black"
+									_hover={{ opacity: 0.9 }}
+									onClick={() => rpcRequest('openUrl', { url: explorerUrl! }).catch(() => {})}
+								>
+									View in Explorer
+								</Button>
+							)}
+							<Button
+								size="sm" flex="1" bg="kk.gold" color="black"
+								_hover={{ bg: "kk.goldHover" }}
+								onClick={reset}
+							>
+								Send Another
 							</Button>
 						</Flex>
-						<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">
-							{txid}
-						</Text>
-					</Box>
-
-					<Button
-						size="sm"
-						bg="kk.gold"
-						color="black"
-						_hover={{ bg: "kk.goldHover" }}
-						onClick={reset}
-						w="full"
-					>
-						Send Another
-					</Button>
-				</>
+					</VStack>
+				</Box>
 			)}
 
 			{/* Error display */}
@@ -392,6 +460,7 @@ function Field({ label, value, onChange, placeholder, disabled }: {
 				size="sm"
 				fontFamily="mono"
 				disabled={disabled}
+				px="3"
 			/>
 		</Box>
 	)

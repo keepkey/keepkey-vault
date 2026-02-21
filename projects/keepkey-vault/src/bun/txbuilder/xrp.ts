@@ -24,9 +24,9 @@ export async function buildXrpTx(
   const { to, memo = '', isMax = false, fromAddress } = params
   let amountNum = parseFloat(params.amount)
 
-  // 1. Get account info (use CAIP networkId)
+  // 1. Get account info (API expects short network name, not CAIP networkId)
   console.log(`${TAG} Fetching account info for XRP...`)
-  let accountInfo = (await pioneer.GetAccountInfo({ address: fromAddress, network: chain.networkId }))?.data
+  let accountInfo = (await pioneer.GetAccountInfo({ address: fromAddress, network: chain.id }))?.data
   if (!accountInfo) throw new Error('Failed to get XRP account info')
 
   const sequence = String(accountInfo.Sequence || '0')

@@ -17,6 +17,7 @@ type AppPhase = "splash" | "claimed" | "setup" | "ready"
 function App() {
 	const deviceState = useDeviceState()
 	const [wizardComplete, setWizardComplete] = useState(false)
+	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 
 	// ── PIN overlay ─────────────────────────────────────────────────
@@ -84,6 +85,8 @@ function App() {
 			setCharRequest(null)
 		}
 	}, [deviceState.state])
+
+	const handlePortfolioLoaded = useCallback(() => setPortfolioLoaded(true), [])
 
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
@@ -158,7 +161,12 @@ function App() {
 	// ── Ready phase ─────────────────────────────────────────────────
 	return (
 		<>{charOverlay}{pinOverlay}
-			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary">
+			{!portfolioLoaded && (
+				<SplashScreen statusText="Loading portfolio" variant="connecting" />
+			)}
+			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary"
+				{...(!portfolioLoaded ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
+			>
 				<TopNav
 					label={deviceState.label}
 					connected={deviceState.state === "ready" || deviceState.state === "needs_pin" || deviceState.state === "needs_passphrase"}
@@ -167,7 +175,7 @@ function App() {
 					settingsOpen={settingsOpen}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
-					<Dashboard />
+					<Dashboard onLoaded={handlePortfolioLoaded} />
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer

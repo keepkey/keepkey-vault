@@ -40,7 +40,7 @@ export function ChainCard({ chain, balance, onClick }: ChainCardProps) {
 						{formatBalance(balance.balance)} {chain.symbol}
 					</Text>
 					{balance.balanceUsd > 0 && (
-						<AnimatedUsd value={balance.balanceUsd} fontSize="xs" color="kk.textMuted" />
+						<AnimatedUsd value={balance.balanceUsd} fontSize="xs" color="white" fontWeight="500" />
 					)}
 				</Box>
 			)}
