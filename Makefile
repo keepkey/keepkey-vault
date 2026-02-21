@@ -1,9 +1,11 @@
 PROJECT_DIR := projects/keepkey-vault
 
-.PHONY: install dev dev-hmr build build-prod clean help
+.PHONY: install dev dev-hmr build build-prod clean help vault
 
 install:
 	cd $(PROJECT_DIR) && bun install
+
+vault: install dev
 
 dev:
 	cd $(PROJECT_DIR) && bun run dev
@@ -23,6 +25,7 @@ clean:
 help:
 	@echo "KeepKey Vault v11 - Electrobun Desktop App"
 	@echo ""
+	@echo "  make vault      - Install deps + build and run in dev mode"
 	@echo "  make install    - Install dependencies"
 	@echo "  make dev        - Build and run in dev mode"
 	@echo "  make dev-hmr    - Dev mode with Vite HMR"

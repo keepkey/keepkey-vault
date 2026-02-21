@@ -1,6 +1,10 @@
 import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun"
 import { EngineController } from "./engine-controller"
 import { startRestApi } from "./rest-api"
+import { getPioneer } from "./pioneer"
+import { buildTx, broadcastTx } from "./txbuilder"
+import { CHAINS } from "../shared/chains"
+import type { ChainBalance } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 const DEV_SERVER_PORT = 5173
@@ -10,26 +14,306 @@ const REST_API_PORT = 1646
 // ── Engine Controller ─────────────────────────────────────────────────
 const engine = new EngineController()
 
-// ── REST API Server (port 1646 — kkapi:// protocol) ───────────────────
-const restServer = startRestApi(engine, REST_API_PORT)
+// ── REST API Server (opt-in via KEEPKEY_REST_API env) ──────────────────
+const enableRest = process.env.KEEPKEY_REST_API === "true" || process.env.KEEPKEY_REST_API === "1"
+const restServer = enableRest ? startRestApi(engine, REST_API_PORT) : null
+if (enableRest) console.log(`[Vault] REST API enabled on port ${REST_API_PORT}`)
+else console.log("[Vault] REST API disabled (set KEEPKEY_REST_API=true to enable)")
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 600000, // device-interactive ops (recovery, create) can take 5-10 minutes
 	handlers: {
 		requests: {
+			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
 			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
 			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			resetDevice: async (params) => { await engine.resetDevice(params) },
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
+			verifySeed: async (params) => { return await engine.verifySeed(params) },
 			applySettings: async (params) => { await engine.applySettings(params) },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
 			sendPassphrase: async (params) => { await engine.sendPassphrase(params.passphrase) },
 			sendCharacter: async (params) => { await engine.sendCharacter(params.character) },
 			sendCharacterDelete: async () => { await engine.sendCharacterDelete() },
 			sendCharacterDone: async () => { await engine.sendCharacterDone() },
+
+			// ── Wallet operations (hdwallet pass-through) ─────────────
+			getFeatures: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.getFeatures()
+			},
+			ping: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.ping({ msg: params.msg || 'pong', passphrase: false })
+			},
+			wipeDevice: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				await engine.wallet.wipe()
+				await engine.syncState()
+				return { success: true }
+			},
+			getPublicKeys: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.getPublicKeys(params.paths)
+			},
+
+			// ── Address derivation ────────────────────────────────────
+			btcGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.btcGetAddress(params)
+			},
+			ethGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.ethGetAddress(params)
+			},
+			cosmosGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.cosmosGetAddress(params)
+			},
+			thorchainGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.thorchainGetAddress(params)
+			},
+			mayachainGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.mayachainGetAddress(params)
+			},
+			osmosisGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.osmosisGetAddress(params)
+			},
+			binanceGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.binanceGetAddress(params)
+			},
+			xrpGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.rippleGetAddress(params)
+			},
+
+			// ── Transaction signing ───────────────────────────────────
+			btcSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.btcSignTx(params)
+			},
+			ethSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.ethSignTx(params)
+			},
+			ethSignMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.ethSignMessage(params)
+			},
+			ethSignTypedData: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.ethSignTypedData(params)
+			},
+			ethVerifyMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.ethVerifyMessage(params)
+			},
+			cosmosSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.cosmosSignTx(params)
+			},
+			thorchainSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.thorchainSignTx(params)
+			},
+			mayachainSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.mayachainSignTx(params)
+			},
+			osmosisSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.osmosisSignTx(params)
+			},
+			binanceSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.binanceSignTx(params)
+			},
+			xrpSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await engine.wallet.rippleSignTx(params)
+			},
+
+			// ── Pioneer integration (batch portfolio API) ────────────────
+			getBalances: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const pioneer = await getPioneer()
+				const wallet = engine.wallet as any
+				const utxoChains = CHAINS.filter(c => c.chainFamily === 'utxo')
+				const nonUtxoChains = CHAINS.filter(c => c.chainFamily !== 'utxo')
+
+				// 1. Batch-fetch ALL UTXO xpubs in a single device call
+				const xpubResults = utxoChains.length > 0
+					? await wallet.getPublicKeys(utxoChains.map(c => ({
+						addressNList: c.defaultPath.slice(0, 3),
+						coin: c.coin,
+						scriptType: c.scriptType,
+						curve: 'secp256k1',
+					})))
+					: []
+
+				// 2. Derive non-UTXO addresses (one device call per chain — unavoidable)
+				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string }> = []
+
+				for (let i = 0; i < utxoChains.length; i++) {
+					const xpub = xpubResults?.[i]?.xpub
+					if (xpub) pubkeys.push({ caip: utxoChains[i].caip, pubkey: xpub, chainId: utxoChains[i].id, symbol: utxoChains[i].symbol })
+				}
+
+				for (const chain of nonUtxoChains) {
+					try {
+						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
+						if (chain.scriptType) addrParams.scriptType = chain.scriptType
+						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+						const result = await wallet[method](addrParams)
+						const address = typeof result === 'string' ? result : result?.address || ''
+						if (address) pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol })
+					} catch (e: any) {
+						console.warn(`[getBalances] ${chain.coin} address failed:`, e.message)
+					}
+				}
+
+				console.log(`[getBalances] ${pubkeys.length} pubkeys → single GetPortfolioBalances call`)
+
+				// 3. Single API call for ALL balances + prices
+				const results: ChainBalance[] = []
+				try {
+					const resp = await pioneer.GetPortfolioBalances({
+						pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
+					})
+					const portfolio = resp?.data || {}
+					const data: any[] = portfolio.balances || []
+					console.log(`[getBalances] Portfolio response: ${data.length} balances, keys: ${Object.keys(portfolio).join(',')}`)
+					if (data.length > 0) console.log(`[getBalances] Sample:`, JSON.stringify(data[0]).slice(0, 200))
+					for (const entry of pubkeys) {
+						const match = data.find((d: any) => d.caip === entry.caip || d.pubkey === entry.pubkey)
+						results.push({
+							chainId: entry.chainId, symbol: entry.symbol,
+							balance: String(match?.balance ?? '0'),
+							balanceUsd: Number(match?.valueUsd ?? 0),
+							address: match?.address || entry.pubkey,
+						})
+					}
+				} catch (e: any) {
+					console.warn('[getBalances] Portfolio API failed:', e.message)
+					for (const entry of pubkeys) {
+						results.push({ chainId: entry.chainId, symbol: entry.symbol, balance: '0', balanceUsd: 0, address: entry.pubkey })
+					}
+				}
+				return results
+			},
+
+			getBalance: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = CHAINS.find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+				const wallet = engine.wallet as any
+
+				// Derive pubkey (xpub for UTXO, address for others)
+				let pubkey: string
+				if (chain.chainFamily === 'utxo') {
+					const result = await wallet.getPublicKeys([{
+						addressNList: chain.defaultPath.slice(0, 3),
+						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
+					}])
+					pubkey = result?.[0]?.xpub || ''
+					if (!pubkey) throw new Error(`Could not derive xpub for ${chain.coin}`)
+				} else {
+					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
+					if (chain.scriptType) addrParams.scriptType = chain.scriptType
+					const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+					const result = await wallet[method](addrParams)
+					pubkey = typeof result === 'string' ? result : result?.address || ''
+					if (!pubkey) throw new Error(`Could not derive address for ${chain.coin}`)
+				}
+
+				// Single portfolio call
+				let balance = '0', balanceUsd = 0
+				try {
+					const resp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] })
+					const match = (resp?.data?.balances || [])[0]
+					if (match) { balance = String(match.balance ?? '0'); balanceUsd = Number(match.valueUsd ?? 0) }
+				} catch (e: any) {
+					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
+				}
+				return { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address: pubkey }
+			},
+
+			buildTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = CHAINS.find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				// For chains that need fromAddress or xpub, derive them
+				const wallet = engine.wallet as any
+				let fromAddress: string | undefined
+				let xpub: string | undefined
+
+				if (chain.chainFamily !== 'utxo') {
+					const addrParams: any = {
+						addressNList: chain.defaultPath,
+						showDisplay: false,
+						coin: chain.coin,
+					}
+					if (chain.scriptType) addrParams.scriptType = chain.scriptType
+					const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+					const addrResult = await wallet[walletMethod](addrParams)
+					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				} else {
+					const xpubResult = await wallet.getPublicKeys([{
+						addressNList: chain.defaultPath.slice(0, 3),
+						coin: chain.coin,
+						scriptType: chain.scriptType,
+						curve: 'secp256k1',
+					}])
+					xpub = xpubResult?.[0]?.xpub
+				}
+
+				const result = await buildTx(pioneer, chain, {
+					...params,
+					fromAddress,
+					xpub,
+				})
+
+				return { unsignedTx: result.unsignedTx, fee: result.fee }
+			},
+
+			broadcastTx: async (params) => {
+				const chain = CHAINS.find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+				return await broadcastTx(pioneer, chain, params.signedTx)
+			},
+
+			getMarketData: async (params) => {
+				const pioneer = await getPioneer()
+				const resp = await pioneer.GetMarketInfo(params.caips)
+				return resp?.data || []
+			},
+
+			getFees: async (params) => {
+				const chain = CHAINS.find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				if (chain.chainFamily === 'utxo') {
+					const resp = await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+					return { feeRate: resp?.data, unit: 'sat/byte' }
+				} else if (chain.chainFamily === 'evm') {
+					const resp = await pioneer.GetGasPriceByNetwork({ networkId: chain.networkId })
+					return { gasPrice: resp?.data, unit: 'gwei' }
+				} else {
+					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
+				}
+			},
 		},
 		messages: {},
 	},
@@ -87,7 +371,7 @@ await engine.start()
 // Quit the app when the main window is closed
 mainWindow.on("close", () => {
 	engine.stop()
-	restServer.stop()
+	restServer?.stop()
 	Utils.quit()
 })
 

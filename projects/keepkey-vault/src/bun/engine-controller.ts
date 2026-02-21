@@ -559,6 +559,61 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  async verifySeed(opts: { wordCount: 12 | 18 | 24 }) {
+    if (!this.wallet) throw new Error('No device connected')
+    if (!this.wallet.transport) throw new Error('No transport available')
+
+    // hdwallet's recover() doesn't support dryRun, so we construct
+    // the raw RecoveryDevice protobuf with dryRun=true and send via transport.
+    // dryRun means the device verifies the seed WITHOUT modifying any state.
+    const Messages = require('@keepkey/device-protocol/lib/messages_pb')
+
+    this.setupInProgress = true
+    this.pinRequestCount = 0
+
+    try {
+      const msg = new Messages.RecoveryDevice()
+      msg.setWordCount(opts.wordCount)
+      msg.setPassphraseProtection(false)
+      msg.setPinProtection(false)
+      msg.setLabel('KeepKey')
+      msg.setLanguage('english')
+      msg.setEnforceWordlist(true)
+      msg.setUseCharacterCipher(true)
+      msg.setDryRun(true)
+      msg.setAutoLockDelayMs(600000)
+
+      await this.wallet.transport.call(
+        Messages.MessageType.MESSAGETYPE_RECOVERYDEVICE,
+        msg,
+        { msgTimeout: 10 * 60 * 1000 }
+      )
+
+      return { success: true, message: 'Seed verified successfully' }
+    } catch (err: any) {
+      const rawMessage: string =
+        typeof err?.message === 'string' ? err.message
+        : typeof err?.message?.message === 'string' ? err.message.message
+        : String(err)
+      console.error('[Engine] Seed verification failed:', rawMessage)
+
+      let errorType: 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' = 'unknown'
+      if (rawMessage.includes('Action cancelled')) {
+        errorType = 'cancelled'
+      } else if (rawMessage.includes('Invalid mnemonic') || rawMessage.includes('does not match')) {
+        errorType = 'invalid-mnemonic'
+      } else if (rawMessage.includes('Words were not entered correctly') || rawMessage.includes('substition cipher') || rawMessage.includes('substitution cipher')) {
+        errorType = 'bad-words'
+      }
+
+      this.emit('recovery-error', { message: rawMessage, errorType })
+      throw err
+    } finally {
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+    }
+  }
+
   async applySettings(opts: { label?: string }) {
     if (!this.wallet) throw new Error('No device connected')
     await this.wallet.applySettings({ label: opts.label })
