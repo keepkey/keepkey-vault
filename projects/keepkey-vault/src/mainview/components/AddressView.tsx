@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import type { ChainDef } from "../lib/chains"
+import type { ChainDef } from "../../shared/chains"
 
 interface AddressViewProps {
 	chain: ChainDef

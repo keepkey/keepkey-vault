@@ -2,19 +2,13 @@
  * TX builder dispatcher — routes to chain-family builder, signs, broadcasts.
  */
 import type { ChainDef } from '../../shared/chains'
+import type { BuildTxParams } from '../../shared/types'
 import { buildUtxoTx, type BuildUtxoParams } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 
-export interface BuildTxParams {
-  chainId: string
-  to: string
-  amount: string
-  memo?: string
-  feeLevel?: number
-  isMax?: boolean
-}
+export type { BuildTxParams }
 
 /**
  * Build an unsigned transaction for any supported chain.
@@ -120,14 +114,9 @@ export async function signTx(
     case 'evm':
       return wallet.ethSignTx(unsignedTx)
     case 'cosmos': {
-      const signMethod = chain.signMethod.replace('SignTx', 'SignTx')
       // hdwallet method names: cosmosSignTx, thorchainSignTx, mayachainSignTx, osmosisSignTx
-      const methodName = chain.id === 'thorchain' ? 'thorchainSignTx'
-        : chain.id === 'mayachain' ? 'mayachainSignTx'
-        : chain.id === 'osmosis' ? 'osmosisSignTx'
-        : 'cosmosSignTx'
-      if (!wallet[methodName]) throw new Error(`Wallet missing method: ${methodName}`)
-      return wallet[methodName](unsignedTx)
+      if (!wallet[chain.signMethod]) throw new Error(`Wallet missing method: ${chain.signMethod}`)
+      return wallet[chain.signMethod](unsignedTx)
     }
     case 'binance':
       return wallet.binanceSignTx(unsignedTx)

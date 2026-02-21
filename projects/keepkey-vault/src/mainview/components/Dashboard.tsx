@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Box, Flex, Text, VStack, HStack, Spinner } from "@chakra-ui/react"
-import { CHAINS, type ChainDef } from "../lib/chains"
+import { CHAINS, type ChainDef } from "../../shared/chains"
+import { formatBalance } from "../lib/formatting"
 import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { rpcRequest } from "../lib/rpc"
@@ -208,13 +209,4 @@ export function Dashboard() {
 			</VStack>
 		</Box>
 	)
-}
-
-function formatBalance(val: string): string {
-	const num = parseFloat(val)
-	if (isNaN(num) || num === 0) return "0"
-	if (num < 0.000001) return num.toExponential(2)
-	if (num < 1) return num.toFixed(6)
-	if (num < 1000) return num.toFixed(4)
-	return num.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
