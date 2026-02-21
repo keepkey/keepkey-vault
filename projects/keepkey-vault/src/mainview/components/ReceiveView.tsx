@@ -2,6 +2,7 @@ import { useState, useCallback } from "react"
 import { Box, Text, Button, Flex } from "@chakra-ui/react"
 import { generateQRSvg } from "../lib/qr"
 import { rpcRequest } from "../lib/rpc"
+import { pathToString } from "../lib/bip44"
 import { PathEditDialog } from "./PathEditDialog"
 import type { ChainDef } from "../../shared/chains"
 
@@ -9,27 +10,21 @@ interface ReceiveViewProps {
 	chain: ChainDef
 	address: string | null
 	loading: boolean
+	error?: string | null
 	currentPath: number[]
 	onDerive: (path?: number[]) => void
 }
 
-const HARDENED = 0x80000000
-
-function pathToString(path: number[]): string {
-	return "m/" + path.map(n => n >= HARDENED ? `${n - HARDENED}'` : `${n}`).join("/")
-}
-
-export function ReceiveView({ chain, address, loading, currentPath, onDerive }: ReceiveViewProps) {
+export function ReceiveView({ chain, address, loading, error, currentPath, onDerive }: ReceiveViewProps) {
 	const [copied, setCopied] = useState(false)
 	const [showing, setShowing] = useState(false)
 	const [pathDialogOpen, setPathDialogOpen] = useState(false)
 
 	const copyAddress = useCallback(() => {
 		if (!address) return
-		navigator.clipboard.writeText(address).then(() => {
-			setCopied(true)
-			setTimeout(() => setCopied(false), 2000)
-		})
+		navigator.clipboard.writeText(address)
+			.then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+			.catch(() => console.warn('[ReceiveView] Clipboard not available'))
 	}, [address])
 
 	const showOnDevice = useCallback(async () => {
@@ -54,10 +49,21 @@ export function ReceiveView({ chain, address, loading, currentPath, onDerive }: 
 	if (!address && !loading) {
 		return (
 			<Flex direction="column" align="center" py="8" gap="4">
-				<Text fontSize="sm" color="kk.textMuted">No address derived yet</Text>
-				<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
-					Derive Address
-				</Button>
+				{error ? (
+					<>
+						<Text fontSize="sm" color="kk.error">{error}</Text>
+						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
+							Retry
+						</Button>
+					</>
+				) : (
+					<>
+						<Text fontSize="sm" color="kk.textMuted">No address derived yet</Text>
+						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
+							Derive Address
+						</Button>
+					</>
+				)}
 			</Flex>
 		)
 	}
@@ -70,7 +76,7 @@ export function ReceiveView({ chain, address, loading, currentPath, onDerive }: 
 		)
 	}
 
-	const qrSvg = generateQRSvg(address!, 4, 4)
+	const qrSvg = generateQRSvg(address!, 4, 2)
 
 	return (
 		<>
@@ -80,11 +86,11 @@ export function ReceiveView({ chain, address, loading, currentPath, onDerive }: 
 				{/* QR Code */}
 				<Box
 					bg="white"
-					borderRadius="xl"
-					p="2"
+					borderRadius="lg"
 					dangerouslySetInnerHTML={{ __html: qrSvg }}
-					w={{ base: "160px", md: "180px" }}
-					h={{ base: "160px", md: "180px" }}
+					w={{ base: "180px", md: "200px" }}
+					h={{ base: "180px", md: "200px" }}
+					overflow="hidden"
 				/>
 
 				{/* Address */}

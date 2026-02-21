@@ -1,6 +1,7 @@
 import { Box, Flex, Text } from "@chakra-ui/react"
 import type { ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
+import { AnimatedUsd } from "./AnimatedUsd"
 import type { ChainBalance } from "../../shared/types"
 
 interface ChainCardProps {
@@ -39,9 +40,7 @@ export function ChainCard({ chain, balance, onClick }: ChainCardProps) {
 						{formatBalance(balance.balance)} {chain.symbol}
 					</Text>
 					{balance.balanceUsd > 0 && (
-						<Text fontSize="xs" color="kk.textMuted">
-							${balance.balanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-						</Text>
+						<AnimatedUsd value={balance.balanceUsd} fontSize="xs" color="kk.textMuted" />
 					)}
 				</Box>
 			)}

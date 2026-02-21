@@ -302,6 +302,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			broadcastTx: async (params) => {
+				if (!params.signedTx) throw new Error('Missing signedTx payload')
 				const chain = CHAINS.find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				const pioneer = await getPioneer()

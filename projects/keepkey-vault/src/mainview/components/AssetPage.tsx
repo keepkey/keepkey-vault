@@ -4,6 +4,7 @@ import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance } from "../../shared/types"
 import { getAssetIcon } from "../../shared/assetLookup"
+import { AnimatedUsd } from "./AnimatedUsd"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
 
@@ -19,12 +20,14 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const [view, setView] = useState<AssetView>("receive")
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
+	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
 
 	const deriveAddress = useCallback(async (path?: number[]) => {
 		const usePath = path || currentPath
 		if (path) setCurrentPath(path)
 		setLoading(true)
+		setDeriveError(null)
 		try {
 			const params: any = {
 				addressNList: usePath,
@@ -37,14 +40,16 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			setAddress(addr)
 		} catch (e: any) {
 			console.error(`${chain.coin} address:`, e)
+			setDeriveError(e.message || 'Address derivation failed')
 			setAddress(null)
 		}
 		setLoading(false)
 	}, [chain, currentPath])
 
+	// Only auto-derive once on mount, not on every address change
 	useEffect(() => {
-		if (!address) deriveAddress()
-	}, [deriveAddress, address])
+		if (!address && !deriveError) deriveAddress()
+	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
 	const PILLS: { id: AssetView; label: string }[] = [
 		{ id: "receive", label: "Receive" },
@@ -84,9 +89,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								{balance.balance} {chain.symbol}
 							</Text>
 							{balance.balanceUsd > 0 && (
-								<Text fontSize="xs" color="kk.textMuted" display={{ base: "none", sm: "block" }}>
-									(${balance.balanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-								</Text>
+								<AnimatedUsd value={balance.balanceUsd} prefix="($" suffix=")" fontSize="xs" color="kk.textMuted" display={{ base: "none", sm: "block" }} />
 							)}
 						</Flex>
 					)}
@@ -128,6 +131,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							chain={chain}
 							address={address}
 							loading={loading}
+							error={deriveError}
 							currentPath={currentPath}
 							onDerive={deriveAddress}
 						/>

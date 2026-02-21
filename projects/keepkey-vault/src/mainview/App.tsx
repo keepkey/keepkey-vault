@@ -148,7 +148,11 @@ function App() {
 	}
 
 	if (deviceState.state === "needs_passphrase") {
-		return <SplashScreen statusText="Passphrase entry required" />
+		return (
+			<>{charOverlay}{pinOverlay}
+				<SplashScreen statusText="Passphrase entry required" variant="connecting" />
+			</>
+		)
 	}
 
 	// ── Ready phase ─────────────────────────────────────────────────

@@ -1,5 +1,5 @@
-import { useState } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
+import { AnimatedUsd } from "./AnimatedUsd"
 
 export interface DonutChartItem {
 	name: string
@@ -104,9 +104,7 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice }: Donu
 				<Text fontSize="11px" color="kk.gold" fontWeight="500" lineHeight="1">
 					Portfolio
 				</Text>
-				<Text fontSize="18px" color="kk.gold" fontWeight="bold" lineHeight="1.4">
-					${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-				</Text>
+				<AnimatedUsd value={total} fontSize="18px" color="kk.gold" fontWeight="bold" lineHeight="1.4" />
 			</Flex>
 		</Box>
 	)
@@ -144,9 +142,7 @@ export function ChartLegend({ data, total, activeIndex, onHoverItem }: ChartLege
 			<Box w="8px" h="8px" borderRadius="full" bg={item.color} flexShrink={0} />
 			<Text fontSize="xs" fontWeight="500" color="white">{item.name}</Text>
 			<Text fontSize="xs" fontWeight="bold" color="white">{percent}%</Text>
-			<Text fontSize="xs" color="gray.300">
-				${item.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-			</Text>
+			<AnimatedUsd value={item.value} fontSize="xs" color="gray.300" />
 		</Flex>
 	)
 }

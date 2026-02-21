@@ -6,9 +6,9 @@
  *   - `chainId` omitted (== key.split('/')[0])
  *   - `icon` omitted when derivable from CAIP via keepkey.info convention
  *
- * This module reconstitutes the full entry at lookup time.
+ * This module lazy-loads the 4.6MB asset data on first use to avoid
+ * blocking initial render.
  */
-import assetDataRaw from './assetData.json'
 
 interface SlimAssetEntry {
   symbol: string
@@ -40,7 +40,27 @@ export interface AssetEntry {
   denom?: string
 }
 
-const assetMap = assetDataRaw as Record<string, SlimAssetEntry>
+let assetMap: Record<string, SlimAssetEntry> | null = null
+let loadPromise: Promise<Record<string, SlimAssetEntry>> | null = null
+
+function getAssetMap(): Record<string, SlimAssetEntry> | null {
+  if (assetMap) return assetMap
+  // Kick off lazy load if not started yet
+  if (!loadPromise) {
+    loadPromise = import('./assetData.json').then((m) => {
+      assetMap = (m.default || m) as Record<string, SlimAssetEntry>
+      return assetMap
+    }).catch((err) => {
+      console.warn('[assetLookup] Failed to load asset data:', err)
+      assetMap = {}
+      return assetMap
+    })
+  }
+  return null // not loaded yet
+}
+
+// Start loading immediately (non-blocking)
+getAssetMap()
 
 /** Derive the keepkey.info icon URL from a CAIP identifier */
 export function caipToIcon(caip: string): string {
@@ -49,19 +69,23 @@ export function caipToIcon(caip: string): string {
 
 /** Look up a full asset entry by CAIP */
 export function getAsset(caip: string): AssetEntry | undefined {
-  const entry = assetMap[caip]
+  const map = getAssetMap()
+  if (!map) return undefined
+  const entry = map[caip]
   if (!entry) return undefined
   return {
+    ...entry,
     assetId: caip,
     chainId: caip.split('/')[0],
     icon: entry.icon || caipToIcon(caip),
     color: entry.color || '#888',
-    ...entry,
   }
 }
 
 /** Look up just the icon URL for a CAIP */
 export function getAssetIcon(caip: string): string {
-  const entry = assetMap[caip]
+  const map = getAssetMap()
+  if (!map) return caipToIcon(caip)
+  const entry = map[caip]
   return entry?.icon || caipToIcon(caip)
 }

@@ -1,4 +1,5 @@
 import { Flex, Text, Box, Image, IconButton } from "@chakra-ui/react"
+import { Z } from "../lib/z-index"
 import kkIcon from "../assets/icon.png"
 
 interface TopNavProps {
@@ -23,7 +24,7 @@ export function TopNav({ label, connected, firmwareVersion, onSettingsToggle, se
 			borderColor="kk.border"
 			align="center"
 			px="4"
-			zIndex={1000}
+			zIndex={Z.nav}
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1">

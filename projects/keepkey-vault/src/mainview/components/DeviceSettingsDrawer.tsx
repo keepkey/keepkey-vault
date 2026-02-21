@@ -1,7 +1,15 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
+import { Z } from "../lib/z-index"
 import type { DeviceStateInfo } from "../../shared/types"
+
+interface DeviceFeatures {
+	label?: string
+	pinProtection?: boolean
+	passphraseProtection?: boolean
+	u2fCounter?: number
+}
 
 interface DeviceSettingsDrawerProps {
 	open: boolean
@@ -10,19 +18,25 @@ interface DeviceSettingsDrawerProps {
 }
 
 export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSettingsDrawerProps) {
-	const [features, setFeatures] = useState<any>(null)
+	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
+	const [featuresError, setFeaturesError] = useState(false)
 	const [label, setLabel] = useState(deviceState.label || "")
 	const [saving, setSaving] = useState(false)
+	const [labelSaved, setLabelSaved] = useState(false)
 	const [pinging, setPinging] = useState(false)
 	const [pingResult, setPingResult] = useState("")
 	const [wiping, setWiping] = useState(false)
 	const [wipeConfirm, setWipeConfirm] = useState(false)
 	const [verifying, setVerifying] = useState(false)
 	const [verifyResult, setVerifyResult] = useState<{ success: boolean; message: string } | null>(null)
+	const panelRef = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
 		if (open && deviceState.state === "ready") {
-			rpcRequest("getFeatures").then(setFeatures).catch(() => {})
+			setFeaturesError(false)
+			rpcRequest<DeviceFeatures>("getFeatures")
+				.then(setFeatures)
+				.catch(() => setFeaturesError(true))
 		}
 	}, [open, deviceState.state])
 
@@ -31,13 +45,26 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 	// Reset wipe confirm when drawer closes
 	useEffect(() => { if (!open) setWipeConfirm(false) }, [open])
 
+	// Escape key closes drawer
+	useEffect(() => {
+		if (!open) return
+		const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+		document.addEventListener("keydown", handler)
+		return () => document.removeEventListener("keydown", handler)
+	}, [open, onClose])
+
+	// Auto-focus panel on open
+	useEffect(() => {
+		if (open) panelRef.current?.focus()
+	}, [open])
+
 	const saveLabel = useCallback(async () => {
 		if (!label.trim()) return
 		setSaving(true)
 		try {
 			await rpcRequest("applySettings", { label: label.trim() }, 60000)
-			setPingResult("Label saved")
-			setTimeout(() => setPingResult(""), 2000)
+			setLabelSaved(true)
+			setTimeout(() => setLabelSaved(false), 2000)
 		} catch (e: any) { console.error("applySettings:", e) }
 		setSaving(false)
 	}, [label])
@@ -70,10 +97,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 
 	const wipeDevice = useCallback(async () => {
 		setWiping(true)
-		try { await rpcRequest("wipeDevice", undefined, 60000) } catch (e: any) { console.error("wipeDevice:", e) }
+		try {
+			await rpcRequest("wipeDevice", undefined, 60000)
+		} catch (e: any) { console.error("wipeDevice:", e) }
 		setWiping(false)
 		setWipeConfirm(false)
-	}, [])
+		onClose()
+	}, [onClose])
+
+	const securityValue = (val: boolean | undefined): string => {
+		if (featuresError || features === null) return "—"
+		return val ? "Enabled" : "Disabled"
+	}
 
 	return (
 		<>
@@ -83,13 +118,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 					position="fixed"
 					inset="0"
 					bg="blackAlpha.600"
-					zIndex={1100}
+					zIndex={Z.drawerBackdrop}
 					onClick={onClose}
 				/>
 			)}
 
 			{/* Drawer panel */}
 			<Box
+				ref={panelRef}
+				tabIndex={-1}
 				position="fixed"
 				top="0"
 				right="0"
@@ -99,10 +136,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 				bg="kk.bg"
 				borderLeft="1px solid"
 				borderColor="kk.border"
-				zIndex={1200}
+				zIndex={Z.drawerPanel}
 				transform={open ? "translateX(0)" : "translateX(100%)"}
 				transition="transform 0.25s ease"
 				overflowY="auto"
+				outline="none"
+				role="dialog"
+				aria-label="Device Settings"
+				aria-modal="true"
 			>
 				{/* Header */}
 				<Flex
@@ -151,10 +192,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 					{/* Security Status */}
 					<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5">
 						<Text fontSize="md" fontWeight="600" mb="3" color="kk.gold">Security</Text>
+						{featuresError && (
+							<Text fontSize="xs" color="kk.error" mb="2">Could not load device features</Text>
+						)}
 						<VStack gap="2" align="stretch">
 							<InfoRow label="Initialized" value={deviceState.initialized ? "Yes" : "No"} />
-							<InfoRow label="PIN Protection" value={features?.pinProtection ? "Enabled" : "Disabled"} />
-							<InfoRow label="Passphrase" value={features?.passphraseProtection ? "Enabled" : "Disabled"} />
+							<InfoRow label="PIN Protection" value={securityValue(features?.pinProtection)} />
+							<InfoRow label="Passphrase" value={securityValue(features?.passphraseProtection)} />
 							<InfoRow label="U2F Counter" value={features?.u2fCounter != null ? String(features.u2fCounter) : "—"} />
 						</VStack>
 					</Box>
@@ -190,7 +234,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 						<Text fontSize="md" fontWeight="600" mb="3" color="kk.gold">Actions</Text>
 
 						<Text fontSize="xs" color="kk.textSecondary" mb="2">Device Label</Text>
-						<Flex gap="2" mb="3">
+						<Flex gap="2" mb="1">
 							<Input
 								value={label}
 								onChange={(e) => setLabel(e.target.value)}
@@ -206,8 +250,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 								{saving ? "..." : "Save"}
 							</Button>
 						</Flex>
+						{labelSaved && <Text fontSize="xs" color="kk.success" mb="2">Label saved</Text>}
 
-						<Flex gap="3" align="center">
+						<Flex gap="3" align="center" mt="2">
 							<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={pingDevice} disabled={pinging}>
 								{pinging ? "..." : "Ping Device"}
 							</Button>

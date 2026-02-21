@@ -19,7 +19,6 @@ const STATUS_DOT_COLORS: Record<string, string> = {
 
 export function SplashScreen({ statusText, hintText, children, variant = 'searching' }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
-  const showAnimation = variant === 'searching' || variant === 'connecting'
 
   return (
     <Box

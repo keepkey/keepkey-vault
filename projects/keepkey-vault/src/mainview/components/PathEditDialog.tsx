@@ -1,30 +1,12 @@
 import { useState, useCallback, useEffect } from "react"
 import { Box, Flex, Text, Button, Input } from "@chakra-ui/react"
+import { pathToString, stringToPath } from "../lib/bip44"
+import { Z } from "../lib/z-index"
 
 interface PathEditDialogProps {
 	path: number[]
 	onApply: (newPath: number[]) => void
 	onClose: () => void
-}
-
-const HARDENED = 0x80000000
-
-function pathToString(path: number[]): string {
-	return "m/" + path.map(n => n >= HARDENED ? `${n - HARDENED}'` : `${n}`).join("/")
-}
-
-function stringToPath(str: string): number[] | null {
-	const s = str.trim().replace(/^m\/?/, "")
-	if (!s) return null
-	const parts = s.split("/")
-	const result: number[] = []
-	for (const p of parts) {
-		const hardened = p.endsWith("'") || p.endsWith("h") || p.endsWith("H")
-		const num = parseInt(hardened ? p.slice(0, -1) : p, 10)
-		if (isNaN(num) || num < 0) return null
-		result.push(hardened ? num + HARDENED : num)
-	}
-	return result
 }
 
 export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) {
@@ -39,7 +21,7 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 	const handleApply = useCallback(() => {
 		const parsed = stringToPath(value)
 		if (!parsed || parsed.length === 0) {
-			setError("Invalid path format. Use m/44'/0'/0'/0/0")
+			setError("Invalid path. Use m/44'/0'/0'/0/0 (max 10 levels)")
 			return
 		}
 		onApply(parsed)
@@ -54,11 +36,14 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 		<Box
 			position="fixed"
 			inset="0"
-			zIndex="1500"
+			zIndex={Z.dialog}
 			display="flex"
 			alignItems="center"
 			justifyContent="center"
 			onClick={onClose}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="path-dialog-title"
 		>
 			<Box position="absolute" inset="0" bg="blackAlpha.700" />
 			<Box
@@ -72,7 +57,7 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 				maxW="90vw"
 				onClick={(e) => e.stopPropagation()}
 			>
-				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="1">
+				<Text id="path-dialog-title" fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="1">
 					Derivation Path
 				</Text>
 				<Text fontSize="xs" color="kk.textMuted" mb="3">

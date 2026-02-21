@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 
 export default defineConfig({
 	plugins: [react()],
@@ -9,10 +10,16 @@ export default defineConfig({
 		emptyOutDir: true,
 		rollupOptions: {
 			output: {
-				manualChunks: {
-					"asset-data": ["./src/shared/assetData.json"],
+				manualChunks(id) {
+					// Split the large asset data JSON into its own chunk
+					if (id.includes("assetData.json")) return "asset-data";
 				},
 			},
+		},
+	},
+	resolve: {
+		alias: {
+			"@shared": resolve(__dirname, "src/shared"),
 		},
 	},
 	server: {
