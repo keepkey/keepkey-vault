@@ -4,7 +4,7 @@ import { startRestApi } from "./rest-api"
 import { getPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS } from "../shared/chains"
-import type { ChainBalance } from "../shared/types"
+import type { ChainBalance, TokenBalance } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 const DEV_SERVER_PORT = 5173
@@ -189,15 +189,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					})
 					const portfolio = resp?.data || {}
 					const data: any[] = portfolio.balances || []
-					console.log(`[getBalances] Portfolio response: ${data.length} balances, keys: ${Object.keys(portfolio).join(',')}`)
-					if (data.length > 0) console.log(`[getBalances] Sample:`, JSON.stringify(data[0]).slice(0, 200))
+					console.log(`[getBalances] Portfolio response: ${data.length} balances`)
 					for (const entry of pubkeys) {
 						const match = data.find((d: any) => d.caip === entry.caip || d.pubkey === entry.pubkey)
+						// Extract token balances: entries sharing same pubkey but different caip
+						const tokens: TokenBalance[] = data
+							.filter((d: any) => {
+								if (!d.caip || d.caip === entry.caip) return false
+								return d.pubkey === entry.pubkey || d.address === (match?.address || entry.pubkey)
+							})
+							.map((d: any) => ({
+								symbol: d.symbol || '???',
+								name: d.name || d.symbol || 'Unknown Token',
+								balance: String(d.balance ?? '0'),
+								balanceUsd: Number(d.valueUsd ?? 0),
+								caip: d.caip,
+								contractAddress: d.contractAddress,
+							}))
+							.filter((t: TokenBalance) => parseFloat(t.balance) > 0)
 						results.push({
 							chainId: entry.chainId, symbol: entry.symbol,
 							balance: String(match?.balance ?? '0'),
 							balanceUsd: Number(match?.valueUsd ?? 0),
 							address: match?.address || entry.pubkey,
+							tokens: tokens.length > 0 ? tokens : undefined,
 						})
 					}
 				} catch (e: any) {
@@ -206,7 +221,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						results.push({ chainId: entry.chainId, symbol: entry.symbol, balance: '0', balanceUsd: 0, address: entry.pubkey })
 					}
 				}
-				return results
+					return results
 			},
 
 			getBalance: async (params) => {
@@ -287,6 +302,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			broadcastTx: async (params) => {
+				if (!params.signedTx) throw new Error('Missing signedTx payload')
 				const chain = CHAINS.find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				const pioneer = await getPioneer()

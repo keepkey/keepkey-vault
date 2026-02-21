@@ -1,8 +1,7 @@
-import { Box, Text, Flex, Image } from "@chakra-ui/react"
+import { Box, Text, Flex } from "@chakra-ui/react"
 import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
 import splashBg from '../assets/splash-bg.png'
-import connectSvg from '../assets/svg/connect-keepkey.svg'
 
 interface SplashScreenProps {
   statusText: string
@@ -20,7 +19,6 @@ const STATUS_DOT_COLORS: Record<string, string> = {
 
 export function SplashScreen({ statusText, hintText, children, variant = 'searching' }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
-  const showAnimation = variant === 'searching' || variant === 'connecting'
 
   return (
     <Box
@@ -46,15 +44,6 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
             transition: 'filter 0.2s ease'
           }}
         />
-        {showAnimation && (
-          <Image
-            src={connectSvg}
-            alt="Connect KeepKey"
-            w="120px"
-            h="120px"
-            opacity={0.85}
-          />
-        )}
       </Flex>
       <Box
         position="absolute"

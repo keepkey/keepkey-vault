@@ -1,6 +1,9 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
+import { formatBalance } from "../lib/formatting"
+import { parseQrValue } from "../lib/qr-parse"
+import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
 
@@ -23,13 +26,36 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 
+	const [scannerOpen, setScannerOpen] = useState(false)
+
 	const [buildResult, setBuildResult] = useState<BuildTxResult | null>(null)
 	const [signedTx, setSignedTx] = useState<any>(null)
 	const [txid, setTxid] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
 
+	const handleQrScan = useCallback((raw: string) => {
+		setScannerOpen(false)
+		const parsed = parseQrValue(raw)
+		setRecipient(parsed.address)
+		if (parsed.amount) { setAmount(parsed.amount); setIsMax(false) }
+		if (parsed.memo) setMemo(parsed.memo)
+	}, [])
+
+	// Basic client-side validation
+	const amountNum = parseFloat(amount)
+	const balanceNum = parseFloat(balance?.balance || '0')
+	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
+
+	const recipientTooShort = useMemo(() => {
+		if (!recipient) return false
+		// Most addresses are 25+ chars; catch obvious typos
+		return recipient.length > 0 && recipient.length < 10
+	}, [recipient])
+
 	const handleBuild = useCallback(async () => {
 		if (!recipient || (!amount && !isMax)) return
+		if (recipientTooShort) { setError('Address looks too short — please verify'); return }
+		if (exceedsBalance) { setError('Amount exceeds available balance'); return }
 		setLoading(true)
 		setError(null)
 
@@ -98,19 +124,18 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 
 	const copyTxid = useCallback(() => {
 		if (!txid) return
-		navigator.clipboard.writeText(txid).then(() => {
-			setCopied(true)
-			setTimeout(() => setCopied(false), 2000)
-		})
+		navigator.clipboard.writeText(txid)
+			.then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+			.catch(() => console.warn('[SendForm] Clipboard not available'))
 	}, [txid])
 
 	const needsMemo = chain.chainFamily === 'cosmos' || chain.chainFamily === 'binance' || chain.chainFamily === 'xrp'
 
 	return (
-		<VStack gap="4" align="stretch" py="4">
+		<VStack gap="4" align="stretch" py="2">
 			{/* Balance display */}
 			{balance && (
-				<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" p="3" borderRadius="lg">
+				<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
 					<Text fontSize="xs" color="kk.textMuted">Available</Text>
 					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
 						{balance.balance} {chain.symbol}
@@ -121,7 +146,39 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 			{/* Phase: Input */}
 			{phase === 'input' && (
 				<>
-					<Field label="Recipient" value={recipient} onChange={setRecipient} placeholder="Address" />
+					<Box>
+					<Text fontSize="xs" color="kk.textMuted" mb="1">Recipient</Text>
+					<Flex gap="1.5">
+						<Input
+							value={recipient}
+							onChange={(e) => setRecipient(e.target.value)}
+							placeholder="Address"
+							bg="kk.bg"
+							border="1px solid"
+							borderColor="kk.border"
+							color="kk.textPrimary"
+							size="sm"
+							fontFamily="mono"
+							flex="1"
+						/>
+						<Button
+							size="sm"
+							variant="outline"
+							borderColor="kk.border"
+							color="kk.textSecondary"
+							_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+							onClick={() => setScannerOpen(true)}
+							px="2"
+							minW="auto"
+							title="Scan QR code"
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+								<circle cx="12" cy="13" r="4"/>
+							</svg>
+						</Button>
+					</Flex>
+				</Box>
 					<Flex gap="2" align="end">
 						<Box flex="1">
 							<Field
@@ -178,6 +235,10 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 						</Box>
 					)}
 
+					{exceedsBalance && (
+						<Text fontSize="xs" color="kk.error">Amount exceeds available balance ({formatBalance(balance?.balance || '0')} {chain.symbol})</Text>
+					)}
+
 					<Button
 						size="sm"
 						bg="kk.gold"
@@ -207,7 +268,7 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 						</Flex>
 						<Flex justify="space-between">
 							<Text fontSize="xs" color="kk.textSecondary">Fee</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{buildResult.fee} {chain.symbol}</Text>
+							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
 						</Flex>
 					</Box>
 
