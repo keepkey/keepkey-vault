@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Box, Flex, Text, HStack, Spinner, Image, SimpleGrid, IconButton } from "@chakra-ui/react"
 import { CHAINS, customChainToChainDef, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
@@ -61,21 +61,21 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 		if (!loadingBalances) setFetchKey((k) => k + 1)
 	}, [loadingBalances])
 
-	const totalUsd = Array.from(balances.values()).reduce((sum, b) => sum + (b.balanceUsd || 0), 0)
+	const totalUsd = useMemo(() => Array.from(balances.values()).reduce((sum, b) => sum + (b.balanceUsd || 0), 0), [balances])
 
-	const allChains = [...CHAINS, ...customChainDefs]
+	const allChains = useMemo(() => [...CHAINS, ...customChainDefs], [customChainDefs])
 
-	const chartData: DonutChartItem[] = allChains
+	const chartData = useMemo<DonutChartItem[]>(() => allChains
 		.map((chain) => {
 			const bal = balances.get(chain.id)
 			return { name: chain.coin, value: bal?.balanceUsd || 0, color: chain.color, chainId: chain.id }
 		})
 		.filter((d) => d.value > 0)
-		.sort((a, b) => b.value - a.value)
+		.sort((a, b) => b.value - a.value), [allChains, balances])
 
 	const hasAnyBalance = chartData.length > 0
 
-	const sortedChains = [...allChains].sort((a, b) => {
+	const sortedChains = useMemo(() => [...allChains].sort((a, b) => {
 		const aUsd = balances.get(a.id)?.balanceUsd || 0
 		const bUsd = balances.get(b.id)?.balanceUsd || 0
 		const aHas = aUsd > 0 || parseFloat(balances.get(a.id)?.balance || '0') > 0
@@ -84,7 +84,7 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 		if (!aHas && bHas) return 1
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
-	})
+	}), [allChains, balances])
 
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)

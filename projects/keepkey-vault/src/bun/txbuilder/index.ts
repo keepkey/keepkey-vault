@@ -82,6 +82,8 @@ export async function buildTx(
 
     case 'binance': {
       // Binance chain — simple transfer, no Pioneer API needed for tx building
+      // TODO: account_number and sequence should be fetched from Binance API
+      // Currently hardcoded — will fail for accounts with prior transactions
       const amountNum = parseFloat(params.amount)
       const unsignedTx = {
         addressNList: chain.defaultPath,

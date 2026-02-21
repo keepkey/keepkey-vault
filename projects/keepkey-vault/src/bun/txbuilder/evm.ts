@@ -211,7 +211,7 @@ export async function buildEvmTx(
   let amountWei: bigint
   if (isMax) {
     if (nativeBalance <= gasFee) throw new Error('Insufficient funds to cover gas fees')
-    amountWei = nativeBalance - gasFee - gasFee / 2n // 50% buffer
+    amountWei = nativeBalance - gasFee * 110n / 100n // 10% gas buffer for safety
   } else {
     amountWei = BigInt(Math.round(amountNum * 1e18))
     if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {

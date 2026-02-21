@@ -127,8 +127,9 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		if (!address && !deriveError) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-	const tokens = balance?.tokens || []
-	const tokenTotalUsd = tokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0)
+	const tokens = useMemo(() => balance?.tokens || [], [balance?.tokens])
+	const sortedTokens = useMemo(() => [...tokens].sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)), [tokens])
+	const tokenTotalUsd = useMemo(() => tokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [tokens])
 	const [showAddToken, setShowAddToken] = useState(false)
 	const isEvmChain = chain.chainFamily === 'evm'
 
@@ -283,9 +284,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							</HStack>
 						</Flex>
 						<VStack gap="1.5">
-							{tokens
-								.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0))
-								.map((tok) => (
+							{sortedTokens.map((tok) => (
 								<Box
 									key={tok.caip}
 									w="100%"

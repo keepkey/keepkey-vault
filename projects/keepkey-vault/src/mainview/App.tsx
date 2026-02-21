@@ -22,9 +22,11 @@ function App() {
 
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
+	const [pinDismissed, setPinDismissed] = useState(false)
 
 	useEffect(() => {
 		return onRpcMessage("pin-request", (payload) => {
+			setPinDismissed(false) // new request from device resets dismiss
 			setPinRequestType(payload.type as PinRequestType)
 		})
 	}, [])
@@ -34,11 +36,12 @@ function App() {
 		setPinRequestType(null)
 	}, [])
 
-	const handlePinCancel = useCallback(() => setPinRequestType(null), [])
+	const handlePinCancel = useCallback(() => { setPinRequestType(null); setPinDismissed(true) }, [])
 
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
 	const [recoveryError, setRecoveryError] = useState<{ message: string; errorType: string } | null>(null)
+	const [recoveryWordCount, setRecoveryWordCount] = useState(12)
 
 	useEffect(() => {
 		return onRpcMessage("character-request", (payload) => {
@@ -70,19 +73,20 @@ function App() {
 	const handleRecoveryRetry = useCallback(async () => {
 		setCharRequest(null)
 		setRecoveryError(null)
-		try { await rpcRequest("recoverDevice", { wordCount: 12, pin: true, passphrase: false }, 600000) } catch { /* errors via RPC message */ }
-	}, [])
+		try { await rpcRequest("recoverDevice", { wordCount: recoveryWordCount, pin: true, passphrase: false }, 600000) } catch { /* errors via RPC message */ }
+	}, [recoveryWordCount])
 
-	// Auto-show PIN for locked device
+	// Auto-show PIN for locked device (only once — respect user dismiss)
 	useEffect(() => {
-		if (deviceState.state === "needs_pin" && !pinRequestType) setPinRequestType("current")
-	}, [deviceState.state, pinRequestType])
+		if (deviceState.state === "needs_pin" && !pinRequestType && !pinDismissed) setPinRequestType("current")
+	}, [deviceState.state, pinRequestType, pinDismissed])
 
-	// Clear overlays on ready
+	// Clear overlays on ready or disconnect
 	useEffect(() => {
-		if (deviceState.state === "ready") {
+		if (deviceState.state === "ready" || deviceState.state === "disconnected") {
 			setPinRequestType(null)
 			setCharRequest(null)
+			setPinDismissed(false) // reset dismiss on state transitions
 		}
 	}, [deviceState.state])
 
@@ -106,7 +110,7 @@ function App() {
 		<RecoveryWordEntry
 			wordPos={charRequest?.wordPos ?? 0}
 			characterPos={charRequest?.characterPos ?? 0}
-			totalWords={12}
+			totalWords={recoveryWordCount}
 			onCharacter={handleCharacter}
 			onDelete={handleCharDelete}
 			onDone={handleCharDone}

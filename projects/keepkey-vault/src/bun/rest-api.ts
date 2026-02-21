@@ -4,24 +4,16 @@ import type { Server } from 'bun'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-}
+const ALLOWED_ORIGINS = new Set(['http://localhost:1646', 'http://127.0.0.1:1646'])
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-  })
-}
-
-function binary(data: Uint8Array | Buffer, status = 200): Response {
-  return new Response(data, {
-    status,
-    headers: { 'Content-Type': 'application/octet-stream', ...CORS_HEADERS },
-  })
+function corsHeaders(req?: Request): Record<string, string> {
+  const origin = req?.headers.get('Origin') || ''
+  return {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin) ? origin : 'http://localhost:1646',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
+  }
 }
 
 function requireWallet(engine: EngineController) {
@@ -144,9 +136,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const path = url.pathname
       const method = req.method
 
+      // Per-request response helpers (capture req for CORS origin check)
+      const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
+        status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
+      })
+      const binary = (data: Uint8Array | Buffer, status = 200) => new Response(data, {
+        status, headers: { 'Content-Type': 'application/octet-stream', ...corsHeaders(req) },
+      })
+
       // CORS preflight
       if (method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: CORS_HEADERS })
+        return new Response(null, { status: 204, headers: corsHeaders(req) })
       }
 
       try {
@@ -155,7 +155,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (path === '/spec/swagger.json' && method === 'GET') {
           return new Response(getSwagger(), {
-            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+            headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
           })
         }
 
@@ -176,24 +176,30 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // ADMIN (public)
+        // ADMIN (requires auth)
         // ═══════════════════════════════════════════════════════════════
         if (path === '/admin/wallets' && method === 'GET') {
+          auth.requireAuth(req)
           return json([])
         }
         if (path === '/admin/wallets/current' && method === 'GET') {
+          auth.requireAuth(req)
           return json(null)
         }
         if (path === '/admin/wallets/switch' && method === 'POST') {
+          auth.requireAuth(req)
           return json({ success: true })
         }
         if (path === '/admin/usb/devices' && method === 'GET') {
+          auth.requireAuth(req)
           return json([])
         }
         if (path === '/admin/usb/state' && method === 'GET') {
+          auth.requireAuth(req)
           return json({ connected: engine.wallet !== null })
         }
         if (path === '/admin/info' && method === 'GET') {
+          auth.requireAuth(req)
           return json({
             wallets: [],
             currentWallet: null,
@@ -400,16 +406,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             chainId,
           }
 
-          // EIP-1559 fields
+          // EIP-1559 fields — pass through to hdwallet (most EVM chains support EIP-1559)
           if (body.maxFeePerGas || body.max_fee_per_gas) {
             msg.maxFeePerGas = body.maxFeePerGas || body.max_fee_per_gas
             msg.maxPriorityFeePerGas = body.maxPriorityFeePerGas || body.max_priority_fee_per_gas || '0x0'
-            // Strip EIP-1559 on non-mainnet chains
-            if (chainId !== 1) {
-              msg.gasPrice = msg.maxFeePerGas
-              delete msg.maxFeePerGas
-              delete msg.maxPriorityFeePerGas
-            }
           } else {
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
@@ -599,7 +599,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await req.json() as any
           return json(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'))
         }
-        if (path === '/thorchain/sign-amino-desposit' && method === 'POST') {
+        if (path === '/thorchain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await req.json() as any
@@ -613,7 +613,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await req.json() as any
           return json(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'))
         }
-        if (path === '/mayachain/sign-amino-desposit' && method === 'POST') {
+        if (path === '/mayachain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await req.json() as any
@@ -697,6 +697,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── SYSTEM INITIALIZE (3 endpoints) ──────────────────────────
         if (path === '/system/initialize/load-device' && method === 'POST') {
           auth.requireAuth(req)
+          console.warn('[REST] WARNING: load-device called — mnemonic transmitted over HTTP (localhost only)')
           const wallet = requireWallet(engine)
           const body = await req.json() as any
           if (!body.mnemonic) throw { status: 400, message: 'Missing mnemonic' }

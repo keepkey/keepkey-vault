@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, Fragment } from "react"
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
@@ -52,6 +52,20 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const [copied, setCopied] = useState(false)
 	const [showPayload, setShowPayload] = useState(false)
 
+	// Reset form when token selection changes
+	const tokenCaip = token?.caip ?? null
+	useEffect(() => {
+		setPhase('input')
+		setBuildResult(null)
+		setSignedTx(null)
+		setTxid(null)
+		setError(null)
+		setRecipient("")
+		setAmount("")
+		setMemo("")
+		setIsMax(false)
+	}, [tokenCaip])
+
 	// Derived display values — token mode vs native mode
 	const isTokenSend = !!(token && token.caip?.includes('erc20'))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
@@ -96,7 +110,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || 'Failed to build transaction')
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax])
+	}, [chain, recipient, amount, memo, feeLevel, isMax, recipientTooShort, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
