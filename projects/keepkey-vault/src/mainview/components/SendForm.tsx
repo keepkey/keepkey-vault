@@ -107,10 +107,10 @@ export function SendForm({ chain, address, balance }: SendFormProps) {
 	const needsMemo = chain.chainFamily === 'cosmos' || chain.chainFamily === 'binance' || chain.chainFamily === 'xrp'
 
 	return (
-		<VStack gap="4" align="stretch" py="4">
+		<VStack gap="4" align="stretch" py="2">
 			{/* Balance display */}
 			{balance && (
-				<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" p="3" borderRadius="lg">
+				<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
 					<Text fontSize="xs" color="kk.textMuted">Available</Text>
 					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
 						{balance.balance} {chain.symbol}

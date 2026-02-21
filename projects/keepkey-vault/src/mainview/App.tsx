@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex, Text } from "@chakra-ui/react"
+import { Box, Flex } from "@chakra-ui/react"
 import { PinEntry } from "./components/device/PinEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
 import { SplashScreen } from "./components/SplashScreen"
@@ -7,18 +7,17 @@ import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
-import { DevicePage } from "./components/DevicePage"
+import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import type { PinRequestType } from "../shared/types"
 
-type Tab = "dashboard" | "device"
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
 function App() {
 	const deviceState = useDeviceState()
 	const [wizardComplete, setWizardComplete] = useState(false)
-	const [tab, setTab] = useState<Tab>("dashboard")
+	const [settingsOpen, setSettingsOpen] = useState(false)
 
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
@@ -159,14 +158,19 @@ function App() {
 				<TopNav
 					label={deviceState.label}
 					connected={deviceState.state === "ready" || deviceState.state === "needs_pin" || deviceState.state === "needs_passphrase"}
-					tab={tab}
-					onTabChange={setTab}
+					firmwareVersion={deviceState.firmwareVersion}
+					onSettingsToggle={() => setSettingsOpen((o) => !o)}
+					settingsOpen={settingsOpen}
 				/>
-				<Box flex="1" overflow="auto" pt="74px" px="6" pb="6">
-					{tab === "dashboard" && <Dashboard />}
-					{tab === "device" && <DevicePage deviceState={deviceState} />}
-				</Box>
+				<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
+					<Dashboard />
+				</Flex>
 			</Flex>
+			<DeviceSettingsDrawer
+				open={settingsOpen}
+				onClose={() => setSettingsOpen(false)}
+				deviceState={deviceState}
+			/>
 		</>
 	)
 }

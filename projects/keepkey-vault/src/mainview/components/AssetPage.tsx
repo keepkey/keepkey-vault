@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex, Text, Button } from "@chakra-ui/react"
+import { Box, Flex, Text, Button, Image } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance } from "../../shared/types"
-import { AddressView } from "./AddressView"
+import { getAssetIcon } from "../../shared/assetLookup"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
 
-type AssetView = "address" | "receive" | "send"
+type AssetView = "receive" | "send"
 
 interface AssetPageProps {
 	chain: ChainDef
@@ -16,15 +16,18 @@ interface AssetPageProps {
 }
 
 export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
-	const [view, setView] = useState<AssetView>("address")
+	const [view, setView] = useState<AssetView>("receive")
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
+	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
 
-	const deriveAddress = useCallback(async () => {
+	const deriveAddress = useCallback(async (path?: number[]) => {
+		const usePath = path || currentPath
+		if (path) setCurrentPath(path)
 		setLoading(true)
 		try {
 			const params: any = {
-				addressNList: chain.defaultPath,
+				addressNList: usePath,
 				showDisplay: false,
 				coin: chain.coin,
 			}
@@ -37,84 +40,103 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			setAddress(null)
 		}
 		setLoading(false)
-	}, [chain])
+	}, [chain, currentPath])
 
 	useEffect(() => {
 		if (!address) deriveAddress()
 	}, [deriveAddress, address])
 
 	const PILLS: { id: AssetView; label: string }[] = [
-		{ id: "address", label: "Address" },
 		{ id: "receive", label: "Receive" },
 		{ id: "send", label: "Send" },
 	]
 
 	return (
-		<Box>
-			{/* Header */}
-			<Flex align="center" gap="3" mb="2">
-				<Button
-					size="sm"
-					variant="ghost"
-					color="kk.textSecondary"
-					_hover={{ color: "kk.textPrimary" }}
-					onClick={onBack}
-					px="2"
-				>
-					&larr;
-				</Button>
-				<Box w="3px" h="20px" bg={chain.color} borderRadius="full" />
-				<Text fontSize="lg" fontWeight="600" color="kk.textPrimary">{chain.coin}</Text>
-				<Text fontSize="sm" color="kk.textMuted">{chain.symbol}</Text>
-			</Flex>
-
-			{/* Balance summary */}
-			{balance && (
-				<Box mb="4" ml="10">
-					<Text fontSize="md" fontFamily="mono" color="kk.textPrimary">
-						{balance.balance} {chain.symbol}
+		<Flex flex="1" direction="column" align="center" justify="center" px={{ base: "3", md: "6" }} py="4">
+			<Box w="100%" maxW={{ base: "100%", sm: "480px", md: "560px" }}>
+				{/* Header */}
+				<Flex align="center" gap={{ base: "2", md: "3" }} mb="1">
+					<Button
+						size="sm"
+						variant="ghost"
+						color="kk.textSecondary"
+						_hover={{ color: "kk.textPrimary" }}
+						onClick={onBack}
+						px="2"
+						minW="auto"
+					>
+						&larr;
+					</Button>
+					<Image
+						src={getAssetIcon(chain.caip)}
+						alt={chain.symbol}
+						w="28px"
+						h="28px"
+						borderRadius="full"
+						flexShrink={0}
+						bg={chain.color}
+					/>
+					<Text fontSize={{ base: "md", md: "lg" }} fontWeight="600" color="kk.textPrimary">{chain.coin}</Text>
+					<Text fontSize={{ base: "xs", md: "sm" }} color="kk.textMuted">{chain.symbol}</Text>
+					{balance && (
+						<Flex ml="auto" align="baseline" gap="2" flexShrink={0}>
+							<Text fontSize={{ base: "xs", md: "sm" }} fontFamily="mono" color="kk.textPrimary">
+								{balance.balance} {chain.symbol}
+							</Text>
+							{balance.balanceUsd > 0 && (
+								<Text fontSize="xs" color="kk.textMuted" display={{ base: "none", sm: "block" }}>
+									(${balance.balanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+								</Text>
+							)}
+						</Flex>
+					)}
+				</Flex>
+				{/* CAIP badge */}
+				<Flex justify="center" mb="2">
+					<Text fontSize="10px" fontFamily="mono" color="kk.textMuted" bg="rgba(255,255,255,0.04)" px="2" py="0.5" borderRadius="md">
+						{chain.caip}
 					</Text>
-					{balance.balanceUsd > 0 && (
-						<Text fontSize="sm" color="kk.textMuted">
-							${balance.balanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-						</Text>
+				</Flex>
+
+				{/* Pill toggle */}
+				<Flex justify="center" mb="3">
+					<Flex gap="1" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg">
+						{PILLS.map((p) => (
+							<Button
+								key={p.id}
+								size="xs"
+								variant="ghost"
+								color={view === p.id ? "kk.gold" : "kk.textSecondary"}
+								bg={view === p.id ? "rgba(255,215,0,0.1)" : "transparent"}
+								_hover={{ bg: "rgba(255,255,255,0.06)" }}
+								fontWeight={view === p.id ? "600" : "400"}
+								fontSize="12px"
+								px={{ base: "3", md: "4" }}
+								borderRadius="md"
+								onClick={() => setView(p.id)}
+							>
+								{p.label}
+							</Button>
+						))}
+					</Flex>
+				</Flex>
+
+				{/* Content */}
+				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }}>
+					{view === "receive" && (
+						<ReceiveView
+							chain={chain}
+							address={address}
+							loading={loading}
+							currentPath={currentPath}
+							onDerive={deriveAddress}
+						/>
+					)}
+					{view === "send" && (
+						<SendForm chain={chain} address={address} balance={balance} />
 					)}
 				</Box>
-			)}
-
-			{/* Pill toggle */}
-			<Flex gap="1" mb="4" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg" w="fit-content">
-				{PILLS.map((p) => (
-					<Button
-						key={p.id}
-						size="xs"
-						variant="ghost"
-						color={view === p.id ? "kk.gold" : "kk.textSecondary"}
-						bg={view === p.id ? "rgba(255,215,0,0.1)" : "transparent"}
-						_hover={{ bg: "rgba(255,255,255,0.06)" }}
-						fontWeight={view === p.id ? "600" : "400"}
-						fontSize="12px"
-						px="3"
-						borderRadius="md"
-						onClick={() => setView(p.id)}
-					>
-						{p.label}
-					</Button>
-				))}
-			</Flex>
-
-			{/* Content */}
-			<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5">
-				{view === "address" && (
-					<AddressView chain={chain} address={address} loading={loading} onDerive={deriveAddress} />
-				)}
-				{view === "receive" && (
-					<ReceiveView address={address} symbol={chain.symbol} onDerive={deriveAddress} />
-				)}
-				{view === "send" && (
-					<SendForm chain={chain} address={address} balance={balance} />
-				)}
 			</Box>
-		</Box>
+		</Flex>
 	)
 }

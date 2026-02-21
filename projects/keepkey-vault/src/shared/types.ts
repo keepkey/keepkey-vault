@@ -56,12 +56,22 @@ export interface FirmwareManifest {
 }
 
 // Pioneer integration types
+export interface TokenBalance {
+  symbol: string
+  name: string
+  balance: string       // human-readable
+  balanceUsd: number
+  caip: string          // CAIP-19 token identifier
+  contractAddress?: string
+}
+
 export interface ChainBalance {
   chainId: string
   symbol: string
   balance: string       // human-readable (e.g. "0.001")
   balanceUsd: number
   address: string
+  tokens?: TokenBalance[]
 }
 
 export interface BuildTxParams {

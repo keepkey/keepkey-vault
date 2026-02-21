@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react"
-import { Box, Flex, Text, VStack, HStack, Spinner } from "@chakra-ui/react"
+import { Box, Flex, Text, VStack, HStack, Spinner, Image } from "@chakra-ui/react"
 import { CHAINS, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
+import { supportsTokens } from "../lib/asset-utils"
+import { getAssetIcon } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { rpcRequest } from "../lib/rpc"
@@ -63,20 +65,25 @@ export function Dashboard() {
 		return 0
 	})
 
+	// Aggregate token stats across all chains
+	const totalTokenCount = Array.from(balances.values()).reduce((sum, b) => sum + (b.tokens?.length || 0), 0)
+	const totalTokenUsd = Array.from(balances.values()).reduce(
+		(sum, b) => sum + (b.tokens?.reduce((ts, t) => ts + (t.balanceUsd || 0), 0) || 0), 0
+	)
+
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
 		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
 	}
 
 	return (
-		<Box maxW="600px" mx="auto" pt="2" px="4">
-			<VStack gap="6" align="center">
+		<Box w="100%" maxW={{ base: "100%", sm: "480px", md: "560px" }} mx="auto" pt="2" px={{ base: "3", md: "4" }}>
+			<VStack gap={{ base: "4", md: "5" }} align="center">
 				{/* Portfolio Donut Card */}
 				<Box
 					w="100%"
-					maxW="420px"
-					p="6"
-					borderRadius="2xl"
+					p={{ base: "4", md: "5" }}
+					borderRadius="xl"
 					bg="kk.cardBg"
 					border="1px solid"
 					borderColor={hasAnyBalance ? `${chartData[0]?.color}40` : "kk.border"}
@@ -84,19 +91,19 @@ export function Dashboard() {
 					transition="all 0.2s"
 				>
 					{loadingBalances && !hasAnyBalance ? (
-						<Flex direction="column" align="center" justify="center" py="10" gap="4">
+						<Flex direction="column" align="center" justify="center" py="8" gap="3">
 							<Spinner size="lg" color="kk.gold" />
 							<Text fontSize="sm" color="kk.gold">Loading portfolio...</Text>
 						</Flex>
 					) : hasAnyBalance ? (
-						<Flex direction="column" align="center" gap="4">
+						<Flex direction="column" align="center" gap="3">
 							<DonutChart
 								data={chartData}
-								size={210}
+								size={180}
 								activeIndex={activeSliceIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 							/>
-							<Box w="100%" maxW="360px" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
+							<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
 								<ChartLegend
 									data={chartData}
 									total={totalUsd}
@@ -106,20 +113,20 @@ export function Dashboard() {
 							</Box>
 						</Flex>
 					) : (
-						<Flex direction="column" align="center" py="8" gap="3">
-							<Text fontSize="3xl">📊</Text>
-							<Text fontSize="md" color="gray.400" fontWeight="500">No Portfolio Balance</Text>
+						<Flex direction="column" align="center" py="6" gap="2">
+							<Text fontSize="2xl">📊</Text>
+							<Text fontSize="sm" color="gray.400" fontWeight="500">No Portfolio Balance</Text>
 							<Text fontSize="xs" color="gray.500" textAlign="center" maxW="280px">
 								Your portfolio is empty. Add funds to see your portfolio breakdown.
 							</Text>
-							<Text fontSize="xl" color="kk.gold" fontWeight="bold">$0.00</Text>
+							<Text fontSize="lg" color="kk.gold" fontWeight="bold">$0.00</Text>
 						</Flex>
 					)}
 				</Box>
 
 				{/* Asset List */}
 				<Box w="100%">
-					<HStack justify="space-between" mb="3">
+					<HStack justify="space-between" mb="2">
 						<HStack gap="2">
 							<Text fontSize="sm" color="gray.400">Your Assets</Text>
 							<Text fontSize="xs" color="gray.600">({CHAINS.length})</Text>
@@ -127,69 +134,60 @@ export function Dashboard() {
 						{loadingBalances && hasAnyBalance && <Spinner size="xs" color="kk.gold" />}
 					</HStack>
 
-					<VStack gap="3">
+					<VStack gap="1.5">
 						{sortedChains.map((chain) => {
 							const bal = balances.get(chain.id)
 							const balNum = parseFloat(bal?.balance || '0')
 							const usdNum = bal?.balanceUsd || 0
 							const hasBalance = balNum > 0 || usdNum > 0
+							const tokenCount = bal?.tokens?.length || 0
 
 							return (
 								<Box
 									key={chain.id}
 									w="100%"
-									p="4"
-									borderRadius="xl"
+									py="2"
+									px={{ base: "2.5", md: "3" }}
+									borderRadius="lg"
 									border="1px solid"
-									borderColor={hasBalance ? `${chain.color}50` : "kk.border"}
-									borderLeft="4px solid"
-									borderLeftColor={chain.color}
-									bg={hasBalance ? `${chain.color}10` : "kk.cardBg"}
-									boxShadow={hasBalance ? `0 2px 12px ${chain.color}15` : "none"}
+									borderColor={hasBalance ? `${chain.color}40` : "kk.border"}
+									bg={hasBalance ? `${chain.color}08` : "kk.cardBg"}
 									cursor="pointer"
-									transition="all 0.2s"
+									transition="all 0.15s"
 									_hover={{
-										transform: "translateY(-2px)",
-										boxShadow: `0 6px 20px ${chain.color}30`,
 										borderColor: chain.color,
-										bg: `${chain.color}18`,
+										bg: `${chain.color}14`,
 									}}
-									_active={{ transform: "scale(0.98)" }}
+									_active={{ transform: "scale(0.99)" }}
 									onClick={() => setSelectedChain(chain)}
 								>
 									<Flex align="center" justify="space-between">
-										<HStack gap="3">
-											{/* Color dot icon */}
-											<Box
-												w="36px"
-												h="36px"
+										<HStack gap="2">
+											<Image
+												src={getAssetIcon(chain.caip)}
+												alt={chain.symbol}
+												w="26px"
+												h="26px"
 												borderRadius="full"
+												flexShrink={0}
 												bg={chain.color}
-												display="flex"
-												alignItems="center"
-												justifyContent="center"
-												boxShadow={`0 0 8px ${chain.color}40`}
-											>
-												<Text fontSize="xs" fontWeight="bold" color="white">
-													{chain.symbol.slice(0, 3)}
-												</Text>
-											</Box>
+											/>
 											<Box>
-												<Text fontSize="sm" fontWeight="600" color="white">
+												<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2">
 													{chain.coin}
 												</Text>
-												<Text fontSize="xs" color="gray.500">{chain.symbol}</Text>
+												<Text fontSize="xs" color="gray.500" lineHeight="1.2">{chain.symbol}</Text>
 											</Box>
 										</HStack>
 
 										<Box textAlign="right">
 											{bal ? (
 												<>
-													<Text fontSize="sm" fontFamily="mono" fontWeight="500" color="white">
+													<Text fontSize={{ base: "xs", md: "sm" }} fontFamily="mono" fontWeight="500" color="white" lineHeight="1.2">
 														{formatBalance(bal.balance)} {chain.symbol}
 													</Text>
 													{usdNum > 0 && (
-														<Text fontSize="xs" color="gray.400">
+														<Text fontSize="xs" color="gray.400" lineHeight="1.2">
 															${usdNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 														</Text>
 													)}
