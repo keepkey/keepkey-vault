@@ -3,6 +3,7 @@ import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
 import { getAsset } from "../../shared/assetLookup"
+import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
 
@@ -51,6 +52,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const [txid, setTxid] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
 	const [showPayload, setShowPayload] = useState(false)
+	const [showScanner, setShowScanner] = useState(false)
 
 	// Reset form when token selection changes
 	const tokenCaip = token?.caip ?? null
@@ -164,6 +166,32 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			.catch(() => console.warn('[SendForm] Clipboard not available'))
 	}, [txid])
 
+	// Parse QR scan result — handles plain addresses and BIP-21 / EIP-681 URIs
+	const handleQrScan = useCallback((data: string) => {
+		setShowScanner(false)
+		// BIP-21: bitcoin:addr?amount=X&label=Y  or  ethereum:addr@chainId?value=X
+		const colonIdx = data.indexOf(':')
+		let addr = data
+		if (colonIdx > 0 && colonIdx < 12) {
+			// Strip scheme prefix
+			addr = data.slice(colonIdx + 1)
+		}
+		// Strip query params, extract amount/memo if present
+		const qIdx = addr.indexOf('?')
+		let params: URLSearchParams | null = null
+		if (qIdx >= 0) {
+			params = new URLSearchParams(addr.slice(qIdx + 1))
+			addr = addr.slice(0, qIdx)
+		}
+		setRecipient(addr)
+		if (params) {
+			const amt = params.get('amount') || params.get('value')
+			if (amt) { setAmount(amt); setIsMax(false) }
+			const m = params.get('memo') || params.get('dt') || params.get('label')
+			if (m) setMemo(m)
+		}
+	}, [])
+
 	// Build explorer URL from assetData
 	const explorerUrl = useMemo(() => {
 		if (!txid) return null
@@ -221,7 +249,38 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* Phase: Input */}
 			{phase === 'input' && (
 				<>
-					<Field label="Recipient" value={recipient} onChange={setRecipient} placeholder="Address" />
+					<Box>
+						<Text fontSize="xs" color="kk.textMuted" mb="1">Recipient</Text>
+						<Flex gap="2">
+							<Input
+								value={recipient}
+								onChange={(e) => setRecipient(e.target.value)}
+								placeholder="Address"
+								bg="kk.bg"
+								border="1px solid"
+								borderColor="kk.border"
+								color="kk.textPrimary"
+								size="sm"
+								fontFamily="mono"
+								px="3"
+								flex="1"
+							/>
+							<Button
+								size="sm"
+								variant="outline"
+								borderColor="kk.border"
+								color="kk.textSecondary"
+								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+								onClick={() => setShowScanner(true)}
+								px="2"
+								minW="36px"
+								h="32px"
+								title="Scan QR code"
+							>
+								<QrIcon />
+							</Button>
+						</Flex>
+					</Box>
 					<Flex gap="2" align="end">
 						<Box flex="1">
 							<Field
@@ -453,7 +512,29 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					<Text fontSize="xs" color="kk.error">{error}</Text>
 				</Box>
 			)}
+
+			{/* QR Scanner overlay */}
+			{showScanner && (
+				<QrScannerOverlay onScan={handleQrScan} onClose={() => setShowScanner(false)} />
+			)}
 		</VStack>
+	)
+}
+
+function QrIcon() {
+	return (
+		<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+			<rect x="2" y="2" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="2" fill="none" />
+			<rect x="4" y="4" width="4" height="4" fill="currentColor" />
+			<rect x="14" y="2" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="2" fill="none" />
+			<rect x="16" y="4" width="4" height="4" fill="currentColor" />
+			<rect x="2" y="14" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="2" fill="none" />
+			<rect x="4" y="16" width="4" height="4" fill="currentColor" />
+			<rect x="14" y="14" width="3" height="3" fill="currentColor" />
+			<rect x="19" y="14" width="3" height="3" fill="currentColor" />
+			<rect x="14" y="19" width="3" height="3" fill="currentColor" />
+			<rect x="19" y="19" width="3" height="3" fill="currentColor" />
+		</svg>
 	)
 }
 
