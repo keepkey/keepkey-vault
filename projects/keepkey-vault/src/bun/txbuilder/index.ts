@@ -153,7 +153,7 @@ export async function broadcastTx(
   // Extract serialized tx from signed result
   // XRP: hdwallet returns { value: { signatures: [{ serializedTx: "base64" }] } }
   // EVM/UTXO: hdwallet returns { serializedTx: "hex" }
-  // Cosmos/Binance: hdwallet returns { serialized: "hex" }
+  // Cosmos: proto-tx-builder returns { serialized: "base64" } — must convert to hex for Pioneer
   let serializedTx: string
   if (typeof signedTx === 'string') {
     serializedTx = signedTx
@@ -163,9 +163,22 @@ export async function broadcastTx(
   } else if (signedTx?.serializedTx) {
     serializedTx = signedTx.serializedTx
   } else if (signedTx?.serialized) {
-    serializedTx = signedTx.serialized
+    // proto-tx-builder returns base64-encoded TxRaw, but Pioneer's broadcast
+    // pipeline expects hex. Detect base64 and convert to hex.
+    const raw = signedTx.serialized
+    if (raw && !/^[0-9a-fA-F]+$/.test(raw)) {
+      serializedTx = Buffer.from(raw, 'base64').toString('hex')
+    } else {
+      serializedTx = raw
+    }
   } else {
     throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
+  }
+
+  // EVM chains: Pioneer's broadcast calls ethers arrayify() which requires 0x prefix.
+  // hdwallet's ethSignTx returns raw hex without 0x — add it here.
+  if (chain.chainFamily === 'evm' && serializedTx && !serializedTx.startsWith('0x')) {
+    serializedTx = '0x' + serializedTx
   }
 
   const result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
