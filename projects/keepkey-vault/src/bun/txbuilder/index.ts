@@ -17,60 +17,73 @@ export type { BuildTxParams }
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; rpcUrl?: string; accountPath?: number[] },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
-      const unsignedTx = await buildUtxoTx(pioneer, chain, {
+      const utxoResult = await buildUtxoTx(pioneer, chain, {
         to: params.to,
         amount: params.amount,
         memo: params.memo,
         feeLevel: params.feeLevel,
         isMax: params.isMax,
         xpub: params.xpub,
+        scriptTypeOverride: params.scriptTypeOverride,
+        accountPath: params.accountPath,
       })
-      return { unsignedTx, fee: unsignedTx.fee }
+      const { fee: utxoFee, ...utxoTx } = utxoResult
+      return { unsignedTx: utxoTx, fee: utxoFee }
     }
 
     case 'evm': {
       if (!params.fromAddress) throw new Error('fromAddress required for EVM chains')
-      const unsignedTx = await buildEvmTx(pioneer, chain, {
+      const evmResult = await buildEvmTx(pioneer, chain, {
         to: params.to,
         amount: params.amount,
         memo: params.memo,
         feeLevel: params.feeLevel,
         isMax: params.isMax,
         fromAddress: params.fromAddress,
+        caip: params.caip,
+        tokenBalance: params.tokenBalance,
+        tokenDecimals: params.tokenDecimals,
+        rpcUrl: params.rpcUrl,
       })
-      return { unsignedTx, fee: unsignedTx.fee }
+      // Strip non-tx metadata so only hdwallet-compatible fields reach ethSignTx
+      const { fee, ...unsignedTx } = evmResult
+      return { unsignedTx, fee }
     }
 
     case 'cosmos': {
       if (!params.fromAddress) throw new Error('fromAddress required for Cosmos chains')
-      const unsignedTx = await buildCosmosTx(pioneer, chain, {
+      const cosmosResult = await buildCosmosTx(pioneer, chain, {
         to: params.to,
         amount: params.amount,
         memo: params.memo,
         isMax: params.isMax,
         fromAddress: params.fromAddress,
       })
-      return { unsignedTx, fee: unsignedTx.fee }
+      const { fee: cosmosFee, ...cosmosTx } = cosmosResult
+      return { unsignedTx: cosmosTx, fee: cosmosFee }
     }
 
     case 'xrp': {
       if (!params.fromAddress) throw new Error('fromAddress required for XRP')
-      const unsignedTx = await buildXrpTx(pioneer, chain, {
+      const xrpResult = await buildXrpTx(pioneer, chain, {
         to: params.to,
         amount: params.amount,
         memo: params.memo,
         isMax: params.isMax,
         fromAddress: params.fromAddress,
       })
-      return { unsignedTx, fee: unsignedTx.fee }
+      const { fee: xrpFee, ...xrpTx } = xrpResult
+      return { unsignedTx: xrpTx, fee: xrpFee }
     }
 
     case 'binance': {
       // Binance chain — simple transfer, no Pioneer API needed for tx building
+      // TODO: account_number and sequence should be fetched from Binance API
+      // Currently hardcoded — will fail for accounts with prior transactions
       const amountNum = parseFloat(params.amount)
       const unsignedTx = {
         addressNList: chain.defaultPath,
@@ -135,27 +148,56 @@ export async function broadcastTx(
   chain: ChainDef,
   signedTx: any,
 ): Promise<{ txid: string }> {
-  console.log(`[broadcast] Broadcasting ${chain.coin} tx...`)
+  console.log(`[broadcast] Broadcasting ${chain.coin} tx (networkId=${chain.networkId})...`)
 
-  // Extract serialized hex from signed result
+  // Extract serialized tx from signed result
+  // XRP: hdwallet returns { value: { signatures: [{ serializedTx: "base64" }] } }
+  // EVM/UTXO: hdwallet returns { serializedTx: "hex" }
+  // Cosmos: proto-tx-builder returns { serialized: "base64" } — must convert to hex for Pioneer
   let serializedTx: string
   if (typeof signedTx === 'string') {
     serializedTx = signedTx
+  } else if (signedTx?.value?.signatures?.[0]?.serializedTx) {
+    // XRP signed response — serializedTx is already base64 (what Pioneer expects)
+    serializedTx = signedTx.value.signatures[0].serializedTx
   } else if (signedTx?.serializedTx) {
     serializedTx = signedTx.serializedTx
   } else if (signedTx?.serialized) {
-    serializedTx = signedTx.serialized
+    // proto-tx-builder returns base64-encoded TxRaw, but Pioneer's broadcast
+    // pipeline expects hex. Detect base64 and convert to hex.
+    const raw = signedTx.serialized
+    if (raw && !/^[0-9a-fA-F]+$/.test(raw)) {
+      serializedTx = Buffer.from(raw, 'base64').toString('hex')
+    } else {
+      serializedTx = raw
+    }
   } else {
-    serializedTx = JSON.stringify(signedTx)
+    throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
   }
 
-  const result = await pioneer.Broadcast({ caip: chain.caip, serializedTx, txHex: serializedTx })
+  // EVM chains: Pioneer's broadcast calls ethers arrayify() which requires 0x prefix.
+  // hdwallet's ethSignTx returns raw hex without 0x — add it here.
+  if (chain.chainFamily === 'evm' && serializedTx && !serializedTx.startsWith('0x')) {
+    serializedTx = '0x' + serializedTx
+  }
+
+  const result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
   const data = result?.data
+
+  // Detect broadcast failure — Pioneer wraps errors in { success: false, error: ... }
+  if (data && typeof data === 'object' && data.success === false) {
+    const errMsg = typeof data.error === 'string' ? data.error
+      : typeof data.error?.error === 'string' ? data.error.error
+      : JSON.stringify(data.error || data)
+    throw new Error(`Broadcast rejected: ${errMsg}`)
+  }
 
   if (data?.txid) return { txid: data.txid }
   if (data?.tx_hash) return { txid: data.tx_hash }
   if (data?.hash) return { txid: data.hash }
-  if (typeof data === 'string') return { txid: data }
+  if (typeof data === 'string' && data.length >= 32) return { txid: data }
 
-  return { txid: JSON.stringify(data) }
+  // If we get here, the response is unexpected — don't pretend it's a txid
+  console.error(`[broadcast] Unexpected response:`, JSON.stringify(data).slice(0, 500))
+  throw new Error(`Broadcast failed: unexpected response — ${JSON.stringify(data).slice(0, 200)}`)
 }

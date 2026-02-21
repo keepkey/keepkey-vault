@@ -5,7 +5,7 @@
  */
 
 // Error correction level M constants per version (1-10)
-const EC_CODEWORDS = [10, 16, 26, 18, 24, 16, 18, 22, 22, 26]
+const EC_CODEWORDS = [10, 16, 26, 36, 48, 64, 72, 88, 110, 130]
 const DATA_CODEWORDS = [16, 28, 44, 64, 86, 108, 124, 154, 182, 216]
 const NUM_BLOCKS = [1, 1, 1, 2, 2, 4, 4, 4, 5, 5]
 

@@ -57,12 +57,18 @@ export interface FirmwareManifest {
 
 // Pioneer integration types
 export interface TokenBalance {
-  symbol: string
-  name: string
-  balance: string       // human-readable
-  balanceUsd: number
-  caip: string          // CAIP-19 token identifier
-  contractAddress?: string
+  symbol: string           // [DB] TEXT NOT NULL — token ticker (e.g. "USDT")
+  name: string             // [DB] TEXT NOT NULL — display name (e.g. "Tether USD")
+  balance: string          // [DB] TEXT NOT NULL DEFAULT '0' — human-readable balance
+  balanceUsd: number       // [DB] REAL NOT NULL DEFAULT 0 — total USD value
+  priceUsd: number         // [DB] REAL NOT NULL DEFAULT 0 — per-unit USD price
+  caip: string             // [DB] TEXT NOT NULL — CAIP-19 identifier (e.g. "eip155:1/erc20:0x...")
+  contractAddress?: string // [DB] TEXT — contract address (extracted from CAIP)
+  networkId?: string       // [DB] TEXT — CAIP-2 network (e.g. "eip155:1")
+  icon?: string            // [DB] TEXT — icon URL (keepkey.info or override)
+  decimals?: number        // [DB] INTEGER — token decimals (e.g. 6 for USDT, 18 for most ERC-20)
+  type?: string            // [DB] TEXT — "native" | "token" | "unknown"
+  dataSource?: string      // data origin: "zapper" | "blockbook" | "cache"
 }
 
 export interface ChainBalance {
@@ -81,6 +87,38 @@ export interface BuildTxParams {
   memo?: string
   feeLevel?: number   // 1=slow, 5=avg, 10=fast
   isMax?: boolean
+  caip?: string        // Token CAIP-19 — triggers token transfer mode when contains 'erc20'
+  tokenBalance?: string  // human-readable token balance (from frontend) — avoids re-fetch on max send
+  tokenDecimals?: number // token decimals (from frontend) — avoids re-fetch
+  xpubOverride?: string        // BTC multi-account: use this xpub instead of default
+  scriptTypeOverride?: string  // BTC multi-account: use this scriptType instead of default
+  accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
+}
+
+// ── Bitcoin multi-account types ─────────────────────────────────────────
+export type BtcScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh'
+
+export interface BtcXpub {
+  scriptType: BtcScriptType
+  purpose: number              // 44, 49, or 84
+  path: number[]               // [purpose+H, 0+H, account+H]
+  xpub: string                 // xpub/ypub/zpub string
+  xpubPrefix: 'xpub' | 'ypub' | 'zpub'
+  balance: string
+  balanceUsd: number
+}
+
+export interface BtcAccount {
+  accountIndex: number
+  xpubs: BtcXpub[]             // always 3 (one per script type)
+  totalBalanceUsd: number
+}
+
+export interface BtcAccountSet {
+  accounts: BtcAccount[]
+  totalBalanceUsd: number
+  totalBalance: string
+  selectedXpub?: { accountIndex: number; scriptType: BtcScriptType }
 }
 
 export interface BuildTxResult {
@@ -91,6 +129,24 @@ export interface BuildTxResult {
 
 export interface BroadcastResult {
   txid: string
+}
+
+// Custom token / chain types
+export interface CustomToken {
+  chainId: string         // parent chain id (e.g. 'polygon')
+  contractAddress: string // 0x-prefixed checksummed
+  symbol: string
+  name: string
+  decimals: number
+  networkId: string       // CAIP-2 (e.g. 'eip155:137')
+}
+
+export interface CustomChain {
+  chainId: number
+  name: string
+  symbol: string          // gas token symbol
+  rpcUrl: string
+  explorerUrl?: string
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts
