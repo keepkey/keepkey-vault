@@ -1,4 +1,5 @@
-import { Box, Text, Flex, VStack } from "@chakra-ui/react"
+import { Box, Text, Flex, VStack, Image } from "@chakra-ui/react"
+import connectSvg from "../assets/svg/connect-keepkey.svg"
 
 export function DeviceClaimedDialog({ error }: { error: string }) {
   return (
@@ -8,19 +9,19 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
       left="50%"
       transform="translate(-50%, -50%)"
       mt="60px"
-      bg="rgba(30, 20, 10, 0.95)"
+      bg="rgba(10, 15, 30, 0.95)"
       border="1px solid"
-      borderColor="orange.700"
+      borderColor="blue.700"
       borderRadius="lg"
       px={6}
       py={5}
       maxW="420px"
       w="90%"
-      boxShadow="0 0 30px rgba(200, 120, 0, 0.15)"
+      boxShadow="0 0 30px rgba(59, 130, 246, 0.15)"
     >
       <VStack gap={3} align="stretch">
         <Flex align="center" gap={2}>
-          <Text fontSize="lg" fontWeight="bold" color="orange.300">
+          <Text fontSize="lg" fontWeight="bold" color="blue.300">
             Device In Use
           </Text>
         </Flex>
@@ -35,6 +36,10 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
             {error}
           </Text>
         </Box>
+
+        <Flex justify="center" py={2}>
+          <Image src={connectSvg} alt="Unplug and replug KeepKey" w="80px" h="80px" />
+        </Flex>
 
         <Text fontSize="sm" color="gray.400" fontWeight="semibold">
           To connect:

@@ -68,7 +68,7 @@ export function Dashboard() {
 	}
 
 	return (
-		<Box maxW="600px" mx="auto" pt="4" px="4">
+		<Box maxW="600px" mx="auto" pt="2" px="4">
 			<VStack gap="6" align="center">
 				{/* Portfolio Donut Card */}
 				<Box

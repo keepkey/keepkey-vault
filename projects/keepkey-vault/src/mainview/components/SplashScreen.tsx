@@ -1,7 +1,8 @@
-import { Box, Text, Flex, Spinner } from "@chakra-ui/react"
+import { Box, Text, Flex, Image } from "@chakra-ui/react"
 import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
 import splashBg from '../assets/splash-bg.png'
+import connectSvg from '../assets/svg/connect-keepkey.svg'
 
 interface SplashScreenProps {
   statusText: string
@@ -12,13 +13,14 @@ interface SplashScreenProps {
 
 const STATUS_DOT_COLORS: Record<string, string> = {
   searching: 'gray.500',
-  connecting: 'yellow.400',
+  connecting: '#3B82F6',
   error: 'red.400',
-  claimed: 'orange.400',
+  claimed: '#3B82F6',
 }
 
 export function SplashScreen({ statusText, hintText, children, variant = 'searching' }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
+  const showAnimation = variant === 'searching' || variant === 'connecting'
 
   return (
     <Box
@@ -35,6 +37,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         direction="column"
         alignItems="center"
         justifyContent="center"
+        gap="6"
       >
         <Logo
           width="100px"
@@ -43,6 +46,15 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
             transition: 'filter 0.2s ease'
           }}
         />
+        {showAnimation && (
+          <Image
+            src={connectSvg}
+            alt="Connect KeepKey"
+            w="120px"
+            h="120px"
+            opacity={0.85}
+          />
+        )}
       </Flex>
       <Box
         position="absolute"
@@ -57,13 +69,9 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         bg="rgba(0, 0, 0, 0.5)"
       >
         <Flex gap="2" justifyContent="center" alignItems="center">
-          {variant === 'searching' ? (
-            <Spinner size="xs" color="gray.400" />
-          ) : (
-            <Box w="8px" h="8px" borderRadius="full" bg={dotColor} flexShrink={0}
-              style={{ animation: variant === 'connecting' ? 'pulse 1.5s infinite' : undefined }}
-            />
-          )}
+          <Box w="8px" h="8px" borderRadius="full" bg={dotColor} flexShrink={0}
+            style={{ animation: (variant === 'searching' || variant === 'connecting') ? 'pulse 1.5s infinite' : undefined }}
+          />
           <Text fontSize="xs" color="gray.300">
             {statusText}
           </Text>

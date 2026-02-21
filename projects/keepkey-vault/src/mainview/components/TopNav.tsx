@@ -1,4 +1,5 @@
-import { Flex, Text, Box, Button } from "@chakra-ui/react"
+import { Flex, Text, Box, Button, Image } from "@chakra-ui/react"
+import kkIcon from "../assets/icon.png"
 
 interface TopNavProps {
 	label?: string
@@ -28,9 +29,28 @@ export function TopNav({ label, connected, tab, onTabChange }: TopNavProps) {
 			px="4"
 			zIndex={1000}
 		>
-			{/* Left: device status */}
+			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" minW="180px">
-				<Box w="8px" h="8px" borderRadius="full" bg={connected ? "kk.success" : "kk.textMuted"} />
+				<Box position="relative">
+					<Image
+						src={kkIcon}
+						alt="KeepKey"
+						w="24px"
+						h="24px"
+						borderRadius="4px"
+					/>
+					<Box
+						position="absolute"
+						bottom="-1px"
+						right="-1px"
+						w="8px"
+						h="8px"
+						borderRadius="full"
+						bg={connected ? "#3B82F6" : "kk.textMuted"}
+						border="2px solid"
+						borderColor="rgba(0,0,0,0.92)"
+					/>
+				</Box>
 				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" truncate>
 					{label || "KeepKey"}
 				</Text>

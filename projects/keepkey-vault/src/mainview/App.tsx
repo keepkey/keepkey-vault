@@ -162,7 +162,7 @@ function App() {
 					tab={tab}
 					onTabChange={setTab}
 				/>
-				<Box flex="1" overflow="auto" pt="50px" p="6">
+				<Box flex="1" overflow="auto" pt="74px" px="6" pb="6">
 					{tab === "dashboard" && <Dashboard />}
 					{tab === "device" && <DevicePage deviceState={deviceState} />}
 				</Box>
