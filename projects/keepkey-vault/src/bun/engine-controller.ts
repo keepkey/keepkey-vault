@@ -22,6 +22,13 @@ const WORD_COUNT_TO_ENTROPY: Record<number, 128 | 192 | 256> = {
   12: 128, 18: 192, 24: 256,
 }
 
+/** Extract a string message from hdwallet errors (raw protobuf FAILURE objects or standard Errors). */
+function extractErrorMessage(err: any): string {
+  if (typeof err?.message === 'string') return err.message
+  if (typeof err?.message?.message === 'string') return err.message.message
+  return String(err)
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     promise,
@@ -519,13 +526,7 @@ export class EngineController extends EventEmitter {
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
     } catch (err: any) {
-      // hdwallet rejects with raw protobuf FAILURE objects like:
-      // { message_type: "FAILURE", message: { code: 3, message: "..." }, from_wallet: true }
-      // — NOT standard Error instances. Extract the string safely.
-      const rawMessage: string =
-        typeof err?.message === 'string' ? err.message
-        : typeof err?.message?.message === 'string' ? err.message.message
-        : String(err)
+      const rawMessage = extractErrorMessage(err)
       console.error('[Engine] Recovery failed:', rawMessage)
 
       // Classify the failure for user-friendly messaging
@@ -591,10 +592,7 @@ export class EngineController extends EventEmitter {
 
       return { success: true, message: 'Seed verified successfully' }
     } catch (err: any) {
-      const rawMessage: string =
-        typeof err?.message === 'string' ? err.message
-        : typeof err?.message?.message === 'string' ? err.message.message
-        : String(err)
+      const rawMessage = extractErrorMessage(err)
       console.error('[Engine] Seed verification failed:', rawMessage)
 
       let errorType: 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' = 'unknown'

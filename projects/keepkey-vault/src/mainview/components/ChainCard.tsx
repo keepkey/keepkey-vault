@@ -1,5 +1,6 @@
 import { Box, Flex, Text } from "@chakra-ui/react"
-import type { ChainDef } from "../lib/chains"
+import type { ChainDef } from "../../shared/chains"
+import { formatBalance } from "../lib/formatting"
 import type { ChainBalance } from "../../shared/types"
 
 interface ChainCardProps {
@@ -46,13 +47,4 @@ export function ChainCard({ chain, balance, onClick }: ChainCardProps) {
 			)}
 		</Box>
 	)
-}
-
-function formatBalance(val: string): string {
-	const num = parseFloat(val)
-	if (isNaN(num) || num === 0) return '0'
-	if (num < 0.000001) return num.toExponential(2)
-	if (num < 1) return num.toFixed(6)
-	if (num < 1000) return num.toFixed(4)
-	return num.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }

@@ -1,5 +1,12 @@
 import type { EngineController } from './engine-controller'
 import type { Server } from 'bun'
+import { CHAINS } from '../shared/chains'
+
+function getChain(id: string) {
+  const chain = CHAINS.find(c => c.id === id)
+  if (!chain) throw { status: 400, message: `Unknown chain: ${id}` }
+  return chain
+}
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -72,76 +79,45 @@ export function startRestApi(engine: EngineController, port = 1646): Server {
           return json(result)
         }
 
-        // ── Bitcoin ────────────────────────────────────────────────────
+        // ── Chain address derivation (uses CHAINS for default paths) ────
 
-        if (path === '/api/btc/address' && req.method === 'POST') {
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const address = await wallet.btcGetAddress({
-            addressNList: body.addressNList || [0x80000000 + 44, 0x80000000, 0x80000000, 0, 0],
-            coin: body.coin || 'Bitcoin',
-            scriptType: body.scriptType || 'p2wpkh',
-            showDisplay: body.showDisplay ?? false,
-          })
-          return json({ address })
+        if (path.match(/^\/api\/(\w+)\/address$/) && req.method === 'POST') {
+          const slug = path.match(/^\/api\/(\w+)\/address$/)![1]
+          // Map URL slugs to chain IDs
+          const slugToChainId: Record<string, string> = {
+            btc: 'bitcoin', eth: 'ethereum', cosmos: 'cosmos',
+            thorchain: 'thorchain', mayachain: 'mayachain',
+          }
+          const chainId = slugToChainId[slug]
+          if (chainId) {
+            const wallet = requireWallet(engine)
+            const chain = getChain(chainId)
+            const body = await req.json() as any
+            const params: any = {
+              addressNList: body.addressNList || chain.defaultPath,
+              showDisplay: body.showDisplay ?? false,
+            }
+            if (chain.coin) params.coin = body.coin || chain.coin
+            if (chain.scriptType) params.scriptType = body.scriptType || chain.scriptType
+            const method = chainId === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+            const result = await (wallet as any)[method](params)
+            const address = typeof result === 'string' ? result : result?.address || result
+            return json({ address })
+          }
         }
+
+        // ── Transaction signing ──────────────────────────────────────────
 
         if (path === '/api/btc/sign' && req.method === 'POST') {
           const wallet = requireWallet(engine)
           const body = await req.json() as any
-          const signed = await wallet.btcSignTx(body)
-          return json(signed)
-        }
-
-        // ── Ethereum ───────────────────────────────────────────────────
-
-        if (path === '/api/eth/address' && req.method === 'POST') {
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const address = await wallet.ethGetAddress({
-            addressNList: body.addressNList || [0x80000000 + 44, 0x80000000 + 60, 0x80000000, 0, 0],
-            showDisplay: body.showDisplay ?? false,
-          })
-          return json({ address })
+          return json(await wallet.btcSignTx(body))
         }
 
         if (path === '/api/eth/sign' && req.method === 'POST') {
           const wallet = requireWallet(engine)
           const body = await req.json() as any
-          const signed = await wallet.ethSignTx(body)
-          return json(signed)
-        }
-
-        // ── Cosmos-SDK Chains ──────────────────────────────────────────
-
-        if (path === '/api/cosmos/address' && req.method === 'POST') {
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const address = await wallet.cosmosGetAddress({
-            addressNList: body.addressNList || [0x80000000 + 44, 0x80000000 + 118, 0x80000000, 0, 0],
-            showDisplay: body.showDisplay ?? false,
-          })
-          return json({ address })
-        }
-
-        if (path === '/api/thorchain/address' && req.method === 'POST') {
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const address = await wallet.thorchainGetAddress({
-            addressNList: body.addressNList || [0x80000000 + 44, 0x80000000 + 931, 0x80000000, 0, 0],
-            showDisplay: body.showDisplay ?? false,
-          })
-          return json({ address })
-        }
-
-        if (path === '/api/mayachain/address' && req.method === 'POST') {
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const address = await wallet.mayachainGetAddress({
-            addressNList: body.addressNList || [0x80000000 + 44, 0x80000000 + 931, 0x80000000, 0, 0],
-            showDisplay: body.showDisplay ?? false,
-          })
-          return json({ address })
+          return json(await wallet.ethSignTx(body))
         }
 
         // ── PIN Management ────────────────────────────────────────────

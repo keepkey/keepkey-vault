@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import type { ChainDef } from "../lib/chains"
+import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
