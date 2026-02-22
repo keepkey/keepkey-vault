@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import type { ChainBalance, CustomToken, CustomChain } from '../shared/types'
 
-const SCHEMA_VERSION = '2'
+const SCHEMA_VERSION = '3'
 
 let db: Database | null = null
 
@@ -81,6 +81,14 @@ export function initDb() {
       CREATE TABLE IF NOT EXISTS settings (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      )
+    `)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS token_visibility (
+        caip       TEXT PRIMARY KEY,
+        status     TEXT NOT NULL CHECK(status IN ('visible', 'hidden')),
+        updated_at INTEGER NOT NULL
       )
     `)
 
@@ -272,5 +280,77 @@ export function setSetting(key: string, value: string) {
     db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
   } catch (e: any) {
     console.warn('[db] setSetting failed:', e.message)
+  }
+}
+
+// ── Token Visibility (spam filter user overrides) ─────────────────────
+
+export type TokenVisibilityStatus = 'visible' | 'hidden'
+
+export interface TokenVisibilityRow {
+  caip: string
+  status: TokenVisibilityStatus
+  updatedAt: number
+}
+
+/** Get visibility status for a single token */
+export function getTokenVisibility(caip: string): TokenVisibilityStatus | null {
+  try {
+    if (!db) return null
+    const row = db.query('SELECT status FROM token_visibility WHERE caip = ?').get(caip.toLowerCase()) as { status: string } | null
+    return (row?.status as TokenVisibilityStatus) ?? null
+  } catch (e: any) {
+    console.warn('[db] getTokenVisibility failed:', e.message)
+    return null
+  }
+}
+
+/** Get all user overrides as a Map<caip, status> */
+export function getAllTokenVisibility(): Map<string, TokenVisibilityStatus> {
+  const map = new Map<string, TokenVisibilityStatus>()
+  try {
+    if (!db) return map
+    const rows = db.query('SELECT caip, status FROM token_visibility').all() as Array<{ caip: string; status: string }>
+    for (const r of rows) map.set(r.caip, r.status as TokenVisibilityStatus)
+  } catch (e: any) {
+    console.warn('[db] getAllTokenVisibility failed:', e.message)
+  }
+  return map
+}
+
+/** Set visibility override for a token (upsert) */
+export function setTokenVisibility(caip: string, status: TokenVisibilityStatus) {
+  try {
+    if (!db) return
+    db.run(
+      'INSERT OR REPLACE INTO token_visibility (caip, status, updated_at) VALUES (?, ?, ?)',
+      [caip.toLowerCase(), status, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] setTokenVisibility failed:', e.message)
+  }
+}
+
+/** Remove a user override (revert to auto-detection) */
+export function removeTokenVisibility(caip: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM token_visibility WHERE caip = ?', [caip.toLowerCase()])
+  } catch (e: any) {
+    console.warn('[db] removeTokenVisibility failed:', e.message)
+  }
+}
+
+/** Get all tokens with a given status */
+export function getTokensByVisibility(status: TokenVisibilityStatus): TokenVisibilityRow[] {
+  try {
+    if (!db) return []
+    const rows = db.query('SELECT caip, status, updated_at FROM token_visibility WHERE status = ?').all(status) as Array<{
+      caip: string; status: string; updated_at: number
+    }>
+    return rows.map(r => ({ caip: r.caip, status: r.status as TokenVisibilityStatus, updatedAt: r.updated_at }))
+  } catch (e: any) {
+    console.warn('[db] getTokensByVisibility failed:', e.message)
+    return []
   }
 }

@@ -153,6 +153,15 @@ export interface CustomChain {
   explorerUrl?: string
 }
 
+// Token visibility (spam filter user overrides)
+export type TokenVisibilityStatus = 'visible' | 'hidden'
+
+export interface TokenVisibilityEntry {
+  caip: string
+  status: TokenVisibilityStatus
+  updatedAt: number
+}
+
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   restApiEnabled: boolean

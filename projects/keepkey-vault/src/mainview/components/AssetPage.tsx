@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaPlus } from "react-icons/fa"
+import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { BTC_SCRIPT_TYPES, btcAccountPath } from "../../shared/chains"
-import type { ChainBalance, TokenBalance } from "../../shared/types"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance, formatUsd } from "../lib/formatting"
@@ -13,6 +13,7 @@ import { SendForm } from "./SendForm"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { AddTokenDialog } from "./AddTokenDialog"
+import { detectSpamToken, type SpamResult } from "../../shared/spamFilter"
 
 type AssetView = "receive" | "send"
 
@@ -127,16 +128,216 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		if (!address && !deriveError) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+	// ── Token spam filter ──────────────────────────────────────────────
 	const tokens = useMemo(() => balance?.tokens || [], [balance?.tokens])
-	const sortedTokens = useMemo(() => [...tokens].sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)), [tokens])
-	const tokenTotalUsd = useMemo(() => tokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [tokens])
+	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
+	const [showHidden, setShowHidden] = useState(false)
+
+	// Load visibility overrides once on mount
+	useEffect(() => {
+		rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
+			.then(setVisibilityMap)
+			.catch(() => {})
+	}, [])
+
+	// Categorize tokens: clean (shown), spam (hidden by default), zeroValue (hidden by default)
+	const { cleanTokens, spamTokens, zeroValueTokens, spamResults } = useMemo(() => {
+		const clean: TokenBalance[] = []
+		const spam: TokenBalance[] = []
+		const zero: TokenBalance[] = []
+		const results = new Map<string, SpamResult>()
+
+		for (const t of tokens) {
+			const override = visibilityMap[t.caip?.toLowerCase()] ?? null
+			const result = detectSpamToken(t, override)
+			results.set(t.caip, result)
+
+			if (result.isSpam) {
+				spam.push(t)
+			} else if ((t.balanceUsd ?? 0) === 0) {
+				zero.push(t)
+			} else {
+				clean.push(t)
+			}
+		}
+
+		return {
+			cleanTokens: clean.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
+			spamTokens: spam.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
+			zeroValueTokens: zero.sort((a, b) => a.symbol.localeCompare(b.symbol)),
+			spamResults: results,
+		}
+	}, [tokens, visibilityMap])
+
+	const hiddenCount = spamTokens.length + zeroValueTokens.length
+	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
+
 	const [showAddToken, setShowAddToken] = useState(false)
 	const isEvmChain = chain.chainFamily === 'evm'
+
+	// Toggle token visibility via RPC
+	const handleSetVisibility = useCallback(async (caip: string, status: TokenVisibilityStatus) => {
+		try {
+			await rpcRequest('setTokenVisibility', { caip, status }, 5000)
+			setVisibilityMap(prev => ({ ...prev, [caip.toLowerCase()]: status }))
+		} catch (e: any) {
+			console.warn('[AssetPage] setTokenVisibility failed:', e.message)
+		}
+	}, [])
+
+	const handleRemoveVisibility = useCallback(async (caip: string) => {
+		try {
+			await rpcRequest('removeTokenVisibility', { caip }, 5000)
+			setVisibilityMap(prev => {
+				const next = { ...prev }
+				delete next[caip.toLowerCase()]
+				return next
+			})
+		} catch (e: any) {
+			console.warn('[AssetPage] removeTokenVisibility failed:', e.message)
+		}
+	}, [])
 
 	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: "Receive", icon: FaArrowDown },
 		{ id: "send", label: "Send", icon: FaArrowUp },
 	]
+
+	// Shared token row renderer
+	const renderTokenRow = (tok: TokenBalance, opts?: { showSpamBadge?: boolean; showActions?: boolean }) => {
+		const spamResult = spamResults.get(tok.caip)
+		const override = visibilityMap[tok.caip?.toLowerCase()]
+		const isUserHidden = override === 'hidden'
+		const isUserSafe = override === 'visible'
+
+		return (
+			<Box
+				key={tok.caip}
+				w="100%"
+				py="2"
+				px="3"
+				bg="kk.cardBg"
+				border="1px solid"
+				borderColor={
+					isUserHidden ? "red.900"
+					: spamResult?.isSpam ? "orange.900"
+					: tok.balanceUsd > 0 ? `${chain.color}30`
+					: "kk.border"
+				}
+				borderRadius="lg"
+				transition="all 0.15s"
+				opacity={isUserHidden ? 0.5 : 1}
+			>
+				<Flex align="center" justify="space-between">
+					<HStack
+						gap="2"
+						flex="1"
+						cursor="pointer"
+						_hover={{ opacity: 0.8 }}
+						onClick={() => { setSelectedToken(tok); setView('send') }}
+					>
+						<Image
+							src={tok.icon || caipToIcon(tok.caip)}
+							alt={tok.symbol}
+							w="24px"
+							h="24px"
+							borderRadius="full"
+							flexShrink={0}
+							bg="gray.700"
+						/>
+						<Box>
+							<HStack gap="1">
+								<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2">
+									{tok.symbol}
+								</Text>
+								{opts?.showSpamBadge && spamResult?.level === 'confirmed' && (
+									<Text fontSize="9px" bg="red.900" color="red.300" px="1" py="0.5" borderRadius="sm" lineHeight="1">
+										SCAM
+									</Text>
+								)}
+								{opts?.showSpamBadge && spamResult?.level === 'possible' && !isUserSafe && (
+									<Text fontSize="9px" bg="orange.900" color="orange.300" px="1" py="0.5" borderRadius="sm" lineHeight="1">
+										SPAM?
+									</Text>
+								)}
+								{isUserSafe && (
+									<Box as={FaCheck} fontSize="9px" color="green.400" />
+								)}
+							</HStack>
+							<Text fontSize="10px" color="kk.textMuted" lineHeight="1.2" maxW="140px" truncate>
+								{tok.name}
+							</Text>
+						</Box>
+					</HStack>
+					<Flex align="center" gap="1.5">
+						<Box textAlign="right">
+							<Text fontSize="xs" fontFamily="mono" fontWeight="500" color="white" lineHeight="1.2">
+								{formatBalance(tok.balance)}
+							</Text>
+							{tok.balanceUsd > 0 && (
+								<Text fontSize="11px" color="kk.textMuted" lineHeight="1.2">
+									${formatUsd(tok.balanceUsd)}
+								</Text>
+							)}
+						</Box>
+						{/* Per-token actions */}
+						{spamResult?.isSpam && !isUserSafe && (
+							<IconButton
+								aria-label="Mark as safe"
+								size="xs"
+								variant="ghost"
+								color="green.500"
+								_hover={{ bg: "rgba(72,187,120,0.15)" }}
+								onClick={(e) => { e.stopPropagation(); handleSetVisibility(tok.caip, 'visible') }}
+								title="Mark as safe"
+							>
+								<FaShieldAlt />
+							</IconButton>
+						)}
+						{!spamResult?.isSpam && !isUserHidden && (
+							<IconButton
+								aria-label="Hide token"
+								size="xs"
+								variant="ghost"
+								color="kk.textMuted"
+								_hover={{ color: "red.400", bg: "rgba(245,101,101,0.1)" }}
+								onClick={(e) => { e.stopPropagation(); handleSetVisibility(tok.caip, 'hidden') }}
+								title="Hide token"
+							>
+								<FaEyeSlash />
+							</IconButton>
+						)}
+						{isUserSafe && (
+							<IconButton
+								aria-label="Revert to auto-detect"
+								size="xs"
+								variant="ghost"
+								color="kk.textMuted"
+								_hover={{ color: "orange.400", bg: "rgba(237,137,54,0.1)" }}
+								onClick={(e) => { e.stopPropagation(); handleRemoveVisibility(tok.caip) }}
+								title="Revert to auto-detect"
+							>
+								<FaEyeSlash />
+							</IconButton>
+						)}
+						{isUserHidden && (
+							<IconButton
+								aria-label="Unhide token"
+								size="xs"
+								variant="ghost"
+								color="kk.textMuted"
+								_hover={{ color: "green.400", bg: "rgba(72,187,120,0.1)" }}
+								onClick={(e) => { e.stopPropagation(); handleSetVisibility(tok.caip, 'visible') }}
+								title="Unhide"
+							>
+								<FaEye />
+							</IconButton>
+						)}
+					</Flex>
+				</Flex>
+			</Box>
+		)
+	}
 
 	return (
 		<Flex flex="1" direction="column" align="center" justify="center" px={{ base: "3", md: "6" }} py="4">
@@ -255,16 +456,19 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 					)}
 				</Box>
 
-				{/* Tokens Section */}
+				{/* Tokens Section — with spam filter */}
 				{(tokens.length > 0 || isEvmChain) && (
 					<Box mt="4">
+						{/* Section header */}
 						<Flex align="center" justify="space-between" mb="2" px="1">
 							<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em">
 								Tokens
 							</Text>
 							<HStack gap="2">
-								{tokens.length > 0 && (
-									<Text fontSize="xs" color="kk.textMuted">{tokens.length} token{tokens.length > 1 ? 's' : ''}</Text>
+								{cleanTokens.length > 0 && (
+									<Text fontSize="xs" color="kk.textMuted">
+										{cleanTokens.length} token{cleanTokens.length > 1 ? 's' : ''}
+									</Text>
 								)}
 								{tokenTotalUsd > 0 && (
 									<Text fontSize="xs" color="kk.gold" fontWeight="500">${formatUsd(tokenTotalUsd)}</Text>
@@ -283,59 +487,55 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								)}
 							</HStack>
 						</Flex>
+
+						{/* Clean tokens (always visible) */}
 						<VStack gap="1.5">
-							{sortedTokens.map((tok) => (
-								<Box
-									key={tok.caip}
-									w="100%"
-									py="2"
-									px="3"
-									bg="kk.cardBg"
-									border="1px solid"
-									borderColor={tok.balanceUsd > 0 ? `${chain.color}30` : "kk.border"}
-									borderRadius="lg"
-									cursor="pointer"
-									_hover={{ bg: "rgba(255,255,255,0.04)", borderColor: "kk.gold" }}
-									transition="all 0.15s"
-									onClick={() => { setSelectedToken(tok); setView('send') }}
-								>
-									<Flex align="center" justify="space-between">
-										<HStack gap="2">
-											<Image
-												src={tok.icon || caipToIcon(tok.caip)}
-												alt={tok.symbol}
-												w="24px"
-												h="24px"
-												borderRadius="full"
-												flexShrink={0}
-												bg="gray.700"
-											/>
-											<Box>
-												<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2">
-													{tok.symbol}
-												</Text>
-												<Text fontSize="10px" color="kk.textMuted" lineHeight="1.2" maxW="140px" truncate>
-													{tok.name}
-												</Text>
-											</Box>
-										</HStack>
-										<Flex align="center" gap="2">
-											<Box textAlign="right">
-												<Text fontSize="xs" fontFamily="mono" fontWeight="500" color="white" lineHeight="1.2">
-													{formatBalance(tok.balance)}
-												</Text>
-												{tok.balanceUsd > 0 && (
-													<Text fontSize="11px" color="kk.textMuted" lineHeight="1.2">
-														${formatUsd(tok.balanceUsd)}
-													</Text>
-												)}
-											</Box>
-											<Box as={FaArrowUp} fontSize="10px" color="kk.textMuted" />
-										</Flex>
-									</Flex>
-								</Box>
-							))}
+							{cleanTokens.map((tok) => renderTokenRow(tok))}
 						</VStack>
+
+						{/* Hidden tokens toggle */}
+						{hiddenCount > 0 && (
+							<Box mt="3">
+								<Button
+									size="xs"
+									variant="ghost"
+									color={showHidden ? "kk.gold" : "kk.textMuted"}
+									_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.04)" }}
+									onClick={() => setShowHidden(!showHidden)}
+									w="100%"
+									justifyContent="center"
+									gap="1.5"
+									py="1.5"
+								>
+									<Box as={showHidden ? FaEyeSlash : FaEye} fontSize="10px" />
+									{showHidden ? 'Hide' : 'Show'} {hiddenCount} filtered token{hiddenCount > 1 ? 's' : ''}
+									{spamTokens.length > 0 && ` (${spamTokens.length} spam)`}
+								</Button>
+
+								{showHidden && (
+									<VStack gap="1.5" mt="2">
+										{/* Zero-value tokens */}
+										{zeroValueTokens.length > 0 && (
+											<>
+												<Text fontSize="10px" color="kk.textMuted" w="100%" px="1" mt="1">
+													$0.00 USD ({zeroValueTokens.length})
+												</Text>
+												{zeroValueTokens.map((tok) => renderTokenRow(tok))}
+											</>
+										)}
+										{/* Spam tokens */}
+										{spamTokens.length > 0 && (
+											<>
+												<Text fontSize="10px" color="orange.400" w="100%" px="1" mt="1">
+													Suspected spam ({spamTokens.length})
+												</Text>
+												{spamTokens.map((tok) => renderTokenRow(tok, { showSpamBadge: true, showActions: true }))}
+											</>
+										)}
+									</VStack>
+								)}
+							</Box>
+						)}
 					</Box>
 				)}
 				{showAddToken && (

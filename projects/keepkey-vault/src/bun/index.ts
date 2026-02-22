@@ -7,7 +7,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken } from "../shared/types"
@@ -646,6 +646,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getCustomChains: async () => {
 				return getCustomChains()
+			},
+
+			// ── Token visibility (spam filter) ───────────────────────
+			setTokenVisibility: async (params) => {
+				const caip = params.caip?.trim()
+				if (!caip) throw new Error('caip required')
+				if (params.status !== 'visible' && params.status !== 'hidden') throw new Error('status must be visible or hidden')
+				dbSetTokenVisibility(caip, params.status)
+			},
+			removeTokenVisibility: async (params) => {
+				const caip = params.caip?.trim()
+				if (!caip) throw new Error('caip required')
+				dbRemoveTokenVisibility(caip)
+			},
+			getTokenVisibilityMap: async () => {
+				const map = getAllTokenVisibility()
+				return Object.fromEntries(map)
 			},
 
 			// ── Camera / QR scanning ─────────────────────────────────
