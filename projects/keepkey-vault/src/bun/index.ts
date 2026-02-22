@@ -7,7 +7,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, hasWatchOnlyData } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry } from "../shared/types"
@@ -25,6 +25,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 const PIONEER_TIMEOUT_MS = 30_000
+
+/** Fire-and-forget: cache a derived address for watch-only mode */
+function cacheAddress(chainId: string, path: string, address: string) {
+	try {
+		const deviceId = engine.getDeviceState().deviceId || 'unknown'
+		saveCachedPubkey(deviceId, chainId, path, '', address, '')
+	} catch { /* never block on cache failure */ }
+}
 
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`
@@ -146,31 +154,52 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Address derivation ────────────────────────────────────
 			btcGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.btcGetAddress(params)
+				const result = await engine.wallet.btcGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('bitcoin', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 			ethGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.ethGetAddress(params)
+				const result = await engine.wallet.ethGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('ethereum', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 			cosmosGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.cosmosGetAddress(params)
+				const result = await engine.wallet.cosmosGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('cosmos', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 			thorchainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.thorchainGetAddress(params)
+				const result = await engine.wallet.thorchainGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('thorchain', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 			mayachainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.mayachainGetAddress(params)
+				const result = await engine.wallet.mayachainGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('mayachain', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 			osmosisGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.osmosisGetAddress(params)
+				const result = await engine.wallet.osmosisGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('osmosis', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 			xrpGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.rippleGetAddress(params)
+				const result = await engine.wallet.rippleGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('ripple', JSON.stringify(params.addressNList || []), addr)
+				return result
 			},
 
 			// ── Transaction signing ───────────────────────────────────
@@ -450,6 +479,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						results.push({ chainId: entry.chainId, symbol: entry.symbol, balance: '0', balanceUsd: 0, address: entry.pubkey })
 					}
 				}
+
+				// Cache balances for watch-only mode (fire-and-forget)
+				try {
+					const deviceId = engine.getDeviceState().deviceId || 'unknown'
+					if (results.length > 0) setCachedBalances(deviceId, results)
+				} catch { /* never block on cache failure */ }
+
 				return results
 			},
 
@@ -767,6 +803,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			clearApiLogs: async () => {
 				clearApiLogs()
+			},
+
+			// ── Watch-only mode ─────────────────────────────────────
+			checkWatchOnlyCache: async () => {
+				const snap = getLatestDeviceSnapshot()
+				if (!snap) return { available: false }
+				return { available: true, deviceLabel: snap.label || undefined, lastSynced: snap.updatedAt }
+			},
+			getWatchOnlyBalances: async () => {
+				const snap = getLatestDeviceSnapshot()
+				if (!snap) return null
+				return getCachedBalances(snap.deviceId)
+			},
+			getWatchOnlyPubkeys: async () => {
+				const snap = getLatestDeviceSnapshot()
+				if (!snap) return []
+				return getCachedPubkeys(snap.deviceId)
 			},
 
 			// ── Utility ──────────────────────────────────────────────

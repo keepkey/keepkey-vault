@@ -3,6 +3,7 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
+import { saveDeviceSnapshot } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType } from '../shared/types'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -185,6 +186,16 @@ export class EngineController extends EventEmitter {
     this.lastState = state
     console.log(`[Engine] State → ${state}`)
     this.emit('state-change', this.getDeviceState())
+
+    // Persist device snapshot for watch-only mode (fire-and-forget)
+    if (state === 'ready' && this.cachedFeatures) {
+      try {
+        const deviceId = this.cachedFeatures.deviceId || 'unknown'
+        const label = this.cachedFeatures.label || ''
+        const fwVer = this.extractVersion(this.cachedFeatures)
+        saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+      } catch { /* never block on cache failure */ }
+    }
 
     // Auto-trigger PIN matrix on device OLED when state becomes needs_pin
     if (state === 'needs_pin') {

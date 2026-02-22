@@ -13,6 +13,7 @@ interface TopNavProps {
 	settingsOpen?: boolean
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
+	watchOnly?: boolean
 }
 
 /** Grid icon (11px) for Apps tab */
@@ -43,7 +44,7 @@ const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 	},
 ]
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
 	return (
 		<Flex
 			position="fixed"
@@ -84,7 +85,11 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" truncate>
 					{label || "KeepKey"}
 				</Text>
-				{firmwareVersion && (
+				{watchOnly ? (
+					<Text fontSize="10px" color="kk.gold" fontWeight="500" bg="rgba(255,215,0,0.12)" px="1.5" py="0.5" borderRadius="sm">
+						Watch Only
+					</Text>
+				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
 						{firmwareVerified === false && (
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
@@ -96,7 +101,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 							v{firmwareVersion}
 						</Text>
 					</Flex>
-				)}
+				) : null}
 			</Flex>
 
 			{/* Center: navigation tabs (icon above label) */}
@@ -135,11 +140,13 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			<Flex flex="1" justify="flex-end">
 				<IconButton
 					aria-label="Device settings"
-					onClick={onSettingsToggle}
+					onClick={watchOnly ? undefined : onSettingsToggle}
 					size="sm"
 					variant="ghost"
 					color={settingsOpen ? "kk.gold" : "kk.textSecondary"}
-					_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+					_hover={watchOnly ? {} : { color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+					disabled={watchOnly}
+					opacity={watchOnly ? 0.4 : 1}
 				>
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<circle cx="12" cy="12" r="3" />

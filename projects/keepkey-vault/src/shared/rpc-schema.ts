@@ -104,6 +104,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getAppSettings: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
 
+      // ── Watch-only mode ──────────────────────────────────────────────
+      checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
+      getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }
+      getWatchOnlyPubkeys: { params: void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
 

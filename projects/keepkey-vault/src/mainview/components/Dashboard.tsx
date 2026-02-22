@@ -12,9 +12,10 @@ import type { ChainBalance, CustomChain } from "../../shared/types"
 
 interface DashboardProps {
 	onLoaded?: () => void
+	watchOnly?: boolean
 }
 
-export function Dashboard({ onLoaded }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
 	const [loadingBalances, setLoadingBalances] = useState(true)
@@ -38,18 +39,21 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 			setLoadingBalances(true)
 			let hasTokenData = false
 			try {
-				const result = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+				// In watch-only mode, fetch cached balances instead of live data
+				const result = watchOnly
+					? await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000).then(r => r || [])
+					: await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
 				if (!cancelled && result) {
 					const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 					const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
 					hasTokenData = tokenTotal > 0 || balTotal > 0 || result.length > 0
-					console.log(`[Dashboard] getBalances returned ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)} (attempt=${attempt}, fetchKey=${fetchKey})`)
+					console.log(`[Dashboard] ${watchOnly ? 'watchOnly' : 'getBalances'} returned ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)} (attempt=${attempt}, fetchKey=${fetchKey})`)
 					const map = new Map<string, ChainBalance>()
 					for (const b of result) map.set(b.chainId, b)
 					setBalances(map)
 				}
 			} catch (e: any) {
-				console.warn(`[Dashboard] getBalances failed (attempt=${attempt}):`, e.message)
+				console.warn(`[Dashboard] ${watchOnly ? 'watchOnly' : 'getBalances'} failed (attempt=${attempt}):`, e.message)
 			}
 			if (!cancelled) {
 				setLoadingBalances(false)
@@ -58,8 +62,8 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 					onLoaded?.()
 				}
 				// Auto-retry once if first attempt returned no meaningful data
-				// (Pioneer API may not have been ready on cold start)
-				if (!hasTokenData && attempt < 2 && !cancelled) {
+				// (Pioneer API may not have been ready on cold start) — skip in watch-only
+				if (!watchOnly && !hasTokenData && attempt < 2 && !cancelled) {
 					console.log('[Dashboard] No balance data — auto-retrying in 3s')
 					retryTimer = setTimeout(() => { if (!cancelled) fetchBalances(attempt + 1) }, 3000)
 				}
@@ -67,7 +71,7 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 		}
 		fetchBalances()
 		return () => { cancelled = true; clearTimeout(retryTimer) }
-	}, [fetchKey])
+	}, [fetchKey, watchOnly])
 
 	const refreshBalances = useCallback(() => {
 		if (!loadingBalances) setFetchKey((k) => k + 1)
@@ -105,6 +109,30 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 
 	return (
 		<Box w="100%" maxW="600px" mx="auto" pt="2">
+			{/* Watch-only banner */}
+			{watchOnly && (
+				<Flex
+					align="center"
+					justify="center"
+					gap="2"
+					mb="3"
+					px="3"
+					py="2"
+					bg="rgba(255,215,0,0.08)"
+					border="1px solid"
+					borderColor="rgba(255,215,0,0.2)"
+					borderRadius="lg"
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+						<circle cx="12" cy="12" r="3" />
+					</svg>
+					<Text fontSize="xs" color="kk.gold" fontWeight="500">
+						Watch Only — Connect device for full access
+					</Text>
+				</Flex>
+			)}
+
 			{/* Portfolio Chart — only when there are balances */}
 			{hasAnyBalance && (
 				<Box
@@ -144,13 +172,14 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 					{loadingBalances && hasAnyBalance && <Spinner size="xs" color="kk.gold" />}
 					<Text fontSize="xs" color="kk.textMuted">{allChains.length} networks</Text>
 					<IconButton
-						aria-label="Refresh balances"
+						aria-label={watchOnly ? "Connect device to refresh" : "Refresh balances"}
 						size="xs"
 						variant="ghost"
 						color="kk.gold"
-						_hover={{ color: "white", bg: "rgba(255,215,0,0.15)" }}
-						onClick={refreshBalances}
-						disabled={loadingBalances}
+						_hover={watchOnly ? {} : { color: "white", bg: "rgba(255,215,0,0.15)" }}
+						onClick={watchOnly ? undefined : refreshBalances}
+						disabled={loadingBalances || watchOnly}
+						opacity={watchOnly ? 0.4 : 1}
 					>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 							<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
@@ -248,30 +277,32 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 					)
 				})}
 
-				{/* Add Chain card */}
-				<Box
-					bg="kk.cardBg"
-					border="1px dashed"
-					borderColor="kk.border"
-					borderRadius="xl"
-					p="3"
-					cursor="pointer"
-					transition="all 0.15s"
-					_hover={{
-						borderColor: "kk.gold",
-						bg: "rgba(255,215,0,0.05)",
-					}}
-					onClick={() => setShowAddChain(true)}
-					display="flex"
-					alignItems="center"
-					justifyContent="center"
-					minH="80px"
-				>
-					<Flex direction="column" align="center" gap="1">
-						<Text fontSize="lg" color="kk.textMuted">+</Text>
-						<Text fontSize="10px" color="kk.textMuted">Add Chain</Text>
-					</Flex>
-				</Box>
+				{/* Add Chain card — hidden in watch-only mode */}
+				{!watchOnly && (
+					<Box
+						bg="kk.cardBg"
+						border="1px dashed"
+						borderColor="kk.border"
+						borderRadius="xl"
+						p="3"
+						cursor="pointer"
+						transition="all 0.15s"
+						_hover={{
+							borderColor: "kk.gold",
+							bg: "rgba(255,215,0,0.05)",
+						}}
+						onClick={() => setShowAddChain(true)}
+						display="flex"
+						alignItems="center"
+						justifyContent="center"
+						minH="80px"
+					>
+						<Flex direction="column" align="center" gap="1">
+							<Text fontSize="lg" color="kk.textMuted">+</Text>
+							<Text fontSize="10px" color="kk.textMuted">Add Chain</Text>
+						</Flex>
+					</Box>
+				)}
 			</SimpleGrid>
 
 			{showAddChain && (

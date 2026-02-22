@@ -8,6 +8,7 @@ import { SigningApproval } from "./components/device/SigningApproval"
 import { ApiAuditLog } from "./components/ApiAuditLog"
 import { PairedAppsPanel } from "./components/PairedAppsPanel"
 import { SplashScreen } from "./components/SplashScreen"
+import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav } from "./components/TopNav"
@@ -36,6 +37,12 @@ function App() {
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [enablingApi, setEnablingApi] = useState(false)
+
+	// ── Watch-only mode ──────────────────────────────────────────
+	const [watchOnlyAvailable, setWatchOnlyAvailable] = useState(false)
+	const [watchOnlyMode, setWatchOnlyMode] = useState(false)
+	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
+	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
 
 	// Fetch app version + REST API state on mount
 	useEffect(() => {
@@ -235,6 +242,25 @@ function App() {
 		if (deviceState.state !== "ready") setPortfolioLoaded(false)
 	}, [deviceState.state])
 
+	// Watch-only: check cache when disconnected, auto-exit when device connects
+	useEffect(() => {
+		if (deviceState.state === "disconnected") {
+			rpcRequest<{ available: boolean; deviceLabel?: string; lastSynced?: number }>("checkWatchOnlyCache")
+				.then((res) => {
+					if (res.available) {
+						setWatchOnlyAvailable(true)
+						setWatchOnlyLabel(res.deviceLabel || "")
+						setWatchOnlyLastSynced(res.lastSynced || 0)
+					}
+				})
+				.catch(() => {})
+		} else {
+			// Device found — exit watch-only seamlessly
+			setWatchOnlyAvailable(false)
+			setWatchOnlyMode(false)
+		}
+	}, [deviceState.state])
+
 	// ── Launch an external app (gate on REST API) ──────────────────
 	const launchApp = useCallback(async (url: string) => {
 		try {
@@ -335,7 +361,37 @@ function App() {
 		/>
 	) : null
 
+	const handleViewPortfolio = useCallback(() => setWatchOnlyMode(true), [])
+	const handleConnectWallet = useCallback(() => {
+		setWatchOnlyAvailable(false)
+		setWatchOnlyMode(false)
+	}, [])
+
 	// ── Render phases ───────────────────────────────────────────────
+
+	// Watch-only mode: render dashboard with cached data (read-only)
+	if (watchOnlyMode) {
+		return (
+			<>
+				<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary">
+					<TopNav
+						label={watchOnlyLabel || "KeepKey"}
+						connected={false}
+						firmwareVersion={undefined}
+						firmwareVerified={undefined}
+						onSettingsToggle={() => {}}
+						activeTab="vault"
+						onTabChange={() => {}}
+						watchOnly
+					/>
+					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
+						<Dashboard watchOnly onLoaded={() => {}} />
+					</Flex>
+				</Flex>
+			</>
+		)
+	}
+
 	if (phase === "claimed") {
 		return (
 			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
@@ -363,7 +419,16 @@ function App() {
 					}
 					hintText={isError ? "Try unplugging and replugging your KeepKey." : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
-				/>
+				>
+					{watchOnlyAvailable && deviceState.state === "disconnected" && (
+						<WatchOnlyPrompt
+							deviceLabel={watchOnlyLabel}
+							lastSynced={watchOnlyLastSynced}
+							onViewPortfolio={handleViewPortfolio}
+							onConnectWallet={handleConnectWallet}
+						/>
+					)}
+				</SplashScreen>
 			</>
 		)
 	}

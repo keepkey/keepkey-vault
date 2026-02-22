@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry } from '../shared/types'
 
-const SCHEMA_VERSION = '5'
+const SCHEMA_VERSION = '6'
 
 let db: Database | null = null
 
@@ -117,6 +117,29 @@ export function initDb() {
       )
     `)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_ts ON api_log(timestamp DESC)`)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS device_snapshot (
+        device_id     TEXT PRIMARY KEY,
+        label         TEXT NOT NULL DEFAULT '',
+        firmware_ver  TEXT NOT NULL DEFAULT '',
+        features_json TEXT NOT NULL,
+        updated_at    INTEGER NOT NULL
+      )
+    `)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cached_pubkeys (
+        device_id   TEXT NOT NULL,
+        chain_id    TEXT NOT NULL,
+        path        TEXT NOT NULL DEFAULT '',
+        xpub        TEXT NOT NULL DEFAULT '',
+        address     TEXT NOT NULL DEFAULT '',
+        script_type TEXT NOT NULL DEFAULT '',
+        updated_at  INTEGER NOT NULL,
+        PRIMARY KEY (device_id, chain_id, path)
+      )
+    `)
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -494,5 +517,71 @@ export function clearApiLogs() {
     db.run('DELETE FROM api_log')
   } catch (e: any) {
     console.warn('[db] clearApiLogs failed:', e.message)
+  }
+}
+
+// ── Device Snapshot (watch-only cache) ──────────────────────────────
+
+export function saveDeviceSnapshot(deviceId: string, label: string, firmwareVer: string, featuresJson: string) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      [deviceId, label, firmwareVer, featuresJson, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] saveDeviceSnapshot failed:', e.message)
+  }
+}
+
+export function getLatestDeviceSnapshot(): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number } | null {
+  try {
+    if (!db) return null
+    const row = db.query(
+      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot ORDER BY updated_at DESC LIMIT 1'
+    ).get() as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
+    if (!row) return null
+    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
+  } catch (e: any) {
+    console.warn('[db] getLatestDeviceSnapshot failed:', e.message)
+    return null
+  }
+}
+
+// ── Cached Pubkeys (watch-only address cache) ───────────────────────
+
+export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] saveCachedPubkey failed:', e.message)
+  }
+}
+
+export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; path: string; xpub: string; address: string; scriptType: string }> {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      'SELECT chain_id, path, xpub, address, script_type FROM cached_pubkeys WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; path: string; xpub: string; address: string; script_type: string }>
+    return rows.map(r => ({ chainId: r.chain_id, path: r.path, xpub: r.xpub, address: r.address, scriptType: r.script_type }))
+  } catch (e: any) {
+    console.warn('[db] getCachedPubkeys failed:', e.message)
+    return []
+  }
+}
+
+export function hasWatchOnlyData(): boolean {
+  try {
+    if (!db) return false
+    const row = db.query('SELECT COUNT(*) as cnt FROM device_snapshot').get() as { cnt: number } | null
+    return (row?.cnt ?? 0) > 0
+  } catch (e: any) {
+    console.warn('[db] hasWatchOnlyData failed:', e.message)
+    return false
   }
 }
