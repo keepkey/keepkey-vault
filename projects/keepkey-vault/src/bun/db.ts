@@ -77,6 +77,13 @@ export function initDb() {
       )
     `)
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `)
+
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
     console.warn('[db] Failed to init SQLite cache:', e.message)
@@ -243,5 +250,27 @@ export function removeCustomChainDb(chainId: number) {
     db.run('DELETE FROM custom_chains WHERE chain_id = ?', [chainId])
   } catch (e: any) {
     console.warn('[db] removeCustomChain failed:', e.message)
+  }
+}
+
+// ── App Settings (key-value) ────────────────────────────────────────
+
+export function getSetting(key: string): string | null {
+  try {
+    if (!db) return null
+    const row = db.query('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | null
+    return row?.value ?? null
+  } catch (e: any) {
+    console.warn('[db] getSetting failed:', e.message)
+    return null
+  }
+}
+
+export function setSetting(key: string, value: string) {
+  try {
+    if (!db) return
+    db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
+  } catch (e: any) {
+    console.warn('[db] setSetting failed:', e.message)
   }
 }

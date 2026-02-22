@@ -149,6 +149,11 @@ export interface CustomChain {
   explorerUrl?: string
 }
 
+// Application-level settings (persisted in SQLite)
+export interface AppSettings {
+  restApiEnabled: boolean
+}
+
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.
 // These aliases are for convenience in frontend code that doesn't need Electrobun types.

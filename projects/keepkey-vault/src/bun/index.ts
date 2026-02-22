@@ -7,7 +7,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken } from "../shared/types"
@@ -46,12 +46,18 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 	return chain.chainId ? EVM_RPC_URLS[chain.chainId] : undefined
 }
 
-// ── REST API Server (opt-in via KEEPKEY_REST_API env) ──────────────────
+// ── REST API Server (off by default — persisted in SQLite, env var overrides) ──
 const auth = new AuthStore()
-const enableRest = process.env.KEEPKEY_REST_API === "true" || process.env.KEEPKEY_REST_API === "1"
-const restServer = enableRest ? startRestApi(engine, auth, REST_API_PORT) : null
+const envOverride = process.env.KEEPKEY_REST_API === "true" || process.env.KEEPKEY_REST_API === "1"
+const dbSetting = getSetting('rest_api_enabled')
+const enableRest = envOverride || dbSetting === '1'
+let restServer = enableRest ? startRestApi(engine, auth, REST_API_PORT) : null
 if (enableRest) console.log(`[Vault] REST API enabled on port ${REST_API_PORT}`)
-else console.log("[Vault] REST API disabled (set KEEPKEY_REST_API=true to enable)")
+else console.log("[Vault] REST API disabled")
+
+function getAppSettings() {
+	return { restApiEnabled: restServer !== null }
+}
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -630,6 +636,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			stopQrScan: async () => {
 				stopCamera()
+			},
+
+			// ── App Settings ─────────────────────────────────────────
+			getAppSettings: async () => {
+				return getAppSettings()
+			},
+			setRestApiEnabled: async (params) => {
+				if (params.enabled) {
+					if (!restServer) {
+						restServer = startRestApi(engine, auth, REST_API_PORT)
+						console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+					}
+				} else {
+					if (restServer) {
+						restServer.stop()
+						restServer = null
+						console.log('[Vault] REST API stopped')
+					}
+				}
+				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
+				return getAppSettings()
 			},
 
 			// ── Utility ──────────────────────────────────────────────

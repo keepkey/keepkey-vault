@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -81,6 +81,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Camera / QR scanning ──────────────────────────────────────────
       startQrScan: { params: void; response: void }
       stopQrScan: { params: void; response: void }
+
+      // ── App Settings ──────────────────────────────────────────────────
+      getAppSettings: { params: void; response: AppSettings }
+      setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
 
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
