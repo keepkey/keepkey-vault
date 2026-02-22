@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import type { PinRequestType } from "../../../shared/types"
+import { KeepKeyUILogo } from "../logo/keepkey-ui"
 
 interface PinEntryProps {
 	type?: PinRequestType
@@ -186,6 +187,12 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						Cancel
 					</Button>
 				)}
+
+				<Flex justify="flex-end" mt="3">
+					<Box w="24px" h="24px" opacity={0.3}>
+						<KeepKeyUILogo />
+					</Box>
+				</Flex>
 			</Box>
 		</Flex>
 	)
