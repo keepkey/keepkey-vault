@@ -163,13 +163,15 @@ export async function broadcastTx(
   } else if (signedTx?.serializedTx) {
     serializedTx = signedTx.serializedTx
   } else if (signedTx?.serialized) {
-    // proto-tx-builder returns base64-encoded TxRaw, but Pioneer's broadcast
-    // pipeline expects hex. Detect base64 and convert to hex.
+    // hdwallet-keepkey returns { serialized: "0xf86c..." } for EVM (hex with 0x prefix)
+    // proto-tx-builder returns { serialized: "CpQB..." } for Cosmos (base64)
+    // Detect which format: strip optional 0x prefix, then test if remaining chars are hex
     const raw = signedTx.serialized
-    if (raw && !/^[0-9a-fA-F]+$/.test(raw)) {
-      serializedTx = Buffer.from(raw, 'base64').toString('hex')
-    } else {
+    const stripped = raw.startsWith('0x') ? raw.slice(2) : raw
+    if (stripped && /^[0-9a-fA-F]*$/.test(stripped)) {
       serializedTx = raw
+    } else {
+      serializedTx = Buffer.from(raw, 'base64').toString('hex')
     }
   } else {
     throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
