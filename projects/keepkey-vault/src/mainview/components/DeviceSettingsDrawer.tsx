@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
-import type { DeviceStateInfo } from "../../shared/types"
+import type { DeviceStateInfo, AppSettings } from "../../shared/types"
 
 interface DeviceFeatures {
 	label?: string
@@ -17,6 +17,80 @@ interface DeviceSettingsDrawerProps {
 	deviceState: DeviceStateInfo
 }
 
+// ── Collapsible Section ─────────────────────────────────────────────
+
+function Section({ title, color, defaultOpen = true, children }: {
+	title: string
+	color?: string
+	defaultOpen?: boolean
+	children: React.ReactNode
+}) {
+	const [open, setOpen] = useState(defaultOpen)
+	return (
+		<Box bg="kk.cardBg" border="1px solid" borderColor={color === "kk.error" ? "kk.error" : "kk.border"} borderRadius="xl" overflow="hidden">
+			<Flex
+				as="button"
+				align="center"
+				justify="space-between"
+				w="100%"
+				px="5"
+				py="3"
+				cursor="pointer"
+				onClick={() => setOpen(o => !o)}
+				_hover={{ bg: "rgba(255,255,255,0.02)" }}
+				borderBottom={open ? "1px solid" : "none"}
+				borderColor="kk.border"
+			>
+				<Text fontSize="md" fontWeight="600" color={color || "kk.gold"}>{title}</Text>
+				<svg
+					width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+					style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", color: "var(--chakra-colors-kk-textSecondary)" }}
+				>
+					<polyline points="6 9 12 15 18 9" />
+				</svg>
+			</Flex>
+			{open && <Box px="5" py="4">{children}</Box>}
+		</Box>
+	)
+}
+
+// ── Toggle Switch ───────────────────────────────────────────────────
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+	return (
+		<Box
+			as="button"
+			role="switch"
+			aria-checked={checked}
+			onClick={() => !disabled && onChange(!checked)}
+			w="40px"
+			h="22px"
+			borderRadius="full"
+			bg={checked ? "kk.gold" : "kk.border"}
+			position="relative"
+			transition="background 0.2s"
+			cursor={disabled ? "not-allowed" : "pointer"}
+			opacity={disabled ? 0.5 : 1}
+			flexShrink={0}
+		>
+			<Box
+				position="absolute"
+				top="2px"
+				left={checked ? "20px" : "2px"}
+				w="18px"
+				h="18px"
+				borderRadius="full"
+				bg="white"
+				transition="left 0.2s"
+				boxShadow="0 1px 3px rgba(0,0,0,0.3)"
+			/>
+		</Box>
+	)
+}
+
+// ── Main Component ──────────────────────────────────────────────────
+
 export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSettingsDrawerProps) {
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -29,20 +103,25 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 	const [wipeConfirm, setWipeConfirm] = useState(false)
 	const [verifying, setVerifying] = useState(false)
 	const [verifyResult, setVerifyResult] = useState<{ success: boolean; message: string } | null>(null)
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false })
+	const [togglingRest, setTogglingRest] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
 
+	// Fetch device features + app settings when drawer opens
 	useEffect(() => {
-		if (open && deviceState.state === "ready") {
+		if (!open) return
+		if (deviceState.state === "ready") {
 			setFeaturesError(false)
 			rpcRequest<DeviceFeatures>("getFeatures")
 				.then(setFeatures)
 				.catch(() => setFeaturesError(true))
 		}
+		rpcRequest<AppSettings>("getAppSettings")
+			.then(setAppSettings)
+			.catch(() => {})
 	}, [open, deviceState.state])
 
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
-
-	// Reset wipe confirm when drawer closes
 	useEffect(() => { if (!open) setWipeConfirm(false) }, [open])
 
 	// Escape key closes drawer
@@ -53,10 +132,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 		return () => document.removeEventListener("keydown", handler)
 	}, [open, onClose])
 
-	// Auto-focus panel on open
-	useEffect(() => {
-		if (open) panelRef.current?.focus()
-	}, [open])
+	useEffect(() => { if (open) panelRef.current?.focus() }, [open])
+
+	// ── Handlers ────────────────────────────────────────────────────
 
 	const saveLabel = useCallback(async () => {
 		if (!label.trim()) return
@@ -104,6 +182,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 		setWipeConfirm(false)
 		onClose()
 	}, [onClose])
+
+	const toggleRestApi = useCallback(async (enabled: boolean) => {
+		setTogglingRest(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setRestApiEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setRestApiEnabled:", e) }
+		setTogglingRest(false)
+	}, [])
 
 	const securityValue = (val: boolean | undefined): string => {
 		if (featuresError || features === null) return "—"
@@ -158,7 +245,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 					bg="kk.bg"
 					zIndex={1}
 				>
-					<Text fontSize="lg" fontWeight="600" color="kk.textPrimary">Device Settings</Text>
+					<Text fontSize="lg" fontWeight="600" color="kk.textPrimary">Settings</Text>
 					<IconButton
 						aria-label="Close settings"
 						onClick={onClose}
@@ -175,10 +262,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 				</Flex>
 
 				{/* Content */}
-				<VStack gap="4" align="stretch" p="5">
-					{/* Device Identity */}
-					<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5">
-						<Text fontSize="md" fontWeight="600" mb="3" color="kk.gold">Device Identity</Text>
+				<VStack gap="3" align="stretch" p="4">
+
+					{/* ── Device Identity ─────────────────────────────── */}
+					<Section title="Device">
 						<VStack gap="2" align="stretch">
 							<InfoRow label="Label" value={features?.label || deviceState.label || "—"} />
 							<InfoRow label="Device ID" value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
@@ -187,11 +274,38 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 							<InfoRow label="Latest FW" value={deviceState.latestFirmware || "—"} />
 							<InfoRow label="Transport" value={deviceState.activeTransport || "—"} />
 						</VStack>
-					</Box>
 
-					{/* Security Status */}
-					<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5">
-						<Text fontSize="md" fontWeight="600" mb="3" color="kk.gold">Security</Text>
+						<Box mt="4">
+							<Text fontSize="xs" color="kk.textSecondary" mb="2">Change Label</Text>
+							<Flex gap="2">
+								<Input
+									value={label}
+									onChange={(e) => setLabel(e.target.value)}
+									placeholder="My KeepKey"
+									bg="kk.bg"
+									border="1px solid"
+									borderColor="kk.border"
+									color="kk.textPrimary"
+									size="sm"
+									flex="1"
+								/>
+								<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={saveLabel} disabled={saving || !label.trim()}>
+									{saving ? "..." : "Save"}
+								</Button>
+							</Flex>
+							{labelSaved && <Text fontSize="xs" color="kk.success" mt="1">Label saved</Text>}
+						</Box>
+
+						<Flex gap="3" align="center" mt="3">
+							<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={pingDevice} disabled={pinging}>
+								{pinging ? "..." : "Ping Device"}
+							</Button>
+							{pingResult && <Text fontSize="xs" color="kk.success">{pingResult}</Text>}
+						</Flex>
+					</Section>
+
+					{/* ── Security ────────────────────────────────────── */}
+					<Section title="Security">
 						{featuresError && (
 							<Text fontSize="xs" color="kk.error" mb="2">Could not load device features</Text>
 						)}
@@ -201,68 +315,63 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 							<InfoRow label="Passphrase" value={securityValue(features?.passphraseProtection)} />
 							<InfoRow label="U2F Counter" value={features?.u2fCounter != null ? String(features.u2fCounter) : "—"} />
 						</VStack>
-					</Box>
 
-					{/* Verify Seed */}
-					<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5">
-						<Text fontSize="md" fontWeight="600" mb="2" color="kk.gold">Verify Recovery Seed</Text>
-						<Text fontSize="xs" color="kk.textSecondary" mb="3">
-							Confirm your recovery phrase matches the seed stored on the device.
-						</Text>
-						<Flex gap="3" align="center">
-							<Button
-								size="sm"
-								variant="outline"
-								borderColor="kk.gold"
-								color="kk.gold"
-								_hover={{ bg: "rgba(192,168,96,0.1)" }}
-								onClick={verifySeed}
-								disabled={verifying}
-							>
-								{verifying ? "Verifying..." : "Verify Seed"}
-							</Button>
-							{verifyResult && (
-								<Text fontSize="xs" color={verifyResult.success ? "kk.success" : "kk.error"}>
-									{verifyResult.success ? "Seed verified!" : verifyResult.message}
-								</Text>
+						<Box mt="4">
+							<Text fontSize="xs" color="kk.textSecondary" mb="2">
+								Confirm your recovery phrase matches the seed stored on the device.
+							</Text>
+							<Flex gap="3" align="center">
+								<Button
+									size="sm"
+									variant="outline"
+									borderColor="kk.gold"
+									color="kk.gold"
+									_hover={{ bg: "rgba(192,168,96,0.1)" }}
+									onClick={verifySeed}
+									disabled={verifying}
+								>
+									{verifying ? "Verifying..." : "Verify Seed"}
+								</Button>
+								{verifyResult && (
+									<Text fontSize="xs" color={verifyResult.success ? "kk.success" : "kk.error"}>
+										{verifyResult.success ? "Seed verified!" : verifyResult.message}
+									</Text>
+								)}
+							</Flex>
+						</Box>
+					</Section>
+
+					{/* ── Application Settings ────────────────────────── */}
+					<Section title="Application" defaultOpen={false}>
+						<VStack gap="4" align="stretch">
+							<Flex justify="space-between" align="center">
+								<Box>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">REST API Server</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+										Enable the signing API on port 1646 for dApp integrations.
+									</Text>
+								</Box>
+								<Toggle
+									checked={appSettings.restApiEnabled}
+									onChange={toggleRestApi}
+									disabled={togglingRest}
+								/>
+							</Flex>
+							{appSettings.restApiEnabled && (
+								<Box bg="rgba(192,168,96,0.08)" borderRadius="lg" px="3" py="2">
+									<Text fontSize="xs" color="kk.gold" fontFamily="mono">
+										http://localhost:1646
+									</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="1">
+										API is running. dApps can connect via kkapi:// protocol.
+									</Text>
+								</Box>
 							)}
-						</Flex>
-					</Box>
+						</VStack>
+					</Section>
 
-					{/* Actions */}
-					<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5">
-						<Text fontSize="md" fontWeight="600" mb="3" color="kk.gold">Actions</Text>
-
-						<Text fontSize="xs" color="kk.textSecondary" mb="2">Device Label</Text>
-						<Flex gap="2" mb="1">
-							<Input
-								value={label}
-								onChange={(e) => setLabel(e.target.value)}
-								placeholder="My KeepKey"
-								bg="kk.bg"
-								border="1px solid"
-								borderColor="kk.border"
-								color="kk.textPrimary"
-								size="sm"
-								flex="1"
-							/>
-							<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={saveLabel} disabled={saving || !label.trim()}>
-								{saving ? "..." : "Save"}
-							</Button>
-						</Flex>
-						{labelSaved && <Text fontSize="xs" color="kk.success" mb="2">Label saved</Text>}
-
-						<Flex gap="3" align="center" mt="2">
-							<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={pingDevice} disabled={pinging}>
-								{pinging ? "..." : "Ping Device"}
-							</Button>
-							{pingResult && <Text fontSize="xs" color="kk.success">{pingResult}</Text>}
-						</Flex>
-					</Box>
-
-					{/* Danger Zone */}
-					<Box bg="kk.cardBg" border="1px solid" borderColor="kk.error" borderRadius="xl" p="5">
-						<Text fontSize="md" fontWeight="600" mb="2" color="kk.error">Danger Zone</Text>
+					{/* ── Danger Zone ─────────────────────────────────── */}
+					<Section title="Danger Zone" color="kk.error" defaultOpen={false}>
 						<Text fontSize="xs" color="kk.textSecondary" mb="3">
 							Wiping erases all data on the device. Make sure you have your recovery phrase backed up.
 						</Text>
@@ -280,7 +389,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 								</Button>
 							</Flex>
 						)}
-					</Box>
+					</Section>
+
 				</VStack>
 			</Box>
 		</>

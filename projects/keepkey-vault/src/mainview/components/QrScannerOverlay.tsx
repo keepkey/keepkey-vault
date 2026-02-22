@@ -1,218 +1,279 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
-import { getCameraStream, startScanning, stopStream } from "../lib/qr-scanner"
-import { Z } from "../lib/z-index"
-
-type ScanState = "requesting" | "scanning" | "error"
+import jsQR from "jsqr"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 
 interface QrScannerOverlayProps {
-	onDetect: (value: string) => void
+	onScan: (data: string) => void
 	onClose: () => void
 }
 
-export function QrScannerOverlay({ onDetect, onClose }: QrScannerOverlayProps) {
-	const videoRef = useRef<HTMLVideoElement>(null)
-	const streamRef = useRef<MediaStream | null>(null)
-	const cleanupRef = useRef<(() => void) | null>(null)
-	const [state, setState] = useState<ScanState>("requesting")
-	const [errorMsg, setErrorMsg] = useState("")
+type ScanMode = "starting" | "streaming" | "fallback"
 
-	const shutdown = useCallback(() => {
-		cleanupRef.current?.()
-		cleanupRef.current = null
-		stopStream(streamRef.current)
-		streamRef.current = null
-	}, [])
+function decodeQrFromBlob(blob: File | Blob): Promise<string | null> {
+	return new Promise((resolve) => {
+		const img = new Image()
+		const url = URL.createObjectURL(blob)
+		img.onload = () => {
+			const canvas = document.createElement("canvas")
+			canvas.width = img.width
+			canvas.height = img.height
+			const ctx = canvas.getContext("2d")
+			if (!ctx) { URL.revokeObjectURL(url); resolve(null); return }
+			ctx.drawImage(img, 0, 0)
+			const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+			const code = jsQR(imageData.data, imageData.width, imageData.height)
+			URL.revokeObjectURL(url)
+			resolve(code?.data || null)
+		}
+		img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+		img.src = url
+	})
+}
 
-	// Start camera on mount
+export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
+	const [mode, setMode] = useState<ScanMode>("starting")
+	const [error, setError] = useState<string | null>(null)
+	const [loading, setLoading] = useState(false)
+	const [dragOver, setDragOver] = useState(false)
+	const canvasRef = useRef<HTMLCanvasElement>(null)
+	const imgRef = useRef<HTMLImageElement>(null)
+	const fileInputRef = useRef<HTMLInputElement>(null)
+	const foundRef = useRef(false)
+	const modeRef = useRef<ScanMode>("starting")
+	const decoderImgRef = useRef(new Image())
+
+	// Keep modeRef in sync
+	useEffect(() => { modeRef.current = mode }, [mode])
+
+	// Start camera on mount, stop on unmount
 	useEffect(() => {
-		let cancelled = false
+		foundRef.current = false
 
-		getCameraStream()
-			.then((stream) => {
-				if (cancelled) { stopStream(stream); return }
-				streamRef.current = stream
-				const video = videoRef.current
-				if (!video) { stopStream(stream); return }
-				video.srcObject = stream
-				video.play().catch(() => {})
-				setState("scanning")
+		rpcRequest("startQrScan", undefined, 10000).catch((err: any) => {
+			console.warn("[QrScanner] startQrScan failed:", err.message)
+			setError(err.message)
+			setMode("fallback")
+		})
 
-				// Start detection loop once video is playing
-				const onPlaying = () => {
-					if (cancelled) return
-					cleanupRef.current = startScanning(
-						video,
-						(value) => {
-							shutdown()
-							onDetect(value)
-						},
-						(err) => {
-							setState("error")
-							setErrorMsg(err.message)
-						},
-					)
-				}
-				if (video.readyState >= video.HAVE_CURRENT_DATA) {
-					onPlaying()
-				} else {
-					video.addEventListener("playing", onPlaying, { once: true })
-				}
-			})
-			.catch((err: DOMException | Error) => {
-				if (cancelled) return
-				setState("error")
-				if (err.name === "NotAllowedError") {
-					setErrorMsg("Camera permission denied. Open System Settings > Privacy & Security > Camera to allow access.")
-				} else if (err.name === "NotFoundError") {
-					setErrorMsg("No camera found on this device.")
-				} else if (err.name === "NotReadableError") {
-					setErrorMsg("Camera is in use by another application.")
-				} else {
-					setErrorMsg(err.message || "Failed to access camera")
-				}
-			})
+		// Timeout: if no frame arrives within 5s, fall back to file upload
+		const startTimeout = setTimeout(() => {
+			if (modeRef.current === "starting") {
+				setError("Camera did not start. Try uploading an image instead.")
+				setMode("fallback")
+				rpcRequest("stopQrScan").catch(() => {})
+			}
+		}, 5000)
 
 		return () => {
-			cancelled = true
-			shutdown()
+			clearTimeout(startTimeout)
+			rpcRequest("stopQrScan").catch(() => {})
 		}
-	}, []) // eslint-disable-line react-hooks/exhaustive-deps
+	}, [])
 
-	// Escape key to close
+	// Listen for camera frames — no mode dependency to avoid re-subscriptions
 	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") { shutdown(); onClose() }
-		}
-		window.addEventListener("keydown", onKey)
-		return () => window.removeEventListener("keydown", onKey)
-	}, [onClose, shutdown])
+		const decoderImg = decoderImgRef.current
 
-	const handleBackdropClick = useCallback((e: React.MouseEvent) => {
-		if (e.target === e.currentTarget) { shutdown(); onClose() }
-	}, [onClose, shutdown])
+		const unsubFrame = onRpcMessage("camera-frame", (base64: string) => {
+			if (foundRef.current) return
+			if (modeRef.current === "starting") setMode("streaming")
+
+			// Display frame
+			if (imgRef.current) {
+				imgRef.current.src = `data:image/jpeg;base64,${base64}`
+			}
+
+			// Decode QR from frame (reuse single Image object)
+			decoderImg.onload = () => {
+				if (foundRef.current) return
+				const canvas = canvasRef.current || document.createElement("canvas")
+				canvas.width = decoderImg.width
+				canvas.height = decoderImg.height
+				const ctx = canvas.getContext("2d", { willReadFrequently: true })
+				if (!ctx) return
+				ctx.drawImage(decoderImg, 0, 0)
+				const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+				const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
+				if (code?.data) {
+					foundRef.current = true
+					rpcRequest("stopQrScan").catch(() => {})
+					onScan(code.data)
+				}
+			}
+			decoderImg.src = `data:image/jpeg;base64,${base64}`
+		})
+
+		const unsubError = onRpcMessage("camera-error", (message: string) => {
+			setError(message)
+			setMode("fallback")
+		})
+
+		return () => { unsubFrame(); unsubError() }
+	}, [onScan])
+
+	const handleClose = useCallback(() => {
+		rpcRequest("stopQrScan").catch(() => {})
+		onClose()
+	}, [onClose])
+
+	// File upload fallback
+	const processFile = useCallback(async (file: File | Blob) => {
+		setLoading(true)
+		setError(null)
+		const result = await decodeQrFromBlob(file)
+		setLoading(false)
+		if (result) {
+			onScan(result)
+		} else {
+			setError("No QR code found in image. Try a clearer photo.")
+		}
+	}, [onScan])
+
+	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0]
+		if (file) processFile(file)
+		e.target.value = ""
+	}, [processFile])
+
+	const handleDrop = useCallback((e: React.DragEvent) => {
+		e.preventDefault()
+		setDragOver(false)
+		const file = e.dataTransfer.files?.[0]
+		if (file && file.type.startsWith("image/")) {
+			processFile(file)
+		}
+	}, [processFile])
 
 	return (
 		<Flex
 			position="fixed"
-			top={0}
-			left={0}
-			w="100vw"
-			h="100vh"
-			bg="blackAlpha.700"
-			align="center"
-			justify="center"
-			zIndex={Z.dialog}
-			onClick={handleBackdropClick}
+			top={0} left={0}
+			w="100vw" h="100vh"
+			bg="blackAlpha.900"
+			align="center" justify="center"
+			zIndex={2000}
+			direction="column"
 		>
-			<Box
-				bg="gray.800"
-				borderRadius="xl"
-				border="1px solid"
-				borderColor="gray.600"
-				p="5"
-				maxW="420px"
-				w="90%"
-				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
-			>
-				<Text fontSize="lg" fontWeight="bold" mb="1" textAlign="center" color="white">
-					Scan QR Code
-				</Text>
-				<Text color="gray.400" fontSize="xs" mb="4" textAlign="center">
-					Hold a QR code in front of the camera
-				</Text>
+			<Text fontSize="lg" fontWeight="bold" color="white" mb="4">
+				Scan QR Code
+			</Text>
 
-				{/* Camera viewport */}
-				<Box
-					position="relative"
-					w="100%"
-					bg="black"
-					borderRadius="lg"
-					overflow="hidden"
-					mb="4"
-					// 4:3 aspect ratio box
-					_before={{
-						content: '""',
-						display: "block",
-						pb: "75%",
-					}}
-				>
-					<video
-						ref={videoRef}
-						autoPlay
-						playsInline
-						muted
-						style={{
-							position: "absolute",
-							top: 0,
-							left: 0,
-							width: "100%",
-							height: "100%",
-							objectFit: "cover",
-						}}
-					/>
-
-					{/* Scanning guide box */}
-					{state === "scanning" && (
-						<Box
-							position="absolute"
-							top="50%"
-							left="50%"
-							transform="translate(-50%, -50%)"
-							w="55%"
-							h="73%"
-							border="2px solid"
-							borderColor="kk.gold"
-							borderRadius="lg"
-							opacity={0.7}
-							pointerEvents="none"
+			{/* Live camera feed */}
+			{(mode === "starting" || mode === "streaming") && (
+				<>
+					<Box
+						position="relative"
+						borderRadius="lg"
+						overflow="hidden"
+						border="2px solid"
+						borderColor="kk.gold"
+						maxW="400px"
+						w="90%"
+						bg="black"
+					>
+						{mode === "starting" && (
+							<Flex align="center" justify="center" h="300px">
+								<Text fontSize="sm" color="gray.500">Starting camera...</Text>
+							</Flex>
+						)}
+						<img
+							ref={imgRef}
+							style={{
+								width: "100%",
+								display: mode === "streaming" ? "block" : "none",
+								background: "#000",
+							}}
+							alt=""
 						/>
+						{/* Scan target overlay */}
+						{mode === "streaming" && (
+							<Box
+								position="absolute" top="50%" left="50%"
+								transform="translate(-50%, -50%)"
+								w="60%" h="60%"
+								border="2px solid rgba(255,215,0,0.5)"
+								borderRadius="md"
+								pointerEvents="none"
+							/>
+						)}
+					</Box>
+					<canvas ref={canvasRef} style={{ display: "none" }} />
+
+					<Text fontSize="xs" color="gray.500" mt="3" textAlign="center">
+						Point your camera at a wallet QR code
+					</Text>
+
+					{/* Switch to file upload */}
+					<Button
+						size="xs" variant="ghost" color="gray.600" mt="2"
+						_hover={{ color: "gray.400" }}
+						onClick={() => { rpcRequest("stopQrScan").catch(() => {}); setMode("fallback") }}
+					>
+						Use image file instead
+					</Button>
+				</>
+			)}
+
+			{/* File upload fallback */}
+			{mode === "fallback" && (
+				<>
+					{error && (
+						<Box mb="3" bg="rgba(255,23,68,0.1)" border="1px solid" borderColor="red.500" borderRadius="lg" p="3" maxW="360px" w="90%">
+							<Text color="red.400" fontSize="xs" textAlign="center">{error}</Text>
+						</Box>
 					)}
 
-					{/* Requesting state */}
-					{state === "requesting" && (
-						<Flex
-							position="absolute"
-							top={0}
-							left={0}
-							w="100%"
-							h="100%"
-							align="center"
-							justify="center"
-						>
-							<Text color="gray.400" fontSize="sm">Requesting camera...</Text>
+					<Box
+						w="90%" maxW="360px" h="180px"
+						border="2px dashed"
+						borderColor={dragOver ? "kk.gold" : "gray.600"}
+						borderRadius="lg"
+						bg={dragOver ? "rgba(255,215,0,0.06)" : "rgba(255,255,255,0.03)"}
+						cursor="pointer"
+						transition="all 0.15s"
+						_hover={{ borderColor: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+						onClick={() => fileInputRef.current?.click()}
+						onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+						onDragLeave={() => setDragOver(false)}
+						onDrop={handleDrop}
+					>
+						<Flex direction="column" align="center" justify="center" h="100%" gap="2" px="4">
+							<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={dragOver ? "#FFD700" : "#888"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+								<polyline points="17 8 12 3 7 8" />
+								<line x1="12" y1="3" x2="12" y2="15" />
+							</svg>
+							<Text fontSize="sm" color={dragOver ? "kk.gold" : "gray.400"} textAlign="center">
+								{loading ? "Scanning..." : "Drop a QR code image here"}
+							</Text>
+							<Text fontSize="xs" color="gray.600" textAlign="center">
+								or click to browse
+							</Text>
 						</Flex>
-					)}
+					</Box>
 
-					{/* Error state */}
-					{state === "error" && (
-						<Flex
-							position="absolute"
-							top={0}
-							left={0}
-							w="100%"
-							h="100%"
-							align="center"
-							justify="center"
-							p="4"
-						>
-							<Text color="kk.error" fontSize="sm" textAlign="center">{errorMsg}</Text>
-						</Flex>
-					)}
-				</Box>
+					<input
+						ref={fileInputRef}
+						type="file"
+						accept="image/*"
+						style={{ display: "none" }}
+						onChange={handleFileChange}
+					/>
+				</>
+			)}
 
-				<Button
-					onClick={() => { shutdown(); onClose() }}
-					size="sm"
-					variant="outline"
-					borderColor="gray.600"
-					color="gray.300"
-					_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
-					w="100%"
-				>
-					Cancel
-				</Button>
-			</Box>
+			{/* Cancel */}
+			<Button
+				mt="4" size="sm"
+				variant="outline"
+				borderColor="gray.600"
+				color="gray.300"
+				_hover={{ borderColor: "red.400", color: "red.400" }}
+				onClick={handleClose}
+			>
+				Cancel
+			</Button>
 		</Flex>
 	)
 }

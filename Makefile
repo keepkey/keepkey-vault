@@ -11,6 +11,8 @@ dev:
 	cd $(PROJECT_DIR) && bun run dev
 
 dev-hmr:
+	-lsof -ti :5173 | xargs kill -9 2>/dev/null || true
+	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
 
 build:

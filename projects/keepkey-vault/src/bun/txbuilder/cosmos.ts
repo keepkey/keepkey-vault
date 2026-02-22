@@ -51,9 +51,9 @@ export async function buildCosmosTx(
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
-  // 1. Get account info (use CAIP networkId)
+  // 1. Get account info (API expects short network name, not CAIP networkId)
   console.log(`${TAG} Fetching account info for ${chain.coin}...`)
-  const accountResp = await pioneer.GetAccountInfo({ network: chain.networkId, address: fromAddress })
+  const accountResp = await pioneer.GetAccountInfo({ network: chain.id, address: fromAddress })
   const accountInfo = accountResp?.data
 
   let account_number: string
@@ -88,18 +88,18 @@ export async function buildCosmosTx(
   // 3. Build unsigned tx
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
   const msgType = MSG_TYPES[chain.id] || 'cosmos-sdk/MsgSend'
-  const chain_id = chain.chainId || chain.id
+  if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
+  const chain_id = chain.chainId
 
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
 
   return {
     signerAddress: fromAddress,
     addressNList: chain.defaultPath,
-    signDoc: {
-      account_number,
-      chain_id,
+    tx: {
       fee,
-      msgs: [
+      memo: memo || '',
+      msg: [
         {
           type: msgType,
           value: {
@@ -109,9 +109,11 @@ export async function buildCosmosTx(
           },
         },
       ],
-      memo: memo || '',
-      sequence,
+      signatures: [],
     },
+    chain_id,
+    account_number,
+    sequence,
     fee: feeInDisplay,
   }
 }

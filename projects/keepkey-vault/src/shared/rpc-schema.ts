@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -63,6 +63,31 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       broadcastTx: { params: { chainId: string; signedTx: any }; response: BroadcastResult }
       getMarketData: { params: { caips: string[] }; response: any }
       getFees: { params: { chainId: string }; response: any }
+
+      // ── Bitcoin multi-account ─────────────────────────────────────────
+      getBtcAccounts: { params: void; response: BtcAccountSet }
+      addBtcAccount: { params: void; response: BtcAccountSet }
+      setBtcSelectedXpub: { params: { accountIndex: number; scriptType: BtcScriptType }; response: void }
+      getBtcAddressIndices: { params: { xpub: string }; response: { receiveIndex: number; changeIndex: number } }
+
+      // ── Custom tokens & chains ──────────────────────────────────────────
+      addCustomToken: { params: { chainId: string; contractAddress: string }; response: CustomToken }
+      removeCustomToken: { params: { chainId: string; contractAddress: string }; response: void }
+      getCustomTokens: { params: void; response: CustomToken[] }
+      addCustomChain: { params: CustomChain; response: void }
+      removeCustomChain: { params: { chainId: number }; response: void }
+      getCustomChains: { params: void; response: CustomChain[] }
+
+      // ── Camera / QR scanning ──────────────────────────────────────────
+      startQrScan: { params: void; response: void }
+      stopQrScan: { params: void; response: void }
+
+      // ── App Settings ──────────────────────────────────────────────────
+      getAppSettings: { params: void; response: AppSettings }
+      setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
+
+      // ── Utility ───────────────────────────────────────────────────────
+      openUrl: { params: { url: string }; response: void }
     }
     messages: {
       'device-state': DeviceStateInfo
@@ -70,6 +95,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'pin-request': PinRequest
       'character-request': CharacterRequest
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
+      'btc-accounts-update': BtcAccountSet
+      'camera-frame': string
+      'camera-error': string
     }
   }
   webview: {

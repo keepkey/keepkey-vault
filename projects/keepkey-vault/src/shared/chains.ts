@@ -1,4 +1,5 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
+import type { BtcScriptType, CustomChain } from './types'
 
 export interface ChainDef {
   id: string
@@ -18,6 +19,24 @@ export interface ChainDef {
   chainId?: string
 }
 
+// ── Bitcoin multi-account constants ─────────────────────────────────────
+export const BTC_SCRIPT_TYPES: Array<{
+  scriptType: BtcScriptType
+  purpose: number
+  xpubPrefix: 'xpub' | 'ypub' | 'zpub'
+  label: string
+  addressPrefix: string
+}> = [
+  { scriptType: 'p2pkh',       purpose: 44, xpubPrefix: 'xpub', label: 'Legacy',         addressPrefix: '1' },
+  { scriptType: 'p2sh-p2wpkh', purpose: 49, xpubPrefix: 'ypub', label: 'SegWit',         addressPrefix: '3' },
+  { scriptType: 'p2wpkh',      purpose: 84, xpubPrefix: 'zpub', label: 'Native SegWit',  addressPrefix: 'bc1' },
+]
+
+/** Build a BIP44/49/84 account-level path: m/purpose'/0'/accountIndex' */
+export function btcAccountPath(purpose: number, accountIndex: number): number[] {
+  return [purpose + 0x80000000, 0x80000000, accountIndex + 0x80000000]
+}
+
 // Minimal per-chain config — everything else derived from pioneer-caip
 type ChainConfig = Omit<ChainDef, 'networkId' | 'caip' | 'decimals'>
 
@@ -26,13 +45,49 @@ const CONFIGS: ChainConfig[] = [
     id: 'bitcoin', chain: Chain.Bitcoin, coin: 'Bitcoin', symbol: 'BTC',
     chainFamily: 'utxo', color: '#F7931A',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
-    defaultPath: [0x8000002C, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2wpkh',
+    defaultPath: [0x8000002C, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2pkh',
   },
   {
     id: 'ethereum', chain: Chain.Ethereum, coin: 'Ethereum', symbol: 'ETH',
     chainFamily: 'evm', color: '#627EEA',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '1',
+  },
+  {
+    id: 'polygon', chain: Chain.Polygon, coin: 'Polygon', symbol: 'MATIC',
+    chainFamily: 'evm', color: '#8247E5',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '137',
+  },
+  {
+    id: 'arbitrum', chain: Chain.Arbitrum, coin: 'Arbitrum', symbol: 'ETH',
+    chainFamily: 'evm', color: '#28A0F0',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '42161',
+  },
+  {
+    id: 'optimism', chain: Chain.Optimism, coin: 'Optimism', symbol: 'ETH',
+    chainFamily: 'evm', color: '#FF0420',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '10',
+  },
+  {
+    id: 'avalanche', chain: Chain.Avalanche, coin: 'Avalanche', symbol: 'AVAX',
+    chainFamily: 'evm', color: '#E84142',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '43114',
+  },
+  {
+    id: 'bsc', chain: Chain.BinanceSmartChain, coin: 'BNB Smart Chain', symbol: 'BNB',
+    chainFamily: 'evm', color: '#F0B90B',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '56',
+  },
+  {
+    id: 'base', chain: Chain.Base, coin: 'Base', symbol: 'ETH',
+    chainFamily: 'evm', color: '#0052FF',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '8453',
   },
   {
     id: 'cosmos', chain: Chain.Cosmos, coin: 'Cosmos', symbol: 'ATOM',
@@ -115,3 +170,22 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
+
+/** Convert a user-added custom EVM chain into a ChainDef */
+export function customChainToChainDef(c: CustomChain): ChainDef {
+  return {
+    id: `evm-custom-${c.chainId}`,
+    chain: `CUSTOM_${c.chainId}`,
+    coin: c.name,
+    symbol: c.symbol,
+    networkId: `eip155:${c.chainId}`,
+    caip: `eip155:${c.chainId}/slip44:60`,
+    decimals: 18,
+    chainFamily: 'evm',
+    color: '#888888',
+    rpcMethod: 'ethGetAddress',
+    signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0],
+    chainId: String(c.chainId),
+  }
+}
