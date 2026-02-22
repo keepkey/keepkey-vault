@@ -6,11 +6,12 @@ interface TopNavProps {
 	label?: string
 	connected: boolean
 	firmwareVersion?: string
+	firmwareVerified?: boolean
 	onSettingsToggle: () => void
 	settingsOpen?: boolean
 }
 
-export function TopNav({ label, connected, firmwareVersion, onSettingsToggle, settingsOpen }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen }: TopNavProps) {
 	return (
 		<Flex
 			position="fixed"
@@ -52,9 +53,17 @@ export function TopNav({ label, connected, firmwareVersion, onSettingsToggle, se
 					{label || "KeepKey"}
 				</Text>
 				{firmwareVersion && (
-					<Text fontSize="xs" color="#4ADE80" fontWeight="400">
-						v{firmwareVersion}
-					</Text>
+					<Flex align="center" gap="1">
+						{firmwareVerified === false && (
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+								<path d="M12 2L1 21h22L12 2z" fill="#FB923C" />
+								<path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
+							</svg>
+						)}
+						<Text fontSize="xs" color={firmwareVerified === false ? "#FB923C" : "#4ADE80"} fontWeight="400">
+							v{firmwareVersion}
+						</Text>
+					</Flex>
 				)}
 			</Flex>
 

@@ -30,12 +30,26 @@ export default {
 		},
 		mac: {
 			bundleCEF: false,
+			icons: "icon.iconset",
+			// Code signing — requires ELECTROBUN_DEVELOPER_ID, ELECTROBUN_TEAMID env vars
+			codesign: true,
+			// Notarization — requires ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS env vars
+			notarize: true,
+			// Entitlements for native USB modules (node-hid, usb, hdwallet)
+			entitlements: {
+				"com.apple.security.cs.allow-jit": true,
+				"com.apple.security.cs.allow-unsigned-executable-memory": true,
+				"com.apple.security.cs.disable-library-validation": true,
+				"com.apple.security.cs.allow-dyld-environment-variables": true,
+			},
 		},
 		linux: {
 			bundleCEF: false,
+			icon: "icon.png",
 		},
 		win: {
 			bundleCEF: false,
+			icon: "icon.png",
 		},
 	},
 } satisfies ElectrobunConfig;

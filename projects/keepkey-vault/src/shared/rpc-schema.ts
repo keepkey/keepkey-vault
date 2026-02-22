@@ -20,7 +20,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       resetDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
       recoverDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
       verifySeed: { params: { wordCount: 12 | 18 | 24 }; response: { success: boolean; message: string } }
-      applySettings: { params: { label?: string }; response: void }
+      applySettings: { params: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }; response: void }
+      changePin: { params: void; response: void }
+      removePin: { params: void; response: void }
       sendPin: { params: { pin: string }; response: void }
       sendPassphrase: { params: { passphrase: string }; response: void }
       sendCharacter: { params: { character: string }; response: void }
@@ -94,6 +96,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'firmware-progress': FirmwareProgress
       'pin-request': PinRequest
       'character-request': CharacterRequest
+      'passphrase-request': void
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
       'camera-frame': string

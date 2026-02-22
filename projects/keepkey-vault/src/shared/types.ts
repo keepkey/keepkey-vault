@@ -31,6 +31,10 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  firmwareHash?: string
+  bootloaderHash?: string
+  firmwareVerified?: boolean
+  bootloaderVerified?: boolean
   error?: string | null
 }
 

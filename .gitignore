@@ -4,5 +4,13 @@ build/
 bun.lock
 *.log
 .DS_Store
+.idea/
+
+# Credentials — NEVER commit
 .env
-.env.local
+.env.*
+*.p12
+*.cer
+*.key
+*.pem
+*.mobileprovision

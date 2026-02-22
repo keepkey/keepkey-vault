@@ -89,6 +89,32 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 	)
 }
 
+// ── Verification Badge ──────────────────────────────────────────────
+
+function VerificationBadge({ verified }: { verified?: boolean }) {
+	if (verified === undefined) return null
+	if (verified) {
+		return (
+			<Flex align="center" gap="1">
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+					<circle cx="12" cy="12" r="10" fill="#22C55E" />
+					<path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+				<Text fontSize="9px" color="#22C55E" fontWeight="600">Official</Text>
+			</Flex>
+		)
+	}
+	return (
+		<Flex align="center" gap="1">
+			<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+				<path d="M12 2L1 21h22L12 2z" fill="#FB923C" />
+				<path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
+			</svg>
+			<Text fontSize="9px" color="#FB923C" fontWeight="600">Unknown</Text>
+		</Flex>
+	)
+}
+
 // ── Main Component ──────────────────────────────────────────────────
 
 export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSettingsDrawerProps) {
@@ -103,6 +129,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 	const [wipeConfirm, setWipeConfirm] = useState(false)
 	const [verifying, setVerifying] = useState(false)
 	const [verifyResult, setVerifyResult] = useState<{ success: boolean; message: string } | null>(null)
+	const [changingPin, setChangingPin] = useState(false)
+	const [removingPin, setRemovingPin] = useState(false)
+	const [removePinConfirm, setRemovePinConfirm] = useState(false)
+	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false })
 	const [togglingRest, setTogglingRest] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
@@ -122,7 +152,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 	}, [open, deviceState.state])
 
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
-	useEffect(() => { if (!open) setWipeConfirm(false) }, [open])
+	useEffect(() => { if (!open) { setWipeConfirm(false); setRemovePinConfirm(false) } }, [open])
 
 	// Escape key closes drawer
 	useEffect(() => {
@@ -190,6 +220,38 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 			setAppSettings(result)
 		} catch (e: any) { console.error("setRestApiEnabled:", e) }
 		setTogglingRest(false)
+	}, [])
+
+	const handleChangePin = useCallback(async () => {
+		setChangingPin(true)
+		try {
+			await rpcRequest("changePin", undefined, 600000)
+		} catch (e: any) { console.error("changePin:", e) }
+		setChangingPin(false)
+		// Refresh features
+		rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
+	}, [])
+
+	const handleRemovePin = useCallback(async () => {
+		setRemovingPin(true)
+		try {
+			await rpcRequest("removePin", undefined, 60000)
+		} catch (e: any) { console.error("removePin:", e) }
+		setRemovingPin(false)
+		setRemovePinConfirm(false)
+		// Refresh features
+		rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
+	}, [])
+
+	const handleTogglePassphrase = useCallback(async (enable: boolean) => {
+		setTogglingPassphrase(true)
+		try {
+			await rpcRequest("applySettings", { usePassphrase: enable }, 60000)
+			// Refresh features to reflect the new state
+			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
+			setFeatures(updated)
+		} catch (e: any) { console.error("togglePassphrase:", e) }
+		setTogglingPassphrase(false)
 	}, [])
 
 	const securityValue = (val: boolean | undefined): string => {
@@ -269,10 +331,41 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 						<VStack gap="2" align="stretch">
 							<InfoRow label="Label" value={features?.label || deviceState.label || "—"} />
 							<InfoRow label="Device ID" value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
-							<InfoRow label="Firmware" value={deviceState.firmwareVersion || "—"} />
-							<InfoRow label="Bootloader" value={deviceState.bootloaderVersion || "—"} />
+							{/* Firmware with verification badge */}
+							<Flex justify="space-between" align="center">
+								<Text fontSize="xs" color="kk.textSecondary">Firmware</Text>
+								<Flex align="center" gap="2">
+									<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{deviceState.firmwareVersion || "—"}</Text>
+									<VerificationBadge verified={deviceState.firmwareVerified} />
+								</Flex>
+							</Flex>
+							{/* Bootloader with verification badge */}
+							<Flex justify="space-between" align="center">
+								<Text fontSize="xs" color="kk.textSecondary">Bootloader</Text>
+								<Flex align="center" gap="2">
+									<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{deviceState.bootloaderVersion || "—"}</Text>
+									<VerificationBadge verified={deviceState.bootloaderVerified} />
+								</Flex>
+							</Flex>
 							<InfoRow label="Latest FW" value={deviceState.latestFirmware || "—"} />
 							<InfoRow label="Transport" value={deviceState.activeTransport || "—"} />
+							{/* Collapsible hash display for advanced users */}
+							{(deviceState.firmwareHash || deviceState.bootloaderHash) && (
+								<Box mt="1" pt="2" borderTop="1px solid" borderColor="kk.border">
+									{deviceState.firmwareHash && (
+										<Box mb="1">
+											<Text fontSize="9px" color="kk.textSecondary">FW Hash</Text>
+											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.firmwareHash}</Text>
+										</Box>
+									)}
+									{deviceState.bootloaderHash && (
+										<Box>
+											<Text fontSize="9px" color="kk.textSecondary">BL Hash</Text>
+											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.bootloaderHash}</Text>
+										</Box>
+									)}
+								</Box>
+							)}
 						</VStack>
 
 						<Box mt="4">
@@ -309,36 +402,196 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 						{featuresError && (
 							<Text fontSize="xs" color="kk.error" mb="2">Could not load device features</Text>
 						)}
-						<VStack gap="2" align="stretch">
-							<InfoRow label="Initialized" value={deviceState.initialized ? "Yes" : "No"} />
-							<InfoRow label="PIN Protection" value={securityValue(features?.pinProtection)} />
-							<InfoRow label="Passphrase" value={securityValue(features?.passphraseProtection)} />
-							<InfoRow label="U2F Counter" value={features?.u2fCounter != null ? String(features.u2fCounter) : "—"} />
-						</VStack>
 
-						<Box mt="4">
-							<Text fontSize="xs" color="kk.textSecondary" mb="2">
-								Confirm your recovery phrase matches the seed stored on the device.
-							</Text>
-							<Flex gap="3" align="center">
-								<Button
-									size="sm"
-									variant="outline"
-									borderColor="kk.gold"
-									color="kk.gold"
-									_hover={{ bg: "rgba(192,168,96,0.1)" }}
-									onClick={verifySeed}
-									disabled={verifying}
-								>
-									{verifying ? "Verifying..." : "Verify Seed"}
-								</Button>
-								{verifyResult && (
-									<Text fontSize="xs" color={verifyResult.success ? "kk.success" : "kk.error"}>
-										{verifyResult.success ? "Seed verified!" : verifyResult.message}
+						{/* ── PIN row ────────────────────────────── */}
+						<Flex
+							align="center"
+							justify="space-between"
+							py="3"
+							borderBottom="1px solid"
+							borderColor="rgba(255,255,255,0.06)"
+						>
+							<Flex align="center" gap="3">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+										<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+									</svg>
+								</Flex>
+								<Box>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">PIN Protection</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+										{features?.pinProtection ? "Enabled" : "Not set"}
 									</Text>
-								)}
+								</Box>
 							</Flex>
-						</Box>
+							{features?.pinProtection ? (
+								<Flex gap="2">
+									<Box
+										as="button"
+										px="3"
+										py="1.5"
+										borderRadius="full"
+										bg="rgba(192,168,96,0.12)"
+										color="kk.gold"
+										fontSize="xs"
+										fontWeight="500"
+										cursor={changingPin ? "not-allowed" : "pointer"}
+										opacity={changingPin ? 0.5 : 1}
+										_hover={{ bg: "rgba(192,168,96,0.22)" }}
+										transition="all 0.15s"
+										onClick={handleChangePin}
+									>
+										{changingPin ? "..." : "Change"}
+									</Box>
+									{!removePinConfirm ? (
+										<Box
+											as="button"
+											px="3"
+											py="1.5"
+											borderRadius="full"
+											bg="rgba(255,23,68,0.08)"
+											color="#FF6B6B"
+											fontSize="xs"
+											fontWeight="500"
+											cursor="pointer"
+											_hover={{ bg: "rgba(255,23,68,0.18)" }}
+											transition="all 0.15s"
+											onClick={() => setRemovePinConfirm(true)}
+										>
+											Remove
+										</Box>
+									) : (
+										<Flex gap="2" align="center">
+											<Box
+												as="button"
+												px="3"
+												py="1.5"
+												borderRadius="full"
+												bg="#FF4444"
+												color="white"
+												fontSize="xs"
+												fontWeight="600"
+												cursor={removingPin ? "not-allowed" : "pointer"}
+												opacity={removingPin ? 0.6 : 1}
+												_hover={{ bg: "#FF2222" }}
+												transition="all 0.15s"
+												onClick={handleRemovePin}
+											>
+												{removingPin ? "..." : "Confirm"}
+											</Box>
+											<Box
+												as="button"
+												px="2"
+												py="1.5"
+												color="kk.textSecondary"
+												fontSize="xs"
+												cursor="pointer"
+												_hover={{ color: "kk.textPrimary" }}
+												onClick={() => setRemovePinConfirm(false)}
+											>
+												Cancel
+											</Box>
+										</Flex>
+									)}
+								</Flex>
+							) : (
+								<Box
+									as="button"
+									px="3"
+									py="1.5"
+									borderRadius="full"
+									bg="rgba(192,168,96,0.12)"
+									color="kk.gold"
+									fontSize="xs"
+									fontWeight="500"
+									cursor={changingPin ? "not-allowed" : "pointer"}
+									opacity={changingPin ? 0.5 : 1}
+									_hover={{ bg: "rgba(192,168,96,0.22)" }}
+									transition="all 0.15s"
+									onClick={handleChangePin}
+								>
+									{changingPin ? "..." : "Add PIN"}
+								</Box>
+							)}
+						</Flex>
+
+						{/* ── Passphrase row ─────────────────────── */}
+						<Flex
+							align="center"
+							justify="space-between"
+							py="3"
+							borderBottom="1px solid"
+							borderColor="rgba(255,255,255,0.06)"
+						>
+							<Flex align="center" gap="3">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<path d="M12 2a5 5 0 0 1 5 5v3H7V7a5 5 0 0 1 5-5z" />
+										<rect x="3" y="10" width="18" height="12" rx="2" />
+										<path d="M12 14v4" />
+									</svg>
+								</Flex>
+								<Box>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">BIP-39 Passphrase</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+										{togglingPassphrase
+											? "Confirm on device..."
+											: features?.passphraseProtection
+												? "Required on each connection"
+												: "Adds an extra word to your seed"
+										}
+									</Text>
+								</Box>
+							</Flex>
+							<Toggle
+								checked={!!features?.passphraseProtection}
+								onChange={handleTogglePassphrase}
+								disabled={togglingPassphrase || !features}
+							/>
+						</Flex>
+
+						{/* ── Verify Seed row ────────────────────── */}
+						<Flex
+							align="center"
+							justify="space-between"
+							py="3"
+						>
+							<Flex align="center" gap="3">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+										<path d="M9 12l2 2 4-4" />
+									</svg>
+								</Flex>
+								<Box>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Verify Seed</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+										{verifyResult
+											? verifyResult.success ? "Seed verified!" : verifyResult.message
+											: "Confirm your recovery phrase"
+										}
+									</Text>
+								</Box>
+							</Flex>
+							<Box
+								as="button"
+								px="3"
+								py="1.5"
+								borderRadius="full"
+								bg="rgba(192,168,96,0.12)"
+								color="kk.gold"
+								fontSize="xs"
+								fontWeight="500"
+								cursor={verifying ? "not-allowed" : "pointer"}
+								opacity={verifying ? 0.5 : 1}
+								_hover={{ bg: "rgba(192,168,96,0.22)" }}
+								transition="all 0.15s"
+								onClick={verifySeed}
+							>
+								{verifying ? "..." : "Verify"}
+							</Box>
+						</Flex>
 					</Section>
 
 					{/* ── Application Settings ────────────────────────── */}

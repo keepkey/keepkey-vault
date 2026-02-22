@@ -73,6 +73,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
 			applySettings: async (params) => { await engine.applySettings(params) },
+			changePin: async () => { await engine.changePin() },
+			removePin: async () => { await engine.removePin() },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
 			sendPassphrase: async (params) => { await engine.sendPassphrase(params.passphrase) },
 			sendCharacter: async (params) => { await engine.sendCharacter(params.character) },
@@ -687,6 +689,9 @@ engine.on('pin-request', (req) => {
 })
 engine.on('character-request', (req) => {
 	try { rpc.send['character-request'](req) } catch { /* webview not ready yet */ }
+})
+engine.on('passphrase-request', () => {
+	try { rpc.send['passphrase-request'](undefined as any) } catch { /* webview not ready yet */ }
 })
 engine.on('recovery-error', (err) => {
 	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }

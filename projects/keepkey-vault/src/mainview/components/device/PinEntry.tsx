@@ -83,28 +83,28 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 			zIndex={2000}
 		>
 			<Box
-				bg="gray.800"
+				bg="kk.cardBg"
 				borderRadius="xl"
 				border="1px solid"
-				borderColor="gray.600"
+				borderColor="kk.border"
 				p="8"
 				maxW="360px"
 				w="90%"
 				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
 			>
-				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="white">
+				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 					{TITLES[type]}
 				</Text>
-				<Text color="gray.400" fontSize="sm" mb="6" textAlign="center">
+				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
 					{DESCRIPTIONS[type]}
 				</Text>
 
 				{/* PIN display — masked dots */}
 				<Box
-					bg="gray.900"
+					bg="kk.bg"
 					borderRadius="md"
 					border="1px solid"
-					borderColor="gray.600"
+					borderColor="kk.border"
 					p="3"
 					mb="5"
 					textAlign="center"
@@ -112,7 +112,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					fontSize="2xl"
 					letterSpacing="8px"
 					minH="48px"
-					color="orange.400"
+					color="kk.gold"
 				>
 					{"\u2022".repeat(pin.length) || "\u00A0"}
 				</Box>
@@ -127,15 +127,15 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 									onClick={() => handleDigit(digit)}
 									w="72px"
 									h="72px"
-									bg="gray.700"
+									bg="kk.cardBg"
 									border="2px solid"
-									borderColor="gray.600"
-									color="white"
+									borderColor="kk.border"
+									color="kk.textPrimary"
 									fontSize="xl"
 									fontWeight="bold"
 									borderRadius="xl"
-									_hover={{ borderColor: "orange.500", bg: "gray.600" }}
-									_active={{ bg: "orange.500", borderColor: "orange.500" }}
+									_hover={{ borderColor: "kk.gold", bg: "kk.cardBgHover" }}
+									_active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black" }}
 									disabled={pin.length >= 9}
 								>
 									{"\u2022"}
@@ -151,9 +151,9 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						onClick={handleBackspace}
 						size="md"
 						variant="outline"
-						borderColor="gray.600"
-						color="gray.300"
-						_hover={{ borderColor: "orange.500", color: "white" }}
+						borderColor="kk.border"
+						color="kk.textSecondary"
+						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
 						disabled={pin.length === 0}
 						flex={1}
 					>
@@ -162,10 +162,10 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					<Button
 						onClick={handleSubmit}
 						size="md"
-						bg="orange.500"
-						color="white"
+						bg="kk.gold"
+						color="black"
 						fontWeight="semibold"
-						_hover={{ bg: "orange.600" }}
+						_hover={{ bg: "kk.goldHover" }}
 						disabled={pin.length === 0}
 						flex={1}
 					>
@@ -178,8 +178,8 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						onClick={onCancel}
 						size="sm"
 						variant="ghost"
-						color="gray.500"
-						_hover={{ color: "red.400" }}
+						color="kk.textMuted"
+						_hover={{ color: "kk.error" }}
 						w="100%"
 						mt="3"
 					>
