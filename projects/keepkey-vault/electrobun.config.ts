@@ -24,9 +24,11 @@ export default {
 			],
 		},
 		// Vite builds to dist/, we copy from there
+		// build/_ext_modules contains native addons + transitive deps (see scripts/collect-externals.ts)
 		copy: {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
+			"build/_ext_modules": "node_modules",
 		},
 		mac: {
 			bundleCEF: false,

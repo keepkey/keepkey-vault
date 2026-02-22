@@ -1,3 +1,6 @@
-[submodule "hdwallet"]
-	path = hdwallet
+[submodule "modules/hdwallet"]
+	path = modules/hdwallet
 	url = https://github.com/keepkey/hdwallet
+[submodule "modules/proto-tx-builder"]
+	path = modules/proto-tx-builder
+	url = https://github.com/BitHighlander/proto-tx-builder
