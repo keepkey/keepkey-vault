@@ -110,7 +110,9 @@ function pruneDir(dirPath: string) {
           rmSync(fullPath, { recursive: true })
           prunedCount++
           prunedSize += size
-        } catch {}
+        } catch (e) {
+          console.warn(`  WARN: Failed to prune ${fullPath}: ${e}`)
+        }
         continue
       }
       // Prune by extension (including .d.ts — Bun doesn't need type declarations at runtime)
@@ -130,7 +132,9 @@ function pruneDir(dirPath: string) {
             prunedSize += statSync(fullPath).size
             rmSync(fullPath)
             prunedCount++
-          } catch {}
+          } catch (e) {
+            console.warn(`  WARN: Failed to prune ${fullPath}: ${e}`)
+          }
           continue
         }
       }
@@ -139,7 +143,9 @@ function pruneDir(dirPath: string) {
         pruneDir(fullPath)
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn(`  WARN: Error scanning directory ${dirPath}: ${e}`)
+  }
 }
 
 pruneDir(nmDest)
@@ -186,7 +192,9 @@ function cleanNativeArtifacts(dirPath: string) {
         }
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn(`  WARN: Error cleaning native artifacts in ${dirPath}: ${e}`)
+  }
 }
 
 cleanNativeArtifacts(nmDest)

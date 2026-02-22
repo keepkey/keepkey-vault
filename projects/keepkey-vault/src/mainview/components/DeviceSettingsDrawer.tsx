@@ -15,6 +15,9 @@ interface DeviceSettingsDrawerProps {
 	open: boolean
 	onClose: () => void
 	deviceState: DeviceStateInfo
+	onCheckForUpdate?: () => Promise<any>
+	updatePhase?: string
+	appVersion?: { version: string; channel: string } | null
 }
 
 // ── Collapsible Section ─────────────────────────────────────────────
@@ -117,7 +120,7 @@ function VerificationBadge({ verified }: { verified?: boolean }) {
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion }: DeviceSettingsDrawerProps) {
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
 	const [label, setLabel] = useState(deviceState.label || "")
@@ -136,6 +139,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false })
 	const [togglingRest, setTogglingRest] = useState(false)
+	const [checkingUpdate, setCheckingUpdate] = useState(false)
+	const [updateMessage, setUpdateMessage] = useState("")
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -221,6 +226,33 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 			setAppSettings(result)
 		} catch (e: any) { console.error("setRestApiEnabled:", e) }
 		setTogglingRest(false)
+	}, [])
+
+	const updateMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const handleCheckForUpdate = useCallback(async () => {
+		if (!onCheckForUpdate) return
+		setCheckingUpdate(true)
+		setUpdateMessage("")
+		if (updateMsgTimerRef.current) clearTimeout(updateMsgTimerRef.current)
+		try {
+			const info = await onCheckForUpdate()
+			if (info?.updateAvailable) {
+				setUpdateMessage(`Version ${info.version} available`)
+			} else {
+				setUpdateMessage("You are on the latest version")
+				updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
+			}
+		} catch (e: any) {
+			setUpdateMessage(e.message || "Check failed")
+			updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
+		}
+		setCheckingUpdate(false)
+	}, [onCheckForUpdate])
+
+	// Cleanup timer on unmount
+	useEffect(() => {
+		return () => { if (updateMsgTimerRef.current) clearTimeout(updateMsgTimerRef.current) }
 	}, [])
 
 	const handleChangePin = useCallback(async () => {
@@ -641,6 +673,41 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 									</Text>
 								</Box>
 							)}
+
+							{/* ── App Version + Update Check ────── */}
+							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+								<Flex justify="space-between" align="center">
+									<Box>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">App Version</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="0.5" fontFamily="mono">
+											{appVersion ? `v${appVersion.version}` : "—"}
+											{appVersion?.channel && appVersion.channel !== "stable" ? ` (${appVersion.channel})` : ""}
+										</Text>
+									</Box>
+									<Box
+										as="button"
+										px="3"
+										py="1.5"
+										borderRadius="full"
+										bg="rgba(192,168,96,0.12)"
+										color="kk.gold"
+										fontSize="xs"
+										fontWeight="500"
+										cursor={checkingUpdate ? "not-allowed" : "pointer"}
+										opacity={checkingUpdate ? 0.5 : 1}
+										_hover={{ bg: "rgba(192,168,96,0.22)" }}
+										transition="all 0.15s"
+										onClick={handleCheckForUpdate}
+									>
+										{checkingUpdate ? "Checking..." : "Check for Updates"}
+									</Box>
+								</Flex>
+								{updateMessage && (
+									<Text fontSize="xs" color={updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1">
+										{updateMessage}
+									</Text>
+								)}
+							</Box>
 						</VStack>
 					</Section>
 
