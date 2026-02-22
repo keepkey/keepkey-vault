@@ -78,6 +78,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       removeCustomChain: { params: { chainId: number }; response: void }
       getCustomChains: { params: void; response: CustomChain[] }
 
+      // ── Camera / QR scanning ──────────────────────────────────────────
+      startQrScan: { params: void; response: void }
+      stopQrScan: { params: void; response: void }
+
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
     }
@@ -88,6 +92,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'character-request': CharacterRequest
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
+      'camera-frame': string
+      'camera-error': string
     }
   }
   webview: {

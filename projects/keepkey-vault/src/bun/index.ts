@@ -9,6 +9,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx, getEvmBalance } from "./evm-rpc"
+import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, CustomChain } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
@@ -614,6 +615,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getCustomChains()
 			},
 
+			// ── Camera / QR scanning ─────────────────────────────────
+			startQrScan: async () => {
+				startCamera(
+					(base64) => { try { rpc.send['camera-frame'](base64) } catch { /* webview not ready */ } },
+					(message) => { try { rpc.send['camera-error'](message) } catch { /* webview not ready */ } },
+				)
+			},
+			stopQrScan: async () => {
+				stopCamera()
+			},
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				if (!params.url || !params.url.startsWith('http')) throw new Error('Invalid URL')
@@ -715,6 +727,7 @@ await engine.start()
 
 // Quit the app when the main window is closed
 mainWindow.on("close", () => {
+	stopCamera()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()
