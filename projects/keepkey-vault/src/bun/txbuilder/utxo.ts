@@ -13,6 +13,13 @@ import * as bech32 from 'bech32'
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
 
+/** String-based decimal→integer to avoid floating-point precision loss */
+function parseDecimalToInt(amount: string, decimals: number): number {
+  const [whole = '0', frac = ''] = amount.split('.')
+  const padded = (frac + '0'.repeat(decimals)).slice(0, decimals)
+  return Number(whole + padded)
+}
+
 const TAG = '[txbuilder:utxo]'
 
 // BIP32 path segment to addressNList
@@ -125,7 +132,6 @@ export async function buildUtxoTx(
   params: BuildUtxoParams,
 ) {
   const { to, memo, feeLevel = 5, isMax = false, xpub, scriptTypeOverride, accountPath } = params
-  const amount = parseFloat(params.amount)
 
   if (!xpub) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
 
@@ -199,8 +205,8 @@ export async function buildUtxoTx(
   )
   console.log(`${TAG} Fee rate: ${effectiveFeeRate} sat/vB (level=${feeLevel})`)
 
-  // 3. Coin selection
-  const satoshis = Math.round(amount * 10 ** chain.decimals)
+  // 3. Coin selection (string-based to avoid float precision loss)
+  const satoshis = parseDecimalToInt(params.amount, chain.decimals)
   const result = isMax
     ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
     : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)

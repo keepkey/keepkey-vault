@@ -88,7 +88,8 @@ export async function buildCosmosTx(
   // 3. Build unsigned tx
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
   const msgType = MSG_TYPES[chain.id] || 'cosmos-sdk/MsgSend'
-  const chain_id = chain.chainId || chain.id
+  if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
+  const chain_id = chain.chainId
 
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
 

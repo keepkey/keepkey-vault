@@ -10,6 +10,13 @@ import { getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
 
+/** String-based decimal→BigInt to avoid floating-point precision loss */
+function parseUnits(amount: string, decimals: number): bigint {
+  const [whole = '0', frac = ''] = amount.split('.')
+  const padded = (frac + '0'.repeat(decimals)).slice(0, decimals)
+  return BigInt(whole + padded)
+}
+
 const toHex = (value: bigint | number): string => {
   let hex = BigInt(value).toString(16)
   if (hex.length % 2) hex = '0' + hex
@@ -159,14 +166,13 @@ export async function buildEvmTx(
 
     // Compute token amount in base units
     let amountBaseUnits: bigint
-    const tokenMultiplier = 10n ** BigInt(tokenDecimals)
 
     if (isMax) {
       // Prefer frontend-provided balance (already displayed to user) over re-fetching
-      let tokBal: number
+      let tokBalStr: string
       if (tokenBalance && parseFloat(tokenBalance) > 0) {
-        tokBal = parseFloat(tokenBalance)
-        console.log(`${TAG} Using frontend token balance for max: ${tokBal}`)
+        tokBalStr = tokenBalance
+        console.log(`${TAG} Using frontend token balance for max: ${tokBalStr}`)
       } else {
         try {
           const tokBalResp = await pioneer.GetTokenBalance({
@@ -174,17 +180,17 @@ export async function buildEvmTx(
             address: fromAddress,
             contractAddress,
           })
-          tokBal = parseFloat(tokBalResp?.data?.balance || '0')
-          console.log(`${TAG} Fetched token balance from API for max: ${tokBal}`)
+          tokBalStr = String(tokBalResp?.data?.balance || '0')
+          console.log(`${TAG} Fetched token balance from API for max: ${tokBalStr}`)
         } catch (e: any) {
           throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
         }
       }
-      amountBaseUnits = BigInt(Math.round(tokBal * Number(tokenMultiplier)))
+      amountBaseUnits = parseUnits(tokBalStr, tokenDecimals)
       if (amountBaseUnits <= 0n) throw new Error('Token balance is zero')
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')
-      amountBaseUnits = BigInt(Math.round(amountNum * Number(tokenMultiplier)))
+      amountBaseUnits = parseUnits(String(params.amount), tokenDecimals)
     }
 
     console.log(`${TAG} ERC-20 transfer: ${amountBaseUnits} base units → ${contractAddress}`)
@@ -205,7 +211,9 @@ export async function buildEvmTx(
   }
 
   // ── Native ETH transfer ─────────────────────────────────────────────
-  const gasLimit = memo ? 21000n + BigInt(Buffer.from(memo, 'utf8').length) * 68n : 21000n
+  const memoBytes = memo ? Buffer.from(memo, 'utf8') : null
+  const memoGas = memoBytes ? memoBytes.reduce((sum: bigint, b: number) => sum + (b === 0 ? 4n : 16n), 0n) : 0n
+  const gasLimit = 21000n + memoGas
   const gasFee = gasPrice * gasLimit
 
   let amountWei: bigint
@@ -213,7 +221,7 @@ export async function buildEvmTx(
     if (nativeBalance <= gasFee) throw new Error('Insufficient funds to cover gas fees')
     amountWei = nativeBalance - gasFee * 110n / 100n // 10% gas buffer for safety
   } else {
-    amountWei = BigInt(Math.round(amountNum * 1e18))
+    amountWei = parseUnits(String(params.amount), 18)
     if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {
       throw new Error(
         `Insufficient funds: balance ${Number(nativeBalance) / 1e18} ${chain.symbol}, ` +

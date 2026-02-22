@@ -93,7 +93,7 @@ export function ReceiveView({
 			const params: any = {
 				addressNList: currentPath,
 				showDisplay: true,
-				coin: chain.coin,
+				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
 			}
 			const st = scriptType || chain.scriptType
 			if (st) params.scriptType = st

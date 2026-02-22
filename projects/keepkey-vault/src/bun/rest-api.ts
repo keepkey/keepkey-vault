@@ -1,17 +1,19 @@
 import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
-import type { Server } from 'bun'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const ALLOWED_ORIGINS = new Set(['http://localhost:1646', 'http://127.0.0.1:1646'])
 
+/** Custom header required on all non-GET/OPTIONS requests to prevent CSRF */
+const CSRF_HEADER = 'x-keepkey-sdk'
+
 function corsHeaders(req?: Request): Record<string, string> {
   const origin = req?.headers.get('Origin') || ''
   return {
     'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin) ? origin : 'http://localhost:1646',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': `Content-Type, Authorization, ${CSRF_HEADER}`,
     'Vary': 'Origin',
   }
 }
@@ -35,10 +37,16 @@ async function getCachedFeatures(wallet: any): Promise<any> {
   return features
 }
 
-// ── Public key cache ───────────────────────────────────────────────────
+/** Clear features cache (call on device disconnect) */
+export function clearFeaturesCache() {
+  featuresCache = null
+}
+
+// ── Public key cache (capped) ─────────────────────────────────────────
+const MAX_CACHE_SIZE = 500
 const pubkeyCache = new Map<string, any>()
 
-// ── Address cache ──────────────────────────────────────────────────────
+// ── Address cache (capped) ────────────────────────────────────────────
 const addressCache = new Map<string, string>()
 
 // ── Cosmos-family amino signing helper ─────────────────────────────────
@@ -122,15 +130,25 @@ async function findEthAddressNList(
 let swaggerContent: string | null = null
 function getSwagger(): string {
   if (!swaggerContent) {
-    swaggerContent = readFileSync(join(__dirname, 'swagger.json'), 'utf-8')
+    try {
+      swaggerContent = readFileSync(join(__dirname, 'swagger.json'), 'utf-8')
+    } catch {
+      swaggerContent = JSON.stringify({ error: 'swagger.json not found' })
+    }
   }
   return swaggerContent
 }
 
-export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646): Server {
+export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646) {
+  // Invalidate features cache on device disconnect
+  engine.on('state-change', (state) => {
+    if (state.state === 'disconnected') clearFeaturesCache()
+  })
+
   const server = Bun.serve({
     reusePort: true,
     port,
+    maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
     async fetch(req) {
       const url = new URL(req.url)
       const path = url.pathname
@@ -140,13 +158,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
         status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
       })
-      const binary = (data: Uint8Array | Buffer, status = 200) => new Response(data, {
-        status, headers: { 'Content-Type': 'application/octet-stream', ...corsHeaders(req) },
-      })
 
       // CORS preflight
       if (method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: corsHeaders(req) })
+      }
+
+      // CSRF protection: require custom header on all mutating requests
+      if (method !== 'GET') {
+        if (!req.headers.get(CSRF_HEADER)) {
+          return json({ error: `Missing ${CSRF_HEADER} header` }, 403)
+        }
       }
 
       try {
@@ -160,7 +182,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // AUTH
+        // HEALTH (public)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/health' && method === 'GET') {
+          return json({ status: 'ok', connected: engine.wallet !== null })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // AUTH — pairing requires user approval via Electrobun UI
         // ═══════════════════════════════════════════════════════════════
         if (path === '/auth/pair') {
           if (method === 'GET') {
@@ -170,45 +199,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (method === 'POST') {
             const body = await req.json() as any
             if (!body.name) throw { status: 400, message: 'Missing name in pairing request' }
-            const apiKey = auth.pair(body)
+            // requestPair requires user approval via UI — NOT auto-granted
+            const apiKey = await auth.requestPair(body)
             return json({ apiKey })
           }
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // ADMIN (requires auth)
-        // ═══════════════════════════════════════════════════════════════
-        if (path === '/admin/wallets' && method === 'GET') {
-          auth.requireAuth(req)
-          return json([])
-        }
-        if (path === '/admin/wallets/current' && method === 'GET') {
-          auth.requireAuth(req)
-          return json(null)
-        }
-        if (path === '/admin/wallets/switch' && method === 'POST') {
-          auth.requireAuth(req)
-          return json({ success: true })
-        }
-        if (path === '/admin/usb/devices' && method === 'GET') {
-          auth.requireAuth(req)
-          return json([])
-        }
-        if (path === '/admin/usb/state' && method === 'GET') {
-          auth.requireAuth(req)
-          return json({ connected: engine.wallet !== null })
-        }
-        if (path === '/admin/info' && method === 'GET') {
-          auth.requireAuth(req)
-          return json({
-            wallets: [],
-            currentWallet: null,
-            usbState: { connected: engine.wallet !== null },
-          })
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // All remaining endpoints require POST + auth
+        // All remaining endpoints require auth
         // ═══════════════════════════════════════════════════════════════
 
         // ── ADDRESSES (9 endpoints) ──────────────────────────────────
@@ -227,6 +225,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -245,6 +244,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -263,6 +263,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -281,6 +282,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -299,6 +301,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -317,6 +320,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -335,6 +339,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -353,6 +358,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -371,6 +377,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -406,7 +413,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             chainId,
           }
 
-          // EIP-1559 fields — pass through to hdwallet (most EVM chains support EIP-1559)
+          // EIP-1559 fields
           if (body.maxFeePerGas || body.max_fee_per_gas) {
             msg.maxFeePerGas = body.maxFeePerGas || body.max_fee_per_gas
             msg.maxPriorityFeePerGas = body.maxPriorityFeePerGas || body.max_priority_fee_per_gas || '0x0'
@@ -629,7 +636,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
-        // ── SYSTEM INFO (5 endpoints) ────────────────────────────────
+        // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
         if (path === '/system/info/get-features' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
@@ -654,192 +661,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }])
           const xpub = result?.[0]?.xpub
           const out = { xpub }
+          if (pubkeyCache.size >= MAX_CACHE_SIZE) pubkeyCache.clear()
           pubkeyCache.set(cacheKey, out)
           return json(out)
-        }
-
-        if (path === '/system/info/list-coins' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          try {
-            const table = await (wallet as any).getCoinTable()
-            return json(table)
-          } catch {
-            return json([])
-          }
-        }
-
-        if (path === '/system/info/ping' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const result = await wallet.ping({
-            msg: body.message || 'pong',
-            button: body.button_protection ?? false,
-            pin: body.pin_protection ?? false,
-            passphrase: body.passphrase_protection ?? false,
-          })
-          return json({ message: typeof result === 'string' ? result : result?.msg || 'pong' })
-        }
-
-        if (path === '/system/info/get-entropy' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const size = body.size || 32
-          const entropy = await (wallet as any).getEntropy(size)
-          if (entropy instanceof Uint8Array || Buffer.isBuffer(entropy)) {
-            return binary(entropy)
-          }
-          return json(entropy)
-        }
-
-        // ── SYSTEM INITIALIZE (3 endpoints) ──────────────────────────
-        if (path === '/system/initialize/load-device' && method === 'POST') {
-          auth.requireAuth(req)
-          console.warn('[REST] WARNING: load-device called — mnemonic transmitted over HTTP (localhost only)')
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.mnemonic) throw { status: 400, message: 'Missing mnemonic' }
-          await wallet.loadDevice({
-            mnemonic: body.mnemonic,
-            pin: body.pin ? String(body.pin) : undefined,
-            passphrase: body.passphrase_protection ?? false,
-            label: body.label || 'KeepKey',
-            skipChecksum: body.skip_checksum ?? false,
-          })
-          return json({ success: true })
-        }
-
-        if (path === '/system/initialize/recover-device' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const wordCountToEntropy: Record<number, 128 | 192 | 256> = { 12: 128, 18: 192, 24: 256 }
-          const entropy = wordCountToEntropy[body.word_count] || 128
-          await wallet.recover({
-            entropy,
-            label: body.label || 'KeepKey',
-            passphrase: body.passphrase_protection ?? false,
-            pin: body.pin_protection ?? false,
-            autoLockDelayMs: body.auto_lock_delay_ms ?? 600000,
-          })
-          return json({ success: true })
-        }
-
-        if (path === '/system/initialize/reset-device' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          await wallet.reset({
-            entropy: body.strength || 128,
-            label: body.label || 'KeepKey',
-            passphrase: body.passphrase_protection ?? false,
-            pin: body.pin_protection ?? false,
-            autoLockDelayMs: body.auto_lock_delay_ms ?? 600000,
-          })
-          return json({ success: true })
-        }
-
-        // ── SYSTEM MANAGEMENT (9 endpoints) ──────────────────────────
-        if (path === '/system/apply-policies' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const policies = Array.isArray(body) ? body : body.policies || []
-          for (const p of policies) {
-            await wallet.applyPolicy({ policyName: p.policyName || p.policy_name, enabled: p.enabled })
-          }
-          return json({ success: true })
-        }
-
-        if (path === '/system/apply-settings' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          await wallet.applySettings({
-            autoLockDelayMs: body.auto_lock_delay_ms,
-            label: body.label,
-            language: body.language,
-            usePassphrase: body.use_passphrase,
-            u2fCounter: body.u2f_counter,
-          })
-          return json({ success: true })
-        }
-
-        if (path === '/system/change-pin' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (body.remove) {
-            await wallet.removePin()
-          } else {
-            await wallet.changePin()
-          }
-          return json({ success: true })
-        }
-
-        if (path === '/system/change-wipe-code' && method === 'POST') {
-          throw { status: 501, message: 'change-wipe-code is deprecated' }
-        }
-
-        if (path === '/system/cipher-key-value' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          const result = await (wallet as any).cipherKeyValue({
-            addressNList: body.address_n_list || body.address_n,
-            key: body.key,
-            value: body.value,
-            encrypt: !body.decrypt,
-            askOnEncrypt: body.ask_on_encrypt ?? true,
-            askOnDecrypt: body.ask_on_decrypt ?? true,
-            iv: body.iv ? Buffer.from(body.iv, 'hex') : undefined,
-          })
-          if (result instanceof Uint8Array || Buffer.isBuffer(result)) {
-            return binary(result)
-          }
-          return json(result)
-        }
-
-        if (path === '/system/clear-session' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.clearSession()
-          return json({ success: true })
-        }
-
-        if (path === '/system/firmware-update' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = Buffer.from(await req.arrayBuffer())
-          await wallet.firmwareErase()
-          await wallet.firmwareUpload(body)
-          return json({ success: true })
-        }
-
-        if (path === '/system/sign-identity' && method === 'POST') {
-          throw { status: 501, message: 'sign-identity is not supported' }
-        }
-
-        if (path === '/system/wipe-device' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.wipe()
-          await engine.syncState()
-          return json({ success: true })
-        }
-
-        // ── RAW (1 endpoint) ─────────────────────────────────────────
-        if (path === '/raw' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = new Uint8Array(await req.arrayBuffer())
-          const transport = (wallet as any).transport
-          if (!transport) throw { status: 503, message: 'No transport available' }
-          await transport.write(body)
-          const out = await transport.read()
-          return binary(out instanceof Uint8Array ? out : Buffer.from(out))
         }
 
         // ── Catch-all ────────────────────────────────────────────────
@@ -850,7 +674,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ error: err.message }, err.status)
         }
         console.error('[REST] Error:', err)
-        return json({ error: err.message || 'Internal error' }, 500)
+        return json({ error: 'Internal error' }, 500)
       }
     },
   })

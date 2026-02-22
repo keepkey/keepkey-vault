@@ -31,7 +31,7 @@ export function initDb() {
     if (row?.value !== SCHEMA_VERSION) {
       db.exec('DROP TABLE IF EXISTS balances')
       db.exec('DROP TABLE IF EXISTS pioneer_cache')
-      db.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '${SCHEMA_VERSION}')`)
+      db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`, ['schema_version', SCHEMA_VERSION])
     }
 
     db.exec(`

@@ -8,9 +8,9 @@ import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb } from "./db"
-import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx, getEvmBalance } from "./evm-rpc"
+import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
-import type { ChainBalance, TokenBalance, CustomToken, CustomChain } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 const DEV_SERVER_PORT = 5173
@@ -35,11 +35,13 @@ function getAllChains(): ChainDef[] {
 	return [...CHAINS, ...customChainDefs]
 }
 
-/** Lookup RPC URL for a chain (custom chains store it, built-in chains use EVM_RPC_URLS) */
+/** Lookup RPC URL for a chain (custom chains from DB on miss, built-in chains from EVM_RPC_URLS) */
 function getRpcUrl(chain: ChainDef): string | undefined {
-	// Custom chains: find the stored entry
-	const stored = getCustomChains().find(c => `evm-custom-${c.chainId}` === chain.id)
-	if (stored) return stored.rpcUrl
+	// Custom chains: query DB only for custom chain IDs (avoids per-call overhead for built-in chains)
+	if (chain.id.startsWith('evm-custom-')) {
+		const stored = getCustomChains().find(c => `evm-custom-${c.chainId}` === chain.id)
+		if (stored) return stored.rpcUrl
+	}
 	// Built-in chains: lookup from EVM_RPC_URLS
 	return chain.chainId ? EVM_RPC_URLS[chain.chainId] : undefined
 }
@@ -600,11 +602,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!params.chainId || params.chainId < 1) throw new Error('Invalid chainId')
 				if (!params.name?.trim()) throw new Error('Chain name required')
 				if (!params.symbol?.trim()) throw new Error('Gas token symbol required')
-				if (!params.rpcUrl?.trim() || !params.rpcUrl.startsWith('http')) throw new Error('Valid RPC URL required')
+				try {
+				const rpcParsed = new URL(params.rpcUrl?.trim() || '')
+				if (rpcParsed.protocol !== 'http:' && rpcParsed.protocol !== 'https:') throw new Error()
+			} catch { throw new Error('Valid http/https RPC URL required') }
 				// Prevent duplicate built-in chains
 				const existing = getAllChains().find(c => c.chainId === String(params.chainId))
 				if (existing) throw new Error(`Chain ${params.chainId} already exists as ${existing.coin}`)
 				addCustomChainDb(params)
+				customChainDefs = customChainDefs.filter(c => c.id !== `evm-custom-${params.chainId}`)
 				customChainDefs.push(customChainToChainDef(params))
 			},
 			removeCustomChain: async (params) => {
@@ -628,8 +634,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
-				if (!params.url || !params.url.startsWith('http')) throw new Error('Invalid URL')
-				Bun.spawn(['open', params.url])
+				try {
+					const parsed = new URL(params.url)
+					if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error()
+					Bun.spawn(['open', parsed.href])
+				} catch {
+					throw new Error('Invalid URL')
+				}
 			},
 		},
 		messages: {},
