@@ -5,7 +5,7 @@
  *
  * Usage: bun scripts/collect-externals.ts
  */
-import { existsSync, mkdirSync, cpSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
 const EXTERNALS = [
@@ -38,8 +38,9 @@ function addDeps(pkg: string) {
         addDeps(dep)
       }
     }
-  } catch {
+  } catch (e) {
     // Package may be a sub-dependency already resolved elsewhere
+    if (allDeps.size < 20) console.warn(`  WARN: Could not read deps for ${pkg}: ${e}`)
   }
 }
 
@@ -58,7 +59,6 @@ if (existsSync(nmDest)) {
 
 // Copy each package
 let copiedCount = 0
-let totalSize = 0
 
 for (const dep of sorted) {
   const src = join(nmSource, dep)
@@ -94,20 +94,18 @@ const PRUNE_PATTERNS = [
   '*.map',
 ]
 
-const PRUNE_EXTENSIONS = ['.map', '.ts', '.d.ts', '.d.ts.map', '.flow', '.mts', '.cts', '.d.mts', '.d.cts']
-
 let prunedCount = 0
 let prunedSize = 0
 
 function pruneDir(dirPath: string) {
   try {
-    const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+    const entries = readdirSync(dirPath, { withFileTypes: true })
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name)
       // Prune by name
       if (PRUNE_PATTERNS.includes(entry.name)) {
         try {
-          const stat = require('fs').statSync(fullPath)
+          const stat = statSync(fullPath)
           const size = entry.isDirectory() ? 0 : stat.size
           rmSync(fullPath, { recursive: true })
           prunedCount++
@@ -129,8 +127,7 @@ function pruneDir(dirPath: string) {
           entry.name.endsWith('.cts')
         ) {
           try {
-            const stat = require('fs').statSync(fullPath)
-            prunedSize += stat.size
+            prunedSize += statSync(fullPath).size
             rmSync(fullPath)
             prunedCount++
           } catch {}
@@ -157,7 +154,7 @@ const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi
 let nativePrunedSize = 0
 function cleanNativeArtifacts(dirPath: string) {
   try {
-    const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+    const entries = readdirSync(dirPath, { withFileTypes: true })
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name)
       if (entry.isDirectory()) {
@@ -183,7 +180,7 @@ function cleanNativeArtifacts(dirPath: string) {
         const ext = entry.name.includes('.') ? entry.name.slice(entry.name.lastIndexOf('.')) : ''
         if (NATIVE_PRUNE_EXTENSIONS.includes(ext) || entry.name === 'Makefile' || entry.name === 'configure') {
           try {
-            nativePrunedSize += require('fs').statSync(fullPath).size
+            nativePrunedSize += statSync(fullPath).size
           } catch {}
           rmSync(fullPath)
         }
@@ -245,7 +242,7 @@ const STRIP_DIRS = [
 // They also pull in devDeps (jest, node-notifier with unsigned Mach-O) that break notarization.
 function stripAllNestedNodeModules(dirPath: string) {
   try {
-    const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+    const entries = readdirSync(dirPath, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       const fullPath = join(dirPath, entry.name)
@@ -282,7 +279,7 @@ if (DEVELOPER_ID) {
 
   function signNativeBinaries(dirPath: string) {
     try {
-      const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+      const entries = readdirSync(dirPath, { withFileTypes: true })
       for (const entry of entries) {
         const fullPath = join(dirPath, entry.name)
         if (entry.isDirectory()) {
@@ -302,7 +299,9 @@ if (DEVELOPER_ID) {
           }
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn(`  WARN: Error scanning for native binaries in ${dirPath}: ${e}`)
+    }
   }
 
   signNativeBinaries(nmDest)

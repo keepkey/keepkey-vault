@@ -9,7 +9,7 @@ include .env
 export
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check verify publish modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check verify publish release modules-install modules-build modules-clean audit
 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
@@ -23,7 +23,7 @@ modules-build: modules-install
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
-	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf modules/hdwallet/packages/*/dist modules/hdwallet/node_modules)
+	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf packages/*/dist node_modules)
 
 # --- Vault ---
 
@@ -122,9 +122,22 @@ verify:
 
 # --- Publishing ---
 
+GITHUB_REPO ?= keepkey/keepkey-vault
+
 publish:
 	@echo "Artifacts:"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME) 2>/dev/null || echo "No DMG found. Run 'make build-signed' first."
+
+release: sign-check build-signed
+	@echo "Creating GitHub release v$(VERSION)..."
+	gh release create v$(VERSION) \
+		--repo $(GITHUB_REPO) \
+		--title "KeepKey Vault v$(VERSION)" \
+		--generate-notes \
+		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
+		$(wildcard $(PROJECT_DIR)/artifacts/stable-*-update.json) \
+		$(wildcard $(PROJECT_DIR)/artifacts/stable-*-keepkey-vault.app.tar.zst)
+	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
 
 help:
 	@echo "KeepKey Vault v11 - Electrobun Desktop App"
@@ -143,4 +156,5 @@ help:
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
+	@echo "  make release        - Build, sign, and publish GitHub release"
 	@echo "  make clean          - Remove all build artifacts and node_modules"

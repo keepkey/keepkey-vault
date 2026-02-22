@@ -26,4 +26,4 @@ const result = Bun.spawnSync(
   }
 )
 
-process.exit(result.exitCode)
+process.exit(result.exitCode ?? 1)
