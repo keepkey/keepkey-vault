@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -78,6 +78,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       addCustomChain: { params: CustomChain; response: void }
       removeCustomChain: { params: { chainId: number }; response: void }
       getCustomChains: { params: void; response: CustomChain[] }
+
+      // ── Token visibility (spam filter) ──────────────────────────────────
+      setTokenVisibility: { params: { caip: string; status: TokenVisibilityStatus }; response: void }
+      removeTokenVisibility: { params: { caip: string }; response: void }
+      getTokenVisibilityMap: { params: void; response: Record<string, TokenVisibilityStatus> }
 
       // ── Camera / QR scanning ──────────────────────────────────────────
       startQrScan: { params: void; response: void }
