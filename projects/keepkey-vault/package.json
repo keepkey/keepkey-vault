@@ -6,17 +6,20 @@
     "dev": "vite build && electrobun build && electrobun dev",
     "dev:hmr": "concurrently \"bun run hmr\" \"bun run dev\"",
     "hmr": "vite --port 5173",
-    "build": "vite build && electrobun build",
-    "build:prod": "vite build && electrobun build --channel prod",
-    "start": "bun run dev"
+    "build": "vite build && bun scripts/collect-externals.ts && electrobun build",
+    "build:stable": "vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
+    "build:canary": "vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
+    "start": "bun run dev",
+    "postinstall": "bash scripts/patch-electrobun.sh"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.33.0",
     "@emotion/react": "^11.14.0",
-    "@keepkey/hdwallet-core": "^1.53.16",
-    "@keepkey/hdwallet-keepkey": "^1.53.16",
-    "@keepkey/hdwallet-keepkey-nodehid": "^1.53.16",
-    "@keepkey/hdwallet-keepkey-nodewebusb": "^1.53.16",
+    "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
+    "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",
+    "@keepkey/hdwallet-keepkey-nodehid": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodehid",
+    "@keepkey/hdwallet-keepkey-nodewebusb": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodewebusb",
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@pioneer-platform/pioneer-caip": "^9.27.10",
     "@pioneer-platform/pioneer-client": "^11.0.0",
     "@pioneer-platform/pioneer-coins": "^11.0.0",
@@ -45,5 +48,8 @@
   "trustedDependencies": [
     "protobufjs",
     "tiny-secp256k1"
-  ]
+  ],
+  "overrides": {
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder"
+  }
 }

@@ -1,0 +1,316 @@
+#!/usr/bin/env bun
+/**
+ * Collects external packages and their transitive dependencies into a staging
+ * directory (build/node_modules) so they can be copied into the Electrobun app bundle.
+ *
+ * Usage: bun scripts/collect-externals.ts
+ */
+import { existsSync, mkdirSync, cpSync, readFileSync, rmSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+
+const EXTERNALS = [
+  '@keepkey/hdwallet-core',
+  '@keepkey/hdwallet-keepkey',
+  '@keepkey/hdwallet-keepkey-nodehid',
+  '@keepkey/hdwallet-keepkey-nodewebusb',
+  '@keepkey/device-protocol',
+  '@keepkey/proto-tx-builder',
+  'google-protobuf',
+  'node-hid',
+  'usb',
+  'ethers',
+]
+
+const projectRoot = join(import.meta.dir, '..')
+const nmSource = join(projectRoot, 'node_modules')
+const nmDest = join(projectRoot, 'build', '_ext_modules')
+
+// Recursively collect all transitive dependencies
+const allDeps = new Set<string>(EXTERNALS)
+
+function addDeps(pkg: string) {
+  try {
+    const pjPath = join(nmSource, pkg, 'package.json')
+    const pj = JSON.parse(readFileSync(pjPath, 'utf8'))
+    for (const dep of Object.keys(pj.dependencies || {})) {
+      if (!allDeps.has(dep)) {
+        allDeps.add(dep)
+        addDeps(dep)
+      }
+    }
+  } catch {
+    // Package may be a sub-dependency already resolved elsewhere
+  }
+}
+
+EXTERNALS.forEach(addDeps)
+
+console.log(`[collect-externals] ${allDeps.size} packages to copy:`)
+const sorted = [...allDeps].sort()
+for (const dep of sorted) {
+  console.log(`  ${dep}`)
+}
+
+// Clean destination
+if (existsSync(nmDest)) {
+  rmSync(nmDest, { recursive: true })
+}
+
+// Copy each package
+let copiedCount = 0
+let totalSize = 0
+
+for (const dep of sorted) {
+  const src = join(nmSource, dep)
+  const dst = join(nmDest, dep)
+
+  if (!existsSync(src)) {
+    console.warn(`  WARN: ${dep} not found in node_modules, skipping`)
+    continue
+  }
+
+  // Ensure parent dir exists for scoped packages (@keepkey/...)
+  mkdirSync(dirname(dst), { recursive: true })
+  cpSync(src, dst, { recursive: true })
+  copiedCount++
+}
+
+console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
+
+// Prune unnecessary files to reduce bundle size
+const PRUNE_PATTERNS = [
+  // Docs & metadata
+  'README.md', 'readme.md', 'README', 'CHANGELOG.md', 'CHANGELOG', 'HISTORY.md',
+  'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'license', 'LICENCE', 'LICENCE.md',
+  'CONTRIBUTING.md', '.npmignore', '.eslintrc', '.eslintrc.js', '.eslintrc.json',
+  '.prettierrc', '.prettierrc.js', '.editorconfig', '.travis.yml', '.github',
+  'tsconfig.json', 'tsconfig.tsbuildinfo', '.babelrc', 'babel.config.js',
+  'jest.config.js', 'jest.config.ts', 'karma.conf.js', '.nyc_output',
+  'coverage', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'AUTHORS',
+  // Test directories
+  'test', 'tests', '__tests__', '__mocks__', 'spec', 'benchmark', 'benchmarks',
+  // NOTE: Do NOT prune 'src' — many packages (bip32, etc.) use src/ as their main entry point
+  // TypeScript source maps
+  '*.map',
+]
+
+const PRUNE_EXTENSIONS = ['.map', '.ts', '.d.ts', '.d.ts.map', '.flow', '.mts', '.cts', '.d.mts', '.d.cts']
+
+let prunedCount = 0
+let prunedSize = 0
+
+function pruneDir(dirPath: string) {
+  try {
+    const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name)
+      // Prune by name
+      if (PRUNE_PATTERNS.includes(entry.name)) {
+        try {
+          const stat = require('fs').statSync(fullPath)
+          const size = entry.isDirectory() ? 0 : stat.size
+          rmSync(fullPath, { recursive: true })
+          prunedCount++
+          prunedSize += size
+        } catch {}
+        continue
+      }
+      // Prune by extension (including .d.ts — Bun doesn't need type declarations at runtime)
+      if (entry.isFile()) {
+        if (
+          entry.name.endsWith('.map') ||
+          entry.name.endsWith('.d.ts') ||
+          entry.name.endsWith('.d.ts.map') ||
+          entry.name.endsWith('.d.mts') ||
+          entry.name.endsWith('.d.cts') ||
+          entry.name.endsWith('.flow') ||
+          (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) ||
+          entry.name.endsWith('.mts') ||
+          entry.name.endsWith('.cts')
+        ) {
+          try {
+            const stat = require('fs').statSync(fullPath)
+            prunedSize += stat.size
+            rmSync(fullPath)
+            prunedCount++
+          } catch {}
+          continue
+        }
+      }
+      // Recurse into directories
+      if (entry.isDirectory()) {
+        pruneDir(fullPath)
+      }
+    }
+  } catch {}
+}
+
+pruneDir(nmDest)
+console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
+
+// Remove non-macOS prebuilds, build artifacts, and native source files
+const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
+const REMOVE_PREBUILD_PREFIXES = ['linux', 'win32', 'android']
+// C/C++ source and build artifacts not needed at runtime (~7MB)
+const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
+
+let nativePrunedSize = 0
+function cleanNativeArtifacts(dirPath: string) {
+  try {
+    const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name)
+      if (entry.isDirectory()) {
+        // Remove non-macOS prebuilds (HID-win32-*, HID-linux-*, etc.)
+        if (REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
+            entry.name.startsWith('HID-win') || entry.name.startsWith('HID-linux') ||
+            entry.name.startsWith('HID_hidraw-linux')) {
+          try {
+            const result = Bun.spawnSync(['du', '-sk', fullPath])
+            nativePrunedSize += parseInt(result.stdout.toString().split('\t')[0] || '0', 10) * 1024
+          } catch {}
+          rmSync(fullPath, { recursive: true })
+          continue
+        }
+        // Remove node-gyp build artifacts
+        if (REMOVE_DIRS.includes(entry.name)) {
+          rmSync(fullPath, { recursive: true })
+          continue
+        }
+        cleanNativeArtifacts(fullPath)
+      } else if (entry.isFile()) {
+        // Remove C/C++ source and build config files
+        const ext = entry.name.includes('.') ? entry.name.slice(entry.name.lastIndexOf('.')) : ''
+        if (NATIVE_PRUNE_EXTENSIONS.includes(ext) || entry.name === 'Makefile' || entry.name === 'configure') {
+          try {
+            nativePrunedSize += require('fs').statSync(fullPath).size
+          } catch {}
+          rmSync(fullPath)
+        }
+      }
+    }
+  } catch {}
+}
+
+cleanNativeArtifacts(nmDest)
+console.log(`[collect-externals] Cleaned native artifacts (${(nativePrunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
+
+// Aggressively strip large directories not needed at runtime
+const STRIP_DIRS = [
+  // --- Local packages: TS source (compiled to dist/) ---
+  '@keepkey/hdwallet-core/src',
+  '@keepkey/hdwallet-keepkey/src',
+  '@keepkey/hdwallet-keepkey-nodehid/src',
+  '@keepkey/hdwallet-keepkey-nodewebusb/src',
+  '@keepkey/proto-tx-builder/src',
+  '@keepkey/proto-tx-builder/osmosis-frontend',
+
+  // --- protobufjs: CLI tooling + dist bundles (main→index.js at root) ---
+  'protobufjs/cli',
+  'protobufjs/dist',
+  'protobufjs/src',
+
+  // --- rxjs: UMD bundles + ESM duplicates (main→dist/cjs/) ---
+  'rxjs/src',
+  'rxjs/dist/bundles',
+
+  // --- ethers: dist/ has UMD/ESM bundles 3.4MB (main→lib/) ---
+  'ethers/dist',
+  'ethers/src.ts',
+
+  // --- libsodium: ESM copy (main→dist/modules/) ---
+  'libsodium/dist/modules-esm',
+
+  // --- @ethereumjs/common: browser bundle + TS source ---
+  '@ethereumjs/common/dist.browser',
+  '@ethereumjs/common/src',
+
+  // --- osmojs: large proto directories ---
+  'osmojs/types',
+  'osmojs/main',
+
+  // --- keccak: build/Release artifacts (prebuilds are used) ---
+  'keccak/build',
+
+  // --- Native build artifacts (obj files, C source not needed) ---
+  'tiny-secp256k1/build',
+  'secp256k1/build',
+  'secp256k1/src',
+]
+
+// Remove ALL nested node_modules inside every copied package. The flat top-level
+// already contains every transitive runtime dep (collected by addDeps). Nested
+// node_modules are artifacts of how Bun copies file: deps and contain duplicated
+// copies of hdwallet-core (5.4MB x4), rxjs, cosmjs, etc. — totaling ~64MB of bloat.
+// They also pull in devDeps (jest, node-notifier with unsigned Mach-O) that break notarization.
+function stripAllNestedNodeModules(dirPath: string) {
+  try {
+    const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const fullPath = join(dirPath, entry.name)
+      if (entry.name === 'node_modules') {
+        rmSync(fullPath, { recursive: true })
+      } else {
+        stripAllNestedNodeModules(fullPath)
+      }
+    }
+  } catch {}
+}
+stripAllNestedNodeModules(nmDest)
+console.log(`[collect-externals] Stripped all nested node_modules`)
+let strippedSize = 0
+for (const dir of STRIP_DIRS) {
+  const target = join(nmDest, dir)
+  if (existsSync(target)) {
+    try {
+      const result = Bun.spawnSync(['du', '-sk', target])
+      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
+      rmSync(target, { recursive: true })
+      strippedSize += kb * 1024
+      console.log(`  Stripped: ${dir} (${(kb / 1024).toFixed(1)}MB)`)
+    } catch {}
+  }
+}
+console.log(`[collect-externals] Stripped ${(strippedSize / 1024 / 1024).toFixed(1)}MB from large directories`)
+
+// Code-sign all native .node binaries and .dylib files
+const DEVELOPER_ID = process.env.ELECTROBUN_DEVELOPER_ID
+if (DEVELOPER_ID) {
+  console.log(`[collect-externals] Signing native binaries with: ${DEVELOPER_ID}`)
+  let signedCount = 0
+
+  function signNativeBinaries(dirPath: string) {
+    try {
+      const entries = require('fs').readdirSync(dirPath, { withFileTypes: true })
+      for (const entry of entries) {
+        const fullPath = join(dirPath, entry.name)
+        if (entry.isDirectory()) {
+          signNativeBinaries(fullPath)
+        } else if (entry.name.endsWith('.node') || entry.name.endsWith('.dylib') || entry.name.endsWith('.so')) {
+          const result = Bun.spawnSync([
+            'codesign', '--force', '--verbose', '--timestamp',
+            '--sign', `Developer ID Application: ${DEVELOPER_ID} (${process.env.ELECTROBUN_TEAMID || ''})`,
+            '--options', 'runtime',
+            fullPath,
+          ])
+          if (result.exitCode === 0) {
+            signedCount++
+            console.log(`  Signed: ${entry.name}`)
+          } else {
+            console.warn(`  WARN: Failed to sign ${fullPath}: ${result.stderr.toString()}`)
+          }
+        }
+      }
+    } catch {}
+  }
+
+  signNativeBinaries(nmDest)
+  console.log(`[collect-externals] Signed ${signedCount} native binaries`)
+} else {
+  console.log(`[collect-externals] ELECTROBUN_DEVELOPER_ID not set, skipping native binary signing`)
+}
+
+// Report final size
+const { stdout } = Bun.spawnSync(['du', '-sh', nmDest])
+console.log(`[collect-externals] Final size: ${stdout.toString().trim().split('\t')[0]}`)

@@ -1,8 +1,33 @@
 PROJECT_DIR := projects/keepkey-vault
+VERSION := $(shell grep '"version"' $(PROJECT_DIR)/package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
+ARCH := $(shell uname -m)
+DMG_NAME := KeepKey-Vault-$(VERSION)-$(ARCH).dmg
 
-.PHONY: install dev dev-hmr build build-prod clean help vault sign-check verify
+# Auto-load .env if present (exports all vars for sub-processes)
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
 
-install:
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check verify publish modules-install modules-build modules-clean audit
+
+# --- Module Builds (hdwallet + proto-tx-builder from source) ---
+
+modules-install:
+	cd modules/proto-tx-builder && bun install
+	cd modules/hdwallet && yarn install
+
+modules-build: modules-install
+	cd modules/proto-tx-builder && bun run build
+	cd modules/hdwallet && yarn build
+
+modules-clean:
+	cd modules/proto-tx-builder && rm -rf dist node_modules
+	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf modules/hdwallet/packages/*/dist modules/hdwallet/node_modules)
+
+# --- Vault ---
+
+install: modules-build
 	cd $(PROJECT_DIR) && bun install
 
 vault: install dev
@@ -18,11 +43,57 @@ dev-hmr:
 build:
 	cd $(PROJECT_DIR) && bun run build
 
-build-prod:
-	cd $(PROJECT_DIR) && bun run build:prod
+build-stable:
+	cd $(PROJECT_DIR) && bun run build:stable
 
-clean:
-	cd $(PROJECT_DIR) && rm -rf dist node_modules build
+build-canary:
+	cd $(PROJECT_DIR) && bun run build:canary
+
+# Full signed build: electrobun build → extract from tar → create DMG → sign + notarize DMG
+build-signed: sign-check build-stable dmg
+	@echo ""
+	@echo "=== Build complete ==="
+	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
+	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME)
+
+# Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
+dmg:
+	@echo "Creating DMG from tar.zst artifact..."
+	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
+	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
+	STAGING=$$(mktemp -d); \
+	echo "Extracting app from $$TAR_ZST..."; \
+	zstd -d "$$TAR_ZST" -o "$$STAGING/app.tar" --force; \
+	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
+	rm "$$STAGING/app.tar"; \
+	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
+	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; rm -rf "$$STAGING"; exit 1; fi; \
+	echo "Verifying extracted app..."; \
+	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; rm -rf "$$STAGING"; exit 1); \
+	ln -s /Applications "$$STAGING/Applications"; \
+	DMG_OUT="$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
+	rm -f "$$DMG_OUT"; \
+	echo "Creating DMG..."; \
+	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	rm -rf "$$STAGING"; \
+	echo "Signing DMG..."; \
+	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
+	echo "Notarizing DMG..."; \
+	ZIP_TMP=$$(mktemp).zip; \
+	(cd "$$(dirname "$$DMG_OUT")" && zip -q "$$ZIP_TMP" "$$(basename "$$DMG_OUT")"); \
+	xcrun notarytool submit --apple-id "$$ELECTROBUN_APPLEID" --password "$$ELECTROBUN_APPLEIDPASS" --team-id "$$ELECTROBUN_TEAMID" --wait "$$ZIP_TMP"; \
+	rm -f "$$ZIP_TMP"; \
+	echo "Stapling notarization ticket..."; \
+	xcrun stapler staple "$$DMG_OUT"; \
+	echo "DMG ready: $$DMG_OUT"
+
+clean: modules-clean
+	cd $(PROJECT_DIR) && rm -rf dist node_modules build artifacts
+
+# --- Audit & SBOM ---
+
+audit:
+	cd $(PROJECT_DIR) && bun scripts/audit-deps.ts
 
 # --- Code Signing ---
 
@@ -33,7 +104,10 @@ sign-check:
 	@test -n "$$ELECTROBUN_APPLEID" || (echo "ERROR: ELECTROBUN_APPLEID not set" && exit 1)
 	@test -n "$$ELECTROBUN_APPLEIDPASS" || (echo "ERROR: ELECTROBUN_APPLEIDPASS not set" && exit 1)
 	@echo "All signing env vars present."
-	@security find-identity -v -p codesigning | head -5
+	@echo "  DEVELOPER_ID: $$ELECTROBUN_DEVELOPER_ID"
+	@echo "  TEAM_ID:      $$ELECTROBUN_TEAMID"
+	@echo "  APPLE_ID:     $$ELECTROBUN_APPLEID"
+	@security find-identity -v -p codesigning | grep "$$ELECTROBUN_DEVELOPER_ID" || echo "WARNING: Certificate not found in keychain"
 
 verify:
 	@APP=$$(find $(PROJECT_DIR)/build -name "*.app" -maxdepth 2 | head -1); \
@@ -46,15 +120,27 @@ verify:
 	echo "--- entitlements ---"; \
 	codesign -d --entitlements :- "$$APP" 2>/dev/null || echo "(no entitlements found)"
 
+# --- Publishing ---
+
+publish:
+	@echo "Artifacts:"
+	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME) 2>/dev/null || echo "No DMG found. Run 'make build-signed' first."
+
 help:
 	@echo "KeepKey Vault v11 - Electrobun Desktop App"
 	@echo ""
-	@echo "  make vault      - Install deps + build and run in dev mode"
-	@echo "  make install    - Install dependencies"
-	@echo "  make dev        - Build and run in dev mode"
-	@echo "  make dev-hmr    - Dev mode with Vite HMR"
-	@echo "  make build      - Production build (with signing if env set)"
-	@echo "  make build-prod - Production build (prod channel)"
-	@echo "  make sign-check - Verify signing env vars are configured"
-	@echo "  make verify     - Verify .app bundle signature + Gatekeeper"
-	@echo "  make clean      - Remove build artifacts and node_modules"
+	@echo "  make vault          - Install deps + build and run in dev mode"
+	@echo "  make install        - Build modules + install vault dependencies"
+	@echo "  make dev            - Build and run in dev mode"
+	@echo "  make dev-hmr        - Dev mode with Vite HMR"
+	@echo "  make build          - Development build (no signing)"
+	@echo "  make build-stable   - Production build (signs + notarizes via Electrobun)"
+	@echo "  make build-signed   - Full pipeline: build → extract → DMG → sign → notarize"
+	@echo "  make dmg            - Create DMG from existing build artifacts"
+	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
+	@echo "  make modules-clean  - Clean module build artifacts"
+	@echo "  make audit          - Generate dependency manifest + SBOM"
+	@echo "  make sign-check     - Verify signing env vars are configured"
+	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
+	@echo "  make publish        - Show distribution artifacts"
+	@echo "  make clean          - Remove all build artifacts and node_modules"

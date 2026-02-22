@@ -1,0 +1,4 @@
+#!/bin/bash
+# Shim: intercepts zip calls from electrobun to add -q (quiet) flag
+# This prevents ENOBUFS when zipping large app bundles with many files
+exec /usr/bin/zip -q "$@"
