@@ -182,7 +182,9 @@ const sbom = {
     version: d.version,
     licenses: d.license !== 'UNKNOWN' ? [{ license: { id: d.license } }] : [],
     hashes: [{ alg: 'SHA-256', content: d.integrity.replace('sha256:', '') }],
-    purl: `pkg:npm/${d.name.replace('/', '%2F')}@${d.version}`,
+    purl: d.name.startsWith('@')
+      ? `pkg:npm/${encodeURIComponent(d.name.split('/')[0])}/${d.name.split('/')[1]}@${d.version}`
+      : `pkg:npm/${d.name}@${d.version}`,
   })),
 }
 

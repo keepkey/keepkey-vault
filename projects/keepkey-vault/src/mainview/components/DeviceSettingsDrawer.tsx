@@ -228,24 +228,32 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingRest(false)
 	}, [])
 
+	const updateMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
 	const handleCheckForUpdate = useCallback(async () => {
 		if (!onCheckForUpdate) return
 		setCheckingUpdate(true)
 		setUpdateMessage("")
+		if (updateMsgTimerRef.current) clearTimeout(updateMsgTimerRef.current)
 		try {
 			const info = await onCheckForUpdate()
 			if (info?.updateAvailable) {
 				setUpdateMessage(`Version ${info.version} available`)
 			} else {
 				setUpdateMessage("You are on the latest version")
-				setTimeout(() => setUpdateMessage(""), 4000)
+				updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
 			}
 		} catch (e: any) {
 			setUpdateMessage(e.message || "Check failed")
-			setTimeout(() => setUpdateMessage(""), 4000)
+			updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
 		}
 		setCheckingUpdate(false)
 	}, [onCheckForUpdate])
+
+	// Cleanup timer on unmount
+	useEffect(() => {
+		return () => { if (updateMsgTimerRef.current) clearTimeout(updateMsgTimerRef.current) }
+	}, [])
 
 	const handleChangePin = useCallback(async () => {
 		setChangingPin(true)
@@ -695,7 +703,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 								</Flex>
 								{updateMessage && (
-									<Text fontSize="xs" color={updatePhase === "error" ? "kk.error" : "kk.success"} mt="1">
+									<Text fontSize="xs" color={updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1">
 										{updateMessage}
 									</Text>
 								)}

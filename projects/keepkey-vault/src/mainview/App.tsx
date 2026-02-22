@@ -250,7 +250,8 @@ function App() {
 						onDismiss={() => setUpdateDismissed(true)}
 					/>
 				)}
-				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "100px" : "54px"} pb="4" transition="padding-top 0.2s">
+				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
+				{/* pt: 54px TopNav + 50px banner height when visible */}
 					<Dashboard onLoaded={handlePortfolioLoaded} />
 				</Flex>
 			</Flex>

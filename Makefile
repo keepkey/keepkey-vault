@@ -3,10 +3,10 @@ VERSION := $(shell grep '"version"' $(PROJECT_DIR)/package.json | head -1 | sed 
 ARCH := $(shell uname -m)
 DMG_NAME := KeepKey-Vault-$(VERSION)-$(ARCH).dmg
 
-# Auto-load .env if present (exports all vars for sub-processes)
+# Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
 include .env
-export
+export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
 .PHONY: install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check verify publish release modules-install modules-build modules-clean audit
@@ -62,20 +62,20 @@ dmg:
 	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
 	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
 	STAGING=$$(mktemp -d); \
+	trap 'rm -rf "$$STAGING"' EXIT; \
 	echo "Extracting app from $$TAR_ZST..."; \
 	zstd -d "$$TAR_ZST" -o "$$STAGING/app.tar" --force; \
 	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
 	rm "$$STAGING/app.tar"; \
 	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
-	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; rm -rf "$$STAGING"; exit 1; fi; \
+	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
 	echo "Verifying extracted app..."; \
-	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; rm -rf "$$STAGING"; exit 1); \
+	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
 	ln -s /Applications "$$STAGING/Applications"; \
 	DMG_OUT="$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	rm -f "$$DMG_OUT"; \
 	echo "Creating DMG..."; \
 	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
-	rm -rf "$$STAGING"; \
 	echo "Signing DMG..."; \
 	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
 	echo "Notarizing DMG..."; \
@@ -122,7 +122,7 @@ verify:
 
 # --- Publishing ---
 
-GITHUB_REPO ?= keepkey/keepkey-vault
+GITHUB_REPO ?= BitHighlander/keepkey-vault-v11
 
 publish:
 	@echo "Artifacts:"
@@ -130,13 +130,18 @@ publish:
 
 release: sign-check build-signed
 	@echo "Creating GitHub release v$(VERSION)..."
+	@test -f $(PROJECT_DIR)/artifacts/$(DMG_NAME) || (echo "ERROR: DMG not found: $(DMG_NAME)" && exit 1)
+	@UPDATE_JSON=$$(ls $(PROJECT_DIR)/artifacts/stable-*-update.json 2>/dev/null | head -1); \
+	TAR_ZST=$$(ls $(PROJECT_DIR)/artifacts/stable-*-keepkey-vault.app.tar.zst 2>/dev/null | head -1); \
+	if [ -z "$$UPDATE_JSON" ] || [ -z "$$TAR_ZST" ]; then \
+		echo "WARNING: Missing update artifacts (update.json or tar.zst) — release will not support auto-updates"; \
+	fi; \
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
 		--title "KeepKey Vault v$(VERSION)" \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
-		$(wildcard $(PROJECT_DIR)/artifacts/stable-*-update.json) \
-		$(wildcard $(PROJECT_DIR)/artifacts/stable-*-keepkey-vault.app.tar.zst)
+		$$UPDATE_JSON $$TAR_ZST
 	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
 
 help:

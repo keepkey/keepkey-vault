@@ -716,7 +716,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── App Updates ──────────────────────────────────────────
 			checkForUpdate: async () => {
-				return await Updater.checkForUpdate()
+				const result = await Updater.checkForUpdate()
+				const info = Updater.updateInfo()
+				return {
+					updateAvailable: !!info?.updateAvailable,
+					updateReady: !!info?.updateReady,
+					version: info?.version ?? '',
+					hash: info?.hash ?? '',
+					error: result?.error || undefined,
+				}
 			},
 			downloadUpdate: async () => {
 				await Updater.downloadUpdate()
@@ -843,10 +851,12 @@ const mainWindow = new BrowserWindow({
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
-// Background update check (skip in dev)
+// Background update check (skip in dev, delay to let webview initialize)
 Updater.localInfo.channel().then(ch => {
 	if (ch !== 'dev') {
-		Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+		setTimeout(() => {
+			Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+		}, 5000)
 	}
 })
 
