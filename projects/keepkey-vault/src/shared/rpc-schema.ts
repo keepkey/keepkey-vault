@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -89,6 +89,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
+
+      // ── App Updates ────────────────────────────────────────────────────
+      checkForUpdate: { params: void; response: UpdateInfo }
+      downloadUpdate: { params: void; response: void }
+      applyUpdate: { params: void; response: void }
+      getUpdateInfo: { params: void; response: UpdateInfo | null }
+      getAppVersion: { params: void; response: { version: string; channel: string } }
     }
     messages: {
       'device-state': DeviceStateInfo
@@ -100,6 +107,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'btc-accounts-update': BtcAccountSet
       'camera-frame': string
       'camera-error': string
+      'update-status': UpdateStatus
     }
   }
   webview: {

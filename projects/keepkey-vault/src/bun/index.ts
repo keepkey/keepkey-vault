@@ -189,7 +189,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const pioneer = await getPioneer()
+
+				// Initialize Pioneer client — isolate failure so device derivation still works
+				let pioneer: any = null
+				try {
+					pioneer = await getPioneer()
+				} catch (e: any) {
+					console.warn('[getBalances] Pioneer init failed (will return zero balances):', e.message)
+				}
+
 				const wallet = engine.wallet as any
 
 				// Initialize BTC multi-account on first balance fetch
@@ -205,14 +213,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
 				// 1. Batch-fetch non-BTC UTXO xpubs in a single device call
-				const xpubResults = utxoChains.length > 0
-					? await wallet.getPublicKeys(utxoChains.map(c => ({
-						addressNList: c.defaultPath.slice(0, 3),
-						coin: c.coin,
-						scriptType: c.scriptType,
-						curve: 'secp256k1',
-					})))
-					: []
+				let xpubResults: any[] = []
+				try {
+					if (utxoChains.length > 0) {
+						xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
+							addressNList: c.defaultPath.slice(0, 3),
+							coin: c.coin,
+							scriptType: c.scriptType,
+							curve: 'secp256k1',
+						}))) || []
+					}
+				} catch (e: any) {
+					console.warn('[getBalances] UTXO xpub batch failed:', e.message)
+				}
 
 				// 2. Derive non-UTXO addresses (one device call per chain — unavoidable)
 				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
@@ -229,7 +242,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (chain.chainFamily === 'evm') {
 							if (!cachedEvmAddress) {
 								const result = await wallet.ethGetAddress({ addressNList: chain.defaultPath, showDisplay: false, coin: 'Ethereum' })
-								cachedEvmAddress = typeof result === 'string' ? result : result?.address || ''
+								cachedEvmAddress = typeof result === 'string' ? result : result?.address || null
+								if (!cachedEvmAddress) console.warn('[getBalances] ethGetAddress returned empty — skipping all EVM chains')
 							}
 							if (cachedEvmAddress) pubkeys.push({ caip: chain.caip, pubkey: cachedEvmAddress, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
 							continue
@@ -265,6 +279,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// 3. Single API call for ALL balances + prices
 				const results: ChainBalance[] = []
 				try {
+					if (!pioneer) throw new Error('Pioneer client not available')
 					const resp = await withTimeout(
 						pioneer.GetPortfolioBalances({
 							pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
@@ -272,9 +287,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						PIONEER_TIMEOUT_MS,
 						'GetPortfolioBalances'
 					)
-					// Handle Swagger double-wrapping: resp.data?.data || resp.data
+					// Defensive response unwrapping — handle all known Pioneer response shapes:
+					//   { data: { data: { balances: [...] } } }  (Swagger double-wrap)
+					//   { data: { balances: [...] } }             (Swagger single-wrap)
+					//   { data: [...] }                           (raw array)
 					const rawData = resp?.data?.data || resp?.data || {}
-					const data: any[] = rawData.balances || []
+					const data: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+
+					if (data.length === 0 && pubkeys.length > 0) {
+						console.warn(`[getBalances] Pioneer returned 0 balance entries for ${pubkeys.length} pubkeys — response shape:`, JSON.stringify(Object.keys(resp?.data || {})).slice(0, 200))
+					}
 
 					// Separate native balances from token entries
 					const nativeEntries: any[] = []
@@ -691,6 +713,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error('Invalid URL')
 				}
 			},
+
+			// ── App Updates ──────────────────────────────────────────
+			checkForUpdate: async () => {
+				return await Updater.checkForUpdate()
+			},
+			downloadUpdate: async () => {
+				await Updater.downloadUpdate()
+			},
+			applyUpdate: async () => {
+				await Updater.applyUpdate()
+			},
+			getUpdateInfo: async () => {
+				return Updater.updateInfo() || null
+			},
+			getAppVersion: async () => ({
+				version: await Updater.localInfo.version(),
+				channel: await Updater.localInfo.channel(),
+			}),
 		},
 		messages: {},
 	},
@@ -720,6 +760,21 @@ engine.on('recovery-error', (err) => {
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {
 	try { rpc.send['btc-accounts-update'](set) } catch { /* webview not ready yet */ }
+})
+
+// Updater status changes → push to WebView
+Updater.onStatusChange((entry: any) => {
+	try {
+		rpc.send['update-status']({
+			status: entry.status,
+			message: entry.message,
+			timestamp: entry.timestamp,
+			progress: entry.details?.progress,
+			bytesDownloaded: entry.details?.bytesDownloaded,
+			totalBytes: entry.details?.totalBytes,
+			errorMessage: entry.details?.errorMessage,
+		})
+	} catch { /* webview not ready */ }
 })
 
 // ── Window Setup ──────────────────────────────────────────────────────
@@ -787,6 +842,13 @@ const mainWindow = new BrowserWindow({
 
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
+
+// Background update check (skip in dev)
+Updater.localInfo.channel().then(ch => {
+	if (ch !== 'dev') {
+		Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+	}
+})
 
 // Quit the app when the main window is closed
 mainWindow.on("close", () => {

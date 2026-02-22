@@ -54,4 +54,7 @@ export default {
 			icon: "icon.png",
 		},
 	},
+	release: {
+		baseUrl: "https://github.com/AnotherOrg/keepkey-vault/releases/latest/download",
+	},
 } satisfies ElectrobunConfig;

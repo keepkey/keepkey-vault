@@ -204,6 +204,25 @@ export interface GetPublicKeysParams {
   }>
 }
 
+// ── App Update types ─────────────────────────────────────────────────
+export interface UpdateInfo {
+  version: string
+  hash: string
+  updateAvailable: boolean
+  updateReady: boolean
+  error: string
+}
+
+export interface UpdateStatus {
+  status: string
+  message: string
+  timestamp: number
+  progress?: number
+  bytesDownloaded?: number
+  totalBytes?: number
+  errorMessage?: string
+}
+
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.
 // These aliases are for convenience in frontend code that doesn't need Electrobun types.

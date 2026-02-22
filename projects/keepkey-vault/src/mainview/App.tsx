@@ -9,7 +9,9 @@ import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
+import { UpdateBanner } from "./components/UpdateBanner"
 import { useDeviceState } from "./hooks/useDeviceState"
+import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import type { PinRequestType } from "../shared/types"
 
@@ -17,9 +19,26 @@ type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
 function App() {
 	const deviceState = useDeviceState()
+	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
+	const [updateDismissed, setUpdateDismissed] = useState(false)
+	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
+
+	// Fetch app version on mount
+	useEffect(() => {
+		rpcRequest<{ version: string; channel: string }>("getAppVersion")
+			.then(setAppVersion)
+			.catch(() => {})
+	}, [])
+
+	// Reset dismiss when update phase transitions to available or ready
+	useEffect(() => {
+		if (update.phase === "available" || update.phase === "ready") {
+			setUpdateDismissed(false)
+		}
+	}, [update.phase])
 
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
@@ -202,6 +221,8 @@ function App() {
 	}
 
 	// ── Ready phase ─────────────────────────────────────────────────
+	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking"
+
 	return (
 		<>{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && (
@@ -218,7 +239,18 @@ function App() {
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					settingsOpen={settingsOpen}
 				/>
-				<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
+				{showBanner && (
+					<UpdateBanner
+						phase={update.phase}
+						progress={update.progress}
+						message={update.message}
+						error={update.error}
+						onDownload={update.downloadUpdate}
+						onApply={update.applyUpdate}
+						onDismiss={() => setUpdateDismissed(true)}
+					/>
+				)}
+				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "100px" : "54px"} pb="4" transition="padding-top 0.2s">
 					<Dashboard onLoaded={handlePortfolioLoaded} />
 				</Flex>
 			</Flex>
@@ -226,6 +258,9 @@ function App() {
 				open={settingsOpen}
 				onClose={() => setSettingsOpen(false)}
 				deviceState={deviceState}
+				onCheckForUpdate={update.checkForUpdate}
+				updatePhase={update.phase}
+				appVersion={appVersion}
 			/>
 		</>
 	)
