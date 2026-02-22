@@ -1,6 +1,6 @@
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import { EngineController } from "./engine-controller"
-import { startRestApi } from "./rest-api"
+import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
@@ -10,7 +10,7 @@ import { BtcAccountManager } from "./btc-accounts"
 import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
-import type { ChainBalance, TokenBalance, CustomToken } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 /** Timeout wrapper for external API calls */
@@ -59,18 +59,34 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 	return chain.chainId ? EVM_RPC_URLS[chain.chainId] : undefined
 }
 
-// ── REST API Server (off by default — persisted in SQLite, env var overrides) ──
+// ── REST API Server (always-on, pairing is gated) ──────────────────────
 const auth = new AuthStore()
-const envOverride = process.env.KEEPKEY_REST_API === "true" || process.env.KEEPKEY_REST_API === "1"
-const dbSetting = getSetting('rest_api_enabled')
-const enableRest = envOverride || dbSetting === '1'
-let restServer = enableRest ? startRestApi(engine, auth, REST_API_PORT) : null
-if (enableRest) console.log(`[Vault] REST API enabled on port ${REST_API_PORT}`)
-else console.log("[Vault] REST API disabled")
+let pairingEnabled = getSetting('pairing_enabled') !== '0' // default true
+let appVersionCache = ''
 
 function getAppSettings() {
-	return { restApiEnabled: restServer !== null }
+	return { restApiEnabled: true, pairingEnabled }
 }
+
+// Callbacks bridge REST → RPC UI
+const restCallbacks: RestApiCallbacks = {
+	onApiLog: (entry: ApiLogEntry) => {
+		try { rpc.send['api-log'](entry) } catch { /* webview not ready */ }
+	},
+	onSigningRequest: async (info: SigningRequestInfo) => {
+		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
+		return auth.requestSigningApproval(info.id)
+	},
+	onPairRequest: (info) => {
+		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
+	},
+	isPairingEnabled: () => pairingEnabled,
+	getVersion: () => appVersionCache,
+}
+
+// REST always starts
+const restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
+console.log(`[Vault] REST API listening on port ${REST_API_PORT} (pairing ${pairingEnabled ? 'enabled' : 'disabled'})`)
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -698,24 +714,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				stopCamera()
 			},
 
+			// ── Pairing & Signing approval ───────────────────────────
+			approvePairing: async () => {
+				const apiKey = auth.approvePairing()
+				if (!apiKey) throw new Error('No pending pairing request')
+				return { apiKey }
+			},
+			rejectPairing: async () => {
+				auth.rejectPairing()
+			},
+			approveSigningRequest: async (params) => {
+				if (!auth.approveSigningRequest(params.id)) throw new Error('No pending signing request with that id')
+			},
+			rejectSigningRequest: async (params) => {
+				if (!auth.rejectSigningRequest(params.id)) throw new Error('No pending signing request with that id')
+			},
+			setPairingEnabled: async (params) => {
+				pairingEnabled = params.enabled
+				setSetting('pairing_enabled', params.enabled ? '1' : '0')
+				return getAppSettings()
+			},
+
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
 				return getAppSettings()
 			},
-			setRestApiEnabled: async (params) => {
-				if (params.enabled) {
-					if (!restServer) {
-						restServer = startRestApi(engine, auth, REST_API_PORT)
-						console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
-					}
-				} else {
-					if (restServer) {
-						restServer.stop()
-						restServer = null
-						console.log('[Vault] REST API stopped')
-					}
-				}
-				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
+			setRestApiEnabled: async (_params) => {
+				// Backward compat — REST is always on now, this is a no-op
 				return getAppSettings()
 			},
 
@@ -868,6 +893,9 @@ const mainWindow = new BrowserWindow({
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
+// Cache app version for REST health endpoint
+Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
+
 // Background update check (skip in dev, delay to let webview initialize)
 Updater.localInfo.channel().then(ch => {
 	if (ch !== 'dev') {
@@ -881,7 +909,7 @@ Updater.localInfo.channel().then(ch => {
 mainWindow.on("close", () => {
 	stopCamera()
 	engine.stop()
-	restServer?.stop()
+	restServer.stop()
 	Utils.quit()
 })
 

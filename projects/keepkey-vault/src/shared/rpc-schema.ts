@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, SigningRequestInfo, ApiLogEntry } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -88,6 +88,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       startQrScan: { params: void; response: void }
       stopQrScan: { params: void; response: void }
 
+      // ── Pairing & Signing approval ───────────────────────────────────
+      approvePairing: { params: void; response: { apiKey: string } }
+      rejectPairing: { params: void; response: void }
+      approveSigningRequest: { params: { id: string }; response: void }
+      rejectSigningRequest: { params: { id: string }; response: void }
+      setPairingEnabled: { params: { enabled: boolean }; response: AppSettings }
+
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
@@ -113,6 +120,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'camera-frame': string
       'camera-error': string
       'update-status': UpdateStatus
+      'pair-request': PairingRequestInfo
+      'signing-request': SigningRequestInfo
+      'signing-dismissed': { id: string }
+      'api-log': ApiLogEntry
     }
   }
   webview: {

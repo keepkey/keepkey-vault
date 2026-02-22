@@ -3,17 +3,22 @@ import { Box, Flex } from "@chakra-ui/react"
 import { PinEntry } from "./components/device/PinEntry"
 import { PassphraseEntry } from "./components/device/PassphraseEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
+import { PairingApproval } from "./components/device/PairingApproval"
+import { SigningApproval } from "./components/device/SigningApproval"
+import { ApiAuditLog } from "./components/ApiAuditLog"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav } from "./components/TopNav"
+import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
+import { AppStore } from "./components/AppStore"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
-import type { PinRequestType } from "../shared/types"
+import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
@@ -23,6 +28,7 @@ function App() {
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
+	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 
@@ -84,6 +90,71 @@ function App() {
 		}
 	}, [deviceState.state, passphraseRequested])
 
+	// ── Pairing approval overlay ────────────────────────────────────
+	const [pairRequest, setPairRequest] = useState<PairingRequestInfo | null>(null)
+
+	useEffect(() => {
+		return onRpcMessage("pair-request", (payload) => {
+			setPairRequest(payload as PairingRequestInfo)
+		})
+	}, [])
+
+	const handleApprovePairing = useCallback(async () => {
+		try { await rpcRequest("approvePairing") } catch (e) { console.error("approvePairing:", e) }
+		setPairRequest(null)
+	}, [])
+
+	const handleRejectPairing = useCallback(async () => {
+		try { await rpcRequest("rejectPairing") } catch (e) { console.error("rejectPairing:", e) }
+		setPairRequest(null)
+	}, [])
+
+	// ── Signing approval overlay ────────────────────────────────────
+	const [signingRequest, setSigningRequest] = useState<SigningRequestInfo | null>(null)
+
+	useEffect(() => {
+		return onRpcMessage("signing-request", (payload) => {
+			setSigningRequest(payload as SigningRequestInfo)
+		})
+	}, [])
+
+	useEffect(() => {
+		return onRpcMessage("signing-dismissed", () => {
+			setSigningRequest(null)
+		})
+	}, [])
+
+	const handleApproveSign = useCallback(async () => {
+		if (!signingRequest) return
+		try { await rpcRequest("approveSigningRequest", { id: signingRequest.id }) } catch (e) { console.error("approveSign:", e) }
+		setSigningRequest(null)
+	}, [signingRequest])
+
+	const handleRejectSign = useCallback(async () => {
+		if (!signingRequest) return
+		try { await rpcRequest("rejectSigningRequest", { id: signingRequest.id }) } catch (e) { console.error("rejectSign:", e) }
+		setSigningRequest(null)
+	}, [signingRequest])
+
+	// ── API Audit Log ───────────────────────────────────────────────
+	const [auditLogOpen, setAuditLogOpen] = useState(false)
+	const [auditLogEntries, setAuditLogEntries] = useState<ApiLogEntry[]>([])
+	const auditAutoOpened = useCallback(() => {}, []) // placeholder ref
+
+	useEffect(() => {
+		return onRpcMessage("api-log", (payload) => {
+			const entry = payload as ApiLogEntry
+			setAuditLogEntries((prev) => {
+				const next = [entry, ...prev]
+				return next.length > 50 ? next.slice(0, 50) : next
+			})
+			// Auto-open on first non-public signing-related request
+			if (entry.appName !== "public" && entry.route !== "/api/health" && entry.route !== "/spec/swagger.json") {
+				setAuditLogOpen(true)
+			}
+		})
+	}, [])
+
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
 	const [recoveryError, setRecoveryError] = useState<{ message: string; errorType: string } | null>(null)
@@ -144,6 +215,37 @@ function App() {
 		if (deviceState.state !== "ready") setPortfolioLoaded(false)
 	}, [deviceState.state])
 
+	// ── Tab change handler ──────────────────────────────────────────
+	const handleTabChange = useCallback(async (tab: NavTab) => {
+		if (tab === "shapeshift") {
+			// REST API is always on — open ShapeShift in browser + show audit log
+			try {
+				await rpcRequest("openUrl", { url: "https://app.shapeshift.com" }, 5000)
+			} catch (e) {
+				console.error("Failed to open ShapeShift:", e)
+			}
+			setAuditLogOpen(true)
+			// Don't switch tab — stay on current view
+			return
+		}
+		setActiveTab(tab)
+	}, [])
+
+	// ── Open app from AppStore ───────────────────────────────────────
+	const handleOpenApp = useCallback(async (url: string) => {
+		// Open external app in system browser + auto-show audit log for bridge traffic
+		try {
+			await rpcRequest("openUrl", { url }, 5000)
+		} catch (e) {
+			console.error("Failed to open app:", e)
+		}
+		setAuditLogOpen(true)
+	}, [])
+
+	const handleOpenKeepKey = useCallback(() => {
+		setActiveTab("vault")
+	}, [])
+
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
 
@@ -155,7 +257,15 @@ function App() {
 		: "splash"
 
 	// ── Overlays (render above everything, only one at a time) ──────
-	// Priority: passphrase > PIN (passphrase comes after PIN in unlock sequence)
+	// Priority: signing > pairing > passphrase > recovery > PIN
+	const signingOverlay = signingRequest ? (
+		<SigningApproval request={signingRequest} onApprove={handleApproveSign} onReject={handleRejectSign} />
+	) : null
+
+	const pairingOverlay = pairRequest ? (
+		<PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />
+	) : null
+
 	const passphraseOverlay = passphraseRequested ? (
 		<PassphraseEntry onSubmit={handlePassphraseSubmit} onCancel={handlePassphraseCancel} />
 	) : null
@@ -182,7 +292,7 @@ function App() {
 	// ── Render phases ───────────────────────────────────────────────
 	if (phase === "claimed") {
 		return (
-			<>{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen statusText="KeepKey detected" variant="claimed">
 					<DeviceClaimedDialog error={deviceState.error || "Device claimed by another process"} />
 				</SplashScreen>
@@ -196,7 +306,7 @@ function App() {
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
 		return (
-			<>{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
 						needsPin ? "Unlock your KeepKey"
@@ -214,7 +324,7 @@ function App() {
 
 	if (phase === "setup") {
 		return (
-			<>{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
 			</>
 		)
@@ -224,12 +334,12 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking"
 
 	return (
-		<>{passphraseOverlay}{charOverlay}{pinOverlay}
-			{!portfolioLoaded && (
+		<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText="Loading portfolio" variant="connecting" />
 			)}
 			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary"
-				{...(!portfolioLoaded ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
+				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
 				<TopNav
 					label={deviceState.label}
@@ -238,6 +348,8 @@ function App() {
 					firmwareVerified={deviceState.firmwareVerified}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					settingsOpen={settingsOpen}
+					activeTab={activeTab}
+					onTabChange={handleTabChange}
 				/>
 				{showBanner && (
 					<UpdateBanner
@@ -252,7 +364,8 @@ function App() {
 				)}
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
-					<Dashboard onLoaded={handlePortfolioLoaded} />
+					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} />}
+					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
@@ -262,6 +375,12 @@ function App() {
 				onCheckForUpdate={update.checkForUpdate}
 				updatePhase={update.phase}
 				appVersion={appVersion}
+				onOpenAuditLog={() => setAuditLogOpen(true)}
+			/>
+			<ApiAuditLog
+				open={auditLogOpen}
+				entries={auditLogEntries}
+				onClose={() => setAuditLogOpen(false)}
 			/>
 		</>
 	)

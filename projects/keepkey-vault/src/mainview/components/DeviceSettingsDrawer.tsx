@@ -18,6 +18,7 @@ interface DeviceSettingsDrawerProps {
 	onCheckForUpdate?: () => Promise<any>
 	updatePhase?: string
 	appVersion?: { version: string; channel: string } | null
+	onOpenAuditLog?: () => void
 }
 
 // ── Collapsible Section ─────────────────────────────────────────────
@@ -120,7 +121,7 @@ function VerificationBadge({ verified }: { verified?: boolean }) {
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion, onOpenAuditLog }: DeviceSettingsDrawerProps) {
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
 	const [label, setLabel] = useState(deviceState.label || "")
@@ -137,8 +138,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removingPin, setRemovingPin] = useState(false)
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false })
-	const [togglingRest, setTogglingRest] = useState(false)
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: true, pairingEnabled: true })
+	const [togglingPairing, setTogglingPairing] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
 	const panelRef = useRef<HTMLDivElement>(null)
@@ -219,13 +220,19 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		onClose()
 	}, [onClose])
 
-	const toggleRestApi = useCallback(async (enabled: boolean) => {
-		setTogglingRest(true)
+	const togglePairing = useCallback(async (enabled: boolean) => {
+		setTogglingPairing(true)
 		try {
-			const result = await rpcRequest<AppSettings>("setRestApiEnabled", { enabled }, 10000)
+			const result = await rpcRequest<AppSettings>("setPairingEnabled", { enabled }, 10000)
 			setAppSettings(result)
-		} catch (e: any) { console.error("setRestApiEnabled:", e) }
-		setTogglingRest(false)
+		} catch (e: any) { console.error("setPairingEnabled:", e) }
+		setTogglingPairing(false)
+	}, [])
+
+	const openSwagger = useCallback(async () => {
+		try {
+			await rpcRequest("openUrl", { url: "http://localhost:1646/docs" }, 5000)
+		} catch (e: any) { console.error("openUrl:", e) }
 	}, [])
 
 	const updateMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -650,29 +657,65 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Application Settings ────────────────────────── */}
 					<Section title="Application" defaultOpen={false}>
 						<VStack gap="4" align="stretch">
+							{/* Pairing toggle */}
 							<Flex justify="space-between" align="center">
 								<Box>
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">REST API Server</Text>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Accept Pairing Requests</Text>
 									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-										Enable the signing API on port 1646 for dApp integrations.
+										Allow external dApps to pair with your KeepKey.
 									</Text>
 								</Box>
 								<Toggle
-									checked={appSettings.restApiEnabled}
-									onChange={toggleRestApi}
-									disabled={togglingRest}
+									checked={appSettings.pairingEnabled}
+									onChange={togglePairing}
+									disabled={togglingPairing}
 								/>
 							</Flex>
-							{appSettings.restApiEnabled && (
-								<Box bg="rgba(192,168,96,0.08)" borderRadius="lg" px="3" py="2">
-									<Text fontSize="xs" color="kk.gold" fontFamily="mono">
-										http://localhost:1646
+
+							{/* API Bridge status */}
+							<Box bg="rgba(192,168,96,0.08)" borderRadius="lg" px="3" py="3">
+								<Flex align="center" justify="space-between">
+									<Flex align="center" gap="2">
+										<Box
+											w="8px"
+											h="8px"
+											borderRadius="full"
+											bg={appSettings.pairingEnabled ? "#22C55E" : "#EF4444"}
+											boxShadow={appSettings.pairingEnabled ? "0 0 6px rgba(34,197,94,0.5)" : "0 0 6px rgba(239,68,68,0.4)"}
+										/>
+										<Text fontSize="sm" fontWeight="500" color={appSettings.pairingEnabled ? "#22C55E" : "#EF4444"}>
+											{appSettings.pairingEnabled ? "Accepting Requests" : "Not Accepting Requests"}
+										</Text>
+									</Flex>
+									<Text fontSize="xs" color="kk.textMuted" fontFamily="mono">
+										:1646
 									</Text>
-									<Text fontSize="xs" color="kk.textSecondary" mt="1">
-										API is running. dApps can connect via kkapi:// protocol.
-									</Text>
-								</Box>
-							)}
+								</Flex>
+								<Flex gap="3" mt="2">
+									<Box
+										as="button"
+										fontSize="xs"
+										color="kk.gold"
+										cursor="pointer"
+										_hover={{ textDecoration: "underline" }}
+										onClick={openSwagger}
+									>
+										API Docs
+									</Box>
+									{onOpenAuditLog && (
+										<Box
+											as="button"
+											fontSize="xs"
+											color="kk.gold"
+											cursor="pointer"
+											_hover={{ textDecoration: "underline" }}
+											onClick={onOpenAuditLog}
+										>
+											Audit Log
+										</Box>
+									)}
+								</Flex>
+							</Box>
 
 							{/* ── App Version + Update Check ────── */}
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">

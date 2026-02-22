@@ -17,6 +17,7 @@ export class AuthStore {
   private keys = new Map<string, PairedClient>()
   private accounts = new Map<string, number[]>()
   private pendingPair: { info: PairingInfo; resolve: (apiKey: string) => void; reject: (err: Error) => void } | null = null
+  private pendingSigningRequests = new Map<string, { resolve: (ok: boolean) => void; timer: Timer }>()
 
   /** Queue a pairing request — must be approved via approvePairing() */
   requestPair(info: PairingInfo): Promise<string> {
@@ -83,6 +84,35 @@ export class AuthStore {
     // Map iterates in insertion order — first key is oldest
     const oldest = this.keys.keys().next().value
     if (oldest) this.keys.delete(oldest)
+  }
+
+  /** Queue a signing request — must be approved/rejected by the user */
+  requestSigningApproval(id: string, timeoutMs = 120000): Promise<boolean> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingSigningRequests.delete(id)
+        resolve(false)
+      }, timeoutMs)
+      this.pendingSigningRequests.set(id, { resolve, timer })
+    })
+  }
+
+  approveSigningRequest(id: string): boolean {
+    const entry = this.pendingSigningRequests.get(id)
+    if (!entry) return false
+    clearTimeout(entry.timer)
+    this.pendingSigningRequests.delete(id)
+    entry.resolve(true)
+    return true
+  }
+
+  rejectSigningRequest(id: string): boolean {
+    const entry = this.pendingSigningRequests.get(id)
+    if (!entry) return false
+    clearTimeout(entry.timer)
+    this.pendingSigningRequests.delete(id)
+    entry.resolve(false)
+    return true
   }
 
   extractBearerToken(req: Request): string | null {

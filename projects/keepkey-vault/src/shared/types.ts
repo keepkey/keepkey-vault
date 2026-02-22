@@ -162,9 +162,37 @@ export interface TokenVisibilityEntry {
   updatedAt: number
 }
 
+// ── REST API bridge types ─────────────────────────────────────────────
+export interface PairingRequestInfo {
+  name: string
+  url: string
+  imageUrl: string
+}
+
+export interface SigningRequestInfo {
+  id: string
+  method: string
+  appName: string
+  chain?: string
+  from?: string
+  to?: string
+  value?: string
+  data?: string
+  chainId?: number
+}
+
+export interface ApiLogEntry {
+  method: string
+  route: string
+  timestamp: number
+  status: number
+  appName: string
+}
+
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
-  restApiEnabled: boolean
+  restApiEnabled: boolean   // always true now (backward compat)
+  pairingEnabled: boolean   // controls /auth/pair availability
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────

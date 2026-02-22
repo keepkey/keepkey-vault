@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "keepkey-vault",
-    "version": "0.1.0",
+    "title": "keepkey-vault-server",
+    "version": "0.1.1",
     "contact": {}
   },
   "servers": [
@@ -3807,6 +3807,169 @@
         "tags": [
           "Spec"
         ]
+      }
+    },
+    "/info/ping": {
+      "get": {
+        "operationId": "InfoPing",
+        "summary": "Ping check (SDK detection)",
+        "description": "Returns a pong response. Used by keepkey-website-v7 to detect a running vault instance.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "pong" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "tags": ["Detection"]
+      }
+    },
+    "/system/info/ping": {
+      "post": {
+        "operationId": "SystemInfoPing",
+        "summary": "System ping check",
+        "description": "POST variant of ping check, compatible with keepkey-desktop SDK detection.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "pong" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "tags": ["Detection"]
+      }
+    },
+    "/admin/info": {
+      "get": {
+        "operationId": "AdminInfo",
+        "summary": "Admin health info",
+        "description": "Returns version, connection status, and uptime. Alias of /api/health.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": { "type": "string" },
+                    "connected": { "type": "boolean" },
+                    "uptime": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "tags": ["Detection"]
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "GetDocs",
+        "summary": "Interactive API documentation",
+        "description": "Serves a branded Swagger UI page for exploring the KeepKey Vault API.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "HTML page"
+          }
+        },
+        "security": [],
+        "tags": ["Spec"]
+      }
+    },
+    "/addresses/bnb": {
+      "post": {
+        "operationId": "BnbGetAddress",
+        "summary": "Get Binance Chain Address",
+        "description": "Get a Binance Chain (BNB) address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": { "type": "boolean" },
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" }
+                },
+                "required": ["address_n"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": { "type": "string" }
+                  },
+                  "required": ["address"]
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Addresses"]
+      }
+    },
+    "/bnb/sign-transaction": {
+      "post": {
+        "operationId": "BnbSignTransaction",
+        "summary": "Sign a Binance Chain transaction",
+        "description": "Sign a Binance Chain transaction using the connected KeepKey device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Signing"]
       }
     }
   },

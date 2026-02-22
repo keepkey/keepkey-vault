@@ -1,7 +1,16 @@
 import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
+import type { SigningRequestInfo, ApiLogEntry } from '../shared/types'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+
+export interface RestApiCallbacks {
+  onApiLog: (entry: ApiLogEntry) => void
+  onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
+  onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
+  isPairingEnabled: () => boolean
+  getVersion: () => string
+}
 
 /** Matches any http/https origin on localhost or 127.0.0.1 (any port) */
 const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
@@ -158,7 +167,117 @@ function getSwagger(): string {
   return swaggerContent
 }
 
-export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646) {
+// ── Branded Swagger UI HTML ───────────────────────────────────────────
+function getSwaggerUiHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KeepKey Vault API</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; background: #1a1a2e; }
+    .kk-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border-bottom: 2px solid #C0A860;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .kk-header svg { flex-shrink: 0; }
+    .kk-header h1 {
+      margin: 0; color: #C0A860; font-family: system-ui, sans-serif;
+      font-size: 18px; font-weight: 600;
+    }
+    .kk-header span { color: #8a8a9a; font-size: 13px; font-family: system-ui, sans-serif; }
+    /* Dark theme overrides */
+    .swagger-ui { background: #1a1a2e; }
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui .info .title { color: #e0e0e0; }
+    .swagger-ui .info p, .swagger-ui .info li { color: #b0b0c0; }
+    .swagger-ui .opblock-tag { color: #e0e0e0 !important; border-bottom-color: #333 !important; }
+    .swagger-ui .opblock { border-color: #333; background: rgba(255,255,255,0.03); }
+    .swagger-ui .opblock .opblock-summary { border-color: #333; }
+    .swagger-ui .opblock .opblock-summary-description { color: #b0b0c0; }
+    .swagger-ui .opblock .opblock-summary-method { font-weight: 700; }
+    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #2563EB; }
+    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #C0A860; color: #000; }
+    .swagger-ui .opblock.opblock-get { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.3); }
+    .swagger-ui .opblock.opblock-post { background: rgba(192,168,96,0.06); border-color: rgba(192,168,96,0.3); }
+    .swagger-ui .btn { border-radius: 4px; }
+    .swagger-ui .btn.execute { background: #C0A860; color: #000; border: none; }
+    .swagger-ui .btn.execute:hover { background: #d4bc6a; }
+    .swagger-ui .model-box, .swagger-ui .models { background: rgba(255,255,255,0.03); }
+    .swagger-ui .model { color: #b0b0c0; }
+    .swagger-ui table thead tr th { color: #b0b0c0; border-bottom-color: #333; }
+    .swagger-ui table tbody tr td { color: #e0e0e0; border-bottom-color: #222; }
+    .swagger-ui .parameter__name { color: #e0e0e0; }
+    .swagger-ui .parameter__type { color: #C0A860; }
+    .swagger-ui input[type=text], .swagger-ui textarea, .swagger-ui select {
+      background: #0d1117; color: #e0e0e0; border-color: #333;
+    }
+    .swagger-ui .scheme-container { background: #1a1a2e; box-shadow: none; }
+    .swagger-ui .loading-container .loading::after { color: #C0A860; }
+    .swagger-ui section.models { border-color: #333; }
+    .swagger-ui section.models h4 { color: #e0e0e0; }
+    .swagger-ui .response-col_status { color: #e0e0e0; }
+    .swagger-ui .response-col_description { color: #b0b0c0; }
+    .swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5 { color: #e0e0e0; }
+    .swagger-ui .opblock-description-wrapper p { color: #b0b0c0; }
+    .swagger-ui .opblock-section-header { background: rgba(255,255,255,0.02); }
+    .swagger-ui .opblock-section-header h4 { color: #e0e0e0; }
+    .swagger-ui .highlight-code { background: #0d1117; }
+    .swagger-ui .microlight { background: #0d1117 !important; color: #e0e0e0 !important; }
+  </style>
+</head>
+<body>
+  <div class="kk-header">
+    <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
+      <rect width="100" height="100" rx="16" fill="#C0A860"/>
+      <path d="M30 70V30h10v15l15-15h14L52 47l18 23H56L43 53l-3 3v14H30z" fill="#1a1a2e"/>
+    </svg>
+    <div>
+      <h1>KeepKey Vault API</h1>
+      <span>Interactive documentation &mdash; localhost:1646</span>
+    </div>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/spec/swagger.json',
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: 'BaseLayout',
+    })
+  </script>
+</body>
+</html>`
+}
+
+/** Start time for uptime calculation */
+const startTime = Date.now()
+
+/** Set of signing endpoints that require user approval */
+const SIGNING_ROUTES = new Set([
+  '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
+  '/utxo/sign-transaction', '/xrp/sign-transaction',
+  '/bnb/sign-transaction',
+  '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
+  '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
+  '/cosmos/sign-amino-ibc-transfer',
+  '/osmosis/sign-amino', '/osmosis/sign-amino-delegate', '/osmosis/sign-amino-undelegate',
+  '/osmosis/sign-amino-redelegate', '/osmosis/sign-amino-withdraw-delegator-rewards-all',
+  '/osmosis/sign-amino-ibc-transfer', '/osmosis/sign-amino-lp-remove',
+  '/osmosis/sign-amino-lp-add', '/osmosis/sign-amino-swap',
+  '/thorchain/sign-amino-transfer', '/thorchain/sign-amino-deposit',
+  '/mayachain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
+])
+
+export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
   // Invalidate features cache on device disconnect
   engine.on('state-change', (state) => {
     if (state.state === 'disconnected') clearFeaturesCache()
@@ -172,11 +291,27 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const url = new URL(req.url)
       const path = url.pathname
       const method = req.method
+      const requestStart = Date.now()
+
+      // Resolve app name from bearer token (or 'public')
+      const resolveAppName = (): string => {
+        const token = auth.extractBearerToken(req)
+        if (!token) return 'public'
+        const entry = auth.validate(token)
+        return entry?.info?.name || 'paired'
+      }
 
       // Per-request response helpers (capture req for CORS origin check)
-      const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
-        status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
-      })
+      const json = (data: unknown, status = 200) => {
+        const resp = new Response(JSON.stringify(data), {
+          status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
+        })
+        // Log the request
+        if (callbacks?.onApiLog) {
+          callbacks.onApiLog({ method, route: path, timestamp: requestStart, status, appName: resolveAppName() })
+        }
+        return resp
+      }
 
       // CORS preflight
       if (method === 'OPTIONS') {
@@ -195,16 +330,54 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // SPEC (public)
         // ═══════════════════════════════════════════════════════════════
         if (path === '/spec/swagger.json' && method === 'GET') {
+          if (callbacks?.onApiLog) {
+            callbacks.onApiLog({ method, route: path, timestamp: requestStart, status: 200, appName: 'public' })
+          }
           return new Response(getSwagger(), {
             headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
           })
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // HEALTH (public)
+        // HEALTH (public — privacy-safe, no deviceId/label)
         // ═══════════════════════════════════════════════════════════════
         if (path === '/api/health' && method === 'GET') {
-          return json({ status: 'ok', connected: engine.wallet !== null })
+          return json({
+            version: callbacks?.getVersion?.() || 'unknown',
+            connected: engine.wallet !== null,
+            uptime: Math.floor((Date.now() - startTime) / 1000),
+          })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SDK DETECTION (public — used by keepkey-website-v7 + Pioneer)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/info/ping' && method === 'GET') {
+          return json({ message: 'pong' })
+        }
+
+        if (path === '/system/info/ping' && method === 'POST') {
+          return json({ message: 'pong' })
+        }
+
+        if (path === '/admin/info' && method === 'GET') {
+          return json({
+            version: callbacks?.getVersion?.() || 'unknown',
+            connected: engine.wallet !== null,
+            uptime: Math.floor((Date.now() - startTime) / 1000),
+          })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SWAGGER UI (public — branded API docs)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/docs' && method === 'GET') {
+          if (callbacks?.onApiLog) {
+            callbacks.onApiLog({ method, route: path, timestamp: requestStart, status: 200, appName: 'public' })
+          }
+          return new Response(getSwaggerUiHtml(), {
+            headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders(req) },
+          })
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -216,6 +389,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json(entry.info)
           }
           if (method === 'POST') {
+            // Check if pairing is enabled
+            if (callbacks?.isPairingEnabled && !callbacks.isPairingEnabled()) {
+              return json({ error: 'Pairing disabled' }, 403)
+            }
+
             // Sliding-window rate limit
             const now = Date.now()
             while (pairAttempts.length > 0 && now - pairAttempts[0] > PAIR_RATE_WINDOW_MS) pairAttempts.shift()
@@ -226,9 +404,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
             const body = await req.json() as any
             if (!body.name) throw { status: 400, message: 'Missing name in pairing request' }
+            // Notify UI about the incoming pair request
+            if (callbacks?.onPairRequest) {
+              callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
+            }
             // requestPair requires user approval via UI — NOT auto-granted
             const apiKey = await auth.requestPair(body)
             return json({ apiKey })
+          }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SIGNING APPROVAL GATE — user must approve signing requests
+        // ═══════════════════════════════════════════════════════════════
+        if (method === 'POST' && SIGNING_ROUTES.has(path) && callbacks?.onSigningRequest) {
+          const appName = resolveAppName()
+          const id = crypto.randomUUID()
+          const signingInfo: SigningRequestInfo = { id, method: path, appName }
+
+          // Try to extract useful details from the body without consuming it
+          // (we'll parse body again in the handler below — Bun caches it)
+          try {
+            const preview = await req.clone().json() as any
+            signingInfo.from = preview.from || preview.signerAddress
+            signingInfo.to = preview.to
+            signingInfo.value = preview.value
+            signingInfo.chain = path.split('/')[1] // e.g. "eth", "cosmos"
+            signingInfo.chainId = preview.chainId || preview.chain_id
+            signingInfo.data = preview.data ? (preview.data.length > 66 ? preview.data.slice(0, 66) + '...' : preview.data) : undefined
+          } catch { /* body parse failed, non-fatal */ }
+
+          const approved = await callbacks.onSigningRequest(signingInfo)
+          if (!approved) {
+            return json({ error: 'Signing rejected by user' }, 403)
           }
         }
 
@@ -381,6 +589,25 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.rippleGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : result?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
+        if (path === '/addresses/bnb' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await req.json() as any
+          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const cacheKey = 'bnb:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.binanceGetAddress({
             addressNList: body.address_n,
             showDisplay: body.show_display ?? false,
           })
@@ -629,6 +856,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await req.json() as any
           const result = await wallet.rippleSignTx(body)
+          return json(result)
+        }
+
+        // ── BNB SIGNING (1 endpoint) ─────────────────────────────────
+        if (path === '/bnb/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await req.json() as any
+          const result = await wallet.binanceSignTx(body)
           return json(result)
         }
 
