@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, SigningRequestInfo, ApiLogEntry } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -93,7 +93,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       rejectPairing: { params: void; response: void }
       approveSigningRequest: { params: { id: string }; response: void }
       rejectSigningRequest: { params: { id: string }; response: void }
-      setPairingEnabled: { params: { enabled: boolean }; response: AppSettings }
+      listPairedApps: { params: void; response: PairedAppInfo[] }
+      revokePairing: { params: { apiKey: string }; response: void }
+
+      // ── API Audit Log ──────────────────────────────────────────────────
+      getApiLogs: { params: { limit?: number; offset?: number } | void; response: ApiLogEntry[] }
+      clearApiLogs: { params: void; response: void }
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }

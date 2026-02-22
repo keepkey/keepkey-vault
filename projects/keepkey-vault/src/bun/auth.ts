@@ -1,3 +1,15 @@
+import { getStoredPairings, storePairing, removePairing, clearPairings } from './db'
+import type { PairedAppInfo } from '../shared/types'
+
+/** HTTP-aware error with status code — caught by rest-api error handler */
+export class HttpError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 export interface PairingInfo {
   name: string
   url: string
@@ -10,7 +22,6 @@ interface PairedClient {
   info: PairingInfo
 }
 
-const KEY_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const MAX_KEYS = 20
 
 export class AuthStore {
@@ -19,9 +30,25 @@ export class AuthStore {
   private pendingPair: { info: PairingInfo; resolve: (apiKey: string) => void; reject: (err: Error) => void } | null = null
   private pendingSigningRequests = new Map<string, { resolve: (ok: boolean) => void; timer: Timer }>()
 
+  constructor() {
+    // Seed in-memory map from persisted pairings
+    try {
+      const stored = getStoredPairings()
+      for (const row of stored) {
+        this.keys.set(row.apiKey, {
+          apiKey: row.apiKey,
+          info: { name: row.name, url: row.url, imageUrl: row.imageUrl, addedOn: row.addedOn },
+        })
+      }
+      if (stored.length) console.log(`[auth] Loaded ${stored.length} persisted pairings`)
+    } catch (e: any) {
+      console.warn('[auth] Failed to load stored pairings:', e.message)
+    }
+  }
+
   /** Queue a pairing request — must be approved via approvePairing() */
   requestPair(info: PairingInfo): Promise<string> {
-    if (this.pendingPair) throw { status: 429, message: 'A pairing request is already pending' }
+    if (this.pendingPair) throw new HttpError(429, 'A pairing request is already pending')
     return new Promise((resolve, reject) => {
       this.pendingPair = { info, resolve, reject }
       // Auto-reject after 60s if not approved
@@ -43,7 +70,9 @@ export class AuthStore {
     this.evictIfFull()
     const apiKey = crypto.randomUUID()
     const { info, resolve } = this.pendingPair
-    this.keys.set(apiKey, { apiKey, info: { ...info, addedOn: Date.now() } })
+    const enriched = { ...info, addedOn: Date.now() }
+    this.keys.set(apiKey, { apiKey, info: enriched })
+    storePairing(apiKey, { name: enriched.name, url: enriched.url, imageUrl: enriched.imageUrl, addedOn: enriched.addedOn! })
     this.pendingPair = null
     resolve(apiKey)
     return apiKey
@@ -59,22 +88,26 @@ export class AuthStore {
   pair(info: PairingInfo): string {
     this.evictIfFull()
     const apiKey = crypto.randomUUID()
-    this.keys.set(apiKey, { apiKey, info: { ...info, addedOn: Date.now() } })
+    const enriched = { ...info, addedOn: Date.now() }
+    this.keys.set(apiKey, { apiKey, info: enriched })
+    storePairing(apiKey, { name: enriched.name, url: enriched.url, imageUrl: enriched.imageUrl, addedOn: enriched.addedOn! })
     return apiKey
   }
 
   revoke(apiKey: string): boolean {
-    return this.keys.delete(apiKey)
+    const deleted = this.keys.delete(apiKey)
+    if (deleted) removePairing(apiKey)
+    return deleted
+  }
+
+  revokeAll(): void {
+    this.keys.clear()
+    clearPairings()
   }
 
   validate(apiKey: string): PairedClient | null {
     const entry = this.keys.get(apiKey)
     if (!entry) return null
-    // Expire keys older than TTL
-    if (entry.info.addedOn && Date.now() - entry.info.addedOn > KEY_TTL_MS) {
-      this.keys.delete(apiKey)
-      return null
-    }
     return entry
   }
 
@@ -83,11 +116,18 @@ export class AuthStore {
     if (this.keys.size < MAX_KEYS) return
     // Map iterates in insertion order — first key is oldest
     const oldest = this.keys.keys().next().value
-    if (oldest) this.keys.delete(oldest)
+    if (oldest) {
+      this.keys.delete(oldest)
+      removePairing(oldest)
+    }
   }
 
   /** Queue a signing request — must be approved/rejected by the user */
   requestSigningApproval(id: string, timeoutMs = 120000): Promise<boolean> {
+    // Cap pending requests to prevent memory exhaustion
+    if (this.pendingSigningRequests.size >= 50) {
+      return Promise.resolve(false)
+    }
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pendingSigningRequests.delete(id)
@@ -124,10 +164,33 @@ export class AuthStore {
 
   requireAuth(req: Request): PairedClient {
     const token = this.extractBearerToken(req)
-    if (!token) throw { status: 403, message: 'Unauthorized' }
+    if (!token) throw new HttpError(403, 'Unauthorized')
     const entry = this.validate(token)
-    if (!entry) throw { status: 403, message: 'Unauthorized' }
+    if (!entry) throw new HttpError(403, 'Unauthorized')
     return entry
+  }
+
+  /** List all currently paired apps with their API keys */
+  listPairedApps(): PairedAppInfo[] {
+    const result: PairedAppInfo[] = []
+    for (const [apiKey, entry] of this.keys) {
+      result.push({
+        apiKey,
+        name: entry.info.name,
+        url: entry.info.url,
+        imageUrl: entry.info.imageUrl,
+        addedOn: entry.info.addedOn || 0,
+      })
+    }
+    return result
+  }
+
+  /** Resolve imageUrl for a bearer token (returns empty string if not paired) */
+  resolveImageUrl(req: Request): string {
+    const token = this.extractBearerToken(req)
+    if (!token) return ''
+    const entry = this.validate(token)
+    return entry?.info?.imageUrl || ''
   }
 
   saveAccount(address: string, addressNList: number[]): void {
@@ -136,7 +199,7 @@ export class AuthStore {
 
   getAccount(address: string): { addressNList: number[] } {
     const addressNList = this.accounts.get(address.toLowerCase())
-    if (!addressNList) throw { status: 400, message: `Unrecognized address: ${address}` }
+    if (!addressNList) throw new HttpError(400, `Unrecognized address: ${address}`)
     return { addressNList }
   }
 }

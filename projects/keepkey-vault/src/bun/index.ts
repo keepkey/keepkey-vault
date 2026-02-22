@@ -7,7 +7,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry } from "../shared/types"
@@ -59,19 +59,21 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 	return chain.chainId ? EVM_RPC_URLS[chain.chainId] : undefined
 }
 
-// ── REST API Server (always-on, pairing is gated) ──────────────────────
+// ── REST API Server (opt-in, persisted in DB, default OFF) ─────────────
 const auth = new AuthStore()
-let pairingEnabled = getSetting('pairing_enabled') !== '0' // default true
+let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF
 let appVersionCache = ''
+let restServer: ReturnType<typeof startRestApi> | null = null
 
 function getAppSettings() {
-	return { restApiEnabled: true, pairingEnabled }
+	return { restApiEnabled }
 }
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
 		try { rpc.send['api-log'](entry) } catch { /* webview not ready */ }
+		try { insertApiLog(entry) } catch { /* db not ready */ }
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
@@ -80,13 +82,24 @@ const restCallbacks: RestApiCallbacks = {
 	onPairRequest: (info) => {
 		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
 	},
-	isPairingEnabled: () => pairingEnabled,
 	getVersion: () => appVersionCache,
 }
 
-// REST always starts
-const restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
-console.log(`[Vault] REST API listening on port ${REST_API_PORT} (pairing ${pairingEnabled ? 'enabled' : 'disabled'})`)
+/** Start or stop the REST API server based on the persisted setting */
+function applyRestApiState() {
+	if (restApiEnabled && !restServer) {
+		restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
+		console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+	} else if (!restApiEnabled && restServer) {
+		restServer.stop()
+		restServer = null
+		console.log('[Vault] REST API stopped')
+	}
+}
+
+// Start REST if previously enabled
+applyRestApiState()
+if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings → Application)')
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -729,19 +742,31 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			rejectSigningRequest: async (params) => {
 				if (!auth.rejectSigningRequest(params.id)) throw new Error('No pending signing request with that id')
 			},
-			setPairingEnabled: async (params) => {
-				pairingEnabled = params.enabled
-				setSetting('pairing_enabled', params.enabled ? '1' : '0')
-				return getAppSettings()
+			listPairedApps: async () => {
+				return auth.listPairedApps()
+			},
+			revokePairing: async (params) => {
+				if (!params.apiKey) throw new Error('apiKey required')
+				auth.revoke(params.apiKey)
 			},
 
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
 				return getAppSettings()
 			},
-			setRestApiEnabled: async (_params) => {
-				// Backward compat — REST is always on now, this is a no-op
+			setRestApiEnabled: async (params) => {
+				restApiEnabled = params.enabled
+				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
+				applyRestApiState()
 				return getAppSettings()
+			},
+
+			// ── API Audit Log ────────────────────────────────────────
+			getApiLogs: async (params) => {
+				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0)
+			},
+			clearApiLogs: async () => {
+				clearApiLogs()
 			},
 
 			// ── Utility ──────────────────────────────────────────────
@@ -909,7 +934,7 @@ Updater.localInfo.channel().then(ch => {
 mainWindow.on("close", () => {
 	stopCamera()
 	engine.stop()
-	restServer.stop()
+	restServer?.stop()
 	Utils.quit()
 })
 

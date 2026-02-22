@@ -11,6 +11,8 @@ export const EVM_RPC_URLS: Record<string, string> = {
   '43114': 'https://api.avax.network/ext/bc/C/rpc',
   '56': 'https://bsc-dataseed.binance.org',
   '8453': 'https://mainnet.base.org',
+  '143': 'https://rpc.monad.xyz',
+  '2868': 'https://rpc.hyperliquid.xyz',
 }
 
 async function ethCall(rpcUrl: string, to: string, data: string): Promise<string> {

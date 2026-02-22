@@ -87,6 +87,8 @@ export class EngineController extends EventEmitter {
   // race with the pending getPublicKeys and cause transport "Unexpected message".
   private promptPinActive = false
 
+  get isSyncing(): boolean { return this.syncing }
+
   constructor() {
     super()
     this.keyring = new core.Keyring()

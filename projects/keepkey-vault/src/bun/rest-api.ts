@@ -1,40 +1,32 @@
 import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
+import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry } from '../shared/types'
+import { CHAINS } from '../shared/chains'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import * as S from './schemas'
+import { parseRequest, validateResponse } from './validate'
 
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
   onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
-  isPairingEnabled: () => boolean
   getVersion: () => string
 }
 
-/** Matches any http/https origin on localhost or 127.0.0.1 (any port) */
-const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
-
-/** Custom header required on all non-GET/OPTIONS requests to prevent CSRF */
-const CSRF_HEADER = 'x-keepkey-sdk'
-
-/** Sliding-window rate limiter for /auth/pair — 5 attempts per 60s */
-const PAIR_RATE_LIMIT = 5
-const PAIR_RATE_WINDOW_MS = 60_000
-const pairAttempts: number[] = []
-
-function corsHeaders(req?: Request): Record<string, string> {
-  const origin = req?.headers.get('Origin') || ''
+function corsHeaders(_req?: Request): Record<string, string> {
+  // Use '*' — bearer-token auth model (not cookie-based), so wildcard is safe
+  // and prevents browsers from ever sending credentials via CORS.
   return {
-    'Access-Control-Allow-Origin': LOCALHOST_ORIGIN_RE.test(origin) ? origin : 'http://localhost:1646',
+    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': `Content-Type, Authorization, ${CSRF_HEADER}`,
-    'Vary': 'Origin',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   }
 }
 
 function requireWallet(engine: EngineController) {
-  if (!engine.wallet) throw { status: 503, message: 'No device connected' }
+  if (!engine.wallet) throw new HttpError(503, 'No device connected')
   return engine.wallet
 }
 
@@ -55,6 +47,51 @@ async function getCachedFeatures(wallet: any): Promise<any> {
 /** Clear features cache (call on device disconnect) */
 export function clearFeaturesCache() {
   featuresCache = null
+}
+
+/**
+ * Convert raw hdwallet features (camelCase) to keepkey-desktop REST format (snake_case).
+ * Matches the types.Features schema from keepkey-sdk-server swagger spec.
+ */
+function formatFeatures(f: any): any {
+  const decodeB64 = (x: any): string | undefined => {
+    if (x === undefined || x === null) return undefined
+    if (x instanceof Uint8Array || Buffer.isBuffer(x)) return Buffer.from(x).toString('hex')
+    if (typeof x === 'string') {
+      if (/^[0-9a-fA-F]+$/.test(x)) return x.toLowerCase()
+      return Buffer.from(x, 'base64').toString('hex')
+    }
+    return undefined
+  }
+
+  return {
+    vendor: f.vendor,
+    major_version: f.majorVersion,
+    minor_version: f.minorVersion,
+    patch_version: f.patchVersion,
+    bootloader_mode: f.bootloaderMode ?? false,
+    device_id: f.deviceId,
+    pin_protection: f.pinProtection,
+    passphrase_protection: f.passphraseProtection,
+    language: f.language,
+    label: f.label,
+    initialized: f.initialized,
+    revision: decodeB64(f.revision),
+    bootloader_hash: decodeB64(f.bootloaderHash),
+    imported: f.imported,
+    pin_cached: f.pinCached,
+    passphrase_cached: f.passphraseCached,
+    policies: Array.isArray(f.policiesList) ? f.policiesList.map((p: any) => ({
+      policy_name: p.policyName ?? p.policy_name,
+      enabled: p.enabled,
+    })) : f.policies,
+    model: f.model,
+    firmware_variant: f.firmwareVariant,
+    firmware_hash: decodeB64(f.firmwareHash),
+    no_backup: f.noBackup,
+    wipe_code_protection: f.wipeCodeProtection,
+    auto_lock_delay_ms: f.autoLockDelayMs,
+  }
 }
 
 // ── Public key cache (capped) ─────────────────────────────────────────
@@ -85,8 +122,6 @@ async function cosmosAminoSign(
   defaultGas: string,
 ): Promise<any> {
   const { signDoc, signerAddress } = body
-  if (!signDoc) throw { status: 400, message: 'Missing signDoc' }
-  if (!signerAddress) throw { status: 400, message: 'Missing signerAddress' }
 
   // Default fee if not provided
   if (!signDoc.fee || !signDoc.fee.amount || signDoc.fee.amount.length === 0) {
@@ -97,7 +132,7 @@ async function cosmosAminoSign(
   }
 
   const msgs = signDoc.msgs || signDoc.msg || []
-  if (!Array.isArray(msgs) || msgs.length === 0) throw { status: 400, message: 'signDoc must contain at least one message (msgs or msg)' }
+  if (!Array.isArray(msgs) || msgs.length === 0) throw new HttpError(400, 'signDoc must contain at least one message (msgs or msg)')
 
   const tx = {
     account_number: String(signDoc.account_number),
@@ -151,7 +186,7 @@ async function findEthAddressNList(
       if (addr === lower) return addressNList
     }
   }
-  throw { status: 400, message: `Could not find addressNList for ${fromAddress} (scanned 5 accounts)` }
+  throw new HttpError(400, `Could not find addressNList for ${fromAddress} (scanned 5 accounts)`)
 }
 
 // ── Load swagger.json once ─────────────────────────────────────────────
@@ -258,6 +293,11 @@ function getSwaggerUiHtml(): string {
 </html>`
 }
 
+/** Convert addressNList to BIP32 string, e.g. [0x8000002C, 0x80000000, 0x80000000] → "m/44'/0'/0'" */
+function addressNListToBIP32(addressNList: number[]): string {
+  return 'm/' + addressNList.map(n => n >= 0x80000000 ? `${n - 0x80000000}'` : String(n)).join('/')
+}
+
 /** Start time for uptime calculation */
 const startTime = Date.now()
 
@@ -293,22 +333,32 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const method = req.method
       const requestStart = Date.now()
 
-      // Resolve app name from bearer token (or 'public')
-      const resolveAppName = (): string => {
+      // Resolve app info from bearer token (or 'public')
+      const resolveAppInfo = (): { appName: string; imageUrl: string } => {
         const token = auth.extractBearerToken(req)
-        if (!token) return 'public'
+        if (!token) return { appName: 'public', imageUrl: '' }
         const entry = auth.validate(token)
-        return entry?.info?.name || 'paired'
+        return { appName: entry?.info?.name || 'paired', imageUrl: entry?.info?.imageUrl || '' }
       }
+
+      // Request-scoped body capture (set by POST handlers before json() is called)
+      let reqBody: any = undefined
 
       // Per-request response helpers (capture req for CORS origin check)
       const json = (data: unknown, status = 200) => {
         const resp = new Response(JSON.stringify(data), {
           status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
         })
-        // Log the request
+        // Log the request with body + response + duration
         if (callbacks?.onApiLog) {
-          callbacks.onApiLog({ method, route: path, timestamp: requestStart, status, appName: resolveAppName() })
+          const { appName, imageUrl } = resolveAppInfo()
+          callbacks.onApiLog({
+            method, route: path, timestamp: requestStart,
+            durationMs: Date.now() - requestStart,
+            status, appName, imageUrl: imageUrl || undefined,
+            requestBody: reqBody,
+            responseBody: data,
+          })
         }
         return resp
       }
@@ -318,11 +368,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return new Response(null, { status: 204, headers: corsHeaders(req) })
       }
 
-      // CSRF protection: require custom header on all mutating requests
-      if (method !== 'GET') {
-        if (!req.headers.get(CSRF_HEADER)) {
-          return json({ error: `Missing ${CSRF_HEADER} header` }, 403)
-        }
+      // Capture POST body for audit logging (Bun caches req.json(), so parseRequest still works)
+      if (method === 'POST') {
+        try { reqBody = await req.clone().json() } catch { /* not JSON or empty */ }
       }
 
       try {
@@ -331,7 +379,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (path === '/spec/swagger.json' && method === 'GET') {
           if (callbacks?.onApiLog) {
-            callbacks.onApiLog({ method, route: path, timestamp: requestStart, status: 200, appName: 'public' })
+            callbacks.onApiLog({ method, route: path, timestamp: requestStart, durationMs: Date.now() - requestStart, status: 200, appName: 'public' })
           }
           return new Response(getSwagger(), {
             headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
@@ -341,12 +389,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         // HEALTH (public — privacy-safe, no deviceId/label)
         // ═══════════════════════════════════════════════════════════════
-        if (path === '/api/health' && method === 'GET') {
+        if ((path === '/api/health' || path === '/api/v1/health') && method === 'GET') {
+          const ds = engine.getDeviceState()
           return json({
+            ready: ds.state === 'ready',
+            status: 'healthy',
+            syncing: engine.isSyncing,
+            apiVersion: 2,
+            supportedChains: CHAINS.map(c => c.networkId),
+            device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
             uptime: Math.floor((Date.now() - startTime) / 1000),
+            // Report at least 1 when wallet is connected — signals to SDK that
+            // the batch endpoint is functional and will fetch on-demand from device.
+            // SDK skips batch call entirely when cached_pubkeys === 0.
+            cached_pubkeys: engine.wallet ? Math.max(pubkeyCache.size, 1) : 0,
+            frontload_progress: { status: 'complete', can_operate_offline: false },
           })
+        }
+
+        if (path === '/api/v1/health/fast' && method === 'GET') {
+          return json({ status: 'ok', uptime: Math.floor((Date.now() - startTime) / 1000) })
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -371,9 +435,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         // SWAGGER UI (public — branded API docs)
         // ═══════════════════════════════════════════════════════════════
-        if (path === '/docs' && method === 'GET') {
+        if ((path === '/docs' || path === '/docs/') && method === 'GET') {
           if (callbacks?.onApiLog) {
-            callbacks.onApiLog({ method, route: path, timestamp: requestStart, status: 200, appName: 'public' })
+            callbacks.onApiLog({ method, route: path, timestamp: requestStart, durationMs: Date.now() - requestStart, status: 200, appName: 'public' })
           }
           return new Response(getSwaggerUiHtml(), {
             headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders(req) },
@@ -385,25 +449,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (path === '/auth/pair') {
           if (method === 'GET') {
-            const entry = auth.requireAuth(req)
-            return json(entry.info)
+            // Graceful verify — SDK checks pairing status via GET /auth/pair.
+            // Return { paired: false } instead of 403 so the SDK knows to re-pair.
+            const token = auth.extractBearerToken(req)
+            if (!token) return json({ paired: false, message: 'No bearer token provided' }, 401)
+            const entry = auth.validate(token)
+            if (!entry) return json({ paired: false, message: 'Token expired or invalid' }, 401)
+            return json({ paired: true, ...entry.info })
           }
           if (method === 'POST') {
-            // Check if pairing is enabled
-            if (callbacks?.isPairingEnabled && !callbacks.isPairingEnabled()) {
-              return json({ error: 'Pairing disabled' }, 403)
-            }
-
-            // Sliding-window rate limit
-            const now = Date.now()
-            while (pairAttempts.length > 0 && now - pairAttempts[0] > PAIR_RATE_WINDOW_MS) pairAttempts.shift()
-            if (pairAttempts.length >= PAIR_RATE_LIMIT) {
-              return json({ error: 'Too many pairing attempts. Try again later.' }, 429)
-            }
-            pairAttempts.push(now)
-
-            const body = await req.json() as any
-            if (!body.name) throw { status: 400, message: 'Missing name in pairing request' }
+            const body = await parseRequest(req, S.PairRequest)
             // Notify UI about the incoming pair request
             if (callbacks?.onPairRequest) {
               callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
@@ -415,10 +470,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // SIGNING APPROVAL GATE — user must approve signing requests
+        // SIGNING APPROVAL GATE — auth required, then user must approve
         // ═══════════════════════════════════════════════════════════════
         if (method === 'POST' && SIGNING_ROUTES.has(path) && callbacks?.onSigningRequest) {
-          const appName = resolveAppName()
+          auth.requireAuth(req)
+          const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()
           const signingInfo: SigningRequestInfo = { id, method: path, appName }
 
@@ -440,6 +496,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
         }
 
+        // ── List paired apps (public — shows connected dApps, keys stripped) ──
+        if (path === '/auth/paired-apps' && method === 'GET') {
+          const apps = auth.listPairedApps().map(({ apiKey: _k, ...safe }) => safe)
+          return json({ apps, total: apps.length })
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // All remaining endpoints require auth
         // ═══════════════════════════════════════════════════════════════
@@ -448,8 +510,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/utxo' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -469,8 +530,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/cosmos' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -488,8 +548,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/osmosis' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = 'osmo:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -507,8 +566,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/eth' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -526,8 +584,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/tendermint' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -545,8 +602,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/thorchain' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = 'thor:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -564,8 +620,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/mayachain' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = 'maya:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -583,8 +638,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/xrp' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -602,8 +656,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/addresses/bnb' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = 'bnb:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
@@ -622,14 +675,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
+          const body = await parseRequest(req, S.EthSignTransactionRequest)
 
           // Resolve addressNList from body or by scanning
           let addressNList = body.addressNList || body.address_n_list
           if (!addressNList && body.from) {
             addressNList = await findEthAddressNList(wallet, auth, body.from)
           }
-          if (!addressNList) throw { status: 400, message: 'Missing from address or addressNList' }
 
           // chainId: default to 1 if 0 or missing
           let chainId = body.chainId ?? body.chain_id ?? 1
@@ -657,15 +709,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           const result = await wallet.ethSignTx(msg)
-          return json(result)
+          return json(validateResponse(result, S.EthSignTransactionResponse, path))
         }
 
         if (path === '/eth/sign-typed-data' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address) throw { status: 400, message: 'Missing address' }
-          if (!body.typedData) throw { status: 400, message: 'Missing typedData' }
+          const body = await parseRequest(req, S.EthSignTypedDataRequest)
           const { addressNList } = auth.getAccount(body.address)
           const result = await wallet.ethSignTypedData({ addressNList, typedData: body.typedData })
           return json(result)
@@ -674,12 +724,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/eth/sign' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address) throw { status: 400, message: 'Missing address' }
-          if (!body.message) throw { status: 400, message: 'Missing message' }
-          if (typeof body.message !== 'string' || !/^0x[0-9a-fA-F]*$/.test(body.message)) {
-            throw { status: 400, message: 'Message must be a 0x-prefixed hex string' }
-          }
+          const body = await parseRequest(req, S.EthSignRequest)
           const { addressNList } = auth.getAccount(body.address)
           const msgBytes = Buffer.from(body.message.slice(2), 'hex')
           const result = await wallet.ethSignMessage({ addressNList, message: msgBytes })
@@ -689,10 +734,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/eth/verify' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address || !body.message || !body.signature) {
-            throw { status: 400, message: 'Missing address, message, or signature' }
-          }
+          const body = await parseRequest(req, S.EthVerifyRequest)
           const msgBytes = Buffer.from(body.message.replace(/^0x/, ''), 'hex')
           const result = await wallet.ethVerifyMessage({
             address: body.address,
@@ -706,7 +748,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/utxo/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
+          const body = await parseRequest(req, S.UtxoSignTransactionRequest)
           const coin = body.coin || 'Bitcoin'
 
           // BCH: prepend bitcoincash: prefix to output addresses
@@ -725,136 +767,136 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
           })
-          return json(result)
+          return json(validateResponse(result, S.UtxoSignTransactionResponse, path))
         }
 
         // ── COSMOS SIGNING (6 endpoints) ──────────────────────────────
         if (path === '/cosmos/sign-amino' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-delegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-undelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-redelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-withdraw-delegator-rewards-all' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-ibc-transfer' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
         }
 
         // ── OSMOSIS SIGNING (9 endpoints) ────────────────────────────
         if (path === '/osmosis/sign-amino' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-delegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-undelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-redelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-withdraw-delegator-rewards-all' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-ibc-transfer' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-lp-remove' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-lp-add' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-swap' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
         }
 
         // ── THORCHAIN SIGNING (2 endpoints) ──────────────────────────
         if (path === '/thorchain/sign-amino-transfer' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/thorchain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'), S.CosmosAminoSignResponse, path))
         }
 
         // ── MAYACHAIN SIGNING (2 endpoints) ──────────────────────────
         if (path === '/mayachain/sign-amino-transfer' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'), S.CosmosAminoSignResponse, path))
         }
         if (path === '/mayachain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          return json(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'))
+          const body = await parseRequest(req, S.CosmosAminoSignRequest)
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'), S.CosmosAminoSignResponse, path))
         }
 
         // ── XRP SIGNING (1 endpoint) ─────────────────────────────────
         if (path === '/xrp/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
+          const body = await parseRequest(req, S.XrpSignRequest)
           const result = await wallet.rippleSignTx(body)
           return json(result)
         }
@@ -863,7 +905,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/bnb/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
+          const body = await parseRequest(req, S.BnbSignRequest)
           const result = await wallet.binanceSignTx(body)
           return json(result)
         }
@@ -873,14 +915,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const features = await getCachedFeatures(wallet)
-          return json(features)
+          return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
         }
 
         if (path === '/system/info/get-public-key' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
+          const body = await parseRequest(req, S.GetPublicKeyRequest)
           const cacheKey = JSON.stringify(body)
           const cached = pubkeyCache.get(cacheKey)
           if (cached) return json(cached)
@@ -895,11 +936,358 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const out = { xpub }
           if (pubkeyCache.size >= MAX_CACHE_SIZE) evictOldest(pubkeyCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           pubkeyCache.set(cacheKey, out)
-          return json(out)
+          return json(validateResponse(out, S.GetPublicKeyResponse, path))
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // V2 DEVICE MANAGEMENT (5 endpoints — require auth, single-device mode)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v2/devices' && method === 'GET') {
+          auth.requireAuth(req)
+          const ds = engine.getDeviceState()
+          const devices = ds.deviceId ? [{
+            device_id: ds.deviceId,
+            is_active: true,
+            state: ds.state,
+            name: ds.label || 'KeepKey',
+          }] : []
+          return json({ devices, total: devices.length })
+        }
+
+        if (path === '/api/v2/devices/active' && method === 'GET') {
+          auth.requireAuth(req)
+          const ds = engine.getDeviceState()
+          if (!ds.deviceId) return json({ error: 'No active device' }, 404)
+          return json({ device_id: ds.deviceId, state: ds.state })
+        }
+
+        if (path === '/api/v2/devices/paired' && method === 'GET') {
+          auth.requireAuth(req)
+          const ds = engine.getDeviceState()
+          const devices = ds.deviceId ? [{
+            device_id: ds.deviceId,
+            is_connected: true,
+            is_active: true,
+            total_frontloads: 0,
+            first_seen: new Date().toISOString(),
+            last_seen: new Date().toISOString(),
+          }] : []
+          return json({
+            total_paired: devices.length,
+            total_connected: devices.length,
+            devices,
+          })
+        }
+
+        if (path === '/api/v2/devices/select' && method === 'POST') {
+          auth.requireAuth(req)
+          const ds = engine.getDeviceState()
+          return json({
+            success: true,
+            device_id: ds.deviceId || null,
+            message: 'Single-device mode — device selected',
+          })
+        }
+
+        // /api/v2/devices/:id — must come AFTER specific paths above
+        if (path.startsWith('/api/v2/devices/') && method === 'GET') {
+          auth.requireAuth(req)
+          const id = path.split('/').pop()
+          const ds = engine.getDeviceState()
+          if (!ds.deviceId || ds.deviceId !== id) {
+            return json({ error: 'Device not found' }, 404)
+          }
+          return json({ device_id: ds.deviceId, is_active: true, state: ds.state })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SDK-CALLED ENDPOINTS (cache, portfolio, batch pubkeys)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/cache/status' && method === 'GET') {
+          return json({
+            available: true,
+            cached_pubkeys: pubkeyCache.size,
+            cached_addresses: addressCache.size,
+          })
+        }
+
+        if (path === '/api/portfolio' && method === 'GET') {
+          const ds = engine.getDeviceState()
+          return json({
+            devices: ds.deviceId ? [{ state: ds.state }] : [],
+            total_value_usd: 0,
+            message: 'Portfolio aggregation not implemented — use Pioneer API for balances',
+          })
+        }
+
+        if (path.startsWith('/api/portfolio/') && method === 'GET') {
+          auth.requireAuth(req)
+          const deviceId = path.split('/').pop()
+          const ds = engine.getDeviceState()
+          if (!ds.deviceId || ds.deviceId !== deviceId) {
+            return json({ error: 'Device not found' }, 404)
+          }
+          return json({
+            device_id: ds.deviceId,
+            state: ds.state,
+            total_value_usd: 0,
+            message: 'Portfolio not implemented — use Pioneer API for balances',
+          })
+        }
+
+        if (path === '/api/pubkeys/batch' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.BatchPubkeysRequest)
+          const paths = body.paths || []
+          const results: any[] = []
+
+          for (const p of paths) {
+            if (!p.address_n || !Array.isArray(p.address_n)) continue
+
+            // ── Address-type paths (non-UTXO: XRP, ETH, Cosmos, etc.) ──
+            // SDK sends type='address' for chains that need actual addresses, not xpubs.
+            if (p.type === 'address') {
+              const primaryNetwork = (p.networks || [])[0] || ''
+              const addrCacheKey = `batch-addr:${JSON.stringify(p.address_n)}:${primaryNetwork}`
+              const cachedAddr = addressCache.get(addrCacheKey)
+              if (cachedAddr) {
+                results.push({
+                  pubkey: cachedAddr,
+                  address: cachedAddr,
+                  path: addressNListToBIP32(p.address_n),
+                  pathMaster: addressNListToBIP32(p.address_n.slice(0, 3)),
+                  scriptType: p.script_type || 'p2pkh',
+                  networks: p.networks || [],
+                  type: 'address',
+                  note: p.note,
+                  addressNList: p.address_n,
+                })
+                continue
+              }
+
+              try {
+                const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
+                // Extend account-level path (3 elements) to full derivation path
+                const addrNList = p.address_n.length <= 3 ? [...p.address_n, 0, 0] : p.address_n
+                let address = ''
+
+                if (coinType === 60) {
+                  const r = await wallet.ethGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                } else if (coinType === 144) {
+                  const r = await wallet.rippleGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                } else if (coinType === 714) {
+                  const r = await wallet.binanceGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                } else if (primaryNetwork.includes('thorchain')) {
+                  const r = await wallet.thorchainGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                } else if (primaryNetwork.includes('maya')) {
+                  const r = await wallet.mayachainGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                } else if (primaryNetwork.includes('osmosis')) {
+                  const r = await wallet.osmosisGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                } else if (coinType === 118 || coinType === 931) {
+                  const r = await wallet.cosmosGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : r?.address || ''
+                }
+
+                if (address) {
+                  if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+                  addressCache.set(addrCacheKey, address)
+                  auth.saveAccount(address, addrNList)
+                }
+
+                results.push({
+                  pubkey: address,
+                  address,
+                  path: addressNListToBIP32(p.address_n),
+                  pathMaster: addressNListToBIP32(p.address_n.slice(0, 3)),
+                  scriptType: p.script_type || 'p2pkh',
+                  networks: p.networks || [],
+                  type: 'address',
+                  note: p.note,
+                  addressNList: p.address_n,
+                })
+              } catch (err: any) {
+                console.warn(`[REST] batch address failed for path ${JSON.stringify(p.address_n)}:`, err?.message)
+              }
+              continue
+            }
+
+            // ── xpub/ypub/zpub-type paths (UTXO chains) ──
+            const cacheKey = JSON.stringify({ address_n: p.address_n, script_type: p.script_type })
+            const cached = pubkeyCache.get(cacheKey)
+            if (cached) {
+              results.push({
+                pubkey: cached.xpub || '',
+                address: '',
+                path: addressNListToBIP32(p.address_n),
+                pathMaster: addressNListToBIP32(p.address_n.slice(0, 3)),
+                scriptType: p.script_type || 'p2pkh',
+                networks: p.networks || [],
+                type: p.type || 'xpub',
+                note: p.note,
+                addressNList: p.address_n,
+              })
+              continue
+            }
+            try {
+              const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
+              const coin = p.coin || (coinType === 60 ? 'Ethereum' : 'Bitcoin')
+              const result = await wallet.getPublicKeys([{
+                addressNList: p.address_n,
+                curve: 'secp256k1',
+                showDisplay: false,
+                coin,
+                scriptType: p.script_type,
+              }])
+              const xpub = result?.[0]?.xpub || ''
+              const out = { xpub }
+              if (pubkeyCache.size >= MAX_CACHE_SIZE) evictOldest(pubkeyCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+              pubkeyCache.set(cacheKey, out)
+              results.push({
+                pubkey: xpub,
+                address: '',
+                path: addressNListToBIP32(p.address_n),
+                pathMaster: addressNListToBIP32(p.address_n.slice(0, 3)),
+                scriptType: p.script_type || 'p2pkh',
+                networks: p.networks || [],
+                type: p.type || 'xpub',
+                note: p.note,
+                addressNList: p.address_n,
+              })
+            } catch (err: any) {
+              console.warn(`[REST] batch pubkey failed for path ${JSON.stringify(p.address_n)}:`, err?.message)
+            }
+          }
+
+          return json({
+            pubkeys: results,
+            cached_count: results.length,
+            total_requested: paths.length,
+          })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SYSTEM MANAGEMENT (keepkey-desktop compatible — require auth)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/system/info/list-coins' && method === 'POST') {
+          auth.requireAuth(req)
+          return json(CHAINS.map(c => ({
+            coin_name: c.coin,
+            coin_shortcut: c.symbol,
+            chain: c.chain,
+            chain_family: c.chainFamily,
+            network_id: c.networkId,
+            caip: c.caip,
+            decimals: c.decimals,
+          })))
+        }
+
+        if (path === '/system/apply-settings' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.ApplySettingsRequest)
+          const settings: any = {}
+          if (body.label !== undefined) settings.label = body.label
+          if (body.use_passphrase !== undefined) settings.usePassphrase = body.use_passphrase
+          if (body.autolock_delay_ms !== undefined) settings.autoLockDelayMs = body.autolock_delay_ms
+          await wallet.applySettings(settings)
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/change-pin' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.ChangePinRequest).catch(() => ({} as any))
+          if (body.remove) {
+            await wallet.removePin()
+          } else {
+            await wallet.changePin()
+          }
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/apply-policies' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.ApplyPoliciesRequest)
+          await wallet.applyPolicy(body)
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/wipe-device' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await wallet.wipe()
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/clear-session' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await wallet.clearSession()
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/initialize/reset-device' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.ResetDeviceRequest)
+          await wallet.reset({
+            entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
+            label: body.label || 'KeepKey',
+            pin: body.pin_protection ?? true,
+            passphrase: body.passphrase_protection ?? false,
+            autoLockDelayMs: 600000,
+          })
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/initialize/recover-device' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.RecoverDeviceRequest)
+          await wallet.recover({
+            entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
+            label: body.label || 'KeepKey',
+            pin: body.pin_protection ?? true,
+            passphrase: body.passphrase_protection ?? false,
+            autoLockDelayMs: 600000,
+          })
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/initialize/load-device' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.LoadDeviceRequest)
+          await wallet.loadDevice(body)
+          featuresCache = null
+          return json({ success: true })
+        }
+
+        if (path === '/system/recovery/pin' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SendPinRequest)
+          await wallet.sendPin(body.pin)
+          return json({ success: true })
         }
 
         // ── Catch-all ────────────────────────────────────────────────
-        // Sequential if/else routing is fine for ~35 localhost-only endpoints.
+        // Sequential if/else routing is fine for ~60 localhost-only endpoints.
         // A Map-based router adds complexity with no measurable perf gain here.
         return json({ error: 'Not found', path }, 404)
 

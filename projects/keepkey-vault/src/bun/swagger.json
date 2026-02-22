@@ -3971,6 +3971,185 @@
         },
         "tags": ["Signing"]
       }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "V1Health",
+        "summary": "V1 Health check (alias for /api/health)",
+        "responses": { "200": { "description": "Health status", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Health"]
+      }
+    },
+    "/api/v1/health/fast": {
+      "get": {
+        "operationId": "V1HealthFast",
+        "summary": "Fast health check (minimal response)",
+        "responses": { "200": { "description": "Minimal health", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "uptime": { "type": "integer" } } } } } } },
+        "tags": ["Health"]
+      }
+    },
+    "/api/v2/devices": {
+      "get": {
+        "operationId": "V2ListDevices",
+        "summary": "List all connected devices",
+        "responses": { "200": { "description": "Device list", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/active": {
+      "get": {
+        "operationId": "V2GetActiveDevice",
+        "summary": "Get the active device",
+        "responses": { "200": { "description": "Active device", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "No active device" } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/select": {
+      "post": {
+        "operationId": "V2SelectDevice",
+        "summary": "Select active device (single-device mode)",
+        "responses": { "200": { "description": "Device selected", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/paired": {
+      "get": {
+        "operationId": "V2GetPairedDevices",
+        "summary": "Get all paired device history",
+        "responses": { "200": { "description": "Paired devices", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/{id}": {
+      "get": {
+        "operationId": "V2GetDevice",
+        "summary": "Get a specific device by ID",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Device info", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/cache/status": {
+      "get": {
+        "operationId": "GetCacheStatus",
+        "summary": "Get cache status (pubkeys and addresses)",
+        "responses": { "200": { "description": "Cache status", "content": { "application/json": { "schema": { "type": "object", "properties": { "available": { "type": "boolean" }, "cached_pubkeys": { "type": "integer" }, "cached_addresses": { "type": "integer" } } } } } } },
+        "tags": ["Cache"]
+      }
+    },
+    "/api/portfolio": {
+      "get": {
+        "operationId": "GetPortfolio",
+        "summary": "Get combined portfolio for all devices",
+        "responses": { "200": { "description": "Portfolio data", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Portfolio"]
+      }
+    },
+    "/api/portfolio/{deviceId}": {
+      "get": {
+        "operationId": "GetDevicePortfolio",
+        "summary": "Get portfolio for a specific device",
+        "parameters": [{ "name": "deviceId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Device portfolio", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
+        "tags": ["Portfolio"]
+      }
+    },
+    "/api/pubkeys/batch": {
+      "post": {
+        "operationId": "BatchGetPubkeys",
+        "summary": "Get multiple public keys in a single batch call",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "paths": { "type": "array", "items": { "type": "object", "properties": { "address_n": { "$ref": "#/components/schemas/types.AddressNList" }, "script_type": { "type": "string" }, "coin": { "type": "string" }, "networks": { "type": "array", "items": { "type": "string" } }, "type": { "type": "string" } }, "required": ["address_n"] } }, "context": { "type": "string" } }, "required": ["paths"] } } },
+          "required": true
+        },
+        "responses": { "200": { "description": "Batch pubkey results", "content": { "application/json": { "schema": { "type": "object", "properties": { "pubkeys": { "type": "array", "items": { "type": "object" } }, "cached_count": { "type": "integer" }, "total_requested": { "type": "integer" }, "device_id": { "type": "string" } } } } } }, "503": { "description": "No device connected" } },
+        "tags": ["Pubkeys"]
+      }
+    },
+    "/system/apply-settings": {
+      "post": {
+        "operationId": "ApplySettings",
+        "summary": "Change device configuration (label, passphrase, autolock)",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "label": { "type": "string" }, "use_passphrase": { "type": "boolean" }, "autolock_delay_ms": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Settings applied" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/change-pin": {
+      "post": {
+        "operationId": "ChangePin",
+        "summary": "Change or remove device PIN",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "remove": { "type": "boolean" } } } } } },
+        "responses": { "200": { "description": "PIN operation started" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/apply-policies": {
+      "post": {
+        "operationId": "ApplyPolicies",
+        "summary": "Enable or disable device policies",
+        "responses": { "200": { "description": "Policies applied" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/wipe-device": {
+      "post": {
+        "operationId": "WipeDevice",
+        "summary": "Wipe and reset device to factory defaults",
+        "responses": { "200": { "description": "Device wiped" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/clear-session": {
+      "post": {
+        "operationId": "ClearSession",
+        "summary": "Lock device (forget PIN and passphrase)",
+        "responses": { "200": { "description": "Session cleared" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/initialize/reset-device": {
+      "post": {
+        "operationId": "ResetDevice",
+        "summary": "Set up device and generate new seed",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "word_count": { "type": "integer" }, "pin_protection": { "type": "boolean" }, "passphrase_protection": { "type": "boolean" }, "label": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Device reset started" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/initialize/recover-device": {
+      "post": {
+        "operationId": "RecoverDevice",
+        "summary": "Recover device from seed phrase",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "word_count": { "type": "integer" }, "pin_protection": { "type": "boolean" }, "passphrase_protection": { "type": "boolean" }, "label": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Recovery started" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/initialize/load-device": {
+      "post": {
+        "operationId": "LoadDevice",
+        "summary": "Load externally-derived keys into device (NOT RECOMMENDED)",
+        "responses": { "200": { "description": "Device loaded" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/recovery/pin": {
+      "post": {
+        "operationId": "SendRecoveryPin",
+        "summary": "Send PIN during device setup or unlock flow",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "pin": { "type": "string" } }, "required": ["pin"] } } }, "required": true },
+        "responses": { "200": { "description": "PIN accepted" }, "400": { "description": "Missing pin" } },
+        "tags": ["System"]
+      }
     }
   },
   "components": {

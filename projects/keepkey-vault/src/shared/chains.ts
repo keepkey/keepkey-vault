@@ -90,6 +90,18 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '8453',
   },
   {
+    id: 'monad', chain: Chain.Monad, coin: 'Monad', symbol: 'MON',
+    chainFamily: 'evm', color: '#1F70FF',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '143',
+  },
+  {
+    id: 'hyperliquid', chain: Chain.Hyperliquid, coin: 'Hyperliquid', symbol: 'HYPE',
+    chainFamily: 'evm', color: '#00D084',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '2868',
+  },
+  {
     id: 'cosmos', chain: Chain.Cosmos, coin: 'Cosmos', symbol: 'ATOM',
     chainFamily: 'cosmos', color: '#2E3148',
     rpcMethod: 'cosmosGetAddress', signMethod: 'cosmosSignTx',
@@ -140,6 +152,12 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#008CE7',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000005, 0x80000000, 0, 0], scriptType: 'p2pkh',
+  },
+  {
+    id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
+    chainFamily: 'utxo', color: '#315BCA',
+    rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
+    defaultPath: [0x8000002C, 0x80000014, 0x80000000, 0, 0], scriptType: 'p2pkh',
   },
   {
     id: 'binance', chain: Chain.Binance, coin: 'Binance', symbol: 'BNB',

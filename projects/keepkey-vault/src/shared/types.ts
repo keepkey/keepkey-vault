@@ -169,6 +169,14 @@ export interface PairingRequestInfo {
   imageUrl: string
 }
 
+export interface PairedAppInfo {
+  apiKey: string
+  name: string
+  url: string
+  imageUrl: string
+  addedOn: number
+}
+
 export interface SigningRequestInfo {
   id: string
   method: string
@@ -182,17 +190,21 @@ export interface SigningRequestInfo {
 }
 
 export interface ApiLogEntry {
+  id?: number            // SQLite rowid (set after DB insert)
   method: string
   route: string
   timestamp: number
+  durationMs: number     // response time in ms
   status: number
   appName: string
+  imageUrl?: string
+  requestBody?: any      // parsed JSON body (POST requests)
+  responseBody?: any     // parsed JSON response
 }
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
-  restApiEnabled: boolean   // always true now (backward compat)
-  pairingEnabled: boolean   // controls /auth/pair availability
+  restApiEnabled: boolean   // controls entire REST API server on/off
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────

@@ -8,9 +8,9 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry } from '../shared/types'
 
-const SCHEMA_VERSION = '3'
+const SCHEMA_VERSION = '5'
 
 let db: Database | null = null
 
@@ -78,6 +78,16 @@ export function initDb() {
     `)
 
     db.exec(`
+      CREATE TABLE IF NOT EXISTS paired_apps (
+        api_key   TEXT PRIMARY KEY,
+        name      TEXT NOT NULL,
+        url       TEXT NOT NULL DEFAULT '',
+        image_url TEXT NOT NULL DEFAULT '',
+        added_on  INTEGER NOT NULL
+      )
+    `)
+
+    db.exec(`
       CREATE TABLE IF NOT EXISTS settings (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -91,6 +101,22 @@ export function initDb() {
         updated_at INTEGER NOT NULL
       )
     `)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS api_log (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        method        TEXT NOT NULL,
+        route         TEXT NOT NULL,
+        timestamp     INTEGER NOT NULL,
+        duration_ms   INTEGER NOT NULL DEFAULT 0,
+        status        INTEGER NOT NULL,
+        app_name      TEXT NOT NULL DEFAULT 'public',
+        image_url     TEXT,
+        request_body  TEXT,
+        response_body TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_ts ON api_log(timestamp DESC)`)
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -352,5 +378,121 @@ export function getTokensByVisibility(status: TokenVisibilityStatus): TokenVisib
   } catch (e: any) {
     console.warn('[db] getTokensByVisibility failed:', e.message)
     return []
+  }
+}
+
+// ── Paired Apps ──────────────────────────────────────────────────────
+
+export function getStoredPairings(): PairedAppInfo[] {
+  try {
+    if (!db) return []
+    const rows = db.query('SELECT api_key, name, url, image_url, added_on FROM paired_apps').all() as Array<{
+      api_key: string; name: string; url: string; image_url: string; added_on: number
+    }>
+    return rows.map(r => ({ apiKey: r.api_key, name: r.name, url: r.url, imageUrl: r.image_url, addedOn: r.added_on }))
+  } catch (e: any) {
+    console.warn('[db] getStoredPairings failed:', e.message)
+    return []
+  }
+}
+
+export function storePairing(apiKey: string, info: { name: string; url: string; imageUrl: string; addedOn: number }) {
+  try {
+    if (!db) return
+    db.run(
+      'INSERT OR REPLACE INTO paired_apps (api_key, name, url, image_url, added_on) VALUES (?, ?, ?, ?, ?)',
+      [apiKey, info.name, info.url || '', info.imageUrl || '', info.addedOn]
+    )
+  } catch (e: any) {
+    console.warn('[db] storePairing failed:', e.message)
+  }
+}
+
+export function removePairing(apiKey: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM paired_apps WHERE api_key = ?', [apiKey])
+  } catch (e: any) {
+    console.warn('[db] removePairing failed:', e.message)
+  }
+}
+
+export function clearPairings() {
+  try {
+    if (!db) return
+    db.run('DELETE FROM paired_apps')
+  } catch (e: any) {
+    console.warn('[db] clearPairings failed:', e.message)
+  }
+}
+
+// ── API Audit Log ──────────────────────────────────────────────────────
+
+const MAX_API_LOG_ROWS = 5000
+
+/** Insert an API log entry and prune old rows beyond MAX_API_LOG_ROWS */
+export function insertApiLog(entry: ApiLogEntry) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        entry.method,
+        entry.route,
+        entry.timestamp,
+        entry.durationMs,
+        entry.status,
+        entry.appName,
+        entry.imageUrl || null,
+        entry.requestBody ? JSON.stringify(entry.requestBody) : null,
+        entry.responseBody ? JSON.stringify(entry.responseBody) : null,
+      ]
+    )
+    // Periodic prune (every ~100 inserts, check if over limit)
+    if (Math.random() < 0.01) {
+      db.run(`DELETE FROM api_log WHERE id NOT IN (SELECT id FROM api_log ORDER BY timestamp DESC LIMIT ?)`, [MAX_API_LOG_ROWS])
+    }
+  } catch (e: any) {
+    console.warn('[db] insertApiLog failed:', e.message)
+  }
+}
+
+/** Get recent API log entries (newest first) */
+export function getApiLogs(limit = 200, offset = 0): ApiLogEntry[] {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      'SELECT id, method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body FROM api_log ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+    ).all(limit, offset) as Array<{
+      id: number; method: string; route: string; timestamp: number; duration_ms: number;
+      status: number; app_name: string; image_url: string | null;
+      request_body: string | null; response_body: string | null
+    }>
+    return rows.map(r => ({
+      id: r.id,
+      method: r.method,
+      route: r.route,
+      timestamp: r.timestamp,
+      durationMs: r.duration_ms,
+      status: r.status,
+      appName: r.app_name,
+      imageUrl: r.image_url || undefined,
+      requestBody: r.request_body ? JSON.parse(r.request_body) : undefined,
+      responseBody: r.response_body ? JSON.parse(r.response_body) : undefined,
+    }))
+  } catch (e: any) {
+    console.warn('[db] getApiLogs failed:', e.message)
+    return []
+  }
+}
+
+/** Clear all API logs */
+export function clearApiLogs() {
+  try {
+    if (!db) return
+    db.run('DELETE FROM api_log')
+  } catch (e: any) {
+    console.warn('[db] clearApiLogs failed:', e.message)
   }
 }

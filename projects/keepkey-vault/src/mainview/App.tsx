@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex } from "@chakra-ui/react"
+import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { PinEntry } from "./components/device/PinEntry"
 import { PassphraseEntry } from "./components/device/PassphraseEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
 import { PairingApproval } from "./components/device/PairingApproval"
 import { SigningApproval } from "./components/device/SigningApproval"
 import { ApiAuditLog } from "./components/ApiAuditLog"
+import { PairedAppsPanel } from "./components/PairedAppsPanel"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
@@ -18,7 +19,8 @@ import { UpdateBanner } from "./components/UpdateBanner"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
-import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry } from "../shared/types"
+import { Z } from "./lib/z-index"
+import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
@@ -31,11 +33,17 @@ function App() {
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
+	const [restApiEnabled, setRestApiEnabled] = useState(false)
+	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
+	const [enablingApi, setEnablingApi] = useState(false)
 
-	// Fetch app version on mount
+	// Fetch app version + REST API state on mount
 	useEffect(() => {
 		rpcRequest<{ version: string; channel: string }>("getAppVersion")
 			.then(setAppVersion)
+			.catch(() => {})
+		rpcRequest<AppSettings>("getAppSettings")
+			.then((s) => setRestApiEnabled(s.restApiEnabled))
 			.catch(() => {})
 	}, [])
 
@@ -136,17 +144,29 @@ function App() {
 		setSigningRequest(null)
 	}, [signingRequest])
 
+	// ── Paired Apps panel ───────────────────────────────────────────
+	const [pairedAppsOpen, setPairedAppsOpen] = useState(false)
+
 	// ── API Audit Log ───────────────────────────────────────────────
 	const [auditLogOpen, setAuditLogOpen] = useState(false)
 	const [auditLogEntries, setAuditLogEntries] = useState<ApiLogEntry[]>([])
 	const auditAutoOpened = useCallback(() => {}, []) // placeholder ref
+
+	// Load persisted API logs from SQLite on mount
+	useEffect(() => {
+		rpcRequest<ApiLogEntry[]>("getApiLogs", { limit: 200 })
+			.then((logs) => {
+				if (logs?.length) setAuditLogEntries(logs)
+			})
+			.catch(() => {})
+	}, [])
 
 	useEffect(() => {
 		return onRpcMessage("api-log", (payload) => {
 			const entry = payload as ApiLogEntry
 			setAuditLogEntries((prev) => {
 				const next = [entry, ...prev]
-				return next.length > 50 ? next.slice(0, 50) : next
+				return next.length > 200 ? next.slice(0, 200) : next
 			})
 			// Auto-open on first non-public signing-related request
 			if (entry.appName !== "public" && entry.route !== "/api/health" && entry.route !== "/spec/swagger.json") {
@@ -215,31 +235,57 @@ function App() {
 		if (deviceState.state !== "ready") setPortfolioLoaded(false)
 	}, [deviceState.state])
 
-	// ── Tab change handler ──────────────────────────────────────────
-	const handleTabChange = useCallback(async (tab: NavTab) => {
-		if (tab === "shapeshift") {
-			// REST API is always on — open ShapeShift in browser + show audit log
-			try {
-				await rpcRequest("openUrl", { url: "https://app.shapeshift.com" }, 5000)
-			} catch (e) {
-				console.error("Failed to open ShapeShift:", e)
-			}
-			setAuditLogOpen(true)
-			// Don't switch tab — stay on current view
-			return
-		}
-		setActiveTab(tab)
-	}, [])
-
-	// ── Open app from AppStore ───────────────────────────────────────
-	const handleOpenApp = useCallback(async (url: string) => {
-		// Open external app in system browser + auto-show audit log for bridge traffic
+	// ── Launch an external app (gate on REST API) ──────────────────
+	const launchApp = useCallback(async (url: string) => {
 		try {
 			await rpcRequest("openUrl", { url }, 5000)
 		} catch (e) {
 			console.error("Failed to open app:", e)
 		}
 		setAuditLogOpen(true)
+	}, [])
+
+	// ── Tab change handler ──────────────────────────────────────────
+	const handleTabChange = useCallback(async (tab: NavTab) => {
+		if (tab === "shapeshift") {
+			if (!restApiEnabled) {
+				setPendingAppUrl("https://app.shapeshift.com")
+				return
+			}
+			await launchApp("https://app.shapeshift.com")
+			return
+		}
+		setActiveTab(tab)
+	}, [restApiEnabled, launchApp])
+
+	// ── Open app from AppStore ───────────────────────────────────────
+	const handleOpenApp = useCallback(async (url: string) => {
+		if (!restApiEnabled) {
+			setPendingAppUrl(url)
+			return
+		}
+		await launchApp(url)
+	}, [restApiEnabled, launchApp])
+
+	// ── Enable API dialog handlers ──────────────────────────────────
+	const handleEnableApiAndLaunch = useCallback(async () => {
+		if (!pendingAppUrl) return
+		setEnablingApi(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setRestApiEnabled", { enabled: true }, 10000)
+			setRestApiEnabled(result.restApiEnabled)
+			if (result.restApiEnabled) {
+				await launchApp(pendingAppUrl)
+			}
+		} catch (e) {
+			console.error("Failed to enable REST API:", e)
+		}
+		setEnablingApi(false)
+		setPendingAppUrl(null)
+	}, [pendingAppUrl, launchApp])
+
+	const handleCancelAppLaunch = useCallback(() => {
+		setPendingAppUrl(null)
 	}, [])
 
 	const handleOpenKeepKey = useCallback(() => {
@@ -376,12 +422,91 @@ function App() {
 				updatePhase={update.phase}
 				appVersion={appVersion}
 				onOpenAuditLog={() => setAuditLogOpen(true)}
+				onOpenPairedApps={() => setPairedAppsOpen(true)}
+				onRestApiChanged={setRestApiEnabled}
 			/>
 			<ApiAuditLog
 				open={auditLogOpen}
 				entries={auditLogEntries}
 				onClose={() => setAuditLogOpen(false)}
 			/>
+			<PairedAppsPanel
+				open={pairedAppsOpen}
+				onClose={() => setPairedAppsOpen(false)}
+			/>
+			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
+			{pendingAppUrl && (
+				<>
+					<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={handleCancelAppLaunch} />
+					<Box
+						position="fixed"
+						top="50%"
+						left="50%"
+						transform="translate(-50%, -50%)"
+						w="380px"
+						maxW="90vw"
+						bg="kk.bg"
+						border="1px solid"
+						borderColor="kk.border"
+						borderRadius="xl"
+						zIndex={Z.dialog + 1}
+						overflow="hidden"
+						role="dialog"
+						aria-modal="true"
+						aria-label="Enable API Bridge"
+					>
+						<Box px="6" pt="5" pb="4">
+							<Flex align="center" gap="2" mb="3">
+								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M4 11a9 9 0 0 1 9 9" />
+									<path d="M4 4a16 16 0 0 1 16 16" />
+									<circle cx="5" cy="19" r="1" />
+								</svg>
+								<Text fontSize="md" fontWeight="600" color="kk.textPrimary">
+									API Bridge Required
+								</Text>
+							</Flex>
+							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5" mb="2">
+								This app communicates with your KeepKey through the local API bridge (port 1646). The bridge is currently disabled.
+							</Text>
+							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
+								Enable it to continue. You can turn it off anytime in <Text as="span" color="kk.gold" fontWeight="500">Settings &rarr; Application</Text>.
+							</Text>
+						</Box>
+						<Flex
+							px="6"
+							py="4"
+							gap="3"
+							justify="flex-end"
+							borderTop="1px solid"
+							borderColor="kk.border"
+							bg="rgba(255,255,255,0.02)"
+						>
+							<Button
+								size="sm"
+								variant="ghost"
+								color="kk.textSecondary"
+								_hover={{ color: "kk.textPrimary" }}
+								onClick={handleCancelAppLaunch}
+								disabled={enablingApi}
+							>
+								Cancel
+							</Button>
+							<Button
+								size="sm"
+								bg="kk.gold"
+								color="black"
+								fontWeight="600"
+								_hover={{ bg: "kk.goldHover" }}
+								onClick={handleEnableApiAndLaunch}
+								disabled={enablingApi}
+							>
+								{enablingApi ? "Enabling..." : "Enable & Launch"}
+							</Button>
+						</Flex>
+					</Box>
+				</>
+			)}
 		</>
 	)
 }

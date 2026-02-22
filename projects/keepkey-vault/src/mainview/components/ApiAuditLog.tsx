@@ -1,4 +1,5 @@
-import { Box, Flex, Text, VStack, IconButton } from "@chakra-ui/react"
+import { useState } from "react"
+import { Box, Flex, Text, VStack, IconButton, Image } from "@chakra-ui/react"
 import { Z } from "../lib/z-index"
 import type { ApiLogEntry } from "../../shared/types"
 
@@ -48,6 +49,46 @@ function MethodBadge({ method }: { method: string }) {
 	)
 }
 
+/** Fallback icon when imageUrl fails or is missing */
+function AppInitial({ name }: { name: string }) {
+	const letter = name.charAt(0).toUpperCase() || "?"
+	return (
+		<Flex
+			w="18px"
+			h="18px"
+			borderRadius="4px"
+			bg="rgba(192,168,96,0.15)"
+			align="center"
+			justify="center"
+			flexShrink={0}
+		>
+			<Text fontSize="9px" fontWeight="700" color="#C0A860" lineHeight="1">
+				{letter}
+			</Text>
+		</Flex>
+	)
+}
+
+/** Small app logo with fallback to initial */
+function AppLogo({ name, imageUrl, size = 18 }: { name: string; imageUrl?: string; size?: number }) {
+	const [failed, setFailed] = useState(false)
+
+	if (!imageUrl || failed) return <AppInitial name={name} />
+
+	return (
+		<Image
+			src={imageUrl}
+			alt={name}
+			w={`${size}px`}
+			h={`${size}px`}
+			borderRadius="4px"
+			objectFit="cover"
+			flexShrink={0}
+			onError={() => setFailed(true)}
+		/>
+	)
+}
+
 function relativeTime(ts: number): string {
 	const delta = Math.floor((Date.now() - ts) / 1000)
 	if (delta < 5) return "now"
@@ -56,8 +97,66 @@ function relativeTime(ts: number): string {
 	return `${Math.floor(delta / 3600)}h ago`
 }
 
+/** Derive unique paired apps from log entries */
+function getUniqueApps(entries: ApiLogEntry[]): Array<{ name: string; imageUrl: string }> {
+	const seen = new Map<string, string>()
+	for (const e of entries) {
+		if (e.appName && e.appName !== "public" && !seen.has(e.appName)) {
+			seen.set(e.appName, e.imageUrl || "")
+		}
+	}
+	return Array.from(seen, ([name, imageUrl]) => ({ name, imageUrl }))
+}
+
+/** Truncate JSON string for display */
+function truncateJson(data: any, maxLen = 500): string {
+	try {
+		const str = typeof data === "string" ? data : JSON.stringify(data, null, 2)
+		if (str.length <= maxLen) return str
+		return str.slice(0, maxLen) + "\n..."
+	} catch {
+		return String(data)
+	}
+}
+
+/** Collapsible JSON block */
+function JsonBlock({ label, data }: { label: string; data: any }) {
+	if (data === undefined || data === null) return null
+	return (
+		<Box mt="1.5">
+			<Text fontSize="9px" fontWeight="600" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1">
+				{label}
+			</Text>
+			<Box
+				bg="rgba(0,0,0,0.3)"
+				borderRadius="4px"
+				p="2"
+				maxH="200px"
+				overflowY="auto"
+				border="1px solid"
+				borderColor="rgba(255,255,255,0.06)"
+			>
+				<Text
+					fontSize="10px"
+					fontFamily="mono"
+					color="kk.textSecondary"
+					whiteSpace="pre-wrap"
+					wordBreak="break-all"
+					lineHeight="1.4"
+				>
+					{truncateJson(data)}
+				</Text>
+			</Box>
+		</Box>
+	)
+}
+
 export function ApiAuditLog({ open, entries, onClose }: ApiAuditLogProps) {
+	const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
+
 	if (!open) return null
+
+	const pairedApps = getUniqueApps(entries)
 
 	return (
 		<Box
@@ -116,6 +215,41 @@ export function ApiAuditLog({ open, entries, onClose }: ApiAuditLogProps) {
 				</IconButton>
 			</Flex>
 
+			{/* Paired Apps strip */}
+			{pairedApps.length > 0 && (
+				<Box
+					px="4"
+					py="2.5"
+					borderBottom="1px solid"
+					borderColor="kk.border"
+					bg="rgba(192,168,96,0.04)"
+				>
+					<Text fontSize="9px" fontWeight="600" color="kk.textMuted" mb="1.5" textTransform="uppercase" letterSpacing="0.05em">
+						Paired Apps ({pairedApps.length})
+					</Text>
+					<Flex gap="2" flexWrap="wrap">
+						{pairedApps.map((app) => (
+							<Flex
+								key={app.name}
+								align="center"
+								gap="1.5"
+								bg="rgba(255,255,255,0.04)"
+								borderRadius="6px"
+								px="2"
+								py="1"
+								border="1px solid"
+								borderColor="rgba(255,255,255,0.06)"
+							>
+								<AppLogo name={app.name} imageUrl={app.imageUrl} size={16} />
+								<Text fontSize="10px" fontWeight="500" color="kk.textSecondary" lineHeight="1">
+									{app.name}
+								</Text>
+							</Flex>
+						))}
+					</Flex>
+				</Box>
+			)}
+
 			{/* Entries */}
 			<VStack gap="0" align="stretch">
 				{entries.length === 0 ? (
@@ -125,36 +259,66 @@ export function ApiAuditLog({ open, entries, onClose }: ApiAuditLogProps) {
 						</Text>
 					</Box>
 				) : (
-					entries.map((entry, i) => (
-						<Flex
-							key={`${entry.timestamp}-${i}`}
-							align="center"
-							gap="2"
-							px="4"
-							py="2.5"
-							borderBottom="1px solid"
-							borderColor="rgba(255,255,255,0.04)"
-							_hover={{ bg: "rgba(255,255,255,0.02)" }}
-						>
-							<MethodBadge method={entry.method} />
-							<Text
-								fontSize="xs"
-								color="kk.textPrimary"
-								fontFamily="mono"
-								flex="1"
-								truncate
+					entries.map((entry, i) => {
+						const isExpanded = expandedIndex === i
+						const hasDetail = entry.requestBody || entry.responseBody
+						return (
+							<Box
+								key={`${entry.timestamp}-${i}`}
+								borderBottom="1px solid"
+								borderColor="rgba(255,255,255,0.04)"
+								_hover={{ bg: "rgba(255,255,255,0.02)" }}
+								cursor={hasDetail ? "pointer" : "default"}
+								onClick={() => {
+									if (hasDetail) setExpandedIndex(isExpanded ? null : i)
+								}}
 							>
-								{entry.route}
-							</Text>
-							<Text fontSize="9px" color="kk.textMuted" flexShrink={0}>
-								{entry.appName !== "public" ? entry.appName : ""}
-							</Text>
-							<StatusBadge status={entry.status} />
-							<Text fontSize="9px" color="kk.textMuted" flexShrink={0} minW="40px" textAlign="right">
-								{relativeTime(entry.timestamp)}
-							</Text>
-						</Flex>
-					))
+								<Flex align="center" gap="2" px="4" py="2.5">
+									{/* App logo (or method badge for public requests) */}
+									{entry.appName && entry.appName !== "public" ? (
+										<AppLogo name={entry.appName} imageUrl={entry.imageUrl} />
+									) : (
+										<MethodBadge method={entry.method} />
+									)}
+									<Text
+										fontSize="xs"
+										color="kk.textPrimary"
+										fontFamily="mono"
+										flex="1"
+										truncate
+									>
+										{entry.route}
+									</Text>
+									{entry.appName && entry.appName !== "public" && (
+										<Text fontSize="9px" color="kk.textMuted" flexShrink={0} maxW="60px" truncate>
+											{entry.appName}
+										</Text>
+									)}
+									{entry.durationMs !== undefined && entry.durationMs > 0 && (
+										<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" flexShrink={0}>
+											{entry.durationMs}ms
+										</Text>
+									)}
+									<StatusBadge status={entry.status} />
+									<Text fontSize="9px" color="kk.textMuted" flexShrink={0} minW="40px" textAlign="right">
+										{relativeTime(entry.timestamp)}
+									</Text>
+									{hasDetail && (
+										<Text fontSize="9px" color="kk.textMuted" flexShrink={0} transition="transform 0.15s" transform={isExpanded ? "rotate(180deg)" : "rotate(0deg)"}>
+											&#x25BC;
+										</Text>
+									)}
+								</Flex>
+								{/* Expanded detail panel */}
+								{isExpanded && hasDetail && (
+									<Box px="4" pb="3" pt="0">
+										<JsonBlock label="Request Body" data={entry.requestBody} />
+										<JsonBlock label="Response Body" data={entry.responseBody} />
+									</Box>
+								)}
+							</Box>
+						)
+					})
 				)}
 			</VStack>
 		</Box>
