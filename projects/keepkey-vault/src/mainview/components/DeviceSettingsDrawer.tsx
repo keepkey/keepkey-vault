@@ -129,6 +129,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 	const [wipeConfirm, setWipeConfirm] = useState(false)
 	const [verifying, setVerifying] = useState(false)
 	const [verifyResult, setVerifyResult] = useState<{ success: boolean; message: string } | null>(null)
+	const [verifyWordCount, setVerifyWordCount] = useState<12 | 18 | 24>(12)
 	const [changingPin, setChangingPin] = useState(false)
 	const [removingPin, setRemovingPin] = useState(false)
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
@@ -194,14 +195,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 		setVerifying(true)
 		setVerifyResult(null)
 		try {
-			const result = await rpcRequest("verifySeed", { wordCount: 12 }, 600000) as { success: boolean; message: string }
+			const result = await rpcRequest("verifySeed", { wordCount: verifyWordCount }, 600000) as { success: boolean; message: string }
 			setVerifyResult(result)
 		} catch (e: any) {
 			const msg = typeof e?.message === "string" ? e.message : "Verification failed"
 			setVerifyResult({ success: false, message: msg })
 		}
 		setVerifying(false)
-	}, [])
+	}, [verifyWordCount])
 
 	const wipeDevice = useCallback(async () => {
 		setWiping(true)
@@ -552,46 +553,66 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState }: DeviceSetti
 						</Flex>
 
 						{/* ── Verify Seed row ────────────────────── */}
-						<Flex
-							align="center"
-							justify="space-between"
-							py="3"
-						>
-							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-										<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-										<path d="M9 12l2 2 4-4" />
-									</svg>
+						<Box py="3">
+							<Flex align="center" justify="space-between">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+											<path d="M9 12l2 2 4-4" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Verify Seed</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+											{verifyResult
+												? verifyResult.success ? "Seed verified!" : verifyResult.message
+												: "Confirm your recovery phrase"
+											}
+										</Text>
+									</Box>
 								</Flex>
-								<Box>
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Verify Seed</Text>
-									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-										{verifyResult
-											? verifyResult.success ? "Seed verified!" : verifyResult.message
-											: "Confirm your recovery phrase"
-										}
-									</Text>
+								<Box
+									as="button"
+									px="3"
+									py="1.5"
+									borderRadius="full"
+									bg="rgba(192,168,96,0.12)"
+									color="kk.gold"
+									fontSize="xs"
+									fontWeight="500"
+									cursor={verifying ? "not-allowed" : "pointer"}
+									opacity={verifying ? 0.5 : 1}
+									_hover={{ bg: "rgba(192,168,96,0.22)" }}
+									transition="all 0.15s"
+									onClick={verifySeed}
+								>
+									{verifying ? "..." : "Verify"}
 								</Box>
 							</Flex>
-							<Box
-								as="button"
-								px="3"
-								py="1.5"
-								borderRadius="full"
-								bg="rgba(192,168,96,0.12)"
-								color="kk.gold"
-								fontSize="xs"
-								fontWeight="500"
-								cursor={verifying ? "not-allowed" : "pointer"}
-								opacity={verifying ? 0.5 : 1}
-								_hover={{ bg: "rgba(192,168,96,0.22)" }}
-								transition="all 0.15s"
-								onClick={verifySeed}
-							>
-								{verifying ? "..." : "Verify"}
-							</Box>
-						</Flex>
+							{/* Word count selector */}
+							<Flex mt="2" ml="44px" gap="2">
+								{([12, 18, 24] as const).map((wc) => (
+									<Box
+										key={wc}
+										as="button"
+										px="3"
+										py="1"
+										borderRadius="full"
+										fontSize="xs"
+										fontWeight="500"
+										cursor="pointer"
+										bg={verifyWordCount === wc ? "kk.gold" : "rgba(255,255,255,0.06)"}
+										color={verifyWordCount === wc ? "black" : "kk.textSecondary"}
+										_hover={{ bg: verifyWordCount === wc ? "kk.goldHover" : "rgba(255,255,255,0.1)" }}
+										transition="all 0.15s"
+										onClick={() => setVerifyWordCount(wc)}
+									>
+										{wc} words
+									</Box>
+								))}
+							</Flex>
+						</Box>
 					</Section>
 
 					{/* ── Application Settings ────────────────────────── */}

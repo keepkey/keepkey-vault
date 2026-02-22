@@ -3,15 +3,21 @@ import type { AuthStore } from './auth'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const ALLOWED_ORIGINS = new Set(['http://localhost:1646', 'http://127.0.0.1:1646'])
+/** Matches any http/https origin on localhost or 127.0.0.1 (any port) */
+const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 
 /** Custom header required on all non-GET/OPTIONS requests to prevent CSRF */
 const CSRF_HEADER = 'x-keepkey-sdk'
 
+/** Sliding-window rate limiter for /auth/pair — 5 attempts per 60s */
+const PAIR_RATE_LIMIT = 5
+const PAIR_RATE_WINDOW_MS = 60_000
+const pairAttempts: number[] = []
+
 function corsHeaders(req?: Request): Record<string, string> {
   const origin = req?.headers.get('Origin') || ''
   return {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin) ? origin : 'http://localhost:1646',
+    'Access-Control-Allow-Origin': LOCALHOST_ORIGIN_RE.test(origin) ? origin : 'http://localhost:1646',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': `Content-Type, Authorization, ${CSRF_HEADER}`,
     'Vary': 'Origin',
@@ -49,6 +55,16 @@ const pubkeyCache = new Map<string, any>()
 // ── Address cache (capped) ────────────────────────────────────────────
 const addressCache = new Map<string, string>()
 
+/** Evict oldest entries from a Map (uses insertion-order iteration). */
+function evictOldest<K, V>(cache: Map<K, V>, count: number) {
+  let removed = 0
+  for (const key of cache.keys()) {
+    if (removed >= count) break
+    cache.delete(key)
+    removed++
+  }
+}
+
 // ── Cosmos-family amino signing helper ─────────────────────────────────
 async function cosmosAminoSign(
   wallet: any,
@@ -71,12 +87,15 @@ async function cosmosAminoSign(
     }
   }
 
+  const msgs = signDoc.msgs || signDoc.msg || []
+  if (!Array.isArray(msgs) || msgs.length === 0) throw { status: 400, message: 'signDoc must contain at least one message (msgs or msg)' }
+
   const tx = {
     account_number: String(signDoc.account_number),
     chain_id: signDoc.chain_id,
     fee: signDoc.fee,
     memo: signDoc.memo || '',
-    msg: [signDoc.msgs?.[0] || signDoc.msg?.[0]],
+    msg: msgs,
     signatures: [],
     sequence: signDoc.sequence,
   }
@@ -197,6 +216,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json(entry.info)
           }
           if (method === 'POST') {
+            // Sliding-window rate limit
+            const now = Date.now()
+            while (pairAttempts.length > 0 && now - pairAttempts[0] > PAIR_RATE_WINDOW_MS) pairAttempts.shift()
+            if (pairAttempts.length >= PAIR_RATE_LIMIT) {
+              return json({ error: 'Too many pairing attempts. Try again later.' }, 429)
+            }
+            pairAttempts.push(now)
+
             const body = await req.json() as any
             if (!body.name) throw { status: 400, message: 'Missing name in pairing request' }
             // requestPair requires user approval via UI — NOT auto-granted
@@ -225,26 +252,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
-          addressCache.set(cacheKey, address)
-          auth.saveAccount(String(address), body.address_n)
-          return json({ address })
-        }
-
-        if (path === '/addresses/bnb' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.address_n) throw { status: 400, message: 'Missing address_n' }
-          const cacheKey = JSON.stringify(body)
-          const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
-          const result = await wallet.binanceGetAddress({
-            addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
-          const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -263,7 +271,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -282,7 +290,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -301,7 +309,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -320,7 +328,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -339,7 +347,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -358,7 +366,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -377,7 +385,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display ?? false,
           })
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) addressCache.clear()
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -490,18 +498,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
           })
-          return json(result)
-        }
-
-        // ── BNB SIGNING (1 endpoint) ─────────────────────────────────
-        if (path === '/bnb/sign-transaction' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await req.json() as any
-          if (!body.signerAddress) throw { status: 400, message: 'Missing signerAddress' }
-          if (!body.signDoc) throw { status: 400, message: 'Missing signDoc' }
-          const { addressNList } = auth.getAccount(body.signerAddress)
-          const result = await wallet.binanceSignTx({ addressNList, tx: body.signDoc })
           return json(result)
         }
 
@@ -661,12 +657,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }])
           const xpub = result?.[0]?.xpub
           const out = { xpub }
-          if (pubkeyCache.size >= MAX_CACHE_SIZE) pubkeyCache.clear()
+          if (pubkeyCache.size >= MAX_CACHE_SIZE) evictOldest(pubkeyCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           pubkeyCache.set(cacheKey, out)
           return json(out)
         }
 
         // ── Catch-all ────────────────────────────────────────────────
+        // Sequential if/else routing is fine for ~35 localhost-only endpoints.
+        // A Map-based router adds complexity with no measurable perf gain here.
         return json({ error: 'Not found', path }, 404)
 
       } catch (err: any) {

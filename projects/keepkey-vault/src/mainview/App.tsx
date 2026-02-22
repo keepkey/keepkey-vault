@@ -63,7 +63,7 @@ function App() {
 		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
 			setPassphraseRequested(true)
 		}
-	}, [deviceState.state])
+	}, [deviceState.state, passphraseRequested])
 
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
@@ -97,11 +97,11 @@ function App() {
 		setCharRequest(null)
 		setRecoveryError(null)
 	}, [])
-	const handleRecoveryRetry = useCallback(async () => {
+	const handleRecoveryRetry = useCallback(() => {
+		// Dismiss error overlay — let the wizard/settings UI handle re-initiation
 		setCharRequest(null)
 		setRecoveryError(null)
-		try { await rpcRequest("recoverDevice", { wordCount: recoveryWordCount, pin: true, passphrase: false }, 600000) } catch { /* errors via RPC message */ }
-	}, [recoveryWordCount])
+	}, [])
 
 	// Auto-show PIN for locked device (only once — respect user dismiss)
 	useEffect(() => {

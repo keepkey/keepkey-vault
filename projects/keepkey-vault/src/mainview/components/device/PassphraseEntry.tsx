@@ -26,19 +26,21 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 		setPassphrase("")
 	}, [passphrase, onSubmit])
 
-	// Keyboard: Enter to submit
+	// Keyboard: Enter on input submits; Escape anywhere dismisses
+	const handleInputKeyDown = useCallback((e: React.KeyboardEvent) => {
+		if (e.key === "Enter") {
+			e.preventDefault()
+			handleSubmit()
+		}
+	}, [handleSubmit])
+
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Enter") {
-				e.preventDefault()
-				handleSubmit()
-			} else if (e.key === "Escape") {
-				onCancel()
-			}
+			if (e.key === "Escape") onCancel()
 		}
 		window.addEventListener("keydown", onKeyDown)
 		return () => window.removeEventListener("keydown", onKeyDown)
-	}, [handleSubmit, onCancel])
+	}, [onCancel])
 
 	return (
 		<Flex
@@ -78,6 +80,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						type={showPassphrase ? "text" : "password"}
 						value={passphrase}
 						onChange={(e) => setPassphrase(e.target.value)}
+						onKeyDown={handleInputKeyDown}
 						placeholder="Passphrase (optional)"
 						bg="kk.bg"
 						border="1px solid"

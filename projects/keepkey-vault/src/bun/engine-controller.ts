@@ -52,19 +52,22 @@ function extractErrorMessage(err: any): string {
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    ),
-  ])
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer!))
 }
 
 export class EngineController extends EventEmitter {
   private keyring: core.Keyring
   private hidAdapter: ReturnType<typeof HIDKeepKeyAdapter.useKeyring>
   private webUsbAdapter: ReturnType<typeof NodeWebUSBKeepKeyAdapter.useKeyring>
-  wallet: any | null = null
+  // Typed as HDWallet with KeepKey-specific extensions (firmware, PIN, etc.)
+  // Cast to `any` when calling KeepKey-only methods not in the HDWallet interface
+  wallet: (core.HDWallet & Record<string, any>) | null = null
   private activeTransport: ActiveTransport = null
   private updatePhase: UpdatePhase = 'idle'
   private lastState: DeviceState = 'disconnected'
@@ -95,8 +98,20 @@ export class EngineController extends EventEmitter {
    * Attach transport event listeners to catch PIN_REQUEST / BUTTON_REQUEST
    * events emitted mid-operation by the hdwallet transport layer.
    */
+  private cleanupTransportListeners() {
+    if (!this.wallet?.transport) return
+    const transport = this.wallet.transport
+    transport.removeAllListeners(String(core.Events.PIN_REQUEST))
+    transport.removeAllListeners(String(core.Events.BUTTON_REQUEST))
+    transport.removeAllListeners(String(core.Events.PASSPHRASE_REQUEST))
+    transport.removeAllListeners("80")
+  }
+
   private attachTransportListeners() {
     if (!this.wallet?.transport) return
+
+    // Clean up any existing listeners to prevent leaks on re-pair
+    this.cleanupTransportListeners()
 
     const transport = this.wallet.transport
 
@@ -146,6 +161,7 @@ export class EngineController extends EventEmitter {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB detached')
       this.clearRetry()
+      this.cleanupTransportListeners()
       this.wallet = null
       this.activeTransport = null
       this.cachedFeatures = null
@@ -661,7 +677,7 @@ export class EngineController extends EventEmitter {
     // hdwallet's recover() doesn't support dryRun, so we construct
     // the raw RecoveryDevice protobuf with dryRun=true and send via transport.
     // dryRun means the device verifies the seed WITHOUT modifying any state.
-    const Messages = require('@keepkey/device-protocol/lib/messages_pb')
+    const Messages = await import('@keepkey/device-protocol/lib/messages_pb')
 
     this.setupInProgress = true
     this.pinRequestCount = 0

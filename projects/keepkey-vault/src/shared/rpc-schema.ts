@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -33,30 +33,29 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getFeatures: { params: void; response: any }
       ping: { params: { msg?: string }; response: any }
       wipeDevice: { params: void; response: any }
-      getPublicKeys: { params: { paths: any[] }; response: any }
+      // Types defined in types.ts: GetPublicKeysParams, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams
+      getPublicKeys: { params: any; response: any }
 
       // ── Address derivation ────────────────────────────────────────
       btcGetAddress: { params: any; response: any }
       ethGetAddress: { params: any; response: any }
-      cosmosGetAddress: { params: any; response: any }
-      thorchainGetAddress: { params: any; response: any }
-      mayachainGetAddress: { params: any; response: any }
-      osmosisGetAddress: { params: any; response: any }
-      binanceGetAddress: { params: any; response: any }
-      xrpGetAddress: { params: any; response: any }
+      cosmosGetAddress: { params: any; response: any } // TODO: type
+      thorchainGetAddress: { params: any; response: any } // TODO: type
+      mayachainGetAddress: { params: any; response: any } // TODO: type
+      osmosisGetAddress: { params: any; response: any } // TODO: type
+      xrpGetAddress: { params: any; response: any } // TODO: type
 
       // ── Transaction signing ───────────────────────────────────────
       btcSignTx: { params: any; response: any }
       ethSignTx: { params: any; response: any }
-      ethSignMessage: { params: any; response: any }
-      ethSignTypedData: { params: any; response: any }
-      ethVerifyMessage: { params: any; response: any }
-      cosmosSignTx: { params: any; response: any }
-      thorchainSignTx: { params: any; response: any }
-      mayachainSignTx: { params: any; response: any }
-      osmosisSignTx: { params: any; response: any }
-      binanceSignTx: { params: any; response: any }
-      xrpSignTx: { params: any; response: any }
+      ethSignMessage: { params: any; response: any } // TODO: type
+      ethSignTypedData: { params: any; response: any } // TODO: type
+      ethVerifyMessage: { params: any; response: any } // TODO: type
+      cosmosSignTx: { params: any; response: any } // TODO: type
+      thorchainSignTx: { params: any; response: any } // TODO: type
+      mayachainSignTx: { params: any; response: any } // TODO: type
+      osmosisSignTx: { params: any; response: any } // TODO: type
+      xrpSignTx: { params: any; response: any } // TODO: type
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: void; response: ChainBalance[] }
@@ -96,7 +95,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'firmware-progress': FirmwareProgress
       'pin-request': PinRequest
       'character-request': CharacterRequest
-      'passphrase-request': void
+      'passphrase-request': Record<string, never>
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
       'camera-frame': string

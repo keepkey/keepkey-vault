@@ -1,24 +1,24 @@
-import { useState, useEffect, useCallback } from "react";
-import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react";
-import type { PinRequestType } from "../../../shared/types";
+import { useState, useEffect, useCallback } from "react"
+import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
+import type { PinRequestType } from "../../../shared/types"
 
 interface PinEntryProps {
-	type?: PinRequestType;
-	onSubmit: (pin: string) => void;
-	onCancel: () => void;
+	type?: PinRequestType
+	onSubmit: (pin: string) => void
+	onCancel: () => void
 }
 
 const TITLES: Record<PinRequestType, string> = {
 	"current": "Enter PIN",
 	"new-first": "Create a PIN",
 	"new-second": "Confirm Your PIN",
-};
+}
 
 const DESCRIPTIONS: Record<PinRequestType, string> = {
 	"current": "Use the positions shown on your KeepKey to enter your PIN",
 	"new-first": "Look at your KeepKey screen and tap the positions to set a new PIN",
 	"new-second": "Enter the same PIN again to confirm",
-};
+}
 
 /**
  * PIN entry pad matching KeepKey's scrambled 3x3 layout.
@@ -26,49 +26,49 @@ const DESCRIPTIONS: Record<PinRequestType, string> = {
  * position-based buttons (1-9) on this grid.
  */
 export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps) {
-	const [pin, setPin] = useState("");
+	const [pin, setPin] = useState("")
 
 	// Reset pin when type changes (e.g. new-first → new-second)
 	useEffect(() => {
-		setPin("");
-	}, [type]);
+		setPin("")
+	}, [type])
 
 	const handleDigit = useCallback((digit: string) => {
-		setPin((p) => (p.length < 9 ? p + digit : p));
-	}, []);
+		setPin((p) => (p.length < 9 ? p + digit : p))
+	}, [])
 
 	const handleBackspace = useCallback(() => {
-		setPin((p) => p.slice(0, -1));
-	}, []);
+		setPin((p) => p.slice(0, -1))
+	}, [])
 
 	const handleSubmit = useCallback(() => {
 		if (pin.length > 0) {
-			onSubmit(pin);
-			setPin("");
+			onSubmit(pin)
+			setPin("")
 		}
-	}, [pin, onSubmit]);
+	}, [pin, onSubmit])
 
 	// Keyboard support: 1-9 digits, backspace, enter
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key >= "1" && e.key <= "9") {
-				handleDigit(e.key);
+				handleDigit(e.key)
 			} else if (e.key === "Backspace") {
-				handleBackspace();
+				handleBackspace()
 			} else if (e.key === "Enter") {
-				handleSubmit();
+				handleSubmit()
 			}
-		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [handleDigit, handleBackspace, handleSubmit]);
+		}
+		window.addEventListener("keydown", onKeyDown)
+		return () => window.removeEventListener("keydown", onKeyDown)
+	}, [handleDigit, handleBackspace, handleSubmit])
 
 	// KeepKey PIN pad layout: 7 8 9 / 4 5 6 / 1 2 3
 	const rows = [
 		["7", "8", "9"],
 		["4", "5", "6"],
 		["1", "2", "3"],
-	];
+	]
 
 	return (
 		<Flex
@@ -188,5 +188,5 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 				)}
 			</Box>
 		</Flex>
-	);
+	)
 }
