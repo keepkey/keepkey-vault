@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check verify publish release modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release modules-install modules-build modules-clean audit
 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
@@ -49,8 +49,12 @@ build-stable:
 build-canary:
 	cd $(PROJECT_DIR) && bun run build:canary
 
-# Full signed build: electrobun build → extract from tar → create DMG → sign + notarize DMG
-build-signed: sign-check build-stable dmg
+# Prune the app bundle after Electrobun build (strips nested node_modules, .d.ts, etc.)
+prune-bundle:
+	cd $(PROJECT_DIR) && bun scripts/prune-app-bundle.ts
+
+# Full signed build: electrobun build → prune → extract from tar → create DMG → sign + notarize DMG
+build-signed: sign-check build-stable prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
@@ -154,6 +158,7 @@ help:
 	@echo "  make build          - Development build (no signing)"
 	@echo "  make build-stable   - Production build (signs + notarizes via Electrobun)"
 	@echo "  make build-signed   - Full pipeline: build → extract → DMG → sign → notarize"
+	@echo "  make prune-bundle   - Prune app bundle (strip nested deps, .d.ts, etc.)"
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"

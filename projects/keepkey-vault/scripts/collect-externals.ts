@@ -241,6 +241,28 @@ const STRIP_DIRS = [
   'tiny-secp256k1/build',
   'secp256k1/build',
   'secp256k1/src',
+
+  // --- lodash: not needed at runtime (hdwallet-core inlines isObject) ---
+  'lodash',
+
+  // --- rxjs: not needed at runtime (hdwallet-core no longer imports it) ---
+  'rxjs',
+
+  // --- @cosmjs: TypeScript source dirs ---
+  '@cosmjs/amino/src',
+  '@cosmjs/crypto/src',
+  '@cosmjs/encoding/src',
+  '@cosmjs/math/src',
+  '@cosmjs/proto-signing/src',
+  '@cosmjs/stargate/src',
+  '@cosmjs/tendermint-rpc/src',
+  '@cosmjs/utils/src',
+
+  // --- cosmjs-types: source not needed ---
+  'cosmjs-types/src',
+
+  // --- long: ESM build not needed (main→src/long.js) ---
+  'long/umd',
 ]
 
 // Remove nested node_modules that duplicate top-level packages at the SAME version.

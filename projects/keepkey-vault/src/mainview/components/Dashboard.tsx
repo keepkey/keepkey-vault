@@ -33,19 +33,23 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 
 	useEffect(() => {
 		let cancelled = false
-		async function fetchBalances() {
+		let retryTimer: ReturnType<typeof setTimeout> | undefined
+		async function fetchBalances(attempt = 1) {
 			setLoadingBalances(true)
+			let hasTokenData = false
 			try {
 				const result = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
 				if (!cancelled && result) {
 					const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
-					console.log(`[Dashboard] getBalances returned ${result.length} chains, ${tokenTotal} tokens (fetchKey=${fetchKey})`)
+					const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
+					hasTokenData = tokenTotal > 0 || balTotal > 0 || result.length > 0
+					console.log(`[Dashboard] getBalances returned ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)} (attempt=${attempt}, fetchKey=${fetchKey})`)
 					const map = new Map<string, ChainBalance>()
 					for (const b of result) map.set(b.chainId, b)
 					setBalances(map)
 				}
 			} catch (e: any) {
-				console.warn('[Dashboard] getBalances failed:', e.message)
+				console.warn(`[Dashboard] getBalances failed (attempt=${attempt}):`, e.message)
 			}
 			if (!cancelled) {
 				setLoadingBalances(false)
@@ -53,10 +57,16 @@ export function Dashboard({ onLoaded }: DashboardProps) {
 					setInitialLoaded(true)
 					onLoaded?.()
 				}
+				// Auto-retry once if first attempt returned no meaningful data
+				// (Pioneer API may not have been ready on cold start)
+				if (!hasTokenData && attempt < 2 && !cancelled) {
+					console.log('[Dashboard] No balance data — auto-retrying in 3s')
+					retryTimer = setTimeout(() => { if (!cancelled) fetchBalances(attempt + 1) }, 3000)
+				}
 			}
 		}
 		fetchBalances()
-		return () => { cancelled = true }
+		return () => { cancelled = true; clearTimeout(retryTimer) }
 	}, [fetchKey])
 
 	const refreshBalances = useCallback(() => {

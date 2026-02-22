@@ -50,6 +50,11 @@
     "tiny-secp256k1"
   ],
   "overrides": {
-    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder"
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
+    "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
+    "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",
+    "lodash": "^4.17.21",
+    "rxjs": "^6.6.7",
+    "cosmjs-types": "^0.5.1"
   }
 }
