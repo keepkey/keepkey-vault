@@ -40,6 +40,11 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 	const imgRef = useRef<HTMLImageElement>(null)
 	const fileInputRef = useRef<HTMLInputElement>(null)
 	const foundRef = useRef(false)
+	const modeRef = useRef<ScanMode>("starting")
+	const decoderImgRef = useRef(new Image())
+
+	// Keep modeRef in sync
+	useEffect(() => { modeRef.current = mode }, [mode])
 
 	// Start camera on mount, stop on unmount
 	useEffect(() => {
@@ -51,32 +56,43 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 			setMode("fallback")
 		})
 
+		// Timeout: if no frame arrives within 5s, fall back to file upload
+		const startTimeout = setTimeout(() => {
+			if (modeRef.current === "starting") {
+				setError("Camera did not start. Try uploading an image instead.")
+				setMode("fallback")
+				rpcRequest("stopQrScan").catch(() => {})
+			}
+		}, 5000)
+
 		return () => {
+			clearTimeout(startTimeout)
 			rpcRequest("stopQrScan").catch(() => {})
 		}
 	}, [])
 
-	// Listen for camera frames
+	// Listen for camera frames — no mode dependency to avoid re-subscriptions
 	useEffect(() => {
+		const decoderImg = decoderImgRef.current
+
 		const unsubFrame = onRpcMessage("camera-frame", (base64: string) => {
 			if (foundRef.current) return
-			if (mode === "starting") setMode("streaming")
+			if (modeRef.current === "starting") setMode("streaming")
 
 			// Display frame
 			if (imgRef.current) {
 				imgRef.current.src = `data:image/jpeg;base64,${base64}`
 			}
 
-			// Decode QR from frame
-			const img = new Image()
-			img.onload = () => {
+			// Decode QR from frame (reuse single Image object)
+			decoderImg.onload = () => {
 				if (foundRef.current) return
 				const canvas = canvasRef.current || document.createElement("canvas")
-				canvas.width = img.width
-				canvas.height = img.height
+				canvas.width = decoderImg.width
+				canvas.height = decoderImg.height
 				const ctx = canvas.getContext("2d", { willReadFrequently: true })
 				if (!ctx) return
-				ctx.drawImage(img, 0, 0)
+				ctx.drawImage(decoderImg, 0, 0)
 				const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 				const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
 				if (code?.data) {
@@ -85,7 +101,7 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 					onScan(code.data)
 				}
 			}
-			img.src = `data:image/jpeg;base64,${base64}`
+			decoderImg.src = `data:image/jpeg;base64,${base64}`
 		})
 
 		const unsubError = onRpcMessage("camera-error", (message: string) => {
@@ -94,7 +110,7 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 		})
 
 		return () => { unsubFrame(); unsubError() }
-	}, [mode, onScan])
+	}, [onScan])
 
 	const handleClose = useCallback(() => {
 		rpcRequest("stopQrScan").catch(() => {})

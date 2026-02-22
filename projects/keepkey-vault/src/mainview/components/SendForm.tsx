@@ -169,13 +169,13 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Parse QR scan result — handles plain addresses and BIP-21 / EIP-681 URIs
 	const handleQrScan = useCallback((data: string) => {
 		setShowScanner(false)
-		// BIP-21: bitcoin:addr?amount=X&label=Y  or  ethereum:addr@chainId?value=X
-		const colonIdx = data.indexOf(':')
-		let addr = data
-		if (colonIdx > 0 && colonIdx < 12) {
-			// Strip scheme prefix
-			addr = data.slice(colonIdx + 1)
-		}
+		// Sanitize: trim, strip control chars, limit length
+		const clean = data.trim().replace(/[\x00-\x1f\x7f]/g, '').slice(0, 256)
+		if (!clean) return
+
+		// BIP-21 / EIP-681: scheme:addr?amount=X&label=Y
+		const schemeMatch = clean.match(/^([a-z]+):(.+)/i)
+		let addr = schemeMatch ? schemeMatch[2] : clean
 		// Strip query params, extract amount/memo if present
 		const qIdx = addr.indexOf('?')
 		let params: URLSearchParams | null = null

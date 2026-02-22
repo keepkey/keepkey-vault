@@ -10,12 +10,15 @@ import { Subprocess } from "bun"
 
 let cameraProc: Subprocess<"ignore", "pipe", "pipe"> | null = null
 let scanning = false
+let sessionId = 0                     // monotonic — guards stale callbacks
 
 // JPEG markers
 const SOI_0 = 0xff
 const SOI_1 = 0xd8
 const EOI_0 = 0xff
 const EOI_1 = 0xd9
+
+const MAX_BUFFER_SIZE = 5 * 1024 * 1024 // 5 MB — safety cap for corrupted streams
 
 /**
  * Start capturing camera frames.
@@ -25,8 +28,14 @@ export function startCamera(
 	onFrame: (base64: string) => void,
 	onError: (message: string) => void,
 ): void {
-	if (cameraProc) {
+	if (cameraProc || scanning) {
 		console.log("[camera] Already running")
+		return
+	}
+
+	// macOS only — AVFoundation is not available on other platforms
+	if (process.platform !== "darwin") {
+		onError("Camera capture is currently only supported on macOS")
 		return
 	}
 
@@ -37,6 +46,7 @@ export function startCamera(
 		return
 	}
 
+	const thisSession = ++sessionId
 	scanning = true
 	console.log("[camera] Starting ffmpeg capture...")
 
@@ -63,20 +73,24 @@ export function startCamera(
 	const proc = cameraProc
 
 	// Read stderr for errors (ffmpeg logs to stderr) — background task
-	readStderr(proc, onError)
+	readStderr(proc, thisSession, onError)
 
 	// Parse MJPEG stream from stdout — background task
-	readFrames(proc, onFrame, onError)
+	readFrames(proc, thisSession, onFrame, onError)
 }
 
 /** Background: read stderr and detect camera errors */
-function readStderr(proc: Subprocess<"ignore", "pipe", "pipe">, onError: (msg: string) => void) {
+function readStderr(
+	proc: Subprocess<"ignore", "pipe", "pipe">,
+	session: number,
+	onError: (msg: string) => void,
+) {
 	;(async () => {
 		const reader = proc.stderr.getReader()
 		const decoder = new TextDecoder()
 		let stderrBuf = ""
 		try {
-			while (scanning) {
+			while (session === sessionId && scanning) {
 				const { done, value } = await reader.read()
 				if (done) break
 				stderrBuf += decoder.decode(value, { stream: true })
@@ -95,22 +109,24 @@ function readStderr(proc: Subprocess<"ignore", "pipe", "pipe">, onError: (msg: s
 				if (stderrBuf.length > 4096) stderrBuf = stderrBuf.slice(-2048)
 			}
 		} catch { /* process exited */ }
+		try { reader.releaseLock() } catch { /* already released */ }
 	})()
 }
 
 /** Background: parse MJPEG frames from stdout and emit via callback */
 function readFrames(
 	proc: Subprocess<"ignore", "pipe", "pipe">,
+	session: number,
 	onFrame: (base64: string) => void,
 	onError: (msg: string) => void,
 ) {
 	;(async () => {
 		const reader = proc.stdout.getReader()
 		let buffer = new Uint8Array(0)
-		let firstFrame = false
+		let hasReceivedFrame = false
 
 		try {
-			while (scanning) {
+			while (session === sessionId && scanning) {
 				const { done, value } = await reader.read()
 				if (done) break
 				if (!value) continue
@@ -120,6 +136,13 @@ function readFrames(
 				newBuf.set(buffer, 0)
 				newBuf.set(value, buffer.length)
 				buffer = newBuf
+
+				// Safety cap: discard corrupted stream data
+				if (buffer.length > MAX_BUFFER_SIZE) {
+					console.warn("[camera] Buffer overflow, resetting")
+					buffer = new Uint8Array(0)
+					continue
+				}
 
 				// Extract complete JPEG frames (SOI=FF D8 ... EOI=FF D9)
 				while (buffer.length > 4) {
@@ -147,22 +170,25 @@ function readFrames(
 					const frame = buffer.slice(soiIdx, eoiIdx + 2)
 					buffer = buffer.slice(eoiIdx + 2)
 
-					if (!firstFrame) {
-						firstFrame = true
+					if (!hasReceivedFrame) {
+						hasReceivedFrame = true
 						console.log(`[camera] First frame received (${frame.length} bytes)`)
 					}
 
-					// Convert to base64 and emit
+					// Skip encoding if we're shutting down
+					if (session !== sessionId || !scanning) break
+
 					const base64 = Buffer.from(frame).toString("base64")
 					onFrame(base64)
 				}
 			}
 		} catch (err: any) {
-			if (scanning) {
+			if (session === sessionId && scanning) {
 				console.error("[camera] Stream read error:", err.message)
 				onError("Camera stream interrupted")
 			}
 		}
+		try { reader.releaseLock() } catch { /* already released */ }
 	})()
 }
 

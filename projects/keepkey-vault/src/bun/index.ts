@@ -727,6 +727,7 @@ await engine.start()
 
 // Quit the app when the main window is closed
 mainWindow.on("close", () => {
+	stopCamera()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()
