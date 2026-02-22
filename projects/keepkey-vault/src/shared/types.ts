@@ -31,6 +31,10 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  firmwareHash?: string
+  bootloaderHash?: string
+  firmwareVerified?: boolean
+  bootloaderVerified?: boolean
   error?: string | null
 }
 
@@ -152,6 +156,52 @@ export interface CustomChain {
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   restApiEnabled: boolean
+}
+
+// ── RPC param/response types for top-use endpoints ──────────────────────
+
+export interface BtcGetAddressParams {
+  addressNList: number[]
+  coin?: string
+  scriptType?: string
+  showDisplay?: boolean
+}
+
+export interface EthGetAddressParams {
+  addressNList: number[]
+  showDisplay?: boolean
+  coin?: string
+}
+
+export interface EthSignTxParams {
+  addressNList: number[]
+  to: string
+  value: string
+  data?: string
+  nonce: string
+  gasLimit: string
+  chainId: number
+  gasPrice?: string
+  maxFeePerGas?: string
+  maxPriorityFeePerGas?: string
+}
+
+export interface BtcSignTxParams {
+  coin: string
+  inputs: any[] // TODO: type BTCSignTxInput
+  outputs: any[] // TODO: type BTCSignTxOutput
+  version?: number
+  locktime?: number
+}
+
+export interface GetPublicKeysParams {
+  paths: Array<{
+    addressNList: number[]
+    curve?: string
+    showDisplay?: boolean
+    coin?: string
+    scriptType?: string
+  }>
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts

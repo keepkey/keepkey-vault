@@ -13,6 +13,19 @@ import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
+/** Timeout wrapper for external API calls */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout>
+	return Promise.race([
+		promise,
+		new Promise<never>((_, reject) => {
+			timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+		}),
+	]).finally(() => clearTimeout(timer!))
+}
+
+const PIONEER_TIMEOUT_MS = 30_000
+
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`
 const REST_API_PORT = 1646
@@ -73,6 +86,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
 			applySettings: async (params) => { await engine.applySettings(params) },
+			changePin: async () => { await engine.changePin() },
+			removePin: async () => { await engine.removePin() },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
 			sendPassphrase: async (params) => { await engine.sendPassphrase(params.passphrase) },
 			sendCharacter: async (params) => { await engine.sendCharacter(params.character) },
@@ -124,10 +139,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.osmosisGetAddress(params)
 			},
-			binanceGetAddress: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.binanceGetAddress(params)
-			},
 			xrpGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.rippleGetAddress(params)
@@ -169,10 +180,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			osmosisSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.osmosisSignTx(params)
-			},
-			binanceSignTx: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.binanceSignTx(params)
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -258,9 +265,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// 3. Single API call for ALL balances + prices
 				const results: ChainBalance[] = []
 				try {
-					const resp = await pioneer.GetPortfolioBalances({
-						pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
-					})
+					const resp = await withTimeout(
+						pioneer.GetPortfolioBalances({
+							pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
+						}),
+						PIONEER_TIMEOUT_MS,
+						'GetPortfolioBalances'
+					)
 					// Handle Swagger double-wrapping: resp.data?.data || resp.data
 					const rawData = resp?.data?.data || resp?.data || {}
 					const data: any[] = rawData.balances || []
@@ -419,7 +430,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Single portfolio call
 				let balance = '0', balanceUsd = 0
 				try {
-					const resp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] })
+					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
 					const match = (resp?.data?.balances || [])[0]
 					if (match) { balance = String(match.balance ?? '0'); balanceUsd = Number(match.valueUsd ?? 0) }
 				} catch (e: any) {
@@ -510,7 +521,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			getMarketData: async (params) => {
 				const pioneer = await getPioneer()
-				const resp = await pioneer.GetMarketInfo(params.caips)
+				const resp = await withTimeout(pioneer.GetMarketInfo(params.caips), PIONEER_TIMEOUT_MS, 'GetMarketInfo')
 				return resp?.data || []
 			},
 
@@ -520,10 +531,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 
 				if (chain.chainFamily === 'utxo') {
-					const resp = await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+					const resp = await withTimeout(pioneer.GetFeeRateByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
-					const resp = await pioneer.GetGasPriceByNetwork({ networkId: chain.networkId })
+					const resp = await withTimeout(pioneer.GetGasPriceByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetGasPriceByNetwork')
 					return { gasPrice: resp?.data, unit: 'gwei' }
 				} else {
 					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
@@ -552,7 +563,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let receiveIndex = 0
 				let changeIndex = 0
 				try {
-					const resp = await pioneer.GetPubkeyInfo({ network: 'BTC', xpub })
+					const resp = await withTimeout(pioneer.GetPubkeyInfo({ network: 'BTC', xpub }), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
 					const tokens = resp?.data?.tokens || []
 					let maxReceive = -1
 					let maxChange = -1
@@ -611,7 +622,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 				const rpcParsed = new URL(params.rpcUrl?.trim() || '')
 				if (rpcParsed.protocol !== 'http:' && rpcParsed.protocol !== 'https:') throw new Error()
-			} catch { throw new Error('Valid http/https RPC URL required') }
+				// SSRF protection: block private/internal hostnames
+				const host = rpcParsed.hostname.toLowerCase()
+				const BLOCKED_HOSTS = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|0\.0\.0\.0|::1|\[::1\])$/
+				const BLOCKED_SUFFIXES = ['.local', '.internal', '.localhost']
+				if (BLOCKED_HOSTS.test(host) || BLOCKED_SUFFIXES.some(s => host.endsWith(s))) {
+					throw new Error('RPC URL must not point to private/internal networks')
+				}
+			} catch (e: any) {
+				if (e.message?.includes('private/internal')) throw e
+				throw new Error('Valid http/https RPC URL required')
+			}
 				// Prevent duplicate built-in chains
 				const existing = getAllChains().find(c => c.chainId === String(params.chainId))
 				if (existing) throw new Error(`Chain ${params.chainId} already exists as ${existing.coin}`)
@@ -664,7 +685,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					const parsed = new URL(params.url)
 					if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error()
-					Bun.spawn(['open', parsed.href])
+					const cmd = process.platform === 'win32' ? 'start' : process.platform === 'linux' ? 'xdg-open' : 'open'
+					Bun.spawn([cmd, parsed.href])
 				} catch {
 					throw new Error('Invalid URL')
 				}
@@ -687,6 +709,9 @@ engine.on('pin-request', (req) => {
 })
 engine.on('character-request', (req) => {
 	try { rpc.send['character-request'](req) } catch { /* webview not ready yet */ }
+})
+engine.on('passphrase-request', () => {
+	try { rpc.send['passphrase-request']({}) } catch { /* webview not ready yet */ }
 })
 engine.on('recovery-error', (err) => {
 	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }

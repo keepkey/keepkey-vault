@@ -8,7 +8,7 @@ import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, Firmwa
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
 
-const FALLBACK_FIRMWARE = '7.7.0'
+const FALLBACK_FIRMWARE = '7.10.0'
 const FALLBACK_BOOTLOADER = '2.1.4'
 
 // Delay before trying to pair after USB attach — device needs time to enumerate
@@ -22,6 +22,28 @@ const WORD_COUNT_TO_ENTROPY: Record<number, 128 | 192 | 256> = {
   12: 128, 18: 192, 24: 256,
 }
 
+/** SHA-256 hex digest of a Buffer (for binary integrity checks). */
+function sha256Hex(data: Buffer): string {
+  const hasher = new Bun.CryptoHasher('sha256')
+  hasher.update(data)
+  return hasher.digest('hex')
+}
+
+/** Convert hdwallet's firmwareHash (base64 string or Uint8Array) to lowercase hex. */
+function base64ToHex(value: any): string | undefined {
+  if (!value) return undefined
+  if (value instanceof Uint8Array || Buffer.isBuffer(value)) {
+    return Buffer.from(value).toString('hex')
+  }
+  if (typeof value === 'string') {
+    // Already hex?
+    if (/^[0-9a-fA-F]+$/.test(value)) return value.toLowerCase()
+    // Base64
+    return Buffer.from(value, 'base64').toString('hex')
+  }
+  return undefined
+}
+
 /** Extract a string message from hdwallet errors (raw protobuf FAILURE objects or standard Errors). */
 function extractErrorMessage(err: any): string {
   if (typeof err?.message === 'string') return err.message
@@ -30,19 +52,22 @@ function extractErrorMessage(err: any): string {
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    ),
-  ])
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer!))
 }
 
 export class EngineController extends EventEmitter {
   private keyring: core.Keyring
   private hidAdapter: ReturnType<typeof HIDKeepKeyAdapter.useKeyring>
   private webUsbAdapter: ReturnType<typeof NodeWebUSBKeepKeyAdapter.useKeyring>
-  wallet: any | null = null
+  // Typed as HDWallet with KeepKey-specific extensions (firmware, PIN, etc.)
+  // Cast to `any` when calling KeepKey-only methods not in the HDWallet interface
+  wallet: (core.HDWallet & Record<string, any>) | null = null
   private activeTransport: ActiveTransport = null
   private updatePhase: UpdatePhase = 'idle'
   private lastState: DeviceState = 'disconnected'
@@ -57,6 +82,10 @@ export class EngineController extends EventEmitter {
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
   private pinRequestCount = 0
+  // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
+  // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
+  // race with the pending getPublicKeys and cause transport "Unexpected message".
+  private promptPinActive = false
 
   constructor() {
     super()
@@ -69,8 +98,20 @@ export class EngineController extends EventEmitter {
    * Attach transport event listeners to catch PIN_REQUEST / BUTTON_REQUEST
    * events emitted mid-operation by the hdwallet transport layer.
    */
+  private cleanupTransportListeners() {
+    if (!this.wallet?.transport) return
+    const transport = this.wallet.transport
+    transport.removeAllListeners(String(core.Events.PIN_REQUEST))
+    transport.removeAllListeners(String(core.Events.BUTTON_REQUEST))
+    transport.removeAllListeners(String(core.Events.PASSPHRASE_REQUEST))
+    transport.removeAllListeners("80")
+  }
+
   private attachTransportListeners() {
     if (!this.wallet?.transport) return
+
+    // Clean up any existing listeners to prevent leaks on re-pair
+    this.cleanupTransportListeners()
 
     const transport = this.wallet.transport
 
@@ -89,7 +130,8 @@ export class EngineController extends EventEmitter {
     })
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
-      console.log('[Engine] PASSPHRASE_REQUEST')
+      console.log('[Engine] PASSPHRASE_REQUEST → emitting to UI')
+      this.emit('passphrase-request')
     })
 
     // CHARACTER_REQUEST — raw numeric event (80) contains wordPos/characterPos
@@ -119,6 +161,7 @@ export class EngineController extends EventEmitter {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB detached')
       this.clearRetry()
+      this.cleanupTransportListeners()
       this.wallet = null
       this.activeTransport = null
       this.cachedFeatures = null
@@ -164,6 +207,44 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  /**
+   * Verify device firmware/bootloader against the manifest registry.
+   *
+   * Key insight from keepkey-desktop: the manifest's hashes.firmware contains
+   * SHA-256 of downloadable .bin files, NOT on-device hashes. But hashes.bootloader
+   * DOES contain on-device bootloader hashes. So:
+   *   - Bootloader: lookup device hash in manifest.hashes.bootloader (hash-based)
+   *   - Firmware: check if device version exists in manifest.hashes.firmware values (version-based)
+   */
+  private verifyHashes(features: any): {
+    firmwareHash?: string
+    bootloaderHash?: string
+    firmwareVerified?: boolean
+    bootloaderVerified?: boolean
+  } {
+    const fwHash = base64ToHex(features?.firmwareHash)
+    const blHash = base64ToHex(features?.bootloaderHash)
+
+    let firmwareVerified: boolean | undefined
+    let bootloaderVerified: boolean | undefined
+
+    if (this.manifest?.hashes) {
+      // Bootloader: on-device hash matches manifest keys directly
+      if (blHash) {
+        bootloaderVerified = blHash in (this.manifest.hashes.bootloader || {})
+      }
+      // Firmware: manifest firmware hashes are .bin file hashes (different from on-device hash).
+      // Verify by checking if the device's version string appears as a known release.
+      const fwVersion = this.extractVersion(features)
+      if (fwVersion && fwVersion !== '0.0.0') {
+        const knownVersions = Object.values(this.manifest.hashes.firmware || {})
+        firmwareVerified = knownVersions.includes(`v${fwVersion}`)
+      }
+    }
+
+    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified }
+  }
+
   // ── State Sync (called on USB attach + startup) ────────────────────────
 
   async syncState() {
@@ -202,11 +283,16 @@ export class EngineController extends EventEmitter {
             PAIR_TIMEOUT_MS,
             'getFeatures'
           )
+          const hashVerification = this.verifyHashes(this.cachedFeatures)
           console.log('[Engine] Features:', JSON.stringify({
             initialized: this.cachedFeatures?.initialized,
             firmwareVersion: this.extractVersion(this.cachedFeatures),
             bootloaderMode: this.cachedFeatures?.bootloaderMode,
             label: this.cachedFeatures?.label,
+            firmwareHash: hashVerification.firmwareHash,
+            firmwareVerified: hashVerification.firmwareVerified,
+            bootloaderHash: hashVerification.bootloaderHash,
+            bootloaderVerified: hashVerification.bootloaderVerified,
           }))
           this.updateState(this.deriveState(this.cachedFeatures))
         } catch (err) {
@@ -391,6 +477,8 @@ export class EngineController extends EventEmitter {
       ? this.versionLessThan(blVersion, this.latestBootloader)
       : bootloaderMode
 
+    const hashes = features ? this.verifyHashes(features) : {}
+
     return {
       state: this.lastState,
       activeTransport: this.activeTransport,
@@ -407,6 +495,10 @@ export class EngineController extends EventEmitter {
       needsInit: !initialized,
       initialized,
       isOob: bootloaderMode || fwVersion === '4.0.0',
+      firmwareHash: hashes.firmwareHash,
+      bootloaderHash: hashes.bootloaderHash,
+      firmwareVerified: hashes.firmwareVerified,
+      bootloaderVerified: hashes.bootloaderVerified,
       error: this.lastError,
     }
   }
@@ -428,6 +520,15 @@ export class EngineController extends EventEmitter {
       const response = await fetch(blUrl)
       if (!response.ok) throw new Error(`Failed to download bootloader: ${response.status}`)
       const firmware = Buffer.from(await response.arrayBuffer())
+
+      // Binary integrity check — compare downloaded file hash against manifest
+      if (this.manifest?.latest?.bootloader?.hash) {
+        const downloadedHash = sha256Hex(firmware)
+        if (downloadedHash !== this.manifest.latest.bootloader.hash) {
+          throw new Error(`Bootloader binary integrity check failed: expected ${this.manifest.latest.bootloader.hash}, got ${downloadedHash}`)
+        }
+        console.log('[Engine] Bootloader binary integrity verified')
+      }
 
       this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })
       await this.wallet.firmwareErase()
@@ -464,6 +565,15 @@ export class EngineController extends EventEmitter {
       const response = await fetch(fwUrl)
       if (!response.ok) throw new Error(`Failed to download firmware: ${response.status}`)
       const firmware = Buffer.from(await response.arrayBuffer())
+
+      // Binary integrity check — compare downloaded file hash against manifest
+      if (this.manifest?.latest?.firmware?.hash) {
+        const downloadedHash = sha256Hex(firmware)
+        if (downloadedHash !== this.manifest.latest.firmware.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${this.manifest.latest.firmware.hash}, got ${downloadedHash}`)
+        }
+        console.log('[Engine] Firmware binary integrity verified')
+      }
 
       this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })
       await this.wallet.firmwareErase()
@@ -567,7 +677,7 @@ export class EngineController extends EventEmitter {
     // hdwallet's recover() doesn't support dryRun, so we construct
     // the raw RecoveryDevice protobuf with dryRun=true and send via transport.
     // dryRun means the device verifies the seed WITHOUT modifying any state.
-    const Messages = require('@keepkey/device-protocol/lib/messages_pb')
+    const Messages = await import('@keepkey/device-protocol/lib/messages_pb')
 
     this.setupInProgress = true
     this.pinRequestCount = 0
@@ -612,9 +722,34 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async applySettings(opts: { label?: string }) {
+  async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }) {
     if (!this.wallet) throw new Error('No device connected')
-    await this.wallet.applySettings({ label: opts.label })
+    const settings: any = {}
+    if (opts.label !== undefined) settings.label = opts.label
+    if (opts.usePassphrase !== undefined) settings.usePassphrase = opts.usePassphrase
+    if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
+    await this.wallet.applySettings(settings)
+    this.cachedFeatures = await this.wallet.getFeatures()
+    this.emit('state-change', this.getDeviceState())
+  }
+
+  async changePin() {
+    if (!this.wallet) throw new Error('No device connected')
+    this.setupInProgress = true
+    this.pinRequestCount = 0
+    try {
+      await this.wallet.changePin()
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.emit('state-change', this.getDeviceState())
+    } finally {
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+    }
+  }
+
+  async removePin() {
+    if (!this.wallet) throw new Error('No device connected')
+    await this.wallet.removePin()
     this.cachedFeatures = await this.wallet.getFeatures()
     this.emit('state-change', this.getDeviceState())
   }
@@ -626,37 +761,41 @@ export class EngineController extends EventEmitter {
    */
   async promptPin() {
     if (!this.wallet) throw new Error('No device connected')
-    // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device
-    // The transport PIN_REQUEST listener (line 70) will emit 'pin-request' to the UI
-    // We intentionally don't await the result — the PIN_REQUEST event fires mid-call
-    // and we need to let the UI handle it before the operation can complete
+    // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device.
+    // It also triggers PASSPHRASE_REQUEST if passphrase protection is enabled.
+    // Both are resolved via transport event handlers (sendPin/sendPassphrase).
+    // While this promise is pending, sendPin/sendPassphrase must NOT call
+    // getFeatures — that would race with getPublicKeys and cause FAILURE.
+    this.promptPinActive = true
     const promise = this.wallet.getPublicKeys([{
       addressNList: [0x8000002C, 0x80000000, 0x80000000], // m/44'/0'/0'
       curve: 'secp256k1',
       showDisplay: false,
       coin: 'Bitcoin',
     }])
-    // If device is already unlocked, getPublicKeys completes immediately
-    // If locked, PIN_REQUEST fires and we wait for sendPin() to resolve it
     try {
       await promise
-      // If we get here, device was already unlocked
+      // getPublicKeys completed — PIN (and passphrase if needed) were provided.
+      // Now it's safe to refresh features.
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
       return { status: 'unlocked', message: 'Device already unlocked' }
     } catch (err: any) {
-      // PIN flow interruption is expected — the UI handles PIN entry
+      // PIN/passphrase flow interruption is expected — the UI handles input
       throw err
+    } finally {
+      this.promptPinActive = false
     }
   }
 
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
     await this.wallet.sendPin(pin)
-    // During setup (reset/recover), don't call getFeatures — the main operation
-    // is still running and the transport is locked. Features refresh happens
-    // when the setup operation completes.
-    if (!this.setupInProgress) {
+    // Don't call getFeatures if another operation owns the transport:
+    // - setupInProgress: reset/recover is still running
+    // - promptPinActive: getPublicKeys is still pending (may also need passphrase)
+    // Both will refresh features themselves when they complete.
+    if (!this.setupInProgress && !this.promptPinActive) {
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
     }
@@ -665,8 +804,12 @@ export class EngineController extends EventEmitter {
   async sendPassphrase(passphrase: string) {
     if (!this.wallet) throw new Error('No device connected')
     await this.wallet.sendPassphrase(passphrase)
-    this.cachedFeatures = await this.wallet.getFeatures()
-    this.updateState(this.deriveState(this.cachedFeatures))
+    // Don't call getFeatures if promptPin's getPublicKeys is still pending —
+    // it owns the transport and will refresh features when it completes.
+    if (!this.promptPinActive) {
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.updateState(this.deriveState(this.cachedFeatures))
+    }
   }
 
   async sendCharacter(character: string) {

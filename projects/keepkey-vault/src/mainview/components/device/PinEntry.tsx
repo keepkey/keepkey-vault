@@ -1,24 +1,24 @@
-import { useState, useEffect, useCallback } from "react";
-import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react";
-import type { PinRequestType } from "../../../shared/types";
+import { useState, useEffect, useCallback } from "react"
+import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
+import type { PinRequestType } from "../../../shared/types"
 
 interface PinEntryProps {
-	type?: PinRequestType;
-	onSubmit: (pin: string) => void;
-	onCancel: () => void;
+	type?: PinRequestType
+	onSubmit: (pin: string) => void
+	onCancel: () => void
 }
 
 const TITLES: Record<PinRequestType, string> = {
 	"current": "Enter PIN",
 	"new-first": "Create a PIN",
 	"new-second": "Confirm Your PIN",
-};
+}
 
 const DESCRIPTIONS: Record<PinRequestType, string> = {
 	"current": "Use the positions shown on your KeepKey to enter your PIN",
 	"new-first": "Look at your KeepKey screen and tap the positions to set a new PIN",
 	"new-second": "Enter the same PIN again to confirm",
-};
+}
 
 /**
  * PIN entry pad matching KeepKey's scrambled 3x3 layout.
@@ -26,49 +26,49 @@ const DESCRIPTIONS: Record<PinRequestType, string> = {
  * position-based buttons (1-9) on this grid.
  */
 export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps) {
-	const [pin, setPin] = useState("");
+	const [pin, setPin] = useState("")
 
 	// Reset pin when type changes (e.g. new-first → new-second)
 	useEffect(() => {
-		setPin("");
-	}, [type]);
+		setPin("")
+	}, [type])
 
 	const handleDigit = useCallback((digit: string) => {
-		setPin((p) => (p.length < 9 ? p + digit : p));
-	}, []);
+		setPin((p) => (p.length < 9 ? p + digit : p))
+	}, [])
 
 	const handleBackspace = useCallback(() => {
-		setPin((p) => p.slice(0, -1));
-	}, []);
+		setPin((p) => p.slice(0, -1))
+	}, [])
 
 	const handleSubmit = useCallback(() => {
 		if (pin.length > 0) {
-			onSubmit(pin);
-			setPin("");
+			onSubmit(pin)
+			setPin("")
 		}
-	}, [pin, onSubmit]);
+	}, [pin, onSubmit])
 
 	// Keyboard support: 1-9 digits, backspace, enter
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key >= "1" && e.key <= "9") {
-				handleDigit(e.key);
+				handleDigit(e.key)
 			} else if (e.key === "Backspace") {
-				handleBackspace();
+				handleBackspace()
 			} else if (e.key === "Enter") {
-				handleSubmit();
+				handleSubmit()
 			}
-		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [handleDigit, handleBackspace, handleSubmit]);
+		}
+		window.addEventListener("keydown", onKeyDown)
+		return () => window.removeEventListener("keydown", onKeyDown)
+	}, [handleDigit, handleBackspace, handleSubmit])
 
 	// KeepKey PIN pad layout: 7 8 9 / 4 5 6 / 1 2 3
 	const rows = [
 		["7", "8", "9"],
 		["4", "5", "6"],
 		["1", "2", "3"],
-	];
+	]
 
 	return (
 		<Flex
@@ -83,28 +83,28 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 			zIndex={2000}
 		>
 			<Box
-				bg="gray.800"
+				bg="kk.cardBg"
 				borderRadius="xl"
 				border="1px solid"
-				borderColor="gray.600"
+				borderColor="kk.border"
 				p="8"
 				maxW="360px"
 				w="90%"
 				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
 			>
-				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="white">
+				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 					{TITLES[type]}
 				</Text>
-				<Text color="gray.400" fontSize="sm" mb="6" textAlign="center">
+				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
 					{DESCRIPTIONS[type]}
 				</Text>
 
 				{/* PIN display — masked dots */}
 				<Box
-					bg="gray.900"
+					bg="kk.bg"
 					borderRadius="md"
 					border="1px solid"
-					borderColor="gray.600"
+					borderColor="kk.border"
 					p="3"
 					mb="5"
 					textAlign="center"
@@ -112,7 +112,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					fontSize="2xl"
 					letterSpacing="8px"
 					minH="48px"
-					color="orange.400"
+					color="kk.gold"
 				>
 					{"\u2022".repeat(pin.length) || "\u00A0"}
 				</Box>
@@ -127,15 +127,15 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 									onClick={() => handleDigit(digit)}
 									w="72px"
 									h="72px"
-									bg="gray.700"
+									bg="kk.cardBg"
 									border="2px solid"
-									borderColor="gray.600"
-									color="white"
+									borderColor="kk.border"
+									color="kk.textPrimary"
 									fontSize="xl"
 									fontWeight="bold"
 									borderRadius="xl"
-									_hover={{ borderColor: "orange.500", bg: "gray.600" }}
-									_active={{ bg: "orange.500", borderColor: "orange.500" }}
+									_hover={{ borderColor: "kk.gold", bg: "kk.cardBgHover" }}
+									_active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black" }}
 									disabled={pin.length >= 9}
 								>
 									{"\u2022"}
@@ -151,9 +151,9 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						onClick={handleBackspace}
 						size="md"
 						variant="outline"
-						borderColor="gray.600"
-						color="gray.300"
-						_hover={{ borderColor: "orange.500", color: "white" }}
+						borderColor="kk.border"
+						color="kk.textSecondary"
+						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
 						disabled={pin.length === 0}
 						flex={1}
 					>
@@ -162,10 +162,10 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					<Button
 						onClick={handleSubmit}
 						size="md"
-						bg="orange.500"
-						color="white"
+						bg="kk.gold"
+						color="black"
 						fontWeight="semibold"
-						_hover={{ bg: "orange.600" }}
+						_hover={{ bg: "kk.goldHover" }}
 						disabled={pin.length === 0}
 						flex={1}
 					>
@@ -178,8 +178,8 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						onClick={onCancel}
 						size="sm"
 						variant="ghost"
-						color="gray.500"
-						_hover={{ color: "red.400" }}
+						color="kk.textMuted"
+						_hover={{ color: "kk.error" }}
 						w="100%"
 						mt="3"
 					>
@@ -188,5 +188,5 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 				)}
 			</Box>
 		</Flex>
-	);
+	)
 }

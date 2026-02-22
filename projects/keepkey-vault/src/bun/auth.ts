@@ -10,6 +10,9 @@ interface PairedClient {
   info: PairingInfo
 }
 
+const KEY_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const MAX_KEYS = 20
+
 export class AuthStore {
   private keys = new Map<string, PairedClient>()
   private accounts = new Map<string, number[]>()
@@ -36,6 +39,7 @@ export class AuthStore {
 
   approvePairing(): string | null {
     if (!this.pendingPair) return null
+    this.evictIfFull()
     const apiKey = crypto.randomUUID()
     const { info, resolve } = this.pendingPair
     this.keys.set(apiKey, { apiKey, info: { ...info, addedOn: Date.now() } })
@@ -52,6 +56,7 @@ export class AuthStore {
 
   /** Direct pair — only for internal/trusted callers (NOT exposed via REST) */
   pair(info: PairingInfo): string {
+    this.evictIfFull()
     const apiKey = crypto.randomUUID()
     this.keys.set(apiKey, { apiKey, info: { ...info, addedOn: Date.now() } })
     return apiKey
@@ -62,7 +67,22 @@ export class AuthStore {
   }
 
   validate(apiKey: string): PairedClient | null {
-    return this.keys.get(apiKey) ?? null
+    const entry = this.keys.get(apiKey)
+    if (!entry) return null
+    // Expire keys older than TTL
+    if (entry.info.addedOn && Date.now() - entry.info.addedOn > KEY_TTL_MS) {
+      this.keys.delete(apiKey)
+      return null
+    }
+    return entry
+  }
+
+  /** Evict oldest key when at capacity */
+  private evictIfFull() {
+    if (this.keys.size < MAX_KEYS) return
+    // Map iterates in insertion order — first key is oldest
+    const oldest = this.keys.keys().next().value
+    if (oldest) this.keys.delete(oldest)
   }
 
   extractBearerToken(req: Request): string | null {

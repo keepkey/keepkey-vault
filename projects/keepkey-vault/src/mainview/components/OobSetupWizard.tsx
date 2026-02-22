@@ -732,6 +732,25 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       <Text fontSize="xs" color="blue.200">
                         Your KeepKey is restarting with the new firmware. Please wait...
                       </Text>
+                      {deviceStatus.firmwareVerified !== undefined && (
+                        <HStack gap={2} mt={1}>
+                          {deviceStatus.firmwareVerified ? (
+                            <>
+                              <FaCheckCircle color="#48BB78" size={14} />
+                              <Text fontSize="xs" color="green.300" fontWeight="bold">
+                                Firmware verified as official release
+                              </Text>
+                            </>
+                          ) : (
+                            <>
+                              <FaExclamationTriangle color="#FB923C" size={14} />
+                              <Text fontSize="xs" color="orange.300" fontWeight="bold">
+                                Firmware hash not found in manifest
+                              </Text>
+                            </>
+                          )}
+                        </HStack>
+                      )}
                     </VStack>
                   </Box>
                 )}

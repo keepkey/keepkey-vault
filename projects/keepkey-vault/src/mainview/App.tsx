@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex } from "@chakra-ui/react"
 import { PinEntry } from "./components/device/PinEntry"
+import { PassphraseEntry } from "./components/device/PassphraseEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -38,6 +39,32 @@ function App() {
 
 	const handlePinCancel = useCallback(() => { setPinRequestType(null); setPinDismissed(true) }, [])
 
+	// ── Passphrase overlay ──────────────────────────────────────────
+	const [passphraseRequested, setPassphraseRequested] = useState(false)
+
+	useEffect(() => {
+		return onRpcMessage("passphrase-request", () => {
+			setPinRequestType(null) // PIN was already handled — dismiss its overlay
+			setPinDismissed(true)   // prevent auto-show effect from re-arming PIN
+			setPassphraseRequested(true)
+		})
+	}, [])
+
+	const handlePassphraseSubmit = useCallback(async (passphrase: string) => {
+		try { await rpcRequest("sendPassphrase", { passphrase }) } catch (e) { console.error("sendPassphrase:", e) }
+		setPinRequestType(null) // ensure PIN overlay stays cleared
+		setPassphraseRequested(false)
+	}, [])
+
+	const handlePassphraseCancel = useCallback(() => { setPinRequestType(null); setPassphraseRequested(false) }, [])
+
+	// Auto-show passphrase overlay when device needs passphrase
+	useEffect(() => {
+		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
+			setPassphraseRequested(true)
+		}
+	}, [deviceState.state, passphraseRequested])
+
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
 	const [recoveryError, setRecoveryError] = useState<{ message: string; errorType: string } | null>(null)
@@ -70,11 +97,11 @@ function App() {
 		setCharRequest(null)
 		setRecoveryError(null)
 	}, [])
-	const handleRecoveryRetry = useCallback(async () => {
+	const handleRecoveryRetry = useCallback(() => {
+		// Dismiss error overlay — let the wizard/settings UI handle re-initiation
 		setCharRequest(null)
 		setRecoveryError(null)
-		try { await rpcRequest("recoverDevice", { wordCount: recoveryWordCount, pin: true, passphrase: false }, 600000) } catch { /* errors via RPC message */ }
-	}, [recoveryWordCount])
+	}, [])
 
 	// Auto-show PIN for locked device (only once — respect user dismiss)
 	useEffect(() => {
@@ -86,11 +113,17 @@ function App() {
 		if (deviceState.state === "ready" || deviceState.state === "disconnected") {
 			setPinRequestType(null)
 			setCharRequest(null)
+			setPassphraseRequested(false)
 			setPinDismissed(false) // reset dismiss on state transitions
 		}
 	}, [deviceState.state])
 
 	const handlePortfolioLoaded = useCallback(() => setPortfolioLoaded(true), [])
+
+	// Reset portfolioLoaded when device leaves ready state so Dashboard re-fetches fresh
+	useEffect(() => {
+		if (deviceState.state !== "ready") setPortfolioLoaded(false)
+	}, [deviceState.state])
 
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
@@ -99,10 +132,16 @@ function App() {
 		isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
-		: "ready"
+		: deviceState.state === "ready" ? "ready"
+		: "splash"
 
-	// ── Overlays (render above everything) ──────────────────────────
-	const pinOverlay = pinRequestType ? (
+	// ── Overlays (render above everything, only one at a time) ──────
+	// Priority: passphrase > PIN (passphrase comes after PIN in unlock sequence)
+	const passphraseOverlay = passphraseRequested ? (
+		<PassphraseEntry onSubmit={handlePassphraseSubmit} onCancel={handlePassphraseCancel} />
+	) : null
+
+	const pinOverlay = pinRequestType && !passphraseRequested ? (
 		<PinEntry type={pinRequestType} onSubmit={handlePinSubmit} onCancel={handlePinCancel} />
 	) : null
 
@@ -124,7 +163,7 @@ function App() {
 	// ── Render phases ───────────────────────────────────────────────
 	if (phase === "claimed") {
 		return (
-			<>{charOverlay}{pinOverlay}
+			<>{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen statusText="KeepKey detected" variant="claimed">
 					<DeviceClaimedDialog error={deviceState.error || "Device claimed by another process"} />
 				</SplashScreen>
@@ -135,12 +174,20 @@ function App() {
 	if (phase === "splash") {
 		const isConnecting = deviceState.state === "connected_unpaired"
 		const isError = deviceState.state === "error"
+		const needsPin = deviceState.state === "needs_pin"
+		const needsPassphrase = deviceState.state === "needs_passphrase"
 		return (
-			<>{charOverlay}{pinOverlay}
+			<>{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
-					statusText={isConnecting ? "KeepKey detected — connecting" : isError ? `Error: ${deviceState.error || "Unknown"}` : "Searching for KeepKey"}
+					statusText={
+						needsPin ? "Unlock your KeepKey"
+						: needsPassphrase ? "Passphrase required"
+						: isConnecting ? "KeepKey detected — connecting"
+						: isError ? `Error: ${deviceState.error || "Unknown"}`
+						: "Searching for KeepKey"
+					}
 					hintText={isError ? "Try unplugging and replugging your KeepKey." : undefined}
-					variant={isConnecting ? "connecting" : isError ? "error" : "searching"}
+					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 				/>
 			</>
 		)
@@ -148,23 +195,15 @@ function App() {
 
 	if (phase === "setup") {
 		return (
-			<>{charOverlay}{pinOverlay}
+			<>{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
-			</>
-		)
-	}
-
-	if (deviceState.state === "needs_passphrase") {
-		return (
-			<>{charOverlay}{pinOverlay}
-				<SplashScreen statusText="Passphrase entry required" variant="connecting" />
 			</>
 		)
 	}
 
 	// ── Ready phase ─────────────────────────────────────────────────
 	return (
-		<>{charOverlay}{pinOverlay}
+		<>{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && (
 				<SplashScreen statusText="Loading portfolio" variant="connecting" />
 			)}
@@ -175,6 +214,7 @@ function App() {
 					label={deviceState.label}
 					connected={deviceState.state === "ready" || deviceState.state === "needs_pin" || deviceState.state === "needs_passphrase"}
 					firmwareVersion={deviceState.firmwareVersion}
+					firmwareVerified={deviceState.firmwareVerified}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					settingsOpen={settingsOpen}
 				/>
