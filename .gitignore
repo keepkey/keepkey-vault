@@ -18,6 +18,5 @@ bun.lock
 
 # Development artifacts
 Vault/
-modules/proto-tx-builder-vendored/
 PLAN.md
 .claude/

@@ -1,0 +1,8 @@
+{
+  "name": "@keepkey/proto-tx-builder",
+  "version": "0.10.0-vendored",
+  "description": "Vendored single-file bundle of proto-tx-builder (Cosmos SIGN_MODE_DIRECT transaction builder)",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "license": "MIT"
+}
