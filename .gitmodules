@@ -1,0 +1,7 @@
+[submodule "modules/hdwallet"]
+	path = modules/hdwallet
+	url = https://github.com/keepkey/hdwallet
+	branch = vault-v1
+[submodule "modules/proto-tx-builder"]
+	path = modules/proto-tx-builder
+	url = https://github.com/BitHighlander/proto-tx-builder

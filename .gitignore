@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+artifacts/
+bun.lock
+*.log
+.DS_Store
+.idea/
+
+# Credentials — NEVER commit
+.env
+.env.*
+*.p12
+*.cer
+*.key
+*.pem
+*.mobileprovision
+
+# Development artifacts
+Vault/
+modules/proto-tx-builder-vendored/
+PLAN.md
+.claude/

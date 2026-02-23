@@ -1,0 +1,5956 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "keepkey-vault-server",
+    "version": "0.1.1",
+    "contact": {}
+  },
+  "servers": [
+    {
+      "url": "http://localhost:1646/"
+    }
+  ],
+  "paths": {
+    "/addresses/utxo": {
+      "post": {
+        "operationId": "UtxoGetAddress",
+        "summary": "Get Binance Address",
+        "description": "Get a Bitcoin/Dogecoin/Dash.... cont. (see coin-support) Chain address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "script_type": {
+                    "$ref": "#/components/schemas/BTCInputScriptType"
+                  },
+                  "coin": {
+                    "type": "string"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "coin",
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {}
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/bnb": {
+      "post": {
+        "operationId": "BinanceGetAddress",
+        "summary": "Get Binance Address",
+        "description": "Get a Binance Chain address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.bnb.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/cosmos": {
+      "post": {
+        "operationId": "CosmosGetAddress",
+        "summary": "Get Cosmos Address",
+        "description": "Get a Cosmos address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.cosmos.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/osmosis": {
+      "post": {
+        "operationId": "OsmosisGetAddress",
+        "summary": "Get Cosmos Address",
+        "description": "Get a Cosmos address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.cosmos.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/eth": {
+      "post": {
+        "operationId": "EthereumGetAddress",
+        "summary": "Get Ethereum Address",
+        "description": "Get an Ethereum address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.eth.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/tendermint": {
+      "post": {
+        "operationId": "TendermintGetAddress",
+        "summary": "Get Tendermint Address",
+        "description": "Get a Tendermint address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.eth.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/thorchain": {
+      "post": {
+        "operationId": "ThorchainGetAddress",
+        "summary": "Get Thorchain Address",
+        "description": "Get a Thorchain address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.cosmos.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/mayachain": {
+      "post": {
+        "operationId": "MayachainGetAddress",
+        "summary": "Get Thorchain Address",
+        "description": "Get a mayachain address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.cosmos.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/xrp": {
+      "post": {
+        "operationId": "XrpGetAddress",
+        "summary": "Get XRP Address",
+        "description": "Get an XRP address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "$ref": "#/components/schemas/types.cosmos.Address"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/auth/pair": {
+      "get": {
+        "operationId": "Verify",
+        "summary": "Verify new SDK client",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "403": {
+            "description": "Invalid API key"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Auth"
+        ]
+      },
+      "post": {
+        "operationId": "Pair",
+        "summary": "Pair new SDK client",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairingInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apiKey": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "apiKey"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "403": {
+            "description": "Pairing request rejected"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [],
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/bnb/sign-transaction": {
+      "post": {
+        "operationId": "bnb_signTransaction",
+        "summary": "Sign a Binance Chain transaction",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.bnb.SignDoc"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.bnb.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.bnb.SignDoc"
+                    },
+                    "txid": {
+                      "type": "string"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "txid",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "BNB"
+        ]
+      }
+    },
+    "/cosmos/sign-amino": {
+      "post": {
+        "operationId": "cosmos_signAmino",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDoc"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDoc"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Cosmos"
+        ]
+      }
+    },
+    "/cosmos/sign-amino-delegate": {
+      "post": {
+        "operationId": "cosmos_signAmino_delegate",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocDelegate"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocDelegate"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Cosmos"
+        ]
+      }
+    },
+    "/cosmos/sign-amino-undelegate": {
+      "post": {
+        "operationId": "cosmos_signAmino_undelegate",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocUnDelegate"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocUnDelegate"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Cosmos"
+        ]
+      }
+    },
+    "/cosmos/sign-amino-redelegate": {
+      "post": {
+        "operationId": "cosmos_signAmino_redelegate",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocBeginReDelegate"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocBeginReDelegate"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Cosmos"
+        ]
+      }
+    },
+    "/cosmos/sign-amino-withdraw-delegator-rewards-all": {
+      "post": {
+        "operationId": "cosmos_signAmino_withdraw-delegator-rewards-all",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocWithdrawDelegationReward"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocWithdrawDelegationReward"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Cosmos"
+        ]
+      }
+    },
+    "/cosmos/sign-amino-ibc-transfer": {
+      "post": {
+        "operationId": "cosmos_signAmino_ibc-transfer",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocIbcGoTransfer"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocIbcGoTransfer"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Cosmos"
+        ]
+      }
+    },
+    "/eth/sign-transaction": {
+      "post": {
+        "operationId": "eth_signTransaction",
+        "summary": "Sign an Ethereum transaction",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "gasPrice": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexQuantity"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "maxPriorityFeePerGas": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexQuantity"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "maxFeePerGas": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexQuantity"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "chainId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number",
+                        "format": "double"
+                      }
+                    ]
+                  },
+                  "nonce": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexQuantity"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexQuantity"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "gas": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexQuantity"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "data": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.HexData"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "addressNList": {},
+                  "from": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/types.eth.Address"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "chainId",
+                  "nonce",
+                  "value",
+                  "data",
+                  "to"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serialized": {
+                      "$ref": "#/components/schemas/types.eth.HexData"
+                    },
+                    "s": {
+                      "$ref": "#/components/schemas/types.eth.HexData"
+                    },
+                    "r": {
+                      "$ref": "#/components/schemas/types.eth.HexData"
+                    },
+                    "v": {
+                      "$ref": "#/components/schemas/types.numeric.U32"
+                    }
+                  },
+                  "required": [
+                    "serialized",
+                    "s",
+                    "r",
+                    "v"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "ETH"
+        ]
+      }
+    },
+    "/eth/sign-typed-data": {
+      "post": {
+        "operationId": "eth_signTypedData",
+        "summary": "Sign EIP-712 typed data",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "typedData": {},
+                  "address": {
+                    "$ref": "#/components/schemas/types.eth.Address"
+                  }
+                },
+                "required": [
+                  "typedData",
+                  "address"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/types.eth.Signature"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "ETH"
+        ]
+      }
+    },
+    "/eth/sign": {
+      "post": {
+        "operationId": "eth_sign",
+        "summary": "Sign an Etherum message",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "$ref": "#/components/schemas/types.eth.Address"
+                  },
+                  "message": {}
+                },
+                "required": [
+                  "address",
+                  "message"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/types.eth.Signature"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "ETH"
+        ]
+      }
+    },
+    "/eth/verify": {
+      "post": {
+        "operationId": "eth_verify",
+        "summary": "Verify an Etherum message",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signature": {
+                    "$ref": "#/components/schemas/types.eth.Signature"
+                  },
+                  "address": {
+                    "$ref": "#/components/schemas/types.eth.Address"
+                  },
+                  "message": {
+                    "$ref": "#/components/schemas/types.eth.HexData"
+                  }
+                },
+                "required": [
+                  "signature",
+                  "address",
+                  "message"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signature checked; see response to determine if message was verified successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "ETH"
+        ]
+      }
+    },
+    "/osmosis/sign-amino": {
+      "post": {
+        "operationId": "osmosis_signAmino",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDoc"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDoc"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-delegate": {
+      "post": {
+        "operationId": "osmo_signAmino_delegate",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocDelegate"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocDelegate"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-undelegate": {
+      "post": {
+        "operationId": "osmo_signAmino_undelegate",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocUnDelegate"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocUnDelegate"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-redelegate": {
+      "post": {
+        "operationId": "osmo_signAmino_redelegate",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocBeginReDelegate"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocBeginReDelegate"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-withdraw-delegator-rewards-all": {
+      "post": {
+        "operationId": "osmo_signAmino_withdraw_delegator_rewards_all",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocWithdrawDelegationReward"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocWithdrawDelegationReward"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-ibc-transfer": {
+      "post": {
+        "operationId": "osmo_signAmino_ibc_transfer",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.cosmos.amino.SignDocIbcGoTransfer"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.cosmos.amino.SignDocIbcGoTransfer"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-lp-remove": {
+      "post": {
+        "operationId": "osmo_signAmino_lp_remove",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.osmosis.SignDocLPRemove"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.osmosis.SignDocLPRemove"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-lp-add": {
+      "post": {
+        "operationId": "osmo_signAmino_lp_add",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.osmosis.SignDocLPAdd"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.osmosis.SignDocLPAdd"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/osmosis/sign-amino-swap": {
+      "post": {
+        "operationId": "osmo_signAmino_swap",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.osmosis.SignDocSwap"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed": {
+                      "$ref": "#/components/schemas/types.osmosis.SignDocSwap"
+                    },
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "signed",
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Osmosis"
+        ]
+      }
+    },
+    "/system/info/get-entropy": {
+      "post": {
+        "operationId": "GetEntropy",
+        "summary": "Get entropy",
+        "description": "Get entropy from the device's RNG.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "size": {
+                    "$ref": "#/components/schemas/types.numeric.U32"
+                  }
+                },
+                "required": [
+                  "size"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Info"
+        ]
+      }
+    },
+    "/system/info/get-features": {
+      "post": {
+        "operationId": "GetFeatures",
+        "summary": "Get features",
+        "description": "Get device features object",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/types.Features"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Info"
+        ]
+      }
+    },
+    "/system/info/get-public-key": {
+      "post": {
+        "operationId": "GetPublicKey",
+        "summary": "Get public key",
+        "description": "Get public key associated with a particular BIP-32 node.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "script_type": {
+                    "type": "string",
+                    "enum": [
+                      "p2pkh",
+                      "p2wpkh",
+                      "p2sh-p2wpkh"
+                    ]
+                  },
+                  "coin_name": {
+                    "type": "string"
+                  },
+                  "show_display": {
+                    "type": "boolean"
+                  },
+                  "ecdsa_curve_name": {
+                    "type": "string"
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  }
+                },
+                "required": [
+                  "address_n"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "xpub": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "xpub"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Info"
+        ]
+      }
+    },
+    "/system/info/list-coins": {
+      "post": {
+        "operationId": "ListCoins",
+        "summary": "List coins",
+        "description": "Dump device coins table.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/types.Coin"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Info"
+        ]
+      }
+    },
+    "/system/info/ping": {
+      "post": {
+        "operationId": "Ping",
+        "summary": "Ping",
+        "description": "Confirm device connectivity, optionally with on-device confirmation.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  },
+                  "wipe_code_protection": {
+                    "type": "boolean"
+                  },
+                  "passphrase_protection": {
+                    "type": "boolean"
+                  },
+                  "pin_protection": {
+                    "type": "boolean"
+                  },
+                  "button_protection": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Info"
+        ]
+      }
+    },
+    "/system/initialize/load-device": {
+      "post": {
+        "operationId": "LoadDevice",
+        "summary": "Load device",
+        "description": "Load a device with externally-derived key material. (Not recommended.)",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "u2f_counter": {
+                        "$ref": "#/components/schemas/types.numeric.U32"
+                      },
+                      "skip_checksum": {
+                        "type": "boolean"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "language": {
+                        "type": "string"
+                      },
+                      "passphrase_protection": {
+                        "type": "boolean"
+                      },
+                      "pin": {
+                        "$ref": "#/components/schemas/types.numeric.U32"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "mnemonic": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "mnemonic"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "xprv": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^xprv"
+                          }
+                        },
+                        "required": [
+                          "xprv"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Initialize"
+        ]
+      }
+    },
+    "/system/initialize/recover-device": {
+      "post": {
+        "operationId": "RecoverDevice",
+        "summary": "Recover device",
+        "description": "Start safe recovery workflow to restore from a recovery sentence.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "dry_run": {
+                    "description": "perform dry-run recovery workflow (for safe mnemonic validation)",
+                    "type": "boolean"
+                  },
+                  "u2f_counter": {
+                    "$ref": "#/components/schemas/types.numeric.U32"
+                  },
+                  "auto_lock_delay_ms": {
+                    "description": "screensaver timeout",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/types.numeric.U32"
+                      },
+                      {}
+                    ]
+                  },
+                  "no_enforce_wordlist": {
+                    "description": "don't enforce BIP-39 wordlist during the process",
+                    "type": "boolean"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "pin_protection": {
+                    "type": "boolean"
+                  },
+                  "passphrase_protection": {
+                    "type": "boolean"
+                  },
+                  "word_count": {
+                    "type": "number",
+                    "enum": [
+                      12,
+                      18,
+                      24
+                    ]
+                  }
+                },
+                "required": [
+                  "word_count"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Initialize"
+        ]
+      }
+    },
+    "/system/initialize/reset-device": {
+      "post": {
+        "operationId": "ResetDevice",
+        "summary": "Set up device",
+        "description": "Perform device setup and generate new seed.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "u2f_counter": {
+                    "$ref": "#/components/schemas/types.numeric.U32"
+                  },
+                  "auto_lock_delay_ms": {
+                    "description": "screensaver timeout",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/types.numeric.U32"
+                      },
+                      {}
+                    ]
+                  },
+                  "no_backup": {
+                    "description": "Initialize without ever showing the recovery sentence",
+                    "type": "boolean"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "pin_protection": {
+                    "type": "boolean"
+                  },
+                  "passphrase_protection": {
+                    "type": "boolean"
+                  },
+                  "strength": {
+                    "type": "number",
+                    "enum": [
+                      128,
+                      192,
+                      256
+                    ]
+                  },
+                  "display_random": {
+                    "description": "Display entropy generated by the device before asking for additional entropy",
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Initialize"
+        ]
+      }
+    },
+    "/system/apply-policies": {
+      "post": {
+        "operationId": "ApplyPolicies",
+        "summary": "Apply policies",
+        "description": "Enable or disable certain device configuration values",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/types.Policy"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/apply-settings": {
+      "post": {
+        "operationId": "ApplySettings",
+        "summary": "Apply settings",
+        "description": "Change device configuration",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "u2f_counter": {
+                    "$ref": "#/components/schemas/types.numeric.U32"
+                  },
+                  "use_passphrase": {
+                    "type": "boolean"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "auto_lock_delay_ms": {
+                    "$ref": "#/components/schemas/types.numeric.U32"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/change-pin": {
+      "post": {
+        "operationId": "ChangePin",
+        "summary": "Change or remove the device's PIN",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "remove": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/change-wipe-code": {
+      "post": {
+        "operationId": "ChangeWipeCode",
+        "summary": "Change or remove the device's wipe code",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "remove": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "deprecated": true,
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/cipher-key-value": {
+      "post": {
+        "operationId": "CipherKeyValue",
+        "summary": "Encrypt or decrypt a key/value pair",
+        "description": "Encrypt or decrypt a key and associated block of data, possibly with an on-device verification step",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "iv": {
+                        "description": "hex-encoded 16-byte initialization vector for AES-256-CBC",
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/types.hex.bytes.Lower"
+                          },
+                          {}
+                        ],
+                        "maxLength": 32,
+                        "minLength": 32
+                      },
+                      "ask_on_decrypt": {
+                        "description": "don't decrypt without prompting the user (setting must match for both encryption and decryption)",
+                        "type": "boolean"
+                      },
+                      "ask_on_encrypt": {
+                        "description": "don't encrypt without prompting the user (setting must match for both encryption and decryption)",
+                        "type": "boolean"
+                      },
+                      "decrypt": {
+                        "description": "decrypt ciphertext instead of encrypting plaintext",
+                        "type": "boolean"
+                      },
+                      "value": {
+                        "description": "decoded length must be a multiple of 16 bytes",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "description": "a key name, which will be mixed into the encryption key",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "address_n_list": {
+                        "description": "BIP-32 path to the encrypting/decrypting key",
+                        "$ref": "#/components/schemas/types.AddressNList"
+                      }
+                    },
+                    "required": [
+                      "iv",
+                      "value",
+                      "key",
+                      "address_n_list"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "decrypt": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ],
+                            "nullable": false
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "decrypt": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "nullable": false
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "decrypt",
+                          "value"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/clear-session": {
+      "post": {
+        "operationId": "ClearSession",
+        "summary": "Lock the device",
+        "description": "Causes the device to forget any cached PIN or passphrase. (Does not end the API session.)",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/firmware-update": {
+      "post": {
+        "operationId": "FirmwareUpdate",
+        "summary": "Firmware update",
+        "description": "Updates the device's firmware",
+        "parameters": [
+          {
+            "name": "skipErase",
+            "in": "query",
+            "description": "skip the usual firmware erase operation and the associated warning screen",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/sign-identity": {
+      "post": {
+        "operationId": "SignIdentity",
+        "summary": "Sign an identity challenge",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ecdsa_curve_name": {
+                    "description": "ECDSA curve name to use",
+                    "type": "string"
+                  },
+                  "challenge_hidden": {
+                    "description": "hex-encoded non-visible challenge",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/types.hex.bytes.Lower"
+                      },
+                      {}
+                    ]
+                  },
+                  "challenge_visual": {
+                    "description": "challenge shown on display (e.g. date+time). (Ignored when signing with SSH or GPG identities.)",
+                    "type": "string"
+                  },
+                  "index": {
+                    "description": "identity index",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/types.numeric.U32"
+                      },
+                      {}
+                    ]
+                  },
+                  "url": {
+                    "description": "identity url",
+                    "type": "string",
+                    "format": "url"
+                  }
+                },
+                "required": [
+                  "challenge_hidden",
+                  "url"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/system/wipe-device": {
+      "post": {
+        "operationId": "WipeDevice",
+        "summary": "Wipe keys and reset device",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/thorchain/sign-amino-transfer": {
+      "post": {
+        "operationId": "thorchain_signAmino_transfer",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.thorchain.SignDocTransfer"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Thorchain"
+        ]
+      }
+    },
+    "/thorchain/sign-amino-desposit": {
+      "post": {
+        "operationId": "thorchain_signAmino_deposit",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.thorchain.SignDocDeposit"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Thorchain"
+        ]
+      }
+    },
+    "/utxo/sign-transaction": {
+      "post": {
+        "operationId": "utxo_signTransaction",
+        "summary": "Sign a UTXO transaction",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "opReturnData": {
+                    "type": "string"
+                  },
+                  "vaultAddress": {
+                    "type": "string"
+                  },
+                  "outputs": {},
+                  "inputs": {},
+                  "coin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "outputs",
+                  "inputs",
+                  "coin"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serializedTx": {
+                      "$ref": "#/components/schemas/types.hex.bytes.Lower"
+                    }
+                  },
+                  "required": [
+                    "serializedTx"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "UTXO"
+        ]
+      }
+    },
+    "/xrp/sign-transaction": {
+      "post": {
+        "operationId": "xrp_signTransaction",
+        "summary": "Sign an XRP transaction",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "payment": {
+                    "type": "object",
+                    "properties": {
+                      "destinationTag": {
+                        "type": "string"
+                      },
+                      "destination": {
+                        "type": "string"
+                      },
+                      "amount": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "destinationTag",
+                      "destination",
+                      "amount"
+                    ]
+                  },
+                  "lastLedgerSequence": {
+                    "type": "string"
+                  },
+                  "sequence": {
+                    "type": "string"
+                  },
+                  "flags": {},
+                  "tx": {},
+                  "addressNList": {}
+                },
+                "required": [
+                  "payment",
+                  "lastLedgerSequence",
+                  "sequence",
+                  "tx",
+                  "addressNList"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "XRP"
+        ]
+      }
+    },
+    "/admin/wallets": {
+      "get": {
+        "operationId": "ListWallets",
+        "description": "List all wallets ever paired (with metadata).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/admin/wallets/current": {
+      "get": {
+        "operationId": "GetCurrentWallet",
+        "description": "Get the current in-context wallet.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/admin/wallets/switch": {
+      "post": {
+        "operationId": "SwitchWallet",
+        "description": "Switch the in-context wallet.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "walletId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "walletId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Switched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/admin/usb/devices": {
+      "get": {
+        "operationId": "ListUsbDevices",
+        "description": "List all USB devices detected.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/admin/usb/state": {
+      "get": {
+        "operationId": "GetUsbState",
+        "description": "Get current USB state.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connected": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "connected"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/admin/info": {
+      "get": {
+        "operationId": "GetInfo",
+        "description": "Combined info endpoint: all wallets, current, usb devices, usb state.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "usb": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "object",
+                          "properties": {
+                            "connected": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "connected"
+                          ]
+                        },
+                        "devices": {
+                          "type": "array",
+                          "items": {}
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "devices"
+                      ]
+                    },
+                    "currentWallet": {},
+                    "wallets": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "usb",
+                    "currentWallet",
+                    "wallets"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/raw": {
+      "post": {
+        "operationId": "Raw",
+        "summary": "Raw KeepKey Device I/0",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unable to communicate with device"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Raw"
+        ]
+      }
+    },
+    "/mayachain/sign-amino-transfer": {
+      "post": {
+        "operationId": "mayachain_signAmino_transfer",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.mayachain.SignDocTransfer"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Mayachain"
+        ]
+      }
+    },
+    "/mayachain/sign-amino-desposit": {
+      "post": {
+        "operationId": "mayachain_signAmino_deposit",
+        "summary": "Sign a Cosmos SDK transaction using SIGN_MODE_AMINO_JSON",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signDoc": {
+                    "$ref": "#/components/schemas/types.mayachain.SignDocDeposit"
+                  },
+                  "signerAddress": {
+                    "$ref": "#/components/schemas/types.cosmos.Address"
+                  }
+                },
+                "required": [
+                  "signDoc",
+                  "signerAddress"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serialized": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
+                    }
+                  },
+                  "required": [
+                    "serialized",
+                    "signature"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Mayachain"
+        ]
+      }
+    },
+    "/spec/swagger.json": {
+      "get": {
+        "operationId": "GetSwagger",
+        "summary": "Get OpenAPI spec",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        },
+        "security": [],
+        "tags": [
+          "Spec"
+        ]
+      }
+    },
+    "/info/ping": {
+      "get": {
+        "operationId": "InfoPing",
+        "summary": "Ping check (SDK detection)",
+        "description": "Returns a pong response. Used by keepkey-website-v7 to detect a running vault instance.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "pong" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "tags": ["Detection"]
+      }
+    },
+    "/system/info/ping": {
+      "post": {
+        "operationId": "SystemInfoPing",
+        "summary": "System ping check",
+        "description": "POST variant of ping check, compatible with keepkey-desktop SDK detection.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "pong" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "tags": ["Detection"]
+      }
+    },
+    "/admin/info": {
+      "get": {
+        "operationId": "AdminInfo",
+        "summary": "Admin health info",
+        "description": "Returns version, connection status, and uptime. Alias of /api/health.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": { "type": "string" },
+                    "connected": { "type": "boolean" },
+                    "uptime": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "tags": ["Detection"]
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "GetDocs",
+        "summary": "Interactive API documentation",
+        "description": "Serves a branded Swagger UI page for exploring the KeepKey Vault API.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "HTML page"
+          }
+        },
+        "security": [],
+        "tags": ["Spec"]
+      }
+    },
+    "/addresses/bnb": {
+      "post": {
+        "operationId": "BnbGetAddress",
+        "summary": "Get Binance Chain Address",
+        "description": "Get a Binance Chain (BNB) address, loading it into the current session and optionally displaying it on-device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": { "type": "boolean" },
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" }
+                },
+                "required": ["address_n"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": { "type": "string" }
+                  },
+                  "required": ["address"]
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Addresses"]
+      }
+    },
+    "/bnb/sign-transaction": {
+      "post": {
+        "operationId": "BnbSignTransaction",
+        "summary": "Sign a Binance Chain transaction",
+        "description": "Sign a Binance Chain transaction using the connected KeepKey device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Signing"]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "V1Health",
+        "summary": "V1 Health check (alias for /api/health)",
+        "responses": { "200": { "description": "Health status", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Health"]
+      }
+    },
+    "/api/v1/health/fast": {
+      "get": {
+        "operationId": "V1HealthFast",
+        "summary": "Fast health check (minimal response)",
+        "responses": { "200": { "description": "Minimal health", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "uptime": { "type": "integer" } } } } } } },
+        "tags": ["Health"]
+      }
+    },
+    "/api/v2/devices": {
+      "get": {
+        "operationId": "V2ListDevices",
+        "summary": "List all connected devices",
+        "responses": { "200": { "description": "Device list", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/active": {
+      "get": {
+        "operationId": "V2GetActiveDevice",
+        "summary": "Get the active device",
+        "responses": { "200": { "description": "Active device", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "No active device" } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/select": {
+      "post": {
+        "operationId": "V2SelectDevice",
+        "summary": "Select active device (single-device mode)",
+        "responses": { "200": { "description": "Device selected", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/paired": {
+      "get": {
+        "operationId": "V2GetPairedDevices",
+        "summary": "Get all paired device history",
+        "responses": { "200": { "description": "Paired devices", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/v2/devices/{id}": {
+      "get": {
+        "operationId": "V2GetDevice",
+        "summary": "Get a specific device by ID",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Device info", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
+        "tags": ["Devices"]
+      }
+    },
+    "/api/cache/status": {
+      "get": {
+        "operationId": "GetCacheStatus",
+        "summary": "Get cache status (pubkeys and addresses)",
+        "responses": { "200": { "description": "Cache status", "content": { "application/json": { "schema": { "type": "object", "properties": { "available": { "type": "boolean" }, "cached_pubkeys": { "type": "integer" }, "cached_addresses": { "type": "integer" } } } } } } },
+        "tags": ["Cache"]
+      }
+    },
+    "/api/portfolio": {
+      "get": {
+        "operationId": "GetPortfolio",
+        "summary": "Get combined portfolio for all devices",
+        "responses": { "200": { "description": "Portfolio data", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Portfolio"]
+      }
+    },
+    "/api/portfolio/{deviceId}": {
+      "get": {
+        "operationId": "GetDevicePortfolio",
+        "summary": "Get portfolio for a specific device",
+        "parameters": [{ "name": "deviceId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Device portfolio", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
+        "tags": ["Portfolio"]
+      }
+    },
+    "/api/pubkeys/batch": {
+      "post": {
+        "operationId": "BatchGetPubkeys",
+        "summary": "Get multiple public keys in a single batch call",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "paths": { "type": "array", "items": { "type": "object", "properties": { "address_n": { "$ref": "#/components/schemas/types.AddressNList" }, "script_type": { "type": "string" }, "coin": { "type": "string" }, "networks": { "type": "array", "items": { "type": "string" } }, "type": { "type": "string" } }, "required": ["address_n"] } }, "context": { "type": "string" } }, "required": ["paths"] } } },
+          "required": true
+        },
+        "responses": { "200": { "description": "Batch pubkey results", "content": { "application/json": { "schema": { "type": "object", "properties": { "pubkeys": { "type": "array", "items": { "type": "object" } }, "cached_count": { "type": "integer" }, "total_requested": { "type": "integer" }, "device_id": { "type": "string" } } } } } }, "503": { "description": "No device connected" } },
+        "tags": ["Pubkeys"]
+      }
+    },
+    "/system/apply-settings": {
+      "post": {
+        "operationId": "ApplySettings",
+        "summary": "Change device configuration (label, passphrase, autolock)",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "label": { "type": "string" }, "use_passphrase": { "type": "boolean" }, "autolock_delay_ms": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Settings applied" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/change-pin": {
+      "post": {
+        "operationId": "ChangePin",
+        "summary": "Change or remove device PIN",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "remove": { "type": "boolean" } } } } } },
+        "responses": { "200": { "description": "PIN operation started" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/apply-policies": {
+      "post": {
+        "operationId": "ApplyPolicies",
+        "summary": "Enable or disable device policies",
+        "responses": { "200": { "description": "Policies applied" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/wipe-device": {
+      "post": {
+        "operationId": "WipeDevice",
+        "summary": "Wipe and reset device to factory defaults",
+        "responses": { "200": { "description": "Device wiped" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/clear-session": {
+      "post": {
+        "operationId": "ClearSession",
+        "summary": "Lock device (forget PIN and passphrase)",
+        "responses": { "200": { "description": "Session cleared" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/initialize/reset-device": {
+      "post": {
+        "operationId": "ResetDevice",
+        "summary": "Set up device and generate new seed",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "word_count": { "type": "integer" }, "pin_protection": { "type": "boolean" }, "passphrase_protection": { "type": "boolean" }, "label": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Device reset started" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/initialize/recover-device": {
+      "post": {
+        "operationId": "RecoverDevice",
+        "summary": "Recover device from seed phrase",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "word_count": { "type": "integer" }, "pin_protection": { "type": "boolean" }, "passphrase_protection": { "type": "boolean" }, "label": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Recovery started" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/initialize/load-device": {
+      "post": {
+        "operationId": "LoadDevice",
+        "summary": "Load externally-derived keys into device (NOT RECOMMENDED)",
+        "responses": { "200": { "description": "Device loaded" } },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
+    "/system/recovery/pin": {
+      "post": {
+        "operationId": "SendRecoveryPin",
+        "summary": "Send PIN during device setup or unlock flow",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "pin": { "type": "string" } }, "required": ["pin"] } } }, "required": true },
+        "responses": { "200": { "description": "PIN accepted" }, "400": { "description": "Missing pin" } },
+        "tags": ["System"]
+      }
+    }
+  },
+  "components": {
+    "parameters": {},
+    "schemas": {
+      "types.numeric.UnsignedInteger.Safe": {
+        "type": "integer",
+        "format": "int64",
+        "maximum": 9007199254740991,
+        "minimum": 0
+      },
+      "types.numeric.U32": {
+        "format": "uint32",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.numeric.UnsignedInteger.Safe"
+          },
+          {}
+        ],
+        "maximum": 4294967295,
+        "minimum": 0
+      },
+      "types.AddressNList": {
+        "description": "a BIP-32 path, expressed as a list of node indexes",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/types.numeric.U32"
+        },
+        "maxItems": 5,
+        "minItems": 3
+      },
+      "BTCInputScriptType": {
+        "type": "string",
+        "enum": [
+          "cashaddr",
+          "bech32",
+          "p2pkh",
+          "p2sh",
+          "external",
+          "p2wpkh",
+          "p2sh-p2wpkh"
+        ]
+      },
+      "types.Bech32": {
+        "type": "string",
+        "format": "bech32",
+        "pattern": "^[!-~]{1,83}1[02-9ac-hj-np-z]{6,}$"
+      },
+      "types.bnb.Address": {
+        "description": "a binance chain address",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.Bech32"
+          },
+          {}
+        ],
+        "minLength": 10,
+        "pattern": "^bnb1[02-9ac-hj-np-z]{6,}$"
+      },
+      "types.cosmos.Address": {
+        "$ref": "#/components/schemas/types.Bech32"
+      },
+      "types.eth.Address": {
+        "description": "an ethereum address, possibly checksummed",
+        "type": "string",
+        "format": "eth_data",
+        "maxLength": 42,
+        "minLength": 42,
+        "pattern": "^0x(?:[0-9a-fA-F]{2}){20}$"
+      },
+      "PairingInfo": {
+        "type": "object",
+        "properties": {
+          "addedOn": {
+            "type": "number",
+            "format": "double"
+          },
+          "imageUrl": {
+            "type": "string",
+            "format": "url"
+          },
+          "url": {
+            "type": "string",
+            "format": "url"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "imageUrl",
+          "url",
+          "name"
+        ]
+      },
+      "types.hex.Bytes": {
+        "type": "string",
+        "pattern": "^(?:[0-9a-fA-F]{2})*$"
+      },
+      "types.hex.bytes.Lower": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.hex.Bytes"
+          },
+          {}
+        ],
+        "pattern": "^(?:[0-9a-f]{2})*$"
+      },
+      "types.hex.secp256k1.Signature": {
+        "description": "- secp256k1 signature in r/s form\n- 64 bytes, lowercase hex",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.hex.bytes.Lower"
+          },
+          {}
+        ],
+        "maxLength": 128,
+        "minLength": 128
+      },
+      "types.decimal.U64": {
+        "type": "string",
+        "format": "uint64",
+        "maxLength": 20,
+        "minLength": 1,
+        "pattern": "^(?:0|[1-9]\\d{0,18}|1(?:[0-7]\\d{18}|8(?:[0-3]\\d{17}|4(?:[0-3]\\d{16}|4(?:[0-5]\\d{15}|6(?:[0-6]\\d{14}|7(?:[0-3]\\d{13}|4(?:[0-3]\\d{12}|40(?:[0-6]\\d{10}|7(?:[0-2]\\d{9}|3(?:[0-6]\\d{8}|70(?:[0-8]\\d{6}|9(?:[0-4]\\d{5}|5(?:[0-4]\\d{4}|5(?:0\\d{3}|1(?:[0-5]\\d{2}|6(?:0\\d|1[0-5])))))))))))))))))$"
+      },
+      "types.numeric.UnsignedInteger.Unsafe": {
+        "description": "Warning: while numeric values >= 2^53 are technically valid JSON, they are often deserialized incorrectly when parsed.",
+        "type": "integer",
+        "format": "int64",
+        "minimum": 9007199254740991
+      },
+      "types.numeric.UnsignedInteger": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/types.numeric.UnsignedInteger.Safe"
+          },
+          {
+            "$ref": "#/components/schemas/types.numeric.UnsignedInteger.Unsafe"
+          }
+        ]
+      },
+      "types.numeric.U64": {
+        "format": "uint64",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.numeric.UnsignedInteger"
+          },
+          {}
+        ],
+        "maximum": 18446744073709552000,
+        "minimum": 0
+      },
+      "types.bnb.Coin": {
+        "type": "object",
+        "properties": {
+          "denom": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount": {
+            "$ref": "#/components/schemas/types.numeric.U64"
+          }
+        },
+        "required": [
+          "denom",
+          "amount"
+        ]
+      },
+      "types.bnb.msg.InputOutput": {
+        "type": "object",
+        "properties": {
+          "coins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/types.bnb.Coin"
+            }
+          },
+          "address": {
+            "$ref": "#/components/schemas/types.bnb.Address"
+          }
+        },
+        "required": [
+          "coins",
+          "address"
+        ]
+      },
+      "types.bnb.Msg": {
+        "type": "object",
+        "properties": {
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/types.bnb.msg.InputOutput"
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/types.bnb.msg.InputOutput"
+            }
+          }
+        },
+        "required": [
+          "outputs",
+          "inputs"
+        ]
+      },
+      "types.bnb.SignDoc": {
+        "type": "object",
+        "properties": {
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/types.bnb.Msg"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          }
+        },
+        "required": [
+          "msgs",
+          "memo",
+          "source",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "types.cosmos.amino.Any": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "additionalProperties": {},
+            "properties": {}
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.decimal.U256": {
+        "type": "string",
+        "format": "uint256",
+        "maxLength": 78,
+        "minLength": 1,
+        "pattern": "^(?:0|[1-9]\\d{0,76}|1(?:0\\d{76}|1(?:[0-4]\\d{75}|5(?:[0-6]\\d{74}|7(?:[0-8]\\d{73}|9(?:[0-1]\\d{72}|20(?:[0-7]\\d{70}|8(?:[0-8]\\d{69}|9(?:[0-1]\\d{68}|2(?:[0-2]\\d{67}|3(?:[0-6]\\d{66}|7(?:[0-2]\\d{65}|3(?:0\\d{64}|1(?:[0-5]\\d{63}|6(?:0\\d{62}|1(?:[0-8]\\d{61}|9(?:[0-4]\\d{60}|5(?:[0-3]\\d{59}|4(?:[0-1]\\d{58}|2(?:[0-2]\\d{57}|3(?:[0-4]\\d{56}|5(?:[0-6]\\d{55}|70(?:[0-8]\\d{53}|9(?:[0-7]\\d{52}|8(?:[0-4]\\d{51}|500(?:[0-7]\\d{48}|8(?:[0-5]\\d{47}|6(?:[0-7]\\d{46}|8(?:[0-6]\\d{45}|7(?:[0-8]\\d{44}|90(?:[0-6]\\d{42}|7(?:[0-7]\\d{41}|8(?:[0-4]\\d{40}|5(?:[0-2]\\d{39}|3(?:[0-1]\\d{38}|2(?:[0-5]\\d{37}|6(?:[0-8]\\d{36}|9(?:[0-8]\\d{35}|9(?:[0-7]\\d{34}|8(?:[0-3]\\d{33}|4(?:[0-5]\\d{32}|6(?:[0-5]\\d{31}|6(?:[0-4]\\d{30}|5(?:[0-5]\\d{29}|6(?:[0-3]\\d{28}|40(?:[0-4]\\d{26}|5(?:[0-5]\\d{25}|6(?:[0-3]\\d{24}|40(?:[0-2]\\d{22}|3(?:[0-8]\\d{21}|9(?:[0-3]\\d{20}|4(?:[0-4]\\d{19}|5(?:[0-6]\\d{18}|7(?:[0-4]\\d{17}|5(?:[0-7]\\d{16}|8(?:[0-3]\\d{15}|400(?:[0-6]\\d{12}|7(?:[0-8]\\d{11}|9(?:0\\d{10}|1(?:[0-2]\\d{9}|3(?:0\\d{8}|1(?:[0-1]\\d{7}|2(?:[0-8]\\d{6}|9(?:[0-5]\\d{5}|6(?:[0-2]\\d{4}|3(?:[0-8]\\d{3}|9(?:[0-8]\\d{2}|9(?:[0-2]\\d|3[0-5]))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))$"
+      },
+      "types.cosmos.Int": {
+        "$ref": "#/components/schemas/types.decimal.U256"
+      },
+      "types.cosmos.Coin": {
+        "type": "object",
+        "properties": {
+          "denom": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount": {
+            "$ref": "#/components/schemas/types.cosmos.Int"
+          }
+        },
+        "required": [
+          "denom",
+          "amount"
+        ]
+      },
+      "types.cosmos.Coins": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/types.cosmos.Coin"
+        }
+      },
+      "types.cosmos.messages.cosmosSdk.Send": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/types.cosmos.Coins"
+          },
+          "to_address": {
+            "$ref": "#/components/schemas/types.cosmos.Address"
+          },
+          "from_address": {
+            "$ref": "#/components/schemas/types.cosmos.Address"
+          }
+        },
+        "required": [
+          "amount",
+          "to_address",
+          "from_address"
+        ]
+      },
+      "types.cosmos.amino.signDoc.CosmosSdkSend": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.cosmos.amino.Any"
+          },
+          {
+            "properties": {
+              "value": {
+                "description": "cosmos-sdk/MsgSend",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/types.cosmos.messages.cosmosSdk.Send"
+                  },
+                  {}
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cosmos-sdk/MsgSend"
+                ],
+                "nullable": false
+              }
+            },
+            "required": [
+              "value",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "types.cosmos.amino.SignDoc": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/types.cosmos.amino.signDoc.CosmosSdkSend"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxDelegate": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "amount": {},
+              "delegator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "validator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              }
+            },
+            "required": [
+              "amount",
+              "validator_address",
+              "delegator_address"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cosmos-sdk/MsgDelegate"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.cosmos.amino.SignDocDelegate": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxDelegate"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxUnDelegate": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "amount": {},
+              "delegator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "validator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              }
+            },
+            "required": [
+              "amount",
+              "validator_address",
+              "delegator_address"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cosmos-sdk/MsgUndelegate"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.cosmos.amino.SignDocUnDelegate": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxUnDelegate"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxBeginReDelegate": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "amount": {},
+              "delegator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "validator_dst_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "validator_src_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              }
+            },
+            "required": [
+              "amount",
+              "validator_dst_address",
+              "validator_src_address",
+              "delegator_address"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cosmos-sdk/MsgBeginRedelegate"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.cosmos.amino.SignDocBeginReDelegate": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxBeginReDelegate"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxWithdrawDelegationReward": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "delegator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "validator_address": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              }
+            },
+            "required": [
+              "validator_address",
+              "delegator_address"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cosmos-sdk/MsgWithdrawDelegationReward"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.cosmos.amino.SignDocWithdrawDelegationReward": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxWithdrawDelegationReward"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "types.cosmos.messages.ibcGo.transfer.Height": {
+        "type": "object",
+        "properties": {
+          "revision_height": {
+            "$ref": "#/components/schemas/types.numeric.U64"
+          },
+          "revision_number": {
+            "$ref": "#/components/schemas/types.numeric.U64"
+          }
+        },
+        "required": [
+          "revision_height",
+          "revision_number"
+        ]
+      },
+      "StdTxMsgTransfer": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "memo": {
+                "type": "string"
+              },
+              "receiver": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "sender": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "source_channel": {
+                "type": "string"
+              },
+              "source_port": {
+                "type": "string"
+              },
+              "timeout_height": {
+                "$ref": "#/components/schemas/types.cosmos.messages.ibcGo.transfer.Height"
+              },
+              "token": {
+                "$ref": "#/components/schemas/types.cosmos.Coin"
+              }
+            },
+            "required": [
+              "timeout_height",
+              "receiver",
+              "sender",
+              "token",
+              "source_channel",
+              "source_port"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cosmos-sdk/MsgTransfer"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.cosmos.amino.SignDocIbcGoTransfer": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxMsgTransfer"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "types.eth.HexData": {
+        "description": "0x-prefixed hexadecimal octet string. (The empty string is `0x`.)",
+        "type": "string",
+        "format": "eth_data",
+        "minLength": 2,
+        "pattern": "^0x(?:[0-9a-f]{2})*$"
+      },
+      "types.eth.HexQuantity": {
+        "type": "string",
+        "format": "eth_quantity",
+        "minLength": 3,
+        "pattern": "^0x(?:0|[1-9a-f][0-9a-f]*)$"
+      },
+      "types.eth.Signature": {
+        "description": "a 65-byte secp256k1 signature, in 0x-prefixed r/s/v format",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/types.eth.HexData"
+          },
+          {}
+        ],
+        "maxLength": 132,
+        "minLength": 132,
+        "pattern": "^0x(?:[0-9a-f]{2}){65}$"
+      },
+      "StdTxMsgLPRemove": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "pool_id": {
+                "type": "string"
+              },
+              "sender": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "share_in_amount": {
+                "type": "string"
+              },
+              "token_out_mins": {
+                "items": {
+                  "$ref": "#/components/schemas/types.cosmos.Coin"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "token_out_mins",
+              "share_in_amount",
+              "sender",
+              "pool_id"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "osmosis/gamm/exit-pool"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.osmosis.SignDocLPRemove": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxMsgLPRemove"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxMsgLPAdd": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "pool_id": {
+                "type": "string"
+              },
+              "sender": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "share_out_amount": {
+                "type": "string"
+              },
+              "token_in_maxs": {
+                "items": {
+                  "$ref": "#/components/schemas/types.cosmos.Coin"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "token_in_maxs",
+              "share_out_amount",
+              "sender",
+              "pool_id"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "osmosis/gamm/join-pool"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.osmosis.SignDocLPAdd": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxMsgLPAdd"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "Route": {
+        "type": "object",
+        "properties": {
+          "token_out_denom": {
+            "type": "string"
+          },
+          "pool_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_out_denom",
+          "pool_id"
+        ]
+      },
+      "StdTxMsgSwap": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "routes": {
+                "items": {
+                  "$ref": "#/components/schemas/Route"
+                },
+                "type": "array"
+              },
+              "sender": {
+                "$ref": "#/components/schemas/types.cosmos.Address"
+              },
+              "token_in": {},
+              "token_out_min_amount": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "token_out_min_amount",
+              "token_in",
+              "sender",
+              "routes"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "osmosis/gamm/swap-exact-amount-in"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.osmosis.SignDocSwap": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/types.cosmos.Coins"
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxMsgSwap"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "types.HDNode": {
+        "type": "object",
+        "properties": {
+          "public_key": {
+            "$ref": "#/components/schemas/types.hex.bytes.Lower"
+          },
+          "private_key": {
+            "$ref": "#/components/schemas/types.hex.bytes.Lower"
+          },
+          "chain_code": {
+            "$ref": "#/components/schemas/types.hex.bytes.Lower"
+          },
+          "child_num": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "fingerprint": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          }
+        },
+        "required": [
+          "chain_code",
+          "child_num",
+          "fingerprint",
+          "depth"
+        ]
+      },
+      "types.Policy": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "policy_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "policy_name"
+        ]
+      },
+      "types.Features": {
+        "type": "object",
+        "properties": {
+          "auto_lock_delay_ms": {
+            "description": "Current auto lock delay (in milliseconds)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.numeric.U32"
+              },
+              {}
+            ]
+          },
+          "wipe_code_protection": {
+            "type": "boolean"
+          },
+          "no_backup": {
+            "description": "Device was initialized without displaying recovery sentence.",
+            "type": "boolean"
+          },
+          "firmware_hash": {
+            "description": "double sha256 hash of the firmware",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.hex.bytes.Lower"
+              },
+              {}
+            ],
+            "maxLength": 64,
+            "minLength": 64
+          },
+          "firmware_variant": {
+            "description": "Firmware variant",
+            "type": "string"
+          },
+          "model": {
+            "description": "device hardware model",
+            "type": "string"
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/types.Policy"
+            }
+          },
+          "passphrase_cached": {
+            "description": "is passphrase already cached in session?",
+            "type": "boolean"
+          },
+          "pin_cached": {
+            "description": "is PIN already cached in session?",
+            "type": "boolean"
+          },
+          "imported": {
+            "description": "was storage imported from an external source?",
+            "type": "boolean"
+          },
+          "bootloader_hash": {
+            "description": "double sha256 hash of the bootloader",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.hex.bytes.Lower"
+              },
+              {}
+            ],
+            "maxLength": 64,
+            "minLength": 64
+          },
+          "revision": {
+            "description": "SCM revision of firmware",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.hex.bytes.Lower"
+              },
+              {}
+            ]
+          },
+          "initialized": {
+            "description": "does device contain seed?",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "device description label",
+            "type": "string"
+          },
+          "language": {
+            "description": "device language",
+            "type": "string"
+          },
+          "passphrase_protection": {
+            "description": "is node/mnemonic encrypted using passphrase?",
+            "type": "boolean"
+          },
+          "pin_protection": {
+            "description": "is device protected by PIN?",
+            "type": "boolean"
+          },
+          "device_id": {
+            "description": "device's unique identifier",
+            "type": "string"
+          },
+          "bootloader_mode": {
+            "description": "is device in bootloader mode?",
+            "type": "boolean"
+          },
+          "patch_version": {
+            "description": "patch version of the device",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.numeric.U32"
+              },
+              {}
+            ]
+          },
+          "minor_version": {
+            "description": "minor version of the device",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.numeric.U32"
+              },
+              {}
+            ]
+          },
+          "major_version": {
+            "description": "major version of the device",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/types.numeric.U32"
+              },
+              {}
+            ]
+          },
+          "vendor": {
+            "description": "name of the manufacturer",
+            "type": "string"
+          }
+        }
+      },
+      "types.Coin": {
+        "description": "an entry in the device's Coins table",
+        "type": "object",
+        "properties": {
+          "nanoaddr_prefix": {
+            "type": "string"
+          },
+          "xpub_magic_segwit_native": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "xpub_magic_segwit_p2sh": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "decred": {
+            "type": "boolean"
+          },
+          "bech32_prefix": {
+            "type": "string"
+          },
+          "cashaddr_prefix": {
+            "type": "string"
+          },
+          "curve_name": {
+            "type": "string"
+          },
+          "force_bip143": {
+            "type": "boolean"
+          },
+          "segwit": {
+            "type": "boolean"
+          },
+          "xpub_magic": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "contract_address": {
+            "$ref": "#/components/schemas/types.hex.bytes.Lower"
+          },
+          "decimals": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "forkid": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "bip44_account_path": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "signed_message_header": {
+            "type": "string"
+          },
+          "address_type_p2sh": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "maxfee_kb": {
+            "$ref": "#/components/schemas/types.numeric.U64"
+          },
+          "address_type": {
+            "$ref": "#/components/schemas/types.numeric.U32"
+          },
+          "coin_shortcut": {
+            "type": "string"
+          },
+          "coin_name": {
+            "type": "string"
+          }
+        }
+      },
+      "StdTxTransfer": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "items": {
+                  "properties": {
+                    "denom": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "denom",
+                    "amount"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "from_address": {
+                "type": "string"
+              },
+              "to_address": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "to_address",
+              "from_address",
+              "amount"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "thorchain/MsgSend"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.thorchain.SignDocTransfer": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "denom": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "denom",
+                    "amount"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxTransfer"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxDeposit": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "coins": {},
+              "memo": {
+                "type": "string"
+              },
+              "signer": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "signer",
+              "memo",
+              "coins"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "thorchain/MsgDeposit"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.thorchain.SignDocDeposit": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {}
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxDeposit"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxTransferMaya": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "items": {
+                  "properties": {
+                    "denom": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "denom",
+                    "amount"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "from_address": {
+                "type": "string"
+              },
+              "to_address": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "to_address",
+              "from_address",
+              "amount"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "mayachain/MsgSend"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.mayachain.SignDocTransfer": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "denom": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "denom",
+                    "amount"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxTransferMaya"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      },
+      "StdTxDepositMaya": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "properties": {
+              "coins": {},
+              "memo": {
+                "type": "string"
+              },
+              "signer": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "signer",
+              "memo",
+              "coins"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "mayachain/MsgDeposit"
+            ],
+            "nullable": false
+          }
+        },
+        "required": [
+          "value",
+          "type"
+        ]
+      },
+      "types.mayachain.SignDocDeposit": {
+        "type": "object",
+        "properties": {
+          "fee": {
+            "type": "object",
+            "properties": {
+              "gas": {
+                "$ref": "#/components/schemas/types.decimal.U64"
+              },
+              "amount": {}
+            },
+            "required": [
+              "gas",
+              "amount"
+            ]
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StdTxDepositMaya"
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "memo": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/types.decimal.U64"
+          },
+          "chain_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee",
+          "msgs",
+          "memo",
+          "sequence",
+          "chain_id",
+          "account_number"
+        ]
+      }
+    },
+    "examples": {},
+    "headers": {},
+    "requestBodies": {},
+    "responses": {},
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "SESSIONID"
+      }
+    }
+  }
+}
