@@ -822,6 +822,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getCachedPubkeys(snap.deviceId)
 			},
 
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				try {
@@ -980,6 +981,25 @@ Updater.localInfo.channel().then(ch => {
 		setTimeout(() => {
 			Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
 		}, 5000)
+	}
+})
+
+// ── keepkey:// Protocol Handler ────────────────────────────────────────
+function getWalletConnectUri(inputUri: string): string | undefined {
+	const uri = inputUri
+		.replace('keepkey://launch/wc?uri=', '')
+		.replace('keepkey://wc?uri=', '')
+	if (!uri.startsWith('wc')) return undefined
+	return decodeURIComponent(uri.replace('wc/?uri=', '').replace('wc?uri=', ''))
+}
+
+mainWindow.on("open-url", (e: any) => {
+	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
+	if (url.startsWith('keepkey://')) {
+		const wcUri = getWalletConnectUri(url)
+		if (wcUri) {
+			try { rpc.send['walletconnect-uri'](wcUri) } catch { /* webview not ready */ }
+		}
 	}
 })
 

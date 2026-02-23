@@ -141,6 +141,7 @@ export function initDb() {
       )
     `)
 
+
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
     console.warn('[db] Failed to init SQLite cache:', e.message)
@@ -519,6 +520,7 @@ export function clearApiLogs() {
     console.warn('[db] clearApiLogs failed:', e.message)
   }
 }
+
 
 // ── Device Snapshot (watch-only cache) ──────────────────────────────
 

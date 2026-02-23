@@ -1,6 +1,7 @@
 #!/bin/bash
-# Patch Electrobun's notarization zip to use quiet mode + larger buffer
-# This prevents ENOBUFS when the app bundle has many files (native node_modules)
+# Patch Electrobun's build to:
+# 1. Use quiet zip mode + larger buffer (prevents ENOBUFS)
+# 2. Add NSAppTransportSecurity to Info.plist (allows WKWebView iframe → http://localhost)
 EBUN_CLI="node_modules/electrobun/src/cli/index.ts"
 if [ -f "$EBUN_CLI" ]; then
   # Check if already patched (idempotent)

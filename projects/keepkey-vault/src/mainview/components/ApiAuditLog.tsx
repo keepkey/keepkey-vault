@@ -7,6 +7,8 @@ interface ApiAuditLogProps {
 	open: boolean
 	entries: ApiLogEntry[]
 	onClose: () => void
+	/** When true, render on the left side (e.g. WalletConnect panel owns the right) */
+	side?: "left" | "right"
 }
 
 function StatusBadge({ status }: { status: number }) {
@@ -151,26 +153,30 @@ function JsonBlock({ label, data }: { label: string; data: any }) {
 	)
 }
 
-export function ApiAuditLog({ open, entries, onClose }: ApiAuditLogProps) {
+export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAuditLogProps) {
 	const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
 
 	if (!open) return null
 
 	const pairedApps = getUniqueApps(entries)
+	const isLeft = side === "left"
 
 	return (
 		<Box
 			position="fixed"
 			top="0"
-			right="0"
+			left={isLeft ? "0" : undefined}
+			right={isLeft ? undefined : "0"}
 			h="100vh"
 			w="380px"
 			maxW="90vw"
 			bg="kk.bg"
-			borderLeft="1px solid"
+			borderLeft={isLeft ? undefined : "1px solid"}
+			borderRight={isLeft ? "1px solid" : undefined}
 			borderColor="kk.border"
 			zIndex={Z.drawerPanel}
 			overflowY="auto"
+			boxShadow={isLeft ? "4px 0 24px rgba(0,0,0,0.5)" : "-4px 0 24px rgba(0,0,0,0.5)"}
 		>
 			{/* Header */}
 			<Flex

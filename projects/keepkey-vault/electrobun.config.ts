@@ -5,6 +5,7 @@ export default {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
 		version: "0.1.0",
+		urlSchemes: ["keepkey"],
 	},
 	build: {
 		bun: {

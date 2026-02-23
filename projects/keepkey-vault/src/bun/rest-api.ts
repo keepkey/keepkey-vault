@@ -18,10 +18,12 @@ export interface RestApiCallbacks {
 function corsHeaders(_req?: Request): Record<string, string> {
   // Use '*' — bearer-token auth model (not cookie-based), so wildcard is safe
   // and prevents browsers from ever sending credentials via CORS.
+  // Private-Network-Access headers required for https → localhost (WKWebView, Chrome 104+).
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Access-Control-Request-Private-Network',
+    'Access-Control-Allow-Private-Network': 'true',
   }
 }
 
@@ -366,6 +368,86 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // CORS preflight
       if (method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: corsHeaders(req) })
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // WC DAPP REVERSE PROXY — serves external WC dapp as same-origin
+      // Avoids WKWebView mixed-content block (https iframe → http://localhost).
+      //
+      // All intentional proxy access goes through /wc/*.
+      // Next.js emits absolute paths (/_next/, /chain-logos/, /icons/) that
+      // can't be prefixed — so we Referer-gate them: only proxy when the
+      // request originates from the WC panel.
+      // ═══════════════════════════════════════════════════════════════
+      const WC_ORIGIN = 'https://wallet-connect-dapp-ochre.vercel.app'
+
+      // Allowlist of upstream path prefixes the proxy may serve
+      const WC_ALLOWED_PREFIXES = ['/_next/', '/chain-logos/', '/icons/', '/favicon.ico']
+
+      // Primary: everything under /wc/ is always proxied
+      const isWcPrimaryPath = path === '/wc' || path.startsWith('/wc/')
+
+      // Secondary: absolute paths leaked by Next.js — only proxy when
+      // the Referer proves the request came from the WC panel iframe
+      const referer = req.headers.get('Referer') || ''
+      const isWcRefererPath = referer.includes('/wc') &&
+        WC_ALLOWED_PREFIXES.some(p => path.startsWith(p) || path === p)
+
+      if (isWcPrimaryPath || isWcRefererPath) {
+        // Only allow GET — the proxy serves static assets, not API calls
+        if (method !== 'GET') {
+          return new Response(JSON.stringify({ error: 'Method not allowed on proxy' }), {
+            status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
+          })
+        }
+
+        // /wc/* → strip prefix; Referer-gated paths pass through as-is
+        const upstreamPath = path.startsWith('/wc/')
+          ? path.slice(3) // "/wc/foo" → "/foo"
+          : path === '/wc' ? '/' : path
+
+        // Denylist: never proxy paths that look like vault API routes
+        if (upstreamPath.startsWith('/api/') || upstreamPath.startsWith('/auth/') || upstreamPath.startsWith('/system/')) {
+          return json({ error: 'Not found', path }, 404)
+        }
+
+        const upstreamUrl = WC_ORIGIN + upstreamPath + url.search
+        const proxyStart = Date.now()
+        try {
+          const upstream = await fetch(upstreamUrl, {
+            method: 'GET',
+            headers: { 'Accept': req.headers.get('Accept') || '*/*' },
+            redirect: 'follow',
+          })
+          // Pass through content-type, cache-control, and status
+          const respHeaders: Record<string, string> = { ...corsHeaders(req) }
+          const ct = upstream.headers.get('Content-Type')
+          if (ct) respHeaders['Content-Type'] = ct
+          const cc = upstream.headers.get('Cache-Control')
+          if (cc) respHeaders['Cache-Control'] = cc
+
+          // Audit log proxy requests
+          if (callbacks?.onApiLog) {
+            callbacks.onApiLog({
+              method, route: path, timestamp: proxyStart,
+              durationMs: Date.now() - proxyStart,
+              status: upstream.status, appName: 'wc-proxy',
+            })
+          }
+
+          return new Response(upstream.body, { status: upstream.status, headers: respHeaders })
+        } catch {
+          if (callbacks?.onApiLog) {
+            callbacks.onApiLog({
+              method, route: path, timestamp: proxyStart,
+              durationMs: Date.now() - proxyStart,
+              status: 502, appName: 'wc-proxy',
+            })
+          }
+          return new Response(JSON.stringify({ error: 'WC proxy unavailable' }), {
+            status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
+          })
+        }
       }
 
       // Capture POST body for audit logging (Bun caches req.json(), so parseRequest still works)

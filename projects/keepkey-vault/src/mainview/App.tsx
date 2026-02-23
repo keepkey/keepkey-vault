@@ -7,6 +7,7 @@ import { PairingApproval } from "./components/device/PairingApproval"
 import { SigningApproval } from "./components/device/SigningApproval"
 import { ApiAuditLog } from "./components/ApiAuditLog"
 import { PairedAppsPanel } from "./components/PairedAppsPanel"
+import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { SplashScreen } from "./components/SplashScreen"
 import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -36,13 +37,19 @@ function App() {
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
+	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
+
+	// ── WalletConnect sidebar ────────────────────────────────────
+	const [wcPanelOpen, setWcPanelOpen] = useState(false)
+	const [wcUri, setWcUri] = useState<string | null>(null)
 
 	// ── Watch-only mode ──────────────────────────────────────────
 	const [watchOnlyAvailable, setWatchOnlyAvailable] = useState(false)
 	const [watchOnlyMode, setWatchOnlyMode] = useState(false)
 	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
+
 
 	// Fetch app version + REST API state on mount
 	useEffect(() => {
@@ -182,6 +189,16 @@ function App() {
 		})
 	}, [])
 
+	// ── WalletConnect deep link listener ────────────────────────────
+	useEffect(() => {
+		return onRpcMessage("walletconnect-uri", (uri) => {
+			setWcUri(uri as string)
+			// Gate through the same API Bridge dialog
+			setPendingWcOpen(true)
+			setPendingAppUrl("walletconnect")
+		})
+	}, [])
+
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
 	const [recoveryError, setRecoveryError] = useState<{ message: string; errorType: string } | null>(null)
@@ -261,6 +278,7 @@ function App() {
 		}
 	}, [deviceState.state])
 
+
 	// ── Launch an external app (gate on REST API) ──────────────────
 	const launchApp = useCallback(async (url: string) => {
 		try {
@@ -295,12 +313,37 @@ function App() {
 
 	// ── Enable API dialog handlers ──────────────────────────────────
 	const handleEnableApiAndLaunch = useCallback(async () => {
-		if (!pendingAppUrl) return
+		if (!pendingAppUrl && !pendingWcOpen) return
 		setEnablingApi(true)
 		try {
-			const result = await rpcRequest<AppSettings>("setRestApiEnabled", { enabled: true }, 10000)
-			setRestApiEnabled(result.restApiEnabled)
-			if (result.restApiEnabled) {
+			// Enable REST API if not already on
+			if (!restApiEnabled) {
+				const result = await rpcRequest<AppSettings>("setRestApiEnabled", { enabled: true }, 10000)
+				setRestApiEnabled(result.restApiEnabled)
+				if (!result.restApiEnabled) {
+					setEnablingApi(false)
+					setPendingAppUrl(null)
+					setPendingWcOpen(false)
+					return
+				}
+			}
+
+			if (pendingWcOpen) {
+				// Poll health endpoint — don't open panel until API is actually responding
+				let ready = false
+				for (let i = 0; i < 20; i++) {
+					try {
+						const resp = await fetch("http://localhost:1646/api/health")
+						if (resp.ok) { ready = true; break }
+					} catch { /* not yet */ }
+					await new Promise(r => setTimeout(r, 300))
+				}
+				if (ready) {
+					setWcPanelOpen(true)
+				} else {
+					console.error("REST API did not become ready in time")
+				}
+			} else if (pendingAppUrl) {
 				await launchApp(pendingAppUrl)
 			}
 		} catch (e) {
@@ -308,14 +351,29 @@ function App() {
 		}
 		setEnablingApi(false)
 		setPendingAppUrl(null)
-	}, [pendingAppUrl, launchApp])
+		setPendingWcOpen(false)
+	}, [pendingAppUrl, pendingWcOpen, restApiEnabled, launchApp])
 
 	const handleCancelAppLaunch = useCallback(() => {
 		setPendingAppUrl(null)
+		setPendingWcOpen(false)
 	}, [])
 
 	const handleOpenKeepKey = useCallback(() => {
 		setActiveTab("vault")
+	}, [])
+
+	// ── WalletConnect panel handlers ─────────────────────────────
+	const handleOpenWalletConnect = useCallback(() => {
+		// Always gate WalletConnect through the API Bridge dialog —
+		// the WC dapp iframe needs port 1646 to be up and responding
+		setPendingWcOpen(true)
+		setPendingAppUrl("walletconnect") // sentinel to trigger the dialog
+	}, [])
+
+	const handleCloseWalletConnect = useCallback(() => {
+		setWcPanelOpen(false)
+		setWcUri(null)
 	}, [])
 
 	// ── Phase detection ─────────────────────────────────────────────
@@ -476,7 +534,7 @@ function App() {
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} />}
-					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
+					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
@@ -494,13 +552,19 @@ function App() {
 				open={auditLogOpen}
 				entries={auditLogEntries}
 				onClose={() => setAuditLogOpen(false)}
+				side={wcPanelOpen ? "left" : "right"}
 			/>
 			<PairedAppsPanel
 				open={pairedAppsOpen}
 				onClose={() => setPairedAppsOpen(false)}
 			/>
+			<WalletConnectPanel
+				open={wcPanelOpen}
+				wcUri={wcUri}
+				onClose={handleCloseWalletConnect}
+			/>
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
-			{pendingAppUrl && (
+			{(pendingAppUrl || pendingWcOpen) && (
 				<>
 					<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={handleCancelAppLaunch} />
 					<Box
@@ -532,11 +596,16 @@ function App() {
 								</Text>
 							</Flex>
 							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5" mb="2">
-								This app communicates with your KeepKey through the local API bridge (port 1646). The bridge is currently disabled.
+								{restApiEnabled
+									? "This app communicates with your KeepKey through the local API bridge (port 1646). Click below to verify the connection and continue."
+									: "This app communicates with your KeepKey through the local API bridge (port 1646). The bridge is currently disabled."
+								}
 							</Text>
-							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-								Enable it to continue. You can turn it off anytime in <Text as="span" color="kk.gold" fontWeight="500">Settings &rarr; Application</Text>.
-							</Text>
+							{!restApiEnabled && (
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
+									Enable it to continue. You can turn it off anytime in <Text as="span" color="kk.gold" fontWeight="500">Settings &rarr; Application</Text>.
+								</Text>
+							)}
 						</Box>
 						<Flex
 							px="6"
@@ -566,7 +635,12 @@ function App() {
 								onClick={handleEnableApiAndLaunch}
 								disabled={enablingApi}
 							>
-								{enablingApi ? "Enabling..." : "Enable & Launch"}
+								{enablingApi
+									? (restApiEnabled ? "Connecting..." : "Enabling...")
+									: pendingWcOpen
+										? (restApiEnabled ? "Open WalletConnect" : "Enable & Open")
+										: "Enable & Launch"
+								}
 							</Button>
 						</Flex>
 					</Box>

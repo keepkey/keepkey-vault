@@ -56,11 +56,16 @@ const APPS: AppDef[] = [
 interface AppStoreProps {
 	onOpenApp: (url: string) => void
 	onOpenKeepKey: () => void
+	onOpenWalletConnect?: () => void
 }
 
-export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
+export function AppStore({ onOpenApp, onOpenKeepKey, onOpenWalletConnect }: AppStoreProps) {
 	const handleClick = (app: AppDef) => {
 		if (!app.enabled) return
+		if (app.id === "walletconnect" && onOpenWalletConnect) {
+			onOpenWalletConnect()
+			return
+		}
 		if (app.internal) {
 			onOpenKeepKey()
 		} else if (app.url) {

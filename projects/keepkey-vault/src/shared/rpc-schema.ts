@@ -134,6 +134,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry
+      'walletconnect-uri': string
     }
   }
   webview: {
