@@ -1,0 +1,66 @@
+{
+  "name": "keepkey-vault",
+  "version": "1.0.0",
+  "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keepkey/keepkey-vault.git"
+  },
+  "homepage": "https://github.com/keepkey/keepkey-vault",
+  "bugs": {
+    "url": "https://github.com/keepkey/keepkey-vault/issues"
+  },
+  "scripts": {
+    "dev": "vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
+    "dev:hmr": "bun run hmr & vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
+    "hmr": "vite --port 5173",
+    "build": "vite build && bun scripts/collect-externals.ts && electrobun build",
+    "build:stable": "vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
+    "build:canary": "vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
+    "start": "bun run dev",
+    "postinstall": "bash scripts/patch-electrobun.sh"
+  },
+  "dependencies": {
+    "@chakra-ui/react": "^3.33.0",
+    "@emotion/react": "^11.14.0",
+    "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
+    "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",
+    "@keepkey/hdwallet-keepkey-nodehid": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodehid",
+    "@keepkey/hdwallet-keepkey-nodewebusb": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodewebusb",
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder-vendored",
+    "@pioneer-platform/pioneer-caip": "^9.27.10",
+    "@pioneer-platform/pioneer-client": "^11.0.0",
+    "@pioneer-platform/pioneer-coins": "^11.0.0",
+    "@pioneer-platform/pioneer-discovery": "^10.0.4",
+    "coinselect": "^3.1.13",
+    "electrobun": "1.13.1",
+    "ethers": "5",
+    "jsqr": "^1.4.0",
+    "node-hid": "^3.3.0",
+    "react": "^18.3.1",
+    "react-countup": "^6.5.3",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.5.0",
+    "usb": "^2.17.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  },
+  "trustedDependencies": [
+    "protobufjs",
+    "tiny-secp256k1"
+  ],
+  "overrides": {
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder-vendored",
+    "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
+    "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey"
+  }
+}
