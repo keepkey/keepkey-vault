@@ -101,6 +101,66 @@ jobs:
         run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
         shell: bash
 
+      - name: Package AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Extract the app from tar.zst
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "No Linux tar.zst found, skipping AppImage"; exit 0; fi
+
+          WORK=$(mktemp -d)
+          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
+          tar xf "$WORK/app.tar" -C "$WORK/"
+          rm "$WORK/app.tar"
+          APP_DIR=$(find "$WORK" -maxdepth 1 -type d -name "keepkey-vault" | head -1)
+          if [ -z "$APP_DIR" ]; then echo "No keepkey-vault dir found after extraction"; exit 1; fi
+
+          # Build AppImage structure
+          APPDIR="$WORK/KeepKey-Vault.AppDir"
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+
+          # Copy app contents
+          cp -r "$APP_DIR"/* "$APPDIR/usr/bin/"
+
+          # Icon
+          cp "$APPDIR/usr/bin/Resources/appIcon.png" "$APPDIR/keepkey-vault.png"
+          cp "$APPDIR/usr/bin/Resources/appIcon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/keepkey-vault.png"
+
+          # Desktop file
+          cat > "$APPDIR/keepkey-vault.desktop" <<DESKTOP
+          [Desktop Entry]
+          Name=KeepKey Vault
+          Exec=AppRun
+          Icon=keepkey-vault
+          Type=Application
+          Categories=Finance;Utility;
+          Comment=Desktop companion for KeepKey hardware wallet
+          DESKTOP
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' "$APPDIR/keepkey-vault.desktop"
+
+          # AppRun launcher
+          cat > "$APPDIR/AppRun" <<'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          exec "$HERE/usr/bin/bin/launcher" "$@"
+          APPRUN
+          sed -i 's/^          //' "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          # Download appimagetool
+          curl -fsSL -o "$WORK/appimagetool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x "$WORK/appimagetool"
+
+          # Build AppImage (--appimage-extract-and-run for CI without FUSE)
+          ARCH=x86_64 "$WORK/appimagetool" --appimage-extract-and-run "$APPDIR" "KeepKey-Vault-x86_64.AppImage"
+          mv "KeepKey-Vault-x86_64.AppImage" .
+
+          # Cleanup
+          rm -rf "$WORK"
+
       - name: Generate checksums (Unix)
         if: runner.os != 'Windows'
         run: |
