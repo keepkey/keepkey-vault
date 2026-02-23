@@ -7,7 +7,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, hasWatchOnlyData } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry } from "../shared/types"
@@ -469,6 +469,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					// Push updated BTC accounts to frontend
 					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+
+					// Cache balances (fire-and-forget) — only on successful Pioneer response
+					try {
+						const deviceId = engine.getDeviceState().deviceId || 'unknown'
+						if (results.length > 0) setCachedBalances(deviceId, results)
+					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					console.warn('[getBalances] Portfolio API failed:', e.message)
 					const seen = new Set<string>()
@@ -479,12 +485,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						results.push({ chainId: entry.chainId, symbol: entry.symbol, balance: '0', balanceUsd: 0, address: entry.pubkey })
 					}
 				}
-
-				// Cache balances for watch-only mode (fire-and-forget)
-				try {
-					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					if (results.length > 0) setCachedBalances(deviceId, results)
-				} catch { /* never block on cache failure */ }
 
 				return results
 			},
@@ -803,6 +803,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			clearApiLogs: async () => {
 				clearApiLogs()
+			},
+
+			// ── Balance cache (instant portfolio) ────────────────────
+			getCachedBalances: async () => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) return null
+				return getCachedBalances(deviceId)
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────

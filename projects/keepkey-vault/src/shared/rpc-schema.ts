@@ -104,6 +104,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getAppSettings: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
 
+      // ── Balance cache (instant portfolio) ─────────────────────────────
+      getCachedBalances: { params: void; response: ChainBalance[] | null }
+
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
       getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }

@@ -254,9 +254,9 @@ function App() {
 
 	const handlePortfolioLoaded = useCallback(() => setPortfolioLoaded(true), [])
 
-	// Reset portfolioLoaded when device leaves ready state so Dashboard re-fetches fresh
+	// Reset portfolioLoaded only on disconnect (not transient state changes)
 	useEffect(() => {
-		if (deviceState.state !== "ready") setPortfolioLoaded(false)
+		if (deviceState.state === "disconnected") setPortfolioLoaded(false)
 	}, [deviceState.state])
 
 	// Watch-only: check cache when disconnected, auto-exit when device connects

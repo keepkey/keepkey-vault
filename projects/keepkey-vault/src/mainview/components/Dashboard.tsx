@@ -32,14 +32,35 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 			.catch(() => {})
 	}, [])
 
+	// Cache-first: show cached balances instantly, then refresh with live data
 	useEffect(() => {
 		let cancelled = false
 		let retryTimer: ReturnType<typeof setTimeout> | undefined
-		async function fetchBalances(attempt = 1) {
+
+		// Phase 1: Load cached balances immediately (< 1ms from SQLite)
+		async function loadCached() {
+			if (watchOnly || cancelled) return
+			try {
+				const cached = await rpcRequest<ChainBalance[] | null>('getCachedBalances', undefined, 3000)
+				if (!cancelled && cached && cached.length > 0) {
+					const map = new Map<string, ChainBalance>()
+					for (const b of cached) map.set(b.chainId, b)
+					setBalances(map)
+					console.log(`[Dashboard] Cache hit: ${cached.length} chains, $${cached.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}`)
+					// Dismiss splash immediately with cached data
+					if (!initialLoaded) {
+						setInitialLoaded(true)
+						onLoaded?.()
+					}
+				}
+			} catch { /* cache unavailable, will wait for live data */ }
+		}
+
+		// Phase 2: Fetch live data (background refresh or primary if no cache)
+		async function fetchLive(attempt = 1) {
 			setLoadingBalances(true)
 			let hasTokenData = false
 			try {
-				// In watch-only mode, fetch cached balances instead of live data
 				const result = watchOnly
 					? await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000).then(r => r || [])
 					: await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
@@ -47,7 +68,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 					const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 					const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
 					hasTokenData = tokenTotal > 0 || balTotal > 0 || result.length > 0
-					console.log(`[Dashboard] ${watchOnly ? 'watchOnly' : 'getBalances'} returned ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)} (attempt=${attempt}, fetchKey=${fetchKey})`)
+					console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)} (attempt=${attempt})`)
 					const map = new Map<string, ChainBalance>()
 					for (const b of result) map.set(b.chainId, b)
 					setBalances(map)
@@ -62,14 +83,16 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 					onLoaded?.()
 				}
 				// Auto-retry once if first attempt returned no meaningful data
-				// (Pioneer API may not have been ready on cold start) — skip in watch-only
 				if (!watchOnly && !hasTokenData && attempt < 2 && !cancelled) {
 					console.log('[Dashboard] No balance data — auto-retrying in 3s')
-					retryTimer = setTimeout(() => { if (!cancelled) fetchBalances(attempt + 1) }, 3000)
+					retryTimer = setTimeout(() => { if (!cancelled) fetchLive(attempt + 1) }, 3000)
 				}
 			}
 		}
-		fetchBalances()
+
+		// Execute: cache first, then live
+		loadCached().then(() => { if (!cancelled) fetchLive() })
+
 		return () => { cancelled = true; clearTimeout(retryTimer) }
 	}, [fetchKey, watchOnly])
 

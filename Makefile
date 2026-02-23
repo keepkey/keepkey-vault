@@ -9,16 +9,20 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit
+
+# --- Submodules (auto-init on fresh worktrees/clones) ---
+
+submodules:
+	@git submodule update --init
 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
-modules-install:
+modules-install: submodules
 	cd modules/proto-tx-builder && bun install
 	cd modules/hdwallet && yarn install
 
 modules-build: modules-install
-	cd modules/proto-tx-builder && bun run build
 	cd modules/hdwallet && yarn build
 
 modules-clean:
@@ -32,21 +36,21 @@ install: modules-build
 
 vault: install dev
 
-dev:
+dev: install
 	cd $(PROJECT_DIR) && bun run dev
 
-dev-hmr:
+dev-hmr: install
 	-lsof -ti :5173 | xargs kill -9 2>/dev/null || true
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
 
-build:
+build: install
 	cd $(PROJECT_DIR) && bun run build
 
-build-stable:
+build-stable: install
 	cd $(PROJECT_DIR) && bun run build:stable
 
-build-canary:
+build-canary: install
 	cd $(PROJECT_DIR) && bun run build:canary
 
 # Prune the app bundle after Electrobun build (strips nested node_modules, .d.ts, etc.)

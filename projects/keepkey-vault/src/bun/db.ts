@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry } from '../shared/types'
 
-const SCHEMA_VERSION = '6'
+const SCHEMA_VERSION = '7'
 
 let db: Database | null = null
 
@@ -42,6 +42,7 @@ export function initDb() {
         balance     TEXT NOT NULL DEFAULT '0',
         balance_usd REAL NOT NULL DEFAULT 0,
         address     TEXT NOT NULL DEFAULT '',
+        tokens_json TEXT,
         updated_at  INTEGER NOT NULL,
         PRIMARY KEY (device_id, chain_id)
       )
@@ -162,16 +163,22 @@ export function getCachedBalances(deviceId: string): ChainBalance[] | null {
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null }>
     if (!rows || rows.length === 0) return null
-    return rows.map(r => ({
-      chainId: r.chain_id,
-      symbol: r.symbol,
-      balance: r.balance,
-      balanceUsd: r.balance_usd,
-      address: r.address,
-    }))
+    return rows.map(r => {
+      const entry: ChainBalance = {
+        chainId: r.chain_id,
+        symbol: r.symbol,
+        balance: r.balance,
+        balanceUsd: r.balance_usd,
+        address: r.address,
+      }
+      if (r.tokens_json) {
+        try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
+      }
+      return entry
+    })
   } catch (e: any) {
     console.warn('[db] getCachedBalances failed:', e.message)
     return null
@@ -183,12 +190,13 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
     if (!db) return
     const now = Date.now()
     const stmt = db.prepare(
-      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
-        stmt.run(deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, now)
+        const tokensJson = b.tokens && b.tokens.length > 0 ? JSON.stringify(b.tokens) : null
+        stmt.run(deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, now)
       }
     })
     tx()
@@ -207,35 +215,6 @@ export function clearBalances(deviceId?: string) {
     }
   } catch (e: any) {
     console.warn('[db] clearBalances failed:', e.message)
-  }
-}
-
-// ── Pioneer Cache (TTL-based JSON blobs) ──────────────────────────────
-
-export function getPioneerCache(key: string, maxAgeMs: number): any | null {
-  try {
-    if (!db) return null
-    const row = db.query(
-      'SELECT data, updated_at FROM pioneer_cache WHERE cache_key = ?'
-    ).get(key) as { data: string; updated_at: number } | null
-    if (!row) return null
-    if (Date.now() - row.updated_at > maxAgeMs) return null
-    return JSON.parse(row.data)
-  } catch (e: any) {
-    console.warn('[db] getPioneerCache failed:', e.message)
-    return null
-  }
-}
-
-export function setPioneerCache(key: string, data: any) {
-  try {
-    if (!db) return
-    db.run(
-      `INSERT OR REPLACE INTO pioneer_cache (cache_key, data, updated_at) VALUES (?, ?, ?)`,
-      [key, JSON.stringify(data), Date.now()]
-    )
-  } catch (e: any) {
-    console.warn('[db] setPioneerCache failed:', e.message)
   }
 }
 
@@ -577,13 +556,3 @@ export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; pat
   }
 }
 
-export function hasWatchOnlyData(): boolean {
-  try {
-    if (!db) return false
-    const row = db.query('SELECT COUNT(*) as cnt FROM device_snapshot').get() as { cnt: number } | null
-    return (row?.cnt ?? 0) > 0
-  } catch (e: any) {
-    console.warn('[db] hasWatchOnlyData failed:', e.message)
-    return false
-  }
-}
