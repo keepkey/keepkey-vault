@@ -1,7 +1,6 @@
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
-import splashBg from '../assets/splash-bg.png'
 
 interface SplashScreenProps {
   statusText: string
@@ -24,9 +23,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
     <Box
       height="100vh"
       width="100vw"
-      backgroundImage={`url(${splashBg})`}
-      backgroundSize="cover"
-      backgroundPosition="center"
+      bg="transparent"
       position="relative"
     >
       <Flex

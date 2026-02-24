@@ -21,6 +21,26 @@ const DESCRIPTIONS: Record<PinRequestType, string> = {
 	"new-second": "Enter the same PIN again to confirm",
 }
 
+const PIN_ANIMATIONS = `
+	@keyframes pinFadeIn {
+		0%   { opacity: 0; transform: scale(0.92); }
+		100% { opacity: 1; transform: scale(1); }
+	}
+	@keyframes pinOverlayFadeIn {
+		0%   { opacity: 0; }
+		100% { opacity: 1; }
+	}
+	@keyframes pinDotPop {
+		0%   { transform: scale(0.5); opacity: 0; }
+		60%  { transform: scale(1.2); }
+		100% { transform: scale(1); opacity: 1; }
+	}
+	@keyframes pinLogoGlow {
+		0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.3)); }
+		50%      { filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.6)); }
+	}
+`
+
 /**
  * PIN entry pad matching KeepKey's scrambled 3x3 layout.
  * The device screen shows scrambled numbers; the user taps
@@ -82,16 +102,19 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 			align="center"
 			justify="center"
 			zIndex={2000}
+			style={{ animation: "pinOverlayFadeIn 0.25s ease-out" }}
 		>
+			<style>{PIN_ANIMATIONS}</style>
 			<Box
 				bg="kk.cardBg"
 				borderRadius="xl"
 				border="1px solid"
-				borderColor="kk.border"
+				borderColor="kk.gold"
 				p="8"
 				maxW="360px"
 				w="90%"
-				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
+				boxShadow="0 0 20px rgba(255, 215, 0, 0.08), 0 8px 32px rgba(0,0,0,0.6)"
+				style={{ animation: "pinFadeIn 0.3s ease-out" }}
 			>
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 					{TITLES[type]}
@@ -105,7 +128,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					bg="kk.bg"
 					borderRadius="md"
 					border="1px solid"
-					borderColor="kk.border"
+					borderColor={pin.length > 0 ? "kk.gold" : "rgba(255, 215, 0, 0.3)"}
 					p="3"
 					mb="5"
 					textAlign="center"
@@ -114,8 +137,21 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					letterSpacing="8px"
 					minH="48px"
 					color="kk.gold"
+					transition="border-color 0.2s ease"
 				>
-					{"\u2022".repeat(pin.length) || "\u00A0"}
+					{pin.length > 0
+						? pin.split("").map((_, i) => (
+							<Box
+								key={i}
+								as="span"
+								display="inline-block"
+								style={{ animation: `pinDotPop 0.15s ease-out ${i * 0.03}s both` }}
+							>
+								{"\u2022"}
+							</Box>
+						))
+						: "\u00A0"
+					}
 				</Box>
 
 				{/* 3x3 PIN pad */}
@@ -129,14 +165,15 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 									w="72px"
 									h="72px"
 									bg="kk.cardBg"
-									border="2px solid"
-									borderColor="kk.border"
+									border="1px solid"
+									borderColor="rgba(255, 215, 0, 0.25)"
 									color="kk.textPrimary"
 									fontSize="xl"
 									fontWeight="bold"
 									borderRadius="xl"
-									_hover={{ borderColor: "kk.gold", bg: "kk.cardBgHover" }}
-									_active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black" }}
+									transition="all 0.15s ease"
+									_hover={{ borderColor: "kk.gold", bg: "kk.cardBgHover", transform: "scale(1.05)" }}
+									_active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black", transform: "scale(0.95)" }}
 									disabled={pin.length >= 9}
 								>
 									{"\u2022"}
@@ -152,9 +189,11 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						onClick={handleBackspace}
 						size="md"
 						variant="outline"
-						borderColor="kk.border"
+						borderColor="rgba(255, 215, 0, 0.2)"
 						color="kk.textSecondary"
+						transition="all 0.15s ease"
 						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
+						_active={{ transform: "scale(0.97)" }}
 						disabled={pin.length === 0}
 						flex={1}
 					>
@@ -166,7 +205,9 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						bg="kk.gold"
 						color="black"
 						fontWeight="semibold"
-						_hover={{ bg: "kk.goldHover" }}
+						transition="all 0.15s ease"
+						_hover={{ bg: "kk.goldHover", transform: "scale(1.02)" }}
+						_active={{ transform: "scale(0.97)" }}
 						disabled={pin.length === 0}
 						flex={1}
 					>
@@ -180,6 +221,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						size="sm"
 						variant="ghost"
 						color="kk.textMuted"
+						transition="color 0.15s ease"
 						_hover={{ color: "kk.error" }}
 						w="100%"
 						mt="3"
@@ -189,8 +231,16 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 				)}
 
 				<Flex justify="flex-end" mt="3">
-					<Box w="24px" h="24px" opacity={0.3}>
-						<KeepKeyUILogo />
+					<Box
+						w="28px"
+						h="28px"
+						p="3px"
+						borderRadius="md"
+						border="1px solid"
+						borderColor="rgba(255, 215, 0, 0.3)"
+						style={{ animation: "pinLogoGlow 3s ease-in-out infinite" }}
+					>
+						<KeepKeyUILogo style={{ opacity: 0.5 }} />
 					</Box>
 				</Flex>
 			</Box>
