@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-flash firmware-info firmware-download firmware-sync
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-build-debug firmware-collect firmware-flash firmware-dev firmware-info firmware-download firmware-sync firmware-clean firmware-init
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -121,13 +121,91 @@ cli-test-live: cli-install
 cli-test-all: cli-install
 	cd projects/keepkey-cli && bun test __tests__/
 
-# --- Firmware ---
+# --- Firmware (Solana feature branch) ---
 
-firmware-build:
-	cd modules/keepkey-firmware && ./scripts/build/docker/device/release.sh
+FW_DIR := modules/keepkey-firmware
+FW_ARTIFACTS := artifacts/firmware
+FW_BRANCH := $(shell cd $(FW_DIR) && git branch --show-current 2>/dev/null || echo "unknown")
+FW_COMMIT := $(shell cd $(FW_DIR) && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+FW_TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
+FW_LABEL := solana-$(FW_COMMIT)-$(FW_TIMESTAMP)
 
+# Init firmware submodules (skips python-keepkey which has dangling ref)
+# Workaround: git worktrees + nested submodules sometimes leave working trees empty,
+# so we force-checkout each submodule after init.
+firmware-init:
+	@echo "Initializing firmware submodules..."
+	cd $(FW_DIR) && git submodule update --init code-signing-keys deps/crypto/hw-crypto deps/device-protocol deps/googletest deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
+	@# Force-checkout worktrees that may be empty due to nested worktree bug
+	@for sm in code-signing-keys deps/crypto/hw-crypto deps/device-protocol deps/googletest deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32; do \
+		if [ -f "$(FW_DIR)/$$sm/.git" ] && [ $$(ls -A "$(FW_DIR)/$$sm" | grep -cv '^\.git$$') -eq 0 ]; then \
+			echo "  Recovering empty worktree: $$sm"; \
+			cd "$(FW_DIR)/$$sm" && git checkout HEAD -- . && cd -; \
+		fi; \
+	done
+	@echo "Firmware submodules ready."
+
+# Build release firmware via Docker → labeled artifacts
+firmware-build: firmware-init
+	@echo "Building firmware (release) from $(FW_BRANCH) @ $(FW_COMMIT)..."
+	cd $(FW_DIR) && ./scripts/build/docker/device/release.sh
+	@mkdir -p $(FW_ARTIFACTS)
+	@cp $(FW_DIR)/bin/firmware.keepkey.bin $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL).bin
+	@cp $(FW_DIR)/bin/firmware.keepkey.elf $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL).elf 2>/dev/null || true
+	@echo ""
+	@echo "=== Firmware build complete ==="
+	@echo "  Branch:  $(FW_BRANCH)"
+	@echo "  Commit:  $(FW_COMMIT)"
+	@echo "  Artifacts:"
+	@ls -lh $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL).*
+	@echo ""
+	@echo "Flash with:  make firmware-flash FW_PATH=$(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL).bin"
+
+# Build debug firmware via Docker → labeled artifacts
+firmware-build-debug: firmware-init
+	@echo "Building firmware (debug) from $(FW_BRANCH) @ $(FW_COMMIT)..."
+	cd $(FW_DIR) && ./scripts/build/docker/device/debug.sh
+	@mkdir -p $(FW_ARTIFACTS)
+	@cp $(FW_DIR)/bin/firmware.keepkey.bin $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL)-debug.bin
+	@cp $(FW_DIR)/bin/firmware.keepkey.elf $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL)-debug.elf 2>/dev/null || true
+	@echo ""
+	@echo "=== Firmware debug build complete ==="
+	@ls -lh $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL)-debug.*
+
+# Copy latest build to a convenience symlink
+firmware-collect:
+	@mkdir -p $(FW_ARTIFACTS)
+	@if [ -f $(FW_DIR)/bin/firmware.keepkey.bin ]; then \
+		cp $(FW_DIR)/bin/firmware.keepkey.bin $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL).bin; \
+		ln -sf firmware.keepkey.$(FW_LABEL).bin $(FW_ARTIFACTS)/firmware-latest.bin; \
+		echo "Collected: $(FW_ARTIFACTS)/firmware.keepkey.$(FW_LABEL).bin"; \
+		echo "Symlink:   $(FW_ARTIFACTS)/firmware-latest.bin"; \
+	else \
+		echo "ERROR: No firmware binary found. Run 'make firmware-build' first."; \
+		exit 1; \
+	fi
+
+# Flash firmware binary to device (device must be in bootloader mode)
 firmware-flash: cli-install
-	cd projects/keepkey-cli && bun run src/index.ts firmware $(FW_PATH)
+	@if [ -z "$(FW_PATH)" ]; then \
+		if [ -L $(FW_ARTIFACTS)/firmware-latest.bin ]; then \
+			echo "Flashing latest build: $$(readlink $(FW_ARTIFACTS)/firmware-latest.bin)"; \
+			cd projects/keepkey-cli && bun run src/index.ts firmware ../../$(FW_ARTIFACTS)/firmware-latest.bin; \
+		else \
+			echo "Usage: make firmware-flash FW_PATH=<path-to-firmware.bin>"; \
+			echo "  or run 'make firmware-build' first to create firmware-latest.bin"; \
+			exit 1; \
+		fi; \
+	else \
+		cd projects/keepkey-cli && bun run src/index.ts firmware $(FW_PATH); \
+	fi
+
+# Full dev cycle: build → collect → flash
+firmware-dev: firmware-build firmware-collect
+	@echo ""
+	@echo "=== Firmware ready for flash ==="
+	@echo "  make firmware-flash"
+	@echo "  (put device in bootloader mode: hold button while plugging in)"
 
 firmware-info: cli-install
 	cd projects/keepkey-cli && bun run src/index.ts firmware-info
@@ -137,6 +215,10 @@ firmware-download:
 
 firmware-sync:
 	bun firmware/download.ts --sync
+
+firmware-clean:
+	rm -rf $(FW_DIR)/bin $(FW_ARTIFACTS)
+	@echo "Firmware build artifacts cleaned."
 
 # --- Clean ---
 
@@ -226,9 +308,14 @@ help:
 	@echo "  make cli-test-live  - Run CLI live device tests (KeepKey required)"
 	@echo "  make cli-test-all   - Run all CLI tests"
 	@echo ""
-	@echo "  Firmware:"
-	@echo "  make firmware-info     - Device firmware diagnostic (signed/unsigned)"
-	@echo "  make firmware-download - Download latest official firmware binaries"
-	@echo "  make firmware-sync     - Download + update manifest.json from remote"
-	@echo "  make firmware-build    - Build firmware via Docker"
-	@echo "  make firmware-flash FW_PATH=<bin> - Flash firmware binary"
+	@echo "  Firmware (Solana):"
+	@echo "  make firmware-init       - Init firmware submodules"
+	@echo "  make firmware-build      - Build release firmware via Docker → artifacts/firmware/"
+	@echo "  make firmware-build-debug - Build debug firmware via Docker"
+	@echo "  make firmware-collect    - Copy latest build to artifacts/ with label"
+	@echo "  make firmware-flash      - Flash firmware-latest.bin (or FW_PATH=<bin>)"
+	@echo "  make firmware-dev        - Full cycle: build → collect → ready to flash"
+	@echo "  make firmware-info       - Device firmware diagnostic (signed/unsigned)"
+	@echo "  make firmware-clean      - Remove firmware build artifacts"
+	@echo "  make firmware-download   - Download latest official firmware binaries"
+	@echo "  make firmware-sync       - Download + update manifest.json from remote"

@@ -15,3 +15,4 @@ bun.lock
 *.key
 *.pem
 *.mobileprovision
+artifacts/firmware/
