@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-flash firmware-info firmware-download firmware-sync
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -95,54 +95,8 @@ dmg:
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
 
-# --- CLI ---
-
-cli-install: modules-build
-	cd projects/keepkey-cli && bun install
-	@# hdwallet packages declare node-hid + usb as peerDependencies.
-	@# Bun's file: links create symlinks that resolve from hdwallet's real path,
-	@# so we ensure these peer deps are findable from modules/hdwallet/node_modules/.
-	@mkdir -p modules/hdwallet/node_modules
-	@test -e modules/hdwallet/node_modules/node-hid || ln -s ../../../projects/keepkey-cli/node_modules/node-hid modules/hdwallet/node_modules/node-hid
-	@test -e modules/hdwallet/node_modules/usb || ln -s ../../../projects/keepkey-cli/node_modules/usb modules/hdwallet/node_modules/usb
-
-cli: cli-install
-	cd projects/keepkey-cli && bun run src/index.ts $(ARGS)
-
-cli-build: cli-install
-	cd projects/keepkey-cli && bun build --compile src/index.ts --outfile dist/keepkey
-
-cli-test: cli-install
-	cd projects/keepkey-cli && bun test __tests__/unit.test.ts
-
-cli-test-live: cli-install
-	cd projects/keepkey-cli && bun test __tests__/live-device.test.ts
-
-cli-test-all: cli-install
-	cd projects/keepkey-cli && bun test __tests__/
-
-# --- Firmware ---
-
-firmware-build:
-	cd modules/keepkey-firmware && ./scripts/build/docker/device/release.sh
-
-firmware-flash: cli-install
-	cd projects/keepkey-cli && bun run src/index.ts firmware $(FW_PATH)
-
-firmware-info: cli-install
-	cd projects/keepkey-cli && bun run src/index.ts firmware-info
-
-firmware-download:
-	bun firmware/download.ts
-
-firmware-sync:
-	bun firmware/download.ts --sync
-
-# --- Clean ---
-
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build artifacts
-	cd projects/keepkey-cli && rm -rf node_modules dist 2>/dev/null || true
 
 # --- Audit & SBOM ---
 
@@ -176,7 +130,7 @@ verify:
 
 # --- Publishing ---
 
-GITHUB_REPO ?= keepkey/keepkey-vault
+GITHUB_REPO ?= BitHighlander/keepkey-vault-v11
 
 publish:
 	@echo "Artifacts:"
@@ -218,17 +172,3 @@ help:
 	@echo "  make publish        - Show distribution artifacts"
 	@echo "  make release        - Build, sign, and publish GitHub release"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
-	@echo ""
-	@echo "  CLI:"
-	@echo "  make cli ARGS=<cmd> - Run keepkey-cli (e.g. make cli ARGS=features)"
-	@echo "  make cli-build      - Compile standalone keepkey binary"
-	@echo "  make cli-test       - Run CLI unit tests (no device needed)"
-	@echo "  make cli-test-live  - Run CLI live device tests (KeepKey required)"
-	@echo "  make cli-test-all   - Run all CLI tests"
-	@echo ""
-	@echo "  Firmware:"
-	@echo "  make firmware-info     - Device firmware diagnostic (signed/unsigned)"
-	@echo "  make firmware-download - Download latest official firmware binaries"
-	@echo "  make firmware-sync     - Download + update manifest.json from remote"
-	@echo "  make firmware-build    - Build firmware via Docker"
-	@echo "  make firmware-flash FW_PATH=<bin> - Flash firmware binary"

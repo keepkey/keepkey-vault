@@ -657,8 +657,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Box>
 					</Section>
 
-					{/* ── REST API Settings ───────────────────────────── */}
-					<Section title="REST API" defaultOpen={false}>
+					{/* ── Application Settings ────────────────────────── */}
+					<Section title="Application" defaultOpen={false}>
 						<VStack gap="4" align="stretch">
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">

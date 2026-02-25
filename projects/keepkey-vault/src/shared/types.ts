@@ -99,23 +99,6 @@ export interface BuildTxParams {
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
 }
 
-export interface BuildStakingTxParams {
-  chainId: string
-  validatorAddress: string
-  amount: string
-  memo?: string
-}
-
-export interface StakingPosition {
-  type: 'delegation' | 'reward' | 'unbonding'
-  balance: string
-  valueUsd?: number
-  ticker?: string
-  validator?: string
-  validatorAddress?: string
-  status?: string
-}
-
 // ── Bitcoin multi-account types ─────────────────────────────────────────
 export type BtcScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh'
 
@@ -168,6 +151,19 @@ export interface CustomChain {
   symbol: string          // gas token symbol
   rpcUrl: string
   explorerUrl?: string
+}
+
+// Pioneer discovery catalog entry (from /api/v1/discovery/search)
+export interface PioneerChainInfo {
+  chainId: number
+  name: string
+  symbol: string
+  icon: string
+  explorer: string
+  explorerAddressLink: string
+  explorerTxLink: string
+  color: string
+  decimals: number
 }
 
 // Token visibility (spam filter user overrides)

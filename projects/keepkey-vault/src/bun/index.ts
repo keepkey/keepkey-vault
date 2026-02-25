@@ -4,14 +4,13 @@ import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
-import { buildCosmosStakingTx } from "./txbuilder/cosmos"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, StakingPosition } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 /** Timeout wrapper for external API calls */
@@ -26,6 +25,59 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 const PIONEER_TIMEOUT_MS = 30_000
+
+// ── Pioneer chain discovery cache (5-minute TTL) ─────────────────────
+const DISCOVERY_CACHE = new Map<string, { data: PioneerChainInfo[]; ts: number }>()
+const DISCOVERY_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const DISCOVERY_API = 'https://api.keepkey.info/api/v1/discovery/search'
+
+/** Built-in EVM chainIds that should be excluded from discovery results */
+const BUILTIN_EVM_CHAIN_IDS = new Set(
+	CHAINS.filter(c => c.chainFamily === 'evm' && c.chainId).map(c => Number(c.chainId))
+)
+
+async function searchPioneerChains(query: string, limit: number): Promise<PioneerChainInfo[]> {
+	const cacheKey = `${query}:${limit}`
+	const cached = DISCOVERY_CACHE.get(cacheKey)
+	if (cached && Date.now() - cached.ts < DISCOVERY_CACHE_TTL) return cached.data
+
+	const url = `${DISCOVERY_API}?q=${encodeURIComponent(query)}&limit=100`
+	const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+	if (!resp.ok) throw new Error(`Discovery API returned ${resp.status}`)
+	const raw: any[] = await resp.json()
+
+	// Filter to EVM native assets only (chainId starts with 'eip155:' and isNative)
+	const seen = new Set<number>()
+	const results: PioneerChainInfo[] = []
+
+	for (const entry of raw) {
+		if (!entry.chainId?.startsWith('eip155:')) continue
+		if (!entry.isNative && entry.type !== 'native') continue
+
+		const numericId = parseInt(entry.chainId.replace('eip155:', ''), 10)
+		if (isNaN(numericId) || numericId < 1) continue
+		if (seen.has(numericId)) continue
+		if (BUILTIN_EVM_CHAIN_IDS.has(numericId)) continue
+		seen.add(numericId)
+
+		results.push({
+			chainId: numericId,
+			name: entry.name || `Chain ${numericId}`,
+			symbol: entry.symbol || 'ETH',
+			icon: entry.icon || '',
+			explorer: entry.explorer || '',
+			explorerAddressLink: entry.explorerAddressLink || '',
+			explorerTxLink: entry.explorerTxLink || '',
+			color: entry.color || '#627EEA',
+			decimals: entry.decimals ?? 18,
+		})
+
+		if (results.length >= limit) break
+	}
+
+	DISCOVERY_CACHE.set(cacheKey, { data: results, ts: Date.now() })
+	return results
+}
 
 /** Fire-and-forget: cache a derived address for watch-only mode */
 function cacheAddress(chainId: string, path: string, address: string) {
@@ -629,97 +681,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 
-			getStakingPositions: async (params) => {
-				const chain = getAllChains().find(c => c.id === params.chainId)
-				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
-				if (chain.chainFamily !== 'cosmos') throw new Error(`Staking not supported for chain: ${params.chainId}`)
-				const pioneer = await getPioneer()
-
-				const resp = await withTimeout(
-					pioneer.GetStakingPositions({ network: chain.id, address: params.address }),
-					PIONEER_TIMEOUT_MS,
-					'GetStakingPositions'
-				)
-
-				const raw = resp?.data?.data || resp?.data || []
-				const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.balances) ? raw.balances : [])
-				const symbol = chain.symbol
-
-				const positions: StakingPosition[] = list.map((pos: any) => ({
-					type: pos.type || 'delegation',
-					balance: String(pos.balance ?? '0'),
-					valueUsd: Number(pos.valueUsd ?? pos.value ?? 0),
-					ticker: pos.ticker || pos.symbol || symbol,
-					validator: pos.validator || pos.validatorName || 'Unknown Validator',
-					validatorAddress: pos.validatorAddress || pos.validator || '',
-					status: pos.status || 'active',
-				}))
-
-				return positions
-			},
-
-			buildDelegateTx: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				const chain = getAllChains().find(c => c.id === params.chainId)
-				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
-				if (chain.chainFamily !== 'cosmos') throw new Error(`Delegation not supported for chain: ${params.chainId}`)
-				const pioneer = await getPioneer()
-
-				const wallet = engine.wallet as any
-				const addrParams: any = {
-					addressNList: chain.defaultPath,
-					showDisplay: false,
-					coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
-				}
-				if (chain.scriptType) addrParams.scriptType = chain.scriptType
-				const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
-				const addrResult = await wallet[walletMethod](addrParams)
-				const fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
-				if (!fromAddress) throw new Error(`Could not derive address for ${chain.coin}`)
-
-				const result = await buildCosmosStakingTx(pioneer, chain, {
-					validatorAddress: params.validatorAddress,
-					amount: params.amount,
-					memo: params.memo,
-					fromAddress,
-					type: 'delegate',
-				})
-
-				const { fee, ...unsignedTx } = result
-				return { unsignedTx, fee }
-			},
-
-			buildUndelegateTx: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				const chain = getAllChains().find(c => c.id === params.chainId)
-				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
-				if (chain.chainFamily !== 'cosmos') throw new Error(`Undelegation not supported for chain: ${params.chainId}`)
-				const pioneer = await getPioneer()
-
-				const wallet = engine.wallet as any
-				const addrParams: any = {
-					addressNList: chain.defaultPath,
-					showDisplay: false,
-					coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
-				}
-				if (chain.scriptType) addrParams.scriptType = chain.scriptType
-				const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
-				const addrResult = await wallet[walletMethod](addrParams)
-				const fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
-				if (!fromAddress) throw new Error(`Could not derive address for ${chain.coin}`)
-
-				const result = await buildCosmosStakingTx(pioneer, chain, {
-					validatorAddress: params.validatorAddress,
-					amount: params.amount,
-					memo: params.memo,
-					fromAddress,
-					type: 'undelegate',
-				})
-
-				const { fee, ...unsignedTx } = result
-				return { unsignedTx, fee }
-			},
-
 			// ── Bitcoin multi-account ─────────────────────────────────
 			getBtcAccounts: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -791,6 +752,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getCustomTokens: async () => {
 				return getCustomTokens()
+			},
+
+			// ── Chain discovery (Pioneer catalog) ────────────────────
+			searchChains: async (params) => {
+				const q = (params.query || '').trim()
+				if (q.length < 2) return []
+				const limit = Math.min(Math.max(params.limit || 50, 1), 100)
+				try {
+					return await searchPioneerChains(q, limit)
+				} catch (e: any) {
+					console.warn('[searchChains] Discovery API failed:', e.message)
+					return []
+				}
 			},
 
 			// ── Custom chains ────────────────────────────────────────

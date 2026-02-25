@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, BuildStakingTxParams, StakingPosition } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -64,15 +64,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       broadcastTx: { params: { chainId: string; signedTx: any }; response: BroadcastResult }
       getMarketData: { params: { caips: string[] }; response: any }
       getFees: { params: { chainId: string }; response: any }
-      getStakingPositions: { params: { chainId: string; address: string }; response: StakingPosition[] }
-      buildDelegateTx: { params: BuildStakingTxParams; response: BuildTxResult }
-      buildUndelegateTx: { params: BuildStakingTxParams; response: BuildTxResult }
 
       // ── Bitcoin multi-account ─────────────────────────────────────────
       getBtcAccounts: { params: void; response: BtcAccountSet }
       addBtcAccount: { params: void; response: BtcAccountSet }
       setBtcSelectedXpub: { params: { accountIndex: number; scriptType: BtcScriptType }; response: void }
       getBtcAddressIndices: { params: { xpub: string }; response: { receiveIndex: number; changeIndex: number } }
+
+      // ── Chain discovery (Pioneer catalog) ──────────────────────────────────
+      searchChains: { params: { query: string; limit?: number }; response: PioneerChainInfo[] }
 
       // ── Custom tokens & chains ──────────────────────────────────────────
       addCustomToken: { params: { chainId: string; contractAddress: string }; response: CustomToken }

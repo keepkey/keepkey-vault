@@ -104,6 +104,11 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 	const allChains = useMemo(() => [...CHAINS, ...customChainDefs], [customChainDefs])
 
+	const existingChainIds = useMemo(() => [
+		...CHAINS.filter(c => c.chainFamily === 'evm' && c.chainId).map(c => Number(c.chainId)),
+		...customChainDefs.filter(c => c.chainId).map(c => Number(c.chainId)),
+	], [customChainDefs])
+
 	const chartData = useMemo<DonutChartItem[]>(() => allChains
 		.map((chain) => {
 			const bal = balances.get(chain.id)
@@ -127,7 +132,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
-		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} watchOnly={watchOnly} />
+		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
 	}
 
 	return (
@@ -334,6 +339,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 					onAdded={(chain) => {
 						setCustomChainDefs(prev => [...prev, customChainToChainDef(chain)])
 					}}
+					existingChainIds={existingChainIds}
 				/>
 			)}
 		</Box>
