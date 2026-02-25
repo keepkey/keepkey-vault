@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build firmware-build firmware-flash
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-flash
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -112,6 +112,15 @@ cli: cli-install
 cli-build: cli-install
 	cd projects/keepkey-cli && bun build --compile src/index.ts --outfile dist/keepkey
 
+cli-test: cli-install
+	cd projects/keepkey-cli && bun test __tests__/unit.test.ts
+
+cli-test-live: cli-install
+	cd projects/keepkey-cli && bun test __tests__/live-device.test.ts
+
+cli-test-all: cli-install
+	cd projects/keepkey-cli && bun test __tests__/
+
 # --- Firmware ---
 
 firmware-build:
@@ -204,6 +213,9 @@ help:
 	@echo "  CLI:"
 	@echo "  make cli ARGS=<cmd> - Run keepkey-cli (e.g. make cli ARGS=features)"
 	@echo "  make cli-build      - Compile standalone keepkey binary"
+	@echo "  make cli-test       - Run CLI unit tests (no device needed)"
+	@echo "  make cli-test-live  - Run CLI live device tests (KeepKey required)"
+	@echo "  make cli-test-all   - Run all CLI tests"
 	@echo ""
 	@echo "  Firmware:"
 	@echo "  make firmware-build - Build firmware via Docker"
