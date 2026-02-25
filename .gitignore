@@ -15,8 +15,3 @@ bun.lock
 *.key
 *.pem
 *.mobileprovision
-
-# Development artifacts
-Vault/
-PLAN.md
-.claude/

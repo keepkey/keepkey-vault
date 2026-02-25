@@ -9,7 +9,7 @@
  *
  * Usage: bun scripts/prune-app-bundle.ts [stable|canary|dev]
  */
-import { existsSync, readdirSync, readFileSync, statSync, rmSync, mkdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, rmSync, mkdirSync } from 'node:fs'
 import { join, basename } from 'node:path'
 
 const env = process.argv[2] || 'stable'
@@ -115,68 +115,16 @@ const sizeBefore = parseInt(Bun.spawnSync(['du', '-sk', nmDir]).stdout.toString(
 // === PRUNING ===
 let prunedFiles = 0
 let prunedDirs = 0
-let keptDirs = 0
 
-// Helper: read version from package.json
-function getPackageVersion(pkgDir: string): string | null {
-  try {
-    const pj = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
-    return pj.version || null
-  } catch { return null }
-}
-
-// 1. Remove nested node_modules — but KEEP deps where the version differs from top-level
-//    (e.g. ethereum-cryptography/node_modules/@noble/hashes@1.4.0 vs top-level @noble/hashes@1.8.0)
+// 1. Remove ALL nested node_modules (flat layout has all deps at top level)
 function stripNestedNodeModules(dir: string) {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const fullPath = join(dir, entry.name)
       if (entry.name === 'node_modules') {
-        // Version-aware: check each package inside before removing
-        try {
-          const nestedPkgs = readdirSync(fullPath, { withFileTypes: true })
-          for (const pkg of nestedPkgs) {
-            if (!pkg.isDirectory()) continue
-            const nestedPkgPath = join(fullPath, pkg.name)
-            if (pkg.name.startsWith('@')) {
-              // Scoped package — check each sub-package
-              const scopedPkgs = readdirSync(nestedPkgPath, { withFileTypes: true })
-              for (const scoped of scopedPkgs) {
-                if (!scoped.isDirectory()) continue
-                const scopedPath = join(nestedPkgPath, scoped.name)
-                const scopedName = `${pkg.name}/${scoped.name}`
-                const nestedVer = getPackageVersion(scopedPath)
-                const topVer = getPackageVersion(join(nmDir, scopedName))
-                if (nestedVer && topVer && nestedVer !== topVer) {
-                  console.log(`  Keeping nested: ${scopedName}@${nestedVer} (top-level: ${topVer})`)
-                  keptDirs++
-                } else {
-                  rmSync(scopedPath, { recursive: true })
-                  prunedDirs++
-                }
-              }
-              // Remove scope dir if empty
-              try { if (readdirSync(nestedPkgPath).length === 0) rmSync(nestedPkgPath, { recursive: true }) } catch {}
-            } else {
-              const nestedVer = getPackageVersion(nestedPkgPath)
-              const topVer = getPackageVersion(join(nmDir, pkg.name))
-              if (nestedVer && topVer && nestedVer !== topVer) {
-                console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
-                keptDirs++
-              } else {
-                rmSync(nestedPkgPath, { recursive: true })
-                prunedDirs++
-              }
-            }
-          }
-          // Remove the node_modules dir if empty
-          try { if (readdirSync(fullPath).length === 0) rmSync(fullPath, { recursive: true }) } catch {}
-        } catch {
-          // If we can't read it, remove it
-          rmSync(fullPath, { recursive: true })
-          prunedDirs++
-        }
+        rmSync(fullPath, { recursive: true })
+        prunedDirs++
       } else {
         stripNestedNodeModules(fullPath)
       }
@@ -197,7 +145,7 @@ for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
     stripNestedNodeModules(pkgDir)
   }
 }
-console.log(`[prune-bundle] Stripped ${prunedDirs} nested node_modules entries (kept ${keptDirs} version-differing deps)`)
+console.log(`[prune-bundle] Stripped ${prunedDirs} nested node_modules dirs`)
 
 // 2. Remove files by extension
 function pruneFilesByExtension(dir: string) {
@@ -353,20 +301,15 @@ if (DEVELOPER_ID && TEAM_ID) {
   console.log(`[prune-bundle] Re-signed ${signedCount} native binaries`)
 }
 
-// Re-sign the entire .app bundle (with entitlements for Bun JIT support)
-const entitlementsPath = join(projectRoot, 'entitlements.plist')
+// Re-sign the entire .app bundle
 if (DEVELOPER_ID && TEAM_ID) {
   console.log('[prune-bundle] Re-signing .app bundle...')
-  const signArgs = [
+  result = Bun.spawnSync([
     'codesign', '--force', '--deep', '--verbose', '--timestamp',
     '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
     '--options', 'runtime',
-  ]
-  if (existsSync(entitlementsPath)) {
-    signArgs.push('--entitlements', entitlementsPath)
-  }
-  signArgs.push(appPath)
-  result = Bun.spawnSync(signArgs)
+    appPath,
+  ])
   if (result.exitCode !== 0) {
     console.warn(`[prune-bundle] WARNING: .app re-signing failed: ${result.stderr.toString()}`)
   } else {

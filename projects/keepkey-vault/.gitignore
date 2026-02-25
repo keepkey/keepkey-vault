@@ -1,9 +1,0 @@
-node_modules/
-dist/
-build/
-artifacts/
-bun.lock
-*.log
-.DS_Store
-.env
-.env.*

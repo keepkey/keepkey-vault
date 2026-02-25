@@ -82,6 +82,7 @@ function App() {
 	const handlePinSubmit = useCallback(async (pin: string) => {
 		try { await rpcRequest("sendPin", { pin }) } catch (e) { console.error("sendPin:", e) }
 		setPinRequestType(null)
+		setPinDismissed(true) // prevent auto-show from re-triggering while device confirms
 	}, [])
 
 	const handlePinCancel = useCallback(() => { setPinRequestType(null); setPinDismissed(true) }, [])
@@ -431,7 +432,7 @@ function App() {
 	if (watchOnlyMode) {
 		return (
 			<>
-				<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary">
+				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
 						connected={false}
@@ -507,7 +508,7 @@ function App() {
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText="Loading portfolio" variant="connecting" />
 			)}
-			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary"
+			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
 				<TopNav

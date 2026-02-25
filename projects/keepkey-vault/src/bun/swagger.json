@@ -3992,6 +3992,7 @@
       "get": {
         "operationId": "V2ListDevices",
         "summary": "List all connected devices",
+        "security": [{ "apiKey": [] }],
         "responses": { "200": { "description": "Device list", "content": { "application/json": { "schema": { "type": "object" } } } } },
         "tags": ["Devices"]
       }
@@ -4000,6 +4001,7 @@
       "get": {
         "operationId": "V2GetActiveDevice",
         "summary": "Get the active device",
+        "security": [{ "apiKey": [] }],
         "responses": { "200": { "description": "Active device", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "No active device" } },
         "tags": ["Devices"]
       }
@@ -4008,6 +4010,7 @@
       "post": {
         "operationId": "V2SelectDevice",
         "summary": "Select active device (single-device mode)",
+        "security": [{ "apiKey": [] }],
         "responses": { "200": { "description": "Device selected", "content": { "application/json": { "schema": { "type": "object" } } } } },
         "tags": ["Devices"]
       }
@@ -4016,6 +4019,7 @@
       "get": {
         "operationId": "V2GetPairedDevices",
         "summary": "Get all paired device history",
+        "security": [{ "apiKey": [] }],
         "responses": { "200": { "description": "Paired devices", "content": { "application/json": { "schema": { "type": "object" } } } } },
         "tags": ["Devices"]
       }
@@ -4024,6 +4028,7 @@
       "get": {
         "operationId": "V2GetDevice",
         "summary": "Get a specific device by ID",
+        "security": [{ "apiKey": [] }],
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": { "200": { "description": "Device info", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
         "tags": ["Devices"]
