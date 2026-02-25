@@ -6,7 +6,9 @@
 	url = https://github.com/BitHighlander/proto-tx-builder
 [submodule "modules/keepkey-firmware"]
 	path = modules/keepkey-firmware
-	url = https://github.com/keepkey/keepkey-firmware
+	url = https://github.com/BitHighlander/keepkey-firmware
+	branch = feature-solana
 [submodule "modules/device-protocol"]
 	path = modules/device-protocol
-	url = https://github.com/keepkey/device-protocol
+	url = https://github.com/BitHighlander/device-protocol
+	branch = feature-solana
