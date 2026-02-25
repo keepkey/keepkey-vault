@@ -4,3 +4,9 @@
 [submodule "modules/proto-tx-builder"]
 	path = modules/proto-tx-builder
 	url = https://github.com/BitHighlander/proto-tx-builder
+[submodule "modules/keepkey-firmware"]
+	path = modules/keepkey-firmware
+	url = https://github.com/keepkey/keepkey-firmware
+[submodule "modules/device-protocol"]
+	path = modules/device-protocol
+	url = https://github.com/keepkey/device-protocol

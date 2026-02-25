@@ -165,13 +165,15 @@ export async function broadcastTx(
   } else if (signedTx?.serialized) {
     // hdwallet-keepkey returns { serialized: "0xf86c..." } for EVM (hex with 0x prefix)
     // proto-tx-builder returns { serialized: "CpQB..." } for Cosmos (base64)
-    // Detect which format: strip optional 0x prefix, then test if remaining chars are hex
     const raw = signedTx.serialized
     const stripped = raw.startsWith('0x') ? raw.slice(2) : raw
-    if (stripped && /^[0-9a-fA-F]*$/.test(stripped)) {
+    const looksHex = stripped && /^[0-9a-fA-F]*$/.test(stripped)
+
+    if (chain.chainFamily === 'cosmos') {
+      // Cosmos broadcast expects base64 tx_bytes (do NOT hex-encode)
       serializedTx = raw
     } else {
-      serializedTx = Buffer.from(raw, 'base64').toString('hex')
+      serializedTx = looksHex ? raw : Buffer.from(raw, 'base64').toString('hex')
     }
   } else {
     throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
@@ -185,6 +187,13 @@ export async function broadcastTx(
 
   const result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
   const data = result?.data
+
+  // Tendermint: detect on-chain broadcast failure even if txid is present
+  const txResponse = data?.results?.raw?.tx_response
+  if (txResponse && typeof txResponse.code === 'number' && txResponse.code !== 0) {
+    const rawLog = txResponse.raw_log || 'Broadcast failed'
+    throw new Error(`Broadcast rejected: ${rawLog}`)
+  }
 
   // Detect broadcast failure — Pioneer wraps errors in { success: false, error: ... }
   if (data && typeof data === 'object' && data.success === false) {

@@ -127,7 +127,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
-		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
+		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} watchOnly={watchOnly} />
 	}
 
 	return (

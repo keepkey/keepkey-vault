@@ -84,8 +84,14 @@ export class AuthStore {
     this.pendingPair = null
   }
 
-  /** Direct pair — only for internal/trusted callers (NOT exposed via REST) */
+  /** Direct pair — idempotent by app name. Returns existing key if already paired. */
   pair(info: PairingInfo): string {
+    // If an app with this name is already paired, return the existing key
+    for (const [key, client] of this.keys) {
+      if (client.info.name === info.name) {
+        return key
+      }
+    }
     this.evictIfFull()
     const apiKey = crypto.randomUUID()
     const enriched = { ...info, addedOn: Date.now() }

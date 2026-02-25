@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
+import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCoins } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { BTC_SCRIPT_TYPES, btcAccountPath } from "../../shared/chains"
@@ -14,16 +14,18 @@ import { BtcXpubSelector } from "./BtcXpubSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { detectSpamToken, type SpamResult } from "../../shared/spamFilter"
+import { StakingPanel } from "./StakingPanel"
 
-type AssetView = "receive" | "send"
+type AssetView = "receive" | "send" | "stake"
 
 interface AssetPageProps {
 	chain: ChainDef
 	balance?: ChainBalance
 	onBack: () => void
+	watchOnly?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, watchOnly }: AssetPageProps) {
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
@@ -198,9 +200,12 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		}
 	}, [])
 
+	const isStakingSupported = chain.chainFamily === 'cosmos' && (chain.id === 'cosmos' || chain.id === 'osmosis')
+
 	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: "Receive", icon: FaArrowDown },
 		{ id: "send", label: "Send", icon: FaArrowUp },
+		...(isStakingSupported ? [{ id: "stake" as const, label: "Stake", icon: FaCoins }] : []),
 	]
 
 	// Shared token row renderer
@@ -452,6 +457,14 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
+						/>
+					)}
+					{view === "stake" && isStakingSupported && (
+						<StakingPanel
+							chain={chain}
+							address={address}
+							availableBalance={balance?.balance || "0"}
+							watchOnly={watchOnly}
 						/>
 					)}
 				</Box>

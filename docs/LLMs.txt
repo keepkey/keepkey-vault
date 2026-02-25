@@ -1,0 +1,80 @@
+# KeepKey Vault v11 — AI-Readable Project Overview
+
+## What Is This?
+Desktop hardware wallet app for KeepKey devices. Manages cryptocurrency keys, signs transactions, and provides a portfolio dashboard. All private keys stay on the hardware device — the app never sees them.
+
+## Tech Stack
+- **Desktop Runtime**: Electrobun (Bun + native WebView, ~14MB bundle)
+- **Backend**: Bun (TypeScript) — device communication, REST API server, SQLite cache
+- **Frontend**: React 18 + Chakra UI 3.0 + Vite 6
+- **Device Library**: @keepkey/hdwallet-* (HID + WebUSB dual-transport)
+- **Transaction Building**: @keepkey/proto-tx-builder + Pioneer API
+- **CLI**: Bun/TypeScript — standalone device operations
+
+## Repository Layout
+```
+keepkey-vault-v11/
+├── Makefile                    # All operations (make vault, make cli, make build)
+├── modules/                    # Git submodules
+│   ├── hdwallet/               # TypeScript wallet library (address derivation, signing)
+│   ├── proto-tx-builder/       # UTXO/EVM/Cosmos transaction construction
+│   ├── keepkey-firmware/       # Device firmware (C, STM32F205)
+│   └── device-protocol/       # Protobuf message definitions (.proto files)
+├── projects/
+│   ├── keepkey-vault/          # Desktop app (Electrobun + React)
+│   │   └── src/
+│   │       ├── bun/            # Main process (engine-controller, REST API, auth, db)
+│   │       ├── mainview/       # React frontend (components, hooks, services)
+│   │       └── shared/         # Types shared between bun and mainview
+│   └── keepkey-cli/            # CLI tool (direct device access, no REST dependency)
+└── docs/                       # Documentation
+    ├── LLMs.txt                # This file
+    ├── ARCHITECTURE.md         # System architecture
+    ├── COIN-ADDITION-GUIDE.md  # How to add a new coin/chain
+    ├── coins/                  # Per-coin implementation notes
+    └── firmware/               # Firmware build & flash guide
+```
+
+## How to Build & Run
+```bash
+make install        # Build hdwallet + proto-tx-builder, install vault deps
+make dev            # Launch desktop app in dev mode
+make dev-hmr        # Dev mode with Vite hot reload
+make cli ARGS=features  # Run CLI (features, address, wipe, etc.)
+make build-signed   # Production build with code signing + notarization
+```
+
+## Device Communication Model
+1. Desktop app creates EngineController (src/bun/engine-controller.ts)
+2. EngineController tries WebUSB adapter, falls back to HID adapter
+3. Uses `getDevice()` + `pairRawDevice()` to claim the USB device
+4. All device operations go through hdwallet: getFeatures(), btcGetAddress(), ethSignTx(), etc.
+5. PIN/passphrase prompts arrive as transport events, forwarded to React UI via RPC
+
+## REST API (port 1646, opt-in)
+Disabled by default. When enabled, exposes keepkey-desktop-compatible endpoints:
+- `GET /api/v1/device/features` — device info
+- `GET /api/v1/btc/address` — derive Bitcoin address
+- `POST /api/v1/eth/sign-transaction` — sign Ethereum transaction
+- Bearer token auth via `POST /auth/pair`
+- Full Swagger spec at `/spec/swagger.json`
+
+## How Coins Are Added
+See docs/COIN-ADDITION-GUIDE.md for the 5-layer pipeline:
+1. **Firmware** — protobuf messages + FSM handlers + crypto implementation
+2. **hdwallet** — TypeScript getAddress() + signTx() methods
+3. **REST API** — HTTP endpoints for the new coin
+4. **Frontend** — React UI components
+5. **CLI** — Command-line address/sign commands
+
+## Supported Chains
+Bitcoin, Ethereum, Cosmos, THORChain, Osmosis, Litecoin, Dogecoin, Bitcoin Cash, Dash, Ripple, Mayachain, Binance, and any custom EVM chain.
+
+## Key Files
+- `projects/keepkey-vault/src/bun/engine-controller.ts` — device lifecycle, transport, PIN/passphrase
+- `projects/keepkey-vault/src/bun/rest-api.ts` — REST API server
+- `projects/keepkey-vault/src/bun/index.ts` — app entry point, RPC bridge, window management
+- `projects/keepkey-vault/src/shared/chains.ts` — chain definitions (paths, CAIP IDs, methods)
+- `projects/keepkey-cli/src/index.ts` — CLI entry point
+- `modules/hdwallet/packages/hdwallet-keepkey/` — KeepKey-specific hdwallet implementation
+- `modules/device-protocol/messages*.proto` — protobuf message definitions

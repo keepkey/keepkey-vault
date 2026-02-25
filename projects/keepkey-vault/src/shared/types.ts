@@ -99,6 +99,23 @@ export interface BuildTxParams {
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
 }
 
+export interface BuildStakingTxParams {
+  chainId: string
+  validatorAddress: string
+  amount: string
+  memo?: string
+}
+
+export interface StakingPosition {
+  type: 'delegation' | 'reward' | 'unbonding'
+  balance: string
+  valueUsd?: number
+  ticker?: string
+  validator?: string
+  validatorAddress?: string
+  status?: string
+}
+
 // ── Bitcoin multi-account types ─────────────────────────────────────────
 export type BtcScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh'
 
