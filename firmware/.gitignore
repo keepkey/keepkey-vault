@@ -1,0 +1,5 @@
+# Firmware binaries — download via `make firmware-download`
+signed/*.bin
+unsigned/*.bin
+# Keep directory structure
+!.gitkeep

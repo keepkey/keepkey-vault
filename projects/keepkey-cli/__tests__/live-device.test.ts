@@ -129,6 +129,37 @@ describe('Address derivation', () => {
   )
 })
 
+// ─── Firmware info ───────────────────────────────────────────
+describe('Firmware info', () => {
+  it(
+    'firmware-info returns diagnostic output',
+    async () => {
+      const { code, stdout, stderr } = await runCli('firmware-info')
+      if (code !== 0) {
+        console.error('firmware-info failed:', stderr)
+      }
+      expect(code).toBe(0)
+      expect(stdout).toContain('Firmware Diagnostic')
+      expect(stdout).toContain('Hash (hex):')
+      expect(stdout).toContain('Bootloader Analysis')
+      expect(stdout).toContain('Firmware Analysis')
+    },
+    TIMEOUT,
+  )
+
+  it(
+    'firmware-info detects signed vs unsigned',
+    async () => {
+      const { stdout } = await runCli('firmware-info')
+      // Should contain either SIGNED or NOT IN MANIFEST for firmware
+      const hasSigned = stdout.includes('SIGNED (official)')
+      const hasUnsigned = stdout.includes('NOT IN MANIFEST')
+      expect(hasSigned || hasUnsigned).toBe(true)
+    },
+    TIMEOUT,
+  )
+})
+
 // ─── Edge cases ──────────────────────────────────────────────
 describe('Live edge cases', () => {
   it(

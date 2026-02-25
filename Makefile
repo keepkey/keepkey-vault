@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-flash
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-flash firmware-info firmware-download firmware-sync
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -129,6 +129,15 @@ firmware-build:
 firmware-flash: cli-install
 	cd projects/keepkey-cli && bun run src/index.ts firmware $(FW_PATH)
 
+firmware-info: cli-install
+	cd projects/keepkey-cli && bun run src/index.ts firmware-info
+
+firmware-download:
+	bun firmware/download.ts
+
+firmware-sync:
+	bun firmware/download.ts --sync
+
 # --- Clean ---
 
 clean: modules-clean
@@ -218,5 +227,8 @@ help:
 	@echo "  make cli-test-all   - Run all CLI tests"
 	@echo ""
 	@echo "  Firmware:"
-	@echo "  make firmware-build - Build firmware via Docker"
+	@echo "  make firmware-info     - Device firmware diagnostic (signed/unsigned)"
+	@echo "  make firmware-download - Download latest official firmware binaries"
+	@echo "  make firmware-sync     - Download + update manifest.json from remote"
+	@echo "  make firmware-build    - Build firmware via Docker"
 	@echo "  make firmware-flash FW_PATH=<bin> - Flash firmware binary"

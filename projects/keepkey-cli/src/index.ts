@@ -24,6 +24,7 @@ Commands:
   label <name>          Set device label
   passphrase <on|off>   Enable/disable passphrase
   firmware <path>       Flash firmware binary (device must be in bootloader)
+  firmware-info         Firmware diagnostic (version, hash, signed/unsigned)
   address <coin>        Get address (bitcoin, ethereum, cosmos, etc.)
   help                  Show this help
 
@@ -73,6 +74,11 @@ try {
     case 'firmware': {
       const { firmwareCommand } = await import('./commands/firmware')
       await firmwareCommand(args)
+      break
+    }
+    case 'firmware-info': {
+      const { firmwareInfoCommand } = await import('./commands/firmware-info')
+      await firmwareInfoCommand()
       break
     }
     case 'label': {

@@ -31,6 +31,7 @@ describe('CLI: command routing', () => {
     expect(out).toContain('keepkey-cli')
     expect(out).toContain('Commands:')
     expect(out).toContain('features')
+    expect(out).toContain('firmware-info')
     expect(out).toContain('address')
   })
 
