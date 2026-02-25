@@ -1165,8 +1165,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/api/pubkeys/batch' && method === 'POST') {
-          // Public keys are not sensitive — allow unauthenticated batch requests.
-          // Pioneer SDK's batchGetPubkeys() calls this without auth headers.
+          auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.BatchPubkeysRequest)
           const paths = body.paths || []

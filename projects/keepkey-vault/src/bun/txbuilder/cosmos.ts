@@ -9,6 +9,14 @@ import type { ChainDef } from '../../shared/chains'
 
 const TAG = '[txbuilder:cosmos]'
 
+/** Convert a decimal string (e.g. "1.5") to base units using integer math only. */
+function toBaseUnits(displayAmount: string, decimals: number): bigint {
+  const parts = displayAmount.split('.')
+  const whole = parts[0] || '0'
+  let frac = (parts[1] || '').slice(0, decimals).padEnd(decimals, '0')
+  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac)
+}
+
 // Chain-specific fees (in display units)
 const FEES: Record<string, number> = {
   thorchain: 0.02,
@@ -55,7 +63,6 @@ export async function buildCosmosTx(
   params: BuildCosmosParams,
 ) {
   const { to, memo = '', isMax = false, fromAddress } = params
-  let amountNum = parseFloat(params.amount)
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
@@ -79,19 +86,22 @@ export async function buildCosmosTx(
 
   console.log(`${TAG} account_number=${account_number}, sequence=${sequence}`)
 
-  // 2. Compute amount in base units
-  let baseAmount: number
+  // 2. Compute amount in base units (integer math to avoid float precision loss)
+  let baseAmount: bigint
 
   if (isMax) {
     const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] })
-    const balanceDisplay = Number((balResp?.data?.balances || [])[0]?.balance ?? 0)
+    const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
     const feeDisplay = FEES[chain.id] || 0
-    baseAmount = Math.floor(Math.max(0, balanceDisplay * 10 ** chain.decimals - feeDisplay * 10 ** chain.decimals))
+    const balBase = toBaseUnits(balStr, chain.decimals)
+    const feeBase = toBaseUnits(String(feeDisplay), chain.decimals)
+    baseAmount = balBase - feeBase
+    if (baseAmount < 0n) baseAmount = 0n
   } else {
-    baseAmount = Math.floor(amountNum * 10 ** chain.decimals)
+    baseAmount = toBaseUnits(params.amount, chain.decimals)
   }
 
-  if (baseAmount <= 0) throw new Error('Amount must be greater than zero')
+  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
 
   // 3. Build unsigned tx
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
@@ -132,10 +142,9 @@ export async function buildCosmosStakingTx(
   params: BuildCosmosStakingParams,
 ) {
   const { validatorAddress, memo = '', fromAddress, type } = params
-  let amountNum = parseFloat(params.amount)
 
   if (!validatorAddress) throw new Error('Validator address is required')
-  if (!amountNum || amountNum <= 0) throw new Error('Amount must be greater than zero')
+  if (!params.amount || parseFloat(params.amount) <= 0) throw new Error('Amount must be greater than zero')
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
@@ -158,8 +167,8 @@ export async function buildCosmosStakingTx(
 
   console.log(`${TAG} account_number=${account_number}, sequence=${sequence}`)
 
-  const baseAmount = Math.floor(amountNum * 10 ** chain.decimals)
-  if (baseAmount <= 0) throw new Error('Amount must be greater than zero')
+  const baseAmount = toBaseUnits(params.amount, chain.decimals)
+  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
 
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)

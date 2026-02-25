@@ -471,6 +471,8 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const [txidCopied, setTxidCopied] = useState(false)
+	const [signStart, setSignStart] = useState<number | null>(null)
+	const [signTimeout, setSignTimeout] = useState<NodeJS.Timeout | null>(null)
 
 	const selectedPosition = delegations.find(d => d.validatorAddress === selected)
 	const unbondingPeriod = getUnbondingPeriod(chain.id)

@@ -1,5 +1,11 @@
 import { readFileSync } from 'fs'
 import { getDevice } from '../device'
+import { confirm } from '../util/prompt'
+
+// KeepKey firmware binaries start with these magic bytes (KPKY)
+const KEEPKEY_MAGIC = Buffer.from([0x4b, 0x50, 0x4b, 0x59])
+const MIN_FIRMWARE_SIZE = 32 * 1024      // 32 KB — smallest plausible firmware
+const MAX_FIRMWARE_SIZE = 1024 * 1024     // 1 MB — largest plausible firmware
 
 export async function firmwareCommand(args: string[]) {
   const filePath = args[0]
@@ -16,6 +22,13 @@ export async function firmwareCommand(args: string[]) {
     process.exit(1)
   }
 
+  // Basic integrity checks
+  if (firmwareBin.length < MIN_FIRMWARE_SIZE || firmwareBin.length > MAX_FIRMWARE_SIZE) {
+    console.error(`Firmware size ${firmwareBin.length} bytes is outside expected range (${MIN_FIRMWARE_SIZE}-${MAX_FIRMWARE_SIZE}).`)
+    console.error('This does not look like a valid KeepKey firmware binary.')
+    process.exit(1)
+  }
+
   console.log(`Firmware binary: ${filePath} (${firmwareBin.length} bytes)`)
 
   const { wallet, features } = await getDevice()
@@ -24,6 +37,12 @@ export async function firmwareCommand(args: string[]) {
     console.log('Device is not in bootloader mode.')
     console.log('To enter bootloader: hold the button while plugging in the device.')
     process.exit(1)
+  }
+
+  const ok = await confirm('This will ERASE the current firmware and flash the new binary. Continue?')
+  if (!ok) {
+    console.log('Aborted.')
+    process.exit(0)
   }
 
   console.log('Erasing current firmware...')

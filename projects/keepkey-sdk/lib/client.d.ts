@@ -3,6 +3,11 @@ export declare class VaultClient {
     private apiKey;
     private serviceName;
     private serviceImageUrl;
+    private rePairPromise;
+    /** Default timeout for read operations (ms). */
+    timeoutMs: number;
+    /** Timeout for signing operations (ms). */
+    signingTimeoutMs: number;
     constructor(baseUrl: string, apiKey?: string, serviceName?: string, serviceImageUrl?: string);
     /** Current API key (set after pairing) */
     getApiKey(): string | null;
@@ -10,10 +15,12 @@ export declare class VaultClient {
     setApiKey(key: string): void;
     /** Build headers for a request */
     private headers;
+    /** Create an AbortSignal with timeout */
+    private signal;
     /** GET request */
-    get<T = any>(path: string): Promise<T>;
+    get<T = any>(path: string, timeoutMs?: number): Promise<T>;
     /** POST request */
-    post<T = any>(path: string, body?: any): Promise<T>;
+    post<T = any>(path: string, body?: any, timeoutMs?: number): Promise<T>;
     /** DELETE request */
     delete<T = any>(path: string): Promise<T>;
     /** Pair with the vault — user must approve on the device UI */
@@ -22,7 +29,10 @@ export declare class VaultClient {
     ping(): Promise<boolean>;
     /** Verify current API key is valid */
     verifyAuth(): Promise<boolean>;
-    /** Attempt to re-pair when a 403 is received */
+    /**
+     * Attempt to re-pair when a 403 is received.
+     * Uses a mutex so concurrent 403s only trigger one re-pair attempt.
+     */
     private tryRePair;
 }
 /** SDK-specific error with HTTP status */

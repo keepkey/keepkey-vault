@@ -158,7 +158,7 @@ verify:
 
 # --- Publishing ---
 
-GITHUB_REPO ?= BitHighlander/keepkey-vault-v11
+GITHUB_REPO ?= keepkey/keepkey-vault
 
 publish:
 	@echo "Artifacts:"

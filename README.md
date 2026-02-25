@@ -66,7 +66,7 @@ keepkey-vault-v11/
 ├── Makefile                          # All operations
 ├── modules/                          # Git submodules
 │   ├── hdwallet/                     # TypeScript wallet library (keepkey/hdwallet)
-│   ├── proto-tx-builder/             # Transaction construction (BitHighlander/proto-tx-builder)
+│   ├── proto-tx-builder/             # Transaction construction (keepkey/proto-tx-builder)
 │   ├── keepkey-firmware/             # Device firmware, C (keepkey/keepkey-firmware)
 │   └── device-protocol/             # Protobuf message definitions (keepkey/device-protocol)
 ├── projects/
@@ -121,6 +121,6 @@ git submodule update --init
 | Module | Purpose |
 |--------|---------|
 | [hdwallet](https://github.com/keepkey/hdwallet) | Address derivation, message signing, transport layer |
-| [proto-tx-builder](https://github.com/BitHighlander/proto-tx-builder) | Transaction construction from Pioneer API |
+| [proto-tx-builder](https://github.com/keepkey/proto-tx-builder) | Transaction construction from Pioneer API |
 | [keepkey-firmware](https://github.com/keepkey/keepkey-firmware) | Device firmware (C, STM32F205) |
 | [device-protocol](https://github.com/keepkey/device-protocol) | Protobuf message definitions |

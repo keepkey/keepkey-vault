@@ -56,6 +56,6 @@ export default {
 		},
 	},
 	release: {
-		baseUrl: "https://github.com/BitHighlander/keepkey-vault-v11/releases/latest/download",
+		baseUrl: "https://github.com/keepkey/keepkey-vault/releases/latest/download",
 	},
 } satisfies ElectrobunConfig;

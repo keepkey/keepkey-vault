@@ -1,10 +1,18 @@
 import type { PairResponse } from './types'
 
+const DEFAULT_TIMEOUT_MS = 30_000
+const SIGNING_TIMEOUT_MS = 600_000
+
 export class VaultClient {
   private baseUrl: string
   private apiKey: string | null
   private serviceName: string
   private serviceImageUrl: string
+  private rePairPromise: Promise<boolean> | null = null
+  /** Default timeout for read operations (ms). */
+  timeoutMs: number
+  /** Timeout for signing operations (ms). */
+  signingTimeoutMs: number
 
   constructor(
     baseUrl: string,
@@ -17,6 +25,8 @@ export class VaultClient {
     this.apiKey = apiKey || null
     this.serviceName = serviceName
     this.serviceImageUrl = serviceImageUrl
+    this.timeoutMs = DEFAULT_TIMEOUT_MS
+    this.signingTimeoutMs = SIGNING_TIMEOUT_MS
   }
 
   /** Current API key (set after pairing) */
@@ -36,19 +46,25 @@ export class VaultClient {
     return h
   }
 
+  /** Create an AbortSignal with timeout */
+  private signal(ms?: number): AbortSignal {
+    return AbortSignal.timeout(ms ?? this.timeoutMs)
+  }
+
   /** GET request */
-  async get<T = any>(path: string): Promise<T> {
+  async get<T = any>(path: string, timeoutMs?: number): Promise<T> {
     const resp = await fetch(`${this.baseUrl}${path}`, {
       method: 'GET',
       headers: this.headers(),
+      signal: this.signal(timeoutMs),
     })
     if (resp.status === 403 && this.apiKey) {
-      // Token may have expired — try re-pairing once
       const rePaired = await this.tryRePair()
       if (rePaired) {
         const retry = await fetch(`${this.baseUrl}${path}`, {
           method: 'GET',
           headers: this.headers(),
+          signal: this.signal(timeoutMs),
         })
         if (!retry.ok) throw new SdkError(retry.status, await retry.text())
         return retry.json() as Promise<T>
@@ -59,11 +75,12 @@ export class VaultClient {
   }
 
   /** POST request */
-  async post<T = any>(path: string, body?: any): Promise<T> {
+  async post<T = any>(path: string, body?: any, timeoutMs?: number): Promise<T> {
     const resp = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.headers(),
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: this.signal(timeoutMs),
     })
     if (resp.status === 403 && this.apiKey) {
       const rePaired = await this.tryRePair()
@@ -72,6 +89,7 @@ export class VaultClient {
           method: 'POST',
           headers: this.headers(),
           body: body !== undefined ? JSON.stringify(body) : undefined,
+          signal: this.signal(timeoutMs),
         })
         if (!retry.ok) throw new SdkError(retry.status, await retry.text())
         return retry.json() as Promise<T>
@@ -86,7 +104,20 @@ export class VaultClient {
     const resp = await fetch(`${this.baseUrl}${path}`, {
       method: 'DELETE',
       headers: this.headers(),
+      signal: this.signal(),
     })
+    if (resp.status === 403 && this.apiKey) {
+      const rePaired = await this.tryRePair()
+      if (rePaired) {
+        const retry = await fetch(`${this.baseUrl}${path}`, {
+          method: 'DELETE',
+          headers: this.headers(),
+          signal: this.signal(),
+        })
+        if (!retry.ok) throw new SdkError(retry.status, await retry.text())
+        return retry.json() as Promise<T>
+      }
+    }
     if (!resp.ok) throw new SdkError(resp.status, await resp.text())
     return resp.json() as Promise<T>
   }
@@ -101,9 +132,13 @@ export class VaultClient {
         url: '',
         imageUrl: this.serviceImageUrl,
       }),
+      signal: this.signal(this.signingTimeoutMs),
     })
     if (!resp.ok) throw new SdkError(resp.status, `Pairing failed: ${await resp.text()}`)
     const data = (await resp.json()) as PairResponse
+    if (!data || typeof data.apiKey !== 'string' || !data.apiKey) {
+      throw new SdkError(500, 'Pairing response missing apiKey')
+    }
     this.apiKey = data.apiKey
     return data.apiKey
   }
@@ -111,7 +146,10 @@ export class VaultClient {
   /** Check if vault is reachable */
   async ping(): Promise<boolean> {
     try {
-      const resp = await fetch(`${this.baseUrl}/api/health`, { method: 'GET' })
+      const resp = await fetch(`${this.baseUrl}/api/health`, {
+        method: 'GET',
+        signal: this.signal(5000),
+      })
       return resp.ok
     } catch {
       return false
@@ -125,6 +163,7 @@ export class VaultClient {
       const resp = await fetch(`${this.baseUrl}/auth/pair`, {
         method: 'GET',
         headers: this.headers(),
+        signal: this.signal(),
       })
       if (!resp.ok) return false
       const data = (await resp.json()) as { paired: boolean }
@@ -134,14 +173,15 @@ export class VaultClient {
     }
   }
 
-  /** Attempt to re-pair when a 403 is received */
+  /**
+   * Attempt to re-pair when a 403 is received.
+   * Uses a mutex so concurrent 403s only trigger one re-pair attempt.
+   */
   private async tryRePair(): Promise<boolean> {
-    try {
-      await this.pair()
-      return true
-    } catch {
-      return false
-    }
+    if (this.rePairPromise) return this.rePairPromise
+    this.rePairPromise = this.pair().then(() => true, () => false)
+      .finally(() => { this.rePairPromise = null })
+    return this.rePairPromise
   }
 }
 

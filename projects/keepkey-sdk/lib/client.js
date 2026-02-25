@@ -1,13 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SdkError = exports.VaultClient = void 0;
+const DEFAULT_TIMEOUT_MS = 30000;
+const SIGNING_TIMEOUT_MS = 600000;
 class VaultClient {
     constructor(baseUrl, apiKey, serviceName = 'keepkey-vault-sdk', serviceImageUrl = '') {
+        this.rePairPromise = null;
         // Strip trailing slash
         this.baseUrl = baseUrl.replace(/\/+$/, '');
         this.apiKey = apiKey || null;
         this.serviceName = serviceName;
         this.serviceImageUrl = serviceImageUrl;
+        this.timeoutMs = DEFAULT_TIMEOUT_MS;
+        this.signingTimeoutMs = SIGNING_TIMEOUT_MS;
     }
     /** Current API key (set after pairing) */
     getApiKey() {
@@ -24,19 +29,24 @@ class VaultClient {
             h['Authorization'] = `Bearer ${this.apiKey}`;
         return h;
     }
+    /** Create an AbortSignal with timeout */
+    signal(ms) {
+        return AbortSignal.timeout(ms ?? this.timeoutMs);
+    }
     /** GET request */
-    async get(path) {
+    async get(path, timeoutMs) {
         const resp = await fetch(`${this.baseUrl}${path}`, {
             method: 'GET',
             headers: this.headers(),
+            signal: this.signal(timeoutMs),
         });
         if (resp.status === 403 && this.apiKey) {
-            // Token may have expired — try re-pairing once
             const rePaired = await this.tryRePair();
             if (rePaired) {
                 const retry = await fetch(`${this.baseUrl}${path}`, {
                     method: 'GET',
                     headers: this.headers(),
+                    signal: this.signal(timeoutMs),
                 });
                 if (!retry.ok)
                     throw new SdkError(retry.status, await retry.text());
@@ -48,11 +58,12 @@ class VaultClient {
         return resp.json();
     }
     /** POST request */
-    async post(path, body) {
+    async post(path, body, timeoutMs) {
         const resp = await fetch(`${this.baseUrl}${path}`, {
             method: 'POST',
             headers: this.headers(),
             body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: this.signal(timeoutMs),
         });
         if (resp.status === 403 && this.apiKey) {
             const rePaired = await this.tryRePair();
@@ -61,6 +72,7 @@ class VaultClient {
                     method: 'POST',
                     headers: this.headers(),
                     body: body !== undefined ? JSON.stringify(body) : undefined,
+                    signal: this.signal(timeoutMs),
                 });
                 if (!retry.ok)
                     throw new SdkError(retry.status, await retry.text());
@@ -76,7 +88,21 @@ class VaultClient {
         const resp = await fetch(`${this.baseUrl}${path}`, {
             method: 'DELETE',
             headers: this.headers(),
+            signal: this.signal(),
         });
+        if (resp.status === 403 && this.apiKey) {
+            const rePaired = await this.tryRePair();
+            if (rePaired) {
+                const retry = await fetch(`${this.baseUrl}${path}`, {
+                    method: 'DELETE',
+                    headers: this.headers(),
+                    signal: this.signal(),
+                });
+                if (!retry.ok)
+                    throw new SdkError(retry.status, await retry.text());
+                return retry.json();
+            }
+        }
         if (!resp.ok)
             throw new SdkError(resp.status, await resp.text());
         return resp.json();
@@ -91,17 +117,24 @@ class VaultClient {
                 url: '',
                 imageUrl: this.serviceImageUrl,
             }),
+            signal: this.signal(this.signingTimeoutMs),
         });
         if (!resp.ok)
             throw new SdkError(resp.status, `Pairing failed: ${await resp.text()}`);
         const data = (await resp.json());
+        if (!data || typeof data.apiKey !== 'string' || !data.apiKey) {
+            throw new SdkError(500, 'Pairing response missing apiKey');
+        }
         this.apiKey = data.apiKey;
         return data.apiKey;
     }
     /** Check if vault is reachable */
     async ping() {
         try {
-            const resp = await fetch(`${this.baseUrl}/api/health`, { method: 'GET' });
+            const resp = await fetch(`${this.baseUrl}/api/health`, {
+                method: 'GET',
+                signal: this.signal(5000),
+            });
             return resp.ok;
         }
         catch {
@@ -116,6 +149,7 @@ class VaultClient {
             const resp = await fetch(`${this.baseUrl}/auth/pair`, {
                 method: 'GET',
                 headers: this.headers(),
+                signal: this.signal(),
             });
             if (!resp.ok)
                 return false;
@@ -126,15 +160,16 @@ class VaultClient {
             return false;
         }
     }
-    /** Attempt to re-pair when a 403 is received */
+    /**
+     * Attempt to re-pair when a 403 is received.
+     * Uses a mutex so concurrent 403s only trigger one re-pair attempt.
+     */
     async tryRePair() {
-        try {
-            await this.pair();
-            return true;
-        }
-        catch {
-            return false;
-        }
+        if (this.rePairPromise)
+            return this.rePairPromise;
+        this.rePairPromise = this.pair().then(() => true, () => false)
+            .finally(() => { this.rePairPromise = null; });
+        return this.rePairPromise;
     }
 }
 exports.VaultClient = VaultClient;
