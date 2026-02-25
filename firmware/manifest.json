@@ -1,18 +1,18 @@
 {
   "$schema": "./manifest-schema.json",
-  "_generated": "Synced from https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json",
+  "_generated": "Synced from https://raw.githubusercontent.com/keepkey/keepkey-vault/master/firmware/releases.json",
   "_updated": "2026-02-25",
   "latest": {
     "firmware": {
       "version": "7.10.0",
       "filename": "firmware-v7.10.0.bin",
-      "url": "https://github.com/keepkey/keepkey-desktop/raw/master/firmware/v7.10.0/firmware.keepkey.bin",
+      "url": "https://github.com/keepkey/keepkey-vault/raw/master/firmware/v7.10.0/firmware.keepkey.bin",
       "sha256": "958764cf3baa53eec0002eab9c54e02ce6f5fdab71e7efbbe723f958e26ff419"
     },
     "bootloader": {
       "version": "2.1.4",
       "filename": "blupdater-v2.1.4.bin",
-      "url": "https://github.com/keepkey/keepkey-desktop/raw/master/firmware/bl_v2.1.4/blupdater.bin",
+      "url": "https://github.com/keepkey/keepkey-vault/raw/master/firmware/bl_v2.1.4/blupdater.bin",
       "sha256": "6bb7cfd28262fcd61c450fdc3f6932650bdf16a134ab6c1bc6f90b0d1578e620"
     }
   },

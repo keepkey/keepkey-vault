@@ -7,7 +7,7 @@ import { saveDeviceSnapshot } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType } from '../shared/types'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
-const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
+const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-vault/main/firmware/releases.json'
 
 const FALLBACK_FIRMWARE = '7.10.0'
 const FALLBACK_BOOTLOADER = '2.1.4'
@@ -223,7 +223,7 @@ export class EngineController extends EventEmitter {
   /**
    * Verify device firmware/bootloader against the manifest registry.
    *
-   * Key insight from keepkey-desktop: the manifest's hashes.firmware contains
+   * Key insight: the manifest's hashes.firmware contains
    * SHA-256 of downloadable .bin files, NOT on-device hashes. But hashes.bootloader
    * DOES contain on-device bootloader hashes. So:
    *   - Bootloader: lookup device hash in manifest.hashes.bootloader (hash-based)

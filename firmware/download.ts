@@ -12,9 +12,9 @@ import { createHash } from 'crypto'
 import { join, dirname } from 'path'
 
 const RELEASES_URL =
-  'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
+  'https://raw.githubusercontent.com/keepkey/keepkey-vault/main/firmware/releases.json'
 const FW_BASE_URL =
-  'https://github.com/keepkey/keepkey-desktop/raw/master/firmware'
+  'https://github.com/keepkey/keepkey-vault/raw/main/firmware'
 
 const FIRMWARE_DIR = dirname(import.meta.path)
 const SIGNED_DIR = join(FIRMWARE_DIR, 'signed')

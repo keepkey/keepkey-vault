@@ -1,7 +1,7 @@
 import { getDevice } from '../device'
 
 const RELEASES_URL =
-  'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
+  'https://raw.githubusercontent.com/keepkey/keepkey-vault/main/firmware/releases.json'
 
 interface ReleasesManifest {
   latest: {

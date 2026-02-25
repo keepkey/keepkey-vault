@@ -43,7 +43,7 @@ make firmware-build              # Builds via Docker → outputs to modules/keep
 
 ## Manifest
 
-`manifest.json` tracks all known firmware and bootloader versions with their SHA-256 hashes. This is fetched from the [keepkey-desktop releases.json](https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json) and stored locally for offline reference.
+`manifest.json` tracks all known firmware and bootloader versions with their SHA-256 hashes. This is fetched from the [keepkey-vault releases.json](https://raw.githubusercontent.com/keepkey/keepkey-vault/main/firmware/releases.json) and stored locally for offline reference.
 
 ## Naming Convention
 
