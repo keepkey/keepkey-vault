@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed build-ci prune-bundle dmg clean help vault sign-check verify publish release sign-release checksums submodules modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit cli-install cli cli-build cli-test cli-test-live cli-test-all firmware-build firmware-flash firmware-info firmware-download firmware-sync
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -64,17 +64,7 @@ build-signed: sign-check build-stable prune-bundle dmg
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME)
 
-# CI build: unsigned artifacts only (no Apple certs needed)
-build-ci: install
-	cd $(PROJECT_DIR) && CI=true bun run build:stable
-	cd $(PROJECT_DIR) && bun scripts/prune-app-bundle.ts
-	@echo ""
-	@echo "=== CI build complete (unsigned) ==="
-	@ls -lh $(PROJECT_DIR)/artifacts/
-
 # Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
-# macOS Sequoia adds com.apple.provenance xattr which blocks hdiutil create -srcfolder and
-# cp -R of signed .app bundles to mounted volumes. Fix: clear provenance before copy.
 dmg:
 	@echo "Creating DMG from tar.zst artifact..."
 	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
@@ -87,34 +77,13 @@ dmg:
 	rm "$$STAGING/app.tar"; \
 	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
 	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
-	APP_NAME=$$(basename "$$APP"); \
-	echo "Re-signing app with entitlements..."; \
-	codesign --force --deep --verbose --timestamp \
-		--sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" \
-		--options runtime \
-		--entitlements "$(PROJECT_DIR)/entitlements.plist" \
-		"$$APP"; \
-	echo "Verifying signature..."; \
+	echo "Verifying extracted app..."; \
 	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
-	echo "Clearing provenance xattr (macOS Sequoia workaround)..."; \
-	xattr -dr com.apple.provenance "$$APP" 2>/dev/null || true; \
-	echo "Creating writable DMG..."; \
-	APP_SIZE_MB=$$(du -sm "$$APP" | cut -f1); \
-	DMG_SIZE_MB=$$(( APP_SIZE_MB + 20 )); \
-	DMG_RW="$$STAGING/writable.dmg"; \
-	hdiutil create -size $${DMG_SIZE_MB}m -fs HFS+ -volname "KeepKey Vault" "$$DMG_RW" -ov; \
-	hdiutil attach "$$DMG_RW" -readwrite -noverify -noautoopen; \
-	echo "Copying app to DMG..."; \
-	cp -R "$$APP" "/Volumes/KeepKey Vault/"; \
-	ln -s /Applications "/Volumes/KeepKey Vault/Applications"; \
-	echo "Verifying app on DMG..."; \
-	codesign --verify --deep --strict "/Volumes/KeepKey Vault/$$APP_NAME" || (echo "ERROR: verification failed on DMG"; hdiutil detach "/Volumes/KeepKey Vault"; exit 1); \
-	hdiutil detach "/Volumes/KeepKey Vault"; \
+	ln -s /Applications "$$STAGING/Applications"; \
 	DMG_OUT="$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	rm -f "$$DMG_OUT"; \
-	echo "Converting to compressed DMG..."; \
-	hdiutil convert "$$DMG_RW" -format UDZO -o "$$DMG_OUT"; \
-	rm -f "$$DMG_RW"; \
+	echo "Creating DMG..."; \
+	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
 	echo "Signing DMG..."; \
 	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
 	echo "Notarizing DMG..."; \
@@ -126,8 +95,54 @@ dmg:
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
 
+# --- CLI ---
+
+cli-install: modules-build
+	cd projects/keepkey-cli && bun install
+	@# hdwallet packages declare node-hid + usb as peerDependencies.
+	@# Bun's file: links create symlinks that resolve from hdwallet's real path,
+	@# so we ensure these peer deps are findable from modules/hdwallet/node_modules/.
+	@mkdir -p modules/hdwallet/node_modules
+	@test -e modules/hdwallet/node_modules/node-hid || ln -s ../../../projects/keepkey-cli/node_modules/node-hid modules/hdwallet/node_modules/node-hid
+	@test -e modules/hdwallet/node_modules/usb || ln -s ../../../projects/keepkey-cli/node_modules/usb modules/hdwallet/node_modules/usb
+
+cli: cli-install
+	cd projects/keepkey-cli && bun run src/index.ts $(ARGS)
+
+cli-build: cli-install
+	cd projects/keepkey-cli && bun build --compile src/index.ts --outfile dist/keepkey
+
+cli-test: cli-install
+	cd projects/keepkey-cli && bun test __tests__/unit.test.ts
+
+cli-test-live: cli-install
+	cd projects/keepkey-cli && bun test __tests__/live-device.test.ts
+
+cli-test-all: cli-install
+	cd projects/keepkey-cli && bun test __tests__/
+
+# --- Firmware ---
+
+firmware-build:
+	cd modules/keepkey-firmware && ./scripts/build/docker/device/release.sh
+
+firmware-flash: cli-install
+	cd projects/keepkey-cli && bun run src/index.ts firmware $(FW_PATH)
+
+firmware-info: cli-install
+	cd projects/keepkey-cli && bun run src/index.ts firmware-info
+
+firmware-download:
+	bun firmware/download.ts
+
+firmware-sync:
+	bun firmware/download.ts --sync
+
+# --- Clean ---
+
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build artifacts
+	cd projects/keepkey-cli && rm -rf node_modules dist 2>/dev/null || true
 
 # --- Audit & SBOM ---
 
@@ -183,35 +198,6 @@ release: sign-check build-signed
 		$$UPDATE_JSON $$TAR_ZST
 	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
 
-# Generate SHA256 checksums for all artifacts
-checksums:
-	@mkdir -p $(PROJECT_DIR)/artifacts
-	@cd $(PROJECT_DIR)/artifacts && shasum -a 256 *.app.tar.zst *-update.json 2>/dev/null > SHA256SUMS.txt || true
-	@echo "Checksums:"
-	@cat $(PROJECT_DIR)/artifacts/SHA256SUMS.txt 2>/dev/null || echo "No artifacts found"
-
-# Download unsigned artifacts from draft release, sign locally, upload DMG
-# Usage: make sign-release VERSION=1.0.0
-sign-release: sign-check
-	@echo "=== Signing release v$(VERSION) ==="
-	@mkdir -p $(PROJECT_DIR)/artifacts
-	@echo "Downloading unsigned artifacts from draft release..."
-	@gh release download v$(VERSION) --repo $(GITHUB_REPO) --dir $(PROJECT_DIR)/artifacts --pattern "*.app.tar.zst" --clobber
-	@gh release download v$(VERSION) --repo $(GITHUB_REPO) --dir $(PROJECT_DIR)/artifacts --pattern "*-update.json" --clobber 2>/dev/null || true
-	@echo "Creating signed DMG..."
-	$(MAKE) dmg
-	@echo "Generating checksums..."
-	@cd $(PROJECT_DIR)/artifacts && shasum -a 256 $(DMG_NAME) > $(DMG_NAME).sha256
-	@cat $(PROJECT_DIR)/artifacts/$(DMG_NAME).sha256
-	@echo "Uploading signed DMG to release..."
-	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
-		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
-		$(PROJECT_DIR)/artifacts/$(DMG_NAME).sha256
-	@echo ""
-	@echo "=== Release v$(VERSION) signed and uploaded ==="
-	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
-	@echo "Review and publish: https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
-
 help:
 	@echo "KeepKey Vault v11 - Electrobun Desktop App"
 	@echo ""
@@ -222,10 +208,8 @@ help:
 	@echo "  make build          - Development build (no signing)"
 	@echo "  make build-stable   - Production build (signs + notarizes via Electrobun)"
 	@echo "  make build-signed   - Full pipeline: build → extract → DMG → sign → notarize"
-	@echo "  make build-ci       - CI build: unsigned artifacts (no Apple certs needed)"
 	@echo "  make prune-bundle   - Prune app bundle (strip nested deps, .d.ts, etc.)"
 	@echo "  make dmg            - Create DMG from existing build artifacts"
-	@echo "  make checksums      - Generate SHA256 checksums for artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
 	@echo "  make audit          - Generate dependency manifest + SBOM"
@@ -233,5 +217,18 @@ help:
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
 	@echo "  make release        - Build, sign, and publish GitHub release"
-	@echo "  make sign-release   - Download CI artifacts, sign + DMG, upload (VERSION=x.y.z)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
+	@echo ""
+	@echo "  CLI:"
+	@echo "  make cli ARGS=<cmd> - Run keepkey-cli (e.g. make cli ARGS=features)"
+	@echo "  make cli-build      - Compile standalone keepkey binary"
+	@echo "  make cli-test       - Run CLI unit tests (no device needed)"
+	@echo "  make cli-test-live  - Run CLI live device tests (KeepKey required)"
+	@echo "  make cli-test-all   - Run all CLI tests"
+	@echo ""
+	@echo "  Firmware:"
+	@echo "  make firmware-info     - Device firmware diagnostic (signed/unsigned)"
+	@echo "  make firmware-download - Download latest official firmware binaries"
+	@echo "  make firmware-sync     - Download + update manifest.json from remote"
+	@echo "  make firmware-build    - Build firmware via Docker"
+	@echo "  make firmware-flash FW_PATH=<bin> - Flash firmware binary"

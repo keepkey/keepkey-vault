@@ -15,6 +15,7 @@ const EXTERNALS = [
   '@keepkey/hdwallet-keepkey-nodewebusb',
   '@keepkey/device-protocol',
   '@keepkey/proto-tx-builder',
+  'google-protobuf',
   'node-hid',
   'usb',
   'ethers',
@@ -70,7 +71,7 @@ for (const dep of sorted) {
 
   // Ensure parent dir exists for scoped packages (@keepkey/...)
   mkdirSync(dirname(dst), { recursive: true })
-  cpSync(src, dst, { recursive: true, dereference: true })
+  cpSync(src, dst, { recursive: true })
   copiedCount++
 }
 
@@ -150,6 +151,19 @@ function pruneDir(dirPath: string) {
 pruneDir(nmDest)
 console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
 
+// Ensure protobufjs/src is present (minimal.js requires ./src/index-minimal)
+try {
+  const pbSrc = join(nmSource, 'protobufjs', 'src')
+  const pbDst = join(nmDest, 'protobufjs', 'src')
+  if (existsSync(pbSrc) && !existsSync(pbDst)) {
+    mkdirSync(pbDst, { recursive: true })
+    cpSync(pbSrc, pbDst, { recursive: true })
+    console.log('[collect-externals] Restored protobufjs/src (required by minimal.js)')
+  }
+} catch (e) {
+  console.warn(`[collect-externals] Failed to restore protobufjs/src: ${e}`)
+}
+
 // Remove non-macOS prebuilds, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
 const REMOVE_PREBUILD_PREFIXES = ['linux', 'win32', 'android']
@@ -206,6 +220,13 @@ const STRIP_DIRS = [
   '@keepkey/hdwallet-keepkey/src',
   '@keepkey/hdwallet-keepkey-nodehid/src',
   '@keepkey/hdwallet-keepkey-nodewebusb/src',
+  '@keepkey/proto-tx-builder/src',
+  '@keepkey/proto-tx-builder/osmosis-frontend',
+
+  // --- protobufjs: CLI tooling + dist bundles (main→index.js at root) ---
+  'protobufjs/cli',
+  'protobufjs/dist',
+
   // --- rxjs: UMD bundles + ESM duplicates (main→dist/cjs/) ---
   'rxjs/src',
   'rxjs/dist/bundles',
@@ -221,6 +242,10 @@ const STRIP_DIRS = [
   '@ethereumjs/common/dist.browser',
   '@ethereumjs/common/src',
 
+  // --- osmojs: large proto directories ---
+  'osmojs/types',
+  'osmojs/main',
+
   // --- keccak: build/Release artifacts (prebuilds are used) ---
   'keccak/build',
 
@@ -235,15 +260,21 @@ const STRIP_DIRS = [
   // --- rxjs: not needed at runtime (hdwallet-core no longer imports it) ---
   'rxjs',
 
-  // --- @cosmjs: not needed at runtime (vendored proto-tx-builder bundles all cosmjs logic) ---
-  '@cosmjs',
+  // --- @cosmjs: TypeScript source dirs ---
+  '@cosmjs/amino/src',
+  '@cosmjs/crypto/src',
+  '@cosmjs/encoding/src',
+  '@cosmjs/math/src',
+  '@cosmjs/proto-signing/src',
+  '@cosmjs/stargate/src',
+  '@cosmjs/tendermint-rpc/src',
+  '@cosmjs/utils/src',
 
-  // --- cosmjs-types: not needed at runtime (vendored proto-tx-builder bundles all proto types) ---
-  'cosmjs-types',
+  // --- cosmjs-types: source not needed ---
+  'cosmjs-types/src',
 
-  // --- protobufjs: not needed at runtime (vendored proto-tx-builder bundles protobufjs/minimal) ---
-  // NOTE: google-protobuf (used by @keepkey/device-protocol) is DIFFERENT from protobufjs — keep it
-  'protobufjs',
+  // --- long: ESM build not needed (main→src/long.js) ---
+  'long/umd',
 ]
 
 // Remove nested node_modules that duplicate top-level packages at the SAME version.
@@ -313,117 +344,8 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
     }
   } catch {}
 }
-// Packages that must never appear in the production bundle (contain unsigned binaries, are dev-only, etc.)
-// proto-tx-builder@0.9.1 nested in hdwallet-keepkey must be stripped — the vendored
-// bundle at top-level has everything inlined and must win resolution.
-const STRIP_NESTED_PACKAGES = ['node-notifier', 'jest', 'jest-cli', 'ts-jest', '.cache']
-const STRIP_NESTED_SCOPED: Record<string, string[]> = {
-  '@keepkey': ['proto-tx-builder'],
-}
-
-function stripUnwantedNestedPackages(dirPath: string) {
-  try {
-    const entries = readdirSync(dirPath, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const fullPath = join(dirPath, entry.name)
-      if (entry.name === 'node_modules') {
-        // Scan this nested node_modules for unwanted packages
-        try {
-          const pkgs = readdirSync(fullPath, { withFileTypes: true })
-          for (const pkg of pkgs) {
-            if (!pkg.isDirectory()) continue
-            if (STRIP_NESTED_PACKAGES.includes(pkg.name)) {
-              rmSync(join(fullPath, pkg.name), { recursive: true })
-              console.log(`  Stripped unwanted nested: ${pkg.name} from ${dirPath.replace(nmDest + '/', '')}`)
-            }
-            // Strip scoped packages (e.g. @keepkey/proto-tx-builder nested copies)
-            if (pkg.name.startsWith('@') && STRIP_NESTED_SCOPED[pkg.name]) {
-              const scopedDir = join(fullPath, pkg.name)
-              for (const sub of STRIP_NESTED_SCOPED[pkg.name]) {
-                const subPath = join(scopedDir, sub)
-                if (existsSync(subPath)) {
-                  rmSync(subPath, { recursive: true })
-                  console.log(`  Stripped unwanted nested: ${pkg.name}/${sub} from ${dirPath.replace(nmDest + '/', '')}`)
-                }
-              }
-              try { if (readdirSync(scopedDir).length === 0) rmSync(scopedDir, { recursive: true }) } catch {}
-            }
-          }
-        } catch {}
-      }
-      stripUnwantedNestedPackages(fullPath)
-    }
-  } catch {}
-}
-
-stripUnwantedNestedPackages(nmDest)
-
 stripDuplicateNestedNodeModules(nmDest)
 console.log(`[collect-externals] Stripped duplicate nested node_modules (kept version-differing deps)`)
-
-// Ensure transitive deps of preserved nested packages are available at the top level.
-// Only scan non-@keepkey packages — @keepkey packages are file: deps with huge dev node_modules
-// that we don't want to crawl. The real cases are small packages like through2/node_modules/readable-stream.
-const collectedExtra = new Set<string>()
-
-function collectMissingNestedDeps(dir: string, depth = 0) {
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const fullPath = join(dir, entry.name)
-      if (entry.name === 'node_modules') {
-        // Only process at depth 0 (top-level packages), skip @keepkey and protobufjs
-        // which have massive dev-dep trees that aren't needed at runtime
-        const parentPkg = dir.replace(nmDest + '/', '')
-        if (parentPkg.startsWith('@keepkey/') || parentPkg.startsWith('protobufjs')) continue
-        for (const pkg of readdirSync(fullPath, { withFileTypes: true })) {
-          if (!pkg.isDirectory()) continue
-          const pkgPath = join(fullPath, pkg.name)
-          if (pkg.name.startsWith('@')) {
-            for (const scoped of readdirSync(pkgPath, { withFileTypes: true })) {
-              if (!scoped.isDirectory()) continue
-              ensureDepsExist(join(pkgPath, scoped.name))
-            }
-          } else {
-            ensureDepsExist(pkgPath)
-          }
-        }
-      } else if (depth < 1) {
-        // Only recurse one level into top-level packages
-        collectMissingNestedDeps(fullPath, depth + 1)
-      }
-    }
-  } catch {}
-}
-
-function ensureDepsExist(pkgDir: string) {
-  try {
-    const pj = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
-    for (const dep of Object.keys(pj.dependencies || {})) {
-      if (collectedExtra.has(dep)) continue
-      const topDest = join(nmDest, dep)
-      if (!existsSync(topDest)) {
-        const topSrc = join(nmSource, dep)
-        if (existsSync(topSrc)) {
-          mkdirSync(dirname(topDest), { recursive: true })
-          cpSync(topSrc, topDest, {
-            recursive: true,
-            filter: (src: string) => !src.slice(topSrc.length).includes('/node_modules'),
-          })
-          collectedExtra.add(dep)
-          pruneDir(topDest)
-          console.log(`  Collected missing nested dep: ${dep} (needed by ${pkgDir.replace(nmDest + '/', '')})`)
-        }
-      }
-    }
-  } catch {}
-}
-
-collectMissingNestedDeps(nmDest)
-if (collectedExtra.size > 0) {
-  console.log(`[collect-externals] Collected ${collectedExtra.size} extra deps for nested packages: ${[...collectedExtra].join(', ')}`)
-}
 let strippedSize = 0
 for (const dir of STRIP_DIRS) {
   const target = join(nmDest, dir)

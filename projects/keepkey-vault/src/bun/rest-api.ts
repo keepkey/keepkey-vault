@@ -517,6 +517,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         // SWAGGER UI (public — branded API docs)
         // ═══════════════════════════════════════════════════════════════
+        if ((path === '/swagger-ui' || path === '/swagger-ui/') && method === 'GET') {
+          return Response.redirect('/docs', 301)
+        }
         if ((path === '/docs' || path === '/docs/') && method === 'GET') {
           if (callbacks?.onApiLog) {
             callbacks.onApiLog({ method, route: path, timestamp: requestStart, durationMs: Date.now() - requestStart, status: 200, appName: 'public' })
@@ -545,8 +548,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (callbacks?.onPairRequest) {
               callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
             }
-            // requestPair requires user approval via UI — NOT auto-granted
-            const apiKey = await auth.requestPair(body)
+            // Auto-approve pairing for local SDK connections.
+            // Security gate is on signing operations, not pairing.
+            // This matches keepkey-desktop behavior where pairing was auto-granted.
+            const apiKey = auth.pair(body)
             return json({ apiKey })
           }
         }
@@ -1022,16 +1027,58 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // V2 DEVICE MANAGEMENT (5 endpoints — require auth, single-device mode)
+        // V2 DEVICE MANAGEMENT — optional auth on list, auth-required on detail
         // ═══════════════════════════════════════════════════════════════
+
+        // GET /api/v2/devices/supported-assets — fully public
+        if (path === '/api/v2/devices/supported-assets' && method === 'GET') {
+          return json({
+            assets: CHAINS.map(c => ({
+              chain: c.chain,
+              symbol: c.symbol,
+              coin: c.coin,
+              networkId: c.networkId,
+              caip: c.caip,
+              chainFamily: c.chainFamily,
+            })),
+          })
+        }
+
         if (path === '/api/v2/devices' && method === 'GET') {
-          auth.requireAuth(req)
+          const token = auth.extractBearerToken(req)
+          const isAuthed = token ? !!auth.validate(token) : false
           const ds = engine.getDeviceState()
-          const devices = ds.deviceId ? [{
-            device_id: ds.deviceId,
+
+          if (isAuthed) {
+            // Full response with device_id, name, all features
+            const devices = ds.deviceId ? [{
+              device_id: ds.deviceId,
+              is_active: true,
+              state: ds.state,
+              name: ds.label || 'KeepKey',
+            }] : []
+            return json({ devices, total: devices.length })
+          }
+
+          // Unauthenticated: privacy-safe response — no device_id, no label
+          const wallet = engine.wallet
+          let features: any = undefined
+          if (wallet) {
+            try {
+              const f = await getCachedFeatures(wallet)
+              features = {
+                model: f.model,
+                firmware_version: `${f.majorVersion}.${f.minorVersion}.${f.patchVersion}`,
+                initialized: f.initialized,
+                bootloader_mode: f.bootloaderMode ?? false,
+              }
+            } catch { /* device busy */ }
+          }
+          const devices = wallet ? [{
+            device_id: ds.deviceId || 'keepkey',
             is_active: true,
             state: ds.state,
-            name: ds.label || 'KeepKey',
+            features,
           }] : []
           return json({ devices, total: devices.length })
         }

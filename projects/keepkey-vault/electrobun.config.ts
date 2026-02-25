@@ -1,13 +1,10 @@
 import type { ElectrobunConfig } from "electrobun";
 
-// CI=true is set automatically by GitHub Actions; skip signing/notarization in CI
-const isCI = !!process.env.CI;
-
 export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.0.0",
+		version: "0.1.0",
 		urlSchemes: ["keepkey"],
 	},
 	build: {
@@ -38,9 +35,9 @@ export default {
 			bundleCEF: false,
 			icons: "icon.iconset",
 			// Code signing — requires ELECTROBUN_DEVELOPER_ID, ELECTROBUN_TEAMID env vars
-			codesign: !isCI,
+			codesign: true,
 			// Notarization — requires ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS env vars
-			notarize: !isCI,
+			notarize: true,
 			// Entitlements for native USB modules (node-hid, usb, hdwallet)
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,

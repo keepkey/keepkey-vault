@@ -369,7 +369,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
       left={0}
       w="100vw"
       h="100vh"
-      bg="gray.900"
+      bg="transparent"
       align="center"
       justify="center"
       zIndex={1000}

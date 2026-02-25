@@ -1,16 +1,7 @@
 {
   "name": "keepkey-vault",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/keepkey/keepkey-vault.git"
-  },
-  "homepage": "https://github.com/keepkey/keepkey-vault",
-  "bugs": {
-    "url": "https://github.com/keepkey/keepkey-vault/issues"
-  },
   "scripts": {
     "dev": "vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
     "dev:hmr": "bun run hmr & vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
@@ -28,7 +19,7 @@
     "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",
     "@keepkey/hdwallet-keepkey-nodehid": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodehid",
     "@keepkey/hdwallet-keepkey-nodewebusb": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodewebusb",
-    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder-vendored",
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@pioneer-platform/pioneer-caip": "^9.27.10",
     "@pioneer-platform/pioneer-client": "^11.0.0",
     "@pioneer-platform/pioneer-coins": "^11.0.0",
@@ -42,6 +33,7 @@
     "react-countup": "^6.5.3",
     "react-dom": "^18.3.1",
     "react-icons": "^5.5.0",
+    "react-router-dom": "^7.0.0",
     "usb": "^2.17.0",
     "zod": "^4.3.6"
   },
@@ -59,8 +51,11 @@
     "tiny-secp256k1"
   ],
   "overrides": {
-    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder-vendored",
+    "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
-    "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey"
+    "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",
+    "lodash": "^4.17.21",
+    "rxjs": "^6.6.7",
+    "cosmjs-types": "^0.5.1"
   }
 }

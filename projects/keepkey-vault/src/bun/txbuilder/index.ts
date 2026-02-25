@@ -81,24 +81,43 @@ export async function buildTx(
     }
 
     case 'binance': {
-      // Binance chain — simple transfer, no Pioneer API needed for tx building
-      // TODO: account_number and sequence should be fetched from Binance API
-      // Currently hardcoded — will fail for accounts with prior transactions
-      const amountNum = parseFloat(params.amount)
+      // Binance chain — simple transfer
+      if (!params.fromAddress) throw new Error('fromAddress required for Binance chain')
+
+      // Integer-safe amount conversion: split decimal string, avoid float math
+      const bnbParts = params.amount.split('.')
+      const bnbWhole = bnbParts[0] || '0'
+      const bnbFrac = (bnbParts[1] || '').slice(0, 8).padEnd(8, '0')
+      const bnbBaseAmount = String(BigInt(bnbWhole) * 100000000n + BigInt(bnbFrac))
+
+      // Fetch account_number and sequence from Binance LCD API
+      let account_number = '0'
+      let sequence = '0'
+      try {
+        const acctResp = await fetch(`https://dex.binance.org/api/v1/account/${params.fromAddress}`)
+        if (acctResp.ok) {
+          const acctData = await acctResp.json() as any
+          account_number = String(acctData.account_number ?? '0')
+          sequence = String(acctData.sequence ?? '0')
+        }
+      } catch (e) {
+        console.warn('[txbuilder:binance] Failed to fetch account info, using defaults:', e)
+      }
+
       const unsignedTx = {
         addressNList: chain.defaultPath,
         chain_id: 'Binance-Chain-Tigris',
-        account_number: '0',
-        sequence: '0',
+        account_number,
+        sequence,
         tx: {
           msg: [{
             inputs: [{
-              address: params.fromAddress || '',
-              coins: [{ denom: 'BNB', amount: String(Math.round(amountNum * 1e8)) }],
+              address: params.fromAddress,
+              coins: [{ denom: 'BNB', amount: bnbBaseAmount }],
             }],
             outputs: [{
               address: params.to,
-              coins: [{ denom: 'BNB', amount: String(Math.round(amountNum * 1e8)) }],
+              coins: [{ denom: 'BNB', amount: bnbBaseAmount }],
             }],
           }],
           signatures: [],
@@ -165,13 +184,15 @@ export async function broadcastTx(
   } else if (signedTx?.serialized) {
     // hdwallet-keepkey returns { serialized: "0xf86c..." } for EVM (hex with 0x prefix)
     // proto-tx-builder returns { serialized: "CpQB..." } for Cosmos (base64)
-    // Detect which format: strip optional 0x prefix, then test if remaining chars are hex
     const raw = signedTx.serialized
     const stripped = raw.startsWith('0x') ? raw.slice(2) : raw
-    if (stripped && /^[0-9a-fA-F]*$/.test(stripped)) {
+    const looksHex = stripped && /^[0-9a-fA-F]*$/.test(stripped)
+
+    if (chain.chainFamily === 'cosmos') {
+      // Cosmos broadcast expects base64 tx_bytes (do NOT hex-encode)
       serializedTx = raw
     } else {
-      serializedTx = Buffer.from(raw, 'base64').toString('hex')
+      serializedTx = looksHex ? raw : Buffer.from(raw, 'base64').toString('hex')
     }
   } else {
     throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
@@ -185,6 +206,13 @@ export async function broadcastTx(
 
   const result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
   const data = result?.data
+
+  // Tendermint: detect on-chain broadcast failure even if txid is present
+  const txResponse = data?.results?.raw?.tx_response
+  if (txResponse && typeof txResponse.code === 'number' && txResponse.code !== 0) {
+    const rawLog = txResponse.raw_log || 'Broadcast failed'
+    throw new Error(`Broadcast rejected: ${rawLog}`)
+  }
 
   // Detect broadcast failure — Pioneer wraps errors in { success: false, error: ... }
   if (data && typeof data === 'object' && data.success === false) {

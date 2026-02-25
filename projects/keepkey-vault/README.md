@@ -1,111 +1,61 @@
-# KeepKey Vault
+# React + Tailwind + Vite Electrobun Template
 
-Desktop companion app for the [KeepKey](https://keepkey.com) hardware wallet. Built with [Electrobun](https://electrobun.dev) (Bun + system WebView), React 18, and Chakra UI.
+A fast Electrobun desktop app template with React, Tailwind CSS, and Vite for hot module replacement (HMR).
 
-## Features
-
-- **Device Management** - Setup wizard, firmware updates, PIN/passphrase, device settings
-- **Multi-Chain Support** - Bitcoin, Ethereum, Cosmos, THORChain, Maya, Osmosis, Binance, XRP, and EVM L2s (Polygon, Arbitrum, Optimism, Avalanche, BSC, Base)
-- **Custom EVM Chains & Tokens** - Add any EIP-155 chain or ERC-20 token
-- **Transaction Signing** - UTXO, EVM, and Cosmos-family transaction building and signing
-- **QR Scanner** - Native camera-based QR code scanning
-- **REST API** - Optional localhost API on port 1646 for third-party integrations (`kkapi://` protocol)
-- **WalletConnect v2** - Pair with dApps via WalletConnect
-- **Auto-Updates** - Built-in update mechanism via GitHub Releases
-
-## Prerequisites
-
-- [Bun](https://bun.sh) >= 1.1
-- [Yarn](https://yarnpkg.com) (for hdwallet module build)
-- macOS, Linux, or Windows
-- KeepKey hardware wallet
-
-## Quick Start
+## Getting Started
 
 ```bash
-# Clone with submodules
-git clone --recurse-submodules https://github.com/keepkey/keepkey-vault.git
-cd keepkey-vault
+# Install dependencies
+bun install
 
-# Build modules + install deps + run
-make vault
+# Development without HMR (uses bundled assets)
+bun run dev
+
+# Development with HMR (recommended)
+bun run dev:hmr
+
+# Build for production
+bun run build
+
+# Build for production release
+bun run build:prod
 ```
 
-## Development
+## How HMR Works
 
-```bash
-make dev          # Build and run
-make dev-hmr      # Dev mode with hot module replacement (recommended)
-make build        # Development build (unsigned)
-make clean        # Remove all build artifacts
-```
+When you run `bun run dev:hmr`:
 
-## Production Build
+1. **Vite dev server** starts on `http://localhost:5173` with HMR enabled
+2. **Electrobun** starts and detects the running Vite server
+3. The app loads from the Vite dev server instead of bundled assets
+4. Changes to React components update instantly without full page reload
 
-```bash
-# Unsigned (CI)
-make build-ci
+When you run `bun run dev` (without HMR):
 
-# Signed + notarized macOS DMG (requires Apple Developer certs)
-make build-signed
-```
+1. Electrobun starts and loads from `views://mainview/index.html`
+2. You need to rebuild (`bun run build`) to see changes
 
-Signing requires these env vars (or a `.env` file):
-- `ELECTROBUN_DEVELOPER_ID`
-- `ELECTROBUN_TEAMID`
-- `ELECTROBUN_APPLEID`
-- `ELECTROBUN_APPLEIDPASS`
-
-Run `make sign-check` to verify your signing environment.
-
-## Architecture
+## Project Structure
 
 ```
-src/
-  bun/                # Main process (Bun runtime)
-    engine-controller   Device lifecycle, USB events, firmware
-    rest-api            Optional REST API (port 1646)
-    txbuilder/          UTXO + EVM + Cosmos tx construction
-    db                  SQLite for caching & custom chains/tokens
-    pioneer             Pioneer API integration for balances
-  mainview/           # Frontend (React, rendered in system WebView)
-    components/         UI components (dashboard, settings, signing, etc.)
-    hooks/              React hooks (device state, firmware, etc.)
-    lib/rpc             RPC transport to Bun process
-  shared/             # Shared between Bun and frontend
-    rpc-schema          RPC method definitions
-    chains              Chain definitions and constants
-    types               TypeScript types
+├── src/
+│   ├── bun/
+│   │   └── index.ts        # Main process (Electrobun/Bun)
+│   └── mainview/
+│       ├── App.tsx         # React app component
+│       ├── main.tsx        # React entry point
+│       ├── index.html      # HTML template
+│       └── index.css       # Tailwind CSS
+├── electrobun.config.ts    # Electrobun configuration
+├── vite.config.ts          # Vite configuration
+├── tailwind.config.js      # Tailwind configuration
+└── package.json
 ```
 
-Communication between frontend and backend uses Electrobun's RPC system -- no HTTP required for device operations.
+## Customizing
 
-## Make Targets
-
-| Target | Description |
-|--------|-------------|
-| `make vault` | Install + build + run (one command) |
-| `make dev` | Build and run in dev mode |
-| `make dev-hmr` | Dev with Vite HMR |
-| `make build` | Development build |
-| `make build-stable` | Production build (signed via Electrobun) |
-| `make build-signed` | Full pipeline: build + DMG + sign + notarize |
-| `make build-ci` | CI build (unsigned) |
-| `make modules-build` | Build hdwallet + proto-tx-builder from source |
-| `make audit` | Generate dependency manifest + SBOM |
-| `make release` | Build + publish GitHub release |
-| `make clean` | Remove all artifacts |
-
-Run `make help` for the full list.
-
-## REST API
-
-Disabled by default. Enable with `KEEPKEY_REST_API=true`.
-
-Runs on `http://localhost:1646` and is compatible with the `kkapi://` protocol used by the Pioneer SDK.
-
-Key endpoints: `/api/health`, `/api/device/features`, `/api/btc/address`, `/api/eth/sign`, `/api/xpub`, and more. See `src/bun/rest-api.ts` for the full list.
-
-## License
-
-MIT
+- **React components**: Edit files in `src/mainview/`
+- **Tailwind theme**: Edit `tailwind.config.js`
+- **Vite settings**: Edit `vite.config.ts`
+- **Window settings**: Edit `src/bun/index.ts`
+- **App metadata**: Edit `electrobun.config.ts`

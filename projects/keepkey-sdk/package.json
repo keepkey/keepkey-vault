@@ -1,0 +1,17 @@
+{
+  "name": "keepkey-vault-sdk",
+  "version": "2.0.0",
+  "description": "TypeScript SDK for KeepKey Vault REST API — zero dependencies, native fetch",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": ["lib"],
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node __tests__/test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "keywords": ["keepkey", "hardware-wallet", "vault", "sdk"],
+  "license": "MIT"
+}

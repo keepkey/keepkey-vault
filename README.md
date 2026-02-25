@@ -1,52 +1,126 @@
-# KeepKey Vault
+# KeepKey Vault v11
 
-Desktop companion app for the [KeepKey](https://keepkey.com) hardware wallet. Built with [Electrobun](https://electrobun.dev) (Bun + system WebView), React 18, and Chakra UI.
+Desktop hardware wallet management built with **Electrobun** + **React 18** + **Chakra UI 3.0**, plus a standalone **Bun CLI** for direct device access.
 
-## Features
+## Architecture
 
-- Device setup wizard, firmware updates, PIN/passphrase management
-- Multi-chain: BTC, ETH, Cosmos, THORChain, Maya, Osmosis, BNB, XRP + EVM L2s
-- Custom EVM chains and ERC-20 tokens
-- Transaction signing (UTXO, EVM, Cosmos-family)
-- Native QR scanner, WalletConnect v2
-- Optional REST API on port 1646 (`kkapi://` protocol)
-- Signed and notarized macOS builds
+```
+Electrobun Desktop App
+├── Main Process (Bun) ──── HID/WebUSB ──── KeepKey Device
+│   ├── EngineController (device lifecycle)
+│   ├── REST API Server (port 1646, opt-in)
+│   └── SQLite Cache (balances, settings)
+└── WebView (React + Chakra UI + Vite)
+
+keepkey-cli (standalone)
+└── Bun ──── HID/WebUSB ──── KeepKey Device
+```
+
+## Prerequisites
+
+- [Bun](https://bun.sh) >= 1.0
+- KeepKey hardware wallet connected via USB
 
 ## Quick Start
 
 ```bash
-git clone --recurse-submodules https://github.com/keepkey/keepkey-vault.git
-cd keepkey-vault
-make vault
+make install    # Build hdwallet + proto-tx-builder, install vault deps
+make dev        # Build and launch desktop app
+make dev-hmr    # Dev mode with Vite hot reload
 ```
 
-See [projects/keepkey-vault/README.md](projects/keepkey-vault/README.md) for full documentation.
-
-## Repository Structure
-
-```
-keepkey-vault/
-  Makefile                    # All build targets (make help)
-  modules/
-    hdwallet/                 # Git submodule: keepkey/hdwallet
-    proto-tx-builder/         # Git submodule: proto-tx-builder
-  projects/
-    keepkey-vault/            # Electrobun desktop app (source code)
-      src/bun/                # Bun main process
-      src/mainview/           # React frontend
-      src/shared/             # Shared types
-  .github/workflows/         # CI/CD
-```
-
-## Development
+## CLI
 
 ```bash
-make dev-hmr      # Dev with hot reload (recommended)
-make build        # Dev build
-make build-signed # Signed + notarized macOS DMG
-make help         # All targets
+make cli ARGS=features              # Show device info
+make cli ARGS="address bitcoin"     # Get Bitcoin address
+make cli ARGS="address ethereum"    # Get Ethereum address
+make cli ARGS="pin set"             # Set device PIN
+make cli ARGS="label My-KeepKey"    # Set device label
 ```
 
-## License
+See [projects/keepkey-cli/README.md](projects/keepkey-cli/README.md) for full CLI documentation.
 
-MIT - see [projects/keepkey-vault/LICENSE](projects/keepkey-vault/LICENSE)
+## Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make vault` | Install deps + build and run in dev mode |
+| `make install` | Build modules + install vault dependencies |
+| `make dev` | Build and run in dev mode |
+| `make dev-hmr` | Dev mode with Vite HMR on port 5173 |
+| `make build` | Development build (no signing) |
+| `make build-signed` | Full pipeline: build + DMG + sign + notarize |
+| `make cli ARGS=<cmd>` | Run keepkey-cli command |
+| `make cli-build` | Compile standalone keepkey binary |
+| `make firmware-build` | Build firmware via Docker |
+| `make firmware-flash FW_PATH=<bin>` | Flash firmware binary |
+| `make modules-build` | Build hdwallet + proto-tx-builder from source |
+| `make clean` | Remove all build artifacts |
+| `make help` | Show all available targets |
+
+## Project Structure
+
+```
+keepkey-vault-v11/
+├── Makefile                          # All operations
+├── modules/                          # Git submodules
+│   ├── hdwallet/                     # TypeScript wallet library (keepkey/hdwallet)
+│   ├── proto-tx-builder/             # Transaction construction (keepkey/proto-tx-builder)
+│   ├── keepkey-firmware/             # Device firmware, C (keepkey/keepkey-firmware)
+│   └── device-protocol/             # Protobuf message definitions (keepkey/device-protocol)
+├── projects/
+│   ├── keepkey-vault/                # Electrobun desktop app
+│   │   └── src/
+│   │       ├── bun/                  # Main process (engine-controller, REST API, db)
+│   │       ├── shared/               # Types shared between bun and mainview
+│   │       └── mainview/             # React frontend
+│   └── keepkey-cli/                  # Standalone CLI (Bun/TypeScript)
+│       └── src/
+│           ├── index.ts              # CLI entry point
+│           ├── device.ts             # Device connection
+│           └── commands/             # One file per command
+└── docs/                             # Documentation
+    ├── LLMs.txt                      # AI-readable project overview
+    ├── ARCHITECTURE.md               # System architecture
+    ├── COIN-ADDITION-GUIDE.md        # How to add a new coin
+    ├── coins/                        # Per-coin implementation notes
+    │   ├── solana/README.md
+    │   ├── zcash/README.md
+    │   ├── tron/README.md
+    │   └── ton/README.md
+    └── firmware/README.md            # Firmware build & flash guide
+```
+
+## Adding a New Coin
+
+See [docs/COIN-ADDITION-GUIDE.md](docs/COIN-ADDITION-GUIDE.md) for the full 5-layer pipeline:
+firmware → hdwallet → REST API → frontend → CLI.
+
+## Supported Chains
+
+Bitcoin, Ethereum, Cosmos, THORChain, Osmosis, Litecoin, Dogecoin, Bitcoin Cash, Dash, Ripple, Mayachain, Binance, and custom EVM chains.
+
+## Tech Stack
+
+- **Runtime**: [Electrobun](https://electrobun.dev) (Bun + native WebView, ~14MB bundle)
+- **UI**: React 18 + Chakra UI 3.0 + Emotion
+- **Build**: Vite 6 with HMR support
+- **Routing**: React Router 7
+- **Device**: @keepkey/hdwallet-* (HID + WebUSB dual-transport)
+- **CLI**: Bun/TypeScript with direct device access
+
+## Submodules
+
+After cloning, initialize all submodules:
+
+```bash
+git submodule update --init
+```
+
+| Module | Purpose |
+|--------|---------|
+| [hdwallet](https://github.com/keepkey/hdwallet) | Address derivation, message signing, transport layer |
+| [proto-tx-builder](https://github.com/keepkey/proto-tx-builder) | Transaction construction from Pioneer API |
+| [keepkey-firmware](https://github.com/keepkey/keepkey-firmware) | Device firmware (C, STM32F205) |
+| [device-protocol](https://github.com/keepkey/device-protocol) | Protobuf message definitions |
