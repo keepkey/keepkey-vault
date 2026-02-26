@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner, Image } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { CustomChain, PioneerChainInfo } from "../../shared/types"
@@ -13,6 +14,7 @@ interface AddChainDialogProps {
 }
 
 export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddChainDialogProps) {
+	const { t } = useTranslation("dialogs")
 	const [mode, setMode] = useState<Mode>('browse')
 
 	// Browse mode state
@@ -204,7 +206,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 							</Box>
 						)}
 						<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-							{mode === 'browse' ? 'Add EVM Chain' : mode === 'configure' ? 'Configure Chain' : 'Add Custom Chain'}
+							{mode === 'browse' ? t('addChain.title') : mode === 'configure' ? t('addChain.configureTitle') : t('addChain.addCustomTitle')}
 						</Text>
 					</Flex>
 					<Box
@@ -231,7 +233,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								</svg>
 								<Input
 									ref={searchRef}
-									placeholder="Search chains..."
+									placeholder={t('addChain.searchPlaceholder')}
 									value={query}
 									onChange={(e) => setQuery(e.target.value)}
 									size="sm"
@@ -249,14 +251,14 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 							{query.trim().length < 2 && !searching && (
 								<Flex direction="column" align="center" justify="center" py="10" gap="2">
 									<Text fontSize="xs" color="kk.textMuted" textAlign="center">
-										Type to search 2,000+ EVM chains
+										{t('addChain.searchHint')}
 									</Text>
 								</Flex>
 							)}
 
 							{searchError && (
 								<Flex direction="column" align="center" justify="center" py="8" gap="2">
-									<Text fontSize="xs" color="red.400" textAlign="center">Catalog unavailable</Text>
+									<Text fontSize="xs" color="red.400" textAlign="center">{t('addChain.catalogUnavailable')}</Text>
 									<Box
 										as="button"
 										fontSize="xs"
@@ -265,14 +267,14 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 										cursor="pointer"
 										onClick={handleManualMode}
 									>
-										Enter chain details manually
+										{t('addChain.enterManually')}
 									</Box>
 								</Flex>
 							)}
 
 							{!searchError && query.trim().length >= 2 && !searching && results.length === 0 && (
 								<Flex direction="column" align="center" justify="center" py="8" gap="2">
-									<Text fontSize="xs" color="kk.textMuted">No chains found for "{query}"</Text>
+									<Text fontSize="xs" color="kk.textMuted">{t('addChain.noResults', { query })}</Text>
 								</Flex>
 							)}
 
@@ -316,7 +318,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 										</Box>
 										{isAdded ? (
 											<Text fontSize="10px" color="kk.textMuted" bg="rgba(255,255,255,0.06)" px="2" py="0.5" borderRadius="full" flexShrink={0}>
-												Added
+												{t('addChain.added')}
 											</Text>
 										) : (
 											<Text fontSize="10px" color="kk.textMuted" fontFamily="mono" flexShrink={0}>
@@ -331,7 +333,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 						{/* Manual entry link */}
 						<Box px="5" py="3" borderTop="1px solid" borderColor="kk.border" flexShrink={0}>
 							<Text fontSize="xs" color="kk.textMuted" textAlign="center">
-								Chain not listed?{' '}
+								{t('addChain.chainNotListed')}{' '}
 								<Box
 									as="span"
 									color="kk.gold"
@@ -340,7 +342,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									_hover={{ color: "white" }}
 									onClick={handleManualMode}
 								>
-									Enter manually
+									{t('addChain.enterManuallyLink')}
 								</Box>
 							</Text>
 						</Box>
@@ -378,7 +380,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 
 						{/* RPC URL (required) */}
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">RPC URL *</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.rpcUrlRequired')}</Text>
 							<Flex gap="2">
 								<Input
 									placeholder="https://rpc.example.com"
@@ -403,14 +405,14 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									disabled={!rpcUrl.startsWith('http') || !chainIdNum || testing}
 									minW="80px"
 								>
-									{testing ? 'Testing...' : tested ? 'OK' : 'Test'}
+									{testing ? t('addChain.testing') : tested ? t('addChain.ok') : t('addChain.test')}
 								</Button>
 							</Flex>
 						</Box>
 
 						{/* Explorer URL (pre-filled, editable) */}
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Explorer URL</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.explorerUrl')}</Text>
 							<Input
 								placeholder="https://explorer.example.com"
 								value={explorerUrl}
@@ -430,7 +432,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 
 						<Flex justify="flex-end" gap="2" pt="1">
 							<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleBack}>
-								Back
+								{t('back', { ns: 'common' })}
 							</Button>
 							<Button
 								size="sm"
@@ -440,7 +442,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								onClick={handleAdd}
 								disabled={!isValidConfigure || loading}
 							>
-								{loading ? 'Adding...' : 'Add Chain'}
+								{loading ? t('addChain.adding') : t('addChain.addChainButton')}
 							</Button>
 						</Flex>
 					</Box>
@@ -451,9 +453,9 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 					<Box px="5" py="4" display="flex" flexDirection="column" gap="3">
 						<Flex gap="3">
 							<Box flex="1">
-								<Text fontSize="xs" color="kk.textMuted" mb="1">Chain ID</Text>
+								<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.chainId')}</Text>
 								<Input
-									placeholder="e.g. 324"
+									placeholder={t('addChain.chainIdPlaceholder')}
 									value={chainId}
 									onChange={(e) => { setChainId(e.target.value.replace(/\D/g, '')); setTested(false); setError(null) }}
 									size="sm"
@@ -466,9 +468,9 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								/>
 							</Box>
 							<Box flex="2">
-								<Text fontSize="xs" color="kk.textMuted" mb="1">Chain Name</Text>
+								<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.chainName')}</Text>
 								<Input
-									placeholder="e.g. zkSync Era"
+									placeholder={t('addChain.chainNamePlaceholder')}
 									value={name}
 									onChange={(e) => setName(e.target.value)}
 									size="sm"
@@ -481,9 +483,9 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 						</Flex>
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Gas Token Symbol</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.gasTokenSymbol')}</Text>
 							<Input
-								placeholder="e.g. ETH"
+								placeholder={t('addChain.gasTokenPlaceholder')}
 								value={symbol}
 								onChange={(e) => setSymbol(e.target.value)}
 								size="sm"
@@ -495,10 +497,10 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 						</Box>
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">RPC URL</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.rpcUrl')}</Text>
 							<Flex gap="2">
 								<Input
-									placeholder="https://..."
+									placeholder={t('addChain.rpcPlaceholder')}
 									value={rpcUrl}
 									onChange={(e) => { setRpcUrl(e.target.value); setTested(false); setError(null) }}
 									size="sm"
@@ -519,13 +521,13 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									disabled={!rpcUrl.startsWith('http') || !chainIdNum || testing}
 									minW="80px"
 								>
-									{testing ? 'Testing...' : tested ? 'OK' : 'Test'}
+									{testing ? t('addChain.testing') : tested ? t('addChain.ok') : t('addChain.test')}
 								</Button>
 							</Flex>
 						</Box>
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Block Explorer URL (optional)</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addChain.explorerUrlOptional')}</Text>
 							<Input
 								placeholder="https://explorer.example.com"
 								value={explorerUrl}
@@ -545,7 +547,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 
 						<Flex justify="flex-end" gap="2" pt="1">
 							<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleBack}>
-								Back
+								{t('back', { ns: 'common' })}
 							</Button>
 							<Button
 								size="sm"
@@ -555,7 +557,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								onClick={handleAdd}
 								disabled={!isValidManual || loading}
 							>
-								{loading ? 'Adding...' : 'Add Chain'}
+								{loading ? t('addChain.adding') : t('addChain.addChainButton')}
 							</Button>
 						</Flex>
 					</Box>

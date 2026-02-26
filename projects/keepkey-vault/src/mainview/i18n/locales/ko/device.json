@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "PIN 입력",
+		"createPin": "PIN 만들기",
+		"confirmPin": "PIN 확인",
+		"enterDescription": "KeepKey에 표시된 위치를 사용하여 PIN을 입력하세요",
+		"createDescription": "KeepKey 화면을 보고 위치를 탭하여 새 PIN을 설정하세요",
+		"confirmDescription": "확인을 위해 동일한 PIN을 다시 입력하세요",
+		"backspace": "백스페이스",
+		"unlock": "잠금 해제"
+	},
+	"passphrase": {
+		"title": "비밀번호 구문 입력",
+		"description": "기기에 비밀번호 구문 보호가 활성화되어 있습니다. 잠금 해제하려면 BIP-39 비밀번호 구문을 입력하세요. 기본 지갑을 사용하려면 비워두세요.",
+		"placeholder": "비밀번호 구문 (선택사항)",
+		"warning": "비밀번호 구문은 대소문자를 구분합니다. 다른 비밀번호 구문은 완전히 다른 지갑을 생성합니다.",
+		"unlock": "잠금 해제"
+	},
+	"pairing": {
+		"wantsToConnect": "이(가) KeepKey에 연결하려고 합니다",
+		"approve": "승인",
+		"reject": "거부",
+		"keyboardHint": "Enter로 승인 · Esc로 거부"
+	},
+	"signing": {
+		"title": "서명 요청",
+		"chain": "체인",
+		"from": "보내는 주소",
+		"to": "받는 주소",
+		"value": "금액",
+		"chainId": "체인 ID",
+		"data": "데이터",
+		"approve": "승인",
+		"reject": "거부",
+		"keyboardHint": "Enter로 승인 · Esc로 거부",
+		"methodEthSignTx": "ETH 트랜잭션 서명",
+		"methodEthSignTypedData": "ETH 타입 데이터 서명",
+		"methodEthSignMessage": "ETH 메시지 서명",
+		"methodBtcSignTx": "BTC 트랜잭션 서명",
+		"methodXrpSignTx": "XRP 트랜잭션 서명",
+		"methodCosmosSign": "Cosmos 서명",
+		"methodThorchainTransfer": "THORChain 전송",
+		"methodThorchainDeposit": "THORChain 입금",
+		"methodMayaTransfer": "Maya 전송",
+		"methodMayaDeposit": "Maya 입금",
+		"methodOsmosisSign": "Osmosis 서명"
+	},
+	"claimed": {
+		"title": "기기 사용 중",
+		"description": "KeepKey가 감지되었지만 현재 다른 애플리케이션(예: KeepKey Desktop, 브라우저 확장 프로그램 또는 scdaemon)이 사용 중입니다.",
+		"toConnect": "연결하려면:",
+		"step1": "1. KeepKey를 사용 중인 다른 앱을 닫으세요",
+		"step2": "2. 기기를 분리했다가 다시 연결하세요",
+		"step3": "3. 이 앱이 자동으로 재연결됩니다",
+		"waiting": "기기가 사용 가능해질 때까지 대기 중...",
+		"defaultError": "다른 프로세스가 기기를 사용 중입니다"
+	}
+}

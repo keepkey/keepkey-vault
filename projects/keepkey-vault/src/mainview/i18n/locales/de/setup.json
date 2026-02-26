@@ -1,0 +1,105 @@
+{
+	"title": "KeepKey Einrichtung",
+	"subtitle": "Sichere Multi-Chain Hardware-Wallet",
+	"stepDescriptions": {
+		"welcome": "Willkommen bei KeepKey",
+		"bootloader": "Bootloader überprüfen und aktualisieren",
+		"firmware": "Firmware überprüfen und aktualisieren",
+		"initChoose": "Wählen Sie Ihre Einrichtungsmethode",
+		"initProgress": "Wallet wird eingerichtet",
+		"initLabel": "Benennen Sie Ihr Gerät",
+		"complete": "Einrichtung abgeschlossen!"
+	},
+	"visibleSteps": {
+		"bootloader": "Bootloader",
+		"firmware": "Firmware",
+		"setup": "Einrichtung"
+	},
+	"welcome": {
+		"title": "Willkommen bei KeepKey",
+		"oobIntro": "Lassen Sie uns Ihre Firmware aktualisieren und Ihre Wallet einrichten.",
+		"intro": "Lassen Sie uns Ihre Hardware-Wallet einrichten.",
+		"startingSetup": "Einrichtung wird gestartet...",
+		"detectingDevice": "Gerätestatus wird erkannt..."
+	},
+	"bootloader": {
+		"title": "Bootloader-Update",
+		"description": "Ihr Bootloader muss aus Sicherheits- und Kompatibilitätsgründen aktualisiert werden.",
+		"current": "Aktuell",
+		"latest": "Neueste",
+		"outdated": "Veraltet",
+		"updatingBootloader": "Bootloader wird aktualisiert...",
+		"doNotUnplugBrick": "Trennen Sie das Gerät NICHT. Eine Unterbrechung kann das Gerät dauerhaft beschädigen.",
+		"updateFailed": "Update fehlgeschlagen",
+		"tryAgain": "Erneut versuchen",
+		"enterFirmwareUpdateMode": "Firmware-Update-Modus starten",
+		"step1Unplug": "1. Trennen Sie Ihren KeepKey",
+		"step2Hold": "2. Halten Sie den Knopf am Gerät gedrückt",
+		"step3Plugin": "3. Stecken Sie bei gedrücktem Knopf das USB-Kabel ein",
+		"step4Release": "4. Lassen Sie los, wenn der Bootloader-Bildschirm erscheint",
+		"listeningForBootloader": "Warte auf Gerät im Bootloader-Modus...",
+		"readyDetectBootloader": "Bereit — Bootloader erkennen",
+		"skipBootloaderUpdate": "Bootloader-Update überspringen"
+	},
+	"firmware": {
+		"title": "Firmware-Update",
+		"oobDescription": "Ihr Gerät hat Werksfirmware. Ein kritisches Update ist erforderlich.",
+		"description": "Ein Firmware-Update ist für Ihr Gerät verfügbar.",
+		"firmwareLabel": "Firmware",
+		"notInstalled": "Nicht installiert",
+		"important": "Wichtig:",
+		"doNotDisconnect": "Trennen Sie Ihr Gerät nicht während des Updates",
+		"mayNeedConfirm": "Möglicherweise müssen Sie auf dem Gerätebildschirm bestätigen",
+		"fundsRemainSafe": "Ihre Guthaben und Einstellungen bleiben sicher",
+		"updatingFirmware": "Firmware wird aktualisiert...",
+		"doNotUnplug": "Trennen Sie Ihr Gerät NICHT.",
+		"deviceRebooting": "Gerät wird neu gestartet...",
+		"rebootingMessage": "Ihr KeepKey wird mit der neuen Firmware neu gestartet. Bitte warten...",
+		"firmwareVerified": "Firmware als offizielle Version verifiziert",
+		"firmwareHashNotFound": "Firmware-Hash nicht im Manifest gefunden",
+		"updateFirmwareTo": "Firmware auf v{{version}} aktualisieren",
+		"skipUpdate": "Update überspringen"
+	},
+	"initChoose": {
+		"title": "Wallet einrichten",
+		"description": "Wählen Sie, wie Sie Ihren KeepKey einrichten möchten",
+		"createNewWallet": "Neue Wallet erstellen",
+		"createDescription": "Neue Seed-Phrase auf Ihrem Gerät generieren",
+		"createWallet": "Wallet erstellen",
+		"recoverExistingWallet": "Bestehende Wallet wiederherstellen",
+		"recoverDescription": "Geben Sie Ihre Wiederherstellungs-Seed-Phrase auf dem Gerät ein",
+		"recoverWallet": "Wallet wiederherstellen"
+	},
+	"initProgress": {
+		"creatingWallet": "Wallet wird erstellt...",
+		"recoveringWallet": "Wallet wird wiederhergestellt...",
+		"followPromptsCreate": "Folgen Sie den Anweisungen auf Ihrem KeepKey-Bildschirm. Notieren Sie die Seed-Wörter sorgfältig — sie sind Ihre Sicherung.",
+		"followPromptsRecover": "Folgen Sie den Anweisungen auf Ihrem KeepKey-Bildschirm. Geben Sie Ihre Wiederherstellungs-Seed-Phrase über das Gerät ein.",
+		"followPrompts": "Folgen Sie den Anweisungen auf Ihrem KeepKey-Bildschirm.",
+		"lookAtDevice": "Schauen Sie auf Ihr KeepKey-Gerät und folgen Sie den Bildschirmanweisungen.",
+		"failedToCreate": "Wallet-Erstellung fehlgeschlagen",
+		"failedToRecover": "Wallet-Wiederherstellung fehlgeschlagen"
+	},
+	"initLabel": {
+		"walletCreated": "Wallet erstellt!",
+		"walletRecovered": "Wallet wiederhergestellt!",
+		"giveAName": "Geben Sie Ihrem KeepKey einen freundlichen Namen zur einfachen Identifizierung",
+		"placeholder": "Mein KeepKey",
+		"setDeviceName": "Gerätename festlegen",
+		"skipForNow": "Vorerst überspringen"
+	},
+	"complete": {
+		"walletCreated": "Wallet erstellt!",
+		"walletRecovered": "Wallet wiederhergestellt!",
+		"deviceReady": "Ihr KeepKey{{label}} ist bereit",
+		"recoveredDescription": "Ihre Wallet wurde erfolgreich aus Ihrer Wiederherstellungsphrase wiederhergestellt",
+		"createdDescription": "Ihre neue Wallet ist sicher und einsatzbereit",
+		"startUsing": "KeepKey verwenden"
+	},
+	"footer": {
+		"stepOf": "Schritt {{current}} von {{total}}",
+		"settingUpWallet": "Wallet wird eingerichtet...",
+		"previous": "Zurück",
+		"next": "Weiter"
+	}
+}

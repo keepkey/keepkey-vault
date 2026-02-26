@@ -1,0 +1,11 @@
+{
+	"supportedChains": "支持的链",
+	"refreshBalances": "刷新余额",
+	"connectDeviceToRefresh": "连接设备以刷新",
+	"networksCount": "{{count}} 个网络",
+	"addChain": "添加链",
+	"noBalance": "无余额",
+	"tokensCount_one": "+{{count}} 个代币",
+	"tokensCount_other": "+{{count}} 个代币",
+	"watchOnlyBanner": "仅查看 — 连接设备以获得完整访问权限"
+}

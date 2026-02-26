@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "Введите PIN",
+		"createPin": "Создать PIN",
+		"confirmPin": "Подтвердите PIN",
+		"enterDescription": "Используйте позиции, показанные на вашем KeepKey, для ввода PIN-кода",
+		"createDescription": "Посмотрите на экран KeepKey и нажмите на позиции для установки нового PIN-кода",
+		"confirmDescription": "Введите тот же PIN-код ещё раз для подтверждения",
+		"backspace": "Назад",
+		"unlock": "Разблокировать"
+	},
+	"passphrase": {
+		"title": "Введите кодовую фразу",
+		"description": "На вашем устройстве включена защита кодовой фразой. Введите кодовую фразу BIP-39 для разблокировки. Оставьте пустым для кошелька по умолчанию.",
+		"placeholder": "Кодовая фраза (необязательно)",
+		"warning": "Кодовые фразы чувствительны к регистру. Другая кодовая фраза создаёт совершенно другой кошелёк.",
+		"unlock": "Разблокировать"
+	},
+	"pairing": {
+		"wantsToConnect": "хочет подключиться к вашему KeepKey",
+		"approve": "Одобрить",
+		"reject": "Отклонить",
+		"keyboardHint": "Enter для одобрения · Esc для отклонения"
+	},
+	"signing": {
+		"title": "Запрос на подпись",
+		"chain": "Сеть",
+		"from": "От",
+		"to": "Кому",
+		"value": "Сумма",
+		"chainId": "ID сети",
+		"data": "Данные",
+		"approve": "Одобрить",
+		"reject": "Отклонить",
+		"keyboardHint": "Enter для одобрения · Esc для отклонения",
+		"methodEthSignTx": "Подписать транзакцию ETH",
+		"methodEthSignTypedData": "Подписать типизированные данные ETH",
+		"methodEthSignMessage": "Подписать сообщение ETH",
+		"methodBtcSignTx": "Подписать транзакцию BTC",
+		"methodXrpSignTx": "Подписать транзакцию XRP",
+		"methodCosmosSign": "Подписать Cosmos",
+		"methodThorchainTransfer": "Перевод THORChain",
+		"methodThorchainDeposit": "Депозит THORChain",
+		"methodMayaTransfer": "Перевод Maya",
+		"methodMayaDeposit": "Депозит Maya",
+		"methodOsmosisSign": "Подписать Osmosis"
+	},
+	"claimed": {
+		"title": "Устройство занято",
+		"description": "Ваш KeepKey обнаружен, но в данный момент используется другим приложением (например, KeepKey Desktop, расширением браузера или scdaemon).",
+		"toConnect": "Для подключения:",
+		"step1": "1. Закройте другие приложения, использующие ваш KeepKey",
+		"step2": "2. Отключите и снова подключите устройство",
+		"step3": "3. Это приложение подключится автоматически",
+		"waiting": "Ожидание доступности устройства...",
+		"defaultError": "Устройство занято другим процессом"
+	}
+}

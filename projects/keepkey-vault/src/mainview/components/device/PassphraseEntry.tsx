@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Text, Flex, Button, Input } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 
 interface PassphraseEntryProps {
 	onSubmit: (passphrase: string) => void
@@ -12,6 +13,7 @@ interface PassphraseEntryProps {
  * Submit empty string to use default (no passphrase) wallet.
  */
 export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
+	const { t } = useTranslation("device")
 	const [passphrase, setPassphrase] = useState("")
 	const [showPassphrase, setShowPassphrase] = useState(false)
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -65,12 +67,10 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
 			>
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
-					Enter Passphrase
+					{t("passphrase.title")}
 				</Text>
 				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
-					Your device has passphrase protection enabled.
-					Enter your BIP-39 passphrase to unlock. Leave empty
-					for the default wallet.
+					{t("passphrase.description")}
 				</Text>
 
 				{/* Passphrase input */}
@@ -81,7 +81,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						value={passphrase}
 						onChange={(e) => setPassphrase(e.target.value)}
 						onKeyDown={handleInputKeyDown}
-						placeholder="Passphrase (optional)"
+						placeholder={t("passphrase.placeholder")}
 						bg="kk.bg"
 						border="1px solid"
 						borderColor="kk.border"
@@ -125,8 +125,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 				</Box>
 
 				<Text color="kk.textMuted" fontSize="xs" mb="5" textAlign="center">
-					Passphrases are case-sensitive. A different passphrase
-					generates a completely different wallet.
+					{t("passphrase.warning")}
 				</Text>
 
 				{/* Action buttons */}
@@ -140,7 +139,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
 						flex={1}
 					>
-						Cancel
+						{t("cancel", { ns: "common" })}
 					</Button>
 					<Button
 						onClick={handleSubmit}
@@ -151,7 +150,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						_hover={{ bg: "kk.goldHover" }}
 						flex={1}
 					>
-						Unlock
+						{t("passphrase.unlock")}
 					</Button>
 				</Flex>
 			</Box>

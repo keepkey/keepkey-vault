@@ -1,0 +1,15 @@
+{
+	"receive": "받기",
+	"sendToAddress": "이 주소로 {{symbol}}을(를) 보내세요",
+	"index": "인덱스",
+	"remaining": "{{remaining}} 남음",
+	"address": "주소",
+	"extendedPublicKey": "확장 공개 키 (xpub)",
+	"path": "경로",
+	"editDerivationPath": "파생 경로 편집",
+	"checkDevice": "기기 확인 중...",
+	"verifyOnDevice": "기기에서 확인",
+	"derivingAddress": "주소 파생 중...",
+	"noAddressDerived": "아직 파생된 주소 없음",
+	"deriveAddress": "주소 파생"
+}

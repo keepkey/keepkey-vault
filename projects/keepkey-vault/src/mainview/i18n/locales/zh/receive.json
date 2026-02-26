@@ -1,0 +1,15 @@
+{
+	"receive": "接收",
+	"sendToAddress": "将 {{symbol}} 发送到此地址",
+	"index": "索引",
+	"remaining": "剩余 {{remaining}}",
+	"address": "地址",
+	"extendedPublicKey": "扩展公钥 (xpub)",
+	"path": "路径",
+	"editDerivationPath": "编辑派生路径",
+	"checkDevice": "检查设备中...",
+	"verifyOnDevice": "在设备上验证",
+	"derivingAddress": "正在派生地址...",
+	"noAddressDerived": "尚未派生地址",
+	"deriveAddress": "派生地址"
+}

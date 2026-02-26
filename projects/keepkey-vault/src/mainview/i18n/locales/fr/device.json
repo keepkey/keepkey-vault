@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "Entrer le PIN",
+		"createPin": "Créer un PIN",
+		"confirmPin": "Confirmer votre PIN",
+		"enterDescription": "Utilisez les positions affichées sur votre KeepKey pour entrer votre PIN",
+		"createDescription": "Regardez l'écran de votre KeepKey et appuyez sur les positions pour définir un nouveau PIN",
+		"confirmDescription": "Entrez le même PIN à nouveau pour confirmer",
+		"backspace": "Retour arrière",
+		"unlock": "Déverrouiller"
+	},
+	"passphrase": {
+		"title": "Entrer la phrase secrète",
+		"description": "Votre appareil a la protection par phrase secrète activée. Entrez votre phrase secrète BIP-39 pour déverrouiller. Laissez vide pour le portefeuille par défaut.",
+		"placeholder": "Phrase secrète (facultatif)",
+		"warning": "Les phrases secrètes sont sensibles à la casse. Une phrase secrète différente génère un portefeuille complètement différent.",
+		"unlock": "Déverrouiller"
+	},
+	"pairing": {
+		"wantsToConnect": "veut se connecter à votre KeepKey",
+		"approve": "Approuver",
+		"reject": "Rejeter",
+		"keyboardHint": "Entrée pour approuver · Échap pour rejeter"
+	},
+	"signing": {
+		"title": "Demande de signature",
+		"chain": "Chaîne",
+		"from": "De",
+		"to": "À",
+		"value": "Valeur",
+		"chainId": "ID de chaîne",
+		"data": "Données",
+		"approve": "Approuver",
+		"reject": "Rejeter",
+		"keyboardHint": "Entrée pour approuver · Échap pour rejeter",
+		"methodEthSignTx": "Signer une transaction ETH",
+		"methodEthSignTypedData": "Signer des données typées ETH",
+		"methodEthSignMessage": "Signer un message ETH",
+		"methodBtcSignTx": "Signer une transaction BTC",
+		"methodXrpSignTx": "Signer une transaction XRP",
+		"methodCosmosSign": "Signer Cosmos",
+		"methodThorchainTransfer": "Transfert THORChain",
+		"methodThorchainDeposit": "Dépôt THORChain",
+		"methodMayaTransfer": "Transfert Maya",
+		"methodMayaDeposit": "Dépôt Maya",
+		"methodOsmosisSign": "Signer Osmosis"
+	},
+	"claimed": {
+		"title": "Appareil en cours d'utilisation",
+		"description": "Votre KeepKey a été détecté mais est actuellement utilisé par une autre application (ex. KeepKey Desktop, une extension de navigateur ou scdaemon).",
+		"toConnect": "Pour se connecter :",
+		"step1": "1. Fermez les autres applications utilisant votre KeepKey",
+		"step2": "2. Débranchez et rebranchez l'appareil",
+		"step3": "3. Cette application se reconnectera automatiquement",
+		"waiting": "En attente de la disponibilité de l'appareil...",
+		"defaultError": "Appareil utilisé par un autre processus"
+	}
+}

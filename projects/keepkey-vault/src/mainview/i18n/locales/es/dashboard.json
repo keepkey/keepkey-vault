@@ -1,0 +1,11 @@
+{
+	"supportedChains": "Cadenas compatibles",
+	"refreshBalances": "Actualizar saldos",
+	"connectDeviceToRefresh": "Conecta el dispositivo para actualizar",
+	"networksCount": "{{count}} redes",
+	"addChain": "Agregar cadena",
+	"noBalance": "Sin saldo",
+	"tokensCount_one": "+{{count}} token",
+	"tokensCount_other": "+{{count}} tokens",
+	"watchOnlyBanner": "Solo lectura — Conecta el dispositivo para acceso completo"
+}

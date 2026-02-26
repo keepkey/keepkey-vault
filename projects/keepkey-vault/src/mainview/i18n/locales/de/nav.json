@@ -1,0 +1,16 @@
+{
+	"apps": "Apps",
+	"keepkey": "KeepKey",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "Nur Ansicht",
+	"deviceSettings": "Geräteeinstellungen",
+	"searchingForKeepKey": "Suche nach KeepKey",
+	"keepkeyDetected": "KeepKey erkannt",
+	"keepkeyDetectedConnecting": "KeepKey erkannt — Verbindung wird hergestellt",
+	"unlockYourKeepKey": "Entsperren Sie Ihren KeepKey",
+	"passphraseRequired": "Passphrase erforderlich",
+	"loadingPortfolio": "Portfolio wird geladen",
+	"errorWithMessage": "Fehler: {{error}}",
+	"tryUnplugging": "Versuchen Sie, Ihren KeepKey aus- und wieder einzustecken.",
+	"watchOnlyConnectPrompt": "Nur Ansicht — Gerät verbinden für vollen Zugriff"
+}

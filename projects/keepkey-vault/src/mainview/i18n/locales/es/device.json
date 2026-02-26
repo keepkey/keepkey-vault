@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "Ingresar PIN",
+		"createPin": "Crear un PIN",
+		"confirmPin": "Confirmar tu PIN",
+		"enterDescription": "Usa las posiciones mostradas en tu KeepKey para ingresar tu PIN",
+		"createDescription": "Mira la pantalla de tu KeepKey y toca las posiciones para establecer un nuevo PIN",
+		"confirmDescription": "Ingresa el mismo PIN nuevamente para confirmar",
+		"backspace": "Retroceso",
+		"unlock": "Desbloquear"
+	},
+	"passphrase": {
+		"title": "Ingresar contraseña",
+		"description": "Tu dispositivo tiene protección por contraseña habilitada. Ingresa tu contraseña BIP-39 para desbloquear. Déjalo vacío para la billetera predeterminada.",
+		"placeholder": "Contraseña (opcional)",
+		"warning": "Las contraseñas distinguen entre mayúsculas y minúsculas. Una contraseña diferente genera una billetera completamente diferente.",
+		"unlock": "Desbloquear"
+	},
+	"pairing": {
+		"wantsToConnect": "quiere conectarse a tu KeepKey",
+		"approve": "Aprobar",
+		"reject": "Rechazar",
+		"keyboardHint": "Enter para aprobar · Esc para rechazar"
+	},
+	"signing": {
+		"title": "Solicitud de firma",
+		"chain": "Cadena",
+		"from": "De",
+		"to": "Para",
+		"value": "Valor",
+		"chainId": "ID de cadena",
+		"data": "Datos",
+		"approve": "Aprobar",
+		"reject": "Rechazar",
+		"keyboardHint": "Enter para aprobar · Esc para rechazar",
+		"methodEthSignTx": "Firmar transacción ETH",
+		"methodEthSignTypedData": "Firmar datos tipados ETH",
+		"methodEthSignMessage": "Firmar mensaje ETH",
+		"methodBtcSignTx": "Firmar transacción BTC",
+		"methodXrpSignTx": "Firmar transacción XRP",
+		"methodCosmosSign": "Firmar Cosmos",
+		"methodThorchainTransfer": "Transferencia THORChain",
+		"methodThorchainDeposit": "Depósito THORChain",
+		"methodMayaTransfer": "Transferencia Maya",
+		"methodMayaDeposit": "Depósito Maya",
+		"methodOsmosisSign": "Firmar Osmosis"
+	},
+	"claimed": {
+		"title": "Dispositivo en uso",
+		"description": "Tu KeepKey fue detectado pero actualmente está siendo usado por otra aplicación (ej. KeepKey Desktop, una extensión del navegador o scdaemon).",
+		"toConnect": "Para conectar:",
+		"step1": "1. Cierra las otras aplicaciones que usan tu KeepKey",
+		"step2": "2. Desconecta y vuelve a conectar el dispositivo",
+		"step3": "3. Esta aplicación se reconectará automáticamente",
+		"waiting": "Esperando a que el dispositivo esté disponible...",
+		"defaultError": "Dispositivo reclamado por otro proceso"
+	}
+}

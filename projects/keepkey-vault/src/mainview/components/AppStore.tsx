@@ -1,4 +1,5 @@
 import { Box, Flex, Text, Grid, Image } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 
 interface AppDef {
 	id: string
@@ -25,33 +26,36 @@ const WalletConnectIcon = () => (
 	</svg>
 )
 
-const APPS: AppDef[] = [
-	{
-		id: "keepkey",
-		name: "KeepKey",
-		description: "Manage your KeepKey hardware wallet",
-		icon: "https://pioneers.dev/coins/keepkey.png",
-		url: "https://vault.keepkey.com",
-		enabled: true,
-	},
-	{
-		id: "shapeshift",
-		name: "ShapeShift",
-		description: "Trade, track, and manage your crypto across chains",
-		icon: "https://pioneers.dev/coins/fox.png",
-		url: "https://app.shapeshift.com",
-		enabled: true,
-	},
-	{
-		id: "walletconnect",
-		name: "WalletConnect",
-		description: "Connect to any WalletConnect-compatible dApp",
-		icon: "",
-		iconFallback: <WalletConnectIcon />,
-		url: "https://wallet-connect-dapp-ochre.vercel.app",
-		enabled: true,
-	},
-]
+function useApps(): AppDef[] {
+	const { t } = useTranslation("appstore")
+	return [
+		{
+			id: "keepkey",
+			name: t("keepkeyName"),
+			description: t("keepkeyDescription"),
+			icon: "https://pioneers.dev/coins/keepkey.png",
+			url: "https://vault.keepkey.com",
+			enabled: true,
+		},
+		{
+			id: "shapeshift",
+			name: t("shapeshiftName"),
+			description: t("shapeshiftDescription"),
+			icon: "https://pioneers.dev/coins/fox.png",
+			url: "https://app.shapeshift.com",
+			enabled: true,
+		},
+		{
+			id: "walletconnect",
+			name: t("walletconnectName"),
+			description: t("walletconnectDescription"),
+			icon: "",
+			iconFallback: <WalletConnectIcon />,
+			url: "https://wallet-connect-dapp-ochre.vercel.app",
+			enabled: true,
+		},
+	]
+}
 
 interface AppStoreProps {
 	onOpenApp: (url: string) => void
@@ -60,6 +64,8 @@ interface AppStoreProps {
 }
 
 export function AppStore({ onOpenApp, onOpenKeepKey, onOpenWalletConnect }: AppStoreProps) {
+	const { t } = useTranslation("appstore")
+	const APPS = useApps()
 	const handleClick = (app: AppDef) => {
 		if (!app.enabled) return
 		if (app.id === "walletconnect" && onOpenWalletConnect) {
@@ -77,10 +83,10 @@ export function AppStore({ onOpenApp, onOpenKeepKey, onOpenWalletConnect }: AppS
 		<Flex flex="1" direction="column" align="center" px={{ base: "3", md: "6" }} py="6">
 			<Box w="100%" maxW="600px">
 				<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="1">
-					Apps
+					{t("title")}
 				</Text>
 				<Text fontSize="sm" color="kk.textSecondary" mb="5">
-					Connect your KeepKey to supported applications
+					{t("subtitle")}
 				</Text>
 				<Grid
 					templateColumns="repeat(auto-fill, minmax(160px, 1fr))"

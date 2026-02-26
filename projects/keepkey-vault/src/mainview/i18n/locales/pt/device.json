@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "Inserir PIN",
+		"createPin": "Criar um PIN",
+		"confirmPin": "Confirmar seu PIN",
+		"enterDescription": "Use as posições mostradas no seu KeepKey para inserir seu PIN",
+		"createDescription": "Olhe para a tela do seu KeepKey e toque nas posições para definir um novo PIN",
+		"confirmDescription": "Insira o mesmo PIN novamente para confirmar",
+		"backspace": "Retrocesso",
+		"unlock": "Desbloquear"
+	},
+	"passphrase": {
+		"title": "Inserir frase-senha",
+		"description": "Seu dispositivo tem proteção por frase-senha ativada. Insira sua frase-senha BIP-39 para desbloquear. Deixe vazio para a carteira padrão.",
+		"placeholder": "Frase-senha (opcional)",
+		"warning": "Frases-senha diferenciam maiúsculas de minúsculas. Uma frase-senha diferente gera uma carteira completamente diferente.",
+		"unlock": "Desbloquear"
+	},
+	"pairing": {
+		"wantsToConnect": "quer se conectar ao seu KeepKey",
+		"approve": "Aprovar",
+		"reject": "Rejeitar",
+		"keyboardHint": "Enter para aprovar · Esc para rejeitar"
+	},
+	"signing": {
+		"title": "Solicitação de assinatura",
+		"chain": "Rede",
+		"from": "De",
+		"to": "Para",
+		"value": "Valor",
+		"chainId": "ID da rede",
+		"data": "Dados",
+		"approve": "Aprovar",
+		"reject": "Rejeitar",
+		"keyboardHint": "Enter para aprovar · Esc para rejeitar",
+		"methodEthSignTx": "Assinar transação ETH",
+		"methodEthSignTypedData": "Assinar dados tipados ETH",
+		"methodEthSignMessage": "Assinar mensagem ETH",
+		"methodBtcSignTx": "Assinar transação BTC",
+		"methodXrpSignTx": "Assinar transação XRP",
+		"methodCosmosSign": "Assinar Cosmos",
+		"methodThorchainTransfer": "Transferência THORChain",
+		"methodThorchainDeposit": "Depósito THORChain",
+		"methodMayaTransfer": "Transferência Maya",
+		"methodMayaDeposit": "Depósito Maya",
+		"methodOsmosisSign": "Assinar Osmosis"
+	},
+	"claimed": {
+		"title": "Dispositivo em uso",
+		"description": "Seu KeepKey foi detectado mas está sendo usado por outro aplicativo (ex. KeepKey Desktop, extensão do navegador ou scdaemon).",
+		"toConnect": "Para conectar:",
+		"step1": "1. Feche outros apps usando seu KeepKey",
+		"step2": "2. Desconecte e reconecte o dispositivo",
+		"step3": "3. Este app reconectará automaticamente",
+		"waiting": "Aguardando o dispositivo ficar disponível...",
+		"defaultError": "Dispositivo sendo usado por outro processo"
+	}
+}

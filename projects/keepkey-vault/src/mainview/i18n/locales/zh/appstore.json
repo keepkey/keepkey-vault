@@ -1,0 +1,10 @@
+{
+	"title": "应用",
+	"subtitle": "将您的 KeepKey 连接到支持的应用程序",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "管理您的 KeepKey 硬件钱包",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "跨链交易、追踪和管理您的加密资产",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "连接到任何兼容 WalletConnect 的 dApp"
+}

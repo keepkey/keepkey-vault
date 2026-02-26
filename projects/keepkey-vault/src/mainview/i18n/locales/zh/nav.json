@@ -1,0 +1,16 @@
+{
+	"apps": "应用",
+	"keepkey": "KeepKey",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "仅查看",
+	"deviceSettings": "设备设置",
+	"searchingForKeepKey": "正在搜索 KeepKey",
+	"keepkeyDetected": "已检测到 KeepKey",
+	"keepkeyDetectedConnecting": "已检测到 KeepKey — 正在连接",
+	"unlockYourKeepKey": "解锁您的 KeepKey",
+	"passphraseRequired": "需要密码短语",
+	"loadingPortfolio": "正在加载投资组合",
+	"errorWithMessage": "错误：{{error}}",
+	"tryUnplugging": "请尝试拔出并重新插入您的 KeepKey。",
+	"watchOnlyConnectPrompt": "仅查看 — 连接设备以获得完整访问权限"
+}

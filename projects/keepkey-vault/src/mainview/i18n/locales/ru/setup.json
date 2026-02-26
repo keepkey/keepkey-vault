@@ -1,0 +1,105 @@
+{
+	"title": "Настройка KeepKey",
+	"subtitle": "Безопасный мультичейн аппаратный кошелёк",
+	"stepDescriptions": {
+		"welcome": "Добро пожаловать в KeepKey",
+		"bootloader": "Проверить и обновить загрузчик",
+		"firmware": "Проверить и обновить прошивку",
+		"initChoose": "Выберите способ настройки",
+		"initProgress": "Настройка кошелька",
+		"initLabel": "Дайте имя устройству",
+		"complete": "Настройка завершена!"
+	},
+	"visibleSteps": {
+		"bootloader": "Загрузчик",
+		"firmware": "Прошивка",
+		"setup": "Настройка"
+	},
+	"welcome": {
+		"title": "Добро пожаловать в KeepKey",
+		"oobIntro": "Давайте обновим прошивку и настроим ваш кошелёк.",
+		"intro": "Давайте настроим ваш аппаратный кошелёк.",
+		"startingSetup": "Начало настройки...",
+		"detectingDevice": "Определение состояния устройства..."
+	},
+	"bootloader": {
+		"title": "Обновление загрузчика",
+		"description": "Ваш загрузчик необходимо обновить для безопасности и совместимости.",
+		"current": "Текущий",
+		"latest": "Последний",
+		"outdated": "Устаревший",
+		"updatingBootloader": "Обновление загрузчика...",
+		"doNotUnplugBrick": "НЕ отключайте устройство. Прерывание может привести к повреждению устройства.",
+		"updateFailed": "Обновление не удалось",
+		"tryAgain": "Попробовать снова",
+		"enterFirmwareUpdateMode": "Войти в режим обновления прошивки",
+		"step1Unplug": "1. Отключите ваш KeepKey",
+		"step2Hold": "2. Зажмите кнопку на устройстве",
+		"step3Plugin": "3. Удерживая кнопку, подключите USB-кабель",
+		"step4Release": "4. Отпустите, когда появится экран загрузчика",
+		"listeningForBootloader": "Ожидание устройства в режиме загрузчика...",
+		"readyDetectBootloader": "Готов — Обнаружить загрузчик",
+		"skipBootloaderUpdate": "Пропустить обновление загрузчика"
+	},
+	"firmware": {
+		"title": "Обновление прошивки",
+		"oobDescription": "На вашем устройстве заводская прошивка. Требуется критическое обновление.",
+		"description": "Доступно обновление прошивки для вашего устройства.",
+		"firmwareLabel": "Прошивка",
+		"notInstalled": "Не установлена",
+		"important": "Важно:",
+		"doNotDisconnect": "Не отключайте устройство во время обновления",
+		"mayNeedConfirm": "Может потребоваться подтверждение на экране устройства",
+		"fundsRemainSafe": "Ваши средства и настройки останутся в безопасности",
+		"updatingFirmware": "Обновление прошивки...",
+		"doNotUnplug": "НЕ отключайте устройство.",
+		"deviceRebooting": "Устройство перезагружается...",
+		"rebootingMessage": "Ваш KeepKey перезагружается с новой прошивкой. Пожалуйста, подождите...",
+		"firmwareVerified": "Прошивка подтверждена как официальный релиз",
+		"firmwareHashNotFound": "Хеш прошивки не найден в манифесте",
+		"updateFirmwareTo": "Обновить прошивку до v{{version}}",
+		"skipUpdate": "Пропустить обновление"
+	},
+	"initChoose": {
+		"title": "Настройте кошелёк",
+		"description": "Выберите способ настройки KeepKey",
+		"createNewWallet": "Создать новый кошелёк",
+		"createDescription": "Сгенерировать новую сид-фразу на устройстве",
+		"createWallet": "Создать кошелёк",
+		"recoverExistingWallet": "Восстановить существующий кошелёк",
+		"recoverDescription": "Введите фразу восстановления на устройстве",
+		"recoverWallet": "Восстановить кошелёк"
+	},
+	"initProgress": {
+		"creatingWallet": "Создание кошелька...",
+		"recoveringWallet": "Восстановление кошелька...",
+		"followPromptsCreate": "Следуйте инструкциям на экране KeepKey. Тщательно запишите слова сид-фразы — это ваша резервная копия.",
+		"followPromptsRecover": "Следуйте инструкциям на экране KeepKey. Введите фразу восстановления с помощью устройства.",
+		"followPrompts": "Следуйте инструкциям на экране KeepKey.",
+		"lookAtDevice": "Посмотрите на экран KeepKey и следуйте инструкциям.",
+		"failedToCreate": "Не удалось создать кошелёк",
+		"failedToRecover": "Не удалось восстановить кошелёк"
+	},
+	"initLabel": {
+		"walletCreated": "Кошелёк создан!",
+		"walletRecovered": "Кошелёк восстановлен!",
+		"giveAName": "Дайте вашему KeepKey понятное имя для лёгкой идентификации",
+		"placeholder": "Мой KeepKey",
+		"setDeviceName": "Задать имя устройства",
+		"skipForNow": "Пропустить"
+	},
+	"complete": {
+		"walletCreated": "Кошелёк создан!",
+		"walletRecovered": "Кошелёк восстановлен!",
+		"deviceReady": "Ваш KeepKey{{label}} готов",
+		"recoveredDescription": "Ваш кошелёк успешно восстановлен из фразы восстановления",
+		"createdDescription": "Ваш новый кошелёк защищён и готов к использованию",
+		"startUsing": "Начать использовать KeepKey"
+	},
+	"footer": {
+		"stepOf": "Шаг {{current}} из {{total}}",
+		"settingUpWallet": "Настройка кошелька...",
+		"previous": "Назад",
+		"next": "Далее"
+	}
+}

@@ -1,0 +1,16 @@
+{
+	"apps": "Приложения",
+	"keepkey": "KeepKey",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "Только просмотр",
+	"deviceSettings": "Настройки устройства",
+	"searchingForKeepKey": "Поиск KeepKey",
+	"keepkeyDetected": "KeepKey обнаружен",
+	"keepkeyDetectedConnecting": "KeepKey обнаружен — подключение",
+	"unlockYourKeepKey": "Разблокируйте ваш KeepKey",
+	"passphraseRequired": "Требуется кодовая фраза",
+	"loadingPortfolio": "Загрузка портфеля",
+	"errorWithMessage": "Ошибка: {{error}}",
+	"tryUnplugging": "Попробуйте отключить и снова подключить ваш KeepKey.",
+	"watchOnlyConnectPrompt": "Только просмотр — Подключите устройство для полного доступа"
+}

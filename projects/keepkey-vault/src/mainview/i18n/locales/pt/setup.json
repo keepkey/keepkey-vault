@@ -1,0 +1,105 @@
+{
+	"title": "Configuração do KeepKey",
+	"subtitle": "Carteira de hardware multi-chain segura",
+	"stepDescriptions": {
+		"welcome": "Bem-vindo ao KeepKey",
+		"bootloader": "Verificar e atualizar bootloader",
+		"firmware": "Verificar e atualizar firmware",
+		"initChoose": "Escolha seu método de configuração",
+		"initProgress": "Configurando sua carteira",
+		"initLabel": "Nomeie seu dispositivo",
+		"complete": "Configuração concluída!"
+	},
+	"visibleSteps": {
+		"bootloader": "Bootloader",
+		"firmware": "Firmware",
+		"setup": "Configuração"
+	},
+	"welcome": {
+		"title": "Bem-vindo ao KeepKey",
+		"oobIntro": "Vamos atualizar seu firmware e configurar sua carteira.",
+		"intro": "Vamos configurar sua carteira de hardware.",
+		"startingSetup": "Iniciando configuração...",
+		"detectingDevice": "Detectando estado do dispositivo..."
+	},
+	"bootloader": {
+		"title": "Atualização do Bootloader",
+		"description": "Seu bootloader precisa ser atualizado por segurança e compatibilidade.",
+		"current": "Atual",
+		"latest": "Mais recente",
+		"outdated": "Desatualizado",
+		"updatingBootloader": "Atualizando bootloader...",
+		"doNotUnplugBrick": "NÃO desconecte seu dispositivo. Interromper pode danificar permanentemente o dispositivo.",
+		"updateFailed": "Atualização falhou",
+		"tryAgain": "Tentar novamente",
+		"enterFirmwareUpdateMode": "Entrar no modo de atualização de firmware",
+		"step1Unplug": "1. Desconecte seu KeepKey",
+		"step2Hold": "2. Segure o botão do dispositivo",
+		"step3Plugin": "3. Enquanto segura, conecte o cabo USB",
+		"step4Release": "4. Solte quando a tela do bootloader aparecer",
+		"listeningForBootloader": "Aguardando dispositivo no modo bootloader...",
+		"readyDetectBootloader": "Estou pronto — Detectar Bootloader",
+		"skipBootloaderUpdate": "Pular atualização do bootloader"
+	},
+	"firmware": {
+		"title": "Atualização de Firmware",
+		"oobDescription": "Seu dispositivo tem firmware de fábrica. Uma atualização crítica é necessária.",
+		"description": "Uma atualização de firmware está disponível para seu dispositivo.",
+		"firmwareLabel": "Firmware",
+		"notInstalled": "Não instalado",
+		"important": "Importante:",
+		"doNotDisconnect": "Não desconecte seu dispositivo durante a atualização",
+		"mayNeedConfirm": "Pode ser necessário confirmar na tela do dispositivo",
+		"fundsRemainSafe": "Seus fundos e configurações permanecerão seguros",
+		"updatingFirmware": "Atualizando firmware...",
+		"doNotUnplug": "NÃO desconecte seu dispositivo.",
+		"deviceRebooting": "Dispositivo reiniciando...",
+		"rebootingMessage": "Seu KeepKey está reiniciando com o novo firmware. Por favor aguarde...",
+		"firmwareVerified": "Firmware verificado como versão oficial",
+		"firmwareHashNotFound": "Hash do firmware não encontrado no manifesto",
+		"updateFirmwareTo": "Atualizar Firmware para v{{version}}",
+		"skipUpdate": "Pular atualização"
+	},
+	"initChoose": {
+		"title": "Configure sua carteira",
+		"description": "Escolha como configurar seu KeepKey",
+		"createNewWallet": "Criar nova carteira",
+		"createDescription": "Gerar uma nova frase semente no seu dispositivo",
+		"createWallet": "Criar carteira",
+		"recoverExistingWallet": "Recuperar carteira existente",
+		"recoverDescription": "Insira sua frase semente de recuperação no dispositivo",
+		"recoverWallet": "Recuperar carteira"
+	},
+	"initProgress": {
+		"creatingWallet": "Criando carteira...",
+		"recoveringWallet": "Recuperando carteira...",
+		"followPromptsCreate": "Siga as instruções na tela do seu KeepKey. Anote as palavras semente cuidadosamente — elas são seu backup.",
+		"followPromptsRecover": "Siga as instruções na tela do seu KeepKey. Insira sua frase semente de recuperação usando o dispositivo.",
+		"followPrompts": "Siga as instruções na tela do seu KeepKey.",
+		"lookAtDevice": "Olhe para o seu KeepKey e siga as instruções na tela.",
+		"failedToCreate": "Falha ao criar a carteira",
+		"failedToRecover": "Falha ao recuperar a carteira"
+	},
+	"initLabel": {
+		"walletCreated": "Carteira criada!",
+		"walletRecovered": "Carteira recuperada!",
+		"giveAName": "Dê ao seu KeepKey um nome amigável para identificá-lo facilmente",
+		"placeholder": "Meu KeepKey",
+		"setDeviceName": "Definir nome do dispositivo",
+		"skipForNow": "Pular por agora"
+	},
+	"complete": {
+		"walletCreated": "Carteira criada!",
+		"walletRecovered": "Carteira recuperada!",
+		"deviceReady": "Seu KeepKey{{label}} está pronto",
+		"recoveredDescription": "Sua carteira foi restaurada com sucesso a partir da frase de recuperação",
+		"createdDescription": "Sua nova carteira está segura e pronta para uso",
+		"startUsing": "Começar a usar o KeepKey"
+	},
+	"footer": {
+		"stepOf": "Passo {{current}} de {{total}}",
+		"settingUpWallet": "Configurando carteira...",
+		"previous": "Anterior",
+		"next": "Próximo"
+	}
+}

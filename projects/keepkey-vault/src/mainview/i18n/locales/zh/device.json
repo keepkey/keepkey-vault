@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "输入 PIN",
+		"createPin": "创建 PIN",
+		"confirmPin": "确认您的 PIN",
+		"enterDescription": "使用 KeepKey 上显示的位置输入您的 PIN",
+		"createDescription": "查看 KeepKey 屏幕并点击相应位置设置新 PIN",
+		"confirmDescription": "再次输入相同的 PIN 以确认",
+		"backspace": "退格",
+		"unlock": "解锁"
+	},
+	"passphrase": {
+		"title": "输入密码短语",
+		"description": "您的设备已启用密码短语保护。输入您的 BIP-39 密码短语以解锁。留空则使用默认钱包。",
+		"placeholder": "密码短语（可选）",
+		"warning": "密码短语区分大小写。不同的密码短语会生成完全不同的钱包。",
+		"unlock": "解锁"
+	},
+	"pairing": {
+		"wantsToConnect": "想要连接到您的 KeepKey",
+		"approve": "批准",
+		"reject": "拒绝",
+		"keyboardHint": "按 Enter 批准 · 按 Esc 拒绝"
+	},
+	"signing": {
+		"title": "签名请求",
+		"chain": "链",
+		"from": "发送方",
+		"to": "接收方",
+		"value": "金额",
+		"chainId": "链 ID",
+		"data": "数据",
+		"approve": "批准",
+		"reject": "拒绝",
+		"keyboardHint": "按 Enter 批准 · 按 Esc 拒绝",
+		"methodEthSignTx": "ETH 签名交易",
+		"methodEthSignTypedData": "ETH 签名类型化数据",
+		"methodEthSignMessage": "ETH 签名消息",
+		"methodBtcSignTx": "BTC 签名交易",
+		"methodXrpSignTx": "XRP 签名交易",
+		"methodCosmosSign": "Cosmos 签名",
+		"methodThorchainTransfer": "THORChain 转账",
+		"methodThorchainDeposit": "THORChain 存款",
+		"methodMayaTransfer": "Maya 转账",
+		"methodMayaDeposit": "Maya 存款",
+		"methodOsmosisSign": "Osmosis 签名"
+	},
+	"claimed": {
+		"title": "设备正在使用中",
+		"description": "已检测到您的 KeepKey，但目前被另一个应用程序占用（如 KeepKey Desktop、浏览器扩展或 scdaemon）。",
+		"toConnect": "要连接：",
+		"step1": "1. 关闭正在使用您 KeepKey 的其他应用",
+		"step2": "2. 拔出设备并重新插入",
+		"step3": "3. 此应用将自动重新连接",
+		"waiting": "等待设备变为可用...",
+		"defaultError": "设备被另一个进程占用"
+	}
+}

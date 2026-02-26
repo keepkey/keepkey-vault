@@ -1,4 +1,5 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
 import kkIcon from "../assets/icon.png"
 
@@ -26,25 +27,26 @@ const GridIcon = () => (
 	</svg>
 )
 
-const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
-	{
-		id: "apps",
-		label: "Apps",
-		icon: <GridIcon />,
-	},
-	{
-		id: "vault",
-		label: "KeepKey",
-		icon: <Image src={kkIcon} alt="KeepKey" w="11px" h="11px" borderRadius="2px" />,
-	},
-	{
-		id: "shapeshift",
-		label: "ShapeShift",
-		icon: <Image src="https://pioneers.dev/coins/fox.png" alt="ShapeShift" w="11px" h="11px" borderRadius="2px" />,
-	},
-]
-
 export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
+	const { t } = useTranslation("nav")
+
+	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
+		{
+			id: "apps",
+			label: t("apps"),
+			icon: <GridIcon />,
+		},
+		{
+			id: "vault",
+			label: t("keepkey"),
+			icon: <Image src={kkIcon} alt="KeepKey" w="11px" h="11px" borderRadius="2px" />,
+		},
+		{
+			id: "shapeshift",
+			label: t("shapeshift"),
+			icon: <Image src="https://pioneers.dev/coins/fox.png" alt="ShapeShift" w="11px" h="11px" borderRadius="2px" />,
+		},
+	]
 	return (
 		<Flex
 			position="fixed"
@@ -87,7 +89,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 				</Text>
 				{watchOnly ? (
 					<Text fontSize="10px" color="kk.gold" fontWeight="500" bg="rgba(255,215,0,0.12)" px="1.5" py="0.5" borderRadius="sm">
-						Watch Only
+						{t("watchOnly")}
 					</Text>
 				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
@@ -139,7 +141,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			{/* Right: settings gear */}
 			<Flex flex="1" justify="flex-end">
 				<IconButton
-					aria-label="Device settings"
+					aria-label={t("deviceSettings")}
 					onClick={watchOnly ? undefined : onSettingsToggle}
 					size="sm"
 					variant="ghost"

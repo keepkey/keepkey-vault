@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { Box, Text, Button, Flex } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaEye, FaSpinner, FaPlus, FaMinus } from "react-icons/fa"
 import { generateQRSvg } from "../lib/qr"
@@ -27,6 +28,7 @@ interface ReceiveViewProps {
 }
 
 function CopyableField({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
+	const { t } = useTranslation("common")
 	const [copied, setCopied] = useState(false)
 	const copy = () => {
 		navigator.clipboard.writeText(value)
@@ -50,7 +52,7 @@ function CopyableField({ label, value, mono = true }: { label: string; value: st
 					fontSize="10px"
 				>
 					<Box as={copied ? FaCheck : FaCopy} fontSize="10px" />
-					{copied ? "Copied" : "Copy"}
+					{copied ? t("copied") : t("copy")}
 				</Box>
 			</Flex>
 			<Box
@@ -83,6 +85,7 @@ export function ReceiveView({
 	chain, address, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, onBtcChangeIndex, onBtcAddressIndex,
 }: ReceiveViewProps) {
+	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
 	const [pathDialogOpen, setPathDialogOpen] = useState(false)
 	const [newAddressCount, setNewAddressCount] = useState(0)
@@ -125,14 +128,14 @@ export function ReceiveView({
 					<>
 						<Text fontSize="sm" color="kk.error">{error}</Text>
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
-							Retry
+							{t("retry", { ns: "common" })}
 						</Button>
 					</>
 				) : (
 					<>
-						<Text fontSize="sm" color="kk.textMuted">No address derived yet</Text>
+						<Text fontSize="sm" color="kk.textMuted">{t("noAddressDerived")}</Text>
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
-							Derive Address
+							{t("deriveAddress")}
 						</Button>
 					</>
 				)}
@@ -143,7 +146,7 @@ export function ReceiveView({
 	if (loading) {
 		return (
 			<Flex align="center" justify="center" py="8">
-				<Text fontSize="sm" color="kk.textMuted">Deriving address...</Text>
+				<Text fontSize="sm" color="kk.textMuted">{t("derivingAddress")}</Text>
 			</Flex>
 		)
 	}
@@ -179,21 +182,21 @@ export function ReceiveView({
 						w="160px"
 					>
 						<Box as={showing ? FaSpinner : FaEye} fontSize="11px" />
-						{showing ? "Check device..." : "Verify on Device"}
+						{showing ? t("checkDevice") : t("verifyOnDevice")}
 					</Button>
 				</Flex>
 
 				{/* Right column: address, xpub, path, controls */}
 				<Flex direction="column" gap="3" flex="1" minW="0" w="100%">
-					<Text fontSize="xs" color="kk.textMuted">Send {chain.symbol} to this address</Text>
+					<Text fontSize="xs" color="kk.textMuted">{t("sendToAddress", { symbol: chain.symbol })}</Text>
 
 					{/* BTC: Receive / Change toggle + index */}
 					{isBtc && onBtcChangeIndex && (
 						<Flex align="center" gap="3" flexWrap="wrap">
 							<Flex gap="1" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg">
 								{([
-									{ value: 0 as const, label: 'Receive' },
-									{ value: 1 as const, label: 'Change' },
+									{ value: 0 as const, label: t("receive") },
+									{ value: 1 as const, label: t("change", { ns: "common" }) },
 								]).map(opt => (
 									<Button
 										key={opt.value}
@@ -217,7 +220,7 @@ export function ReceiveView({
 							{/* Address index — inline */}
 							{onBtcAddressIndex && (
 								<Flex align="center" gap="1.5">
-									<Text fontSize="10px" color="kk.textMuted">Index</Text>
+									<Text fontSize="10px" color="kk.textMuted">{t("index")}</Text>
 									<Box
 										as="button"
 										onClick={handlePrevAddress}
@@ -260,23 +263,23 @@ export function ReceiveView({
 									>
 										<Box as={FaPlus} fontSize="9px" />
 									</Box>
-									<Text fontSize="9px" color="kk.textMuted">({remaining} left)</Text>
+									<Text fontSize="9px" color="kk.textMuted">({t("remaining", { remaining })})</Text>
 								</Flex>
 							)}
 						</Flex>
 					)}
 
 					{/* Address — copyable */}
-					<CopyableField label="Address" value={address!} />
+					<CopyableField label={t("address")} value={address!} />
 
 					{/* xpub — copyable (BTC only) */}
 					{xpub && (
-						<CopyableField label="Extended Public Key (xpub)" value={xpub} />
+						<CopyableField label={t("extendedPublicKey")} value={xpub} />
 					)}
 
 					{/* Derivation path */}
 					<Flex align="center" gap="1.5">
-						<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">Path</Text>
+						<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">{t("path")}</Text>
 						<Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">
 							{pathToString(currentPath)}
 						</Text>
@@ -287,7 +290,7 @@ export function ReceiveView({
 							color="kk.textMuted"
 							_hover={{ color: "kk.gold" }}
 							transition="color 0.15s"
-							title="Edit derivation path"
+							title={t("editDerivationPath")}
 							display="flex"
 							alignItems="center"
 						>

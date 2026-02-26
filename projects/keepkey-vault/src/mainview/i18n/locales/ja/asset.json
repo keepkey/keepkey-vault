@@ -1,0 +1,20 @@
+{
+	"receive": "受取",
+	"send": "送信",
+	"tokens": "トークン",
+	"tokenCount_one": "{{count}} トークン",
+	"tokenCount_other": "{{count}} トークン",
+	"scam": "詐欺",
+	"spamSuspected": "スパム？",
+	"showFiltered_one": "{{count}} 件のフィルタ済みトークンを表示",
+	"showFiltered_other": "{{count}} 件のフィルタ済みトークンを表示",
+	"hideFiltered_one": "{{count}} 件のフィルタ済みトークンを非表示",
+	"hideFiltered_other": "{{count}} 件のフィルタ済みトークンを非表示",
+	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"suspectedSpam": "スパムの疑い ({{count}})",
+	"markAsSafe": "安全としてマーク",
+	"hideToken": "トークンを非表示",
+	"revertToAutoDetect": "自動検出に戻す",
+	"unhide": "再表示",
+	"addCustomToken": "カスタムトークンを追加"
+}

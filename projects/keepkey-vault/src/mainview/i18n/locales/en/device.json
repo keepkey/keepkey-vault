@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "Enter PIN",
+		"createPin": "Create a PIN",
+		"confirmPin": "Confirm Your PIN",
+		"enterDescription": "Use the positions shown on your KeepKey to enter your PIN",
+		"createDescription": "Look at your KeepKey screen and tap the positions to set a new PIN",
+		"confirmDescription": "Enter the same PIN again to confirm",
+		"backspace": "Backspace",
+		"unlock": "Unlock"
+	},
+	"passphrase": {
+		"title": "Enter Passphrase",
+		"description": "Your device has passphrase protection enabled. Enter your BIP-39 passphrase to unlock. Leave empty for the default wallet.",
+		"placeholder": "Passphrase (optional)",
+		"warning": "Passphrases are case-sensitive. A different passphrase generates a completely different wallet.",
+		"unlock": "Unlock"
+	},
+	"pairing": {
+		"wantsToConnect": "wants to connect to your KeepKey",
+		"approve": "Approve",
+		"reject": "Reject",
+		"keyboardHint": "Enter to approve · Esc to reject"
+	},
+	"signing": {
+		"title": "Signing Request",
+		"chain": "Chain",
+		"from": "From",
+		"to": "To",
+		"value": "Value",
+		"chainId": "Chain ID",
+		"data": "Data",
+		"approve": "Approve",
+		"reject": "Reject",
+		"keyboardHint": "Enter to approve · Esc to reject",
+		"methodEthSignTx": "ETH Sign Transaction",
+		"methodEthSignTypedData": "ETH Sign Typed Data",
+		"methodEthSignMessage": "ETH Sign Message",
+		"methodBtcSignTx": "BTC Sign Transaction",
+		"methodXrpSignTx": "XRP Sign Transaction",
+		"methodCosmosSign": "Cosmos Sign",
+		"methodThorchainTransfer": "THORChain Transfer",
+		"methodThorchainDeposit": "THORChain Deposit",
+		"methodMayaTransfer": "Maya Transfer",
+		"methodMayaDeposit": "Maya Deposit",
+		"methodOsmosisSign": "Osmosis Sign"
+	},
+	"claimed": {
+		"title": "Device In Use",
+		"description": "Your KeepKey was detected but is currently claimed by another application (e.g. KeepKey Desktop, a browser extension, or scdaemon).",
+		"toConnect": "To connect:",
+		"step1": "1. Close other apps using your KeepKey",
+		"step2": "2. Unplug and replug the device",
+		"step3": "3. This app will reconnect automatically",
+		"waiting": "Waiting for device to become available...",
+		"defaultError": "Device claimed by another process"
+	}
+}

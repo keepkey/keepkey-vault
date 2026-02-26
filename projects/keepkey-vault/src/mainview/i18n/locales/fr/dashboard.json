@@ -1,0 +1,11 @@
+{
+	"supportedChains": "Chaînes prises en charge",
+	"refreshBalances": "Rafraîchir les soldes",
+	"connectDeviceToRefresh": "Connectez l'appareil pour rafraîchir",
+	"networksCount": "{{count}} réseaux",
+	"addChain": "Ajouter une chaîne",
+	"noBalance": "Aucun solde",
+	"tokensCount_one": "+{{count}} jeton",
+	"tokensCount_other": "+{{count}} jetons",
+	"watchOnlyBanner": "Lecture seule — Connectez l'appareil pour un accès complet"
+}

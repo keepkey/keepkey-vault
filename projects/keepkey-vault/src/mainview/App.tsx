@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
 import { PassphraseEntry } from "./components/device/PassphraseEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
@@ -27,6 +28,7 @@ import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntr
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
 function App() {
+	const { t } = useTranslation()
 	const deviceState = useDeviceState()
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
@@ -454,8 +456,8 @@ function App() {
 	if (phase === "claimed") {
 		return (
 			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<SplashScreen statusText="KeepKey detected" variant="claimed">
-					<DeviceClaimedDialog error={deviceState.error || "Device claimed by another process"} />
+				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed">
+					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
 			</>
 		)
@@ -470,13 +472,13 @@ function App() {
 			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
-						needsPin ? "Unlock your KeepKey"
-						: needsPassphrase ? "Passphrase required"
-						: isConnecting ? "KeepKey detected — connecting"
-						: isError ? `Error: ${deviceState.error || "Unknown"}`
-						: "Searching for KeepKey"
+						needsPin ? t("unlockYourKeepKey", { ns: "nav" })
+						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
+						: isConnecting ? t("keepkeyDetectedConnecting", { ns: "nav" })
+						: isError ? t("errorWithMessage", { ns: "nav", error: deviceState.error || "Unknown" })
+						: t("searchingForKeepKey", { ns: "nav" })
 					}
-					hintText={isError ? "Try unplugging and replugging your KeepKey." : undefined}
+					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 				>
 					{watchOnlyAvailable && deviceState.state === "disconnected" && (
@@ -506,7 +508,7 @@ function App() {
 	return (
 		<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
-				<SplashScreen statusText="Loading portfolio" variant="connecting" />
+				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
 			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
@@ -583,7 +585,7 @@ function App() {
 						overflow="hidden"
 						role="dialog"
 						aria-modal="true"
-						aria-label="Enable API Bridge"
+						aria-label={t("apiBridge.title", { ns: "dialogs" })}
 					>
 						<Box px="6" pt="5" pb="4">
 							<Flex align="center" gap="2" mb="3">
@@ -593,18 +595,18 @@ function App() {
 									<circle cx="5" cy="19" r="1" />
 								</svg>
 								<Text fontSize="md" fontWeight="600" color="kk.textPrimary">
-									API Bridge Required
+									{t("apiBridge.title", { ns: "dialogs" })}
 								</Text>
 							</Flex>
 							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5" mb="2">
 								{restApiEnabled
-									? "This app communicates with your KeepKey through the local API bridge (port 1646). Click below to verify the connection and continue."
-									: "This app communicates with your KeepKey through the local API bridge (port 1646). The bridge is currently disabled."
+									? t("apiBridge.descriptionEnabled", { ns: "dialogs" })
+									: t("apiBridge.descriptionDisabled", { ns: "dialogs" })
 								}
 							</Text>
 							{!restApiEnabled && (
 								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-									Enable it to continue. You can turn it off anytime in <Text as="span" color="kk.gold" fontWeight="500">Settings &rarr; Application</Text>.
+									{t("apiBridge.enablePrompt", { ns: "dialogs" })} <Text as="span" color="kk.gold" fontWeight="500">{t("apiBridge.settingsApplication", { ns: "dialogs" })}</Text>.
 								</Text>
 							)}
 						</Box>
@@ -625,7 +627,7 @@ function App() {
 								onClick={handleCancelAppLaunch}
 								disabled={enablingApi}
 							>
-								Cancel
+								{t("cancel", { ns: "common" })}
 							</Button>
 							<Button
 								size="sm"
@@ -637,10 +639,10 @@ function App() {
 								disabled={enablingApi}
 							>
 								{enablingApi
-									? (restApiEnabled ? "Connecting..." : "Enabling...")
+									? (restApiEnabled ? t("apiBridge.connecting", { ns: "dialogs" }) : t("apiBridge.enabling", { ns: "dialogs" }))
 									: pendingWcOpen
-										? (restApiEnabled ? "Open WalletConnect" : "Enable & Open")
-										: "Enable & Launch"
+										? (restApiEnabled ? t("apiBridge.openWalletConnect", { ns: "dialogs" }) : t("apiBridge.enableAndOpen", { ns: "dialogs" }))
+										: t("apiBridge.enableAndLaunch", { ns: "dialogs" })
 								}
 							</Button>
 						</Flex>

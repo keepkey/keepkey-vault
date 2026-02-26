@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import type { PinRequestType } from "../../../shared/types"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 
@@ -9,16 +10,16 @@ interface PinEntryProps {
 	onCancel: () => void
 }
 
-const TITLES: Record<PinRequestType, string> = {
-	"current": "Enter PIN",
-	"new-first": "Create a PIN",
-	"new-second": "Confirm Your PIN",
+const TITLE_KEYS: Record<PinRequestType, string> = {
+	"current": "pin.enterPin",
+	"new-first": "pin.createPin",
+	"new-second": "pin.confirmPin",
 }
 
-const DESCRIPTIONS: Record<PinRequestType, string> = {
-	"current": "Use the positions shown on your KeepKey to enter your PIN",
-	"new-first": "Look at your KeepKey screen and tap the positions to set a new PIN",
-	"new-second": "Enter the same PIN again to confirm",
+const DESCRIPTION_KEYS: Record<PinRequestType, string> = {
+	"current": "pin.enterDescription",
+	"new-first": "pin.createDescription",
+	"new-second": "pin.confirmDescription",
 }
 
 const PIN_ANIMATIONS = `
@@ -47,6 +48,7 @@ const PIN_ANIMATIONS = `
  * position-based buttons (1-9) on this grid.
  */
 export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps) {
+	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
 
 	// Reset pin when type changes (e.g. new-first → new-second)
@@ -117,10 +119,10 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 				style={{ animation: "pinFadeIn 0.3s ease-out" }}
 			>
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
-					{TITLES[type]}
+					{t(TITLE_KEYS[type])}
 				</Text>
 				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
-					{DESCRIPTIONS[type]}
+					{t(DESCRIPTION_KEYS[type])}
 				</Text>
 
 				{/* PIN display — masked dots */}
@@ -197,7 +199,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						disabled={pin.length === 0}
 						flex={1}
 					>
-						Backspace
+						{t("pin.backspace")}
 					</Button>
 					<Button
 						onClick={handleSubmit}
@@ -211,7 +213,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						disabled={pin.length === 0}
 						flex={1}
 					>
-						{type === "current" ? "Unlock" : "Confirm"}
+						{type === "current" ? t("pin.unlock") : t("confirm", { ns: "common" })}
 					</Button>
 				</Flex>
 
@@ -226,7 +228,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						w="100%"
 						mt="3"
 					>
-						Cancel
+						{t("cancel", { ns: "common" })}
 					</Button>
 				)}
 

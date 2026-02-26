@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "PINを入力",
+		"createPin": "PINを作成",
+		"confirmPin": "PINを確認",
+		"enterDescription": "KeepKeyに表示された位置を使用してPINを入力してください",
+		"createDescription": "KeepKeyの画面を見て、位置をタップして新しいPINを設定してください",
+		"confirmDescription": "確認のため同じPINをもう一度入力してください",
+		"backspace": "バックスペース",
+		"unlock": "ロック解除"
+	},
+	"passphrase": {
+		"title": "パスフレーズを入力",
+		"description": "お使いのデバイスはパスフレーズ保護が有効になっています。ロックを解除するにはBIP-39パスフレーズを入力してください。デフォルトのウォレットの場合は空のままにしてください。",
+		"placeholder": "パスフレーズ（任意）",
+		"warning": "パスフレーズは大文字と小文字を区別します。異なるパスフレーズは完全に異なるウォレットを生成します。",
+		"unlock": "ロック解除"
+	},
+	"pairing": {
+		"wantsToConnect": "がKeepKeyに接続しようとしています",
+		"approve": "承認",
+		"reject": "拒否",
+		"keyboardHint": "Enterで承認 · Escで拒否"
+	},
+	"signing": {
+		"title": "署名リクエスト",
+		"chain": "チェーン",
+		"from": "送信元",
+		"to": "送信先",
+		"value": "値",
+		"chainId": "チェーンID",
+		"data": "データ",
+		"approve": "承認",
+		"reject": "拒否",
+		"keyboardHint": "Enterで承認 · Escで拒否",
+		"methodEthSignTx": "ETHトランザクション署名",
+		"methodEthSignTypedData": "ETH型付きデータ署名",
+		"methodEthSignMessage": "ETHメッセージ署名",
+		"methodBtcSignTx": "BTCトランザクション署名",
+		"methodXrpSignTx": "XRPトランザクション署名",
+		"methodCosmosSign": "Cosmos署名",
+		"methodThorchainTransfer": "THORChain送金",
+		"methodThorchainDeposit": "THORChain入金",
+		"methodMayaTransfer": "Maya送金",
+		"methodMayaDeposit": "Maya入金",
+		"methodOsmosisSign": "Osmosis署名"
+	},
+	"claimed": {
+		"title": "デバイス使用中",
+		"description": "KeepKeyが検出されましたが、現在別のアプリケーション（KeepKey Desktop、ブラウザ拡張機能、scdaemonなど）が使用しています。",
+		"toConnect": "接続するには：",
+		"step1": "1. KeepKeyを使用している他のアプリを閉じてください",
+		"step2": "2. デバイスを抜いて再接続してください",
+		"step3": "3. このアプリは自動的に再接続します",
+		"waiting": "デバイスが利用可能になるまで待機中...",
+		"defaultError": "別のプロセスがデバイスを使用しています"
+	}
+}

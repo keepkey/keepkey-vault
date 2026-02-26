@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
+import { LanguageSelector } from "../i18n/LanguageSelector"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
@@ -97,7 +99,7 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 // ── Verification Badge ──────────────────────────────────────────────
 
-function VerificationBadge({ verified }: { verified?: boolean }) {
+function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: string) => string }) {
 	if (verified === undefined) return null
 	if (verified) {
 		return (
@@ -106,7 +108,7 @@ function VerificationBadge({ verified }: { verified?: boolean }) {
 					<circle cx="12" cy="12" r="10" fill="#22C55E" />
 					<path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 				</svg>
-				<Text fontSize="9px" color="#22C55E" fontWeight="600">Official</Text>
+				<Text fontSize="9px" color="#22C55E" fontWeight="600">{t("official")}</Text>
 			</Flex>
 		)
 	}
@@ -116,7 +118,7 @@ function VerificationBadge({ verified }: { verified?: boolean }) {
 				<path d="M12 2L1 21h22L12 2z" fill="#FB923C" />
 				<path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
 			</svg>
-			<Text fontSize="9px" color="#FB923C" fontWeight="600">Unknown</Text>
+			<Text fontSize="9px" color="#FB923C" fontWeight="600">{t("unknown")}</Text>
 		</Flex>
 	)
 }
@@ -124,6 +126,7 @@ function VerificationBadge({ verified }: { verified?: boolean }) {
 // ── Main Component ──────────────────────────────────────────────────
 
 export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged }: DeviceSettingsDrawerProps) {
+	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
 	const [label, setLabel] = useState(deviceState.label || "")
@@ -190,10 +193,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setPinging(true)
 		try {
 			const result = await rpcRequest("ping", { msg: "Hello KeepKey!" }, 10000)
-			setPingResult(typeof result === "string" ? result : "Pong!")
+			setPingResult(typeof result === "string" ? result : t("pong"))
 			setTimeout(() => setPingResult(""), 3000)
 		} catch {
-			setPingResult("Ping failed")
+			setPingResult(t("pingFailed"))
 			setTimeout(() => setPingResult(""), 3000)
 		}
 		setPinging(false)
@@ -206,7 +209,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			const result = await rpcRequest("verifySeed", { wordCount: verifyWordCount }, 600000) as { success: boolean; message: string }
 			setVerifyResult(result)
 		} catch (e: any) {
-			const msg = typeof e?.message === "string" ? e.message : "Verification failed"
+			const msg = typeof e?.message === "string" ? e.message : t("verificationFailed")
 			setVerifyResult({ success: false, message: msg })
 		}
 		setVerifying(false)
@@ -248,13 +251,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		try {
 			const info = await onCheckForUpdate()
 			if (info?.updateAvailable) {
-				setUpdateMessage(`Version ${info.version} available`)
+				setUpdateMessage(t("versionAvailable", { version: info.version }))
 			} else {
-				setUpdateMessage("You are on the latest version")
+				setUpdateMessage(t("onLatestVersion"))
 				updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
 			}
 		} catch (e: any) {
-			setUpdateMessage(e.message || "Check failed")
+			setUpdateMessage(e.message || t("checkFailed"))
 			updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
 		}
 		setCheckingUpdate(false)
@@ -299,7 +302,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 	const securityValue = (val: boolean | undefined): string => {
 		if (featuresError || features === null) return "—"
-		return val ? "Enabled" : "Disabled"
+		return val ? t("enabled", { ns: "common" }) : t("disabled", { ns: "common" })
 	}
 
 	return (
@@ -350,9 +353,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					bg="kk.bg"
 					zIndex={1}
 				>
-					<Text fontSize="lg" fontWeight="600" color="kk.textPrimary">Settings</Text>
+					<Text fontSize="lg" fontWeight="600" color="kk.textPrimary">{t("title")}</Text>
 					<IconButton
-						aria-label="Close settings"
+						aria-label={t("closeSettings")}
 						onClick={onClose}
 						size="sm"
 						variant="ghost"
@@ -370,40 +373,40 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				<VStack gap="3" align="stretch" p="4">
 
 					{/* ── Device Identity ─────────────────────────────── */}
-					<Section title="Device">
+					<Section title={t("device")}>
 						<VStack gap="2" align="stretch">
-							<InfoRow label="Label" value={features?.label || deviceState.label || "—"} />
-							<InfoRow label="Device ID" value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
+							<InfoRow label={t("label")} value={features?.label || deviceState.label || "—"} />
+							<InfoRow label={t("deviceId")} value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
 							{/* Firmware with verification badge */}
 							<Flex justify="space-between" align="center">
-								<Text fontSize="xs" color="kk.textSecondary">Firmware</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{t("firmware")}</Text>
 								<Flex align="center" gap="2">
 									<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{deviceState.firmwareVersion || "—"}</Text>
-									<VerificationBadge verified={deviceState.firmwareVerified} />
+									<VerificationBadge verified={deviceState.firmwareVerified} t={t} />
 								</Flex>
 							</Flex>
 							{/* Bootloader with verification badge */}
 							<Flex justify="space-between" align="center">
-								<Text fontSize="xs" color="kk.textSecondary">Bootloader</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{t("bootloader")}</Text>
 								<Flex align="center" gap="2">
 									<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{deviceState.bootloaderVersion || "—"}</Text>
-									<VerificationBadge verified={deviceState.bootloaderVerified} />
+									<VerificationBadge verified={deviceState.bootloaderVerified} t={t} />
 								</Flex>
 							</Flex>
-							<InfoRow label="Latest FW" value={deviceState.latestFirmware || "—"} />
-							<InfoRow label="Transport" value={deviceState.activeTransport || "—"} />
+							<InfoRow label={t("latestFw")} value={deviceState.latestFirmware || "—"} />
+							<InfoRow label={t("transport")} value={deviceState.activeTransport || "—"} />
 							{/* Collapsible hash display for advanced users */}
 							{(deviceState.firmwareHash || deviceState.bootloaderHash) && (
 								<Box mt="1" pt="2" borderTop="1px solid" borderColor="kk.border">
 									{deviceState.firmwareHash && (
 										<Box mb="1">
-											<Text fontSize="9px" color="kk.textSecondary">FW Hash</Text>
+											<Text fontSize="9px" color="kk.textSecondary">{t("fwHash")}</Text>
 											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.firmwareHash}</Text>
 										</Box>
 									)}
 									{deviceState.bootloaderHash && (
 										<Box>
-											<Text fontSize="9px" color="kk.textSecondary">BL Hash</Text>
+											<Text fontSize="9px" color="kk.textSecondary">{t("blHash")}</Text>
 											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.bootloaderHash}</Text>
 										</Box>
 									)}
@@ -412,12 +415,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 
 						<Box mt="4">
-							<Text fontSize="xs" color="kk.textSecondary" mb="2">Change Label</Text>
+							<Text fontSize="xs" color="kk.textSecondary" mb="2">{t("changeLabel")}</Text>
 							<Flex gap="2">
 								<Input
 									value={label}
 									onChange={(e) => setLabel(e.target.value)}
-									placeholder="My KeepKey"
+									placeholder={t("myKeepKey")}
 									bg="kk.bg"
 									border="1px solid"
 									borderColor="kk.border"
@@ -426,24 +429,24 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									flex="1"
 								/>
 								<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={saveLabel} disabled={saving || !label.trim()}>
-									{saving ? "..." : "Save"}
+									{saving ? "..." : t("save", { ns: "common" })}
 								</Button>
 							</Flex>
-							{labelSaved && <Text fontSize="xs" color="kk.success" mt="1">Label saved</Text>}
+							{labelSaved && <Text fontSize="xs" color="kk.success" mt="1">{t("labelSaved")}</Text>}
 						</Box>
 
 						<Flex gap="3" align="center" mt="3">
 							<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={pingDevice} disabled={pinging}>
-								{pinging ? "..." : "Ping Device"}
+								{pinging ? "..." : t("pingDevice")}
 							</Button>
 							{pingResult && <Text fontSize="xs" color="kk.success">{pingResult}</Text>}
 						</Flex>
 					</Section>
 
 					{/* ── Security ────────────────────────────────────── */}
-					<Section title="Security">
+					<Section title={t("security")}>
 						{featuresError && (
-							<Text fontSize="xs" color="kk.error" mb="2">Could not load device features</Text>
+							<Text fontSize="xs" color="kk.error" mb="2">{t("couldNotLoadFeatures")}</Text>
 						)}
 
 						{/* ── PIN row ────────────────────────────── */}
@@ -462,9 +465,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</svg>
 								</Flex>
 								<Box>
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">PIN Protection</Text>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("pinProtection")}</Text>
 									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-										{features?.pinProtection ? "Enabled" : "Not set"}
+										{features?.pinProtection ? t("enabled", { ns: "common" }) : t("notSet", { ns: "common" })}
 									</Text>
 								</Box>
 							</Flex>
@@ -485,7 +488,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										transition="all 0.15s"
 										onClick={handleChangePin}
 									>
-										{changingPin ? "..." : "Change"}
+										{changingPin ? "..." : t("change", { ns: "common" })}
 									</Box>
 									{!removePinConfirm ? (
 										<Box
@@ -502,7 +505,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											transition="all 0.15s"
 											onClick={() => setRemovePinConfirm(true)}
 										>
-											Remove
+											{t("remove", { ns: "common" })}
 										</Box>
 									) : (
 										<Flex gap="2" align="center">
@@ -521,7 +524,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												transition="all 0.15s"
 												onClick={handleRemovePin}
 											>
-												{removingPin ? "..." : "Confirm"}
+												{removingPin ? "..." : t("confirm", { ns: "common" })}
 											</Box>
 											<Box
 												as="button"
@@ -533,7 +536,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												_hover={{ color: "kk.textPrimary" }}
 												onClick={() => setRemovePinConfirm(false)}
 											>
-												Cancel
+												{t("cancel", { ns: "common" })}
 											</Box>
 										</Flex>
 									)}
@@ -554,7 +557,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									transition="all 0.15s"
 									onClick={handleChangePin}
 								>
-									{changingPin ? "..." : "Add PIN"}
+									{changingPin ? "..." : t("addPin")}
 								</Box>
 							)}
 						</Flex>
@@ -576,13 +579,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</svg>
 								</Flex>
 								<Box>
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">BIP-39 Passphrase</Text>
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("bip39Passphrase")}</Text>
 									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
 										{togglingPassphrase
-											? "Confirm on device..."
+											? t("confirmOnDevice")
 											: features?.passphraseProtection
-												? "Required on each connection"
-												: "Adds an extra word to your seed"
+												? t("requiredOnEachConnection")
+												: t("addsExtraWord")
 										}
 									</Text>
 								</Box>
@@ -605,11 +608,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										</svg>
 									</Flex>
 									<Box>
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Verify Seed</Text>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("verifySeed")}</Text>
 										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
 											{verifyResult
-												? verifyResult.success ? "Seed verified!" : verifyResult.message
-												: "Confirm your recovery phrase"
+												? verifyResult.success ? t("seedVerified") : verifyResult.message
+												: t("confirmRecoveryPhrase")
 											}
 										</Text>
 									</Box>
@@ -629,7 +632,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									transition="all 0.15s"
 									onClick={verifySeed}
 								>
-									{verifying ? "..." : "Verify"}
+									{verifying ? "..." : t("verify", { ns: "common" })}
 								</Box>
 							</Flex>
 							{/* Word count selector */}
@@ -650,7 +653,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										transition="all 0.15s"
 										onClick={() => setVerifyWordCount(wc)}
 									>
-										{wc} words
+										{t("wordCount", { count: wc })}
 									</Box>
 								))}
 							</Flex>
@@ -658,7 +661,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Application Settings ────────────────────────── */}
-					<Section title="Application" defaultOpen={false}>
+					<Section title={t("application")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">
@@ -671,9 +674,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										</svg>
 									</Flex>
 									<Box>
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">API Bridge</Text>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("apiBridge")}</Text>
 										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-											REST server for dApps and SDKs on port 1646.
+											{t("apiBridgeDescription")}
 										</Text>
 									</Box>
 								</Flex>
@@ -696,7 +699,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											boxShadow={appSettings.restApiEnabled ? "0 0 6px rgba(34,197,94,0.5)" : "0 0 6px rgba(239,68,68,0.4)"}
 										/>
 										<Text fontSize="sm" fontWeight="500" color={appSettings.restApiEnabled ? "#22C55E" : "#EF4444"}>
-											{appSettings.restApiEnabled ? "Running" : "Stopped"}
+											{appSettings.restApiEnabled ? t("running") : t("stopped")}
 										</Text>
 									</Flex>
 									{appSettings.restApiEnabled && (
@@ -715,7 +718,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											_hover={{ textDecoration: "underline" }}
 											onClick={openSwagger}
 										>
-											API Docs
+											{t("apiDocs")}
 										</Box>
 										{onOpenAuditLog && (
 											<Box
@@ -726,7 +729,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												_hover={{ textDecoration: "underline" }}
 												onClick={onOpenAuditLog}
 											>
-												Audit Log
+												{t("auditLog")}
 											</Box>
 										)}
 										{onOpenPairedApps && (
@@ -738,7 +741,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												_hover={{ textDecoration: "underline" }}
 												onClick={onOpenPairedApps}
 											>
-												Paired Apps
+												{t("pairedApps")}
 											</Box>
 										)}
 									</Flex>
@@ -749,7 +752,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
 								<Flex justify="space-between" align="center">
 									<Box>
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">App Version</Text>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("appVersion")}</Text>
 										<Text fontSize="xs" color="kk.textSecondary" mt="0.5" fontFamily="mono">
 											{appVersion ? `v${appVersion.version}` : "—"}
 											{appVersion?.channel && appVersion.channel !== "stable" ? ` (${appVersion.channel})` : ""}
@@ -770,7 +773,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										transition="all 0.15s"
 										onClick={handleCheckForUpdate}
 									>
-										{checkingUpdate ? "Checking..." : "Check for Updates"}
+										{checkingUpdate ? t("checking") : t("checkForUpdates")}
 									</Box>
 								</Flex>
 								{updateMessage && (
@@ -779,25 +782,31 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Text>
 								)}
 							</Box>
+
+							{/* ── Language ────────────────────── */}
+							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+								<Text fontSize="sm" color="kk.textPrimary" fontWeight="500" mb="3">{t("language")}</Text>
+								<LanguageSelector />
+							</Box>
 						</VStack>
 					</Section>
 
 					{/* ── Danger Zone ─────────────────────────────────── */}
-					<Section title="Danger Zone" color="kk.error" defaultOpen={false}>
+					<Section title={t("dangerZone")} color="kk.error" defaultOpen={false}>
 						<Text fontSize="xs" color="kk.textSecondary" mb="3">
-							Wiping erases all data on the device. Make sure you have your recovery phrase backed up.
+							{t("wipeWarning")}
 						</Text>
 						{!wipeConfirm ? (
 							<Button size="sm" variant="outline" borderColor="kk.error" color="kk.error" _hover={{ bg: "rgba(255,23,68,0.1)" }} onClick={() => setWipeConfirm(true)}>
-								Wipe Device
+								{t("wipeDevice")}
 							</Button>
 						) : (
 							<Flex gap="3">
 								<Button size="sm" bg="kk.error" color="white" _hover={{ opacity: 0.8 }} onClick={wipeDevice} disabled={wiping}>
-									{wiping ? "Wiping..." : "Confirm Wipe"}
+									{wiping ? t("wiping") : t("confirmWipe")}
 								</Button>
 								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setWipeConfirm(false)}>
-									Cancel
+									{t("cancel", { ns: "common" })}
 								</Button>
 							</Flex>
 						)}

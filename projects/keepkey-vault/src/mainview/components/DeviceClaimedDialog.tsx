@@ -1,7 +1,9 @@
 import { Box, Text, Flex, VStack, Image } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import connectSvg from "../assets/svg/connect-keepkey.svg"
 
 export function DeviceClaimedDialog({ error }: { error: string }) {
+  const { t } = useTranslation("device")
   return (
     <Box
       position="absolute"
@@ -22,13 +24,12 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
       <VStack gap={3} align="stretch">
         <Flex align="center" gap={2}>
           <Text fontSize="lg" fontWeight="bold" color="blue.300">
-            Device In Use
+            {t("claimed.title")}
           </Text>
         </Flex>
 
         <Text fontSize="sm" color="gray.300" lineHeight="tall">
-          Your KeepKey was detected but is currently claimed by another application
-          (e.g. KeepKey Desktop, a browser extension, or scdaemon).
+          {t("claimed.description")}
         </Text>
 
         <Box bg="rgba(0,0,0,0.3)" borderRadius="md" px={3} py={2}>
@@ -42,16 +43,16 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
         </Flex>
 
         <Text fontSize="sm" color="gray.400" fontWeight="semibold">
-          To connect:
+          {t("claimed.toConnect")}
         </Text>
         <VStack gap={1} align="stretch" pl={2}>
-          <Text fontSize="sm" color="gray.400">1. Close other apps using your KeepKey</Text>
-          <Text fontSize="sm" color="gray.400">2. Unplug and replug the device</Text>
-          <Text fontSize="sm" color="gray.400">3. This app will reconnect automatically</Text>
+          <Text fontSize="sm" color="gray.400">{t("claimed.step1")}</Text>
+          <Text fontSize="sm" color="gray.400">{t("claimed.step2")}</Text>
+          <Text fontSize="sm" color="gray.400">{t("claimed.step3")}</Text>
         </VStack>
 
         <Text fontSize="xs" color="gray.600" textAlign="center" mt={1}>
-          Waiting for device to become available...
+          {t("claimed.waiting")}
         </Text>
       </VStack>
     </Box>

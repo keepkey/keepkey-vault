@@ -1,0 +1,20 @@
+{
+	"receive": "Receber",
+	"send": "Enviar",
+	"tokens": "Tokens",
+	"tokenCount_one": "{{count}} token",
+	"tokenCount_other": "{{count}} tokens",
+	"scam": "GOLPE",
+	"spamSuspected": "SPAM?",
+	"showFiltered_one": "Mostrar {{count}} token filtrado",
+	"showFiltered_other": "Mostrar {{count}} tokens filtrados",
+	"hideFiltered_one": "Ocultar {{count}} token filtrado",
+	"hideFiltered_other": "Ocultar {{count}} tokens filtrados",
+	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"suspectedSpam": "Spam suspeito ({{count}})",
+	"markAsSafe": "Marcar como seguro",
+	"hideToken": "Ocultar token",
+	"revertToAutoDetect": "Reverter para detecção automática",
+	"unhide": "Reexibir",
+	"addCustomToken": "Adicionar token personalizado"
+}

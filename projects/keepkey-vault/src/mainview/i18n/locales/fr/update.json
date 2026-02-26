@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "Une nouvelle version est disponible",
+	"downloadingWithProgress": "Téléchargement de la mise à jour... {{progress}}%",
+	"downloading": "Téléchargement de la mise à jour...",
+	"readyToInstall": "Mise à jour téléchargée et prête",
+	"applying": "Installation de la mise à jour, redémarrage...",
+	"errorWithMessage": "Erreur de mise à jour : {{error}}",
+	"download": "Télécharger",
+	"later": "Plus tard",
+	"restartToUpdate": "Redémarrer pour mettre à jour"
+}

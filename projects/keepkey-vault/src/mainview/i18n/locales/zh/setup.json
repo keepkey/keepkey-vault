@@ -1,0 +1,105 @@
+{
+	"title": "KeepKey 设置",
+	"subtitle": "安全的多链硬件钱包",
+	"stepDescriptions": {
+		"welcome": "欢迎使用 KeepKey",
+		"bootloader": "验证并更新引导程序",
+		"firmware": "验证并更新固件",
+		"initChoose": "选择设置方式",
+		"initProgress": "正在设置钱包",
+		"initLabel": "为设备命名",
+		"complete": "设置完成！"
+	},
+	"visibleSteps": {
+		"bootloader": "引导程序",
+		"firmware": "固件",
+		"setup": "设置"
+	},
+	"welcome": {
+		"title": "欢迎使用 KeepKey",
+		"oobIntro": "让我们更新固件并设置您的钱包。",
+		"intro": "让我们设置您的硬件钱包。",
+		"startingSetup": "正在启动设置...",
+		"detectingDevice": "正在检测设备状态..."
+	},
+	"bootloader": {
+		"title": "引导程序更新",
+		"description": "您的引导程序需要更新以确保安全性和兼容性。",
+		"current": "当前",
+		"latest": "最新",
+		"outdated": "过期",
+		"updatingBootloader": "正在更新引导程序...",
+		"doNotUnplugBrick": "请勿拔出设备。中断可能导致设备永久损坏。",
+		"updateFailed": "更新失败",
+		"tryAgain": "重试",
+		"enterFirmwareUpdateMode": "进入固件更新模式",
+		"step1Unplug": "1. 拔出您的 KeepKey",
+		"step2Hold": "2. 按住设备上的按钮",
+		"step3Plugin": "3. 按住按钮的同时插入 USB 线",
+		"step4Release": "4. 当引导程序屏幕出现时松开按钮",
+		"listeningForBootloader": "正在监听引导程序模式下的设备...",
+		"readyDetectBootloader": "已准备好 — 检测引导程序",
+		"skipBootloaderUpdate": "跳过引导程序更新"
+	},
+	"firmware": {
+		"title": "固件更新",
+		"oobDescription": "您的设备使用出厂固件。需要进行关键更新。",
+		"description": "您的设备有可用的固件更新。",
+		"firmwareLabel": "固件",
+		"notInstalled": "未安装",
+		"important": "重要：",
+		"doNotDisconnect": "更新期间请勿断开设备连接",
+		"mayNeedConfirm": "您可能需要在设备屏幕上确认",
+		"fundsRemainSafe": "您的资金和设置将保持安全",
+		"updatingFirmware": "正在更新固件...",
+		"doNotUnplug": "请勿拔出设备。",
+		"deviceRebooting": "设备正在重启...",
+		"rebootingMessage": "您的 KeepKey 正在使用新固件重启。请稍候...",
+		"firmwareVerified": "固件已验证为官方版本",
+		"firmwareHashNotFound": "在清单中未找到固件哈希",
+		"updateFirmwareTo": "将固件更新至 v{{version}}",
+		"skipUpdate": "跳过更新"
+	},
+	"initChoose": {
+		"title": "设置您的钱包",
+		"description": "选择如何设置您的 KeepKey",
+		"createNewWallet": "创建新钱包",
+		"createDescription": "在设备上生成新的助记词",
+		"createWallet": "创建钱包",
+		"recoverExistingWallet": "恢复现有钱包",
+		"recoverDescription": "在设备上输入您的恢复助记词",
+		"recoverWallet": "恢复钱包"
+	},
+	"initProgress": {
+		"creatingWallet": "正在创建钱包...",
+		"recoveringWallet": "正在恢复钱包...",
+		"followPromptsCreate": "请按照 KeepKey 设备屏幕上的提示操作。请仔细记下助记词 — 这是您的备份。",
+		"followPromptsRecover": "请按照 KeepKey 设备屏幕上的提示操作。使用设备输入您的恢复助记词。",
+		"followPrompts": "请按照 KeepKey 设备屏幕上的提示操作。",
+		"lookAtDevice": "请查看 KeepKey 设备并按照屏幕上的说明操作。",
+		"failedToCreate": "创建钱包失败",
+		"failedToRecover": "恢复钱包失败"
+	},
+	"initLabel": {
+		"walletCreated": "钱包已创建！",
+		"walletRecovered": "钱包已恢复！",
+		"giveAName": "给您的 KeepKey 起一个友好的名称以便于识别",
+		"placeholder": "我的 KeepKey",
+		"setDeviceName": "设置设备名称",
+		"skipForNow": "暂时跳过"
+	},
+	"complete": {
+		"walletCreated": "钱包已创建！",
+		"walletRecovered": "钱包已恢复！",
+		"deviceReady": "您的 KeepKey{{label}} 已就绪",
+		"recoveredDescription": "您的钱包已成功从恢复短语还原",
+		"createdDescription": "您的新钱包已安全并可以使用",
+		"startUsing": "开始使用 KeepKey"
+	},
+	"footer": {
+		"stepOf": "第 {{current}} 步，共 {{total}} 步",
+		"settingUpWallet": "正在设置钱包...",
+		"previous": "上一步",
+		"next": "下一步"
+	}
+}

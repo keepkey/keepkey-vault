@@ -1,0 +1,15 @@
+{
+	"receive": "Получить",
+	"sendToAddress": "Отправьте {{symbol}} на этот адрес",
+	"index": "Индекс",
+	"remaining": "Осталось {{remaining}}",
+	"address": "Адрес",
+	"extendedPublicKey": "Расширенный открытый ключ (xpub)",
+	"path": "Путь",
+	"editDerivationPath": "Редактировать путь деривации",
+	"checkDevice": "Проверка устройства...",
+	"verifyOnDevice": "Проверить на устройстве",
+	"derivingAddress": "Получение адреса...",
+	"noAddressDerived": "Адрес ещё не получен",
+	"deriveAddress": "Получить адрес"
+}

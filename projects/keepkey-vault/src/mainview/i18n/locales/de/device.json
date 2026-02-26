@@ -1,0 +1,58 @@
+{
+	"pin": {
+		"enterPin": "PIN eingeben",
+		"createPin": "PIN erstellen",
+		"confirmPin": "PIN bestätigen",
+		"enterDescription": "Verwenden Sie die auf Ihrem KeepKey angezeigten Positionen, um Ihre PIN einzugeben",
+		"createDescription": "Schauen Sie auf den Bildschirm Ihres KeepKey und tippen Sie auf die Positionen, um eine neue PIN festzulegen",
+		"confirmDescription": "Geben Sie die gleiche PIN erneut ein, um zu bestätigen",
+		"backspace": "Rücktaste",
+		"unlock": "Entsperren"
+	},
+	"passphrase": {
+		"title": "Passphrase eingeben",
+		"description": "Ihr Gerät hat den Passphrase-Schutz aktiviert. Geben Sie Ihre BIP-39-Passphrase ein, um zu entsperren. Lassen Sie das Feld leer für die Standard-Wallet.",
+		"placeholder": "Passphrase (optional)",
+		"warning": "Passphrasen unterscheiden Groß- und Kleinschreibung. Eine andere Passphrase erzeugt eine völlig andere Wallet.",
+		"unlock": "Entsperren"
+	},
+	"pairing": {
+		"wantsToConnect": "möchte sich mit Ihrem KeepKey verbinden",
+		"approve": "Genehmigen",
+		"reject": "Ablehnen",
+		"keyboardHint": "Enter zum Genehmigen · Esc zum Ablehnen"
+	},
+	"signing": {
+		"title": "Signierungsanfrage",
+		"chain": "Blockchain",
+		"from": "Von",
+		"to": "An",
+		"value": "Wert",
+		"chainId": "Chain-ID",
+		"data": "Daten",
+		"approve": "Genehmigen",
+		"reject": "Ablehnen",
+		"keyboardHint": "Enter zum Genehmigen · Esc zum Ablehnen",
+		"methodEthSignTx": "ETH-Transaktion signieren",
+		"methodEthSignTypedData": "ETH typisierte Daten signieren",
+		"methodEthSignMessage": "ETH-Nachricht signieren",
+		"methodBtcSignTx": "BTC-Transaktion signieren",
+		"methodXrpSignTx": "XRP-Transaktion signieren",
+		"methodCosmosSign": "Cosmos signieren",
+		"methodThorchainTransfer": "THORChain-Überweisung",
+		"methodThorchainDeposit": "THORChain-Einzahlung",
+		"methodMayaTransfer": "Maya-Überweisung",
+		"methodMayaDeposit": "Maya-Einzahlung",
+		"methodOsmosisSign": "Osmosis signieren"
+	},
+	"claimed": {
+		"title": "Gerät wird verwendet",
+		"description": "Ihr KeepKey wurde erkannt, wird aber derzeit von einer anderen Anwendung verwendet (z.B. KeepKey Desktop, eine Browsererweiterung oder scdaemon).",
+		"toConnect": "Zum Verbinden:",
+		"step1": "1. Schließen Sie andere Apps, die Ihren KeepKey verwenden",
+		"step2": "2. Trennen Sie das Gerät und schließen Sie es erneut an",
+		"step3": "3. Diese App verbindet sich automatisch neu",
+		"waiting": "Warte auf Verfügbarkeit des Geräts...",
+		"defaultError": "Gerät wird von einem anderen Prozess verwendet"
+	}
+}

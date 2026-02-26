@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
+import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
@@ -37,6 +38,7 @@ interface SendFormProps {
 }
 
 export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride }: SendFormProps) {
+	const { t } = useTranslation("send")
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState("")
@@ -86,8 +88,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 	const handleBuild = useCallback(async () => {
 		if (!recipient || (!amount && !isMax)) return
-		if (recipientTooShort) { setError('Address looks too short — please verify'); return }
-		if (exceedsBalance) { setError('Amount exceeds available balance'); return }
+		if (recipientTooShort) { setError(t("addressTooShort")); return }
+		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 		setLoading(true)
 		setError(null)
 
@@ -109,7 +111,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setBuildResult(result)
 			setPhase('built')
 		} catch (e: any) {
-			setError(e.message || 'Failed to build transaction')
+			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
 	}, [chain, recipient, amount, memo, feeLevel, isMax, recipientTooShort, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride])
@@ -124,7 +126,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setSignedTx(result)
 			setPhase('signed')
 		} catch (e: any) {
-			setError(e.message || 'Signing failed')
+			setError(e.message || t("signingFailed"))
 		}
 		setLoading(false)
 	}, [chain, buildResult])
@@ -142,7 +144,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setTxid(result.txid)
 			setPhase('broadcast')
 		} catch (e: any) {
-			setError(e.message || 'Broadcast failed')
+			setError(e.message || t("broadcastFailed"))
 		}
 		setLoading(false)
 	}, [chain, signedTx])
@@ -217,7 +219,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{isTokenSend && (
 				<Flex align="center" justify="space-between" bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" px="3" py="2" borderRadius="lg">
 					<Flex align="center" gap="2">
-						<Text fontSize="xs" color="kk.gold" fontWeight="600">Sending Token:</Text>
+						<Text fontSize="xs" color="kk.gold" fontWeight="600">{t("sendingToken")}</Text>
 						<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{token!.symbol}</Text>
 						<Text fontSize="10px" color="kk.textMuted">{token!.name}</Text>
 					</Flex>
@@ -231,7 +233,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 			{/* Balance display */}
 			<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
-				<Text fontSize="xs" color="kk.textMuted">Available</Text>
+				<Text fontSize="xs" color="kk.textMuted">{t("available")}</Text>
 				<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
 					{formatBalance(displayBalance)} {displaySymbol}
 				</Text>
@@ -239,7 +241,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* Gas balance hint for token sends */}
 			{isTokenSend && balance && (
 				<Flex justify="space-between" align="center" px="3">
-					<Text fontSize="10px" color="kk.textMuted">Gas ({chain.symbol})</Text>
+					<Text fontSize="10px" color="kk.textMuted">{t("gas")} ({chain.symbol})</Text>
 					<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
 						{formatBalance(balance.balance)} {chain.symbol}
 					</Text>
@@ -250,12 +252,12 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{phase === 'input' && (
 				<>
 					<Box>
-						<Text fontSize="xs" color="kk.textMuted" mb="1">Recipient</Text>
+						<Text fontSize="xs" color="kk.textMuted" mb="1">{t("recipient")}</Text>
 						<Flex gap="2">
 							<Input
 								value={recipient}
 								onChange={(e) => setRecipient(e.target.value)}
-								placeholder="Address"
+								placeholder={t("addressPlaceholder")}
 								bg="kk.bg"
 								border="1px solid"
 								borderColor="kk.border"
@@ -275,7 +277,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								px="2"
 								minW="36px"
 								h="32px"
-								title="Scan QR code"
+								title={t("scanQrCode")}
 							>
 								<QrIcon />
 							</Button>
@@ -284,10 +286,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					<Flex gap="2" align="end">
 						<Box flex="1">
 							<Field
-								label={`Amount (${displaySymbol})`}
+								label={`${t("amount")} (${displaySymbol})`}
 								value={isMax ? 'MAX' : amount}
 								onChange={(v) => { setIsMax(false); setAmount(v) }}
-								placeholder="0.00"
+								placeholder={t("amountPlaceholder")}
 								disabled={isMax}
 							/>
 						</Box>
@@ -301,24 +303,24 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							onClick={() => { setIsMax(!isMax); setAmount("") }}
 							mb="0.5"
 						>
-							Max
+							{t("max")}
 						</Button>
 					</Flex>
 
 					{needsMemo && (
 						<Field
-							label={chain.chainFamily === 'xrp' ? "Memo / Destination Tag" : "Memo"}
+							label={chain.chainFamily === 'xrp' ? t("memoLabel") : t("memoLabelShort")}
 							value={memo}
 							onChange={setMemo}
-							placeholder="Optional"
+							placeholder={t("memoPlaceholder")}
 						/>
 					)}
 
 					{chain.chainFamily === 'utxo' && (
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Fee Priority</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t("feePriority")}</Text>
 							<Flex gap="2">
-								{[{ label: 'Slow', val: 1 }, { label: 'Normal', val: 5 }, { label: 'Fast', val: 10 }].map((opt) => (
+								{[{ label: t("feeSlow"), val: 1 }, { label: t("feeNormal"), val: 5 }, { label: t("feeFast"), val: 10 }].map((opt) => (
 									<Button
 										key={opt.val}
 										size="xs"
@@ -338,7 +340,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					)}
 
 					{exceedsBalance && (
-						<Text fontSize="xs" color="kk.error">Amount exceeds available balance ({formatBalance(displayBalance)} {displaySymbol})</Text>
+						<Text fontSize="xs" color="kk.error">{t("exceedsBalance", { balance: formatBalance(displayBalance), symbol: displaySymbol })}</Text>
 					)}
 
 					<Button
@@ -350,7 +352,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						disabled={loading || !recipient || (!amount && !isMax)}
 						w="full"
 					>
-						{loading ? "Building Transaction..." : "Build Transaction"}
+						{loading ? t("buildingTransaction") : t("buildTransaction")}
 					</Button>
 				</>
 			)}
@@ -359,17 +361,17 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{phase === 'built' && buildResult && (
 				<>
 					<Box bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" borderRadius="lg" p="4">
-						<Text fontSize="xs" color="kk.textMuted" mb="2">Transaction Ready</Text>
+						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
-							<Text fontSize="xs" color="kk.textSecondary">To</Text>
+							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
 							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="250px" truncate>{recipient}</Text>
 						</Flex>
 						<Flex justify="space-between" mb="1">
-							<Text fontSize="xs" color="kk.textSecondary">Amount</Text>
+							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
 							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
 						</Flex>
 						<Flex justify="space-between">
-							<Text fontSize="xs" color="kk.textSecondary">Fee</Text>
+							<Text fontSize="xs" color="kk.textSecondary">{t("fee")}</Text>
 							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
 						</Flex>
 					</Box>
@@ -381,7 +383,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							onClick={() => setShowPayload(!showPayload)}
 							_hover={{ color: "kk.textSecondary" }}
 						>
-							{showPayload ? 'Hide' : 'Show'} hdwallet payload
+							{showPayload ? t("hidePayload") : t("showPayload")}
 						</Button>
 						{showPayload && buildResult.unsignedTx && (
 							<Box bg="rgba(0,0,0,0.3)" borderRadius="md" p="2" mt="1" maxH="300px" overflow="auto">
@@ -402,7 +404,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							_hover={{ bg: "rgba(255,255,255,0.06)" }}
 							onClick={() => setPhase('input')}
 						>
-							Back
+							{t("back", { ns: "common" })}
 						</Button>
 						<Button
 							size="sm"
@@ -413,7 +415,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							onClick={handleSign}
 							disabled={loading}
 						>
-							{loading ? "Confirm on Device..." : "Sign on Device"}
+							{loading ? t("confirmOnDevice") : t("signOnDevice")}
 						</Button>
 					</Flex>
 				</>
@@ -423,7 +425,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{phase === 'signed' && signedTx && (
 				<>
 					<Box bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="#23DCC8" borderRadius="lg" p="4">
-						<Text fontSize="xs" color="#23DCC8" mb="1">Transaction Signed</Text>
+						<Text fontSize="xs" color="#23DCC8" mb="1">{t("transactionSigned")}</Text>
 						<Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" maxH="80px" overflow="auto" wordBreak="break-all">
 							{typeof signedTx === 'string' ? signedTx : (signedTx?.value?.signatures?.[0]?.serializedTx || signedTx?.serializedTx || signedTx?.serialized || JSON.stringify(signedTx))}
 						</Text>
@@ -439,7 +441,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							_hover={{ bg: "rgba(255,255,255,0.06)" }}
 							onClick={() => setPhase('input')}
 						>
-							Cancel
+							{t("cancel", { ns: "common" })}
 						</Button>
 						<Button
 							size="sm"
@@ -450,7 +452,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							onClick={handleBroadcast}
 							disabled={loading}
 						>
-							{loading ? "Broadcasting..." : "Broadcast Transaction"}
+							{loading ? t("broadcasting") : t("broadcastTransaction")}
 						</Button>
 					</Flex>
 				</>
@@ -470,16 +472,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 					<VStack gap="3" position="relative" zIndex={1}>
 						<Box bg="rgba(76,175,80,0.08)" border="1px solid" borderColor="#4CAF50" borderRadius="lg" p="3" w="full">
-							<Text fontSize="xs" color="#4CAF50" fontWeight="600" mb="2">Sent!</Text>
+							<Text fontSize="xs" color="#4CAF50" fontWeight="600" mb="2">{t("sent")}</Text>
 							<Flex justify="space-between" align="center" gap="2">
 								<Flex align="center" gap="1" minW="0" flex="1">
-									<Text fontSize="10px" color="kk.textMuted" flexShrink={0}>TX</Text>
+									<Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{t("tx")}</Text>
 									<Text fontSize="10px" fontFamily="mono" color="kk.textPrimary" truncate title={txid}>
 										{truncatedTxid}
 									</Text>
 								</Flex>
 								<Button size="xs" variant="ghost" color="kk.textSecondary" onClick={copyTxid} px="1" minW="auto" h="auto" py="0.5">
-									{copied ? "Copied" : "Copy"}
+									{copied ? t("copied", { ns: "common" }) : t("copy", { ns: "common" })}
 								</Button>
 							</Flex>
 						</Box>
@@ -491,7 +493,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									_hover={{ opacity: 0.9 }}
 									onClick={() => rpcRequest('openUrl', { url: explorerUrl! }).catch(() => {})}
 								>
-									View in Explorer
+									{t("viewInExplorer")}
 								</Button>
 							)}
 							<Button
@@ -499,7 +501,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								_hover={{ bg: "kk.goldHover" }}
 								onClick={reset}
 							>
-								Send Another
+								{t("sendAnother")}
 							</Button>
 						</Flex>
 					</VStack>

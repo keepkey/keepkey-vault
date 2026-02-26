@@ -1,0 +1,10 @@
+{
+	"title": "アプリ",
+	"subtitle": "KeepKeyを対応アプリケーションに接続",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "KeepKeyハードウェアウォレットを管理",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "チェーン間で暗号資産を交換、追跡、管理",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "WalletConnect対応のあらゆるdAppに接続"
+}

@@ -1,4 +1,5 @@
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 
 interface WatchOnlyPromptProps {
   deviceLabel: string
@@ -7,18 +8,23 @@ interface WatchOnlyPromptProps {
   onConnectWallet: () => void
 }
 
-function formatTimeAgo(ts: number): string {
-  const diffMs = Date.now() - ts
-  const mins = Math.floor(diffMs / 60_000)
-  if (mins < 1) return "just now"
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
+function useFormatTimeAgo() {
+  const { t } = useTranslation("dialogs")
+  return (ts: number): string => {
+    const diffMs = Date.now() - ts
+    const mins = Math.floor(diffMs / 60_000)
+    if (mins < 1) return t("watchOnly.justNow")
+    if (mins < 60) return t("watchOnly.minutesAgo", { count: mins })
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return t("watchOnly.hoursAgo", { count: hours })
+    const days = Math.floor(hours / 24)
+    return t("watchOnly.daysAgo", { count: days })
+  }
 }
 
 export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onConnectWallet }: WatchOnlyPromptProps) {
+  const { t } = useTranslation("dialogs")
+  const formatTimeAgo = useFormatTimeAgo()
   return (
     <Box
       position="absolute"
@@ -39,7 +45,7 @@ export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onCo
           {deviceLabel || "KeepKey"}
         </Text>
         <Text fontSize="xs" color="kk.textMuted">
-          Last synced {formatTimeAgo(lastSynced)}
+          {t("watchOnly.lastSynced", { time: formatTimeAgo(lastSynced) })}
         </Text>
       </Box>
       <Flex px="5" pb="4" gap="3">
@@ -52,7 +58,7 @@ export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onCo
           _hover={{ color: "kk.textPrimary", borderColor: "kk.textMuted" }}
           onClick={onConnectWallet}
         >
-          Connect
+          {t("watchOnly.connect")}
         </Button>
         <Button
           flex="1"
@@ -63,7 +69,7 @@ export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onCo
           _hover={{ bg: "kk.goldHover" }}
           onClick={onViewPortfolio}
         >
-          View Portfolio
+          {t("watchOnly.viewPortfolio")}
         </Button>
       </Flex>
     </Box>

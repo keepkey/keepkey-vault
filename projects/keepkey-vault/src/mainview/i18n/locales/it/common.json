@@ -1,0 +1,23 @@
+{
+	"cancel": "Annulla",
+	"save": "Salva",
+	"back": "Indietro",
+	"next": "Avanti",
+	"done": "Fatto",
+	"close": "Chiudi",
+	"confirm": "Conferma",
+	"copy": "Copia",
+	"copied": "Copiato",
+	"loading": "Caricamento...",
+	"retry": "Riprova",
+	"dismiss": "Ignora",
+	"enabled": "Abilitato",
+	"disabled": "Disabilitato",
+	"notSet": "Non impostato",
+	"change": "Modifica",
+	"remove": "Rimuovi",
+	"add": "Aggiungi",
+	"verify": "Verifica",
+	"skip": "Salta",
+	"previous": "Precedente"
+}

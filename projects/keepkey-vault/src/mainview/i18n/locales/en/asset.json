@@ -1,0 +1,20 @@
+{
+	"receive": "Receive",
+	"send": "Send",
+	"tokens": "Tokens",
+	"tokenCount_one": "{{count}} token",
+	"tokenCount_other": "{{count}} tokens",
+	"scam": "SCAM",
+	"spamSuspected": "SPAM?",
+	"showFiltered_one": "Show {{count}} filtered token",
+	"showFiltered_other": "Show {{count}} filtered tokens",
+	"hideFiltered_one": "Hide {{count}} filtered token",
+	"hideFiltered_other": "Hide {{count}} filtered tokens",
+	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"suspectedSpam": "Suspected spam ({{count}})",
+	"markAsSafe": "Mark as safe",
+	"hideToken": "Hide token",
+	"revertToAutoDetect": "Revert to auto-detect",
+	"unhide": "Unhide",
+	"addCustomToken": "Add custom token"
+}

@@ -1,0 +1,15 @@
+{
+	"receive": "Empfangen",
+	"sendToAddress": "Senden Sie {{symbol}} an diese Adresse",
+	"index": "Index",
+	"remaining": "{{remaining}} übrig",
+	"address": "Adresse",
+	"extendedPublicKey": "Erweiterter öffentlicher Schlüssel (xpub)",
+	"path": "Pfad",
+	"editDerivationPath": "Ableitungspfad bearbeiten",
+	"checkDevice": "Gerät wird überprüft...",
+	"verifyOnDevice": "Auf dem Gerät überprüfen",
+	"derivingAddress": "Adresse wird abgeleitet...",
+	"noAddressDerived": "Noch keine Adresse abgeleitet",
+	"deriveAddress": "Adresse ableiten"
+}

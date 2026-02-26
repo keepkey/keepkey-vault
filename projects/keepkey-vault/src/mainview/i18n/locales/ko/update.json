@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "새 버전을 사용할 수 있습니다",
+	"downloadingWithProgress": "업데이트 다운로드 중... {{progress}}%",
+	"downloading": "업데이트 다운로드 중...",
+	"readyToInstall": "업데이트 다운로드 완료 및 준비됨",
+	"applying": "업데이트 설치 중, 재시작...",
+	"errorWithMessage": "업데이트 오류: {{error}}",
+	"download": "다운로드",
+	"later": "나중에",
+	"restartToUpdate": "재시작하여 업데이트"
+}

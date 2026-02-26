@@ -1,0 +1,15 @@
+{
+	"receive": "Receber",
+	"sendToAddress": "Envie {{symbol}} para este endereço",
+	"index": "Índice",
+	"remaining": "{{remaining}} restantes",
+	"address": "Endereço",
+	"extendedPublicKey": "Chave pública estendida (xpub)",
+	"path": "Caminho",
+	"editDerivationPath": "Editar caminho de derivação",
+	"checkDevice": "Verificando dispositivo...",
+	"verifyOnDevice": "Verificar no dispositivo",
+	"derivingAddress": "Derivando endereço...",
+	"noAddressDerived": "Nenhum endereço derivado ainda",
+	"deriveAddress": "Derivar endereço"
+}

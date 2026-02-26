@@ -1,0 +1,15 @@
+{
+	"receive": "Receive",
+	"sendToAddress": "Send {{symbol}} to this address",
+	"index": "Index",
+	"remaining": "{{remaining}} left",
+	"address": "Address",
+	"extendedPublicKey": "Extended Public Key (xpub)",
+	"path": "Path",
+	"editDerivationPath": "Edit derivation path",
+	"checkDevice": "Check device...",
+	"verifyOnDevice": "Verify on Device",
+	"derivingAddress": "Deriving address...",
+	"noAddressDerived": "No address derived yet",
+	"deriveAddress": "Derive Address"
+}

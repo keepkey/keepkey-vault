@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Box, Flex, Text, HStack, Spinner, Image, SimpleGrid, IconButton } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -16,6 +17,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
+	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
 	const [loadingBalances, setLoadingBalances] = useState(true)
@@ -156,7 +158,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						Watch Only — Connect device for full access
+						{t("watchOnlyBanner")}
 					</Text>
 				</Flex>
 			)}
@@ -194,13 +196,13 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 			{/* Section Header + Chain Grid */}
 			<Flex align="center" justify="space-between" mb="3" px="1">
 				<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em">
-					Supported Chains
+					{t("supportedChains")}
 				</Text>
 				<HStack gap="2">
 					{loadingBalances && hasAnyBalance && <Spinner size="xs" color="kk.gold" />}
-					<Text fontSize="xs" color="kk.textMuted">{allChains.length} networks</Text>
+					<Text fontSize="xs" color="kk.textMuted">{t("networksCount", { count: allChains.length })}</Text>
 					<IconButton
-						aria-label={watchOnly ? "Connect device to refresh" : "Refresh balances"}
+						aria-label={watchOnly ? t("connectDeviceToRefresh") : t("refreshBalances")}
 						size="xs"
 						variant="ghost"
 						color="kk.gold"
@@ -291,14 +293,14 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 										)}
 										{tokenCount > 0 && (
 											<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
-												+{tokenCount} token{tokenCount > 1 ? 's' : ''}
+												{t("tokensCount", { count: tokenCount })}
 											</Text>
 										)}
 									</Box>
 								) : loadingBalances ? (
-									<Text fontSize="10px" color="kk.textMuted">Loading...</Text>
+									<Text fontSize="10px" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>
 								) : (
-									<Text fontSize="10px" color="kk.textMuted">No balance</Text>
+									<Text fontSize="10px" color="kk.textMuted">{t("noBalance")}</Text>
 								)}
 							</Flex>
 						</Box>
@@ -327,7 +329,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 					>
 						<Flex direction="column" align="center" gap="1">
 							<Text fontSize="lg" color="kk.textMuted">+</Text>
-							<Text fontSize="10px" color="kk.textMuted">Add Chain</Text>
+							<Text fontSize="10px" color="kk.textMuted">{t("addChain")}</Text>
 						</Flex>
 					</Box>
 				)}
