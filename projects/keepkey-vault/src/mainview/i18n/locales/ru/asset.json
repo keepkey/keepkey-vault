@@ -1,0 +1,20 @@
+{
+	"receive": "Получить",
+	"send": "Отправить",
+	"tokens": "Токены",
+	"tokenCount_one": "{{count}} токен",
+	"tokenCount_other": "{{count}} токенов",
+	"scam": "МОШЕННИЧЕСТВО",
+	"spamSuspected": "СПАМ?",
+	"showFiltered_one": "Показать {{count}} отфильтрованный токен",
+	"showFiltered_other": "Показать {{count}} отфильтрованных токенов",
+	"hideFiltered_one": "Скрыть {{count}} отфильтрованный токен",
+	"hideFiltered_other": "Скрыть {{count}} отфильтрованных токенов",
+	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"suspectedSpam": "Подозрительный спам ({{count}})",
+	"markAsSafe": "Отметить как безопасный",
+	"hideToken": "Скрыть токен",
+	"revertToAutoDetect": "Вернуть автоопределение",
+	"unhide": "Показать",
+	"addCustomToken": "Добавить пользовательский токен"
+}

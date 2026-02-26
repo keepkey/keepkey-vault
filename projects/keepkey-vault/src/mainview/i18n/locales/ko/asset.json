@@ -1,0 +1,20 @@
+{
+	"receive": "받기",
+	"send": "보내기",
+	"tokens": "토큰",
+	"tokenCount_one": "{{count}}개 토큰",
+	"tokenCount_other": "{{count}}개 토큰",
+	"scam": "사기",
+	"spamSuspected": "스팸?",
+	"showFiltered_one": "필터링된 토큰 {{count}}개 표시",
+	"showFiltered_other": "필터링된 토큰 {{count}}개 표시",
+	"hideFiltered_one": "필터링된 토큰 {{count}}개 숨기기",
+	"hideFiltered_other": "필터링된 토큰 {{count}}개 숨기기",
+	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"suspectedSpam": "스팸 의심 ({{count}})",
+	"markAsSafe": "안전으로 표시",
+	"hideToken": "토큰 숨기기",
+	"revertToAutoDetect": "자동 감지로 되돌리기",
+	"unhide": "숨기기 해제",
+	"addCustomToken": "커스텀 토큰 추가"
+}

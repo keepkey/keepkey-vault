@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react"
 import { Box, Flex, Text, Button, Input } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { CHAINS } from "../../shared/chains"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
@@ -14,6 +15,7 @@ interface AddTokenDialogProps {
 const evmChains = CHAINS.filter(c => c.chainFamily === 'evm')
 
 export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDialogProps) {
+	const { t } = useTranslation("dialogs")
 	const [chainId, setChainId] = useState(defaultChainId || evmChains[0]?.id || '')
 	const [contractAddress, setContractAddress] = useState('')
 	const [loading, setLoading] = useState(false)
@@ -35,7 +37,7 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 			setResult(token)
 			onAdded?.(token)
 		} catch (e: any) {
-			setError(e.message || 'Failed to add token')
+			setError(e.message || t('addToken.failedToAdd'))
 		}
 		setLoading(false)
 	}, [chainId, contractAddress, isValidAddress, onAdded])
@@ -70,11 +72,11 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 				onClick={(e) => e.stopPropagation()}
 			>
 				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="3">
-					Add Custom Token
+					{t('addToken.title')}
 				</Text>
 
 				{/* Chain selector */}
-				<Text fontSize="xs" color="kk.textMuted" mb="1">Chain</Text>
+				<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addToken.chain')}</Text>
 				<Box
 					as="select"
 					w="100%"
@@ -97,7 +99,7 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 				</Box>
 
 				{/* Contract address */}
-				<Text fontSize="xs" color="kk.textMuted" mb="1">Contract Address</Text>
+				<Text fontSize="xs" color="kk.textMuted" mb="1">{t('addToken.contractAddress')}</Text>
 				<Input
 					placeholder="0x..."
 					value={contractAddress}
@@ -119,7 +121,7 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 					<Box p="3" bg="rgba(255,215,0,0.08)" borderRadius="md" mb="3">
 						<Text fontSize="sm" fontWeight="600" color="kk.gold">{result.symbol}</Text>
 						<Text fontSize="xs" color="kk.textMuted">{result.name}</Text>
-						<Text fontSize="xs" color="kk.textMuted">{result.decimals} decimals</Text>
+						<Text fontSize="xs" color="kk.textMuted">{result.decimals} {t('addToken.decimals')}</Text>
 					</Box>
 				)}
 
@@ -135,7 +137,7 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 						color="kk.textSecondary"
 						onClick={onClose}
 					>
-						{result ? 'Done' : 'Cancel'}
+						{result ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{!result && (
 						<Button
@@ -146,7 +148,7 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 							onClick={handleLookup}
 							disabled={!isValidAddress || loading}
 						>
-							{loading ? 'Looking up...' : 'Add Token'}
+							{loading ? t('addToken.lookingUp') : t('addToken.addToken')}
 						</Button>
 					)}
 				</Flex>

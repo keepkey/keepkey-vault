@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Box, Text, VStack, HStack, Flex, Button, Spinner, Input } from '@chakra-ui/react'
 import {
   FaDownload,
@@ -49,22 +50,7 @@ const STEP_SEQUENCE: WizardStep[] = [
   'complete',
 ]
 
-const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
-  'welcome': 'Welcome to KeepKey',
-  'bootloader': 'Verify and update bootloader',
-  'firmware': 'Verify and update firmware',
-  'init-choose': 'Choose your setup method',
-  'init-progress': 'Setting up your wallet',
-  'init-label': 'Name your device',
-  'complete': 'Setup complete!',
-}
-
-// 3 visible progress steps
-const VISIBLE_STEPS = [
-  { id: 'bootloader', label: 'Bootloader', number: 1 },
-  { id: 'firmware', label: 'Firmware', number: 2 },
-  { id: 'init-choose', label: 'Setup', number: 3 },
-]
+// STEP_DESCRIPTIONS and VISIBLE_STEPS moved inside component to use t()
 
 // Map wizard steps → their visible step group
 const stepToVisibleId: Record<WizardStep, string | null> = {
@@ -101,6 +87,23 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
   const [deviceLabel, setDeviceLabel] = useState('')
   const [setupError, setSetupError] = useState<string | null>(null)
   const [, setSetupLoading] = useState(false)
+  const { t } = useTranslation('setup')
+
+  const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
+    'welcome': t('stepDescriptions.welcome'),
+    'bootloader': t('stepDescriptions.bootloader'),
+    'firmware': t('stepDescriptions.firmware'),
+    'init-choose': t('stepDescriptions.initChoose'),
+    'init-progress': t('stepDescriptions.initProgress'),
+    'init-label': t('stepDescriptions.initLabel'),
+    'complete': t('stepDescriptions.complete'),
+  }
+
+  const VISIBLE_STEPS = [
+    { id: 'bootloader', label: t('visibleSteps.bootloader'), number: 1 },
+    { id: 'firmware', label: t('visibleSteps.firmware'), number: 2 },
+    { id: 'init-choose', label: t('visibleSteps.setup'), number: 3 },
+  ]
 
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
@@ -298,7 +301,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
-      setSetupError(err instanceof Error ? err.message : 'Failed to create wallet')
+      setSetupError(err instanceof Error ? err.message : t('initProgress.failedToCreate'))
       setStep('init-choose')
     } finally {
       setSetupLoading(false)
@@ -345,7 +348,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
-      setSetupError(err instanceof Error ? err.message : 'Failed to recover wallet')
+      setSetupError(err instanceof Error ? err.message : t('initProgress.failedToRecover'))
       setStep('init-choose')
     } finally {
       setSetupLoading(false)
@@ -425,7 +428,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
         <Box p={6} borderBottomWidth="1px" borderColor="gray.700">
           <VStack gap={2}>
             <Text fontSize="2xl" fontWeight="bold" color={HIGHLIGHT}>
-              KeepKey Setup
+              {t('title')}
             </Text>
             <Text fontSize="md" color="gray.400">
               {STEP_DESCRIPTIONS[step]}
@@ -526,21 +529,21 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 </Box>
                 <VStack gap={3}>
                   <Text fontSize="3xl" fontWeight="bold" color="white">
-                    Welcome to KeepKey
+                    {t('welcome.title')}
                   </Text>
                   <Text fontSize="xl" color={HIGHLIGHT}>
-                    Secure Multi-Chain Hardware Wallet
+                    {t('subtitle')}
                   </Text>
                   <Text fontSize="md" color="gray.400" maxW="400px">
                     {isOobDevice
-                      ? "Let's update your firmware and set up your wallet."
-                      : "Let's get your hardware wallet set up."}
+                      ? t('welcome.oobIntro')
+                      : t('welcome.intro')}
                   </Text>
                 </VStack>
                 <HStack gap={2}>
                   <Spinner size="sm" color="gray.500" />
                   <Text fontSize="sm" color="gray.500">
-                    {deviceStatus.state !== 'disconnected' ? 'Starting setup...' : 'Detecting device status...'}
+                    {deviceStatus.state !== 'disconnected' ? t('welcome.startingSetup') : t('welcome.detectingDevice')}
                   </Text>
                 </HStack>
               </VStack>
@@ -552,10 +555,10 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 <FaExclamationTriangle color="#ECC94B" size={48} />
                 <VStack gap={2}>
                   <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
-                    Bootloader Update
+                    {t('bootloader.title')}
                   </Text>
                   <Text fontSize="sm" color="gray.400" textAlign="center">
-                    Your bootloader needs to be updated for security and compatibility.
+                    {t('bootloader.description')}
                   </Text>
                 </VStack>
 
@@ -564,18 +567,18 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
                     <HStack justify="space-between">
                       <VStack gap={1} align="start">
-                        <Text fontSize="xs" color="gray.400" textTransform="uppercase">Current</Text>
+                        <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
                         <Text fontSize="md" color="orange.400" fontWeight="bold">
                           {(deviceStatus.bootloaderVersion && !deviceStatus.bootloaderVersion.startsWith('hash:'))
                             ? `v${deviceStatus.bootloaderVersion}`
                             : inBootloader
                               ? `v${deviceStatus.firmwareVersion}`
-                              : 'Outdated'}
+                              : t('bootloader.outdated')}
                         </Text>
                       </VStack>
                       <Text color="gray.500" fontSize="lg">&rarr;</Text>
                       <VStack gap={1} align="end">
-                        <Text fontSize="xs" color="gray.400" textTransform="uppercase">Latest</Text>
+                        <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
                         <Text fontSize="md" color="green.400" fontWeight="bold">
                           v{deviceStatus.latestBootloader}
                         </Text>
@@ -589,13 +592,13 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   <VStack gap={3} w="100%">
                     <Spinner size="lg" color="blue.400" />
                     <Text fontSize="sm" color="gray.300">
-                      {updateProgress?.message || 'Updating bootloader...'}
+                      {updateProgress?.message || t('bootloader.updatingBootloader')}
                     </Text>
                     <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                       <HStack gap={2}>
                         <FaExclamationTriangle color="#FC8181" />
                         <Text fontSize="xs" color="red.200">
-                          Do NOT unplug your device. Interrupting can brick the device.
+                          {t('bootloader.doNotUnplugBrick')}
                         </Text>
                       </HStack>
                     </Box>
@@ -606,7 +609,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 {updateState === 'error' && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                     <VStack gap={2} align="start">
-                      <Text fontSize="sm" color="red.300" fontWeight="bold">Update Failed</Text>
+                      <Text fontSize="sm" color="red.300" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
                       <Text fontSize="xs" color="red.200">{updateError}</Text>
                     </VStack>
                     <Button
@@ -617,7 +620,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       color="red.300"
                       onClick={() => { resetUpdate(); setWaitingForBootloader(false) }}
                     >
-                      Try Again
+                      {t('bootloader.tryAgain')}
                     </Button>
                   </Box>
                 )}
@@ -629,14 +632,14 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       <HStack gap={2}>
                         <FaExclamationTriangle color="#ECC94B" size={18} />
                         <Text fontSize="sm" fontWeight="bold" color="yellow.300">
-                          Enter Firmware Update Mode
+                          {t('bootloader.enterFirmwareUpdateMode')}
                         </Text>
                       </HStack>
                       <VStack align="start" gap={1} pl={6}>
-                        <Text fontSize="sm" color="gray.200">1. Unplug your KeepKey</Text>
-                        <Text fontSize="sm" color="gray.200">2. Hold down the button on the device</Text>
-                        <Text fontSize="sm" color="gray.200">3. While holding, plug in the USB cable</Text>
-                        <Text fontSize="sm" color="gray.200">4. Release when the bootloader screen appears</Text>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step4Release')}</Text>
                       </VStack>
                     </VStack>
                   </Box>
@@ -647,7 +650,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   <HStack gap={3} w="100%" justify="center" py={2}>
                     <Spinner size="sm" color="yellow.400" />
                     <Text fontSize="sm" color="yellow.300">
-                      Listening for device in bootloader mode...
+                      {t('bootloader.listeningForBootloader')}
                     </Text>
                   </HStack>
                 )}
@@ -663,7 +666,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       _hover={{ bg: 'orange.600' }}
                       onClick={handleEnterBootloaderMode}
                     >
-                      I'm Ready — Detect Bootloader
+                      {t('bootloader.readyDetectBootloader')}
                     </Button>
 
                     <Button
@@ -676,7 +679,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                         else setStep('init-choose')
                       }}
                     >
-                      Skip Bootloader Update
+                      {t('bootloader.skipBootloaderUpdate')}
                     </Button>
                   </>
                 )}
@@ -689,12 +692,12 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 <FaDownload color="#F59E0B" size={48} />
                 <VStack gap={2}>
                   <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
-                    Firmware Update
+                    {t('firmware.title')}
                   </Text>
                   <Text fontSize="sm" color="gray.400" textAlign="center">
                     {isOobDevice
-                      ? 'Your device has factory firmware. A critical update is required.'
-                      : 'A firmware update is available for your device.'}
+                      ? t('firmware.oobDescription')
+                      : t('firmware.description')}
                   </Text>
                 </VStack>
 
@@ -703,19 +706,19 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   <HStack justify="space-between">
                     <VStack gap={1} align="start">
                       <Text fontSize="xs" color="gray.400" textTransform="uppercase">
-                        {inBootloader ? 'Firmware' : 'Current'}
+                        {inBootloader ? t('firmware.firmwareLabel') : t('bootloader.current')}
                       </Text>
                       <Text
                         fontSize="md"
                         color={isOobDevice ? 'red.400' : 'white'}
                         fontWeight="bold"
                       >
-                        {inBootloader ? 'Not installed' : `v${deviceStatus.firmwareVersion || '?'}`}
+                        {inBootloader ? t('firmware.notInstalled') : `v${deviceStatus.firmwareVersion || '?'}`}
                       </Text>
                     </VStack>
                     <Text color="gray.500" fontSize="lg">&rarr;</Text>
                     <VStack gap={1} align="end">
-                      <Text fontSize="xs" color="gray.400" textTransform="uppercase">Latest</Text>
+                      <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
                       <Text fontSize="md" color="green.400" fontWeight="bold">
                         v{deviceStatus.latestFirmware || '?'}
                       </Text>
@@ -727,11 +730,11 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
                   <VStack gap={2} align="start">
                     <Text color="orange.400" fontWeight="bold" fontSize="sm">
-                      Important:
+                      {t('firmware.important')}
                     </Text>
-                    <Text fontSize="xs" color="gray.300">Do not disconnect your device during the update</Text>
-                    <Text fontSize="xs" color="gray.300">You may need to confirm on the device screen</Text>
-                    <Text fontSize="xs" color="gray.300">Your funds and settings will remain safe</Text>
+                    <Text fontSize="xs" color="gray.300">{t('firmware.doNotDisconnect')}</Text>
+                    <Text fontSize="xs" color="gray.300">{t('firmware.mayNeedConfirm')}</Text>
+                    <Text fontSize="xs" color="gray.300">{t('firmware.fundsRemainSafe')}</Text>
                   </VStack>
                 </Box>
 
@@ -740,12 +743,12 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   <VStack gap={3} w="100%">
                     <Spinner size="lg" color={HIGHLIGHT} />
                     <Text fontSize="sm" color="gray.300">
-                      {updateProgress?.message || 'Updating firmware...'}
+                      {updateProgress?.message || t('firmware.updatingFirmware')}
                     </Text>
                     <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                       <HStack gap={2}>
                         <FaExclamationTriangle color="#FC8181" />
-                        <Text fontSize="xs" color="red.200">Do NOT unplug your device.</Text>
+                        <Text fontSize="xs" color="red.200">{t('firmware.doNotUnplug')}</Text>
                       </HStack>
                     </Box>
                   </VStack>
@@ -758,11 +761,11 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       <HStack gap={2}>
                         <Spinner size="sm" color="blue.300" />
                         <Text fontSize="sm" color="blue.300" fontWeight="bold">
-                          Device is rebooting...
+                          {t('firmware.deviceRebooting')}
                         </Text>
                       </HStack>
                       <Text fontSize="xs" color="blue.200">
-                        Your KeepKey is restarting with the new firmware. Please wait...
+                        {t('firmware.rebootingMessage')}
                       </Text>
                       {deviceStatus.firmwareVerified !== undefined && (
                         <HStack gap={2} mt={1}>
@@ -770,14 +773,14 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                             <>
                               <FaCheckCircle color="#48BB78" size={14} />
                               <Text fontSize="xs" color="green.300" fontWeight="bold">
-                                Firmware verified as official release
+                                {t('firmware.firmwareVerified')}
                               </Text>
                             </>
                           ) : (
                             <>
                               <FaExclamationTriangle color="#FB923C" size={14} />
                               <Text fontSize="xs" color="orange.300" fontWeight="bold">
-                                Firmware hash not found in manifest
+                                {t('firmware.firmwareHashNotFound')}
                               </Text>
                             </>
                           )}
@@ -791,11 +794,11 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 {updateState === 'error' && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                     <VStack gap={2} align="start">
-                      <Text fontSize="sm" color="red.300" fontWeight="bold">Update Failed</Text>
+                      <Text fontSize="sm" color="red.300" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
                       <Text fontSize="xs" color="red.200">{updateError}</Text>
                     </VStack>
                     <Button mt={3} size="sm" variant="outline" borderColor="red.400" color="red.300" onClick={resetUpdate}>
-                      Try Again
+                      {t('bootloader.tryAgain')}
                     </Button>
                   </Box>
                 )}
@@ -811,7 +814,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       _hover={{ bg: 'orange.600' }}
                       onClick={handleStartFirmwareUpdate}
                     >
-                      Update Firmware to v{deviceStatus.latestFirmware || '?'}
+                      {t('firmware.updateFirmwareTo', { version: deviceStatus.latestFirmware || '?' })}
                     </Button>
                     {!isOobDevice && (
                       <Button
@@ -822,7 +825,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                         _hover={{ bg: 'gray.700' }}
                         onClick={handleSkipFirmware}
                       >
-                        Skip Update
+                        {t('firmware.skipUpdate')}
                       </Button>
                     )}
                   </VStack>
@@ -835,10 +838,10 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
               <VStack gap={{ base: 4, md: 6, lg: 8 }} w="100%">
                 <VStack gap={2}>
                   <Text fontSize={{ base: 'xl', md: '2xl' }} fontWeight="bold" color="white" textAlign="center">
-                    Set Up Your Wallet
+                    {t('initChoose.title')}
                   </Text>
                   <Text fontSize={{ base: 'sm', md: 'md' }} color="gray.400" textAlign="center">
-                    Choose how you'd like to set up your KeepKey
+                    {t('initChoose.description')}
                   </Text>
                 </VStack>
 
@@ -879,10 +882,10 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       </Box>
                       <VStack gap={2}>
                         <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="bold" color="white">
-                          Create New Wallet
+                          {t('initChoose.createNewWallet')}
                         </Text>
                         <Text fontSize={{ base: 'xs', md: 'sm' }} color="gray.400" textAlign="center">
-                          Generate a new seed phrase on your device
+                          {t('initChoose.createDescription')}
                         </Text>
                       </VStack>
                       <Button
@@ -896,7 +899,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                           handleCreateWallet()
                         }}
                       >
-                        Create Wallet
+                        {t('initChoose.createWallet')}
                       </Button>
                     </VStack>
                   </Box>
@@ -926,10 +929,10 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       </Box>
                       <VStack gap={2}>
                         <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="bold" color="white">
-                          Recover Existing Wallet
+                          {t('initChoose.recoverExistingWallet')}
                         </Text>
                         <Text fontSize={{ base: 'xs', md: 'sm' }} color="gray.400" textAlign="center">
-                          Enter your recovery seed phrase on the device
+                          {t('initChoose.recoverDescription')}
                         </Text>
                       </VStack>
                       <Button
@@ -943,7 +946,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                           handleRecoverWallet()
                         }}
                       >
-                        Recover Wallet
+                        {t('initChoose.recoverWallet')}
                       </Button>
                     </VStack>
                   </Box>
@@ -974,12 +977,14 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 />
                 <VStack gap={3}>
                   <Text fontSize="xl" fontWeight="bold" color="white">
-                    {setupType === 'create' ? 'Creating Wallet...' : 'Recovering Wallet...'}
+                    {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
                   </Text>
                   <Text fontSize="sm" color="gray.400" maxW="360px">
-                    Follow the prompts on your KeepKey device screen.
-                    {setupType === 'create' && ' Write down the seed words carefully — they are your backup.'}
-                    {setupType === 'recover' && ' Enter your recovery seed phrase using the device.'}
+                    {setupType === 'create'
+                      ? t('initProgress.followPromptsCreate')
+                      : setupType === 'recover'
+                        ? t('initProgress.followPromptsRecover')
+                        : t('initProgress.followPrompts')}
                   </Text>
                 </VStack>
 
@@ -987,7 +992,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   <HStack gap={2} justify="center">
                     <FaExclamationTriangle color="#F59E0B" />
                     <Text fontSize="sm" color="orange.200" fontWeight="bold">
-                      Look at your KeepKey device and follow the on-screen instructions.
+                      {t('initProgress.lookAtDevice')}
                     </Text>
                   </HStack>
                 </Box>
@@ -1000,16 +1005,16 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 <VStack gap={2}>
                   <FaCheckCircle color="#48BB78" size={48} />
                   <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
-                    {setupType === 'create' ? 'Wallet Created!' : 'Wallet Recovered!'}
+                    {setupType === 'create' ? t('initLabel.walletCreated') : t('initLabel.walletRecovered')}
                   </Text>
                   <Text fontSize="md" color="gray.400" textAlign="center">
-                    Give your KeepKey a friendly name to identify it easily
+                    {t('initLabel.giveAName')}
                   </Text>
                 </VStack>
 
                 <Box w="100%">
                   <Input
-                    placeholder="My KeepKey"
+                    placeholder={t('initLabel.placeholder')}
                     value={deviceLabel}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDeviceLabel(e.target.value)}
                     bg="gray.700"
@@ -1036,7 +1041,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                     onClick={handleApplyLabel}
                     disabled={!deviceLabel.trim()}
                   >
-                    Set Device Name
+                    {t('initLabel.setDeviceName')}
                   </Button>
                   <Button
                     w="100%"
@@ -1045,7 +1050,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                     _hover={{ color: 'white', bg: 'gray.700' }}
                     onClick={handleApplyLabel}
                   >
-                    Skip for Now
+                    {t('initLabel.skipForNow')}
                   </Button>
                 </VStack>
               </VStack>
@@ -1082,15 +1087,15 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   </Box>
                   <VStack gap={3}>
                     <Text fontSize="3xl" fontWeight="bold" color="white">
-                      {setupType === 'recover' ? 'Wallet Recovered!' : 'Wallet Created!'}
+                      {setupType === 'recover' ? t('complete.walletRecovered') : t('complete.walletCreated')}
                     </Text>
                     <Text fontSize="lg" color="gray.300">
-                      Your KeepKey{deviceLabel.trim() ? ` "${deviceLabel.trim()}"` : ''} is ready
+                      {t('complete.deviceReady', { label: deviceLabel.trim() ? ` "${deviceLabel.trim()}"` : '' })}
                     </Text>
                     <Text fontSize="md" color="gray.400" maxW="400px">
                       {setupType === 'recover'
-                        ? 'Your wallet has been successfully restored from your recovery phrase'
-                        : 'Your new wallet is now secure and ready to use'}
+                        ? t('complete.recoveredDescription')
+                        : t('complete.createdDescription')}
                     </Text>
                   </VStack>
                   <Button
@@ -1101,7 +1106,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                     transition="all 0.2s"
                     onClick={onComplete}
                   >
-                    Start Using KeepKey
+                    {t('complete.startUsing')}
                   </Button>
                 </VStack>
               </Box>
@@ -1114,10 +1119,10 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
           <HStack justify="space-between">
             <Text fontSize="sm" color="gray.400">
               {visibleIndex >= 0
-                ? `Step ${visibleIndex + 1} of ${VISIBLE_STEPS.length}`
+                ? t('footer.stepOf', { current: visibleIndex + 1, total: VISIBLE_STEPS.length })
                 : step === 'welcome'
                   ? ''
-                  : 'Setting up wallet...'}
+                  : t('footer.settingUpWallet')}
             </Text>
             <HStack gap={4}>
               {showPrevious && (
@@ -1128,7 +1133,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   color="gray.300"
                   _hover={{ bg: 'gray.700' }}
                 >
-                  Previous
+                  {t('footer.previous')}
                 </Button>
               )}
               {showNext && (
@@ -1139,7 +1144,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   _hover={{ bg: 'orange.600' }}
                   onClick={handleNext}
                 >
-                  Next
+                  {t('footer.next')}
                 </Button>
               )}
             </HStack>

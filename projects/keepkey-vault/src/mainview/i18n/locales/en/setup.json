@@ -1,0 +1,105 @@
+{
+	"title": "KeepKey Setup",
+	"subtitle": "Secure Multi-Chain Hardware Wallet",
+	"stepDescriptions": {
+		"welcome": "Welcome to KeepKey",
+		"bootloader": "Verify and update bootloader",
+		"firmware": "Verify and update firmware",
+		"initChoose": "Choose your setup method",
+		"initProgress": "Setting up your wallet",
+		"initLabel": "Name your device",
+		"complete": "Setup complete!"
+	},
+	"visibleSteps": {
+		"bootloader": "Bootloader",
+		"firmware": "Firmware",
+		"setup": "Setup"
+	},
+	"welcome": {
+		"title": "Welcome to KeepKey",
+		"oobIntro": "Let's update your firmware and set up your wallet.",
+		"intro": "Let's get your hardware wallet set up.",
+		"startingSetup": "Starting setup...",
+		"detectingDevice": "Detecting device status..."
+	},
+	"bootloader": {
+		"title": "Bootloader Update",
+		"description": "Your bootloader needs to be updated for security and compatibility.",
+		"current": "Current",
+		"latest": "Latest",
+		"outdated": "Outdated",
+		"updatingBootloader": "Updating bootloader...",
+		"doNotUnplugBrick": "Do NOT unplug your device. Interrupting can brick the device.",
+		"updateFailed": "Update Failed",
+		"tryAgain": "Try Again",
+		"enterFirmwareUpdateMode": "Enter Firmware Update Mode",
+		"step1Unplug": "1. Unplug your KeepKey",
+		"step2Hold": "2. Hold down the button on the device",
+		"step3Plugin": "3. While holding, plug in the USB cable",
+		"step4Release": "4. Release when the bootloader screen appears",
+		"listeningForBootloader": "Listening for device in bootloader mode...",
+		"readyDetectBootloader": "I'm Ready — Detect Bootloader",
+		"skipBootloaderUpdate": "Skip Bootloader Update"
+	},
+	"firmware": {
+		"title": "Firmware Update",
+		"oobDescription": "Your device has factory firmware. A critical update is required.",
+		"description": "A firmware update is available for your device.",
+		"firmwareLabel": "Firmware",
+		"notInstalled": "Not installed",
+		"important": "Important:",
+		"doNotDisconnect": "Do not disconnect your device during the update",
+		"mayNeedConfirm": "You may need to confirm on the device screen",
+		"fundsRemainSafe": "Your funds and settings will remain safe",
+		"updatingFirmware": "Updating firmware...",
+		"doNotUnplug": "Do NOT unplug your device.",
+		"deviceRebooting": "Device is rebooting...",
+		"rebootingMessage": "Your KeepKey is restarting with the new firmware. Please wait...",
+		"firmwareVerified": "Firmware verified as official release",
+		"firmwareHashNotFound": "Firmware hash not found in manifest",
+		"updateFirmwareTo": "Update Firmware to v{{version}}",
+		"skipUpdate": "Skip Update"
+	},
+	"initChoose": {
+		"title": "Set Up Your Wallet",
+		"description": "Choose how you'd like to set up your KeepKey",
+		"createNewWallet": "Create New Wallet",
+		"createDescription": "Generate a new seed phrase on your device",
+		"createWallet": "Create Wallet",
+		"recoverExistingWallet": "Recover Existing Wallet",
+		"recoverDescription": "Enter your recovery seed phrase on the device",
+		"recoverWallet": "Recover Wallet"
+	},
+	"initProgress": {
+		"creatingWallet": "Creating Wallet...",
+		"recoveringWallet": "Recovering Wallet...",
+		"followPromptsCreate": "Follow the prompts on your KeepKey device screen. Write down the seed words carefully — they are your backup.",
+		"followPromptsRecover": "Follow the prompts on your KeepKey device screen. Enter your recovery seed phrase using the device.",
+		"followPrompts": "Follow the prompts on your KeepKey device screen.",
+		"lookAtDevice": "Look at your KeepKey device and follow the on-screen instructions.",
+		"failedToCreate": "Failed to create wallet",
+		"failedToRecover": "Failed to recover wallet"
+	},
+	"initLabel": {
+		"walletCreated": "Wallet Created!",
+		"walletRecovered": "Wallet Recovered!",
+		"giveAName": "Give your KeepKey a friendly name to identify it easily",
+		"placeholder": "My KeepKey",
+		"setDeviceName": "Set Device Name",
+		"skipForNow": "Skip for Now"
+	},
+	"complete": {
+		"walletCreated": "Wallet Created!",
+		"walletRecovered": "Wallet Recovered!",
+		"deviceReady": "Your KeepKey{{label}} is ready",
+		"recoveredDescription": "Your wallet has been successfully restored from your recovery phrase",
+		"createdDescription": "Your new wallet is now secure and ready to use",
+		"startUsing": "Start Using KeepKey"
+	},
+	"footer": {
+		"stepOf": "Step {{current}} of {{total}}",
+		"settingUpWallet": "Setting up wallet...",
+		"previous": "Previous",
+		"next": "Next"
+	}
+}

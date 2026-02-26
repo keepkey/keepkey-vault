@@ -1,0 +1,20 @@
+{
+	"receive": "Recevoir",
+	"send": "Envoyer",
+	"tokens": "Jetons",
+	"tokenCount_one": "{{count}} jeton",
+	"tokenCount_other": "{{count}} jetons",
+	"scam": "ARNAQUE",
+	"spamSuspected": "SPAM ?",
+	"showFiltered_one": "Afficher {{count}} jeton filtré",
+	"showFiltered_other": "Afficher {{count}} jetons filtrés",
+	"hideFiltered_one": "Masquer {{count}} jeton filtré",
+	"hideFiltered_other": "Masquer {{count}} jetons filtrés",
+	"zeroValueTokens": "0,00 $ USD ({{count}})",
+	"suspectedSpam": "Spam suspecté ({{count}})",
+	"markAsSafe": "Marquer comme sûr",
+	"hideToken": "Masquer le jeton",
+	"revertToAutoDetect": "Revenir à la détection automatique",
+	"unhide": "Afficher",
+	"addCustomToken": "Ajouter un jeton personnalisé"
+}

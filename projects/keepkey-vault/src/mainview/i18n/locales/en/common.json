@@ -1,0 +1,23 @@
+{
+	"cancel": "Cancel",
+	"save": "Save",
+	"back": "Back",
+	"next": "Next",
+	"done": "Done",
+	"close": "Close",
+	"confirm": "Confirm",
+	"copy": "Copy",
+	"copied": "Copied",
+	"loading": "Loading...",
+	"retry": "Retry",
+	"dismiss": "Dismiss",
+	"enabled": "Enabled",
+	"disabled": "Disabled",
+	"notSet": "Not set",
+	"change": "Change",
+	"remove": "Remove",
+	"add": "Add",
+	"verify": "Verify",
+	"skip": "Skip",
+	"previous": "Previous"
+}

@@ -1,0 +1,105 @@
+{
+	"title": "KeepKey セットアップ",
+	"subtitle": "安全なマルチチェーンハードウェアウォレット",
+	"stepDescriptions": {
+		"welcome": "KeepKeyへようこそ",
+		"bootloader": "ブートローダーの確認と更新",
+		"firmware": "ファームウェアの確認と更新",
+		"initChoose": "セットアップ方法を選択",
+		"initProgress": "ウォレットを設定中",
+		"initLabel": "デバイスに名前を付ける",
+		"complete": "セットアップ完了！"
+	},
+	"visibleSteps": {
+		"bootloader": "ブートローダー",
+		"firmware": "ファームウェア",
+		"setup": "セットアップ"
+	},
+	"welcome": {
+		"title": "KeepKeyへようこそ",
+		"oobIntro": "ファームウェアを更新してウォレットを設定しましょう。",
+		"intro": "ハードウェアウォレットを設定しましょう。",
+		"startingSetup": "セットアップを開始中...",
+		"detectingDevice": "デバイスの状態を検出中..."
+	},
+	"bootloader": {
+		"title": "ブートローダーの更新",
+		"description": "セキュリティと互換性のためにブートローダーを更新する必要があります。",
+		"current": "現在",
+		"latest": "最新",
+		"outdated": "古い",
+		"updatingBootloader": "ブートローダーを更新中...",
+		"doNotUnplugBrick": "デバイスを絶対に抜かないでください。中断するとデバイスが使用不能になる可能性があります。",
+		"updateFailed": "更新に失敗しました",
+		"tryAgain": "再試行",
+		"enterFirmwareUpdateMode": "ファームウェア更新モードに入る",
+		"step1Unplug": "1. KeepKeyを抜いてください",
+		"step2Hold": "2. デバイスのボタンを押し続けてください",
+		"step3Plugin": "3. ボタンを押したまま、USBケーブルを接続してください",
+		"step4Release": "4. ブートローダー画面が表示されたら離してください",
+		"listeningForBootloader": "ブートローダーモードのデバイスを待機中...",
+		"readyDetectBootloader": "準備完了 — ブートローダーを検出",
+		"skipBootloaderUpdate": "ブートローダー更新をスキップ"
+	},
+	"firmware": {
+		"title": "ファームウェアの更新",
+		"oobDescription": "デバイスには工場出荷時のファームウェアがあります。重要な更新が必要です。",
+		"description": "デバイスのファームウェア更新が利用可能です。",
+		"firmwareLabel": "ファームウェア",
+		"notInstalled": "未インストール",
+		"important": "重要：",
+		"doNotDisconnect": "更新中にデバイスを切断しないでください",
+		"mayNeedConfirm": "デバイス画面での確認が必要な場合があります",
+		"fundsRemainSafe": "資金と設定は安全に保たれます",
+		"updatingFirmware": "ファームウェアを更新中...",
+		"doNotUnplug": "デバイスを絶対に抜かないでください。",
+		"deviceRebooting": "デバイスを再起動中...",
+		"rebootingMessage": "KeepKeyが新しいファームウェアで再起動しています。お待ちください...",
+		"firmwareVerified": "ファームウェアは公式リリースとして検証されました",
+		"firmwareHashNotFound": "マニフェストにファームウェアハッシュが見つかりません",
+		"updateFirmwareTo": "ファームウェアをv{{version}}に更新",
+		"skipUpdate": "更新をスキップ"
+	},
+	"initChoose": {
+		"title": "ウォレットをセットアップ",
+		"description": "KeepKeyのセットアップ方法を選択してください",
+		"createNewWallet": "新しいウォレットを作成",
+		"createDescription": "デバイスで新しいシードフレーズを生成",
+		"createWallet": "ウォレットを作成",
+		"recoverExistingWallet": "既存のウォレットを復元",
+		"recoverDescription": "デバイスでリカバリーシードフレーズを入力",
+		"recoverWallet": "ウォレットを復元"
+	},
+	"initProgress": {
+		"creatingWallet": "ウォレットを作成中...",
+		"recoveringWallet": "ウォレットを復元中...",
+		"followPromptsCreate": "KeepKeyデバイスの画面の指示に従ってください。シードワードを慎重に書き留めてください — これがバックアップです。",
+		"followPromptsRecover": "KeepKeyデバイスの画面の指示に従ってください。デバイスを使用してリカバリーシードフレーズを入力してください。",
+		"followPrompts": "KeepKeyデバイスの画面の指示に従ってください。",
+		"lookAtDevice": "KeepKeyデバイスを見て、画面の指示に従ってください。",
+		"failedToCreate": "ウォレットの作成に失敗しました",
+		"failedToRecover": "ウォレットの復元に失敗しました"
+	},
+	"initLabel": {
+		"walletCreated": "ウォレットが作成されました！",
+		"walletRecovered": "ウォレットが復元されました！",
+		"giveAName": "KeepKeyにわかりやすい名前を付けて簡単に識別できるようにしましょう",
+		"placeholder": "マイKeepKey",
+		"setDeviceName": "デバイス名を設定",
+		"skipForNow": "今はスキップ"
+	},
+	"complete": {
+		"walletCreated": "ウォレットが作成されました！",
+		"walletRecovered": "ウォレットが復元されました！",
+		"deviceReady": "KeepKey{{label}}の準備が整いました",
+		"recoveredDescription": "ウォレットがリカバリーフレーズから正常に復元されました",
+		"createdDescription": "新しいウォレットは安全で使用準備ができています",
+		"startUsing": "KeepKeyを使い始める"
+	},
+	"footer": {
+		"stepOf": "ステップ {{current}} / {{total}}",
+		"settingUpWallet": "ウォレットを設定中...",
+		"previous": "前へ",
+		"next": "次へ"
+	}
+}

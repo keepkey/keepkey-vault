@@ -1,0 +1,16 @@
+{
+	"apps": "アプリ",
+	"keepkey": "KeepKey",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "閲覧専用",
+	"deviceSettings": "デバイス設定",
+	"searchingForKeepKey": "KeepKeyを検索中",
+	"keepkeyDetected": "KeepKeyが検出されました",
+	"keepkeyDetectedConnecting": "KeepKeyが検出されました — 接続中",
+	"unlockYourKeepKey": "KeepKeyのロックを解除",
+	"passphraseRequired": "パスフレーズが必要です",
+	"loadingPortfolio": "ポートフォリオを読み込み中",
+	"errorWithMessage": "エラー: {{error}}",
+	"tryUnplugging": "KeepKeyを抜いて再接続してみてください。",
+	"watchOnlyConnectPrompt": "閲覧専用 — フルアクセスにはデバイスを接続してください"
+}

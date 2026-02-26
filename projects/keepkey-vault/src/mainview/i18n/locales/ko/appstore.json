@@ -1,0 +1,10 @@
+{
+	"title": "앱",
+	"subtitle": "KeepKey를 지원되는 애플리케이션에 연결",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "KeepKey 하드웨어 지갑 관리",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "크로스 체인 암호화폐 거래, 추적 및 관리",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "WalletConnect 호환 dApp에 연결"
+}

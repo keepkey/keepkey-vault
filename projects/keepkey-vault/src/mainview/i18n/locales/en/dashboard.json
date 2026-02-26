@@ -1,0 +1,11 @@
+{
+	"supportedChains": "Supported Chains",
+	"refreshBalances": "Refresh balances",
+	"connectDeviceToRefresh": "Connect device to refresh",
+	"networksCount": "{{count}} networks",
+	"addChain": "Add Chain",
+	"noBalance": "No balance",
+	"tokensCount_one": "+{{count}} token",
+	"tokensCount_other": "+{{count}} tokens",
+	"watchOnlyBanner": "Watch Only — Connect device for full access"
+}

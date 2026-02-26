@@ -1,0 +1,16 @@
+{
+	"receive": "Recevoir",
+	"sendToAddress": "Envoyez des {{symbol}} à cette adresse",
+	"index": "Index",
+	"remaining": "{{remaining}} restants",
+	"address": "Adresse",
+	"extendedPublicKey": "Clé publique étendue (xpub)",
+	"path": "Chemin",
+	"editDerivationPath": "Modifier le chemin de dérivation",
+	"checkDevice": "Vérification de l'appareil...",
+	"verifyOnDevice": "Vérifier sur l'appareil",
+	"derivingAddress": "Dérivation de l'adresse...",
+	"noAddressDerived": "Aucune adresse dérivée pour le moment",
+	"deriveAddress": "Dériver l'adresse",
+	"account": "Compte {{index}}"
+}

@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "Доступна новая версия",
+	"downloadingWithProgress": "Загрузка обновления... {{progress}}%",
+	"downloading": "Загрузка обновления...",
+	"readyToInstall": "Обновление загружено и готово",
+	"applying": "Установка обновления, перезапуск...",
+	"errorWithMessage": "Ошибка обновления: {{error}}",
+	"download": "Скачать",
+	"later": "Позже",
+	"restartToUpdate": "Перезапустить для обновления"
+}

@@ -1,5 +1,6 @@
-import { useEffect, useCallback } from "react"
+import { useEffect } from "react"
 import { Box, Text, VStack, Flex, Button, Image } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import type { PairingRequestInfo } from "../../../shared/types"
 
@@ -10,6 +11,7 @@ interface PairingApprovalProps {
 }
 
 export function PairingApproval({ request, onApprove, onReject }: PairingApprovalProps) {
+	const { t } = useTranslation("device")
 	// Keyboard: Enter=approve, Escape=reject
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -73,7 +75,7 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 				</VStack>
 
 				<Text fontSize="sm" color="kk.textSecondary">
-					wants to connect to your KeepKey
+					{t("pairing.wantsToConnect")}
 				</Text>
 
 				{/* Action buttons */}
@@ -86,7 +88,7 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 						_hover={{ bg: "kk.goldHover" }}
 						onClick={onApprove}
 					>
-						Approve
+						{t("pairing.approve")}
 					</Button>
 					<Button
 						flex="1"
@@ -97,12 +99,12 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 						_hover={{ color: "white", borderColor: "kk.textSecondary" }}
 						onClick={onReject}
 					>
-						Reject
+						{t("pairing.reject")}
 					</Button>
 				</Flex>
 
 				<Text fontSize="xs" color="kk.textMuted">
-					Enter to approve · Esc to reject
+					{t("pairing.keyboardHint")}
 				</Text>
 			</VStack>
 		</Box>

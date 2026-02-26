@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useTranslation } from "react-i18next"
 import { Box, Text, VStack, Flex, Button, HStack } from "@chakra-ui/react"
 import { FaCheckCircle, FaExclamationTriangle } from "react-icons/fa"
 
@@ -50,6 +51,7 @@ export function RecoveryWordEntry({
   error,
   errorType,
 }: RecoveryWordEntryProps) {
+  const { t } = useTranslation("device")
   const [currentChars, setCurrentChars] = useState<string[]>([])
   const [wordAccepted, setWordAccepted] = useState(false)
   const [acceptedWord, setAcceptedWord] = useState(0)
@@ -134,9 +136,9 @@ export function RecoveryWordEntry({
     const isBadWords = errorType === 'bad-words'
     const isCipherError = isInvalidMnemonic || isBadWords
 
-    const title = isPinMismatch ? 'PINs Did Not Match'
-      : isCipherError ? 'Incorrect Words Entered'
-      : 'Recovery Failed'
+    const title = isPinMismatch ? t('recovery.pinMismatchTitle')
+      : isCipherError ? t('recovery.incorrectWordsTitle')
+      : t('recovery.recoveryFailedTitle')
     const errBorderColor = isPinMismatch ? 'kk.warning' : 'kk.error'
     const iconColor = isPinMismatch ? '#FFB300' : '#FF1744'
 
@@ -176,17 +178,17 @@ export function RecoveryWordEntry({
             {isPinMismatch && (
               <Box w="100%" p={4} bg="kk.bg" borderRadius="lg" textAlign="left">
                 <Text fontSize="xs" fontWeight="bold" color="kk.warning" mb={2}>
-                  How PIN entry works:
+                  {t('recovery.howPinWorks')}
                 </Text>
                 <VStack align="start" gap={1}>
                   <Text fontSize="xs" color="kk.textSecondary">
-                    Your KeepKey displays a scrambled number grid on its screen.
+                    {t('recovery.pinHelp1')}
                   </Text>
                   <Text fontSize="xs" color="kk.textSecondary">
-                    Tap the positions on the computer that match the numbers you want on the device.
+                    {t('recovery.pinHelp2')}
                   </Text>
                   <Text fontSize="xs" color="kk.textSecondary">
-                    Both PIN entries must use the same positions, even though the device scrambles the grid differently each time.
+                    {t('recovery.pinHelp3')}
                   </Text>
                 </VStack>
               </Box>
@@ -195,24 +197,20 @@ export function RecoveryWordEntry({
             {isCipherError && (
               <Box w="100%" p={4} bg="kk.bg" borderRadius="lg" textAlign="left">
                 <Text fontSize="xs" fontWeight="bold" color="kk.error" mb={2}>
-                  How cipher recovery works:
+                  {t('recovery.howCipherWorksError')}
                 </Text>
                 <VStack align="start" gap={1}>
                   <Text fontSize="xs" color="kk.textSecondary">
-                    Your KeepKey shows a scrambled alphabet on its screen. Each letter
-                    on the device maps to a different letter on your keyboard.
+                    {t('recovery.cipherHelp1')}
                   </Text>
                   <Text fontSize="xs" color="kk.textSecondary">
-                    To enter a word, find each letter of your seed word on the
-                    device screen, then press the key at that position on your computer.
+                    {t('recovery.cipherHelp2')}
                   </Text>
                   <Text fontSize="xs" color="kk.textSecondary">
-                    The scramble changes after every character, so always check the
-                    device screen before pressing the next key.
+                    {t('recovery.cipherHelp3')}
                   </Text>
                   <Text fontSize="xs" color="kk.textMuted" fontStyle="italic">
-                    Make sure you are entering the correct BIP39 seed words in the
-                    correct order.
+                    {t('recovery.cipherHelp4')}
                   </Text>
                 </VStack>
               </Box>
@@ -220,7 +218,7 @@ export function RecoveryWordEntry({
 
             {!isPinMismatch && !isCipherError && (
               <Text color="kk.textMuted" fontSize="xs">
-                The recovery process was interrupted. You can safely try again.
+                {t('recovery.recoveryInterrupted')}
               </Text>
             )}
 
@@ -232,7 +230,7 @@ export function RecoveryWordEntry({
               _hover={{ bg: "kk.goldHover" }}
               onClick={onRetry || onCancel}
             >
-              Try Again
+              {t('recovery.tryAgain')}
             </Button>
           </VStack>
         </Box>
@@ -260,7 +258,7 @@ export function RecoveryWordEntry({
         >
           <FaCheckCircle color="#00C853" size={64} />
           <Text fontSize="2xl" fontWeight="bold" color="kk.success">
-            Word {acceptedWord} accepted!
+            {t('recovery.wordAccepted', { number: acceptedWord })}
           </Text>
         </VStack>
       </Flex>
@@ -299,11 +297,10 @@ export function RecoveryWordEntry({
           textAlign="center"
           color="kk.textPrimary"
         >
-          Recover Your Wallet
+          {t('recovery.title')}
         </Text>
         <Text color="kk.textSecondary" fontSize="sm" mb="3" textAlign="center">
-          Look at the scrambled letters on your KeepKey and type the matching
-          position
+          {t('recovery.description')}
         </Text>
 
         {/* Help toggle */}
@@ -315,7 +312,7 @@ export function RecoveryWordEntry({
             _hover={{ color: "kk.goldHover", bg: "kk.bg" }}
             onClick={() => setShowHelp((v) => !v)}
           >
-            {showHelp ? 'Hide help' : 'How does cipher recovery work?'}
+            {showHelp ? t('recovery.hideHelp') : t('recovery.howCipherWorks')}
           </Button>
         </Flex>
 
@@ -323,24 +320,19 @@ export function RecoveryWordEntry({
           <Box p={3} mb="3" bg="kk.bg" borderRadius="lg" border="1px solid" borderColor="kk.border">
             <VStack align="start" gap={2}>
               <Text fontSize="xs" fontWeight="bold" color="kk.gold">
-                Cipher Recovery
+                {t('recovery.cipherRecovery')}
               </Text>
               <Text fontSize="xs" color="kk.textSecondary">
-                Your KeepKey shows a scrambled alphabet on its screen. Each letter
-                on the device maps to a different letter on the computer keyboard.
+                {t('recovery.helpParagraph1')}
               </Text>
               <Text fontSize="xs" color="kk.textSecondary">
-                To enter a word, find each letter of your seed word on the
-                device screen, then press the letter shown at that position on
-                your computer. You only need the first 3-4 characters of each word.
+                {t('recovery.helpParagraph2')}
               </Text>
               <Text fontSize="xs" color="kk.textSecondary">
-                This way, your actual seed phrase is never typed on the computer,
-                protecting you from keyloggers and screen capture malware.
+                {t('recovery.helpParagraph3')}
               </Text>
               <Text fontSize="xs" color="kk.textMuted" fontStyle="italic">
-                The scramble changes for each character, so always look at the
-                device before pressing the next key.
+                {t('recovery.helpParagraph4')}
               </Text>
             </VStack>
           </Box>
@@ -349,10 +341,10 @@ export function RecoveryWordEntry({
         {/* Word counter */}
         <HStack justify="space-between" mb="2">
           <Text fontSize="sm" fontWeight="semibold" color="kk.gold">
-            Word {wordPos + 1} of {totalWords}
+            {t('recovery.wordOf', { current: wordPos + 1, total: totalWords })}
           </Text>
           <Text fontSize="xs" color="kk.textMuted">
-            {Math.round(progressPercent)}% complete
+            {t('recovery.percentComplete', { percent: Math.round(progressPercent) })}
           </Text>
         </HStack>
 
@@ -444,7 +436,7 @@ export function RecoveryWordEntry({
             disabled={currentChars.length === 0}
             flex={1}
           >
-            Backspace
+            {t('recovery.backspace')}
           </Button>
           <Button
             onClick={handleSubmitWord}
@@ -455,7 +447,7 @@ export function RecoveryWordEntry({
             _hover={{ bg: isFinalWord ? "#00E676" : "kk.goldHover" }}
             flex={1}
           >
-            {isFinalWord ? "Complete Recovery" : "Next Word"}
+            {isFinalWord ? t('recovery.completeRecovery') : t('recovery.nextWord')}
           </Button>
         </Flex>
 
@@ -468,7 +460,7 @@ export function RecoveryWordEntry({
           _hover={{ color: "kk.error" }}
           w="100%"
         >
-          Cancel
+          {t('cancel', { ns: 'common' })}
         </Button>
       </Box>
     </Flex>

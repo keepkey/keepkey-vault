@@ -1,0 +1,11 @@
+{
+	"supportedChains": "Redes suportadas",
+	"refreshBalances": "Atualizar saldos",
+	"connectDeviceToRefresh": "Conecte o dispositivo para atualizar",
+	"networksCount": "{{count}} redes",
+	"addChain": "Adicionar rede",
+	"noBalance": "Sem saldo",
+	"tokensCount_one": "+{{count}} token",
+	"tokensCount_other": "+{{count}} tokens",
+	"watchOnlyBanner": "Somente leitura — Conecte o dispositivo para acesso completo"
+}

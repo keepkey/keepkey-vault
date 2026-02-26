@@ -1,0 +1,23 @@
+{
+	"cancel": "취소",
+	"save": "저장",
+	"back": "뒤로",
+	"next": "다음",
+	"done": "완료",
+	"close": "닫기",
+	"confirm": "확인",
+	"copy": "복사",
+	"copied": "복사됨",
+	"loading": "로딩 중...",
+	"retry": "재시도",
+	"dismiss": "닫기",
+	"enabled": "활성화됨",
+	"disabled": "비활성화됨",
+	"notSet": "설정되지 않음",
+	"change": "변경",
+	"remove": "제거",
+	"add": "추가",
+	"verify": "검증",
+	"skip": "건너뛰기",
+	"previous": "이전"
+}

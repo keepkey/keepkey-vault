@@ -1,0 +1,16 @@
+{
+	"receive": "受取",
+	"sendToAddress": "このアドレスに {{symbol}} を送信",
+	"index": "インデックス",
+	"remaining": "残り {{remaining}}",
+	"address": "アドレス",
+	"extendedPublicKey": "拡張公開鍵 (xpub)",
+	"path": "パス",
+	"editDerivationPath": "導出パスを編集",
+	"checkDevice": "デバイスを確認中...",
+	"verifyOnDevice": "デバイスで検証",
+	"derivingAddress": "アドレスを導出中...",
+	"noAddressDerived": "まだアドレスが導出されていません",
+	"deriveAddress": "アドレスを導出",
+	"account": "アカウント {{index}}"
+}

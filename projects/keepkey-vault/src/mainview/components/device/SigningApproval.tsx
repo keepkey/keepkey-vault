@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import type { SigningRequestInfo } from "../../../shared/types"
 
@@ -9,18 +10,18 @@ interface SigningApprovalProps {
 	onReject: () => void
 }
 
-const METHOD_LABELS: Record<string, string> = {
-	"/eth/sign-transaction": "ETH Sign Transaction",
-	"/eth/sign-typed-data": "ETH Sign Typed Data",
-	"/eth/sign": "ETH Sign Message",
-	"/utxo/sign-transaction": "BTC Sign Transaction",
-	"/xrp/sign-transaction": "XRP Sign Transaction",
-	"/cosmos/sign-amino": "Cosmos Sign",
-	"/thorchain/sign-amino-transfer": "THORChain Transfer",
-	"/thorchain/sign-amino-deposit": "THORChain Deposit",
-	"/mayachain/sign-amino-transfer": "Maya Transfer",
-	"/mayachain/sign-amino-deposit": "Maya Deposit",
-	"/osmosis/sign-amino": "Osmosis Sign",
+const METHOD_LABEL_KEYS: Record<string, string> = {
+	"/eth/sign-transaction": "signing.methodEthSignTx",
+	"/eth/sign-typed-data": "signing.methodEthSignTypedData",
+	"/eth/sign": "signing.methodEthSignMessage",
+	"/utxo/sign-transaction": "signing.methodBtcSignTx",
+	"/xrp/sign-transaction": "signing.methodXrpSignTx",
+	"/cosmos/sign-amino": "signing.methodCosmosSign",
+	"/thorchain/sign-amino-transfer": "signing.methodThorchainTransfer",
+	"/thorchain/sign-amino-deposit": "signing.methodThorchainDeposit",
+	"/mayachain/sign-amino-transfer": "signing.methodMayaTransfer",
+	"/mayachain/sign-amino-deposit": "signing.methodMayaDeposit",
+	"/osmosis/sign-amino": "signing.methodOsmosisSign",
 }
 
 function DetailRow({ label, value }: { label: string; value?: string }) {
@@ -38,6 +39,7 @@ function DetailRow({ label, value }: { label: string; value?: string }) {
 }
 
 export function SigningApproval({ request, onApprove, onReject }: SigningApprovalProps) {
+	const { t } = useTranslation("device")
 	// Keyboard: Enter=approve, Escape=reject
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -48,7 +50,8 @@ export function SigningApproval({ request, onApprove, onReject }: SigningApprova
 		return () => document.removeEventListener("keydown", handler)
 	}, [onApprove, onReject])
 
-	const methodLabel = METHOD_LABELS[request.method] || request.method
+	const labelKey = METHOD_LABEL_KEYS[request.method]
+	const methodLabel = labelKey ? t(labelKey) : request.method
 
 	return (
 		<Box
@@ -74,7 +77,7 @@ export function SigningApproval({ request, onApprove, onReject }: SigningApprova
 				{/* Header */}
 				<VStack gap="1" w="100%" textAlign="center">
 					<Text fontSize="lg" fontWeight="700" color="white">
-						Signing Request
+						{t("signing.title")}
 					</Text>
 					<Flex
 						bg="rgba(192,168,96,0.12)"
@@ -104,14 +107,14 @@ export function SigningApproval({ request, onApprove, onReject }: SigningApprova
 					borderRadius="xl"
 					p="4"
 				>
-					<DetailRow label="Chain" value={request.chain?.toUpperCase()} />
-					<DetailRow label="From" value={request.from} />
-					<DetailRow label="To" value={request.to} />
-					<DetailRow label="Value" value={request.value} />
+					<DetailRow label={t("signing.chain")} value={request.chain?.toUpperCase()} />
+					<DetailRow label={t("signing.from")} value={request.from} />
+					<DetailRow label={t("signing.to")} value={request.to} />
+					<DetailRow label={t("signing.value")} value={request.value} />
 					{request.chainId !== undefined && (
-						<DetailRow label="Chain ID" value={String(request.chainId)} />
+						<DetailRow label={t("signing.chainId")} value={String(request.chainId)} />
 					)}
-					<DetailRow label="Data" value={request.data} />
+					<DetailRow label={t("signing.data")} value={request.data} />
 				</VStack>
 
 				{/* Action buttons */}
@@ -124,7 +127,7 @@ export function SigningApproval({ request, onApprove, onReject }: SigningApprova
 						_hover={{ bg: "kk.goldHover" }}
 						onClick={onApprove}
 					>
-						Approve
+						{t("signing.approve")}
 					</Button>
 					<Button
 						flex="1"
@@ -135,12 +138,12 @@ export function SigningApproval({ request, onApprove, onReject }: SigningApprova
 						_hover={{ color: "white", borderColor: "kk.textSecondary" }}
 						onClick={onReject}
 					>
-						Reject
+						{t("signing.reject")}
 					</Button>
 				</Flex>
 
 				<Text fontSize="xs" color="kk.textMuted">
-					Enter to approve · Esc to reject
+					{t("signing.keyboardHint")}
 				</Text>
 			</VStack>
 		</Box>

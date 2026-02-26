@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
 import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
@@ -26,6 +27,7 @@ interface AssetPageProps {
 }
 
 export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
+	const { t } = useTranslation("asset")
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
@@ -216,8 +218,8 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	}, [])
 
 	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
-		{ id: "receive", label: "Receive", icon: FaArrowDown },
-		{ id: "send", label: "Send", icon: FaArrowUp },
+		{ id: "receive", label: t("receive"), icon: FaArrowDown },
+		{ id: "send", label: t("send"), icon: FaArrowUp },
 	]
 
 	// Shared token row renderer
@@ -269,12 +271,12 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								</Text>
 								{opts?.showSpamBadge && spamResult?.level === 'confirmed' && (
 									<Text fontSize="9px" bg="red.900" color="red.300" px="1" py="0.5" borderRadius="sm" lineHeight="1">
-										SCAM
+										{t("scam")}
 									</Text>
 								)}
 								{opts?.showSpamBadge && spamResult?.level === 'possible' && !isUserSafe && (
 									<Text fontSize="9px" bg="orange.900" color="orange.300" px="1" py="0.5" borderRadius="sm" lineHeight="1">
-										SPAM?
+										{t("spamSuspected")}
 									</Text>
 								)}
 								{isUserSafe && (
@@ -300,52 +302,52 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 						{/* Per-token actions */}
 						{spamResult?.isSpam && !isUserSafe && (
 							<IconButton
-								aria-label="Mark as safe"
+								aria-label={t("markAsSafe")}
 								size="xs"
 								variant="ghost"
 								color="green.500"
 								_hover={{ bg: "rgba(72,187,120,0.15)" }}
 								onClick={(e) => { e.stopPropagation(); handleSetVisibility(tok.caip, 'visible') }}
-								title="Mark as safe"
+								title={t("markAsSafe")}
 							>
 								<FaShieldAlt />
 							</IconButton>
 						)}
 						{!spamResult?.isSpam && !isUserHidden && (
 							<IconButton
-								aria-label="Hide token"
+								aria-label={t("hideToken")}
 								size="xs"
 								variant="ghost"
 								color="kk.textMuted"
 								_hover={{ color: "red.400", bg: "rgba(245,101,101,0.1)" }}
 								onClick={(e) => { e.stopPropagation(); handleSetVisibility(tok.caip, 'hidden') }}
-								title="Hide token"
+								title={t("hideToken")}
 							>
 								<FaEyeSlash />
 							</IconButton>
 						)}
 						{isUserSafe && (
 							<IconButton
-								aria-label="Revert to auto-detect"
+								aria-label={t("revertToAutoDetect")}
 								size="xs"
 								variant="ghost"
 								color="kk.textMuted"
 								_hover={{ color: "orange.400", bg: "rgba(237,137,54,0.1)" }}
 								onClick={(e) => { e.stopPropagation(); handleRemoveVisibility(tok.caip) }}
-								title="Revert to auto-detect"
+								title={t("revertToAutoDetect")}
 							>
 								<FaEyeSlash />
 							</IconButton>
 						)}
 						{isUserHidden && (
 							<IconButton
-								aria-label="Unhide token"
+								aria-label={t("unhide")}
 								size="xs"
 								variant="ghost"
 								color="kk.textMuted"
 								_hover={{ color: "green.400", bg: "rgba(72,187,120,0.1)" }}
 								onClick={(e) => { e.stopPropagation(); handleSetVisibility(tok.caip, 'visible') }}
-								title="Unhide"
+								title={t("unhide")}
 							>
 								<FaEye />
 							</IconButton>
@@ -508,12 +510,12 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 						{/* Section header */}
 						<Flex align="center" justify="space-between" mb="2" px="1">
 							<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em">
-								Tokens
+								{t("tokens")}
 							</Text>
 							<HStack gap="2">
 								{cleanTokens.length > 0 && (
 									<Text fontSize="xs" color="kk.textMuted">
-										{cleanTokens.length} token{cleanTokens.length > 1 ? 's' : ''}
+										{t("tokenCount", { count: cleanTokens.length })}
 									</Text>
 								)}
 								{tokenTotalUsd > 0 && (
@@ -521,7 +523,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								)}
 								{isEvmChain && (
 									<IconButton
-										aria-label="Add custom token"
+										aria-label={t("addCustomToken")}
 										size="xs"
 										variant="ghost"
 										color="kk.textMuted"
@@ -554,8 +556,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 									py="1.5"
 								>
 									<Box as={showHidden ? FaEyeSlash : FaEye} fontSize="10px" />
-									{showHidden ? 'Hide' : 'Show'} {hiddenCount} filtered token{hiddenCount > 1 ? 's' : ''}
-									{spamTokens.length > 0 && ` (${spamTokens.length} spam)`}
+									{showHidden ? t("hideFiltered", { count: hiddenCount }) : t("showFiltered", { count: hiddenCount })}
 								</Button>
 
 								{showHidden && (
@@ -564,7 +565,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 										{zeroValueTokens.length > 0 && (
 											<>
 												<Text fontSize="10px" color="kk.textMuted" w="100%" px="1" mt="1">
-													$0.00 USD ({zeroValueTokens.length})
+													{t("zeroValueTokens", { count: zeroValueTokens.length })}
 												</Text>
 												{zeroValueTokens.map((tok) => renderTokenRow(tok))}
 											</>
@@ -573,7 +574,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 										{spamTokens.length > 0 && (
 											<>
 												<Text fontSize="10px" color="orange.400" w="100%" px="1" mt="1">
-													Suspected spam ({spamTokens.length})
+													{t("suspectedSpam", { count: spamTokens.length })}
 												</Text>
 												{spamTokens.map((tok) => renderTokenRow(tok, { showSpamBadge: true, showActions: true }))}
 											</>

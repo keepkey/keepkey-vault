@@ -1,0 +1,11 @@
+{
+	"supportedChains": "Поддерживаемые сети",
+	"refreshBalances": "Обновить балансы",
+	"connectDeviceToRefresh": "Подключите устройство для обновления",
+	"networksCount": "{{count}} сетей",
+	"addChain": "Добавить сеть",
+	"noBalance": "Нет баланса",
+	"tokensCount_one": "+{{count}} токен",
+	"tokensCount_other": "+{{count}} токенов",
+	"watchOnlyBanner": "Только просмотр — Подключите устройство для полного доступа"
+}

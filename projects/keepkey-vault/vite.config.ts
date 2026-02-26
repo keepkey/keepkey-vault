@@ -14,6 +14,11 @@ export default defineConfig({
 				manualChunks(id) {
 					// Split the large asset data JSON into its own chunk
 					if (id.includes("assetData.json")) return "asset-data";
+					// Split non-English locale files into lazy chunks
+					const localeMatch = id.match(/i18n\/locales\/(\w+)\//);
+					if (localeMatch && localeMatch[1] !== "en") {
+						return `locale-${localeMatch[1]}`;
+					}
 				},
 			},
 		},

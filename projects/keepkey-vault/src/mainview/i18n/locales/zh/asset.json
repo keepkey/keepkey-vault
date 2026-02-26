@@ -1,0 +1,20 @@
+{
+	"receive": "接收",
+	"send": "发送",
+	"tokens": "代币",
+	"tokenCount_one": "{{count}} 个代币",
+	"tokenCount_other": "{{count}} 个代币",
+	"scam": "欺诈",
+	"spamSuspected": "疑似垃圾？",
+	"showFiltered_one": "显示 {{count}} 个已过滤代币",
+	"showFiltered_other": "显示 {{count}} 个已过滤代币",
+	"hideFiltered_one": "隐藏 {{count}} 个已过滤代币",
+	"hideFiltered_other": "隐藏 {{count}} 个已过滤代币",
+	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"suspectedSpam": "疑似垃圾 ({{count}})",
+	"markAsSafe": "标记为安全",
+	"hideToken": "隐藏代币",
+	"revertToAutoDetect": "恢复自动检测",
+	"unhide": "取消隐藏",
+	"addCustomToken": "添加自定义代币"
+}

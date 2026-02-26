@@ -1,0 +1,11 @@
+{
+	"supportedChains": "지원 체인",
+	"refreshBalances": "잔액 새로고침",
+	"connectDeviceToRefresh": "새로고침하려면 기기를 연결하세요",
+	"networksCount": "{{count}}개 네트워크",
+	"addChain": "체인 추가",
+	"noBalance": "잔액 없음",
+	"tokensCount_one": "+{{count}}개 토큰",
+	"tokensCount_other": "+{{count}}개 토큰",
+	"watchOnlyBanner": "읽기 전용 — 전체 액세스를 위해 기기를 연결하세요"
+}

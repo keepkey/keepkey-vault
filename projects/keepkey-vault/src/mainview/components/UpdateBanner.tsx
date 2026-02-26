@@ -1,4 +1,5 @@
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import type { UpdatePhaseUI } from "../hooks/useUpdateState"
 
 interface UpdateBannerProps {
@@ -12,6 +13,7 @@ interface UpdateBannerProps {
 }
 
 export function UpdateBanner({ phase, progress, message, error, onDownload, onApply, onDismiss }: UpdateBannerProps) {
+  const { t } = useTranslation("update")
   // Hidden for idle and checking phases
   if (phase === "idle" || phase === "checking") return null
 
@@ -77,15 +79,15 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           {/* Text */}
           <Box flex="1" minW="0">
             <Text fontSize="sm" color={accentColor} fontWeight="500" truncate>
-              {phase === "available" && (message || "A new version is available")}
+              {phase === "available" && (message || t("newVersionAvailable"))}
               {phase === "downloading" && (
                 progress !== undefined
-                  ? `Downloading update... ${Math.round(progress)}%`
-                  : "Downloading update..."
+                  ? t("downloadingWithProgress", { progress: Math.round(progress) })
+                  : t("downloading")
               )}
-              {phase === "ready" && "Update downloaded and ready"}
-              {phase === "applying" && "Installing update, restarting..."}
-              {phase === "error" && `Update error: ${error || message || "Unknown error"}`}
+              {phase === "ready" && t("readyToInstall")}
+              {phase === "applying" && t("applying")}
+              {phase === "error" && t("errorWithMessage", { error: error || message || "Unknown error" })}
             </Text>
             {/* Progress bar for downloading */}
             {phase === "downloading" && progress !== undefined && (
@@ -101,26 +103,26 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           {phase === "available" && (
             <>
               <Button size="xs" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={onDownload}>
-                Download
+                {t("download")}
               </Button>
               <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
-                Later
+                {t("later")}
               </Button>
             </>
           )}
           {phase === "ready" && (
             <>
               <Button size="xs" bg="#22C55E" color="white" _hover={{ bg: "#16A34A" }} onClick={onApply}>
-                Restart to Update
+                {t("restartToUpdate")}
               </Button>
               <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
-                Later
+                {t("later")}
               </Button>
             </>
           )}
           {phase === "error" && (
             <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
-              Dismiss
+              {t("dismiss", { ns: "common" })}
             </Button>
           )}
         </Flex>

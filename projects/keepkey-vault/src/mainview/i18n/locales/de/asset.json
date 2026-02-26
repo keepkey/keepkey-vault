@@ -1,0 +1,20 @@
+{
+	"receive": "Empfangen",
+	"send": "Senden",
+	"tokens": "Token",
+	"tokenCount_one": "{{count}} Token",
+	"tokenCount_other": "{{count}} Token",
+	"scam": "BETRUG",
+	"spamSuspected": "SPAM?",
+	"showFiltered_one": "{{count}} gefilterten Token anzeigen",
+	"showFiltered_other": "{{count}} gefilterte Token anzeigen",
+	"hideFiltered_one": "{{count}} gefilterten Token ausblenden",
+	"hideFiltered_other": "{{count}} gefilterte Token ausblenden",
+	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"suspectedSpam": "Verdächtiger Spam ({{count}})",
+	"markAsSafe": "Als sicher markieren",
+	"hideToken": "Token ausblenden",
+	"revertToAutoDetect": "Auf automatische Erkennung zurücksetzen",
+	"unhide": "Einblenden",
+	"addCustomToken": "Benutzerdefinierten Token hinzufügen"
+}

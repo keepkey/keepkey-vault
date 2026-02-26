@@ -1,0 +1,11 @@
+{
+	"supportedChains": "対応チェーン",
+	"refreshBalances": "残高を更新",
+	"connectDeviceToRefresh": "更新するにはデバイスを接続してください",
+	"networksCount": "{{count}} ネットワーク",
+	"addChain": "チェーンを追加",
+	"noBalance": "残高なし",
+	"tokensCount_one": "+{{count}} トークン",
+	"tokensCount_other": "+{{count}} トークン",
+	"watchOnlyBanner": "閲覧専用 — フルアクセスにはデバイスを接続してください"
+}

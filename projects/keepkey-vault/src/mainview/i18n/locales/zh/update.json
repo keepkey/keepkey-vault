@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "有新版本可用",
+	"downloadingWithProgress": "正在下载更新... {{progress}}%",
+	"downloading": "正在下载更新...",
+	"readyToInstall": "更新已下载并准备就绪",
+	"applying": "正在安装更新，重启中...",
+	"errorWithMessage": "更新错误：{{error}}",
+	"download": "下载",
+	"later": "稍后",
+	"restartToUpdate": "重启以更新"
+}

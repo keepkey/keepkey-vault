@@ -1,0 +1,10 @@
+{
+	"title": "Applications",
+	"subtitle": "Connectez votre KeepKey aux applications prises en charge",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "Gérez votre portefeuille matériel KeepKey",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "Échangez, suivez et gérez vos cryptos entre chaînes",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "Connectez-vous à n'importe quelle dApp compatible WalletConnect"
+}

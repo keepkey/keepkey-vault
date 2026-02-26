@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Box, Button, Flex, HStack, IconButton, Input, Spinner, Text, VStack, Badge } from "@chakra-ui/react"
 import { FaCoins, FaExternalLinkAlt, FaMinus, FaPlus, FaSyncAlt, FaCopy, FaCheck } from "react-icons/fa"
+import { useTranslation } from "react-i18next"
 import type { ChainDef } from "../../shared/chains"
 import type { BuildTxResult, BroadcastResult, StakingPosition } from "../../shared/types"
 import { rpcRequest } from "../lib/rpc"
@@ -34,9 +35,9 @@ function getValidatorExplorerUrl(chainId: string): string | null {
 }
 
 function getUnbondingPeriod(chainId: string): string {
-	if (chainId === "osmosis") return "14 days"
-	if (chainId === "cosmos") return "21 days"
-	return "21 days"
+	if (chainId === "osmosis") return "unbondingPeriod14"
+	if (chainId === "cosmos") return "unbondingPeriod21"
+	return "unbondingPeriod21"
 }
 
 interface DelegateDialogProps {
@@ -51,9 +52,10 @@ interface DelegateDialogProps {
 }
 
 function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount, rewardUsd, onSuccess, watchOnly }: DelegateDialogProps) {
+	const { t } = useTranslation("staking")
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
-	const [memo, setMemo] = useState("Delegation via KeepKey Vault")
+	const [memo, setMemo] = useState(t('defaultDelegationMemo'))
 	const [phase, setPhase] = useState<TxPhase>("input")
 	const [buildResult, setBuildResult] = useState<BuildTxResult | null>(null)
 	const [signedTx, setSignedTx] = useState<any>(null)
@@ -71,7 +73,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		if (!isOpen) return
 		setValidatorAddress("")
 		setAmount("")
-		setMemo("Delegation via KeepKey Vault")
+		setMemo(t('defaultDelegationMemo'))
 		setPhase("input")
 		setBuildResult(null)
 		setSignedTx(null)
@@ -100,10 +102,10 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setBuildResult(result)
 			setPhase("built")
 		} catch (e: any) {
-			setError(e.message || "Failed to build delegation transaction")
+			setError(e.message || t('failedToBuildDelegation'))
 		}
 		setLoading(false)
-	}, [canBuild, watchOnly, chain.id, validatorAddress, amount, memo])
+	}, [canBuild, watchOnly, chain.id, validatorAddress, amount, memo, t])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult || watchOnly) return
@@ -114,7 +116,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		setSignStart(start)
 		if (signTimeout) clearTimeout(signTimeout)
 		const timeout = setTimeout(() => {
-			setError("Still waiting for device confirmation. Make sure your KeepKey is unlocked and approve the transaction on the device.")
+			setError(t('signingTimeout'))
 		}, 120000)
 		setSignTimeout(timeout)
 		try {
@@ -122,13 +124,13 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
-			setError(e.message || "Signing failed")
+			setError(e.message || t('signingFailed'))
 			setPhase("built")
 		}
 		setLoading(false)
 		if (timeout) clearTimeout(timeout)
 		setSignTimeout(null)
-	}, [buildResult, watchOnly, chain])
+	}, [buildResult, watchOnly, chain, t])
 
 	const handleBroadcast = useCallback(async () => {
 		if (!signedTx || watchOnly) return
@@ -143,10 +145,10 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setPhase("broadcast")
 			onSuccess()
 		} catch (e: any) {
-			setError(e.message || "Broadcast failed")
+			setError(e.message || t('broadcastFailed'))
 		}
 		setLoading(false)
-	}, [signedTx, watchOnly, chain.id, onSuccess])
+	}, [signedTx, watchOnly, chain.id, onSuccess, t])
 
 	const handleOpenExplorer = useCallback(async (txidValue: string) => {
 		const url = getExplorerTxUrl(chain, txidValue)
@@ -174,7 +176,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		<Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
 			<Box position="absolute" inset="0" bg="blackAlpha.700" />
 			<Box position="relative" bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" w="520px" maxW="92vw" onClick={(e) => e.stopPropagation()}>
-				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="3">Delegate {chain.symbol}</Text>
+				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="3">{t('delegateTitle', { symbol: chain.symbol })}</Text>
 
 				{error && (
 					<Box p="3" bg="rgba(255,0,0,0.08)" border="1px solid" borderColor="red.500" borderRadius="md" mb="3">
@@ -186,16 +188,16 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 					<VStack align="stretch" gap="3">
 						<Box p="3" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
 							<Flex justify="space-between">
-								<Text fontSize="xs" color="kk.textMuted">Available</Text>
+								<Text fontSize="xs" color="kk.textMuted">{t('available')}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{availableBalance} {chain.symbol}</Text>
 							</Flex>
 						</Box>
 
 						<Box>
 							<Text fontSize="xs" color="kk.textMuted" mb="2">
-								Delegate to a validator to help secure the network and earn rewards. You can undelegate later, but funds are locked during the unbonding period.
+								{t('delegateDescription')}
 							</Text>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Validator Address</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('validatorAddress')}</Text>
 							<Input
 								placeholder={`${expectedPrefix}...`}
 								value={validatorAddress}
@@ -208,11 +210,11 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 							/>
 							{validatorAddress && !isValidValidator && (
 								<Text fontSize="10px" color="red.300" mt="1">
-									Validator address must start with "{expectedPrefix}"
+									{t('validatorMustStartWith', { prefix: expectedPrefix })}
 								</Text>
 							)}
 							<Box mt="2" p="3" bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="md">
-								<Text fontSize="10px" color="kk.textMuted" mb="1">Top validator examples</Text>
+								<Text fontSize="10px" color="kk.textMuted" mb="1">{t('topValidatorExamples')}</Text>
 								{chain.id === "osmosis" && (
 									<VStack align="start" gap="1">
 										<Button
@@ -284,18 +286,20 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 										if (url) window.open(url, "_blank")
 									}}
 								>
-									Browse all validators
+									{t('browseAllValidators')}
 								</Button>
 								{rewardAmount && (
 									<Text fontSize="10px" color="kk.textMuted" mt="2">
-										Rewards available: {rewardAmount} {chain.symbol}{rewardUsd && rewardUsd > 0 ? ` (~$${rewardUsd.toFixed(2)})` : ""}
+										{rewardUsd && rewardUsd > 0
+											? t('rewardsAvailableWithUsd', { amount: rewardAmount, symbol: chain.symbol, usd: rewardUsd.toFixed(2) })
+											: t('rewardsAvailable', { amount: rewardAmount, symbol: chain.symbol })}
 									</Text>
 								)}
 							</Box>
 						</Box>
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Amount</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('amount')}</Text>
 							<HStack>
 								<Input
 									placeholder="0.00"
@@ -317,15 +321,15 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 										setAmount(String(max))
 									}}
 								>
-									MAX
+									{t('max')}
 								</Button>
 							</HStack>
 						</Box>
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Memo (optional)</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('memoOptional')}</Text>
 							<Input
-								placeholder="Delegation via KeepKey Vault"
+								placeholder={t('defaultDelegationMemo')}
 								value={memo}
 								onChange={(e) => setMemo(e.target.value)}
 								bg="kk.bg"
@@ -341,18 +345,18 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 					<VStack align="stretch" gap="2" mb="3">
 						<Box p="3" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
 							<HStack justify="space-between">
-								<Text fontSize="xs" color="kk.textMuted">Amount</Text>
+								<Text fontSize="xs" color="kk.textMuted">{t('amount')}</Text>
 								<Text fontSize="sm" color="kk.textPrimary">{amount} {chain.symbol}</Text>
 							</HStack>
 							<HStack justify="space-between" mt="1">
-								<Text fontSize="xs" color="kk.textMuted">Validator</Text>
+								<Text fontSize="xs" color="kk.textMuted">{t('validator')}</Text>
 								<Text fontSize="10px" fontFamily="mono" color="kk.textPrimary">
 									{validatorAddress.slice(0, 10)}...{validatorAddress.slice(-6)}
 								</Text>
 							</HStack>
 						</Box>
 						<Box p="3" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
-							<Text fontSize="xs" color="kk.textMuted">Fee</Text>
+							<Text fontSize="xs" color="kk.textMuted">{t('fee')}</Text>
 							<Text fontSize="sm" color="kk.textPrimary">{buildResult?.fee} {chain.symbol}</Text>
 						</Box>
 					</VStack>
@@ -362,36 +366,36 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 					<Box p="3" bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="md" mb="3">
 						<Flex align="center" gap="2">
 							<Spinner size="xs" color="kk.gold" />
-							<Text fontSize="xs" color="kk.textPrimary" fontWeight="600">Waiting for device confirmation</Text>
+							<Text fontSize="xs" color="kk.textPrimary" fontWeight="600">{t('waitingForDevice')}</Text>
 						</Flex>
-						<Text fontSize="xs" color="kk.textMuted" mt="1">Confirm the transaction on your KeepKey. This can take up to 2 minutes.</Text>
+						<Text fontSize="xs" color="kk.textMuted" mt="1">{t('confirmOnKeepKey')}</Text>
 						{signStart && (
 							<Text fontSize="10px" color="kk.textMuted" mt="1">
-								Elapsed: {Math.max(0, Math.floor((Date.now() - signStart) / 1000))}s
+								{t('elapsed', { seconds: Math.max(0, Math.floor((Date.now() - signStart) / 1000)) })}
 							</Text>
 						)}
 						<Text fontSize="10px" color="kk.textMuted" mt="1">
-							Tips: unlock device, check cable, or reconnect if prompt doesn’t appear.
+							{t('deviceTips')}
 						</Text>
 					</Box>
 				)}
 
 				{phase === "signed" && (
 					<Box p="3" bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="md" mb="3">
-						<Text fontSize="xs" color="kk.textPrimary" fontWeight="600" mb="1">Signed on device</Text>
-						<Text fontSize="xs" color="kk.textMuted">Review and broadcast when ready.</Text>
+						<Text fontSize="xs" color="kk.textPrimary" fontWeight="600" mb="1">{t('signedOnDevice')}</Text>
+						<Text fontSize="xs" color="kk.textMuted">{t('reviewAndBroadcast')}</Text>
 					</Box>
 				)}
 
 				{phase === "broadcast" && (
 					<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.3)" borderRadius="md" mb="3">
-						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">Delegation submitted</Text>
+						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">{t('delegationSubmitted')}</Text>
 						{txid ? (
 							<Flex justify="space-between" align="center">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">{txid}</Text>
 								<HStack gap="1">
 									<IconButton
-										aria-label="Copy transaction id"
+										aria-label={t('copyTxId')}
 										size="xs"
 										variant="ghost"
 										color={txidCopied ? "green.300" : "kk.gold"}
@@ -401,7 +405,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 									</IconButton>
 									{getExplorerTxUrl(chain, txid) && (
 										<IconButton
-											aria-label="View transaction"
+											aria-label={t('viewTransaction')}
 											size="xs"
 											variant="ghost"
 											color="kk.gold"
@@ -413,38 +417,38 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 								</HStack>
 							</Flex>
 						) : (
-							<Text fontSize="xs" color="kk.textMuted">Broadcasted. Txid will appear shortly.</Text>
+							<Text fontSize="xs" color="kk.textMuted">{t('broadcastedTxidSoon')}</Text>
 						)}
 					</Box>
 				)}
 
 				<Flex justify="flex-end" gap="2" mt="4">
 					<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={onClose}>
-						{phase === "broadcast" ? "Done" : "Cancel"}
+						{phase === "broadcast" ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{phase === "input" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled={!canBuild || loading || watchOnly} onClick={handleBuild}>
-							{loading ? "Building..." : "Build"}
+							{loading ? t('building') : t('build')}
 						</Button>
 					)}
 					{phase === "built" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled={loading || watchOnly} onClick={handleSign}>
-							{loading ? "Signing..." : "Sign"}
+							{loading ? t('signing') : t('sign')}
 						</Button>
 					)}
 					{phase === "signing" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled>
-							Signing...
+							{t('signing')}
 						</Button>
 					)}
 					{phase === "signed" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled={loading || watchOnly} onClick={handleBroadcast}>
-							{loading ? "Broadcasting..." : "Broadcast"}
+							{loading ? t('broadcasting') : t('broadcast')}
 						</Button>
 					)}
 				</Flex>
 				{watchOnly && (
-					<Text fontSize="xs" color="kk.textMuted" mt="2">Connect your device to delegate.</Text>
+					<Text fontSize="xs" color="kk.textMuted" mt="2">{t('connectToDelegate')}</Text>
 				)}
 			</Box>
 		</Box>
@@ -461,9 +465,10 @@ interface UndelegateDialogProps {
 }
 
 function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watchOnly }: UndelegateDialogProps) {
+	const { t } = useTranslation("staking")
 	const [selected, setSelected] = useState("")
 	const [amount, setAmount] = useState("")
-	const [memo, setMemo] = useState("Undelegation via KeepKey Vault")
+	const [memo, setMemo] = useState(t('defaultUndelegationMemo'))
 	const [phase, setPhase] = useState<TxPhase>("input")
 	const [buildResult, setBuildResult] = useState<BuildTxResult | null>(null)
 	const [signedTx, setSignedTx] = useState<any>(null)
@@ -475,13 +480,13 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 	const [signTimeout, setSignTimeout] = useState<NodeJS.Timeout | null>(null)
 
 	const selectedPosition = delegations.find(d => d.validatorAddress === selected)
-	const unbondingPeriod = getUnbondingPeriod(chain.id)
+	const unbondingPeriodKey = getUnbondingPeriod(chain.id)
 
 	useEffect(() => {
 		if (!isOpen) return
 		setSelected("")
 		setAmount("")
-		setMemo("Undelegation via KeepKey Vault")
+		setMemo(t('defaultUndelegationMemo'))
 		setPhase("input")
 		setBuildResult(null)
 		setSignedTx(null)
@@ -510,10 +515,10 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			setBuildResult(result)
 			setPhase("built")
 		} catch (e: any) {
-			setError(e.message || "Failed to build undelegation transaction")
+			setError(e.message || t('failedToBuildUndelegation'))
 		}
 		setLoading(false)
-	}, [canBuild, watchOnly, chain.id, selectedPosition, selected, amount, memo])
+	}, [canBuild, watchOnly, chain.id, selectedPosition, selected, amount, memo, t])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult || watchOnly) return
@@ -524,7 +529,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		setSignStart(start)
 		if (signTimeout) clearTimeout(signTimeout)
 		const timeout = setTimeout(() => {
-			setError("Still waiting for device confirmation. Make sure your KeepKey is unlocked and approve the transaction on the device.")
+			setError(t('signingTimeout'))
 		}, 120000)
 		setSignTimeout(timeout)
 		try {
@@ -532,13 +537,13 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
-			setError(e.message || "Signing failed")
+			setError(e.message || t('signingFailed'))
 			setPhase("built")
 		}
 		setLoading(false)
 		if (timeout) clearTimeout(timeout)
 		setSignTimeout(null)
-	}, [buildResult, watchOnly, chain])
+	}, [buildResult, watchOnly, chain, t])
 
 	const handleBroadcast = useCallback(async () => {
 		if (!signedTx || watchOnly) return
@@ -553,10 +558,10 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			setPhase("broadcast")
 			onSuccess()
 		} catch (e: any) {
-			setError(e.message || "Broadcast failed")
+			setError(e.message || t('broadcastFailed'))
 		}
 		setLoading(false)
-	}, [signedTx, watchOnly, chain.id, onSuccess])
+	}, [signedTx, watchOnly, chain.id, onSuccess, t])
 
 	const handleOpenExplorer = useCallback(async (txidValue: string) => {
 		const url = getExplorerTxUrl(chain, txidValue)
@@ -584,7 +589,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		<Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
 			<Box position="absolute" inset="0" bg="blackAlpha.700" />
 			<Box position="relative" bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" w="520px" maxW="92vw" onClick={(e) => e.stopPropagation()}>
-				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="3">Undelegate {chain.symbol}</Text>
+				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="3">{t('undelegateTitle', { symbol: chain.symbol })}</Text>
 
 				{error && (
 					<Box p="3" bg="rgba(255,0,0,0.08)" border="1px solid" borderColor="red.500" borderRadius="md" mb="3">
@@ -595,12 +600,12 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 				{phase === "input" && (
 					<VStack align="stretch" gap="3">
 						<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.2)" borderRadius="md">
-							<Text fontSize="xs" color="kk.gold" fontWeight="600">Unbonding Period: {unbondingPeriod}</Text>
-							<Text fontSize="xs" color="kk.textMuted">Tokens are locked during unbonding and stop earning rewards.</Text>
+							<Text fontSize="xs" color="kk.gold" fontWeight="600">{t('unbondingPeriod', { period: t(unbondingPeriodKey) })}</Text>
+							<Text fontSize="xs" color="kk.textMuted">{t('tokensLockedDuringUnbonding')}</Text>
 						</Box>
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Delegation</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('delegation')}</Text>
 							<Box
 								as="select"
 								w="100%"
@@ -614,10 +619,10 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 								value={selected}
 								onChange={(e: any) => { setSelected(e.target.value); setAmount("") }}
 							>
-								<option value="">Select delegation...</option>
+								<option value="">{t('selectDelegation')}</option>
 								{delegations.map((pos, idx) => (
 									<option key={`${pos.validatorAddress}-${idx}`} value={pos.validatorAddress || ""} style={{ background: '#1a1a2e' }}>
-										{pos.validator || 'Unknown Validator'} — {pos.balance} {pos.ticker || chain.symbol}
+										{pos.validator || t('unknownValidator')} — {pos.balance} {pos.ticker || chain.symbol}
 									</option>
 								))}
 							</Box>
@@ -625,7 +630,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 
 						{selectedPosition && (
 							<Box>
-								<Text fontSize="xs" color="kk.textMuted" mb="1">Amount</Text>
+								<Text fontSize="xs" color="kk.textMuted" mb="1">{t('amount')}</Text>
 								<HStack>
 									<Input
 										placeholder="0.00"
@@ -644,19 +649,19 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 										_hover={{ color: "kk.gold", borderColor: "kk.gold" }}
 										onClick={() => setAmount(String(selectedPosition.balance || '0'))}
 									>
-										MAX
+										{t('max')}
 									</Button>
 								</HStack>
 								<Text fontSize="10px" color="kk.textMuted" mt="1">
-									Available: {selectedPosition.balance} {selectedPosition.ticker || chain.symbol}
+									{t('available')}: {selectedPosition.balance} {selectedPosition.ticker || chain.symbol}
 								</Text>
 							</Box>
 						)}
 
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Memo (optional)</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{t('memoOptional')}</Text>
 							<Input
-								placeholder="Undelegation via KeepKey Vault"
+								placeholder={t('defaultUndelegationMemo')}
 								value={memo}
 								onChange={(e) => setMemo(e.target.value)}
 								bg="kk.bg"
@@ -672,12 +677,12 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 					<VStack align="stretch" gap="2" mb="3">
 						<Box p="3" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
 							<HStack justify="space-between">
-								<Text fontSize="xs" color="kk.textMuted">Amount</Text>
+								<Text fontSize="xs" color="kk.textMuted">{t('amount')}</Text>
 								<Text fontSize="sm" color="kk.textPrimary">{amount} {chain.symbol}</Text>
 							</HStack>
 							{selectedPosition && (
 								<HStack justify="space-between" mt="1">
-									<Text fontSize="xs" color="kk.textMuted">Validator</Text>
+									<Text fontSize="xs" color="kk.textMuted">{t('validator')}</Text>
 									<Text fontSize="10px" fontFamily="mono" color="kk.textPrimary">
 										{(selectedPosition.validatorAddress || '').slice(0, 10)}...{(selectedPosition.validatorAddress || '').slice(-6)}
 									</Text>
@@ -685,7 +690,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 							)}
 						</Box>
 						<Box p="3" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
-							<Text fontSize="xs" color="kk.textMuted">Fee</Text>
+							<Text fontSize="xs" color="kk.textMuted">{t('fee')}</Text>
 							<Text fontSize="sm" color="kk.textPrimary">{buildResult?.fee} {chain.symbol}</Text>
 						</Box>
 					</VStack>
@@ -695,36 +700,36 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 					<Box p="3" bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="md" mb="3">
 						<Flex align="center" gap="2">
 							<Spinner size="xs" color="kk.gold" />
-							<Text fontSize="xs" color="kk.textPrimary" fontWeight="600">Waiting for device confirmation</Text>
+							<Text fontSize="xs" color="kk.textPrimary" fontWeight="600">{t('waitingForDevice')}</Text>
 						</Flex>
-						<Text fontSize="xs" color="kk.textMuted" mt="1">Confirm the transaction on your KeepKey. This can take up to 2 minutes.</Text>
+						<Text fontSize="xs" color="kk.textMuted" mt="1">{t('confirmOnKeepKey')}</Text>
 						{signStart && (
 							<Text fontSize="10px" color="kk.textMuted" mt="1">
-								Elapsed: {Math.max(0, Math.floor((Date.now() - signStart) / 1000))}s
+								{t('elapsed', { seconds: Math.max(0, Math.floor((Date.now() - signStart) / 1000)) })}
 							</Text>
 						)}
 						<Text fontSize="10px" color="kk.textMuted" mt="1">
-							Tips: unlock device, check cable, or reconnect if prompt doesn’t appear.
+							{t('deviceTips')}
 						</Text>
 					</Box>
 				)}
 
 				{phase === "signed" && (
 					<Box p="3" bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="md" mb="3">
-						<Text fontSize="xs" color="kk.textPrimary" fontWeight="600" mb="1">Signed on device</Text>
-						<Text fontSize="xs" color="kk.textMuted">Review and broadcast when ready.</Text>
+						<Text fontSize="xs" color="kk.textPrimary" fontWeight="600" mb="1">{t('signedOnDevice')}</Text>
+						<Text fontSize="xs" color="kk.textMuted">{t('reviewAndBroadcast')}</Text>
 					</Box>
 				)}
 
 				{phase === "broadcast" && (
 					<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.3)" borderRadius="md" mb="3">
-						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">Undelegation submitted</Text>
+						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">{t('undelegationSubmitted')}</Text>
 						{txid ? (
 							<Flex justify="space-between" align="center">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">{txid}</Text>
 								<HStack gap="1">
 									<IconButton
-										aria-label="Copy transaction id"
+										aria-label={t('copyTxId')}
 										size="xs"
 										variant="ghost"
 										color={txidCopied ? "green.300" : "kk.gold"}
@@ -734,7 +739,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 									</IconButton>
 									{getExplorerTxUrl(chain, txid) && (
 										<IconButton
-											aria-label="View transaction"
+											aria-label={t('viewTransaction')}
 											size="xs"
 											variant="ghost"
 											color="kk.gold"
@@ -746,38 +751,38 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 								</HStack>
 							</Flex>
 						) : (
-							<Text fontSize="xs" color="kk.textMuted">Broadcasted. Txid will appear shortly.</Text>
+							<Text fontSize="xs" color="kk.textMuted">{t('broadcastedTxidSoon')}</Text>
 						)}
 					</Box>
 				)}
 
 				<Flex justify="flex-end" gap="2" mt="4">
 					<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={onClose}>
-						{phase === "broadcast" ? "Done" : "Cancel"}
+						{phase === "broadcast" ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{phase === "input" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled={!canBuild || loading || watchOnly} onClick={handleBuild}>
-							{loading ? "Building..." : "Build"}
+							{loading ? t('building') : t('build')}
 						</Button>
 					)}
 					{phase === "built" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled={loading || watchOnly} onClick={handleSign}>
-							{loading ? "Signing..." : "Sign"}
+							{loading ? t('signing') : t('sign')}
 						</Button>
 					)}
 					{phase === "signing" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled>
-							Signing...
+							{t('signing')}
 						</Button>
 					)}
 					{phase === "signed" && (
 						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} disabled={loading || watchOnly} onClick={handleBroadcast}>
-							{loading ? "Broadcasting..." : "Broadcast"}
+							{loading ? t('broadcasting') : t('broadcast')}
 						</Button>
 					)}
 				</Flex>
 				{watchOnly && (
-					<Text fontSize="xs" color="kk.textMuted" mt="2">Connect your device to undelegate.</Text>
+					<Text fontSize="xs" color="kk.textMuted" mt="2">{t('connectToUndelegate')}</Text>
 				)}
 			</Box>
 		</Box>
@@ -785,6 +790,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 }
 
 export function StakingPanel({ chain, address, availableBalance, watchOnly }: StakingPanelProps) {
+	const { t } = useTranslation("staking")
 	const [positions, setPositions] = useState<StakingPosition[]>([])
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
@@ -811,10 +817,10 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 			}, 60000)
 			setPositions(result || [])
 		} catch (e: any) {
-			setError(e.message || 'Failed to load staking positions')
+			setError(e.message || t('failedToLoadPositions'))
 		}
 		setLoading(false)
-	}, [address, chain.id])
+	}, [address, chain.id, t])
 
 	useEffect(() => {
 		loadPositions()
@@ -825,13 +831,13 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 			<Flex justify="space-between" align="center" mb="3">
 				<HStack gap="2">
 					<Box as={FaCoins} color="kk.gold" />
-					<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">Staking</Text>
+					<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{t('title')}</Text>
 					{totalUsd > 0 && (
 						<Badge colorScheme="yellow" variant="subtle">${totalUsd.toFixed(2)}</Badge>
 					)}
 				</HStack>
 				<IconButton
-					aria-label="Refresh staking"
+					aria-label={t('refreshStaking')}
 					size="xs"
 					variant="ghost"
 					color="kk.textMuted"
@@ -867,7 +873,7 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 							onClick={() => setShowDelegate(true)}
 							disabled={watchOnly || !address}
 						>
-							Delegate
+							{t('delegate')}
 						</Button>
 						<Button
 							size="sm"
@@ -880,17 +886,17 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 							onClick={() => setShowUndelegate(true)}
 							disabled={watchOnly || delegationPositions.length === 0}
 						>
-							Undelegate
+							{t('undelegate')}
 						</Button>
 						{watchOnly && (
-							<Text fontSize="xs" color="kk.textMuted" alignSelf="center">Connect device to manage staking.</Text>
+							<Text fontSize="xs" color="kk.textMuted" alignSelf="center">{t('connectToManage')}</Text>
 						)}
 					</Flex>
 
 					{positions.length === 0 ? (
 						<Box p="4" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
-							<Text fontSize="sm" color="kk.textMuted">No staking positions found.</Text>
-							<Text fontSize="xs" color="kk.textMuted" mt="1">Delegate {chain.symbol} to earn rewards.</Text>
+							<Text fontSize="sm" color="kk.textMuted">{t('noPositions')}</Text>
+							<Text fontSize="xs" color="kk.textMuted" mt="1">{t('delegateToEarn', { symbol: chain.symbol })}</Text>
 						</Box>
 					) : (
 						<VStack align="stretch" gap="2">
@@ -909,7 +915,7 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 												<Text fontSize="sm" color="kk.textPrimary">{pos.balance} {pos.ticker || chain.symbol}</Text>
 											</HStack>
 											<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
-												{pos.validator || pos.validatorAddress || 'Unknown Validator'}
+												{pos.validator || pos.validatorAddress || t('unknownValidator')}
 											</Text>
 										</VStack>
 										<VStack align="end" gap="0">

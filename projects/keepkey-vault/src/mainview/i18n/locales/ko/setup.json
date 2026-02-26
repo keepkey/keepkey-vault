@@ -1,0 +1,105 @@
+{
+	"title": "KeepKey 설정",
+	"subtitle": "안전한 멀티체인 하드웨어 지갑",
+	"stepDescriptions": {
+		"welcome": "KeepKey에 오신 것을 환영합니다",
+		"bootloader": "부트로더 확인 및 업데이트",
+		"firmware": "펌웨어 확인 및 업데이트",
+		"initChoose": "설정 방법 선택",
+		"initProgress": "지갑 설정 중",
+		"initLabel": "기기 이름 지정",
+		"complete": "설정 완료!"
+	},
+	"visibleSteps": {
+		"bootloader": "부트로더",
+		"firmware": "펌웨어",
+		"setup": "설정"
+	},
+	"welcome": {
+		"title": "KeepKey에 오신 것을 환영합니다",
+		"oobIntro": "펌웨어를 업데이트하고 지갑을 설정해 봅시다.",
+		"intro": "하드웨어 지갑을 설정해 봅시다.",
+		"startingSetup": "설정 시작 중...",
+		"detectingDevice": "기기 상태 감지 중..."
+	},
+	"bootloader": {
+		"title": "부트로더 업데이트",
+		"description": "보안 및 호환성을 위해 부트로더를 업데이트해야 합니다.",
+		"current": "현재",
+		"latest": "최신",
+		"outdated": "구버전",
+		"updatingBootloader": "부트로더 업데이트 중...",
+		"doNotUnplugBrick": "기기를 절대 분리하지 마세요. 중단하면 기기가 영구적으로 손상될 수 있습니다.",
+		"updateFailed": "업데이트 실패",
+		"tryAgain": "다시 시도",
+		"enterFirmwareUpdateMode": "펌웨어 업데이트 모드 진입",
+		"step1Unplug": "1. KeepKey를 분리하세요",
+		"step2Hold": "2. 기기의 버튼을 길게 누르세요",
+		"step3Plugin": "3. 버튼을 누른 채로 USB 케이블을 연결하세요",
+		"step4Release": "4. 부트로더 화면이 나타나면 놓으세요",
+		"listeningForBootloader": "부트로더 모드의 기기를 대기 중...",
+		"readyDetectBootloader": "준비 완료 — 부트로더 감지",
+		"skipBootloaderUpdate": "부트로더 업데이트 건너뛰기"
+	},
+	"firmware": {
+		"title": "펌웨어 업데이트",
+		"oobDescription": "기기에 공장 펌웨어가 설치되어 있습니다. 중요 업데이트가 필요합니다.",
+		"description": "기기의 펌웨어 업데이트를 사용할 수 있습니다.",
+		"firmwareLabel": "펌웨어",
+		"notInstalled": "설치되지 않음",
+		"important": "중요:",
+		"doNotDisconnect": "업데이트 중 기기를 분리하지 마세요",
+		"mayNeedConfirm": "기기 화면에서 확인이 필요할 수 있습니다",
+		"fundsRemainSafe": "자금과 설정은 안전하게 유지됩니다",
+		"updatingFirmware": "펌웨어 업데이트 중...",
+		"doNotUnplug": "기기를 절대 분리하지 마세요.",
+		"deviceRebooting": "기기가 재부팅 중...",
+		"rebootingMessage": "KeepKey가 새 펌웨어로 재시작 중입니다. 잠시 기다려 주세요...",
+		"firmwareVerified": "펌웨어가 공식 릴리스로 확인되었습니다",
+		"firmwareHashNotFound": "매니페스트에서 펌웨어 해시를 찾을 수 없습니다",
+		"updateFirmwareTo": "펌웨어를 v{{version}}(으)로 업데이트",
+		"skipUpdate": "업데이트 건너뛰기"
+	},
+	"initChoose": {
+		"title": "지갑 설정",
+		"description": "KeepKey 설정 방법을 선택하세요",
+		"createNewWallet": "새 지갑 만들기",
+		"createDescription": "기기에서 새 시드 구문 생성",
+		"createWallet": "지갑 만들기",
+		"recoverExistingWallet": "기존 지갑 복구",
+		"recoverDescription": "기기에서 복구 시드 구문 입력",
+		"recoverWallet": "지갑 복구"
+	},
+	"initProgress": {
+		"creatingWallet": "지갑 생성 중...",
+		"recoveringWallet": "지갑 복구 중...",
+		"followPromptsCreate": "KeepKey 기기 화면의 안내를 따르세요. 시드 단어를 신중하게 적어두세요 — 이것이 백업입니다.",
+		"followPromptsRecover": "KeepKey 기기 화면의 안내를 따르세요. 기기를 사용하여 복구 시드 구문을 입력하세요.",
+		"followPrompts": "KeepKey 기기 화면의 안내를 따르세요.",
+		"lookAtDevice": "KeepKey 기기를 보고 화면의 지시를 따르세요.",
+		"failedToCreate": "지갑 생성 실패",
+		"failedToRecover": "지갑 복구 실패"
+	},
+	"initLabel": {
+		"walletCreated": "지갑이 생성되었습니다!",
+		"walletRecovered": "지갑이 복구되었습니다!",
+		"giveAName": "KeepKey에 쉽게 식별할 수 있는 이름을 지어주세요",
+		"placeholder": "내 KeepKey",
+		"setDeviceName": "기기 이름 설정",
+		"skipForNow": "지금은 건너뛰기"
+	},
+	"complete": {
+		"walletCreated": "지갑이 생성되었습니다!",
+		"walletRecovered": "지갑이 복구되었습니다!",
+		"deviceReady": "KeepKey{{label}}가 준비되었습니다",
+		"recoveredDescription": "복구 문구에서 지갑이 성공적으로 복원되었습니다",
+		"createdDescription": "새 지갑이 안전하게 설정되어 사용할 준비가 되었습니다",
+		"startUsing": "KeepKey 사용 시작"
+	},
+	"footer": {
+		"stepOf": "{{total}}단계 중 {{current}}단계",
+		"settingUpWallet": "지갑 설정 중...",
+		"previous": "이전",
+		"next": "다음"
+	}
+}

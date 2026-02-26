@@ -1,0 +1,11 @@
+{
+	"supportedChains": "Unterstützte Blockchains",
+	"refreshBalances": "Guthaben aktualisieren",
+	"connectDeviceToRefresh": "Gerät verbinden zum Aktualisieren",
+	"networksCount": "{{count}} Netzwerke",
+	"addChain": "Blockchain hinzufügen",
+	"noBalance": "Kein Guthaben",
+	"tokensCount_one": "+{{count}} Token",
+	"tokensCount_other": "+{{count}} Token",
+	"watchOnlyBanner": "Nur Ansicht — Gerät verbinden für vollen Zugriff"
+}

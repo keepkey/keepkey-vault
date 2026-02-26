@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Box, Flex, Text, VStack, IconButton, Image } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
 import type { ApiLogEntry } from "../../shared/types"
 
@@ -155,6 +156,7 @@ function JsonBlock({ label, data }: { label: string; data: any }) {
 
 export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAuditLogProps) {
 	const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
+	const { t } = useTranslation("settings")
 
 	if (!open) return null
 
@@ -200,14 +202,14 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 						<polyline points="10 9 9 9 8 9" />
 					</svg>
 					<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-						API Audit Log
+						{t('auditLogPanel.title')}
 					</Text>
 					<Text fontSize="xs" color="kk.textMuted">
 						({entries.length})
 					</Text>
 				</Flex>
 				<IconButton
-					aria-label="Close audit log"
+					aria-label={t('auditLogPanel.closeAuditLog')}
 					onClick={onClose}
 					size="sm"
 					variant="ghost"
@@ -231,7 +233,7 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 					bg="rgba(192,168,96,0.04)"
 				>
 					<Text fontSize="9px" fontWeight="600" color="kk.textMuted" mb="1.5" textTransform="uppercase" letterSpacing="0.05em">
-						Paired Apps ({pairedApps.length})
+						{t('auditLogPanel.pairedAppsCount', { count: pairedApps.length })}
 					</Text>
 					<Flex gap="2" flexWrap="wrap">
 						{pairedApps.map((app) => (
@@ -261,7 +263,7 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 				{entries.length === 0 ? (
 					<Box px="4" py="8" textAlign="center">
 						<Text fontSize="sm" color="kk.textMuted">
-							No API requests yet
+							{t('auditLogPanel.noRequests')}
 						</Text>
 					</Box>
 				) : (
@@ -318,8 +320,8 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 								{/* Expanded detail panel */}
 								{isExpanded && hasDetail && (
 									<Box px="4" pb="3" pt="0">
-										<JsonBlock label="Request Body" data={entry.requestBody} />
-										<JsonBlock label="Response Body" data={entry.responseBody} />
+										<JsonBlock label={t('auditLogPanel.requestBody')} data={entry.requestBody} />
+										<JsonBlock label={t('auditLogPanel.responseBody')} data={entry.responseBody} />
 									</Box>
 								)}
 							</Box>

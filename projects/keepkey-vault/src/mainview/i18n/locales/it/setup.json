@@ -1,0 +1,105 @@
+{
+	"title": "Configurazione KeepKey",
+	"subtitle": "Portafoglio hardware multi-chain sicuro",
+	"stepDescriptions": {
+		"welcome": "Benvenuto su KeepKey",
+		"bootloader": "Verifica e aggiorna il bootloader",
+		"firmware": "Verifica e aggiorna il firmware",
+		"initChoose": "Scegli il metodo di configurazione",
+		"initProgress": "Configurazione del portafoglio",
+		"initLabel": "Dai un nome al dispositivo",
+		"complete": "Configurazione completata!"
+	},
+	"visibleSteps": {
+		"bootloader": "Bootloader",
+		"firmware": "Firmware",
+		"setup": "Configurazione"
+	},
+	"welcome": {
+		"title": "Benvenuto su KeepKey",
+		"oobIntro": "Aggiorniamo il firmware e configuriamo il tuo portafoglio.",
+		"intro": "Configuriamo il tuo portafoglio hardware.",
+		"startingSetup": "Avvio configurazione...",
+		"detectingDevice": "Rilevamento stato dispositivo..."
+	},
+	"bootloader": {
+		"title": "Aggiornamento Bootloader",
+		"description": "Il bootloader deve essere aggiornato per sicurezza e compatibilità.",
+		"current": "Attuale",
+		"latest": "Ultimo",
+		"outdated": "Obsoleto",
+		"updatingBootloader": "Aggiornamento bootloader...",
+		"doNotUnplugBrick": "NON scollegare il dispositivo. L'interruzione può danneggiare permanentemente il dispositivo.",
+		"updateFailed": "Aggiornamento fallito",
+		"tryAgain": "Riprova",
+		"enterFirmwareUpdateMode": "Entra in modalità aggiornamento firmware",
+		"step1Unplug": "1. Scollega il tuo KeepKey",
+		"step2Hold": "2. Tieni premuto il pulsante del dispositivo",
+		"step3Plugin": "3. Tenendo premuto, collega il cavo USB",
+		"step4Release": "4. Rilascia quando appare la schermata del bootloader",
+		"listeningForBootloader": "In ascolto del dispositivo in modalità bootloader...",
+		"readyDetectBootloader": "Pronto — Rileva Bootloader",
+		"skipBootloaderUpdate": "Salta aggiornamento bootloader"
+	},
+	"firmware": {
+		"title": "Aggiornamento Firmware",
+		"oobDescription": "Il dispositivo ha il firmware di fabbrica. È necessario un aggiornamento critico.",
+		"description": "È disponibile un aggiornamento firmware per il tuo dispositivo.",
+		"firmwareLabel": "Firmware",
+		"notInstalled": "Non installato",
+		"important": "Importante:",
+		"doNotDisconnect": "Non scollegare il dispositivo durante l'aggiornamento",
+		"mayNeedConfirm": "Potrebbe essere necessario confermare sullo schermo del dispositivo",
+		"fundsRemainSafe": "I tuoi fondi e le impostazioni rimarranno al sicuro",
+		"updatingFirmware": "Aggiornamento firmware...",
+		"doNotUnplug": "NON scollegare il dispositivo.",
+		"deviceRebooting": "Il dispositivo si sta riavviando...",
+		"rebootingMessage": "Il tuo KeepKey si sta riavviando con il nuovo firmware. Attendere...",
+		"firmwareVerified": "Firmware verificato come versione ufficiale",
+		"firmwareHashNotFound": "Hash del firmware non trovato nel manifesto",
+		"updateFirmwareTo": "Aggiorna Firmware a v{{version}}",
+		"skipUpdate": "Salta aggiornamento"
+	},
+	"initChoose": {
+		"title": "Configura il tuo portafoglio",
+		"description": "Scegli come configurare il tuo KeepKey",
+		"createNewWallet": "Crea nuovo portafoglio",
+		"createDescription": "Genera una nuova frase seed sul dispositivo",
+		"createWallet": "Crea portafoglio",
+		"recoverExistingWallet": "Recupera portafoglio esistente",
+		"recoverDescription": "Inserisci la tua frase seed di recupero sul dispositivo",
+		"recoverWallet": "Recupera portafoglio"
+	},
+	"initProgress": {
+		"creatingWallet": "Creazione portafoglio...",
+		"recoveringWallet": "Recupero portafoglio...",
+		"followPromptsCreate": "Segui le istruzioni sullo schermo del tuo KeepKey. Annota le parole seed con attenzione — sono il tuo backup.",
+		"followPromptsRecover": "Segui le istruzioni sullo schermo del tuo KeepKey. Inserisci la tua frase seed di recupero usando il dispositivo.",
+		"followPrompts": "Segui le istruzioni sullo schermo del tuo KeepKey.",
+		"lookAtDevice": "Guarda il tuo dispositivo KeepKey e segui le istruzioni sullo schermo.",
+		"failedToCreate": "Creazione portafoglio fallita",
+		"failedToRecover": "Recupero portafoglio fallito"
+	},
+	"initLabel": {
+		"walletCreated": "Portafoglio creato!",
+		"walletRecovered": "Portafoglio recuperato!",
+		"giveAName": "Dai al tuo KeepKey un nome amichevole per identificarlo facilmente",
+		"placeholder": "Il mio KeepKey",
+		"setDeviceName": "Imposta nome dispositivo",
+		"skipForNow": "Salta per ora"
+	},
+	"complete": {
+		"walletCreated": "Portafoglio creato!",
+		"walletRecovered": "Portafoglio recuperato!",
+		"deviceReady": "Il tuo KeepKey{{label}} è pronto",
+		"recoveredDescription": "Il tuo portafoglio è stato ripristinato con successo dalla frase di recupero",
+		"createdDescription": "Il tuo nuovo portafoglio è sicuro e pronto all'uso",
+		"startUsing": "Inizia a usare KeepKey"
+	},
+	"footer": {
+		"stepOf": "Passo {{current}} di {{total}}",
+		"settingUpWallet": "Configurazione portafoglio...",
+		"previous": "Precedente",
+		"next": "Avanti"
+	}
+}
