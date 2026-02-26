@@ -42,8 +42,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Init required submodules
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
