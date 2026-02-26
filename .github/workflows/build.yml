@@ -1,0 +1,233 @@
+name: Build KeepKey Vault
+
+on:
+  push:
+    branches: [develop, 'release/*']
+    tags: ['v*']
+  pull_request:
+    branches: [develop, master]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: '1.3.5'
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            runner: macos-14
+            artifact-suffix: macos-universal
+          - name: Linux x64
+            runner: ubuntu-latest
+            artifact-suffix: linux-x64
+          - name: Windows x64
+            runner: windows-latest
+            artifact-suffix: windows-x64
+            # Electrobun CLI tar extraction broken on Windows (D:\ drive path)
+            experimental: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js (for yarn / hdwallet build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Yarn
+        run: npm install -g yarn
+
+      - name: Cache proto-tx-builder
+        uses: actions/cache@v4
+        with:
+          path: modules/proto-tx-builder/node_modules
+          key: proto-tx-builder-${{ runner.os }}-${{ hashFiles('modules/proto-tx-builder/package.json') }}
+
+      - name: Cache hdwallet
+        uses: actions/cache@v4
+        with:
+          path: |
+            modules/hdwallet/node_modules
+            modules/hdwallet/packages/*/dist
+          key: hdwallet-${{ runner.os }}-${{ hashFiles('modules/hdwallet/yarn.lock') }}
+
+      - name: Cache vault node_modules
+        uses: actions/cache@v4
+        with:
+          path: projects/keepkey-vault/node_modules
+          key: vault-${{ runner.os }}-${{ hashFiles('projects/keepkey-vault/package.json') }}
+
+      - name: Build modules (hdwallet + proto-tx-builder)
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            make modules-build && break
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Install vault dependencies
+        run: cd projects/keepkey-vault && bun install
+        shell: bash
+
+      - name: Build unsigned app (CI mode)
+        env:
+          CI: 'true'
+        run: cd projects/keepkey-vault && bun run build:stable
+        shell: bash
+
+      - name: Prune app bundle
+        run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
+        shell: bash
+
+      - name: Package AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Extract the app from tar.zst
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "No Linux tar.zst found, skipping AppImage"; exit 0; fi
+
+          WORK=$(mktemp -d)
+          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
+          tar xf "$WORK/app.tar" -C "$WORK/"
+          rm "$WORK/app.tar"
+          APP_DIR=$(find "$WORK" -maxdepth 1 -type d -name "keepkey-vault" | head -1)
+          if [ -z "$APP_DIR" ]; then echo "No keepkey-vault dir found after extraction"; exit 1; fi
+
+          # Build AppImage structure
+          APPDIR="$WORK/KeepKey-Vault.AppDir"
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+
+          # Copy app contents
+          cp -r "$APP_DIR"/* "$APPDIR/usr/bin/"
+
+          # Icon
+          cp "$APPDIR/usr/bin/Resources/appIcon.png" "$APPDIR/keepkey-vault.png"
+          cp "$APPDIR/usr/bin/Resources/appIcon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/keepkey-vault.png"
+
+          # Desktop file
+          cat > "$APPDIR/keepkey-vault.desktop" <<DESKTOP
+          [Desktop Entry]
+          Name=KeepKey Vault
+          Exec=AppRun
+          Icon=keepkey-vault
+          Type=Application
+          Categories=Finance;Utility;
+          Comment=Desktop companion for KeepKey hardware wallet
+          DESKTOP
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' "$APPDIR/keepkey-vault.desktop"
+
+          # AppRun launcher
+          cat > "$APPDIR/AppRun" <<'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          exec "$HERE/usr/bin/bin/launcher" "$@"
+          APPRUN
+          sed -i 's/^          //' "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          # Download appimagetool
+          curl -fsSL -o "$WORK/appimagetool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x "$WORK/appimagetool"
+
+          # Build AppImage (--appimage-extract-and-run for CI without FUSE)
+          ARCH=x86_64 "$WORK/appimagetool" --appimage-extract-and-run "$APPDIR" "KeepKey-Vault-x86_64.AppImage"
+          mv "KeepKey-Vault-x86_64.AppImage" .
+
+          # Cleanup
+          rm -rf "$WORK"
+
+      - name: Generate checksums (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd projects/keepkey-vault/artifacts
+          shasum -a 256 * > SHA256SUMS.txt 2>/dev/null || true
+          cat SHA256SUMS.txt
+
+      - name: Generate checksums (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd projects\keepkey-vault\artifacts
+          Get-ChildItem -File | ForEach-Object { "$($(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Out-File -Encoding utf8 SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - name: List artifacts
+        run: ls -lh projects/keepkey-vault/artifacts/
+        shell: bash
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepkey-vault-${{ matrix.artifact-suffix }}-${{ github.sha }}
+          path: |
+            projects/keepkey-vault/artifacts/*
+          retention-days: 30
+
+  release:
+    name: Create Draft Release
+    needs: build
+    if: (!cancelled()) && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Derive release tag
+        id: tag
+        run: |
+          REF="${{ github.ref }}"
+          if [[ "$REF" == refs/tags/* ]]; then
+            echo "tag=${REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          elif [[ "$REF" == refs/heads/release/* ]]; then
+            VERSION="${REF#refs/heads/release/}"
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List release artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          generate_release_notes: true
+          name: KeepKey Vault ${{ steps.tag.outputs.tag }}
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
