@@ -13,6 +13,7 @@ import type {
   CosmosAminoSignParams,
   XrpSignTxParams,
   BnbSignTxParams,
+  SolanaSignTxParams,
   GetPublicKeyRequest,
   BatchPubkeysPath,
   ApplySettingsParams,
@@ -231,6 +232,9 @@ export class KeepKeySdk {
     // v1 SDK compat alias
     binanceGetAddress: (params: any): Promise<{ address: string }> =>
       this.client.post('/addresses/bnb', params),
+
+    solanaGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
+      this.client.post('/addresses/solana', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -378,6 +382,14 @@ export class KeepKeySdk {
   binance = {
     binanceSignTransaction: (params: BnbSignTxParams): Promise<SignedTx> =>
       this.client.post('/bnb/sign-transaction', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // solana — Solana signing
+  // ═══════════════════════════════════════════════════════════════════
+  solana = {
+    solanaSignTransaction: (params: SolanaSignTxParams): Promise<SignedTx> =>
+      this.client.post('/solana/sign-transaction', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════

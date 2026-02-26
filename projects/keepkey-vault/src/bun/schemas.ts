@@ -135,16 +135,6 @@ export const SolanaSignRequest = z.object({
   raw_tx: z.string().min(1),
 }).strip()
 
-/** POST /bnb/sign-transaction — minimum required fields for BinanceSignTx */
-export const BnbSignRequest = z.object({
-  account_number: z.union([z.string(), z.number()]),
-  chain_id: z.string(),
-  msgs: z.array(z.any()).min(1),
-  sequence: z.union([z.string(), z.number()]),
-  memo: z.string().optional(),
-  source: z.union([z.string(), z.number()]).optional(),
-  addressNList: z.array(z.number().int()).optional(),
-}).strip()
 
 /** POST /system/info/get-public-key */
 export const GetPublicKeyRequest = z.object({

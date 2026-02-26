@@ -213,7 +213,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		return txid
 	}, [txid])
 
-	const needsMemo = !isTokenSend && (chain.chainFamily === 'cosmos' || chain.chainFamily === 'binance' || chain.chainFamily === 'xrp')
+	const needsMemo = !isTokenSend && (chain.chainFamily === 'cosmos' || chain.chainFamily === 'xrp')
 
 	return (
 		<VStack gap="4" align="stretch" py="2" px="2">

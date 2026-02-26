@@ -84,6 +84,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('welcome')
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
+  const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
   const [setupError, setSetupError] = useState<string | null>(null)
   const [, setSetupLoading] = useState(false)
@@ -295,7 +296,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
     setSetupError(null)
     try {
       await rpcRequest('resetDevice', {
-        wordCount: 12,
+        wordCount,
         pin: true,
         passphrase: false,
       }, DEVICE_INTERACTION_TIMEOUT)
@@ -342,7 +343,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
     setSetupError(null)
     try {
       await rpcRequest('recoverDevice', {
-        wordCount: 12,
+        wordCount,
         pin: true,
         passphrase: false,
       }, DEVICE_INTERACTION_TIMEOUT)
@@ -844,6 +845,36 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                     {t('initChoose.description')}
                   </Text>
                 </VStack>
+
+                {/* Word count selector */}
+                <Box w="100%" maxW="400px" mx="auto">
+                  <Text fontSize="xs" color="gray.400" textAlign="center" mb="2">
+                    {t('initChoose.seedLength', { defaultValue: 'Recovery seed length' })}
+                  </Text>
+                  <Flex gap="2" justify="center">
+                    {([12, 18, 24] as const).map((wc) => (
+                      <Box
+                        key={wc}
+                        as="button"
+                        px="5"
+                        py="2"
+                        borderRadius="lg"
+                        fontSize="sm"
+                        fontWeight="600"
+                        cursor="pointer"
+                        bg={wordCount === wc ? HIGHLIGHT : 'gray.700'}
+                        color={wordCount === wc ? 'white' : 'gray.400'}
+                        borderWidth="2px"
+                        borderColor={wordCount === wc ? HIGHLIGHT : 'transparent'}
+                        _hover={{ bg: wordCount === wc ? 'orange.600' : 'gray.600' }}
+                        transition="all 0.15s"
+                        onClick={() => setWordCount(wc)}
+                      >
+                        {wc} {t('initChoose.words', { defaultValue: 'words' })}
+                      </Box>
+                    ))}
+                  </Flex>
+                </Box>
 
                 {setupError && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">

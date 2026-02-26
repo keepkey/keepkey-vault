@@ -175,8 +175,8 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 				</Flex>
 			)}
 
-			{/* Portfolio Chart — only when there are balances */}
-			{hasAnyBalance && (
+			{/* Portfolio Chart — or Welcome placeholder for empty wallets */}
+			{hasAnyBalance ? (
 				<Box
 					w="100%"
 					p="4"
@@ -201,6 +201,64 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 								onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 							/>
 						</Box>
+					</Flex>
+				</Box>
+			) : !loadingBalances && initialLoaded && (
+				<Box
+					w="100%"
+					p="5"
+					mb="5"
+					borderRadius="xl"
+					bg="kk.cardBg"
+					border="1px solid"
+					borderColor="rgba(192,168,96,0.2)"
+				>
+					<Flex direction="column" align="center" gap="3" textAlign="center">
+						{/* Shield / vault icon */}
+						<Box
+							w="56px"
+							h="56px"
+							borderRadius="full"
+							bg="rgba(192,168,96,0.1)"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+						>
+							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+								<path d="M9 12l2 2 4-4" />
+							</svg>
+						</Box>
+
+						<Box>
+							<Text fontSize="md" fontWeight="600" color="white" mb="1">
+								{t("welcomeTitle", { defaultValue: "Welcome to KeepKey Vault" })}
+							</Text>
+							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
+								{t("welcomeSubtitle", { defaultValue: "Your wallet is ready. Here's how to get started:" })}
+							</Text>
+						</Box>
+
+						<Flex direction="column" gap="2" w="100%" maxW="340px" mt="1">
+							<Flex align="flex-start" gap="2.5" textAlign="left">
+								<Text fontSize="sm" mt="0.5">1.</Text>
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
+									{t("welcomeTip1", { defaultValue: "Tap any chain below, then hit Receive to get your deposit address" })}
+								</Text>
+							</Flex>
+							<Flex align="flex-start" gap="2.5" textAlign="left">
+								<Text fontSize="sm" mt="0.5">2.</Text>
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
+									{t("welcomeTip2", { defaultValue: "Send crypto to your address — your balance will appear here automatically" })}
+								</Text>
+							</Flex>
+							<Flex align="flex-start" gap="2.5" textAlign="left">
+								<Text fontSize="sm" mt="0.5">3.</Text>
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
+									{t("welcomeTip3", { defaultValue: "Add custom EVM chains with the + card to track any network" })}
+								</Text>
+							</Flex>
+						</Flex>
 					</Flex>
 				</Box>
 			)}

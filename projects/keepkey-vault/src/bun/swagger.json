@@ -14,7 +14,7 @@
     "/addresses/utxo": {
       "post": {
         "operationId": "UtxoGetAddress",
-        "summary": "Get Binance Address",
+        "summary": "Get UTXO Address",
         "description": "Get a Bitcoin/Dogecoin/Dash.... cont. (see coin-support) Chain address, loading it into the current session and optionally displaying it on-device.",
         "parameters": [],
         "requestBody": {
@@ -54,69 +54,6 @@
                   "type": "object",
                   "properties": {
                     "address": {}
-                  },
-                  "required": [
-                    "address"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request"
-          },
-          "500": {
-            "description": "Error processing request"
-          }
-        },
-        "security": [
-          {
-            "apiKey": []
-          }
-        ],
-        "tags": [
-          "Address"
-        ]
-      }
-    },
-    "/addresses/bnb": {
-      "post": {
-        "operationId": "BinanceGetAddress",
-        "summary": "Get Binance Address",
-        "description": "Get a Binance Chain address, loading it into the current session and optionally displaying it on-device.",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "show_display": {
-                    "type": "boolean"
-                  },
-                  "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
-                  }
-                },
-                "required": [
-                  "address_n"
-                ]
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Ok",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "address": {
-                      "$ref": "#/components/schemas/types.bnb.Address"
-                    }
                   },
                   "required": [
                     "address"
@@ -664,81 +601,6 @@
         "security": [],
         "tags": [
           "Auth"
-        ]
-      }
-    },
-    "/bnb/sign-transaction": {
-      "post": {
-        "operationId": "bnb_signTransaction",
-        "summary": "Sign a Binance Chain transaction",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "signDoc": {
-                    "$ref": "#/components/schemas/types.bnb.SignDoc"
-                  },
-                  "signerAddress": {
-                    "$ref": "#/components/schemas/types.bnb.Address"
-                  }
-                },
-                "required": [
-                  "signDoc",
-                  "signerAddress"
-                ]
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Ok",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "signed": {
-                      "$ref": "#/components/schemas/types.bnb.SignDoc"
-                    },
-                    "txid": {
-                      "type": "string"
-                    },
-                    "serialized": {
-                      "type": "string"
-                    },
-                    "signature": {
-                      "$ref": "#/components/schemas/types.hex.secp256k1.Signature"
-                    }
-                  },
-                  "required": [
-                    "signed",
-                    "txid",
-                    "serialized",
-                    "signature"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request"
-          },
-          "500": {
-            "description": "Error processing request"
-          }
-        },
-        "security": [
-          {
-            "apiKey": []
-          }
-        ],
-        "tags": [
-          "BNB"
         ]
       }
     },
@@ -3901,77 +3763,6 @@
         "tags": ["Spec"]
       }
     },
-    "/addresses/bnb": {
-      "post": {
-        "operationId": "BnbGetAddress",
-        "summary": "Get Binance Chain Address",
-        "description": "Get a Binance Chain (BNB) address, loading it into the current session and optionally displaying it on-device.",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "show_display": { "type": "boolean" },
-                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" }
-                },
-                "required": ["address_n"]
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Ok",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "address": { "type": "string" }
-                  },
-                  "required": ["address"]
-                }
-              }
-            }
-          }
-        },
-        "tags": ["Addresses"]
-      }
-    },
-    "/bnb/sign-transaction": {
-      "post": {
-        "operationId": "BnbSignTransaction",
-        "summary": "Sign a Binance Chain transaction",
-        "description": "Sign a Binance Chain transaction using the connected KeepKey device.",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Ok",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        },
-        "tags": ["Signing"]
-      }
-    },
     "/api/v1/health": {
       "get": {
         "operationId": "V1Health",
@@ -4203,17 +3994,6 @@
         "format": "bech32",
         "pattern": "^[!-~]{1,83}1[02-9ac-hj-np-z]{6,}$"
       },
-      "types.bnb.Address": {
-        "description": "a binance chain address",
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/types.Bech32"
-          },
-          {}
-        ],
-        "minLength": 10,
-        "pattern": "^bnb1[02-9ac-hj-np-z]{6,}$"
-      },
       "types.cosmos.Address": {
         "$ref": "#/components/schemas/types.Bech32"
       },
@@ -4308,98 +4088,6 @@
         ],
         "maximum": 18446744073709552000,
         "minimum": 0
-      },
-      "types.bnb.Coin": {
-        "type": "object",
-        "properties": {
-          "denom": {
-            "type": "string",
-            "minLength": 1
-          },
-          "amount": {
-            "$ref": "#/components/schemas/types.numeric.U64"
-          }
-        },
-        "required": [
-          "denom",
-          "amount"
-        ]
-      },
-      "types.bnb.msg.InputOutput": {
-        "type": "object",
-        "properties": {
-          "coins": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/types.bnb.Coin"
-            }
-          },
-          "address": {
-            "$ref": "#/components/schemas/types.bnb.Address"
-          }
-        },
-        "required": [
-          "coins",
-          "address"
-        ]
-      },
-      "types.bnb.Msg": {
-        "type": "object",
-        "properties": {
-          "outputs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/types.bnb.msg.InputOutput"
-            }
-          },
-          "inputs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/types.bnb.msg.InputOutput"
-            }
-          }
-        },
-        "required": [
-          "outputs",
-          "inputs"
-        ]
-      },
-      "types.bnb.SignDoc": {
-        "type": "object",
-        "properties": {
-          "msgs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/types.bnb.Msg"
-            },
-            "maxItems": 1,
-            "minItems": 1
-          },
-          "memo": {
-            "type": "string"
-          },
-          "source": {
-            "$ref": "#/components/schemas/types.decimal.U64"
-          },
-          "sequence": {
-            "$ref": "#/components/schemas/types.decimal.U64"
-          },
-          "chain_id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "account_number": {
-            "$ref": "#/components/schemas/types.decimal.U64"
-          }
-        },
-        "required": [
-          "msgs",
-          "memo",
-          "source",
-          "sequence",
-          "chain_id",
-          "account_number"
-        ]
       },
       "types.cosmos.amino.Any": {
         "type": "object",

@@ -307,7 +307,6 @@ const startTime = Date.now()
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
   '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction',
-  '/bnb/sign-transaction',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
   '/cosmos/sign-amino-ibc-transfer',
@@ -753,24 +752,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
-        if (path === '/addresses/bnb' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'bnb:' + JSON.stringify(body)
-          const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
-          const result = await wallet.binanceGetAddress({
-            addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
-          const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
-          addressCache.set(cacheKey, address)
-          auth.saveAccount(String(address), body.address_n)
-          return json({ address })
-        }
-
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
@@ -1025,15 +1006,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
-        // ── BNB SIGNING (1 endpoint) ─────────────────────────────────
-        if (path === '/bnb/sign-transaction' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          const body = await parseRequest(req, S.BnbSignRequest)
-          const result = await wallet.binanceSignTx(body)
-          return json(result)
-        }
-
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
         if (path === '/system/info/get-features' && method === 'POST') {
           auth.requireAuth(req)
@@ -1201,9 +1173,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   address = typeof r === 'string' ? r : r?.address || ''
                 } else if (coinType === 144) {
                   const r = await wallet.rippleGetAddress({ addressNList: addrNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : r?.address || ''
-                } else if (coinType === 714) {
-                  const r = await wallet.binanceGetAddress({ addressNList: addrNList, showDisplay: false })
                   address = typeof r === 'string' ? r : r?.address || ''
                 } else if (primaryNetwork.includes('thorchain')) {
                   const r = await wallet.thorchainGetAddress({ addressNList: addrNList, showDisplay: false })

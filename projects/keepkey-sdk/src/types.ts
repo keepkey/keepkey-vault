@@ -135,6 +135,13 @@ export interface BnbSignTxParams {
   [key: string]: any
 }
 
+// ── Solana Types ────────────────────────────────────────────────────
+export interface SolanaSignTxParams {
+  address_n?: number[]
+  addressNList?: number[]
+  raw_tx: string  // base64-encoded raw transaction
+}
+
 // ── Public Key Types ────────────────────────────────────────────────
 export interface GetPublicKeyRequest {
   address_n: number[]

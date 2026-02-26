@@ -64,7 +64,7 @@ function parseRawEntry(entry: any): PioneerChainInfo | null {
 
 // Queries to build a comprehensive EVM chain catalog.
 // 'mainnet' catches most chains; the others fill in major chains whose names don't contain 'mainnet'.
-const CATALOG_QUERIES = ['mainnet', 'ethereum', 'polygon', 'avalanche', 'arbitrum', 'optimism', 'base', 'fantom', 'gnosis', 'celo', 'cronos', 'bsc', 'binance', 'linea', 'zksync', 'scroll', 'mantle', 'blast']
+const CATALOG_QUERIES = ['mainnet', 'ethereum', 'polygon', 'avalanche', 'arbitrum', 'optimism', 'base', 'fantom', 'gnosis', 'celo', 'cronos', 'bsc', 'linea', 'zksync', 'scroll', 'mantle', 'blast']
 
 async function loadChainCatalog(): Promise<void> {
 	if (chainCatalog.length > 0 && Date.now() - catalogLoadedAt < CATALOG_TTL) return
@@ -452,7 +452,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId })
 				}
 
-				// Non-EVM, non-UTXO chains (cosmos, xrp, binance, etc.)
+				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.)
 				for (const chain of nonEvmChains) {
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
@@ -662,6 +662,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Push updated EVM addresses to frontend
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
 
+					// Auto-discover EVM addresses with funds (background, non-blocking)
+					if (evmChains.length > 0 && wallet) {
+						evmAddresses.autoDiscover(wallet, pioneer, evmChains).then(({ discovered }) => {
+							if (discovered.length > 0) {
+								console.log(`[getBalances] Auto-discovered EVM addresses at indices: ${discovered.join(', ')}`)
+								try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch {}
+							}
+						}).catch(() => {})
+					}
+
 					// Cache balances (fire-and-forget) — only on successful Pioneer response
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
@@ -802,8 +812,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Custom chains: broadcast via direct RPC
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
 				if (rpcUrl) {
-					const serialized = params.signedTx?.serializedTx || params.signedTx
-					if (!serialized || typeof serialized !== 'string') throw new Error('Cannot extract serialized tx')
+					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
+					if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
 					const txid = await broadcastEvmTx(rpcUrl, serialized)
 					return { txid }
 				}
@@ -1261,12 +1271,21 @@ mainWindow.on("open-url", (e: any) => {
 	}
 })
 
-// Quit the app when the main window is closed
-mainWindow.on("close", () => {
+// Cleanup and quit helper — shared between window close and app quit
+function cleanupAndQuit() {
 	stopCamera()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()
-})
+}
+
+// Quit the app when the main window is closed
+mainWindow.on("close", cleanupAndQuit)
+
+// Explicit Cmd+Q / app terminate handler (Electrobun may not fire window "close")
+if (typeof process !== 'undefined') {
+	process.on('SIGTERM', cleanupAndQuit)
+	process.on('SIGINT', cleanupAndQuit)
+}
 
 console.log("KeepKey Vault started!")

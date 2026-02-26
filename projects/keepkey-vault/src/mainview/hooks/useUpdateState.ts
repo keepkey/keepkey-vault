@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { UpdateInfo, UpdateStatus } from '../../shared/types'
 
-export type UpdatePhaseUI = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'applying' | 'error'
+export type UpdatePhaseUI = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'applying' | 'warning' | 'error'
 
 export interface UpdateState {
   phase: UpdatePhaseUI
@@ -40,9 +40,10 @@ function statusToPhase(status: string): UpdatePhaseUI {
       return 'idle'
     case 'error':
     case 'download-error':
+      return 'warning'  // transient — network/download failures
     case 'update-error':
     case 'delta-error':
-      return 'error'
+      return 'error'    // critical — update application/patching failures
     default:
       return 'idle'
   }
@@ -99,7 +100,7 @@ export function useUpdateState() {
       }))
       return info
     } catch (e: any) {
-      setState(prev => ({ ...prev, phase: 'error', error: e.message }))
+      setState(prev => ({ ...prev, phase: 'warning', error: e.message }))
       throw e
     }
   }, [])

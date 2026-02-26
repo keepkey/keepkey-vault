@@ -66,6 +66,7 @@ class KeepKeySdk {
             bnbGetAddress: (params) => this.client.post('/addresses/bnb', params),
             // v1 SDK compat alias
             binanceGetAddress: (params) => this.client.post('/addresses/bnb', params),
+            solanaGetAddress: (params) => this.client.post('/addresses/solana', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // eth — Ethereum signing
@@ -143,6 +144,12 @@ class KeepKeySdk {
         // ═══════════════════════════════════════════════════════════════════
         this.binance = {
             binanceSignTransaction: (params) => this.client.post('/bnb/sign-transaction', params),
+        };
+        // ═══════════════════════════════════════════════════════════════════
+        // solana — Solana signing
+        // ═══════════════════════════════════════════════════════════════════
+        this.solana = {
+            solanaSignTransaction: (params) => this.client.post('/solana/sign-transaction', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // xpub — public key operations (batch + single)

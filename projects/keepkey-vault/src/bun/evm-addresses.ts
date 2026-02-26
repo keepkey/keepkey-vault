@@ -146,6 +146,58 @@ export class EvmAddressManager extends EventEmitter {
     }
   }
 
+  /**
+   * Auto-discover balance-bearing addresses by scanning indices 0–maxIndex.
+   * Derives each address, checks Pioneer for non-zero balance, and auto-adds any with funds.
+   * Call once after initial balance fetch to expand tracked addresses.
+   */
+  async autoDiscover(
+    wallet: any,
+    pioneer: any,
+    evmChains: Array<{ caip: string; id: string; symbol: string; networkId: string }>,
+    maxIndex = 9,
+  ): Promise<{ discovered: number[] }> {
+    const discovered: number[] = []
+    const existingIndices = new Set(this.addresses.map(a => a.addressIndex))
+
+    for (let idx = 0; idx <= maxIndex; idx++) {
+      if (existingIndices.has(idx)) continue
+
+      // Derive address without persisting yet
+      const path = evmAddressPath(idx)
+      let address: string
+      try {
+        const result = await wallet.ethGetAddress({ addressNList: path, showDisplay: false, coin: 'Ethereum' })
+        address = typeof result === 'string' ? result : result?.address
+        if (!address) continue
+      } catch { continue }
+
+      // Check if any EVM chain has a balance for this address
+      const pubkeys = evmChains.map(c => ({ caip: c.caip, pubkey: address }))
+      try {
+        const resp = await pioneer.GetPortfolioBalances({ pubkeys })
+        const balances = resp?.data?.balances || resp?.data || []
+        const hasBalance = (Array.isArray(balances) ? balances : []).some(
+          (b: any) => parseFloat(String(b?.balance ?? '0')) > 0 || Number(b?.valueUsd ?? 0) > 0,
+        )
+        if (hasBalance) {
+          // Add this index permanently
+          this.addresses.push({ addressIndex: idx, address, balanceUsd: 0 })
+          this.addresses.sort((a, b) => a.addressIndex - b.addressIndex)
+          discovered.push(idx)
+        }
+      } catch { continue }
+    }
+
+    if (discovered.length > 0) {
+      this.persistIndices()
+      const set = this.toAddressSet()
+      this.emit('change', set)
+    }
+
+    return { discovered }
+  }
+
   /** Reset session state on disconnect. Persisted indices are NOT cleared. */
   reset(): void {
     this.addresses = []

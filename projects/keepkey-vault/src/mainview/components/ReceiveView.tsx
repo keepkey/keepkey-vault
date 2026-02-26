@@ -151,7 +151,13 @@ export function ReceiveView({
 		)
 	}
 
-	const qrSvg = generateQRSvg(address!, 4, 2)
+	// EIP-681 URI for EVM chains so mobile wallets (Rainbow, etc.) auto-detect send
+	const qrContent = chain.chainFamily === 'evm' && chain.chainId
+		? `ethereum:${address!}@${chain.chainId}`
+		: chain.chainFamily === 'solana'
+			? `solana:${address!}`
+			: address!
+	const qrSvg = generateQRSvg(qrContent, 4, 2)
 	const remaining = MAX_NEW_ADDRESSES_PER_SESSION - newAddressCount
 
 	return (

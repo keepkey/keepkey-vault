@@ -19,16 +19,19 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
 
   const bgColor =
     phase === "error" ? "rgba(255,23,68,0.12)"
+    : phase === "warning" ? "rgba(251,191,36,0.10)"
     : phase === "ready" ? "rgba(34,197,94,0.12)"
     : "rgba(192,168,96,0.12)"
 
   const borderColor =
     phase === "error" ? "rgba(255,23,68,0.3)"
+    : phase === "warning" ? "rgba(251,191,36,0.25)"
     : phase === "ready" ? "rgba(34,197,94,0.3)"
     : "rgba(192,168,96,0.3)"
 
   const accentColor =
     phase === "error" ? "#FF6B6B"
+    : phase === "warning" ? "#FBBF24"
     : phase === "ready" ? "#22C55E"
     : "kk.gold"
 
@@ -63,6 +66,11 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
               <path d="M12 2L1 21h22L12 2z" fill="#FF6B6B" />
               <path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
             </svg>
+          ) : phase === "warning" ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" fill="#FBBF24" />
+              <path d="M12 8v4M12 16h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
+            </svg>
           ) : phase === "ready" ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" fill="#22C55E" />
@@ -87,6 +95,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
               )}
               {phase === "ready" && t("readyToInstall")}
               {phase === "applying" && t("applying")}
+              {phase === "warning" && t("checkFailed", { defaultValue: "Update check failed, will retry" })}
               {phase === "error" && t("errorWithMessage", { error: error || message || "Unknown error" })}
             </Text>
             {/* Progress bar for downloading */}
@@ -119,6 +128,11 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
                 {t("later")}
               </Button>
             </>
+          )}
+          {phase === "warning" && (
+            <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
+              {t("dismiss", { ns: "common" })}
+            </Button>
           )}
           {phase === "error" && (
             <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>

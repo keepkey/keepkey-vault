@@ -9,7 +9,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'binance' | 'xrp' | 'solana'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana'
   color: string
   rpcMethod: string
   signMethod: string
@@ -17,6 +17,8 @@ export interface ChainDef {
   scriptType?: string
   denom?: string
   chainId?: string
+  explorerAddressUrl?: string  // e.g. "https://etherscan.io/address/{{address}}"
+  explorerTxUrl?: string       // e.g. "https://etherscan.io/tx/{{txid}}"
 }
 
 // ── Bitcoin multi-account constants ─────────────────────────────────────
@@ -160,12 +162,6 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x80000014, 0x80000000, 0, 0], scriptType: 'p2pkh',
   },
   {
-    id: 'binance', chain: Chain.Binance, coin: 'Binance', symbol: 'BNB',
-    chainFamily: 'binance', color: '#F3BA2F',
-    rpcMethod: 'binanceGetAddress', signMethod: 'binanceSignTx',
-    defaultPath: [0x8000002C, 0x800002CA, 0x80000000, 0, 0],
-  },
-  {
     id: 'ripple', chain: Chain.Ripple, coin: 'Ripple', symbol: 'XRP',
     chainFamily: 'xrp', color: '#23292F',
     rpcMethod: 'xrpGetAddress', signMethod: 'xrpSignTx',
@@ -176,16 +172,14 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'solana', color: '#14F195',
     rpcMethod: 'solanaGetAddress', signMethod: 'solanaSignTx',
     defaultPath: [0x8000002C, 0x800001F5, 0x80000000, 0x80000000],
+    explorerAddressUrl: 'https://solscan.io/account/{{address}}',
+    explorerTxUrl: 'https://solscan.io/tx/{{txid}}',
   },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
-const CAIP_FALLBACKS: Record<string, string> = {
-  BNB: 'binance:bnb-beacon-chain/slip44:714',
-}
-const DECIMAL_FALLBACKS: Record<string, number> = {
-  BNB: 8,
-}
+const CAIP_FALLBACKS: Record<string, string> = {}
+const DECIMAL_FALLBACKS: Record<string, number> = {}
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth
 export const CHAINS: ChainDef[] = CONFIGS.map(c => ({

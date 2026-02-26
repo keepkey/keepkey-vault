@@ -116,6 +116,11 @@ export interface XrpSignTxParams {
 export interface BnbSignTxParams {
     [key: string]: any;
 }
+export interface SolanaSignTxParams {
+    address_n?: number[];
+    addressNList?: number[];
+    raw_tx: string;
+}
 export interface GetPublicKeyRequest {
     address_n: number[];
     ecdsa_curve_name?: string;
