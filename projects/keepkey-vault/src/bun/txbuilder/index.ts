@@ -17,7 +17,7 @@ export type { BuildTxParams }
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string; rpcUrl?: string; accountPath?: number[] },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
@@ -48,6 +48,7 @@ export async function buildTx(
         tokenBalance: params.tokenBalance,
         tokenDecimals: params.tokenDecimals,
         rpcUrl: params.rpcUrl,
+        addressIndex: params.evmAddressIndex,
       })
       // Strip non-tx metadata so only hdwallet-compatible fields reach ethSignTx
       const { fee, ...unsignedTx } = evmResult

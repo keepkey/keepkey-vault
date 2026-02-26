@@ -11,7 +11,9 @@ import { formatBalance, formatUsd } from "../lib/formatting"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
 import { BtcXpubSelector } from "./BtcXpubSelector"
+import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
+import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { detectSpamToken, type SpamResult } from "../../shared/spamFilter"
 
@@ -34,6 +36,10 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
 	const { btcAccounts, selectXpub, addAccount, loading: btcLoading } = useBtcAccounts()
+
+	// EVM multi-address support
+	const isEvm = chain.chainFamily === 'evm'
+	const { evmAddresses, selectIndex: evmSelectIndex, addIndex: evmAddIndex, removeIndex: evmRemoveIndex, loading: evmLoading } = useEvmAddresses()
 
 	// BTC address index state: change (0=receive, 1=change) and address index
 	const [btcChangeIndex, setBtcChangeIndex] = useState<0 | 1>(0)
@@ -122,6 +128,17 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			setBtcAddressIndex(0)
 		}
 	}, [pioneerIndices])
+
+	// When EVM selected index changes, update address from cached value or re-derive
+	useEffect(() => {
+		if (!isEvm || evmAddresses.addresses.length === 0) return
+		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
+		if (selected) {
+			setAddress(selected.address)
+			// Update path to reflect the selected index
+			setCurrentPath([0x8000002C, 0x8000003C, 0x80000000, 0, selected.addressIndex])
+		}
+	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses])
 
 	// Only auto-derive once on mount, not on every address change
 	useEffect(() => {
@@ -424,6 +441,34 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 					/>
 				)}
 
+				{/* EVM multi-address selector */}
+				{isEvm && evmAddresses.addresses.length > 1 && (
+					<EvmAddressSelector
+						evmAddresses={evmAddresses}
+						onSelectIndex={evmSelectIndex}
+						onAddIndex={() => evmAddIndex()}
+						onRemoveIndex={evmRemoveIndex}
+						adding={evmLoading}
+					/>
+				)}
+				{/* Show "+" to add first additional EVM address when only index 0 exists */}
+				{isEvm && evmAddresses.addresses.length === 1 && (
+					<Flex mb="3" align="center" gap="2">
+						<Button
+							size="xs"
+							variant="ghost"
+							color="kk.textMuted"
+							_hover={{ color: "kk.gold" }}
+							onClick={() => evmAddIndex()}
+							disabled={evmLoading}
+							fontSize="10px"
+							px="2"
+						>
+							<Box as={FaPlus} fontSize="9px" mr="1" /> Add Address
+						</Button>
+					</Flex>
+				)}
+
 				{/* Content — fixed minH prevents bounce when switching views */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }} minH="280px">
 					{view === "receive" && (
@@ -452,6 +497,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
+							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
 					)}
 				</Box>

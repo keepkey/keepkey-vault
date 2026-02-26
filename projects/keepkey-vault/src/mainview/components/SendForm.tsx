@@ -34,9 +34,10 @@ interface SendFormProps {
 	onClearToken?: () => void
 	xpubOverride?: string         // BTC multi-account: use this xpub for buildTx
 	scriptTypeOverride?: string   // BTC multi-account: use this scriptType for buildTx
+	evmAddressIndex?: number      // EVM multi-address: derivation index for buildTx
 }
 
-export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride }: SendFormProps) {
+export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState("")
@@ -104,6 +105,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				tokenDecimals: isTokenSend && token!.decimals != null ? token!.decimals : undefined,
 				xpubOverride: xpubOverride || undefined,
 				scriptTypeOverride: scriptTypeOverride || undefined,
+				evmAddressIndex: evmAddressIndex,
 			}, 60000)
 
 			setBuildResult(result)
@@ -112,7 +114,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || 'Failed to build transaction')
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, recipientTooShort, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride])
+	}, [chain, recipient, amount, memo, feeLevel, isMax, recipientTooShort, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return

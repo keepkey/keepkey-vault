@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo } from './types'
+import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -71,8 +71,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setBtcSelectedXpub: { params: { accountIndex: number; scriptType: BtcScriptType }; response: void }
       getBtcAddressIndices: { params: { xpub: string }; response: { receiveIndex: number; changeIndex: number } }
 
+      // ── EVM multi-address ──────────────────────────────────────────────
+      getEvmAddresses: { params: void; response: EvmAddressSet }
+      addEvmAddressIndex: { params: { index?: number }; response: EvmAddressSet }
+      removeEvmAddressIndex: { params: { index: number }; response: EvmAddressSet }
+      setEvmSelectedIndex: { params: { index: number }; response: void }
+
       // ── Chain discovery (Pioneer catalog) ──────────────────────────────────
-      searchChains: { params: { query: string; limit?: number }; response: PioneerChainInfo[] }
+      browseChains: { params: { query?: string; page?: number; pageSize?: number }; response: { chains: PioneerChainInfo[]; total: number; page: number; pageSize: number } }
 
       // ── Custom tokens & chains ──────────────────────────────────────────
       addCustomToken: { params: { chainId: string; contractAddress: string }; response: CustomToken }
@@ -106,6 +112,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setPioneerApiBase: { params: { url: string }; response: AppSettings }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: ChainBalance[] | null }
@@ -133,6 +140,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'passphrase-request': Record<string, never>
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
+      'evm-addresses-update': EvmAddressSet
       'camera-frame': string
       'camera-error': string
       'update-status': UpdateStatus

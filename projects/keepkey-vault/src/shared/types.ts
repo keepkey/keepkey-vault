@@ -97,6 +97,7 @@ export interface BuildTxParams {
   xpubOverride?: string        // BTC multi-account: use this xpub instead of default
   scriptTypeOverride?: string  // BTC multi-account: use this scriptType instead of default
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
+  evmAddressIndex?: number     // EVM multi-address: derivation index (default 0)
 }
 
 // ── Bitcoin multi-account types ─────────────────────────────────────────
@@ -125,6 +126,19 @@ export interface BtcAccountSet {
   selectedXpub?: { accountIndex: number; scriptType: BtcScriptType }
 }
 
+// ── EVM multi-address types ─────────────────────────────────────────
+export interface EvmTrackedAddress {
+  addressIndex: number     // derivation index (m/44'/60'/0'/0/{index})
+  address: string          // 0x-prefixed checksummed address
+  balanceUsd: number       // aggregate USD across all EVM chains
+}
+
+export interface EvmAddressSet {
+  addresses: EvmTrackedAddress[]
+  selectedIndex: number
+  totalBalanceUsd: number
+}
+
 export interface BuildTxResult {
   unsignedTx: any
   fee: string
@@ -151,6 +165,8 @@ export interface CustomChain {
   symbol: string          // gas token symbol
   rpcUrl: string
   explorerUrl?: string
+  explorerAddressLink?: string  // template with {{address}} placeholder
+  explorerTxLink?: string       // template with {{txid}} placeholder
 }
 
 // Pioneer discovery catalog entry (from /api/v1/discovery/search)
@@ -164,6 +180,8 @@ export interface PioneerChainInfo {
   explorerTxLink: string
   color: string
   decimals: number
+  rpcUrl?: string
+  rpcUrls?: string[]
 }
 
 // Token visibility (spam filter user overrides)
@@ -218,6 +236,7 @@ export interface ApiLogEntry {
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   restApiEnabled: boolean   // controls entire REST API server on/off
+  pioneerApiBase: string    // current Pioneer API base URL
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────

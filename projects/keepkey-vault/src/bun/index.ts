@@ -2,15 +2,16 @@ import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "ele
 import { EngineController } from "./engine-controller"
 import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
-import { getPioneer } from "./pioneer"
+import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
+import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys } from "./db"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 /** Timeout wrapper for external API calls */
@@ -26,57 +27,108 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 const PIONEER_TIMEOUT_MS = 30_000
 
-// ── Pioneer chain discovery cache (5-minute TTL) ─────────────────────
-const DISCOVERY_CACHE = new Map<string, { data: PioneerChainInfo[]; ts: number }>()
-const DISCOVERY_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-const DISCOVERY_API = 'https://api.keepkey.info/api/v1/discovery/search'
+// ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
+function getDiscoveryUrl(): string {
+	return `${getPioneerApiBase()}/api/v1/discovery/search`
+}
+const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
+let chainCatalog: PioneerChainInfo[] = []
+let catalogLoadedAt = 0
+let catalogLoading: Promise<void> | null = null
 
 /** Built-in EVM chainIds that should be excluded from discovery results */
 const BUILTIN_EVM_CHAIN_IDS = new Set(
 	CHAINS.filter(c => c.chainFamily === 'evm' && c.chainId).map(c => Number(c.chainId))
 )
 
-async function searchPioneerChains(query: string, limit: number): Promise<PioneerChainInfo[]> {
-	const cacheKey = `${query}:${limit}`
-	const cached = DISCOVERY_CACHE.get(cacheKey)
-	if (cached && Date.now() - cached.ts < DISCOVERY_CACHE_TTL) return cached.data
-
-	const url = `${DISCOVERY_API}?q=${encodeURIComponent(query)}&limit=100`
-	const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) })
-	if (!resp.ok) throw new Error(`Discovery API returned ${resp.status}`)
-	const raw: any[] = await resp.json()
-
-	// Filter to EVM native assets only (chainId starts with 'eip155:' and isNative)
-	const seen = new Set<number>()
-	const results: PioneerChainInfo[] = []
-
-	for (const entry of raw) {
-		if (!entry.chainId?.startsWith('eip155:')) continue
-		if (!entry.isNative && entry.type !== 'native') continue
-
-		const numericId = parseInt(entry.chainId.replace('eip155:', ''), 10)
-		if (isNaN(numericId) || numericId < 1) continue
-		if (seen.has(numericId)) continue
-		if (BUILTIN_EVM_CHAIN_IDS.has(numericId)) continue
-		seen.add(numericId)
-
-		results.push({
-			chainId: numericId,
-			name: entry.name || `Chain ${numericId}`,
-			symbol: entry.symbol || 'ETH',
-			icon: entry.icon || '',
-			explorer: entry.explorer || '',
-			explorerAddressLink: entry.explorerAddressLink || '',
-			explorerTxLink: entry.explorerTxLink || '',
-			color: entry.color || '#627EEA',
-			decimals: entry.decimals ?? 18,
-		})
-
-		if (results.length >= limit) break
+function parseRawEntry(entry: any): PioneerChainInfo | null {
+	if (!entry.chainId?.startsWith('eip155:')) return null
+	if (!entry.assetId?.endsWith('/slip44:60')) return null
+	const numericId = parseInt(entry.chainId.replace('eip155:', ''), 10)
+	if (isNaN(numericId) || numericId < 1) return null
+	if (BUILTIN_EVM_CHAIN_IDS.has(numericId)) return null
+	return {
+		chainId: numericId,
+		name: entry.name || `Chain ${numericId}`,
+		symbol: entry.symbol || 'ETH',
+		icon: entry.icon || '',
+		explorer: entry.explorer || '',
+		explorerAddressLink: entry.explorerAddressLink || '',
+		explorerTxLink: entry.explorerTxLink || '',
+		color: entry.color || '#627EEA',
+		decimals: entry.decimals ?? 18,
+		rpcUrl: entry.rpcUrl || '',
+		rpcUrls: Array.isArray(entry.rpcUrls) ? entry.rpcUrls : [],
 	}
+}
 
-	DISCOVERY_CACHE.set(cacheKey, { data: results, ts: Date.now() })
-	return results
+// Queries to build a comprehensive EVM chain catalog.
+// 'mainnet' catches most chains; the others fill in major chains whose names don't contain 'mainnet'.
+const CATALOG_QUERIES = ['mainnet', 'ethereum', 'polygon', 'avalanche', 'arbitrum', 'optimism', 'base', 'fantom', 'gnosis', 'celo', 'cronos', 'bsc', 'binance', 'linea', 'zksync', 'scroll', 'mantle', 'blast']
+
+async function loadChainCatalog(): Promise<void> {
+	if (chainCatalog.length > 0 && Date.now() - catalogLoadedAt < CATALOG_TTL) return
+	if (catalogLoading) return catalogLoading
+	catalogLoading = (async () => {
+		try {
+			const seen = new Set<number>()
+			const results: PioneerChainInfo[] = []
+
+			// Fetch all queries in parallel for speed
+			const baseUrl = getDiscoveryUrl()
+			const fetches = CATALOG_QUERIES.map(async (q) => {
+				try {
+					const resp = await fetch(`${baseUrl}?q=${q}&limit=2000`, { signal: AbortSignal.timeout(15_000) })
+					if (!resp.ok) return []
+					return (await resp.json()) as any[]
+				} catch { return [] }
+			})
+			const batches = await Promise.all(fetches)
+
+			const byChainId = new Map<number, PioneerChainInfo>()
+			for (const raw of batches) {
+				for (const entry of raw) {
+					const parsed = parseRawEntry(entry)
+					if (!parsed) continue
+					const existing = byChainId.get(parsed.chainId)
+					// Prefer entries that have richer metadata (explorer, rpcUrls)
+					if (!existing || (!existing.explorer && parsed.explorer) || (!existing.rpcUrls?.length && parsed.rpcUrls?.length)) {
+						byChainId.set(parsed.chainId, parsed)
+					}
+				}
+			}
+			results.push(...byChainId.values())
+
+			results.sort((a, b) => a.chainId - b.chainId)
+			chainCatalog = results
+			catalogLoadedAt = Date.now()
+			console.log(`[discovery] Loaded ${results.length} EVM chains into catalog (from ${CATALOG_QUERIES.length} queries)`)
+		} catch (e: any) {
+			console.warn('[discovery] Failed to load chain catalog:', e.message)
+			// Keep stale data if we have it
+		}
+	})()
+	try { await catalogLoading } finally { catalogLoading = null }
+}
+
+/** Browse chains: paginated, optionally filtered by query */
+function browseChains(query: string, page: number, pageSize: number): { chains: PioneerChainInfo[]; total: number; page: number; pageSize: number } {
+	let list = chainCatalog
+	if (query.length >= 2) {
+		const q = query.toLowerCase()
+		list = chainCatalog.filter(c =>
+			c.name.toLowerCase().includes(q) ||
+			c.symbol.toLowerCase().includes(q) ||
+			String(c.chainId).includes(q)
+		)
+	}
+	const start = page * pageSize
+	return {
+		chains: list.slice(start, start + pageSize),
+		total: list.length,
+		page,
+		pageSize,
+	}
 }
 
 /** Fire-and-forget: cache a derived address for watch-only mode */
@@ -94,6 +146,7 @@ const REST_API_PORT = 1646
 // ── Engine Controller ─────────────────────────────────────────────────
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
+const evmAddresses = new EvmAddressManager()
 
 // ── Custom chains (loaded from SQLite on startup) ────────────────────
 initDb()
@@ -127,7 +180,7 @@ let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
 function getAppSettings() {
-	return { restApiEnabled }
+	return { restApiEnabled, pioneerApiBase: getPioneerApiBase() }
 }
 
 // Callbacks bridge REST → RPC UI
@@ -346,19 +399,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (xpub) pubkeys.push({ caip: utxoChains[i].caip, pubkey: xpub, chainId: utxoChains[i].id, symbol: utxoChains[i].symbol, networkId: utxoChains[i].networkId })
 				}
 
-				// Cache EVM address — all EVM chains share m/44'/60'/0'/0/0
-				let cachedEvmAddress: string | null = null
-				for (const chain of nonUtxoChains) {
+				// Initialize EVM multi-address manager
+				const evmChains = nonUtxoChains.filter(c => c.chainFamily === 'evm')
+				const nonEvmChains = nonUtxoChains.filter(c => c.chainFamily !== 'evm')
+
+				if (!evmAddresses.isInitialized) {
+					try { await evmAddresses.initialize(wallet) } catch (e: any) {
+						console.warn('[getBalances] EVM addresses init failed:', e.message)
+					}
+				}
+
+				// Reset EVM balances before aggregation
+				evmAddresses.resetBalances()
+
+				// Add N addresses × M EVM chains to pubkeys
+				const evmPubkeyEntries = evmAddresses.getAllPubkeyEntries(evmChains)
+				const evmAddressSet = new Set(evmAddresses.toAddressSet().addresses.map(a => a.address.toLowerCase()))
+				for (const entry of evmPubkeyEntries) {
+					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId })
+				}
+
+				// Non-EVM, non-UTXO chains (cosmos, xrp, binance, etc.)
+				for (const chain of nonEvmChains) {
 					try {
-						if (chain.chainFamily === 'evm') {
-							if (!cachedEvmAddress) {
-								const result = await wallet.ethGetAddress({ addressNList: chain.defaultPath, showDisplay: false, coin: 'Ethereum' })
-								cachedEvmAddress = typeof result === 'string' ? result : result?.address || null
-								if (!cachedEvmAddress) console.warn('[getBalances] ethGetAddress returned empty — skipping all EVM chains')
-							}
-							if (cachedEvmAddress) pubkeys.push({ caip: chain.caip, pubkey: cachedEvmAddress, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
-							continue
-						}
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 						if (chain.scriptType) addrParams.scriptType = chain.scriptType
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
@@ -479,6 +542,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let btcTotalUsd = 0
 					let btcAddress = ''
 
+					// Aggregate EVM entries per-chain (sum across address indices)
+					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
+
 					for (const entry of pubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
@@ -491,6 +557,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (!btcAddress && match?.address) btcAddress = match.address
 							// Update per-xpub balance in BtcAccountManager
 							btcAccounts.updateXpubBalance(entry.pubkey, String(match?.balance ?? '0'), usd)
+							continue
+						}
+
+						// EVM multi-address: aggregate per-chain, update per-address balance
+						if (evmAddressSet.has(entry.pubkey.toLowerCase())) {
+							const match = nativeEntries.find((d: any) => d.caip === entry.caip && d.pubkey === entry.pubkey)
+								|| nativeEntries.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
+							const bal = parseFloat(String(match?.balance ?? '0'))
+							const usd = Number(match?.valueUsd ?? 0)
+							// Accumulate per-address USD for EvmAddressManager
+							if (usd > 0) evmAddresses.updateAddressBalance(entry.pubkey, usd)
+							// Accumulate per-chain totals
+							const existing = evmChainAgg.get(entry.chainId)
+							if (existing) {
+								existing.balance += bal
+								existing.usd += usd
+								// Keep the selected index address as display address
+								const selectedAddr = evmAddresses.getSelectedAddress()
+								if (selectedAddr && entry.pubkey.toLowerCase() === selectedAddr.address.toLowerCase()) {
+									existing.address = entry.pubkey
+								}
+							} else {
+								evmChainAgg.set(entry.chainId, { balance: bal, usd, address: entry.pubkey, symbol: entry.symbol })
+							}
 							continue
 						}
 
@@ -509,6 +599,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						})
 					}
 
+					// Push aggregated EVM chain entries
+					for (const [chainId, agg] of evmChainAgg) {
+						const chainTokens = tokensByChainId.get(chainId)
+						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
+						results.push({
+							chainId,
+							symbol: agg.symbol,
+							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
+							balanceUsd: agg.usd + tokenUsdTotal,
+							address: agg.address,
+							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+						})
+					}
+
 					// Push one aggregated BTC entry
 					if (btcPubkeyEntries.length > 0) {
 						const selectedXpub = btcAccounts.getSelectedXpub()
@@ -522,6 +626,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					// Push updated BTC accounts to frontend
 					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+					// Push updated EVM addresses to frontend
+					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
 
 					// Cache balances (fire-and-forget) — only on successful Pioneer response
 					try {
@@ -590,11 +696,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let fromAddress: string | undefined
 				let xpub: string | undefined
 
-				if (chain.chainFamily !== 'utxo') {
+				if (chain.chainFamily === 'evm') {
+					// EVM multi-address: use evmAddressIndex or selected index
+					const idx = params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0
+					const addrPath = evmAddressPath(idx)
+					// Try cached address first (avoids device call)
+					const cached = evmAddresses.toAddressSet().addresses.find(a => a.addressIndex === idx)
+					if (cached) {
+						fromAddress = cached.address
+					} else {
+						const addrResult = await wallet.ethGetAddress({ addressNList: addrPath, showDisplay: false, coin: 'Ethereum' })
+						fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+					}
+				} else if (chain.chainFamily !== 'utxo') {
 					const addrParams: any = {
 						addressNList: chain.defaultPath,
 						showDisplay: false,
-						coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
+						coin: chain.coin,
 					}
 					if (chain.scriptType) addrParams.scriptType = chain.scriptType
 					const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
@@ -631,11 +749,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
+				const evmIdx = chain.chainFamily === 'evm' ? (params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0) : undefined
 				const result = await buildTx(pioneer, chain, {
 					...params,
 					fromAddress,
 					xpub,
 					rpcUrl,
+					evmAddressIndex: evmIdx,
 				})
 
 				return { unsignedTx: result.unsignedTx, fee: result.fee }
@@ -726,6 +846,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { receiveIndex, changeIndex }
 			},
 
+			// ── EVM multi-address ────────────────────────────────────
+			getEvmAddresses: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (!evmAddresses.isInitialized) {
+					await evmAddresses.initialize(engine.wallet as any)
+				}
+				return evmAddresses.toAddressSet()
+			},
+			addEvmAddressIndex: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await evmAddresses.addIndex(engine.wallet as any, params.index)
+			},
+			removeEvmAddressIndex: async (params) => {
+				return evmAddresses.removeIndex(params.index)
+			},
+			setEvmSelectedIndex: async (params) => {
+				evmAddresses.setSelectedIndex(params.index)
+			},
+
 			// ── Custom tokens ────────────────────────────────────────
 			addCustomToken: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
@@ -755,16 +894,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Chain discovery (Pioneer catalog) ────────────────────
-			searchChains: async (params) => {
+			browseChains: async (params) => {
+				await loadChainCatalog()
 				const q = (params.query || '').trim()
-				if (q.length < 2) return []
-				const limit = Math.min(Math.max(params.limit || 50, 1), 100)
-				try {
-					return await searchPioneerChains(q, limit)
-				} catch (e: any) {
-					console.warn('[searchChains] Discovery API failed:', e.message)
-					return []
-				}
+				const page = Math.max(params.page || 0, 0)
+				const pageSize = Math.min(Math.max(params.pageSize || 20, 5), 50)
+				return browseChains(q, page, pageSize)
 			},
 
 			// ── Custom chains ────────────────────────────────────────
@@ -862,6 +997,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				applyRestApiState()
 				return getAppSettings()
 			},
+			setPioneerApiBase: async (params) => {
+				const url = (params.url || '').trim()
+				if (url && !/^https?:\/\//i.test(url)) {
+					throw new Error('URL must start with http:// or https://')
+				}
+				setSetting('pioneer_api_base', url) // empty string = reset to default
+				resetPioneer()
+				chainCatalog = []
+				catalogLoadedAt = 0
+				console.log('[settings] Pioneer API base set to:', url || '(default)')
+				return getAppSettings()
+			},
 
 			// ── API Audit Log ────────────────────────────────────────
 			getApiLogs: async (params) => {
@@ -941,7 +1088,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
-	if (state.state === 'disconnected') btcAccounts.reset()
+	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
 })
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
@@ -962,6 +1109,11 @@ engine.on('recovery-error', (err) => {
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {
 	try { rpc.send['btc-accounts-update'](set) } catch { /* webview not ready yet */ }
+})
+
+// EvmAddressManager change events → push to WebView
+evmAddresses.on('change', (set: EvmAddressSet) => {
+	try { rpc.send['evm-addresses-update'](set) } catch { /* webview not ready yet */ }
 })
 
 // Updater status changes → push to WebView

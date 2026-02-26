@@ -89,3 +89,22 @@ export function getAssetIcon(caip: string): string {
   const entry = map[caip]
   return entry?.icon || caipToIcon(caip)
 }
+
+/** Register a custom chain so getAsset() can return its explorer links. */
+export function registerCustomAsset(caip: string, entry: { symbol: string; name: string; explorer?: string; explorerAddressLink?: string; explorerTxLink?: string }): void {
+  const map = getAssetMap()
+  if (!map) {
+    // Map not loaded yet — queue for when it loads
+    if (loadPromise) {
+      loadPromise.then((m) => { m[caip] = { ...entry, isNative: true, type: 'native' } })
+    }
+    return
+  }
+  map[caip] = { ...entry, isNative: true, type: 'native' }
+}
+
+/** Remove a custom chain entry from the asset map. */
+export function unregisterCustomAsset(caip: string): void {
+  const map = getAssetMap()
+  if (map) delete map[caip]
+}

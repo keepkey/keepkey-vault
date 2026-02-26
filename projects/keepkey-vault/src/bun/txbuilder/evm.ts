@@ -49,6 +49,7 @@ export interface BuildEvmParams {
   tokenBalance?: string  // human-readable token balance from frontend
   tokenDecimals?: number // token decimals from frontend
   rpcUrl?: string   // Direct RPC URL — bypasses Pioneer for custom chains
+  addressIndex?: number  // EVM multi-address: derivation index (default 0)
 }
 
 export async function buildEvmTx(
@@ -56,10 +57,15 @@ export async function buildEvmTx(
   chain: ChainDef,
   params: BuildEvmParams,
 ) {
-  const { to, memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl } = params
+  const { to, memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex } = params
   const amountNum = parseFloat(params.amount)
   const chainId = parseInt(chain.chainId || '1', 10)
   const isErc20 = !!(caip && caip.includes('erc20'))
+
+  // Derive addressNList from addressIndex (multi-address) or fall back to chain.defaultPath
+  const addressNList = addressIndex != null
+    ? [0x8000002C, 0x8000003C, 0x80000000, 0, addressIndex]
+    : chain.defaultPath
 
   if (isErc20) console.log(`${TAG} ERC-20 token transfer: ${caip}`)
 
@@ -199,7 +205,7 @@ export async function buildEvmTx(
 
     return {
       chainId,
-      addressNList: chain.defaultPath,
+      addressNList,
       nonce: toHex(nonce),
       gasLimit: toHex(gasLimit),
       gasPrice: toHex(gasPrice),
@@ -234,7 +240,7 @@ export async function buildEvmTx(
 
   return {
     chainId,
-    addressNList: chain.defaultPath,
+    addressNList,
     nonce: toHex(nonce),
     gasLimit: toHex(gasLimit),
     gasPrice: toHex(gasPrice),

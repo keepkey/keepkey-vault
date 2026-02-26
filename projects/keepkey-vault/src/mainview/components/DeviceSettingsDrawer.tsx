@@ -140,10 +140,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removingPin, setRemovingPin] = useState(false)
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '' })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
+	const [pioneerUrl, setPioneerUrl] = useState("")
+	const [savingPioneerUrl, setSavingPioneerUrl] = useState(false)
+	const [pioneerUrlMsg, setPioneerUrlMsg] = useState<{ text: string; ok: boolean } | null>(null)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -156,7 +159,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				.catch(() => setFeaturesError(true))
 		}
 		rpcRequest<AppSettings>("getAppSettings")
-			.then(setAppSettings)
+			.then(s => { setAppSettings(s); setPioneerUrl(s.pioneerApiBase || "") })
 			.catch(() => {})
 	}, [open, deviceState.state])
 
@@ -295,6 +298,22 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setFeatures(updated)
 		} catch (e: any) { console.error("togglePassphrase:", e) }
 		setTogglingPassphrase(false)
+	}, [])
+
+	const savePioneerUrl = useCallback(async (url: string) => {
+		setSavingPioneerUrl(true)
+		setPioneerUrlMsg(null)
+		try {
+			const result = await rpcRequest<AppSettings>("setPioneerApiBase", { url }, 10000)
+			setAppSettings(result)
+			setPioneerUrl(result.pioneerApiBase || "")
+			setPioneerUrlMsg({ text: url ? "Saved" : "Reset to default", ok: true })
+			setTimeout(() => setPioneerUrlMsg(null), 3000)
+		} catch (e: any) {
+			setPioneerUrlMsg({ text: e.message || "Failed", ok: false })
+			setTimeout(() => setPioneerUrlMsg(null), 4000)
+		}
+		setSavingPioneerUrl(false)
 	}, [])
 
 	const securityValue = (val: boolean | undefined): string => {
@@ -782,7 +801,55 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
-					{/* ── Danger Zone ─────────────────────────────────── */}
+					{/* ── Developer ───────────────────────────────────── */}
+					<Section title="Developer" defaultOpen={false}>
+						<VStack gap="3" align="stretch">
+							<Box>
+								<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Pioneer API Server</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+									Override the Pioneer API base URL. Leave empty for the default production server.
+								</Text>
+							</Box>
+							<Flex gap="2">
+								<Input
+									value={pioneerUrl}
+									onChange={(e) => setPioneerUrl(e.target.value)}
+									placeholder="https://api.keepkey.info"
+									bg="kk.bg"
+									border="1px solid"
+									borderColor="kk.border"
+									color="kk.textPrimary"
+									size="sm"
+									flex="1"
+									fontFamily="mono"
+									fontSize="xs"
+								/>
+								<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => savePioneerUrl(pioneerUrl)} disabled={savingPioneerUrl}>
+									{savingPioneerUrl ? "..." : "Save"}
+								</Button>
+							</Flex>
+							{pioneerUrl && (
+								<Box
+									as="button"
+									fontSize="xs"
+									color="kk.textSecondary"
+									cursor="pointer"
+									_hover={{ color: "kk.gold" }}
+									textAlign="left"
+									onClick={() => { setPioneerUrl(""); savePioneerUrl("") }}
+								>
+									Reset to default
+								</Box>
+							)}
+							{pioneerUrlMsg && (
+								<Text fontSize="xs" color={pioneerUrlMsg.ok ? "kk.success" : "kk.error"}>
+									{pioneerUrlMsg.text}
+								</Text>
+							)}
+						</VStack>
+					</Section>
+
+				{/* ── Danger Zone ─────────────────────────────────── */}
 					<Section title="Danger Zone" color="kk.error" defaultOpen={false}>
 						<Text fontSize="xs" color="kk.textSecondary" mb="3">
 							Wiping erases all data on the device. Make sure you have your recovery phrase backed up.
