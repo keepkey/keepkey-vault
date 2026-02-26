@@ -5,7 +5,7 @@ on:
     branches: [develop, 'release/*']
     tags: ['v*']
   pull_request:
-    branches: [develop, master]
+    branches: [develop, main]
   workflow_dispatch:
 
 concurrency:
@@ -27,17 +27,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS universal
-            runner: macos-14
-            artifact-suffix: macos-universal
+          # macOS and Windows are built + signed locally (see `make build-signed`)
           - name: Linux x64
             runner: ubuntu-latest
             artifact-suffix: linux-x64
-          - name: Windows x64
-            runner: windows-latest
-            artifact-suffix: windows-x64
-            # Electrobun CLI tar extraction broken on Windows (D:\ drive path)
-            experimental: true
 
     steps:
       - name: Checkout
@@ -161,20 +154,11 @@ jobs:
           # Cleanup
           rm -rf "$WORK"
 
-      - name: Generate checksums (Unix)
-        if: runner.os != 'Windows'
+      - name: Generate checksums
         run: |
           cd projects/keepkey-vault/artifacts
           shasum -a 256 * > SHA256SUMS.txt 2>/dev/null || true
           cat SHA256SUMS.txt
-
-      - name: Generate checksums (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cd projects\keepkey-vault\artifacts
-          Get-ChildItem -File | ForEach-Object { "$($(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Out-File -Encoding utf8 SHA256SUMS.txt
-          Get-Content SHA256SUMS.txt
 
       - name: List artifacts
         run: ls -lh projects/keepkey-vault/artifacts/
