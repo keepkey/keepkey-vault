@@ -157,7 +157,6 @@ jobs:
 
           # Build AppImage (--appimage-extract-and-run for CI without FUSE)
           ARCH=x86_64 "$WORK/appimagetool" --appimage-extract-and-run "$APPDIR" "KeepKey-Vault-x86_64.AppImage"
-          mv "KeepKey-Vault-x86_64.AppImage" .
 
           # Cleanup
           rm -rf "$WORK"
