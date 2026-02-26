@@ -337,7 +337,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				overflowY="auto"
 				outline="none"
 				role="dialog"
-				aria-label="Device Settings"
+				aria-label={t("title")}
 				aria-modal="true"
 			>
 				{/* Header */}

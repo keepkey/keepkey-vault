@@ -11,5 +11,6 @@
 	"verifyOnDevice": "Проверить на устройстве",
 	"derivingAddress": "Получение адреса...",
 	"noAddressDerived": "Адрес ещё не получен",
-	"deriveAddress": "Получить адрес"
+	"deriveAddress": "Получить адрес",
+	"account": "Аккаунт {{index}}"
 }

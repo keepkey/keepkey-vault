@@ -50,5 +50,27 @@
 	"confirmWipe": "초기화 확인",
 	"wiping": "초기화 중...",
 	"official": "공식",
-	"unknown": "알 수 없음"
+	"unknown": "알 수 없음",
+	"pairedAppsPanel": {
+		"title": "페어링된 앱",
+		"closePairedApps": "페어링된 앱 닫기",
+		"noPairedApps": "페어링된 앱 없음",
+		"noPairedAppsDescription": "REST API를 통해 페어링된 앱이 여기에 표시됩니다.",
+		"paired": "{{date}} 페어링됨",
+		"revoke": "취소",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "API 감사 로그",
+		"closeAuditLog": "감사 로그 닫기",
+		"pairedAppsCount": "페어링된 앱 ({{count}})",
+		"noRequests": "아직 API 요청이 없습니다",
+		"requestBody": "요청 본문",
+		"responseBody": "응답 본문"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "WalletConnect 패널 닫기",
+		"iframeTitle": "WalletConnect dApp"
+	}
 }

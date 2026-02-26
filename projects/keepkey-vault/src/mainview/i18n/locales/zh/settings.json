@@ -50,5 +50,27 @@
 	"confirmWipe": "确认擦除",
 	"wiping": "正在擦除...",
 	"official": "官方",
-	"unknown": "未知"
+	"unknown": "未知",
+	"pairedAppsPanel": {
+		"title": "已配对应用",
+		"closePairedApps": "关闭已配对应用",
+		"noPairedApps": "没有已配对应用",
+		"noPairedAppsDescription": "通过 REST API 配对的应用将显示在此处。",
+		"paired": "{{date}} 配对",
+		"revoke": "撤销",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "API 审计日志",
+		"closeAuditLog": "关闭审计日志",
+		"pairedAppsCount": "已配对应用 ({{count}})",
+		"noRequests": "暂无 API 请求",
+		"requestBody": "请求体",
+		"responseBody": "响应体"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "关闭 WalletConnect 面板",
+		"iframeTitle": "WalletConnect dApp"
+	}
 }

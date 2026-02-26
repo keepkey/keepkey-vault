@@ -50,5 +50,27 @@
 	"confirmWipe": "Conferma cancellazione",
 	"wiping": "Cancellazione...",
 	"official": "Ufficiale",
-	"unknown": "Sconosciuto"
+	"unknown": "Sconosciuto",
+	"pairedAppsPanel": {
+		"title": "App associate",
+		"closePairedApps": "Chiudi app associate",
+		"noPairedApps": "Nessuna app associata",
+		"noPairedAppsDescription": "Le app associate tramite REST API appariranno qui.",
+		"paired": "Associata {{date}}",
+		"revoke": "Revoca",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "Registro di audit API",
+		"closeAuditLog": "Chiudi registro di audit",
+		"pairedAppsCount": "App associate ({{count}})",
+		"noRequests": "Nessuna richiesta API ancora",
+		"requestBody": "Corpo della richiesta",
+		"responseBody": "Corpo della risposta"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "Chiudi pannello WalletConnect",
+		"iframeTitle": "WalletConnect dApp"
+	}
 }

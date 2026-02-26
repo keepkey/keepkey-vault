@@ -50,5 +50,27 @@
 	"confirmWipe": "ワイプを確認",
 	"wiping": "ワイプ中...",
 	"official": "公式",
-	"unknown": "不明"
+	"unknown": "不明",
+	"pairedAppsPanel": {
+		"title": "ペアリング済みアプリ",
+		"closePairedApps": "ペアリング済みアプリを閉じる",
+		"noPairedApps": "ペアリング済みアプリなし",
+		"noPairedAppsDescription": "REST API経由でペアリングされたアプリがここに表示されます。",
+		"paired": "{{date}} にペアリング",
+		"revoke": "取り消し",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "API監査ログ",
+		"closeAuditLog": "監査ログを閉じる",
+		"pairedAppsCount": "ペアリング済みアプリ ({{count}})",
+		"noRequests": "APIリクエストはまだありません",
+		"requestBody": "リクエストボディ",
+		"responseBody": "レスポンスボディ"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "WalletConnectパネルを閉じる",
+		"iframeTitle": "WalletConnect dApp"
+	}
 }

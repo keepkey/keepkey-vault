@@ -11,5 +11,6 @@
 	"verifyOnDevice": "在设备上验证",
 	"derivingAddress": "正在派生地址...",
 	"noAddressDerived": "尚未派生地址",
-	"deriveAddress": "派生地址"
+	"deriveAddress": "派生地址",
+	"account": "账户 {{index}}"
 }

@@ -11,5 +11,6 @@
 	"verifyOnDevice": "デバイスで検証",
 	"derivingAddress": "アドレスを導出中...",
 	"noAddressDerived": "まだアドレスが導出されていません",
-	"deriveAddress": "アドレスを導出"
+	"deriveAddress": "アドレスを導出",
+	"account": "アカウント {{index}}"
 }

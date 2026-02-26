@@ -50,5 +50,27 @@
 	"confirmWipe": "Подтвердить сброс",
 	"wiping": "Сброс...",
 	"official": "Официальный",
-	"unknown": "Неизвестно"
+	"unknown": "Неизвестно",
+	"pairedAppsPanel": {
+		"title": "Сопряженные приложения",
+		"closePairedApps": "Закрыть сопряженные приложения",
+		"noPairedApps": "Нет сопряженных приложений",
+		"noPairedAppsDescription": "Приложения, сопряженные через REST API, появятся здесь.",
+		"paired": "Сопряжено {{date}}",
+		"revoke": "Отозвать",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "Журнал аудита API",
+		"closeAuditLog": "Закрыть журнал аудита",
+		"pairedAppsCount": "Сопряженные приложения ({{count}})",
+		"noRequests": "Запросов API пока нет",
+		"requestBody": "Тело запроса",
+		"responseBody": "Тело ответа"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "Закрыть панель WalletConnect",
+		"iframeTitle": "WalletConnect dApp"
+	}
 }

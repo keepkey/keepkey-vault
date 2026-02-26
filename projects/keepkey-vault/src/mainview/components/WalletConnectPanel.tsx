@@ -1,5 +1,6 @@
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { useRef, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
 
 // Served via reverse proxy on the REST API server (same-origin, avoids WKWebView mixed-content block)
@@ -13,6 +14,7 @@ interface WalletConnectPanelProps {
 
 export function WalletConnectPanel({ open, wcUri, onClose }: WalletConnectPanelProps) {
 	const iframeRef = useRef<HTMLIFrameElement>(null)
+	const { t } = useTranslation("settings")
 
 	const iframeSrc = wcUri
 		? `${WC_DAPP_BASE}?uri=${encodeURIComponent(wcUri)}`
@@ -71,7 +73,7 @@ export function WalletConnectPanel({ open, wcUri, onClose }: WalletConnectPanelP
 							/>
 						</svg>
 						<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-							WalletConnect
+							{t('walletConnect.title')}
 						</Text>
 					</Flex>
 					<Box
@@ -81,7 +83,7 @@ export function WalletConnectPanel({ open, wcUri, onClose }: WalletConnectPanelP
 						color="kk.textSecondary"
 						_hover={{ color: "kk.textPrimary", bg: "rgba(255,255,255,0.06)" }}
 						onClick={onClose}
-						aria-label="Close WalletConnect panel"
+						aria-label={t('walletConnect.closePanel')}
 					>
 						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<line x1="18" y1="6" x2="6" y2="18" />
@@ -96,7 +98,7 @@ export function WalletConnectPanel({ open, wcUri, onClose }: WalletConnectPanelP
 						src={iframeSrc}
 						style={{ width: "100%", height: "100%", border: "none" }}
 						allow="clipboard-read; clipboard-write"
-						title="WalletConnect dApp"
+						title={t('walletConnect.iframeTitle')}
 					/>
 				</Box>
 			</Flex>

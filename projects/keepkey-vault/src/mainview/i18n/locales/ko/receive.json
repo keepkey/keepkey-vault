@@ -11,5 +11,6 @@
 	"verifyOnDevice": "기기에서 확인",
 	"derivingAddress": "주소 파생 중...",
 	"noAddressDerived": "아직 파생된 주소 없음",
-	"deriveAddress": "주소 파생"
+	"deriveAddress": "주소 파생",
+	"account": "계정 {{index}}"
 }

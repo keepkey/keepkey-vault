@@ -50,5 +50,27 @@
 	"confirmWipe": "Confirmar borrado",
 	"wiping": "Borrando...",
 	"official": "Oficial",
-	"unknown": "Desconocido"
+	"unknown": "Desconocido",
+	"pairedAppsPanel": {
+		"title": "Aplicaciones vinculadas",
+		"closePairedApps": "Cerrar aplicaciones vinculadas",
+		"noPairedApps": "Sin aplicaciones vinculadas",
+		"noPairedAppsDescription": "Las aplicaciones vinculadas a través de la REST API aparecerán aquí.",
+		"paired": "Vinculado {{date}}",
+		"revoke": "Revocar",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "Registro de auditoría de API",
+		"closeAuditLog": "Cerrar registro de auditoría",
+		"pairedAppsCount": "Aplicaciones vinculadas ({{count}})",
+		"noRequests": "Aún no hay solicitudes de API",
+		"requestBody": "Cuerpo de la solicitud",
+		"responseBody": "Cuerpo de la respuesta"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "Cerrar panel de WalletConnect",
+		"iframeTitle": "dApp de WalletConnect"
+	}
 }

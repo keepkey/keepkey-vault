@@ -11,5 +11,6 @@
 	"verifyOnDevice": "Verificar no dispositivo",
 	"derivingAddress": "Derivando endereço...",
 	"noAddressDerived": "Nenhum endereço derivado ainda",
-	"deriveAddress": "Derivar endereço"
+	"deriveAddress": "Derivar endereço",
+	"account": "Conta {{index}}"
 }

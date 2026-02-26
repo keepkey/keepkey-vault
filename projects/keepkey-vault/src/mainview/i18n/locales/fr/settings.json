@@ -50,5 +50,27 @@
 	"confirmWipe": "Confirmer l'effacement",
 	"wiping": "Effacement...",
 	"official": "Officiel",
-	"unknown": "Inconnu"
+	"unknown": "Inconnu",
+	"pairedAppsPanel": {
+		"title": "Applications appairées",
+		"closePairedApps": "Fermer les applications appairées",
+		"noPairedApps": "Aucune application appairée",
+		"noPairedAppsDescription": "Les applications appairées via la REST API apparaîtront ici.",
+		"paired": "Appairé le {{date}}",
+		"revoke": "Révoquer",
+		"revoking": "..."
+	},
+	"auditLogPanel": {
+		"title": "Journal d'audit de l'API",
+		"closeAuditLog": "Fermer le journal d'audit",
+		"pairedAppsCount": "Applications appairées ({{count}})",
+		"noRequests": "Aucune requête API pour le moment",
+		"requestBody": "Corps de la requête",
+		"responseBody": "Corps de la réponse"
+	},
+	"walletConnect": {
+		"title": "WalletConnect",
+		"closePanel": "Fermer le panneau WalletConnect",
+		"iframeTitle": "dApp WalletConnect"
+	}
 }

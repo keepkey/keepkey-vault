@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, VStack, IconButton, Image } from "@chakra-ui/react"
+import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { PairedAppInfo } from "../../shared/types"
@@ -58,6 +59,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 	const [loading, setLoading] = useState(false)
 	const [revoking, setRevoking] = useState<string | null>(null)
 	const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null)
+	const { t } = useTranslation("settings")
 
 	const fetchApps = useCallback(async () => {
 		setLoading(true)
@@ -105,7 +107,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 			zIndex={Z.drawerPanel}
 			overflowY="auto"
 			role="dialog"
-			aria-label="Paired Apps"
+			aria-label={t('pairedAppsPanel.title')}
 			aria-modal="true"
 		>
 			{/* Header */}
@@ -127,14 +129,14 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 						<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
 					</svg>
 					<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-						Paired Apps
+						{t('pairedAppsPanel.title')}
 					</Text>
 					<Text fontSize="xs" color="kk.textMuted">
 						({apps.length})
 					</Text>
 				</Flex>
 				<IconButton
-					aria-label="Close paired apps"
+					aria-label={t('pairedAppsPanel.closePairedApps')}
 					onClick={onClose}
 					size="sm"
 					variant="ghost"
@@ -152,15 +154,15 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 			<VStack gap="0" align="stretch">
 				{loading && apps.length === 0 ? (
 					<Box px="4" py="8" textAlign="center">
-						<Text fontSize="sm" color="kk.textMuted">Loading...</Text>
+						<Text fontSize="sm" color="kk.textMuted">{t('loading', { ns: 'common' })}</Text>
 					</Box>
 				) : apps.length === 0 ? (
 					<Box px="4" py="8" textAlign="center">
 						<Text fontSize="sm" color="kk.textMuted" mb="1">
-							No paired apps
+							{t('pairedAppsPanel.noPairedApps')}
 						</Text>
 						<Text fontSize="xs" color="kk.textMuted">
-							Apps paired via the REST API will appear here.
+							{t('pairedAppsPanel.noPairedAppsDescription')}
 						</Text>
 					</Box>
 				) : (
@@ -186,7 +188,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 									</Text>
 								)}
 								<Text fontSize="10px" color="kk.textMuted" mt="0.5">
-									Paired {formatDate(app.addedOn)}
+									{t('pairedAppsPanel.paired', { date: formatDate(app.addedOn) })}
 								</Text>
 							</Box>
 							{confirmRevoke === app.apiKey ? (
@@ -206,7 +208,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 										transition="all 0.15s"
 										onClick={() => handleRevoke(app.apiKey)}
 									>
-										{revoking === app.apiKey ? "..." : "Confirm"}
+										{revoking === app.apiKey ? t('pairedAppsPanel.revoking') : t('confirm', { ns: 'common' })}
 									</Box>
 									<Box
 										as="button"
@@ -218,7 +220,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 										_hover={{ color: "kk.textPrimary" }}
 										onClick={() => setConfirmRevoke(null)}
 									>
-										Cancel
+										{t('cancel', { ns: 'common' })}
 									</Box>
 								</Flex>
 							) : (
@@ -237,7 +239,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 									flexShrink={0}
 									onClick={() => setConfirmRevoke(app.apiKey)}
 								>
-									Revoke
+									{t('pairedAppsPanel.revoke')}
 								</Box>
 							)}
 						</Flex>
