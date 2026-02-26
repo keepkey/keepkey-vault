@@ -1,18 +1,33 @@
 /**
  * Pioneer API client singleton.
  *
- * Uses @pioneer-platform/pioneer-client against https://api.keepkey.info
- * to fetch balances, UTXOs, fee rates, nonces, account info, and broadcast.
+ * Uses @pioneer-platform/pioneer-client against a configurable base URL.
+ * Priority: DB setting > PIONEER_API_BASE env var > https://api.keepkey.info
  */
 import Pioneer from '@pioneer-platform/pioneer-client'
+import { getSetting } from './db'
 
-const SPEC_URL = 'https://api.keepkey.info/spec/swagger.json'
+const DEFAULT_API_BASE = 'https://api.keepkey.info'
 const QUERY_KEY = process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
 const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 
 let pioneerInstance: any = null
 let initPromise: Promise<any> | null = null
 let lastInitAttempt = 0
+
+/** Resolve the Pioneer API base URL (no trailing slash). */
+export function getPioneerApiBase(): string {
+  const dbVal = getSetting('pioneer_api_base')
+  if (dbVal) return dbVal.replace(/\/+$/, '')
+  if (process.env.PIONEER_API_BASE) return process.env.PIONEER_API_BASE.replace(/\/+$/, '')
+  return DEFAULT_API_BASE
+}
+
+/** Force re-initialization on next getPioneer() call. */
+export function resetPioneer(): void {
+  pioneerInstance = null
+  initPromise = null
+}
 
 export async function getPioneer(): Promise<any> {
   if (pioneerInstance) return pioneerInstance
@@ -31,8 +46,23 @@ export async function getPioneer(): Promise<any> {
 
   initPromise = (async () => {
     try {
-      console.log('[Pioneer] Initializing client against', SPEC_URL)
-      const client = new Pioneer(SPEC_URL, { queryKey: QUERY_KEY, timeout: 60000 })
+      const base = getPioneerApiBase()
+      const specUrl = `${base}/spec/swagger.json`
+      console.log('[Pioneer] Initializing client against', specUrl)
+
+      // When pointing at a non-default server, pass overrideHost so the
+      // client rewrites swagger-resolved URLs to match.  The pioneer-client
+      // requestInterceptor automatically forces http: for localhost/127.0.0.1,
+      // which fixes the https://localhost mismatch from the server's swagger spec.
+      let overrideHost: string | undefined
+      if (base !== DEFAULT_API_BASE) {
+        try {
+          const u = new URL(base)
+          overrideHost = u.host // e.g. "localhost:9001"
+        } catch { /* malformed URL — let Pioneer fail naturally */ }
+      }
+
+      const client = new Pioneer(specUrl, { queryKey: QUERY_KEY, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
       console.log('[Pioneer] Client initialized successfully')

@@ -3,7 +3,7 @@ import { Box, Flex, Text, HStack, Spinner, Image, SimpleGrid, IconButton } from 
 import { CHAINS, customChainToChainDef, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
-import { getAssetIcon } from "../../shared/assetLookup"
+import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
@@ -25,10 +25,22 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
 
-	// Load custom chains on mount
+	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
 		rpcRequest<CustomChain[]>('getCustomChains', undefined, 5000)
-			.then(chains => setCustomChainDefs(chains.map(customChainToChainDef)))
+			.then(chains => {
+				setCustomChainDefs(chains.map(customChainToChainDef))
+				for (const c of chains) {
+					if (c.explorerAddressLink || c.explorerTxLink) {
+						registerCustomAsset(`eip155:${c.chainId}/slip44:60`, {
+							symbol: c.symbol, name: c.name,
+							explorer: c.explorerUrl,
+							explorerAddressLink: c.explorerAddressLink,
+							explorerTxLink: c.explorerTxLink,
+						})
+					}
+				}
+			})
 			.catch(() => {})
 	}, [])
 
@@ -104,6 +116,11 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 	const allChains = useMemo(() => [...CHAINS, ...customChainDefs], [customChainDefs])
 
+	const existingChainIds = useMemo(() => [
+		...CHAINS.filter(c => c.chainFamily === 'evm' && c.chainId).map(c => Number(c.chainId)),
+		...customChainDefs.filter(c => c.chainId).map(c => Number(c.chainId)),
+	], [customChainDefs])
+
 	const chartData = useMemo<DonutChartItem[]>(() => allChains
 		.map((chain) => {
 			const bal = balances.get(chain.id)
@@ -127,7 +144,7 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
-		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} watchOnly={watchOnly} />
+		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
 	}
 
 	return (
@@ -333,7 +350,16 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 					onClose={() => setShowAddChain(false)}
 					onAdded={(chain) => {
 						setCustomChainDefs(prev => [...prev, customChainToChainDef(chain)])
+						if (chain.explorerAddressLink || chain.explorerTxLink) {
+							registerCustomAsset(`eip155:${chain.chainId}/slip44:60`, {
+								symbol: chain.symbol, name: chain.name,
+								explorer: chain.explorerUrl,
+								explorerAddressLink: chain.explorerAddressLink,
+								explorerTxLink: chain.explorerTxLink,
+							})
+						}
 					}}
+					existingChainIds={existingChainIds}
 				/>
 			)}
 		</Box>

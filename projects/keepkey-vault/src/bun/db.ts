@@ -70,11 +70,13 @@ export function initDb() {
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS custom_chains (
-        chain_id     INTEGER PRIMARY KEY,
-        name         TEXT NOT NULL,
-        symbol       TEXT NOT NULL,
-        rpc_url      TEXT NOT NULL,
-        explorer_url TEXT
+        chain_id               INTEGER PRIMARY KEY,
+        name                   TEXT NOT NULL,
+        symbol                 TEXT NOT NULL,
+        rpc_url                TEXT NOT NULL,
+        explorer_url           TEXT,
+        explorer_address_link  TEXT,
+        explorer_tx_link       TEXT
       )
     `)
 
@@ -142,6 +144,11 @@ export function initDb() {
       )
     `)
 
+
+    // Migrations: add columns to existing tables (safe to re-run)
+    for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
+      try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -259,10 +266,10 @@ export function removeCustomToken(chainId: string, contractAddress: string) {
 export function getCustomChains(): CustomChain[] {
   try {
     if (!db) return []
-    const rows = db.query('SELECT chain_id, name, symbol, rpc_url, explorer_url FROM custom_chains').all() as Array<{
-      chain_id: number; name: string; symbol: string; rpc_url: string; explorer_url: string | null
+    const rows = db.query('SELECT chain_id, name, symbol, rpc_url, explorer_url, explorer_address_link, explorer_tx_link FROM custom_chains').all() as Array<{
+      chain_id: number; name: string; symbol: string; rpc_url: string; explorer_url: string | null; explorer_address_link: string | null; explorer_tx_link: string | null
     }>
-    return rows.map(r => ({ chainId: r.chain_id, name: r.name, symbol: r.symbol, rpcUrl: r.rpc_url, explorerUrl: r.explorer_url || undefined }))
+    return rows.map(r => ({ chainId: r.chain_id, name: r.name, symbol: r.symbol, rpcUrl: r.rpc_url, explorerUrl: r.explorer_url || undefined, explorerAddressLink: r.explorer_address_link || undefined, explorerTxLink: r.explorer_tx_link || undefined }))
   } catch (e: any) {
     console.warn('[db] getCustomChains failed:', e.message)
     return []
@@ -273,8 +280,8 @@ export function addCustomChainDb(chain: CustomChain) {
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO custom_chains (chain_id, name, symbol, rpc_url, explorer_url) VALUES (?, ?, ?, ?, ?)`,
-      [chain.chainId, chain.name, chain.symbol, chain.rpcUrl, chain.explorerUrl || null]
+      `INSERT OR REPLACE INTO custom_chains (chain_id, name, symbol, rpc_url, explorer_url, explorer_address_link, explorer_tx_link) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [chain.chainId, chain.name, chain.symbol, chain.rpcUrl, chain.explorerUrl || null, chain.explorerAddressLink || null, chain.explorerTxLink || null]
     )
   } catch (e: any) {
     console.warn('[db] addCustomChain failed:', e.message)

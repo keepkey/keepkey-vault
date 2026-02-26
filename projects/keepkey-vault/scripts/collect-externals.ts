@@ -151,19 +151,6 @@ function pruneDir(dirPath: string) {
 pruneDir(nmDest)
 console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
 
-// Ensure protobufjs/src is present (minimal.js requires ./src/index-minimal)
-try {
-  const pbSrc = join(nmSource, 'protobufjs', 'src')
-  const pbDst = join(nmDest, 'protobufjs', 'src')
-  if (existsSync(pbSrc) && !existsSync(pbDst)) {
-    mkdirSync(pbDst, { recursive: true })
-    cpSync(pbSrc, pbDst, { recursive: true })
-    console.log('[collect-externals] Restored protobufjs/src (required by minimal.js)')
-  }
-} catch (e) {
-  console.warn(`[collect-externals] Failed to restore protobufjs/src: ${e}`)
-}
-
 // Remove non-macOS prebuilds, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
 const REMOVE_PREBUILD_PREFIXES = ['linux', 'win32', 'android']
@@ -226,6 +213,7 @@ const STRIP_DIRS = [
   // --- protobufjs: CLI tooling + dist bundles (main→index.js at root) ---
   'protobufjs/cli',
   'protobufjs/dist',
+  'protobufjs/src',
 
   // --- rxjs: UMD bundles + ESM duplicates (main→dist/cjs/) ---
   'rxjs/src',
