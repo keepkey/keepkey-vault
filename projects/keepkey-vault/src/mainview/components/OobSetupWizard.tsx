@@ -102,6 +102,11 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
   const [setupError, setSetupError] = useState<string | null>(null)
   const [, setSetupLoading] = useState(false)
 
+  // Dev: load-device dialog
+  const [devLoadOpen, setDevLoadOpen] = useState(false)
+  const [devSeed, setDevSeed] = useState('')
+  const [devAcknowledged, setDevAcknowledged] = useState(false)
+
   // Bootloader state
   const [waitingForBootloader, setWaitingForBootloader] = useState(false)
   const bootloaderPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -298,6 +303,33 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
     } finally {
       setSetupLoading(false)
     }
+  }
+
+  const handleDevLoadDevice = async () => {
+    const words = devSeed.trim()
+    if (!words || words.split(/\s+/).length < 12) return
+    setDevLoadOpen(false)
+    setSetupType('create')
+    setStep('init-progress')
+    setSetupLoading(true)
+    setSetupError(null)
+    try {
+      await rpcRequest('loadDevice', { mnemonic: words }, DEVICE_INTERACTION_TIMEOUT)
+      setDevSeed('')
+      setDevAcknowledged(false)
+      setStep('init-label')
+    } catch (err) {
+      setSetupError(err instanceof Error ? err.message : 'Failed to load device')
+      setStep('init-choose')
+    } finally {
+      setSetupLoading(false)
+    }
+  }
+
+  const handleDevLoadCancel = () => {
+    setDevLoadOpen(false)
+    setDevSeed('')
+    setDevAcknowledged(false)
   }
 
   const handleRecoverWallet = async () => {
@@ -916,6 +948,19 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                     </VStack>
                   </Box>
                 </HStack>
+
+                {/* Dev: Load Device — tiny link opens dialog */}
+                <Text
+                  fontSize="xs"
+                  color="gray.600"
+                  cursor="pointer"
+                  textAlign="center"
+                  mt="2"
+                  _hover={{ color: 'gray.500' }}
+                  onClick={() => setDevLoadOpen(true)}
+                >
+                  Developer: load seed
+                </Text>
               </VStack>
             )}
 
@@ -1101,6 +1146,146 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
           </HStack>
         </Box>
       </Box>
+
+      {/* ── Dev Load-Device Dialog ──────────────────────────────────── */}
+      {devLoadOpen && (
+        <Flex
+          position="fixed"
+          top={0}
+          left={0}
+          w="100vw"
+          h="100vh"
+          bg="blackAlpha.800"
+          align="center"
+          justify="center"
+          zIndex={2000}
+          onClick={handleDevLoadCancel}
+        >
+          <Box
+            w="100%"
+            maxW="480px"
+            mx={4}
+            bg="gray.900"
+            borderRadius="xl"
+            borderWidth="1px"
+            borderColor="red.700"
+            boxShadow="0 8px 32px rgba(0,0,0,0.6)"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <Box p={5} borderBottomWidth="1px" borderColor="gray.700">
+              <HStack gap={3}>
+                <FaExclamationTriangle color="#FC8181" size={22} />
+                <Text fontSize="lg" fontWeight="bold" color="red.300">
+                  Developer Seed Loading
+                </Text>
+              </HStack>
+            </Box>
+
+            {/* Warning */}
+            <Box p={5}>
+              <Box p={4} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600" mb={4}>
+                <VStack gap={3} align="start">
+                  <Text fontSize="sm" color="red.200" fontWeight="bold">
+                    This defeats the purpose of a hardware wallet.
+                  </Text>
+                  <Text fontSize="xs" color="red.300" lineHeight="tall">
+                    Loading a seed phrase via software transmits it over USB in
+                    plaintext. Any malware on this computer can intercept it.
+                    The entire security model of your KeepKey relies on the seed
+                    never leaving the device — this bypasses that protection
+                    entirely.
+                  </Text>
+                  <Text fontSize="xs" color="red.300" lineHeight="tall">
+                    Only use this for throwaway development and testing wallets.
+                    Never load a seed that controls real funds.
+                  </Text>
+                </VStack>
+              </Box>
+
+              {/* Acknowledgment checkbox */}
+              <Box
+                as="label"
+                display="flex"
+                alignItems="flex-start"
+                gap={3}
+                cursor="pointer"
+                mb={4}
+                p={3}
+                borderRadius="md"
+                bg={devAcknowledged ? 'whiteAlpha.50' : 'transparent'}
+                _hover={{ bg: 'whiteAlpha.50' }}
+              >
+                <Box
+                  as="input"
+                  type="checkbox"
+                  checked={devAcknowledged}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDevAcknowledged(e.target.checked)}
+                  mt="2px"
+                  style={{ accentColor: '#E53E3E', width: '16px', height: '16px', flexShrink: 0 }}
+                />
+                <Text fontSize="xs" color="gray.300" lineHeight="tall">
+                  I understand this is for development only and that loading a
+                  seed over USB compromises device security. I will not use a
+                  seed that holds real funds.
+                </Text>
+              </Box>
+
+              {/* Seed input */}
+              <Box mb={4}>
+                <Text fontSize="xs" color="gray.400" mb={1}>BIP-39 Mnemonic (12, 18, or 24 words)</Text>
+                <Box
+                  as="textarea"
+                  value={devSeed}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDevSeed(e.target.value)}
+                  placeholder="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                  w="100%"
+                  rows={3}
+                  p={3}
+                  bg="gray.800"
+                  color="white"
+                  borderWidth="1px"
+                  borderColor={devAcknowledged ? 'gray.600' : 'gray.700'}
+                  borderRadius="md"
+                  fontSize="sm"
+                  fontFamily="mono"
+                  resize="none"
+                  disabled={!devAcknowledged}
+                  opacity={devAcknowledged ? 1 : 0.4}
+                  _hover={devAcknowledged ? { borderColor: 'gray.500' } : {}}
+                  _focus={devAcknowledged ? { borderColor: 'red.500', outline: 'none' } : {}}
+                />
+                {devSeed.trim() && (
+                  <Text fontSize="xs" color="gray.500" mt={1}>
+                    {devSeed.trim().split(/\s+/).length} words
+                  </Text>
+                )}
+              </Box>
+
+              {/* Actions */}
+              <HStack gap={3} justify="flex-end">
+                <Button
+                  variant="ghost"
+                  color="gray.400"
+                  _hover={{ color: 'white', bg: 'gray.700' }}
+                  onClick={handleDevLoadCancel}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  bg="red.600"
+                  color="white"
+                  _hover={{ bg: 'red.500' }}
+                  disabled={!devAcknowledged || !devSeed.trim() || devSeed.trim().split(/\s+/).length < 12}
+                  onClick={handleDevLoadDevice}
+                >
+                  Load Device
+                </Button>
+              </HStack>
+            </Box>
+          </Box>
+        </Flex>
+      )}
     </Flex>
   )
 }

@@ -120,8 +120,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
 			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
 			flashFirmware: async () => { await engine.flashFirmware() },
+			analyzeFirmware: async (params) => {
+				const buf = Buffer.from(params.data, 'base64')
+				return engine.analyzeFirmware(buf)
+			},
+			flashCustomFirmware: async (params) => {
+				const buf = Buffer.from(params.data, 'base64')
+				await engine.flashCustomFirmware(buf)
+			},
 			resetDevice: async (params) => { await engine.resetDevice(params) },
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
+			loadDevice: async (params) => { await engine.loadDevice(params) },
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
 			applySettings: async (params) => { await engine.applySettings(params) },
 			changePin: async () => { await engine.changePin() },
@@ -202,6 +211,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (addr) cacheAddress('ripple', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
+			solanaGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.solanaGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr)
+				return result
+			},
 
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
@@ -243,6 +259,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.rippleSignTx(params)
+			},
+			solanaSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.solanaSignTx(params)
+				// Assemble signed tx: replace the 64-byte dummy signature in rawTx with real signature
+				if (result?.signature && params.rawTx) {
+					const rawBytes = Buffer.from(params.rawTx, 'base64')
+					const sigBytes = result.signature instanceof Uint8Array
+						? result.signature
+						: Buffer.from(result.signature, 'base64')
+					// rawTx format: [1 byte sig_count] [64 bytes dummy sig] [message...]
+					// Replace bytes 1-64 with real signature
+					if (rawBytes.length > 65 && sigBytes.length === 64) {
+						sigBytes.forEach((b: number, i: number) => { rawBytes[1 + i] = b })
+						return { signature: result.signature, serializedTx: rawBytes.toString('base64') }
+					}
+				}
+				return result
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────

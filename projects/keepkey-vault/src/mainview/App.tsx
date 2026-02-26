@@ -8,6 +8,7 @@ import { SigningApproval } from "./components/device/SigningApproval"
 import { ApiAuditLog } from "./components/ApiAuditLog"
 import { PairedAppsPanel } from "./components/PairedAppsPanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
+import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -426,12 +427,15 @@ function App() {
 		setWatchOnlyMode(false)
 	}, [])
 
+	// ── Firmware drop zone (always active) ──────────────────────────
+	const firmwareDropZone = <FirmwareDropZone />
+
 	// ── Render phases ───────────────────────────────────────────────
 
 	// Watch-only mode: render dashboard with cached data (read-only)
 	if (watchOnlyMode) {
 		return (
-			<>
+			<>{firmwareDropZone}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
@@ -453,7 +457,7 @@ function App() {
 
 	if (phase === "claimed") {
 		return (
-			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen statusText="KeepKey detected" variant="claimed">
 					<DeviceClaimedDialog error={deviceState.error || "Device claimed by another process"} />
 				</SplashScreen>
@@ -467,7 +471,7 @@ function App() {
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
 		return (
-			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
 						needsPin ? "Unlock your KeepKey"
@@ -494,7 +498,7 @@ function App() {
 
 	if (phase === "setup") {
 		return (
-			<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
 			</>
 		)
@@ -504,7 +508,7 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking"
 
 	return (
-		<>{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+		<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText="Loading portfolio" variant="connecting" />
 			)}

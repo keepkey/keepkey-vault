@@ -735,6 +735,18 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  async loadDevice(opts: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }) {
+    if (!this.wallet) throw new Error('No device connected')
+    await (this.wallet as any).loadDevice({
+      mnemonic: opts.mnemonic,
+      pin: opts.pin || '',
+      passphrase: opts.passphrase ?? false,
+      label: opts.label || 'KeepKey',
+    })
+    this.cachedFeatures = await this.wallet.getFeatures()
+    this.updateState(this.deriveState(this.cachedFeatures))
+  }
+
   async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }) {
     if (!this.wallet) throw new Error('No device connected')
     const settings: any = {}
@@ -846,5 +858,152 @@ export class EngineController extends EventEmitter {
   resetUpdatePhase() {
     this.updatePhase = 'idle'
     this.emit('state-change', this.getDeviceState())
+  }
+
+  // ── Custom Firmware Flash (Drag & Drop) ──────────────────────────────
+
+  /**
+   * Analyze a firmware binary to determine signed/unsigned status,
+   * version info, and compare with the currently-installed firmware.
+   */
+  analyzeFirmware(data: Buffer): {
+    isSigned: boolean
+    hasKpkyHeader: boolean
+    detectedVersion: string | null
+    payloadHash: string
+    fileSize: number
+    isBootloaderMode: boolean
+    currentFirmwareVersion: string | null
+    deviceBootloaderVersion: string | null
+    currentFirmwareVerified: boolean | undefined
+    isDowngrade: boolean
+    isSameVersion: boolean
+    willWipeDevice: boolean
+  } {
+    const fileSize = data.length
+    const hasKpkyHeader = data.length >= 256
+      && data[0] === 0x4B && data[1] === 0x50
+      && data[2] === 0x4B && data[3] === 0x59 // "KPKY"
+
+    // Hash the payload (skip 256-byte header for KPKY firmware, full file for bootloaders)
+    const payload = hasKpkyHeader ? data.subarray(256) : data
+    const payloadHash = sha256Hex(payload)
+
+    // Signed detection: KPKY header sigindex bytes at offsets 8-10.
+    // sigindex1 > 0 means at least one signature slot is filled → signed.
+    let headerSigned = false
+    if (hasKpkyHeader) {
+      headerSigned = data[8] !== 0 || data[9] !== 0 || data[10] !== 0
+    }
+
+    // Manifest lookup — provides version AND confirms official release
+    let manifestSigned = false
+    let manifestVersion: string | null = null
+
+    if (this.manifest?.hashes) {
+      const fwVersion = this.manifest.hashes.firmware?.[payloadHash]
+      if (fwVersion) {
+        manifestSigned = true
+        manifestVersion = fwVersion.replace(/^v/, '')
+      } else {
+        // Also check full-file hash (bootloader format)
+        const fullHash = sha256Hex(data)
+        const blVersion = this.manifest.hashes.bootloader?.[fullHash]
+        if (blVersion) {
+          manifestSigned = true
+          manifestVersion = blVersion.replace(/^v/, '')
+        }
+      }
+    }
+
+    // Combined: signed if header has signatures OR manifest recognizes the hash
+    const isSigned = headerSigned || manifestSigned
+
+    // Version detection: manifest version is authoritative.
+    // Fallback: scan binary for "VERSION" marker followed by semver pattern.
+    // KeepKey firmware embeds "VERSION7.10.0" (no space) as a string constant.
+    let detectedVersion = manifestVersion
+    if (!detectedVersion) {
+      const versionPattern = /VERSION(\d+\.\d+\.\d+)/
+      // Search in the payload as a string (ASCII-safe scan)
+      const asStr = payload.toString('ascii')
+      const match = asStr.match(versionPattern)
+      if (match) {
+        detectedVersion = match[1]
+      }
+    }
+
+    // Device state — distinguish bootloader mode from firmware mode
+    const isBootloaderMode = this.cachedFeatures?.bootloaderMode === true
+    const deviceBootloaderVersion = this.cachedFeatures?.bootloaderVersion || null
+
+    // In bootloader mode, extractVersion() returns the BL version (not FW).
+    // The pre-existing firmware version is not available in bootloader mode.
+    let currentFirmwareVersion: string | null = null
+    if (this.cachedFeatures && !isBootloaderMode) {
+      currentFirmwareVersion = this.extractVersion(this.cachedFeatures)
+      if (currentFirmwareVersion === '0.0.0') currentFirmwareVersion = null
+    }
+
+    const currentFirmwareVerified = this.cachedFeatures && !isBootloaderMode
+      ? this.verifyHashes(this.cachedFeatures).firmwareVerified : undefined
+
+    // Version comparison (only meaningful when we know both versions)
+    let isDowngrade = false
+    let isSameVersion = false
+    if (detectedVersion && currentFirmwareVersion) {
+      isSameVersion = detectedVersion === currentFirmwareVersion
+      isDowngrade = this.versionLessThan(detectedVersion, currentFirmwareVersion)
+    }
+
+    // Signed→unsigned transition will wipe the device.
+    // In bootloader mode we can't know the previous firmware state, so be safe.
+    const willWipeDevice = !isSigned && !isBootloaderMode && (currentFirmwareVerified === true)
+
+    return {
+      isSigned,
+      hasKpkyHeader,
+      detectedVersion,
+      payloadHash,
+      fileSize,
+      isBootloaderMode,
+      currentFirmwareVersion,
+      deviceBootloaderVersion,
+      currentFirmwareVerified,
+      isDowngrade,
+      isSameVersion,
+      willWipeDevice,
+    }
+  }
+
+  /**
+   * Flash a custom firmware binary (from drag & drop).
+   * The binary is sent as raw Buffer data from the frontend.
+   */
+  async flashCustomFirmware(data: Buffer) {
+    if (!this.wallet) throw new Error('No device connected')
+    this.updatePhase = 'flashing'
+    this.emit('state-change', this.getDeviceState())
+    this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })
+
+    try {
+      this.emit('firmware-progress', { percent: 20, message: 'Erasing current firmware...' })
+      await this.wallet.firmwareErase()
+
+      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      await this.wallet.firmwareUpload(data)
+
+      this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
+      this.updatePhase = 'rebooting'
+      this.wallet = null
+      this.activeTransport = null
+      this.cachedFeatures = null
+      this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', { percent: 100, message: 'Custom firmware flash complete' })
+    } catch (err: any) {
+      this.updatePhase = 'idle'
+      this.emit('state-change', this.getDeviceState())
+      throw err
+    }
   }
 }

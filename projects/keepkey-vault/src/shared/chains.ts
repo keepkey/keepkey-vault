@@ -9,7 +9,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'binance' | 'xrp'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'binance' | 'xrp' | 'solana'
   color: string
   rpcMethod: string
   signMethod: string
@@ -170,6 +170,12 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'xrp', color: '#23292F',
     rpcMethod: 'xrpGetAddress', signMethod: 'xrpSignTx',
     defaultPath: [0x8000002C, 0x80000090, 0x80000000, 0, 0],
+  },
+  {
+    id: 'solana', chain: Chain.Solana, coin: 'Solana', symbol: 'SOL',
+    chainFamily: 'solana', color: '#14F195',
+    rpcMethod: 'solanaGetAddress', signMethod: 'solanaSignTx',
+    defaultPath: [0x8000002C, 0x800001F5, 0x80000000, 0x80000000],
   },
 ]
 

@@ -80,6 +80,43 @@ export async function buildTx(
       return { unsignedTx: xrpTx, fee: xrpFee }
     }
 
+    case 'solana': {
+      // Solana — Pioneer builds the raw tx (with dummy signature header), device signs
+      if (!params.fromAddress) throw new Error('fromAddress required for Solana')
+
+      // Convert SOL amount to lamports (9 decimals)
+      const solAmountLamports = (() => {
+        const parts = params.amount.split('.')
+        const whole = parts[0] || '0'
+        const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
+        return String(BigInt(whole) * 1000000000n + BigInt(frac))
+      })()
+
+      let rawTx: string
+      try {
+        // Pioneer SDK: BuildTransfer1 = POST /solana/build-transfer
+        // Returns { serialized: "base64..." } with 65-byte header (sig_count + dummy_sig + message)
+        const resp = await pioneer.BuildTransfer1({
+          from: params.fromAddress,
+          to: params.to,
+          amount: solAmountLamports,
+          memo: params.memo || undefined,
+        })
+        const data = resp?.data
+        rawTx = data?.serialized
+        if (!rawTx) throw new Error('Pioneer did not return serialized tx for Solana')
+      } catch (e: any) {
+        throw new Error(`Solana tx build failed: ${e.message}`)
+      }
+
+      const unsignedTx = {
+        addressNList: chain.defaultPath,
+        rawTx,
+      }
+      // Solana fees are per-signature (5000 lamports = 0.000005 SOL)
+      return { unsignedTx, fee: '0.000005' }
+    }
+
     case 'binance': {
       // Binance chain — simple transfer
       if (!params.fromAddress) throw new Error('fromAddress required for Binance chain')
@@ -154,6 +191,8 @@ export async function signTx(
       return wallet.binanceSignTx(unsignedTx)
     case 'xrp':
       return wallet.rippleSignTx(unsignedTx)
+    case 'solana':
+      return wallet.solanaSignTx(unsignedTx)
     default:
       throw new Error(`Cannot sign for chain family: ${chain.chainFamily}`)
   }
@@ -173,8 +212,21 @@ export async function broadcastTx(
   // XRP: hdwallet returns { value: { signatures: [{ serializedTx: "base64" }] } }
   // EVM/UTXO: hdwallet returns { serializedTx: "hex" }
   // Cosmos: proto-tx-builder returns { serialized: "base64" } — must convert to hex for Pioneer
+  // Solana: hdwallet returns { signature: Uint8Array } — pass signature to Pioneer for assembly
   let serializedTx: string
-  if (typeof signedTx === 'string') {
+  if (chain.chainFamily === 'solana') {
+    // Solana: solanaSignTx RPC handler assembles full signed tx (base64)
+    if (signedTx?.serializedTx) {
+      serializedTx = signedTx.serializedTx
+    } else if (signedTx?.signature) {
+      // Fallback: just the signature — Pioneer may handle assembly
+      const sig = signedTx.signature
+      serializedTx = sig instanceof Uint8Array ? Buffer.from(sig).toString('base64')
+        : typeof sig === 'string' ? sig : String(sig)
+    } else {
+      throw new Error('Solana signing did not return a signature or serializedTx')
+    }
+  } else if (typeof signedTx === 'string') {
     serializedTx = signedTx
   } else if (signedTx?.value?.signatures?.[0]?.serializedTx) {
     // XRP signed response — serializedTx is already base64 (what Pioneer expects)

@@ -306,7 +306,7 @@ const startTime = Date.now()
 /** Set of signing endpoints that require user approval */
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
-  '/utxo/sign-transaction', '/xrp/sign-transaction',
+  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction',
   '/bnb/sign-transaction',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
@@ -740,6 +740,24 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/addresses/solana' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = 'sol:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.solanaGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
         if (path === '/addresses/bnb' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
@@ -985,6 +1003,30 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.XrpSignRequest)
           const result = await wallet.rippleSignTx(body)
+          return json(result)
+        }
+
+        // ── SOLANA SIGNING (1 endpoint) ────────────────────────────────
+        if (path === '/solana/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SolanaSignRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const result = await wallet.solanaSignTx({
+            addressNList,
+            rawTx: body.raw_tx,
+          })
+          // Assemble signed tx: replace dummy 64-byte signature in rawTx with real signature
+          if (result?.signature && body.raw_tx) {
+            const rawBytes = Buffer.from(body.raw_tx, 'base64')
+            const sigBytes = result.signature instanceof Uint8Array
+              ? result.signature
+              : Buffer.from(result.signature, 'base64')
+            if (rawBytes.length > 65 && sigBytes.length === 64) {
+              sigBytes.forEach((b: number, i: number) => { rawBytes[1 + i] = b })
+              return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
+            }
+          }
           return json(result)
         }
 

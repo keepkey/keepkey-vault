@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, BuildStakingTxParams, StakingPosition } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, BuildStakingTxParams, StakingPosition } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -17,8 +17,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       startBootloaderUpdate: { params: void; response: void }
       startFirmwareUpdate: { params: void; response: void }
       flashFirmware: { params: void; response: void }
+      analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
+      flashCustomFirmware: { params: { data: string }; response: void }
       resetDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
       recoverDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
+      loadDevice: { params: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }; response: void }
       verifySeed: { params: { wordCount: 12 | 18 | 24 }; response: { success: boolean; message: string } }
       applySettings: { params: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }; response: void }
       changePin: { params: void; response: void }
@@ -44,6 +47,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       mayachainGetAddress: { params: any; response: any } // TODO: type
       osmosisGetAddress: { params: any; response: any } // TODO: type
       xrpGetAddress: { params: any; response: any } // TODO: type
+      solanaGetAddress: { params: any; response: any }
 
       // ── Transaction signing ───────────────────────────────────────
       btcSignTx: { params: any; response: any }
@@ -56,6 +60,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       mayachainSignTx: { params: any; response: any } // TODO: type
       osmosisSignTx: { params: any; response: any } // TODO: type
       xrpSignTx: { params: any; response: any } // TODO: type
+      solanaSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: void; response: ChainBalance[] }

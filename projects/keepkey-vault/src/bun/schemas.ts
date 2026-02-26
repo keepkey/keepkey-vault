@@ -128,6 +128,13 @@ export const XrpSignRequest = z.object({
   addressNList: z.array(z.number().int()).optional(),
 }).strip()
 
+/** POST /solana/sign-transaction — sign a raw Solana transaction */
+export const SolanaSignRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  raw_tx: z.string().min(1),
+}).strip()
+
 /** POST /bnb/sign-transaction — minimum required fields for BinanceSignTx */
 export const BnbSignRequest = z.object({
   account_number: z.union([z.string(), z.number()]),

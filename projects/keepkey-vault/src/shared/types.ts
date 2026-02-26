@@ -59,6 +59,22 @@ export interface FirmwareManifest {
   }
 }
 
+// Custom firmware analysis (drag & drop flash)
+export interface FirmwareAnalysis {
+  isSigned: boolean
+  hasKpkyHeader: boolean
+  detectedVersion: string | null
+  payloadHash: string
+  fileSize: number
+  isBootloaderMode: boolean
+  currentFirmwareVersion: string | null  // null in bootloader mode (FW version unknown)
+  deviceBootloaderVersion: string | null
+  currentFirmwareVerified: boolean | undefined
+  isDowngrade: boolean
+  isSameVersion: boolean
+  willWipeDevice: boolean  // true when going from signed → unsigned (not in BL mode)
+}
+
 // Pioneer integration types
 export interface TokenBalance {
   symbol: string           // [DB] TEXT NOT NULL — token ticker (e.g. "USDT")
