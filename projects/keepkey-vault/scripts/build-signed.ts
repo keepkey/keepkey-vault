@@ -19,7 +19,7 @@ const result = Bun.spawnSync(
     cwd: join(import.meta.dir, '..'),
     env: {
       ...process.env,
-      PATH: `${scriptsDir}:${currentPath}`,
+      PATH: `${scriptsDir}${process.platform === 'win32' ? ';' : ':'}${currentPath}`,
     },
     stdout: 'inherit',
     stderr: 'inherit',

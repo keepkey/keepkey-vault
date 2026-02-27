@@ -6,7 +6,7 @@
  * Usage: bun scripts/collect-externals.ts
  */
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, sep } from 'node:path'
 
 const EXTERNALS = [
   '@keepkey/hdwallet-core',
@@ -19,11 +19,50 @@ const EXTERNALS = [
   'node-hid',
   'usb',
   'ethers',
+  // Dependencies of @keepkey packages (hdwallet-core)
+  'type-assertions',
+  'eventemitter2',
+  'eip-712',
+  // Dependencies of @keepkey packages (hdwallet-keepkey)
+  '@ethereumjs/common',
+  '@ethereumjs/tx',
+  '@metamask/eth-sig-util',
+  '@shapeshiftoss/bitcoinjs-lib',
+  'bignumber.js',
+  'bnb-javascript-sdk-nobroadcast',
+  'crypto-js',
+  'eip55',
+  'icepick',
+  'p-lazy',
+  'semver',
+  'tiny-secp256k1',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
 const nmSource = join(projectRoot, 'node_modules')
 const nmDest = join(projectRoot, 'build', '_ext_modules')
+const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
+const isLinux = process.platform === 'linux'
+
+// Cross-platform directory size calculation
+function getDirSize(dirPath: string): number {
+  let size = 0
+  try {
+    const entries = readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name)
+      if (entry.isDirectory()) {
+        size += getDirSize(fullPath)
+      } else {
+        try {
+          size += statSync(fullPath).size
+        } catch {}
+      }
+    }
+  } catch {}
+  return size
+}
 
 // Recursively collect all transitive dependencies
 const allDeps = new Set<string>(EXTERNALS)
@@ -57,21 +96,55 @@ if (existsSync(nmDest)) {
   rmSync(nmDest, { recursive: true })
 }
 
+// Map of file:-linked packages to their actual source locations
+const FILE_LINKED_PACKAGES: Record<string, string> = {
+  '@keepkey/hdwallet-core': join(projectRoot, '..', '..', 'modules', 'hdwallet', 'packages', 'hdwallet-core'),
+  '@keepkey/hdwallet-keepkey': join(projectRoot, '..', '..', 'modules', 'hdwallet', 'packages', 'hdwallet-keepkey'),
+  '@keepkey/hdwallet-keepkey-nodehid': join(projectRoot, '..', '..', 'modules', 'hdwallet', 'packages', 'hdwallet-keepkey-nodehid'),
+  '@keepkey/hdwallet-keepkey-nodewebusb': join(projectRoot, '..', '..', 'modules', 'hdwallet', 'packages', 'hdwallet-keepkey-nodewebusb'),
+  '@keepkey/device-protocol': join(projectRoot, '..', '..', 'modules', 'hdwallet', 'packages', 'hdwallet-keepkey', 'node_modules', '@keepkey', 'device-protocol'),
+  '@keepkey/proto-tx-builder': join(projectRoot, '..', '..', 'modules', 'proto-tx-builder-vendored'),
+}
+
+// Additional node_modules locations to search (for hdwallet dependencies)
+const EXTRA_NODE_MODULES = [
+  join(projectRoot, '..', '..', 'modules', 'hdwallet', 'node_modules'),
+]
+
 // Copy each package
 let copiedCount = 0
 
 for (const dep of sorted) {
-  const src = join(nmSource, dep)
+  // Check if this is a file:-linked package
+  const fileLinkSrc = FILE_LINKED_PACKAGES[dep]
+  let src = fileLinkSrc && existsSync(fileLinkSrc) ? fileLinkSrc : join(nmSource, dep)
+
+  // If not found in main node_modules, check extra locations
+  if (!existsSync(src)) {
+    for (const extraNm of EXTRA_NODE_MODULES) {
+      const extraSrc = join(extraNm, dep)
+      if (existsSync(extraSrc)) {
+        src = extraSrc
+        break
+      }
+    }
+  }
+
   const dst = join(nmDest, dep)
 
   if (!existsSync(src)) {
-    console.warn(`  WARN: ${dep} not found in node_modules, skipping`)
+    console.warn(`  WARN: ${dep} not found in any node_modules, skipping`)
     continue
   }
 
   // Ensure parent dir exists for scoped packages (@keepkey/...)
   mkdirSync(dirname(dst), { recursive: true })
-  cpSync(src, dst, { recursive: true })
+  cpSync(src, dst, { recursive: true, dereference: true })
+  if (fileLinkSrc) {
+    console.log(`  Copied file-linked: ${dep} from ${src}`)
+  } else if (!src.startsWith(nmSource)) {
+    console.log(`  Copied from hdwallet: ${dep}`)
+  }
   copiedCount++
 }
 
@@ -151,9 +224,16 @@ function pruneDir(dirPath: string) {
 pruneDir(nmDest)
 console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
 
-// Remove non-macOS prebuilds, build artifacts, and native source files
+// Remove prebuilds for other platforms, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
-const REMOVE_PREBUILD_PREFIXES = ['linux', 'win32', 'android']
+
+// Prefixes to REMOVE (non-current platform)
+const REMOVE_PREBUILD_PREFIXES = isWindows
+  ? ['linux', 'darwin', 'android']  // On Windows, remove Linux/Mac/Android
+  : isMac
+    ? ['linux', 'win32', 'android']  // On Mac, remove Linux/Windows/Android
+    : ['darwin', 'win32', 'android'] // On Linux, remove Mac/Windows/Android
+
 // C/C++ source and build artifacts not needed at runtime (~7MB)
 const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
 
@@ -164,14 +244,13 @@ function cleanNativeArtifacts(dirPath: string) {
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name)
       if (entry.isDirectory()) {
-        // Remove non-macOS prebuilds (HID-win32-*, HID-linux-*, etc.)
-        if (REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
-            entry.name.startsWith('HID-win') || entry.name.startsWith('HID-linux') ||
-            entry.name.startsWith('HID_hidraw-linux')) {
-          try {
-            const result = Bun.spawnSync(['du', '-sk', fullPath])
-            nativePrunedSize += parseInt(result.stdout.toString().split('\t')[0] || '0', 10) * 1024
-          } catch {}
+        // Remove prebuilds for other platforms
+        const shouldRemove = REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
+            (isWindows && (entry.name.startsWith('HID-darwin') || entry.name.startsWith('HID-linux') || entry.name.startsWith('HID_hidraw-linux'))) ||
+            (isMac && (entry.name.startsWith('HID-win') || entry.name.startsWith('HID-linux') || entry.name.startsWith('HID_hidraw-linux'))) ||
+            (isLinux && (entry.name.startsWith('HID-win') || entry.name.startsWith('HID-darwin')))
+        if (shouldRemove) {
+          nativePrunedSize += getDirSize(fullPath)
           rmSync(fullPath, { recursive: true })
           continue
         }
@@ -332,19 +411,125 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
     }
   } catch {}
 }
+// Packages that must never appear in the production bundle (contain unsigned binaries, are dev-only, etc.)
+// proto-tx-builder@0.9.1 nested in hdwallet-keepkey must be stripped — the vendored
+// bundle at top-level has everything inlined and must win resolution.
+const STRIP_NESTED_PACKAGES = ['node-notifier', 'jest', 'jest-cli', 'ts-jest', '.cache']
+const STRIP_NESTED_SCOPED: Record<string, string[]> = {
+  '@keepkey': ['proto-tx-builder'],
+}
+
+function stripUnwantedNestedPackages(dirPath: string) {
+  try {
+    const entries = readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const fullPath = join(dirPath, entry.name)
+      if (entry.name === 'node_modules') {
+        // Scan this nested node_modules for unwanted packages
+        try {
+          const pkgs = readdirSync(fullPath, { withFileTypes: true })
+          for (const pkg of pkgs) {
+            if (!pkg.isDirectory()) continue
+            if (STRIP_NESTED_PACKAGES.includes(pkg.name)) {
+              rmSync(join(fullPath, pkg.name), { recursive: true })
+              console.log(`  Stripped unwanted nested: ${pkg.name} from ${dirPath.replace(nmDest + sep, '')}`)
+            }
+            // Strip scoped packages (e.g. @keepkey/proto-tx-builder nested copies)
+            if (pkg.name.startsWith('@') && STRIP_NESTED_SCOPED[pkg.name]) {
+              const scopedDir = join(fullPath, pkg.name)
+              for (const sub of STRIP_NESTED_SCOPED[pkg.name]) {
+                const subPath = join(scopedDir, sub)
+                if (existsSync(subPath)) {
+                  rmSync(subPath, { recursive: true })
+                  console.log(`  Stripped unwanted nested: ${pkg.name}/${sub} from ${dirPath.replace(nmDest + sep, '')}`)
+                }
+              }
+              try { if (readdirSync(scopedDir).length === 0) rmSync(scopedDir, { recursive: true }) } catch {}
+            }
+          }
+        } catch {}
+      }
+      stripUnwantedNestedPackages(fullPath)
+    }
+  } catch {}
+}
+
+stripUnwantedNestedPackages(nmDest)
+
 stripDuplicateNestedNodeModules(nmDest)
 console.log(`[collect-externals] Stripped duplicate nested node_modules (kept version-differing deps)`)
+
+// Ensure transitive deps of preserved nested packages are available at the top level.
+// Only scan non-@keepkey packages — @keepkey packages are file: deps with huge dev node_modules
+// that we don't want to crawl. The real cases are small packages like through2/node_modules/readable-stream.
+const collectedExtra = new Set<string>()
+
+function collectMissingNestedDeps(dir: string, depth = 0) {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const fullPath = join(dir, entry.name)
+      if (entry.name === 'node_modules') {
+        // Only process at depth 0 (top-level packages), skip @keepkey and protobufjs
+        // which have massive dev-dep trees that aren't needed at runtime
+        const parentPkg = dir.replace(nmDest + sep, '')
+        if (parentPkg.startsWith('@keepkey/') || parentPkg.startsWith('protobufjs')) continue
+        for (const pkg of readdirSync(fullPath, { withFileTypes: true })) {
+          if (!pkg.isDirectory()) continue
+          const pkgPath = join(fullPath, pkg.name)
+          if (pkg.name.startsWith('@')) {
+            for (const scoped of readdirSync(pkgPath, { withFileTypes: true })) {
+              if (!scoped.isDirectory()) continue
+              ensureDepsExist(join(pkgPath, scoped.name))
+            }
+          } else {
+            ensureDepsExist(pkgPath)
+          }
+        }
+      } else if (depth < 1) {
+        // Only recurse one level into top-level packages
+        collectMissingNestedDeps(fullPath, depth + 1)
+      }
+    }
+  } catch {}
+}
+
+function ensureDepsExist(pkgDir: string) {
+  try {
+    const pj = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
+    for (const dep of Object.keys(pj.dependencies || {})) {
+      if (collectedExtra.has(dep)) continue
+      const topDest = join(nmDest, dep)
+      if (!existsSync(topDest)) {
+        const topSrc = join(nmSource, dep)
+        if (existsSync(topSrc)) {
+          mkdirSync(dirname(topDest), { recursive: true })
+          cpSync(topSrc, topDest, {
+            recursive: true,
+            filter: (src: string) => !src.slice(topSrc.length).includes(`${sep}node_modules`),
+          })
+          collectedExtra.add(dep)
+          pruneDir(topDest)
+          console.log(`  Collected missing nested dep: ${dep} (needed by ${pkgDir.replace(nmDest + sep, '')})`)
+        }
+      }
+    }
+  } catch {}
+}
+
+collectMissingNestedDeps(nmDest)
+if (collectedExtra.size > 0) {
+  console.log(`[collect-externals] Collected ${collectedExtra.size} extra deps for nested packages: ${[...collectedExtra].join(', ')}`)
+}
 let strippedSize = 0
 for (const dir of STRIP_DIRS) {
   const target = join(nmDest, dir)
   if (existsSync(target)) {
-    try {
-      const result = Bun.spawnSync(['du', '-sk', target])
-      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
-      rmSync(target, { recursive: true })
-      strippedSize += kb * 1024
-      console.log(`  Stripped: ${dir} (${(kb / 1024).toFixed(1)}MB)`)
-    } catch {}
+    const size = getDirSize(target)
+    rmSync(target, { recursive: true })
+    strippedSize += size
+    console.log(`  Stripped: ${dir} (${(size / 1024 / 1024).toFixed(1)}MB)`)
   }
 }
 console.log(`[collect-externals] Stripped ${(strippedSize / 1024 / 1024).toFixed(1)}MB from large directories`)
@@ -389,5 +574,5 @@ if (DEVELOPER_ID) {
 }
 
 // Report final size
-const { stdout } = Bun.spawnSync(['du', '-sh', nmDest])
-console.log(`[collect-externals] Final size: ${stdout.toString().trim().split('\t')[0]}`)
+const finalSize = getDirSize(nmDest)
+console.log(`[collect-externals] Final size: ${(finalSize / 1024 / 1024).toFixed(1)}MB`)

@@ -192,11 +192,15 @@ async function findEthAddressNList(
 }
 
 // ── Load swagger.json once ─────────────────────────────────────────────
+// Note: We use import.meta.dir which is resolved at runtime by Bun, not build time
+// This avoids the __dirname hardcoding issue that breaks Windows MSIX builds
 let swaggerContent: string | null = null
 function getSwagger(): string {
   if (!swaggerContent) {
     try {
-      swaggerContent = readFileSync(join(__dirname, 'swagger.json'), 'utf-8')
+      // import.meta.dir gives us the directory of this source file at runtime
+      const swaggerPath = join(import.meta.dir, 'swagger.json')
+      swaggerContent = readFileSync(swaggerPath, 'utf-8')
     } catch {
       swaggerContent = JSON.stringify({ error: 'swagger.json not found' })
     }
