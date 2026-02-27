@@ -244,9 +244,13 @@ if (-not $SkipSign) {
 # ============================================================================
 
 if (-not $SkipBuild) {
-    Write-Step "Updating git submodules"
+    Write-Step "Updating git submodules (selective)"
     Push-Location $RepoRoot
-    git submodule update --init --recursive
+    # Only init the submodules we actually need — recursive init pulls deeply
+    # nested firmware deps whose paths exceed Windows MAX_PATH (260 chars)
+    git submodule update --init modules/hdwallet
+    git submodule update --init modules/proto-tx-builder-vendored
+    git submodule update --init modules/keepkey-firmware
     Pop-Location
 
     Write-Step "Building proto-tx-builder"
