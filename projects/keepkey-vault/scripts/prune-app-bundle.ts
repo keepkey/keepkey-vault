@@ -9,7 +9,7 @@
  *
  * Usage: bun scripts/prune-app-bundle.ts [stable|canary|dev]
  */
-import { existsSync, readdirSync, statSync, rmSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, rmSync, mkdirSync } from 'node:fs'
 import { join, basename } from 'node:path'
 
 const env = process.argv[2] || 'stable'
@@ -116,17 +116,74 @@ const sizeBefore = parseInt(Bun.spawnSync(['du', '-sk', nmDir]).stdout.toString(
 let prunedFiles = 0
 let prunedDirs = 0
 
-// 1. Remove ALL nested node_modules (flat layout has all deps at top level)
-function stripNestedNodeModules(dir: string) {
+// Helper: read version from package.json
+function getPackageVersion(pkgDir: string): string | null {
+  try {
+    const pjPath = join(pkgDir, 'package.json')
+    if (!existsSync(pjPath)) return null
+    const pj = JSON.parse(readFileSync(pjPath, 'utf8'))
+    return pj.version || null
+  } catch { return null }
+}
+
+// 1. Remove nested node_modules that DUPLICATE top-level packages at the same version.
+//    KEEP nested packages where the version differs — these are required by the parent
+//    package (e.g. ethereum-cryptography needs @noble/hashes@1.4.0, top-level has @1.8.0).
+function stripDuplicateNestedNodeModules(dir: string) {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const fullPath = join(dir, entry.name)
       if (entry.name === 'node_modules') {
-        rmSync(fullPath, { recursive: true })
-        prunedDirs++
+        // Check each package inside this nested node_modules
+        try {
+          const nestedPkgs = readdirSync(fullPath, { withFileTypes: true })
+          for (const pkg of nestedPkgs) {
+            if (!pkg.isDirectory()) continue
+            const nestedPkgPath = join(fullPath, pkg.name)
+            if (pkg.name.startsWith('@')) {
+              // Scoped package — check each sub-package
+              try {
+                const scopedPkgs = readdirSync(nestedPkgPath, { withFileTypes: true })
+                for (const scoped of scopedPkgs) {
+                  if (!scoped.isDirectory()) continue
+                  const scopedPath = join(nestedPkgPath, scoped.name)
+                  const scopedName = `${pkg.name}/${scoped.name}`
+                  const nestedVer = getPackageVersion(scopedPath)
+                  const topVer = getPackageVersion(join(nmDir, scopedName))
+                  if (nestedVer && topVer && nestedVer === topVer) {
+                    rmSync(scopedPath, { recursive: true })
+                    prunedDirs++
+                  }
+                  // else: version differs or missing top-level → keep it
+                }
+                // Remove the scope dir if empty
+                try {
+                  if (readdirSync(nestedPkgPath).length === 0) rmSync(nestedPkgPath, { recursive: true })
+                } catch {}
+              } catch {}
+            } else {
+              const nestedVer = getPackageVersion(nestedPkgPath)
+              const topVer = getPackageVersion(join(nmDir, pkg.name))
+              if (nestedVer && topVer && nestedVer === topVer) {
+                rmSync(nestedPkgPath, { recursive: true })
+                prunedDirs++
+              }
+              // else: version differs or missing top-level → keep it
+            }
+          }
+          // Remove the node_modules dir if empty
+          try {
+            if (readdirSync(fullPath).length === 0) {
+              rmSync(fullPath, { recursive: true })
+              prunedDirs++
+            }
+          } catch {}
+        } catch {
+          // If we can't read it, leave it alone (safer than deleting)
+        }
       } else {
-        stripNestedNodeModules(fullPath)
+        stripDuplicateNestedNodeModules(fullPath)
       }
     }
   } catch {}
@@ -139,13 +196,13 @@ for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
   if (entry.name.startsWith('@')) {
     // Scoped package — go one level deeper
     for (const sub of readdirSync(pkgDir, { withFileTypes: true })) {
-      if (sub.isDirectory()) stripNestedNodeModules(join(pkgDir, sub.name))
+      if (sub.isDirectory()) stripDuplicateNestedNodeModules(join(pkgDir, sub.name))
     }
   } else {
-    stripNestedNodeModules(pkgDir)
+    stripDuplicateNestedNodeModules(pkgDir)
   }
 }
-console.log(`[prune-bundle] Stripped ${prunedDirs} nested node_modules dirs`)
+console.log(`[prune-bundle] Stripped ${prunedDirs} duplicate nested deps (kept version-differing)`)
 
 // 2. Remove files by extension
 function pruneFilesByExtension(dir: string) {
@@ -182,7 +239,6 @@ const STRIP_DIRS = [
   '@keepkey/hdwallet-keepkey-nodehid/src', '@keepkey/hdwallet-keepkey-nodewebusb/src',
   '@keepkey/proto-tx-builder/src', '@keepkey/proto-tx-builder/osmosis-frontend',
   'protobufjs/cli', 'protobufjs/dist', 'protobufjs/src',
-  'rxjs/src', 'rxjs/dist',
   'ethers/dist', 'ethers/src.ts',
   'libsodium/dist/modules-esm',
   '@ethereumjs/common/dist.browser', '@ethereumjs/common/src',
@@ -301,15 +357,20 @@ if (DEVELOPER_ID && TEAM_ID) {
   console.log(`[prune-bundle] Re-signed ${signedCount} native binaries`)
 }
 
-// Re-sign the entire .app bundle
+// Re-sign the entire .app bundle with entitlements (JIT required for Bun)
+const entitlementsPath = join(projectRoot, 'entitlements.plist')
 if (DEVELOPER_ID && TEAM_ID) {
-  console.log('[prune-bundle] Re-signing .app bundle...')
-  result = Bun.spawnSync([
+  console.log('[prune-bundle] Re-signing .app bundle with entitlements...')
+  const signArgs = [
     'codesign', '--force', '--deep', '--verbose', '--timestamp',
     '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
     '--options', 'runtime',
-    appPath,
-  ])
+  ]
+  if (existsSync(entitlementsPath)) {
+    signArgs.push('--entitlements', entitlementsPath)
+  }
+  signArgs.push(appPath)
+  result = Bun.spawnSync(signArgs)
   if (result.exitCode !== 0) {
     console.warn(`[prune-bundle] WARNING: .app re-signing failed: ${result.stderr.toString()}`)
   } else {

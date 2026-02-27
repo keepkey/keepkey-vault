@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release submodules modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -130,12 +130,30 @@ verify:
 
 # --- Publishing ---
 
-GITHUB_REPO ?= BitHighlander/keepkey-vault-v11
+GITHUB_REPO ?= keepkey/keepkey-vault
 
 publish:
 	@echo "Artifacts:"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME) 2>/dev/null || echo "No DMG found. Run 'make build-signed' first."
 
+# Upload signed macOS DMG to existing CI-created draft release
+upload-dmg: sign-check
+	@echo "Uploading signed DMG to draft release v$(VERSION)..."
+	@test -f $(PROJECT_DIR)/artifacts/$(DMG_NAME) || (echo "ERROR: DMG not found. Run 'make build-signed' first." && exit 1)
+	@echo "Checking for existing draft release v$(VERSION)..."
+	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
+		(echo "ERROR: No release v$(VERSION) found. Wait for CI to create the draft, or run 'make release' to create one." && exit 1)
+	gh release upload v$(VERSION) \
+		--repo $(GITHUB_REPO) \
+		--clobber \
+		$(PROJECT_DIR)/artifacts/$(DMG_NAME)
+	@UPDATE_JSON=$$(ls $(PROJECT_DIR)/artifacts/stable-*-update.json 2>/dev/null | head -1); \
+	TAR_ZST=$$(ls $(PROJECT_DIR)/artifacts/stable-*-keepkey-vault.app.tar.zst 2>/dev/null | head -1); \
+	if [ -n "$$UPDATE_JSON" ]; then gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$UPDATE_JSON"; fi; \
+	if [ -n "$$TAR_ZST" ]; then gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$TAR_ZST"; fi
+	@echo "DMG uploaded to https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
+
+# Full release: build signed + create new GitHub release (if CI hasn't already)
 release: sign-check build-signed
 	@echo "Creating GitHub release v$(VERSION)..."
 	@test -f $(PROJECT_DIR)/artifacts/$(DMG_NAME) || (echo "ERROR: DMG not found: $(DMG_NAME)" && exit 1)
@@ -170,5 +188,6 @@ help:
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
-	@echo "  make release        - Build, sign, and publish GitHub release"
+	@echo "  make release        - Build, sign, and create new GitHub release"
+	@echo "  make upload-dmg     - Upload signed DMG to existing CI draft release"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
