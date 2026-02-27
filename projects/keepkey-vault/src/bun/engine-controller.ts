@@ -493,12 +493,22 @@ export class EngineController extends EventEmitter {
 
     // Determine if bootloader needs updating:
     // 1. If we have a version string, compare directly
-    // 2. Otherwise use hash verification against manifest
-    // 3. Never fall back to bootloaderMode — that creates an infinite loop
+    // 2. In normal mode: look up version from on-device hash in manifest
+    // 3. In bootloader mode: always false — prevents infinite loop
     //    (device reboots into bootloader after BL update → needsBl=true → loop)
-    const needsBl = blVersion
-      ? this.versionLessThan(blVersion, this.latestBootloader)
-      : (hashes.bootloaderVerified === false)
+    let needsBl = false
+    if (blVersion) {
+      needsBl = this.versionLessThan(blVersion, this.latestBootloader)
+    } else if (!bootloaderMode && hashes.bootloaderHash && this.manifest?.hashes?.bootloader) {
+      // Normal mode: resolve version from on-device bootloader hash
+      const blVersionFromHash = this.manifest.hashes.bootloader[hashes.bootloaderHash]
+      if (blVersionFromHash) {
+        needsBl = this.versionLessThan(blVersionFromHash.replace(/^v/, ''), this.latestBootloader)
+      } else {
+        // Unknown hash → not in manifest → needs update
+        needsBl = true
+      }
+    }
 
     return {
       state: this.lastState,
