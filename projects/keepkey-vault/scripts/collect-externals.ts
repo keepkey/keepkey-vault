@@ -36,6 +36,28 @@ const EXTERNALS = [
   'p-lazy',
   'semver',
   'tiny-secp256k1',
+  // Dependencies of @keepkey packages (hdwallet-core runtime)
+  'rxjs',
+  'lodash',
+  // Cosmos/osmosis transaction building
+  'protobufjs',
+  'libsodium-wrappers',
+  '@cosmjs/amino',
+  '@cosmjs/crypto',
+  '@cosmjs/encoding',
+  '@cosmjs/json-rpc',
+  '@cosmjs/math',
+  '@cosmjs/proto-signing',
+  '@cosmjs/socket',
+  '@cosmjs/stream',
+  '@cosmjs/tendermint-rpc',
+  '@cosmjs/utils',
+  '@confio/ics23',
+  'cosmjs-types',
+  'isomorphic-ws',
+  'xstream',
+  'readonly-date',
+  'lru-cache',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
@@ -320,12 +342,6 @@ const STRIP_DIRS = [
   'tiny-secp256k1/build',
   'secp256k1/build',
   'secp256k1/src',
-
-  // --- lodash: not needed at runtime (hdwallet-core inlines isObject) ---
-  'lodash',
-
-  // --- rxjs: not needed at runtime (hdwallet-core no longer imports it) ---
-  'rxjs',
 
   // --- @cosmjs: TypeScript source dirs ---
   '@cosmjs/amino/src',
