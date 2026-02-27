@@ -85,5 +85,14 @@
 		"step3": "3. This app will reconnect automatically",
 		"waiting": "Waiting for device to become available...",
 		"defaultError": "Device claimed by another process"
+	},
+	"connectionFailed": {
+		"title": "Connection Issue",
+		"description": "Your KeepKey was detected but could not be connected. This can happen with new or freshly reset devices.",
+		"toConnect": "Try the following:",
+		"step1": "1. Unplug the KeepKey and wait a few seconds",
+		"step2": "2. Plug it back in",
+		"step3": "3. If the issue persists, try a different USB port or cable",
+		"waiting": "Retrying automatically..."
 	}
 }

@@ -290,11 +290,14 @@ export class EngineController extends EventEmitter {
         this.attachTransportListeners()
         this.lastError = null
         try {
-          console.log('[Engine] Getting features...')
+          // Use initialize() instead of getFeatures() — it works in both
+          // normal and bootloader mode (bootloader rejects GetFeatures
+          // with "Unknown message").
+          console.log('[Engine] Initializing device...')
           this.cachedFeatures = await withTimeout(
-            result.wallet.getFeatures(),
+            result.wallet.initialize(),
             PAIR_TIMEOUT_MS,
-            'getFeatures'
+            'initialize'
           )
           const hashVerification = this.verifyHashes(this.cachedFeatures)
           console.log('[Engine] Features:', JSON.stringify({
@@ -309,10 +312,10 @@ export class EngineController extends EventEmitter {
           }))
           this.updateState(this.deriveState(this.cachedFeatures))
         } catch (err) {
-          console.error('[Engine] Failed to get features after pairing:', err)
+          console.error('[Engine] Failed to initialize device after pairing:', err)
           this.wallet = null
           this.activeTransport = null
-          this.lastError = `Failed to read device: ${err}`
+          this.lastError = `Failed to read device: ${extractErrorMessage(err)}`
           this.updateState('error')
         }
       } else if (result.usbDetected) {
@@ -559,12 +562,15 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
-      throw err
+      throw new Error(extractErrorMessage(err))
     }
   }
 
   async startFirmwareUpdate() {
     if (!this.wallet) throw new Error('No device connected')
+    if (!this.cachedFeatures?.bootloaderMode) {
+      throw new Error('Device must be in bootloader mode to flash firmware. Unplug, hold the button, and plug back in.')
+    }
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
@@ -579,9 +585,15 @@ export class EngineController extends EventEmitter {
       if (!response.ok) throw new Error(`Failed to download firmware: ${response.status}`)
       const firmware = Buffer.from(await response.arrayBuffer())
 
-      // Binary integrity check — compare downloaded file hash against manifest
+      // Binary integrity check — compare downloaded file hash against manifest.
+      // Manifest hashes cover the PAYLOAD only (bytes 256+) for firmware files
+      // that have a 256-byte KPKY header. Bootloader binaries have no header.
       if (this.manifest?.latest?.firmware?.hash) {
-        const downloadedHash = sha256Hex(firmware)
+        const hasKpkyHeader = firmware.length >= 256
+          && firmware[0] === 0x4B && firmware[1] === 0x50
+          && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
+        const hashTarget = hasKpkyHeader ? firmware.subarray(256) : firmware
+        const downloadedHash = sha256Hex(hashTarget)
         if (downloadedHash !== this.manifest.latest.firmware.hash) {
           throw new Error(`Firmware binary integrity check failed: expected ${this.manifest.latest.firmware.hash}, got ${downloadedHash}`)
         }
@@ -604,7 +616,7 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
-      throw err
+      throw new Error(extractErrorMessage(err))
     }
   }
 

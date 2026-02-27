@@ -12,7 +12,7 @@ import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
-import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
+import { DeviceClaimedDialog, DeviceConnectionFailedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav } from "./components/TopNav"
 import type { NavTab } from "./components/TopNav"
@@ -26,14 +26,23 @@ import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
 
-type AppPhase = "splash" | "claimed" | "setup" | "ready"
+type AppPhase = "splash" | "claimed" | "connectionFailed" | "setup" | "ready"
 
 function App() {
 	const { t } = useTranslation()
 	const deviceState = useDeviceState()
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
+	const [wizardUpdating, setWizardUpdating] = useState(false)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
+
+	// Safety: auto-clear wizardUpdating after 3 min so wizard doesn't stay stuck forever
+	// (user needs time to read instructions, unplug, hold button, re-plug, wait for detection)
+	useEffect(() => {
+		if (!wizardUpdating) return
+		const timer = setTimeout(() => setWizardUpdating(false), 180000)
+		return () => clearTimeout(timer)
+	}, [wizardUpdating])
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [updateDismissed, setUpdateDismissed] = useState(false)
@@ -381,10 +390,18 @@ function App() {
 	}, [])
 
 	// ── Phase detection ─────────────────────────────────────────────
-	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
+	const hasUnpairedError = deviceState.state === "connected_unpaired" && !!deviceState.error
+	// "Claimed" = another app holds the USB interface (ConflictingApp, LIBUSB_ERROR_ACCESS)
+	const claimedPatterns = ["claimed", "ConflictingApp", "LIBUSB_ERROR_ACCESS", "Unable to claim"]
+	const isClaimed = hasUnpairedError && claimedPatterns.some(p => deviceState.error?.includes(p))
+	// "Connection failed" = device detected but pairing failed for other reasons (OOB, driver, etc.)
+	const isConnectionFailed = hasUnpairedError && !isClaimed
 
 	const phase: AppPhase =
 		isClaimed ? "claimed"
+		: isConnectionFailed ? "connectionFailed"
+		// Keep wizard mounted during firmware/bootloader updates (device disconnects briefly)
+		: wizardUpdating && ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "setup"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"
@@ -467,6 +484,16 @@ function App() {
 		)
 	}
 
+	if (phase === "connectionFailed") {
+		return (
+			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="connecting">
+					<DeviceConnectionFailedDialog />
+				</SplashScreen>
+			</>
+		)
+	}
+
 	if (phase === "splash") {
 		const isConnecting = deviceState.state === "connected_unpaired"
 		const isError = deviceState.state === "error"
@@ -501,7 +528,7 @@ function App() {
 	if (phase === "setup") {
 		return (
 			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
+				<OobSetupWizard onComplete={() => setWizardComplete(true)} onUpdatingChange={setWizardUpdating} />
 			</>
 		)
 	}

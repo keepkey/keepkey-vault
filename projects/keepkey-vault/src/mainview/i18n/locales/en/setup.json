@@ -35,8 +35,7 @@
 		"enterFirmwareUpdateMode": "Enter Firmware Update Mode",
 		"step1Unplug": "1. Unplug your KeepKey",
 		"step2Hold": "2. Hold down the button on the device",
-		"step3Plugin": "3. While holding, plug in the USB cable",
-		"step4Release": "4. Release when the bootloader screen appears",
+		"step3Plugin": "3. While continuing to hold down button, plug device back in",
 		"listeningForBootloader": "Listening for device in bootloader mode...",
 		"readyDetectBootloader": "I'm Ready — Detect Bootloader",
 		"skipBootloaderUpdate": "Skip Bootloader Update"
@@ -46,6 +45,7 @@
 		"oobDescription": "Your device has factory firmware. A critical update is required.",
 		"description": "A firmware update is available for your device.",
 		"firmwareLabel": "Firmware",
+		"factoryFirmware": "Factory",
 		"notInstalled": "Not installed",
 		"important": "Important:",
 		"doNotDisconnect": "Do not disconnect your device during the update",
@@ -58,7 +58,15 @@
 		"firmwareVerified": "Firmware verified as official release",
 		"firmwareHashNotFound": "Firmware hash not found in manifest",
 		"updateFirmwareTo": "Update Firmware to v{{version}}",
-		"skipUpdate": "Skip Update"
+		"skipUpdate": "Skip Update",
+		"enterBootloaderFirst": "Enter Firmware Update Mode",
+		"enterBootloaderDescription": "Your device must be in bootloader mode to install firmware.",
+		"oobEnterBootloaderDescription": "Your device has factory firmware and needs a critical update. Follow the steps below to enter bootloader mode.",
+		"readyDetectBootloader": "I'm Ready — Detect Bootloader",
+		"readyToUpdate": "Ready to Update",
+		"bootloaderDetected": "Your KeepKey is in bootloader mode and ready for update",
+		"oobBootloaderDetected": "Your new KeepKey is in bootloader mode — let's install the latest firmware!",
+		"listeningForBootloader": "Listening for device in bootloader mode..."
 	},
 	"initChoose": {
 		"title": "Set Up Your Wallet",

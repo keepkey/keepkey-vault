@@ -1086,6 +1086,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 
+			// ── Window controls ──────────────────────────────────────
+			windowMinimize: async () => { mainWindow.minimize() },
+			windowMaximize: async () => {
+				if (mainWindow.isMaximized()) mainWindow.unmaximize()
+				else mainWindow.maximize()
+			},
+			windowClose: async () => { mainWindow.close() },
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				try {
@@ -1234,9 +1242,10 @@ const mainWindow = new BrowserWindow({
 	title: "KeepKey Vault",
 	url,
 	rpc,
+	titleBarStyle: "hidden",
 	frame: {
-		width: 1200,
-		height: 800,
+		width: 1400,
+		height: 900,
 		x: 100,
 		y: 100,
 	},

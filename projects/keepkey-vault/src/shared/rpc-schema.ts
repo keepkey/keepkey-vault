@@ -127,6 +127,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }
       getWatchOnlyPubkeys: { params: void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
 
+      // ── Window controls ──────────────────────────────────────────────
+      windowMinimize: { params: void; response: void }
+      windowMaximize: { params: void; response: void }
+      windowClose: { params: void; response: void }
+
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
 

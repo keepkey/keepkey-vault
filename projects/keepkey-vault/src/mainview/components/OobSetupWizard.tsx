@@ -8,7 +8,9 @@ import {
   FaCheckCircle,
   FaExclamationTriangle,
   FaPlus,
+  FaUsb,
 } from 'react-icons/fa'
+import holdAndConnectSvg from '../assets/svg/hold-and-connect.svg'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
 import { rpcRequest } from '../lib/rpc'
@@ -67,6 +69,7 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
 
 interface OobSetupWizardProps {
   onComplete: () => void
+  onUpdatingChange?: (updating: boolean) => void
 }
 
 // ── Confetti pieces ─────────────────────────────────────────────────────────
@@ -81,7 +84,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
-export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
+export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('welcome')
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
@@ -177,6 +180,19 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
     }
   }
 
+  // ── Keep wizard mounted when on bootloader/firmware steps ────────────
+  // The instructions tell users to unplug the device, so a disconnect is
+  // expected. Signal wizardUpdating=true so App.tsx keeps the wizard
+  // rendered instead of switching to splash screen. Clear it when we
+  // leave those steps (e.g. advance to init-choose or complete).
+  useEffect(() => {
+    if (step === 'bootloader' || step === 'firmware') {
+      onUpdatingChange?.(true)
+    } else {
+      onUpdatingChange?.(false)
+    }
+  }, [step])
+
   // ── Bootloader step ────────────────────────────────────────────────────
 
   const handleEnterBootloaderMode = () => {
@@ -243,6 +259,45 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
   }, [])
 
   // ── Firmware step ──────────────────────────────────────────────────────
+
+  const [fwWaitingForBootloader, setFwWaitingForBootloader] = useState(false)
+  const fwBootloaderPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // When device enters bootloader mode while on firmware step, auto-start update
+  useEffect(() => {
+    if (step !== 'firmware') return
+    if (!fwWaitingForBootloader) return
+    if (updateState === 'updating') return
+
+    if (deviceStatus.bootloaderMode) {
+      setFwWaitingForBootloader(false)
+      if (fwBootloaderPollRef.current) clearInterval(fwBootloaderPollRef.current)
+      startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
+    }
+  }, [step, fwWaitingForBootloader, deviceStatus.bootloaderMode, updateState, startFirmwareUpdate, deviceStatus.latestFirmware])
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => {
+      if (fwBootloaderPollRef.current) clearInterval(fwBootloaderPollRef.current)
+    }
+  }, [])
+
+  const handleFwEnterBootloaderMode = () => {
+    setFwWaitingForBootloader(true)
+    fwBootloaderPollRef.current = setInterval(async () => {
+      try {
+        const state = await rpcRequest('getDeviceState')
+        if (state.bootloaderMode) {
+          setFwWaitingForBootloader(false)
+          if (fwBootloaderPollRef.current) clearInterval(fwBootloaderPollRef.current)
+          await startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
+        }
+      } catch {
+        // Device may be disconnecting/reconnecting
+      }
+    }, 2000)
+  }
 
   const handleStartFirmwareUpdate = async () => {
     await startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
@@ -411,6 +466,25 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
       zIndex={1000}
     >
       <style>{ANIMATIONS_CSS}</style>
+
+      {/* Window controls (frameless window) */}
+      <HStack position="absolute" top={0} right={0} gap="0" zIndex={1001}>
+        <Box as="button" display="flex" alignItems="center" justifyContent="center" w="36px" h="28px"
+          bg="transparent" color="gray.400" _hover={{ bg: "rgba(255,255,255,0.1)" }} cursor="pointer"
+          onClick={() => rpcRequest("windowMinimize")}>
+          <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor" /></svg>
+        </Box>
+        <Box as="button" display="flex" alignItems="center" justifyContent="center" w="36px" h="28px"
+          bg="transparent" color="gray.400" _hover={{ bg: "rgba(255,255,255,0.1)" }} cursor="pointer"
+          onClick={() => rpcRequest("windowMaximize")}>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
+        </Box>
+        <Box as="button" display="flex" alignItems="center" justifyContent="center" w="36px" h="28px"
+          bg="transparent" color="gray.400" _hover={{ bg: "#e81123", color: "white" }} cursor="pointer"
+          onClick={() => rpcRequest("windowClose")}>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2"><line x1="0" y1="0" x2="10" y2="10" /><line x1="10" y1="0" x2="0" y2="10" /></svg>
+        </Box>
+      </HStack>
 
       <Box
         w={{ base: '100vw', md: '90vw', lg: '80vw' }}
@@ -640,7 +714,6 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                         <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
                         <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
                         <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
-                        <Text fontSize="sm" color="gray.200">{t('bootloader.step4Release')}</Text>
                       </VStack>
                     </VStack>
                   </Box>
@@ -689,73 +762,171 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
 
             {/* ═══════════════ FIRMWARE ══════════════════════════════ */}
             {step === 'firmware' && (
-              <VStack gap={5} w="100%" maxW="500px" mx="auto">
-                <FaDownload color="#F59E0B" size={48} />
-                <VStack gap={2}>
-                  <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
-                    {t('firmware.title')}
-                  </Text>
-                  <Text fontSize="sm" color="gray.400" textAlign="center">
-                    {isOobDevice
-                      ? t('firmware.oobDescription')
-                      : t('firmware.description')}
-                  </Text>
-                </VStack>
+              <VStack gap={5} w="100%" maxW="560px" mx="auto">
 
-                {/* Version comparison */}
-                <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
-                  <HStack justify="space-between">
-                    <VStack gap={1} align="start">
-                      <Text fontSize="xs" color="gray.400" textTransform="uppercase">
-                        {inBootloader ? t('firmware.firmwareLabel') : t('bootloader.current')}
-                      </Text>
-                      <Text
-                        fontSize="md"
-                        color={isOobDevice ? 'red.400' : 'white'}
-                        fontWeight="bold"
-                      >
-                        {inBootloader ? t('firmware.notInstalled') : `v${deviceStatus.firmwareVersion || '?'}`}
-                      </Text>
-                    </VStack>
-                    <Text color="gray.500" fontSize="lg">&rarr;</Text>
-                    <VStack gap={1} align="end">
-                      <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
-                      <Text fontSize="md" color="green.400" fontWeight="bold">
-                        v{deviceStatus.latestFirmware || '?'}
-                      </Text>
-                    </VStack>
-                  </HStack>
-                </Box>
-
-                {/* Important instructions */}
-                <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
-                  <VStack gap={2} align="start">
-                    <Text color="orange.400" fontWeight="bold" fontSize="sm">
-                      {t('firmware.important')}
-                    </Text>
-                    <Text fontSize="xs" color="gray.300">{t('firmware.doNotDisconnect')}</Text>
-                    <Text fontSize="xs" color="gray.300">{t('firmware.mayNeedConfirm')}</Text>
-                    <Text fontSize="xs" color="gray.300">{t('firmware.fundsRemainSafe')}</Text>
-                  </VStack>
-                </Box>
-
-                {/* Update in progress */}
-                {updateState === 'updating' && (
-                  <VStack gap={3} w="100%">
-                    <Spinner size="lg" color={HIGHLIGHT} />
-                    <Text fontSize="sm" color="gray.300">
-                      {updateProgress?.message || t('firmware.updatingFirmware')}
-                    </Text>
-                    <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
-                      <HStack gap={2}>
-                        <FaExclamationTriangle color="#FC8181" />
-                        <Text fontSize="xs" color="red.200">{t('firmware.doNotUnplug')}</Text>
-                      </HStack>
+                {/* ── STATE: Not in bootloader — guide user to enter it ── */}
+                {updateState === 'idle' && !inBootloader && (
+                  <>
+                    {/* Animated SVG showing hold-button + plug-in */}
+                    <Box w="180px" h="180px" mx="auto">
+                      <img src={holdAndConnectSvg} alt="Hold button and connect" style={{ width: '100%', height: '100%' }} />
                     </Box>
-                  </VStack>
+
+                    <VStack gap={1}>
+                      <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+                        {t('firmware.enterBootloaderFirst')}
+                      </Text>
+                      <Text fontSize="sm" color="gray.400" textAlign="center">
+                        {isOobDevice
+                          ? t('firmware.oobEnterBootloaderDescription')
+                          : t('firmware.enterBootloaderDescription')}
+                      </Text>
+                    </VStack>
+
+                    {/* Visual step cards */}
+                    <VStack w="100%" gap={3}>
+                      <HStack w="100%" p={3} bg="gray.700" borderRadius="lg" gap={3}>
+                        <Flex w="32px" h="32px" borderRadius="full" bg="orange.500" align="center" justify="center" flexShrink={0}>
+                          <FaUsb color="white" size={14} />
+                        </Flex>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
+                      </HStack>
+                      <HStack w="100%" p={3} bg="gray.700" borderRadius="lg" gap={3}>
+                        <Flex w="32px" h="32px" borderRadius="full" bg="orange.500" align="center" justify="center" flexShrink={0}>
+                          <Text color="white" fontSize="xs" fontWeight="bold">2</Text>
+                        </Flex>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
+                      </HStack>
+                      <HStack w="100%" p={3} bg="gray.700" borderRadius="lg" gap={3}>
+                        <Flex w="32px" h="32px" borderRadius="full" bg="orange.500" align="center" justify="center" flexShrink={0}>
+                          <Text color="white" fontSize="xs" fontWeight="bold">3</Text>
+                        </Flex>
+                        <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
+                      </HStack>
+                    </VStack>
+
+                    {fwWaitingForBootloader ? (
+                      <HStack gap={3} w="100%" justify="center" py={2}>
+                        <Spinner size="sm" color={HIGHLIGHT} />
+                        <Text fontSize="sm" color="orange.300">
+                          {t('firmware.listeningForBootloader')}
+                        </Text>
+                      </HStack>
+                    ) : (
+                      <Button
+                        w="100%"
+                        size="lg"
+                        bg={HIGHLIGHT}
+                        color="white"
+                        _hover={{ bg: 'orange.600' }}
+                        onClick={handleFwEnterBootloaderMode}
+                      >
+                        {t('firmware.readyDetectBootloader')}
+                      </Button>
+                    )}
+
+                    {!isOobDevice && (
+                      <Button
+                        w="100%"
+                        variant="ghost"
+                        color="gray.500"
+                        _hover={{ color: 'gray.300', bg: 'gray.700' }}
+                        onClick={handleSkipFirmware}
+                        size="sm"
+                      >
+                        {t('firmware.skipUpdate')}
+                      </Button>
+                    )}
+                  </>
                 )}
 
-                {/* Waiting for reboot */}
+                {/* ── STATE: In bootloader, ready to flash ── */}
+                {updateState === 'idle' && inBootloader && (
+                  <>
+                    <Box p={3} borderRadius="full" bg="green.500" color="white">
+                      <FaCheckCircle size={48} />
+                    </Box>
+
+                    <VStack gap={1}>
+                      <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+                        {t('firmware.readyToUpdate')}
+                      </Text>
+                      <Text fontSize="sm" color="green.300" textAlign="center">
+                        {isOobDevice
+                          ? t('firmware.oobBootloaderDetected')
+                          : t('firmware.bootloaderDetected')}
+                      </Text>
+                    </VStack>
+
+                    {/* Version comparison */}
+                    <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
+                      <HStack justify="space-between">
+                        <VStack gap={1} align="start">
+                          <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('firmware.firmwareLabel')}</Text>
+                          <Text fontSize="md" color={isOobDevice ? 'gray.500' : 'red.400'} fontWeight="bold">
+                            {isOobDevice
+                              ? t('firmware.factoryFirmware')
+                              : `v${deviceStatus.firmwareVersion || '?'}`}
+                          </Text>
+                        </VStack>
+                        <Text color="gray.500" fontSize="lg">&rarr;</Text>
+                        <VStack gap={1} align="end">
+                          <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
+                          <Text fontSize="md" color="green.400" fontWeight="bold">
+                            v{deviceStatus.latestFirmware || '?'}
+                          </Text>
+                        </VStack>
+                      </HStack>
+                    </Box>
+
+                    {/* Warning — shown NOW, right before flashing */}
+                    <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
+                      <VStack gap={2} align="start">
+                        <HStack gap={2}>
+                          <FaExclamationTriangle color="#F59E0B" size={16} />
+                          <Text color="orange.400" fontWeight="bold" fontSize="sm">{t('firmware.important')}</Text>
+                        </HStack>
+                        <Text fontSize="xs" color="gray.300">{t('firmware.doNotDisconnect')}</Text>
+                        <Text fontSize="xs" color="gray.300">{t('firmware.mayNeedConfirm')}</Text>
+                        <Text fontSize="xs" color="gray.300">{t('firmware.fundsRemainSafe')}</Text>
+                      </VStack>
+                    </Box>
+
+                    <Button
+                      w="100%"
+                      size="lg"
+                      bg={HIGHLIGHT}
+                      color="white"
+                      _hover={{ bg: 'orange.600' }}
+                      onClick={handleStartFirmwareUpdate}
+                    >
+                      {t('firmware.updateFirmwareTo', { version: deviceStatus.latestFirmware || '?' })}
+                    </Button>
+                  </>
+                )}
+
+                {/* ── STATE: Updating ── */}
+                {updateState === 'updating' && (
+                  <>
+                    <Spinner size="xl" color={HIGHLIGHT} borderWidth="4px" />
+                    <VStack gap={2}>
+                      <Text fontSize="xl" fontWeight="bold" color="white" textAlign="center">
+                        {t('firmware.updatingFirmware')}
+                      </Text>
+                      <Text fontSize="sm" color="gray.400" textAlign="center">
+                        {updateProgress?.message || t('firmware.updatingFirmware')}
+                      </Text>
+                    </VStack>
+                    <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
+                      <HStack gap={2} justify="center">
+                        <FaExclamationTriangle color="#FC8181" />
+                        <Text fontSize="sm" color="red.200" fontWeight="bold">{t('firmware.doNotUnplug')}</Text>
+                      </HStack>
+                    </Box>
+                  </>
+                )}
+
+                {/* ── STATE: Complete — waiting for reboot ── */}
                 {updateState === 'complete' && (
                   <Box w="100%" p={4} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
                     <VStack gap={2} align="start">
@@ -791,45 +962,17 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   </Box>
                 )}
 
-                {/* Error */}
+                {/* ── STATE: Error ── */}
                 {updateState === 'error' && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                     <VStack gap={2} align="start">
                       <Text fontSize="sm" color="red.300" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
                       <Text fontSize="xs" color="red.200">{updateError}</Text>
                     </VStack>
-                    <Button mt={3} size="sm" variant="outline" borderColor="red.400" color="red.300" onClick={resetUpdate}>
+                    <Button mt={3} size="sm" variant="outline" borderColor="red.400" color="red.300" onClick={() => { resetUpdate() }}>
                       {t('bootloader.tryAgain')}
                     </Button>
                   </Box>
-                )}
-
-                {/* Actions — idle */}
-                {updateState === 'idle' && (
-                  <VStack gap={3} w="100%">
-                    <Button
-                      w="100%"
-                      size="lg"
-                      bg={HIGHLIGHT}
-                      color="white"
-                      _hover={{ bg: 'orange.600' }}
-                      onClick={handleStartFirmwareUpdate}
-                    >
-                      {t('firmware.updateFirmwareTo', { version: deviceStatus.latestFirmware || '?' })}
-                    </Button>
-                    {!isOobDevice && (
-                      <Button
-                        w="100%"
-                        variant="outline"
-                        borderColor="gray.600"
-                        color="gray.300"
-                        _hover={{ bg: 'gray.700' }}
-                        onClick={handleSkipFirmware}
-                      >
-                        {t('firmware.skipUpdate')}
-                      </Button>
-                    )}
-                  </VStack>
                 )}
               </VStack>
             )}

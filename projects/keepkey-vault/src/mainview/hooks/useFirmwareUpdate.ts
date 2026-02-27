@@ -21,12 +21,15 @@ export function useFirmwareUpdate() {
     return unsubscribe
   }, [])
 
+  // Firmware/bootloader updates involve download + erase + upload — can take minutes
+  const FLASH_TIMEOUT = 300000 // 5 minutes
+
   const startBootloaderUpdate = useCallback(async () => {
     setState('updating')
     setError(null)
     setProgress({ percent: 0, message: 'Starting bootloader update...' })
     try {
-      await rpcRequest('startBootloaderUpdate')
+      await rpcRequest('startBootloaderUpdate', undefined, FLASH_TIMEOUT)
       setState('complete')
     } catch (err: any) {
       setState('error')
@@ -39,7 +42,7 @@ export function useFirmwareUpdate() {
     setError(null)
     setProgress({ percent: 0, message: 'Starting firmware update...' })
     try {
-      await rpcRequest('startFirmwareUpdate')
+      await rpcRequest('startFirmwareUpdate', undefined, FLASH_TIMEOUT)
       setState('complete')
     } catch (err: any) {
       setState('error')

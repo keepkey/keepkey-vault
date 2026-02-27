@@ -20,11 +20,11 @@ function Stop-Port {
     $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
     if (-not $connections) { return }
 
-    $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-    foreach ($pid in $pids) {
-        if ($pid -gt 0) {
+    $procIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($procId in $procIds) {
+        if ($procId -gt 0) {
             try {
-                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
             } catch {}
         }
     }

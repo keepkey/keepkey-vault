@@ -1,6 +1,7 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
+import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
@@ -16,6 +17,57 @@ interface TopNavProps {
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
 }
+
+/** Window control buttons for frameless window */
+const WindowControls = () => (
+	<HStack gap="0" ml="2">
+		<Box
+			as="button"
+			display="flex"
+			alignItems="center"
+			justifyContent="center"
+			w="36px"
+			h="28px"
+			bg="transparent"
+			_hover={{ bg: "rgba(255,255,255,0.1)" }}
+			transition="background 0.15s"
+			cursor="pointer"
+			onClick={() => rpcRequest("windowMinimize")}
+		>
+			<svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor" /></svg>
+		</Box>
+		<Box
+			as="button"
+			display="flex"
+			alignItems="center"
+			justifyContent="center"
+			w="36px"
+			h="28px"
+			bg="transparent"
+			_hover={{ bg: "rgba(255,255,255,0.1)" }}
+			transition="background 0.15s"
+			cursor="pointer"
+			onClick={() => rpcRequest("windowMaximize")}
+		>
+			<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
+		</Box>
+		<Box
+			as="button"
+			display="flex"
+			alignItems="center"
+			justifyContent="center"
+			w="36px"
+			h="28px"
+			bg="transparent"
+			_hover={{ bg: "#e81123", color: "white" }}
+			transition="background 0.15s"
+			cursor="pointer"
+			onClick={() => rpcRequest("windowClose")}
+		>
+			<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2"><line x1="0" y1="0" x2="10" y2="10" /><line x1="10" y1="0" x2="0" y2="10" /></svg>
+		</Box>
+	</HStack>
+)
 
 /** Grid icon (11px) for Apps tab */
 const GridIcon = () => (
@@ -138,8 +190,8 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 				})}
 			</HStack>
 
-			{/* Right: settings gear */}
-			<Flex flex="1" justify="flex-end">
+			{/* Right: settings gear + window controls */}
+			<Flex flex="1" justify="flex-end" align="center">
 				<IconButton
 					aria-label={t("deviceSettings")}
 					onClick={watchOnly ? undefined : onSettingsToggle}
@@ -155,6 +207,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 						<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
 					</svg>
 				</IconButton>
+				<WindowControls />
 			</Flex>
 		</Flex>
 	)
