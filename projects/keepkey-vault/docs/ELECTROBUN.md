@@ -32,12 +32,15 @@ Communication between processes uses Electrobun's typed RPC system (`electrobun/
 ## Build Pipeline
 
 ```
-src/mainview/ ──[vite build]──> dist/ ──[electrobun build]──> build/dev-macos-arm64/keepkey-vault-dev.app
+src/mainview/ ──[vite build]──> dist/
+                                  └──[collect-externals]──> build/_ext_modules/
+                                                              └──[electrobun build]──> .app
 ```
 
 ### Production
 ```bash
-make build-prod   # Creates production-signed app bundle
+make build-stable   # Production build with signing + notarization
+make build-signed   # Full pipeline: build → prune → DMG → sign → notarize
 ```
 
 ## Config Files
@@ -58,12 +61,18 @@ make build-prod   # Creates production-signed app bundle
 | Config | electron-builder/forge | `electrobun.config.ts` |
 | Asset loading | `file://` protocol | `views://` protocol |
 
+## Entitlements (macOS Production)
+
+Production builds require `entitlements.plist` with JIT, unsigned executable memory, library validation bypass, and dyld env vars. These are needed because Bun uses JIT compilation. Without them, macOS Sequoia kills the process immediately.
+
+The `prune-app-bundle.ts` script applies entitlements during the re-signing step.
+
 ## Troubleshooting
 
 ### ENOENT launcher error
 The `electrobun build` step must run before `electrobun dev`. The dev script handles this:
 ```json
-"dev": "vite build && electrobun build && electrobun dev"
+"dev": "vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev"
 ```
 
 ### HMR not working
@@ -73,3 +82,4 @@ Ensure Vite dev server is running on port 5173. Use `make dev-hmr` which starts 
 Check browser console in the WebView. Common causes:
 - Missing `dist/` output (run `vite build` first)
 - Build copy paths wrong in `electrobun.config.ts`
+- Most common cause: `vite.config.ts` missing `base: './'`. Absolute paths like `/assets/...` break under the `views://` protocol.

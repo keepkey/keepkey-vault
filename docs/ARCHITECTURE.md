@@ -10,7 +10,7 @@
 │  │   Main Process (Bun) │◄──────────►│  WebView (React)    │ │
 │  │                       │             │  Chakra UI 3.0      │ │
 │  │  EngineController     │             │  Vite 6 + HMR       │ │
-│  │  REST API Server      │             │  React Router 7     │ │
+│  │  REST API Server      │             │  Tab state machine   │ │
 │  │  SQLite Cache         │             └────────────────────┘ │
 │  │  Auth Store           │                                     │
 │  └───────────┬───────────┘                                     │
@@ -38,24 +38,26 @@
 |------|---------|
 | `index.ts` | App entry: window creation, RPC bridge, event wiring |
 | `engine-controller.ts` | Device lifecycle: connect, pair, PIN/passphrase, firmware update |
-| `rest-api.ts` | HTTP REST API (port 1646, opt-in, keepkey-desktop compatible) |
+| `rest-api.ts` | HTTP REST API (port 1646, opt-in, kkapi:// compatible) |
 | `auth.ts` | Bearer token auth, pairing requests, signing approval |
-| `db.ts` | SQLite persistence (balances cache, pubkeys, settings, custom tokens) |
+| `db.ts` | SQLite persistence (balances, pubkeys, settings, custom tokens/chains) |
 | `pioneer.ts` | Pioneer API client (portfolio balances, tx building, market data) |
-| `txbuilder.ts` | Transaction construction (UTXO, EVM, Cosmos) |
-| `schemas.ts` | Zod schemas for REST API request/response validation |
+| `txbuilder/` | Transaction construction (UTXO, EVM, Cosmos) |
+| `schemas.ts` | Zod schemas for REST API validation |
+| `evm-rpc.ts` | Direct EVM chain RPC calls (balance, nonce, gas, broadcast) |
+| `evm-addresses.ts` | EVM multi-address manager |
+| `btc-accounts.ts` | BTC multi-account manager |
+| `camera.ts` | QR code scanning via system camera |
 
 ### Frontend (`src/mainview/`)
 
-| Directory | Purpose |
-|-----------|---------|
-| `components/layout/` | Header, Sidebar, StatusBar |
-| `components/dashboard/` | Portfolio overview, chain balances |
-| `components/device/` | DeviceStatus, PinEntry, Settings |
-| `components/addresses/` | Multi-chain address derivation |
-| `components/signing/` | Transaction review & signing |
-| `hooks/` | useKeepKey (RPC wrapper), useApi (REST client) |
-| `services/` | keepkey-api.ts REST client |
+| Directory/File | Purpose |
+|----------------|---------|
+| `App.tsx` | Tab-based state machine (dashboard, addresses, settings) |
+| `components/` | TopNav, Dashboard, SendForm, OobSetupWizard, SplashScreen, etc. |
+| `components/device/` | PinEntry, PassphraseEntry, RecoveryWordEntry |
+| `hooks/` | useDeviceState, useBtcAccounts, useEvmAddresses, useFirmwareUpdate |
+| `lib/rpc.ts` | Browser-side Electrobun RPC transport |
 
 ### CLI (`projects/keepkey-cli/`)
 
@@ -74,12 +76,11 @@ Standalone Bun/TypeScript CLI. Same `@keepkey/hdwallet-*` packages as vault, but
 | `keepkey-firmware` | C (CMake) | Device firmware — protobuf handlers, crypto, OLED UI |
 | `device-protocol` | protobuf | `.proto` message definitions shared by firmware + hdwallet |
 
-> **Note on hdwallet lodash/rxjs dependencies**: `hdwallet-core` imports `lodash` and `rxjs`;
-> `hdwallet-keepkey` imports `lodash`. These are declared dependencies in each package's
-> `package.json` and are required at compile time. They are **stripped at bundle time** by
-> `collect-externals.ts` (pruning step) so they do not ship in the final app. A future cleanup
-> should inline the ~6 usages (`isObject`, `cloneDeep`, `omit`, `takeFirstOfManyEvents`) and
-> remove the deps entirely from source. See `keepkey/hdwallet` for details.
+> **Note on hdwallet lodash/rxjs dependencies**: The lodash/rxjs imports have been removed from
+> `hdwallet-core` and `hdwallet-keepkey` source code on the `master` branch (commit `179c5668`).
+> `isObject` was inlined, `cloneDeep` replaced with `structuredClone`, `omit` replaced with a
+> local helper, and `takeFirstOfManyEvents` (dead code) was removed. The build scripts
+> (`collect-externals.ts`) still strip lodash/rxjs as a safety measure.
 
 ## Transport Layer
 
