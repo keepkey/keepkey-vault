@@ -489,11 +489,16 @@ export class EngineController extends EventEmitter {
     const needsFw = fwVersion
       ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
       : false
+    const hashes = features ? this.verifyHashes(features) : {}
+
+    // Determine if bootloader needs updating:
+    // 1. If we have a version string, compare directly
+    // 2. Otherwise use hash verification against manifest
+    // 3. Never fall back to bootloaderMode — that creates an infinite loop
+    //    (device reboots into bootloader after BL update → needsBl=true → loop)
     const needsBl = blVersion
       ? this.versionLessThan(blVersion, this.latestBootloader)
-      : bootloaderMode
-
-    const hashes = features ? this.verifyHashes(features) : {}
+      : (hashes.bootloaderVerified === false)
 
     return {
       state: this.lastState,

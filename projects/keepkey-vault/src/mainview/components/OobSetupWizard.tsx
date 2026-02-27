@@ -114,6 +114,10 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
   const [devSeed, setDevSeed] = useState('')
   const [devAcknowledged, setDevAcknowledged] = useState(false)
 
+  // Step completion tracking — prevents re-entering completed steps on device reconnect
+  const bootloaderDoneRef = useRef(false)
+  const firmwareDoneRef = useRef(false)
+
   // Bootloader state
   const [waitingForBootloader, setWaitingForBootloader] = useState(false)
   const bootloaderPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -169,9 +173,9 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
   }, [step, deviceStatus.state, needsBootloader, needsFirmware, needsInit])
 
   const handleGetStarted = () => {
-    if (needsBootloader) {
+    if (needsBootloader && !bootloaderDoneRef.current) {
       setStep('bootloader')
-    } else if (needsFirmware) {
+    } else if (needsFirmware && !firmwareDoneRef.current) {
       setStep('firmware')
     } else if (needsInit) {
       setStep('init-choose')
@@ -227,6 +231,7 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
   useEffect(() => {
     if (step !== 'bootloader') return
     if (updateState === 'complete') {
+      bootloaderDoneRef.current = true
       resetUpdate()
       setTimeout(() => {
         if (needsFirmware) {
@@ -243,6 +248,7 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
     if (step !== 'bootloader') return
     if (updateState !== 'complete') return
     if (deviceStatus.state !== 'disconnected' && !deviceStatus.bootloaderMode) {
+      bootloaderDoneRef.current = true
       resetUpdate()
       if (needsFirmware) {
         setStep('firmware')
@@ -306,6 +312,7 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
   useEffect(() => {
     if (step !== 'firmware') return
     if (updateState === 'complete') {
+      firmwareDoneRef.current = true
       resetUpdate()
       setTimeout(() => {
         if (needsInit) {
@@ -322,6 +329,7 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
     if (step !== 'firmware') return
     if (updateState !== 'complete') return
     if (deviceStatus.state !== 'disconnected' && !deviceStatus.bootloaderMode) {
+      firmwareDoneRef.current = true
       resetUpdate()
       if (needsInit) {
         setStep('init-choose')
@@ -332,6 +340,7 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
   }, [step, updateState, deviceStatus.state, deviceStatus.bootloaderMode, needsInit, resetUpdate])
 
   const handleSkipFirmware = () => {
+    firmwareDoneRef.current = true
     if (needsInit) {
       setStep('init-choose')
     } else {
@@ -749,6 +758,7 @@ export function OobSetupWizard({ onComplete, onUpdatingChange }: OobSetupWizardP
                       color="gray.400"
                       _hover={{ color: 'white', bg: 'gray.700' }}
                       onClick={() => {
+                        bootloaderDoneRef.current = true
                         if (needsFirmware) setStep('firmware')
                         else setStep('init-choose')
                       }}
