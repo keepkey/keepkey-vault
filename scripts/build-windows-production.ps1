@@ -266,7 +266,12 @@ if (-not $SkipBuild) {
 
     Write-Step "Installing keepkey-vault dependencies"
     Push-Location $ProjectDir
+    # bun install may exit non-zero due to ENOENT errors on deeply nested
+    # transitive deps inside file-linked workspace packages. These are not
+    # needed at build time (collect-externals resolves them). Tolerate this.
+    $ErrorActionPreference = 'Continue'
     bun install
+    $ErrorActionPreference = 'Stop'
     Pop-Location
 
     Write-Step "Building Electrobun Windows app"
