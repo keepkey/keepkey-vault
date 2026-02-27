@@ -151,8 +151,7 @@ export class EngineController extends EventEmitter {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   async start() {
-    await this.fetchFirmwareManifest()
-
+    // Register USB listeners FIRST — manifest fetch must never block device detection
     usb.on('attach', (device) => {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB attached')
@@ -171,6 +170,9 @@ export class EngineController extends EventEmitter {
       this.lastError = null
       this.updateState('disconnected')
     })
+
+    // Fetch manifest with timeout — don't block startup if network is slow
+    await this.fetchFirmwareManifest()
 
     // Device may already be plugged in
     await this.syncState()
@@ -209,7 +211,7 @@ export class EngineController extends EventEmitter {
 
   private async fetchFirmwareManifest() {
     try {
-      const res = await fetch(MANIFEST_URL)
+      const res = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       this.manifest = await res.json() as FirmwareManifest
       this.latestFirmware = this.manifest.latest.firmware.version.replace(/^v/, '')
