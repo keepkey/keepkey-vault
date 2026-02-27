@@ -74,6 +74,13 @@ Standalone Bun/TypeScript CLI. Same `@keepkey/hdwallet-*` packages as vault, but
 | `keepkey-firmware` | C (CMake) | Device firmware — protobuf handlers, crypto, OLED UI |
 | `device-protocol` | protobuf | `.proto` message definitions shared by firmware + hdwallet |
 
+> **Note on hdwallet lodash/rxjs dependencies**: `hdwallet-core` imports `lodash` and `rxjs`;
+> `hdwallet-keepkey` imports `lodash`. These are declared dependencies in each package's
+> `package.json` and are required at compile time. They are **stripped at bundle time** by
+> `collect-externals.ts` (pruning step) so they do not ship in the final app. A future cleanup
+> should inline the ~6 usages (`isObject`, `cloneDeep`, `omit`, `takeFirstOfManyEvents`) and
+> remove the deps entirely from source. See `keepkey/hdwallet` for details.
+
 ## Transport Layer
 
 The dual-transport pattern is the same in both vault and CLI:
