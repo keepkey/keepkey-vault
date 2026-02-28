@@ -247,6 +247,10 @@ export class KeepKeySdk {
     ethSignMessage: (params: EthSignMessageParams): Promise<any> =>
       this.client.post('/eth/sign', params),
 
+    // v1 SDK compat alias (old clients call ethSign instead of ethSignMessage)
+    ethSign: (params: EthSignMessageParams): Promise<any> =>
+      this.client.post('/eth/sign', params),
+
     ethSignTypedData: (params: EthSignTypedDataParams): Promise<any> =>
       this.client.post('/eth/sign-typed-data', params),
 

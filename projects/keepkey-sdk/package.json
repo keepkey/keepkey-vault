@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault-sdk",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "TypeScript SDK for KeepKey Vault REST API — zero dependencies, native fetch",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

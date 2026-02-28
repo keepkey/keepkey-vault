@@ -40,7 +40,7 @@ dev: install
 	cd $(PROJECT_DIR) && bun run dev
 
 dev-hmr: install
-	-lsof -ti :5173 | xargs kill -9 2>/dev/null || true
+	-lsof -ti :5177 | xargs kill -9 2>/dev/null || true
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
 

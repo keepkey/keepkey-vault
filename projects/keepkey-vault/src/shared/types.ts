@@ -224,6 +224,21 @@ export interface PairedAppInfo {
   addedOn: number
 }
 
+export interface EIP712DecodedField {
+  label: string
+  value: string
+  format: 'address' | 'amount' | 'datetime' | 'raw' | 'hex'
+  raw?: string
+}
+
+export interface EIP712DecodedInfo {
+  operationName: string
+  domain: { name?: string; version?: string; chainId?: number; verifyingContract?: string }
+  primaryType: string
+  fields: EIP712DecodedField[]
+  isKnownType: boolean
+}
+
 export interface SigningRequestInfo {
   id: string
   method: string
@@ -234,6 +249,7 @@ export interface SigningRequestInfo {
   value?: string
   data?: string
   chainId?: number
+  typedDataDecoded?: EIP712DecodedInfo
 }
 
 export interface ApiLogEntry {

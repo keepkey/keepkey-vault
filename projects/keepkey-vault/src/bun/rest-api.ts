@@ -1,7 +1,8 @@
 import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
-import type { SigningRequestInfo, ApiLogEntry } from '../shared/types'
+import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
+import { decodeEIP712 } from './eip712-decoder'
 import { CHAINS } from '../shared/chains'
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -12,6 +13,7 @@ export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
   onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
+  onPairDismissed?: () => void
   getVersion: () => string
 }
 
@@ -30,6 +32,13 @@ function corsHeaders(_req?: Request): Record<string, string> {
 function requireWallet(engine: EngineController) {
   if (!engine.wallet) throw new HttpError(503, 'No device connected')
   return engine.wallet
+}
+
+/** SLIP44 coin type → KeepKey firmware coin name (must match firmware coin table) */
+const SLIP44_TO_COIN: Record<number, string> = {
+  0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
+  20: 'DigiByte', 60: 'Ethereum', 118: 'Cosmos', 144: 'Ripple',
+  145: 'BitcoinCash', 501: 'Solana', 931: 'Rune',
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -306,7 +315,7 @@ const startTime = Date.now()
 /** Set of signing endpoints that require user approval */
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
-  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction',
+  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
   '/cosmos/sign-amino-ibc-transfer',
@@ -545,8 +554,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
             }
             // requestPair requires user approval via UI — NOT auto-granted
-            const apiKey = await auth.requestPair(body)
-            return json({ apiKey })
+            try {
+              const apiKey = await auth.requestPair(body)
+              return json({ apiKey })
+            } finally {
+              // Dismiss UI overlay + restore window level on approve, reject, or timeout
+              callbacks?.onPairDismissed?.()
+            }
           }
         }
 
@@ -563,12 +577,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // (we'll parse body again in the handler below — Bun caches it)
           try {
             const preview = await req.clone().json() as any
-            signingInfo.from = preview.from || preview.signerAddress
-            signingInfo.to = preview.to
-            signingInfo.value = preview.value
             signingInfo.chain = path.split('/')[1] // e.g. "eth", "cosmos"
-            signingInfo.chainId = preview.chainId || preview.chain_id
-            signingInfo.data = preview.data ? (preview.data.length > 66 ? preview.data.slice(0, 66) + '...' : preview.data) : undefined
+
+            if (path === '/eth/sign-typed-data') {
+              // EIP-712: address + typedData structure (no from/to/value/data)
+              signingInfo.from = preview.address
+              signingInfo.chainId = preview.typedData?.domain?.chainId ? Number(preview.typedData.domain.chainId) : undefined
+              if (preview.typedData) {
+                signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
+              }
+            } else {
+              signingInfo.from = preview.from || preview.signerAddress
+              signingInfo.to = preview.to
+              signingInfo.value = preview.value
+              signingInfo.chainId = preview.chainId || preview.chain_id
+              signingInfo.data = preview.data ? (preview.data.length > 66 ? preview.data.slice(0, 66) + '...' : preview.data) : undefined
+            }
           } catch { /* body parse failed, non-fatal */ }
 
           const approved = await callbacks.onSigningRequest(signingInfo)
@@ -797,9 +821,26 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.EthSignTypedDataRequest)
-          const { addressNList } = auth.getAccount(body.address)
-          const result = await wallet.ethSignTypedData({ addressNList, typedData: body.typedData })
-          return json(result)
+
+          // Address resolution: cache first, then scan accounts
+          let addressNList: number[]
+          try {
+            addressNList = auth.getAccount(body.address).addressNList
+          } catch {
+            addressNList = await findEthAddressNList(wallet, auth, body.address)
+          }
+
+          try {
+            const result = await wallet.ethSignTypedData({ addressNList, typedData: body.typedData })
+            return json(result)
+          } catch (err: any) {
+            // Distinguish user cancellation from actual failures
+            const msg = String(err?.message || err || '').toLowerCase()
+            if (msg.includes('cancel') || msg.includes('rejected') || msg.includes('denied') || msg.includes('action cancelled')) {
+              return json({ error: 'User cancelled signing on device' }, 403)
+            }
+            throw err
+          }
         }
 
         if (path === '/eth/sign' && method === 'POST') {
@@ -807,8 +848,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.EthSignRequest)
           const { addressNList } = auth.getAccount(body.address)
-          const msgBytes = Buffer.from(body.message.slice(2), 'hex')
-          const result = await wallet.ethSignMessage({ addressNList, message: msgBytes })
+          // hdwallet expects message as a hex string (isHexString check), not Buffer
+          const result = await wallet.ethSignMessage({ addressNList, message: body.message })
           return json(result)
         }
 
@@ -1004,6 +1045,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
           return json(result)
+        }
+
+        // ── SOLANA MESSAGE SIGNING (firmware type 754) ──────────────────
+        if (path === '/solana/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SolanaSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const result = await wallet.solanaSignMessage({
+            addressNList,
+            message: body.message,
+            showDisplay: body.show_display !== false,
+          })
+          // result: { publicKey: Uint8Array, signature: Uint8Array }
+          return json({
+            signature: result.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('base64')
+              : result.signature,
+            publicKey: result.publicKey instanceof Uint8Array
+              ? Buffer.from(result.publicKey).toString('base64')
+              : result.publicKey,
+          })
         }
 
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
@@ -1228,9 +1291,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               })
               continue
             }
+            const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
+            const coin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
             try {
-              const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
-              const coin = p.coin || (coinType === 60 ? 'Ethereum' : 'Bitcoin')
               const result = await wallet.getPublicKeys([{
                 addressNList: p.address_n,
                 curve: 'secp256k1',
@@ -1254,7 +1317,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 addressNList: p.address_n,
               })
             } catch (err: any) {
-              console.warn(`[REST] batch pubkey failed for path ${JSON.stringify(p.address_n)}:`, err?.message)
+              console.warn(`[REST] batch pubkey failed for path ${JSON.stringify(p.address_n)} coin=${coin} scriptType=${p.script_type}:`, err?.message)
             }
           }
 

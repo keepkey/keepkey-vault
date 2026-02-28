@@ -120,9 +120,14 @@ function App() {
 	const [pairRequest, setPairRequest] = useState<PairingRequestInfo | null>(null)
 
 	useEffect(() => {
-		return onRpcMessage("pair-request", (payload) => {
+		const unsub1 = onRpcMessage("pair-request", (payload) => {
 			setPairRequest(payload as PairingRequestInfo)
 		})
+		// Dismiss overlay on timeout or external resolution
+		const unsub2 = onRpcMessage("pair-dismissed", () => {
+			setPairRequest(null)
+		})
+		return () => { unsub1(); unsub2() }
 	}, [])
 
 	const handleApprovePairing = useCallback(async () => {
@@ -540,7 +545,7 @@ function App() {
 				)}
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} />}
+					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} />}
 					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
 				</Flex>
 			</Flex>

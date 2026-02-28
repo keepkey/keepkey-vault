@@ -164,9 +164,9 @@ export class AuthStore {
 
   requireAuth(req: Request): PairedClient {
     const token = this.extractBearerToken(req)
-    if (!token) throw new HttpError(403, 'Unauthorized')
+    if (!token) throw new HttpError(401, 'No bearer token — pair first via POST /auth/pair')
     const entry = this.validate(token)
-    if (!entry) throw new HttpError(403, 'Unauthorized')
+    if (!entry) throw new HttpError(401, 'Invalid or expired API key — re-pair via POST /auth/pair')
     return entry
   }
 

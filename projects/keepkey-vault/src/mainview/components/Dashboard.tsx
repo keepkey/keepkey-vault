@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Box, Flex, Text, HStack, Spinner, Image, SimpleGrid, IconButton } from "@chakra-ui/react"
+import { Box, Flex, Text, Spinner, Image, SimpleGrid } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
@@ -8,24 +8,59 @@ import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainBalance, CustomChain } from "../../shared/types"
+
+const DASHBOARD_ANIMATIONS = `
+	@keyframes pulseGold {
+		0%, 100% { box-shadow: 0 0 12px rgba(192,168,96,0.4); }
+		50% { box-shadow: 0 0 24px rgba(192,168,96,0.7); }
+	}
+`
+
+interface PioneerError {
+	message: string
+	url: string
+}
 
 interface DashboardProps {
 	onLoaded?: () => void
 	watchOnly?: boolean
+	onOpenSettings?: () => void
 }
 
-export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
+/** Format a timestamp as a relative "time ago" string */
+function formatTimeAgo(ts: number): string {
+	const diff = Date.now() - ts
+	const mins = Math.floor(diff / 60_000)
+	if (mins < 1) return 'just now'
+	if (mins < 60) return `${mins}m ago`
+	const hours = Math.floor(mins / 60)
+	if (hours < 24) return `${hours}h ago`
+	const days = Math.floor(hours / 24)
+	return `${days}d ago`
+}
+
+export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
-	const [loadingBalances, setLoadingBalances] = useState(true)
+	const [loadingBalances, setLoadingBalances] = useState(false)
 	const [initialLoaded, setInitialLoaded] = useState(false)
 	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
-	const [fetchKey, setFetchKey] = useState(0)
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
+	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
+	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
+	const [tokenWarning, setTokenWarning] = useState(false)
+	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
+
+	// Listen for Pioneer connection errors from backend
+	useEffect(() => {
+		return onRpcMessage("pioneer-error", (payload) => {
+			setPioneerError(payload as PioneerError)
+		})
+	}, [])
 
 	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
@@ -46,73 +81,79 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 			.catch(() => {})
 	}, [])
 
-	// Cache-first: show cached balances instantly, then refresh with live data
+	// On mount: load cached balances ONLY (no live fetch — saves API credits)
 	useEffect(() => {
 		let cancelled = false
-		let retryTimer: ReturnType<typeof setTimeout> | undefined
 
-		// Phase 1: Load cached balances immediately (< 1ms from SQLite)
 		async function loadCached() {
-			if (watchOnly || cancelled) return
-			try {
-				const cached = await rpcRequest<ChainBalance[] | null>('getCachedBalances', undefined, 3000)
-				if (!cancelled && cached && cached.length > 0) {
-					const map = new Map<string, ChainBalance>()
-					for (const b of cached) map.set(b.chainId, b)
-					setBalances(map)
-					console.log(`[Dashboard] Cache hit: ${cached.length} chains, $${cached.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}`)
-					// Dismiss splash immediately with cached data
-					if (!initialLoaded) {
-						setInitialLoaded(true)
-						onLoaded?.()
+			if (watchOnly) {
+				// Watch-only still auto-fetches from cache
+				try {
+					const result = await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000)
+					if (!cancelled && result && result.length > 0) {
+						const map = new Map<string, ChainBalance>()
+						for (const b of result) map.set(b.chainId, b)
+						setBalances(map)
 					}
-				}
-			} catch { /* cache unavailable, will wait for live data */ }
-		}
-
-		// Phase 2: Fetch live data (background refresh or primary if no cache)
-		async function fetchLive(attempt = 1) {
-			setLoadingBalances(true)
-			let hasTokenData = false
-			try {
-				const result = watchOnly
-					? await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000).then(r => r || [])
-					: await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
-				if (!cancelled && result) {
-					const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
-					const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
-					hasTokenData = tokenTotal > 0 || balTotal > 0 || result.length > 0
-					console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)} (attempt=${attempt})`)
-					const map = new Map<string, ChainBalance>()
-					for (const b of result) map.set(b.chainId, b)
-					setBalances(map)
-				}
-			} catch (e: any) {
-				console.warn(`[Dashboard] ${watchOnly ? 'watchOnly' : 'getBalances'} failed (attempt=${attempt}):`, e.message)
-			}
-			if (!cancelled) {
-				setLoadingBalances(false)
-				if (!initialLoaded) {
+				} catch { /* watch-only cache unavailable */ }
+				if (!cancelled) {
 					setInitialLoaded(true)
 					onLoaded?.()
 				}
-				// Auto-retry once if first attempt returned no meaningful data
-				if (!watchOnly && !hasTokenData && attempt < 2 && !cancelled) {
-					console.log('[Dashboard] No balance data — auto-retrying in 3s')
-					retryTimer = setTimeout(() => { if (!cancelled) fetchLive(attempt + 1) }, 3000)
+				return
+			}
+
+			try {
+				const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 3000)
+				if (!cancelled && cached && cached.balances.length > 0) {
+					const map = new Map<string, ChainBalance>()
+					for (const b of cached.balances) map.set(b.chainId, b)
+					setBalances(map)
+					setCacheUpdatedAt(cached.updatedAt)
+					console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt)}`)
 				}
+			} catch { /* cache unavailable */ }
+
+			if (!cancelled) {
+				setInitialLoaded(true)
+				onLoaded?.()
 			}
 		}
 
-		// Execute: cache first, then live
-		loadCached().then(() => { if (!cancelled) fetchLive() })
+		loadCached()
+		return () => { cancelled = true }
+	}, [watchOnly])
 
-		return () => { cancelled = true; clearTimeout(retryTimer) }
-	}, [fetchKey, watchOnly])
+	// Manual refresh: fetch live data from Pioneer API
+	const refreshBalances = useCallback(async () => {
+		if (loadingBalances || watchOnly) return
+		setLoadingBalances(true)
+		setPioneerError(null)
+		setTokenWarning(false)
 
-	const refreshBalances = useCallback(() => {
-		if (!loadingBalances) setFetchKey((k) => k + 1)
-	}, [loadingBalances])
+		try {
+			const result = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+			if (result) {
+				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
+				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
+				console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)}`)
+				const map = new Map<string, ChainBalance>()
+				for (const b of result) map.set(b.chainId, b)
+				setBalances(map)
+				setCacheUpdatedAt(Date.now())
+				setHasEverRefreshed(true)
+
+				// Warn if no token data came back (possible API issue)
+				if (tokenTotal === 0 && balTotal > 0) {
+					setTokenWarning(true)
+				}
+			}
+		} catch (e: any) {
+			console.warn('[Dashboard] getBalances failed:', e.message)
+		}
+
+		setLoadingBalances(false)
+	}, [loadingBalances, watchOnly])
 
 	const totalUsd = useMemo(() => Array.from(balances.values()).reduce((sum, b) => sum + (b.balanceUsd || 0), 0), [balances])
 
@@ -144,6 +185,9 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 		return 0
 	}), [allChains, balances])
 
+	// Is data stale? (loaded from cache but haven't refreshed yet this session)
+	const isStale = !hasEverRefreshed && !loadingBalances
+
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
 		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
@@ -151,6 +195,8 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 	return (
 		<Box w="100%" maxW="600px" mx="auto" pt="2">
+			<style>{DASHBOARD_ANIMATIONS}</style>
+
 			{/* Watch-only banner */}
 			{watchOnly && (
 				<Flex
@@ -175,12 +221,126 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 				</Flex>
 			)}
 
+			{/* Pioneer connection error banner */}
+			{pioneerError && (
+				<Box
+					mb="3"
+					px="4"
+					py="3"
+					bg="rgba(220,53,69,0.08)"
+					border="1px solid"
+					borderColor="rgba(220,53,69,0.3)"
+					borderRadius="lg"
+				>
+					<Flex direction="column" gap="2">
+						<Flex align="center" gap="2">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#DC3545" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<circle cx="12" cy="12" r="10" />
+								<line x1="12" y1="8" x2="12" y2="12" />
+								<line x1="12" y1="16" x2="12.01" y2="16" />
+							</svg>
+							<Text fontSize="sm" fontWeight="600" color="#DC3545">
+								{t("pioneerOfflineTitle", { defaultValue: "Balance server offline" })}
+							</Text>
+						</Flex>
+						<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+							{t("pioneerOfflineDesc", { defaultValue: "Unable to connect to {{url}}. Balances may be unavailable.", url: pioneerError.url })}
+						</Text>
+						<Flex gap="2" mt="1">
+							{onOpenSettings && (
+								<Box
+									as="button"
+									px="3"
+									py="1.5"
+									fontSize="xs"
+									fontWeight="600"
+									color="white"
+									bg="rgba(192,168,96,0.2)"
+									border="1px solid"
+									borderColor="kk.gold"
+									borderRadius="md"
+									cursor="pointer"
+									_hover={{ bg: "rgba(192,168,96,0.35)" }}
+									onClick={() => {
+										setPioneerError(null)
+										onOpenSettings()
+									}}
+								>
+									{t("changeServer", { defaultValue: "Change Server" })}
+								</Box>
+							)}
+							<Box
+								as="button"
+								px="3"
+								py="1.5"
+								fontSize="xs"
+								fontWeight="600"
+								color="kk.textSecondary"
+								bg="transparent"
+								border="1px solid"
+								borderColor="kk.border"
+								borderRadius="md"
+								cursor="pointer"
+								_hover={{ borderColor: "kk.textMuted", color: "white" }}
+								onClick={() => window.open("https://support.keepkey.com", "_blank")}
+							>
+								{t("getSupport", { defaultValue: "Get Support" })}
+							</Box>
+							<Box
+								as="button"
+								px="3"
+								py="1.5"
+								fontSize="xs"
+								fontWeight="600"
+								color="kk.textMuted"
+								bg="transparent"
+								cursor="pointer"
+								_hover={{ color: "white" }}
+								onClick={() => {
+									setPioneerError(null)
+									refreshBalances()
+								}}
+							>
+								{t("retry", { defaultValue: "Retry" })}
+							</Box>
+						</Flex>
+					</Flex>
+				</Box>
+			)}
+
+			{/* Token warning banner — shown when refresh succeeded but no tokens returned */}
+			{tokenWarning && !pioneerError && (
+				<Box
+					mb="3"
+					px="4"
+					py="3"
+					bg="rgba(255,165,0,0.08)"
+					border="1px solid"
+					borderColor="rgba(255,165,0,0.3)"
+					borderRadius="lg"
+				>
+					<Flex align="center" gap="2" mb="1">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFA500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+							<line x1="12" y1="9" x2="12" y2="13" />
+							<line x1="12" y1="17" x2="12.01" y2="17" />
+						</svg>
+						<Text fontSize="xs" fontWeight="600" color="#FFA500">
+							{t("tokenWarningTitle")}
+						</Text>
+					</Flex>
+					<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+						{t("tokenWarningDesc")}
+					</Text>
+				</Box>
+			)}
+
 			{/* Portfolio Chart — or Welcome placeholder for empty wallets */}
 			{hasAnyBalance ? (
 				<Box
 					w="100%"
 					p="4"
-					mb="5"
+					mb="2"
 					borderRadius="xl"
 					bg="kk.cardBg"
 					border="1px solid"
@@ -263,31 +423,47 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 				</Box>
 			)}
 
-			{/* Section Header + Chain Grid */}
-			<Flex align="center" justify="space-between" mb="3" px="1">
-				<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em">
-					{t("supportedChains")}
-				</Text>
-				<HStack gap="2">
-					{loadingBalances && hasAnyBalance && <Spinner size="xs" color="kk.gold" />}
-					<Text fontSize="xs" color="kk.textMuted">{t("networksCount", { count: allChains.length })}</Text>
-					<IconButton
-						aria-label={watchOnly ? t("connectDeviceToRefresh") : t("refreshBalances")}
-						size="xs"
-						variant="ghost"
-						color="kk.gold"
-						_hover={watchOnly ? {} : { color: "white", bg: "rgba(255,215,0,0.15)" }}
-						onClick={watchOnly ? undefined : refreshBalances}
-						disabled={loadingBalances || watchOnly}
-						opacity={watchOnly ? 0.4 : 1}
+			{/* Refresh button — small, highlighted, below chart */}
+			{!watchOnly && (
+				<Flex justify="center" mb="4">
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						fontSize="11px"
+						fontWeight="600"
+						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
+						bg="transparent"
+						borderRadius="full"
+						cursor={loadingBalances ? "default" : "pointer"}
+						transition="all 0.2s"
+						_hover={loadingBalances ? {} : {
+							color: "white",
+							bg: "rgba(192,168,96,0.12)",
+						}}
+						onClick={loadingBalances ? undefined : refreshBalances}
+						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
 					>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-							<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-							<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-						</svg>
-					</IconButton>
-				</HStack>
-			</Flex>
+						<Flex align="center" gap="1.5">
+							{loadingBalances ? (
+								<Spinner size="xs" color="kk.gold" />
+							) : (
+								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+									<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+								</svg>
+							)}
+							{loadingBalances
+								? t("refreshing")
+								: isStale
+									? t("refreshPrompt", { defaultValue: "Press to update balances" })
+									: cacheUpdatedAt
+										? t("lastUpdated", { time: formatTimeAgo(cacheUpdatedAt) })
+										: t("refreshBalances")}
+						</Flex>
+					</Box>
+				</Flex>
+			)}
 
 			<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
 				{sortedChains.map((chain) => {
@@ -355,11 +531,11 @@ export function Dashboard({ onLoaded, watchOnly }: DashboardProps) {
 
 								{bal ? (
 									<Box>
-										<Text fontSize="xs" fontFamily="mono" fontWeight="500" color="white" lineHeight="1.3" truncate>
+										<Text fontSize="xs" fontFamily="mono" fontWeight="500" color={isStale ? "kk.textMuted" : "white"} lineHeight="1.3" truncate>
 											{formatBalance(bal.balance)} {chain.symbol}
 										</Text>
 										{usdNum > 0 && (
-											<AnimatedUsd value={usdNum} fontSize="11px" color="white" fontWeight="500" lineHeight="1.3" />
+											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : "white"} fontWeight="500" lineHeight="1.3" />
 										)}
 										{tokenCount > 0 && (
 											<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">

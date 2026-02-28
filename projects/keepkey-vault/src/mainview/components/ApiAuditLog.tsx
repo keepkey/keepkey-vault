@@ -122,14 +122,39 @@ function truncateJson(data: any, maxLen = 500): string {
 	}
 }
 
-/** Collapsible JSON block */
+/** Collapsible JSON block with copy button */
 function JsonBlock({ label, data }: { label: string; data: any }) {
+	const [copied, setCopied] = useState(false)
 	if (data === undefined || data === null) return null
+
+	const handleCopy = (e: React.MouseEvent) => {
+		e.stopPropagation()
+		const fullJson = typeof data === "string" ? data : JSON.stringify(data, null, 2)
+		navigator.clipboard.writeText(fullJson).then(() => {
+			setCopied(true)
+			setTimeout(() => setCopied(false), 2000)
+		}).catch(() => {})
+	}
+
 	return (
 		<Box mt="1.5">
-			<Text fontSize="9px" fontWeight="600" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1">
-				{label}
-			</Text>
+			<Flex align="center" justify="space-between" mb="1">
+				<Text fontSize="9px" fontWeight="600" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">
+					{label}
+				</Text>
+				<Text
+					as="button"
+					fontSize="9px"
+					fontWeight="500"
+					color={copied ? "#4ADE80" : "kk.textMuted"}
+					cursor="pointer"
+					_hover={{ color: copied ? "#4ADE80" : "kk.textSecondary" }}
+					onClick={handleCopy}
+					transition="color 0.15s"
+				>
+					{copied ? "Copied!" : "Copy"}
+				</Text>
+			</Flex>
 			<Box
 				bg="rgba(0,0,0,0.3)"
 				borderRadius="4px"

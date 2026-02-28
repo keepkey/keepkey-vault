@@ -128,6 +128,7 @@ export declare class KeepKeySdk {
     eth: {
         ethSignTransaction: (params: EthSignTxParams) => Promise<SignedTx>;
         ethSignMessage: (params: EthSignMessageParams) => Promise<any>;
+        ethSign: (params: EthSignMessageParams) => Promise<any>;
         ethSignTypedData: (params: EthSignTypedDataParams) => Promise<any>;
         ethVerifyMessage: (params: EthVerifyMessageParams) => Promise<boolean>;
     };

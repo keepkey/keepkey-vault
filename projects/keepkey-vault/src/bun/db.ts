@@ -166,14 +166,16 @@ export function closeDb() {
 
 // ── Balance Cache ──────────────────────────────────────────────────────
 
-export function getCachedBalances(deviceId: string): ChainBalance[] | null {
+export function getCachedBalances(deviceId: string): { balances: ChainBalance[]; updatedAt: number } | null {
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; updated_at: number }>
     if (!rows || rows.length === 0) return null
-    return rows.map(r => {
+    let maxUpdatedAt = 0
+    const balances = rows.map(r => {
+      if (r.updated_at > maxUpdatedAt) maxUpdatedAt = r.updated_at
       const entry: ChainBalance = {
         chainId: r.chain_id,
         symbol: r.symbol,
@@ -186,6 +188,7 @@ export function getCachedBalances(deviceId: string): ChainBalance[] | null {
       }
       return entry
     })
+    return { balances, updatedAt: maxUpdatedAt }
   } catch (e: any) {
     console.warn('[db] getCachedBalances failed:', e.message)
     return null
