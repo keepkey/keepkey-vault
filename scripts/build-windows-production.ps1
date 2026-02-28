@@ -431,6 +431,20 @@ if (-not (Test-Path $WrapperExe)) {
     Write-Success "Wrapper EXE already exists"
 }
 
+# Embed KeepKey icon into wrapper EXE (otherwise Windows shows default/Zig icon)
+$RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
+if ((Test-Path $WrapperExe) -and (Test-Path $IconIco) -and (Test-Path $RceditExe)) {
+    Write-Host "    Embedding icon into KeepKeyVault.exe..." -ForegroundColor Gray
+    & $RceditExe $WrapperExe --set-icon $IconIco
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Icon embedded into KeepKeyVault.exe"
+    } else {
+        Write-Warning "Failed to embed icon (non-fatal)"
+    }
+} elseif (-not (Test-Path $RceditExe)) {
+    Write-Warning "rcedit not found - wrapper EXE will use default icon"
+}
+
 # ============================================================================
 # Create Output Directory
 # ============================================================================
@@ -441,6 +455,29 @@ if (Test-Path $ArtifactsDir) {
     Remove-Item $ArtifactsDir -Recurse -Force
 }
 New-Item -ItemType Directory -Path $ArtifactsDir | Out-Null
+
+# ============================================================================
+# Build Installer EXE with Inno Setup
+# ============================================================================
+
+Write-Step "Downloading WebView2 bootstrapper (for Windows 10 support)"
+
+$WebView2Bootstrapper = Join-Path $BuildDir "MicrosoftEdgeWebview2Setup.exe"
+if (-not (Test-Path $WebView2Bootstrapper)) {
+    $webview2Url = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+    Write-Host "    Downloading from Microsoft..." -ForegroundColor Gray
+    try {
+        Invoke-WebRequest -Uri $webview2Url -OutFile $WebView2Bootstrapper -UseBasicParsing
+        $sizeKB = [math]::Round((Get-Item $WebView2Bootstrapper).Length / 1024)
+        Write-Success "Downloaded WebView2 bootstrapper: ${sizeKB} KB"
+    } catch {
+        $errMsg = $_.Exception.Message
+        Write-Warning "Failed to download WebView2 bootstrapper: $errMsg"
+        Write-Warning "Windows 10 users may need to install WebView2 manually"
+    }
+} else {
+    Write-Success "WebView2 bootstrapper already exists"
+}
 
 # ============================================================================
 # Build Installer EXE with Inno Setup
@@ -514,7 +551,7 @@ Write-Host "Artifacts:" -ForegroundColor Cyan
 $finalArtifacts = Get-ChildItem -Path $ArtifactsDir -File
 foreach ($file in $finalArtifacts) {
     $size = [math]::Round($file.Length / 1MB, 2)
-    Write-Host "  - $($file.Name) ($size MB)" -ForegroundColor White
+    Write-Host "  - $($file.Name) ${size} MB" -ForegroundColor White
 }
 
 Write-Host ""
@@ -527,7 +564,7 @@ if (-not $SkipSign) {
     Write-Host "  2. Upload EXE to GitHub release" -ForegroundColor Gray
     Write-Host "  3. Verify SmartScreen reputation" -ForegroundColor Gray
 } else {
-    Write-Host "WARNING: Artifacts are NOT signed (test build only)" -ForegroundColor Yellow
+    Write-Host "WARNING: Artifacts are NOT signed - test build only" -ForegroundColor Yellow
 }
 
 Write-Host ""
