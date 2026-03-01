@@ -156,6 +156,12 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x80000005, 0x80000000, 0, 0], scriptType: 'p2pkh',
   },
   {
+    id: 'zcash', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
+    chainFamily: 'utxo', color: '#ECB244',
+    rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
+    defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
+  },
+  {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
     chainFamily: 'utxo', color: '#315BCA',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',

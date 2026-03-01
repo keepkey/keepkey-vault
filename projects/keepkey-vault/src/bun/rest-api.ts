@@ -888,6 +888,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             outputs: body.outputs,
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
+            ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
+            ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
+            ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
+            ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
           })
           return json(validateResponse(result, S.UtxoSignTransactionResponse, path))
         }
