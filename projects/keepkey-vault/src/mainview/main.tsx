@@ -7,6 +7,12 @@ import "./i18n"
 import splashBg from "./assets/splash-bg.png"
 import App from "./App"
 
+// Global error handler — prevent stray promise rejections from crashing the WebView
+window.addEventListener('unhandledrejection', (e) => {
+	console.error('[WebView] Unhandled rejection:', e.reason)
+	e.preventDefault()
+})
+
 // Set background on <body> so it's visible behind every overlay and phase
 document.body.style.background = `#000000 url(${splashBg}) center / cover no-repeat fixed`
 

@@ -1,4 +1,13 @@
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+
+// ── Global error handlers (MUST be first — prevents silent crashes) ──
+process.on('uncaughtException', (err) => {
+	console.error('[Vault] UNCAUGHT EXCEPTION:', err)
+})
+process.on('unhandledRejection', (reason) => {
+	console.error('[Vault] UNHANDLED REJECTION:', reason)
+})
+
 import { EngineController } from "./engine-controller"
 import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
@@ -1242,11 +1251,19 @@ evmAddresses.on('change', (set: EvmAddressSet) => {
 	try { rpc.send['evm-addresses-update'](set) } catch { /* webview not ready yet */ }
 })
 
-// Updater status changes → push to WebView
+// Updater status changes → push to WebView (debounced to prevent spam)
+let lastUpdateStatus = ''
+let lastUpdateStatusTime = 0
 Updater.onStatusChange((entry: any) => {
 	try {
+		const status = entry.status || ''
+		const now = Date.now()
+		// Debounce: skip duplicate error statuses within 5 seconds
+		if ((status === 'error' || status === 'download-error') && status === lastUpdateStatus && now - lastUpdateStatusTime < 5000) return
+		lastUpdateStatus = status
+		lastUpdateStatusTime = now
 		rpc.send['update-status']({
-			status: entry.status,
+			status,
 			message: entry.message,
 			timestamp: entry.timestamp,
 			progress: entry.details?.progress,
@@ -1259,15 +1276,19 @@ Updater.onStatusChange((entry: any) => {
 
 // ── Window Setup ──────────────────────────────────────────────────────
 async function getMainViewUrl(): Promise<string> {
-	const channel = await Updater.localInfo.channel()
-	if (channel === "dev") {
-		try {
-			await fetch(DEV_SERVER_URL, { method: "HEAD" })
-			console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`)
-			return DEV_SERVER_URL
-		} catch {
-			console.log("Vite dev server not running. Run 'bun run dev:hmr' for HMR support.")
+	try {
+		const channel = await Updater.localInfo.channel()
+		if (channel === "dev") {
+			try {
+				await fetch(DEV_SERVER_URL, { method: "HEAD" })
+				console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`)
+				return DEV_SERVER_URL
+			} catch {
+				console.log("Vite dev server not running. Run 'bun run dev:hmr' for HMR support.")
+			}
 		}
+	} catch (e) {
+		console.warn('[Vault] Failed to detect channel, falling back to production view:', e)
 	}
 	return "views://mainview/index.html"
 }
@@ -1312,6 +1333,7 @@ const mainWindow = new BrowserWindow({
 	title: "KeepKey Vault",
 	url,
 	rpc,
+	titleBarStyle: "hidden",
 	frame: {
 		width: 1200,
 		height: 800,

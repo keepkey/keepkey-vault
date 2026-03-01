@@ -59,8 +59,10 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			borderBottom="1px solid"
 			borderColor="kk.border"
 			align="center"
-			px="4"
+			pl="80px"
+			pr="4"
 			zIndex={Z.nav}
+			css={{ WebkitAppRegion: "drag" } as any}
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1">
@@ -107,7 +109,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			</Flex>
 
 			{/* Center: navigation tabs (icon above label) */}
-			<HStack gap="1">
+			<HStack gap="1" css={{ WebkitAppRegion: "no-drag" } as any}>
 				{TAB_DEFS.map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
@@ -139,7 +141,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			</HStack>
 
 			{/* Right: settings gear */}
-			<Flex flex="1" justify="flex-end">
+			<Flex flex="1" justify="flex-end" css={{ WebkitAppRegion: "no-drag" } as any}>
 				<IconButton
 					aria-label={t("deviceSettings")}
 					onClick={watchOnly ? undefined : onSettingsToggle}

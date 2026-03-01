@@ -80,7 +80,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           <Text fontSize="xs" color={accent} flex="1" minW="0" truncate>
             {isError
               ? t("errorWithMessage", { error: error || message || "Unknown error" })
-              : t("checkFailed", { defaultValue: "Update check failed, will retry" })}
+              : t("checkFailed", { defaultValue: "Update check failed" })}
           </Text>
           <Button
             size="xs"
