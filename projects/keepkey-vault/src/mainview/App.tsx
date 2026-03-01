@@ -512,7 +512,8 @@ function App() {
 	}
 
 	// ── Ready phase ─────────────────────────────────────────────────
-	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking"
+	// Warning/error are now bottom-right toasts — only push content down for actionable top banners
+	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
 
 	return (
 		<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}

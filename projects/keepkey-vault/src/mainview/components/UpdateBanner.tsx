@@ -1,5 +1,6 @@
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
+import { useEffect, useState } from "react"
 import type { UpdatePhaseUI } from "../hooks/useUpdateState"
 
 interface UpdateBannerProps {
@@ -14,25 +15,101 @@ interface UpdateBannerProps {
 
 export function UpdateBanner({ phase, progress, message, error, onDownload, onApply, onDismiss }: UpdateBannerProps) {
   const { t } = useTranslation("update")
+  const [toastVisible, setToastVisible] = useState(false)
+
+  // Auto-dismiss warning/error toasts after 20 seconds
+  useEffect(() => {
+    if (phase === "warning" || phase === "error") {
+      setToastVisible(true)
+      const timer = setTimeout(() => {
+        setToastVisible(false)
+        onDismiss()
+      }, 20_000)
+      return () => clearTimeout(timer)
+    }
+    setToastVisible(false)
+  }, [phase, error, message])
+
   // Hidden for idle and checking phases
   if (phase === "idle" || phase === "checking") return null
 
+  // Warning/error: render as subtle bottom-right toast
+  if (phase === "warning" || phase === "error") {
+    if (!toastVisible) return null
+
+    const isError = phase === "error"
+    const bg = isError ? "rgba(255,23,68,0.12)" : "rgba(251,191,36,0.08)"
+    const border = isError ? "rgba(255,23,68,0.25)" : "rgba(251,191,36,0.18)"
+    const accent = isError ? "#FF6B6B" : "#FBBF24"
+
+    return (
+      <Box
+        position="fixed"
+        bottom="16px"
+        right="16px"
+        zIndex={999}
+        maxW="340px"
+        opacity={toastVisible ? 1 : 0}
+        transform={toastVisible ? "translateY(0)" : "translateY(8px)"}
+        transition="opacity 0.3s, transform 0.3s"
+      >
+        <Flex
+          align="center"
+          bg={bg}
+          border="1px solid"
+          borderColor={border}
+          borderRadius="lg"
+          px="3"
+          py="2"
+          gap="2"
+          backdropFilter="blur(8px)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+            {isError ? (
+              <>
+                <path d="M12 2L1 21h22L12 2z" fill={accent} />
+                <path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
+              </>
+            ) : (
+              <>
+                <circle cx="12" cy="12" r="10" fill={accent} />
+                <path d="M12 8v4M12 16h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
+              </>
+            )}
+          </svg>
+          <Text fontSize="xs" color={accent} flex="1" minW="0" truncate>
+            {isError
+              ? t("errorWithMessage", { error: error || message || "Unknown error" })
+              : t("checkFailed", { defaultValue: "Update check failed, will retry" })}
+          </Text>
+          <Button
+            size="xs"
+            variant="ghost"
+            color="kk.textSecondary"
+            _hover={{ color: "kk.textPrimary" }}
+            onClick={() => { setToastVisible(false); onDismiss() }}
+            px="1"
+            minW="auto"
+            h="auto"
+          >
+            ✕
+          </Button>
+        </Flex>
+      </Box>
+    )
+  }
+
+  // Actionable phases (available, downloading, ready, applying): full-width top banner
   const bgColor =
-    phase === "error" ? "rgba(255,23,68,0.12)"
-    : phase === "warning" ? "rgba(251,191,36,0.10)"
-    : phase === "ready" ? "rgba(34,197,94,0.12)"
+    phase === "ready" ? "rgba(34,197,94,0.12)"
     : "rgba(192,168,96,0.12)"
 
   const borderColor =
-    phase === "error" ? "rgba(255,23,68,0.3)"
-    : phase === "warning" ? "rgba(251,191,36,0.25)"
-    : phase === "ready" ? "rgba(34,197,94,0.3)"
+    phase === "ready" ? "rgba(34,197,94,0.3)"
     : "rgba(192,168,96,0.3)"
 
   const accentColor =
-    phase === "error" ? "#FF6B6B"
-    : phase === "warning" ? "#FBBF24"
-    : phase === "ready" ? "#22C55E"
+    phase === "ready" ? "#22C55E"
     : "kk.gold"
 
   return (
@@ -61,17 +138,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
       >
         {/* Icon */}
         <Flex align="center" gap="3" flex="1" minW="0">
-          {phase === "error" ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L1 21h22L12 2z" fill="#FF6B6B" />
-              <path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          ) : phase === "warning" ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" fill="#FBBF24" />
-              <path d="M12 8v4M12 16h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          ) : phase === "ready" ? (
+          {phase === "ready" ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" fill="#22C55E" />
               <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -95,8 +162,6 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
               )}
               {phase === "ready" && t("readyToInstall")}
               {phase === "applying" && t("applying")}
-              {phase === "warning" && t("checkFailed", { defaultValue: "Update check failed, will retry" })}
-              {phase === "error" && t("errorWithMessage", { error: error || message || "Unknown error" })}
             </Text>
             {/* Progress bar for downloading */}
             {phase === "downloading" && progress !== undefined && (
@@ -128,16 +193,6 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
                 {t("later")}
               </Button>
             </>
-          )}
-          {phase === "warning" && (
-            <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
-              {t("dismiss", { ns: "common" })}
-            </Button>
-          )}
-          {phase === "error" && (
-            <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
-              {t("dismiss", { ns: "common" })}
-            </Button>
           )}
         </Flex>
       </Flex>
