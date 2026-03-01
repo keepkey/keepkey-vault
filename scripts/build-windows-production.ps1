@@ -390,6 +390,10 @@ if (-not (Test-Path $IconIco)) {
     Write-Success "Icon already exists: app-real.ico"
 }
 
+# Replace the renamed PNG with the real ICO so LoadImageW works at runtime
+Copy-Item $IconIco $IconPng -Force
+Write-Success "Replaced app.ico with real ICO format"
+
 # ============================================================================
 # Build Wrapper EXE (KeepKeyVault.exe)
 # NOTE: No spaces in filename - Bun Workers silently fail with spaces in paths

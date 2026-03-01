@@ -1348,21 +1348,61 @@ const mainWindow = new BrowserWindow({
 })
 _mainWindow = mainWindow
 
-// Set window icon (Electrobun doesn't call setWindowIcon on Windows)
-// import.meta.dir = Resources/app/bun/ → DLL at ../../bin/, icon at ../app.ico
+// Set window icon on Windows via Win32 API (SendMessage WM_SETICON).
+// Electrobun's setWindowIcon is a no-op on Windows (stub in nativeWrapper.cpp).
+// mainWindow.ptr is the HWND, so we call user32.dll directly.
 if (process.platform === 'win32') {
 	try {
-		const { dlopen, FFIType } = require("bun:ffi")
+		const { dlopen, FFIType, ptr: ffiPtr } = require("bun:ffi")
 		const path = require("path")
 		const appRoot = path.resolve(import.meta.dir, "..", "..", "..")
-		const dllPath = path.join(appRoot, "bin", "libNativeWrapper.dll")
-		const iconPath = path.join(appRoot, "Resources", "app.ico")
-		const lib = dlopen(dllPath, {
-			setWindowIcon: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.void },
+		const { existsSync } = require("fs")
+		// Prefer app-real.ico (proper ICO from production build) over app.ico (may be renamed PNG)
+		const realIco = path.join(appRoot, "Resources", "app-real.ico")
+		const fallbackIco = path.join(appRoot, "Resources", "app.ico")
+		const iconPath = existsSync(realIco) ? realIco : fallbackIco
+
+		// LoadImageW from user32.dll to load .ico file
+		const user32 = dlopen("user32.dll", {
+			LoadImageW: {
+				args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.i32, FFIType.i32, FFIType.u32],
+				returns: FFIType.ptr,
+			},
+			SendMessageW: {
+				args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr],
+				returns: FFIType.ptr,
+			},
+			GetSystemMetrics: {
+				args: [FFIType.i32],
+				returns: FFIType.i32,
+			},
 		})
-		const iconBuf = Buffer.from(iconPath + '\0', 'utf-8')
-		lib.symbols.setWindowIcon(mainWindow.ptr, iconBuf)
-		console.log('[Vault] Window icon set:', iconPath)
+
+		const IMAGE_ICON = 1
+		const LR_LOADFROMFILE = 0x00000010
+		const WM_SETICON = 0x0080
+		const ICON_BIG = 1
+		const ICON_SMALL = 0
+		const SM_CXICON = 11
+		const SM_CYICON = 12
+		const SM_CXSMICON = 49
+		const SM_CYSMICON = 50
+
+		// Encode icon path as UTF-16LE for LoadImageW
+		const iconPathW = Buffer.from(iconPath + '\0', 'utf16le')
+
+		const cxIcon = user32.symbols.GetSystemMetrics(SM_CXICON)
+		const cyIcon = user32.symbols.GetSystemMetrics(SM_CYICON)
+		const cxSmIcon = user32.symbols.GetSystemMetrics(SM_CXSMICON)
+		const cySmIcon = user32.symbols.GetSystemMetrics(SM_CYSMICON)
+
+		const bigIcon = user32.symbols.LoadImageW(null, iconPathW, IMAGE_ICON, cxIcon, cyIcon, LR_LOADFROMFILE)
+		const smallIcon = user32.symbols.LoadImageW(null, iconPathW, IMAGE_ICON, cxSmIcon, cySmIcon, LR_LOADFROMFILE)
+
+		const hwnd = mainWindow.ptr
+		if (bigIcon) user32.symbols.SendMessageW(hwnd, WM_SETICON, ICON_BIG, bigIcon)
+		if (smallIcon) user32.symbols.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, smallIcon)
+		console.log('[Vault] Window icon set via Win32 API:', iconPath)
 	} catch (e: any) {
 		console.warn("[Vault] Failed to set window icon:", e.message)
 	}

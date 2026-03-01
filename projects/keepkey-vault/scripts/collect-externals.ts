@@ -6,7 +6,7 @@
  * Usage: bun scripts/collect-externals.ts
  */
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 
 const EXTERNALS = [
   '@keepkey/hdwallet-core',
@@ -24,6 +24,29 @@ const EXTERNALS = [
 const projectRoot = join(import.meta.dir, '..')
 const nmSource = join(projectRoot, 'node_modules')
 const nmDest = join(projectRoot, 'build', '_ext_modules')
+
+// Resolve file: linked packages to their actual source directories.
+// Bun's file: resolution can leave broken stubs in node_modules (empty dir with only node_modules/).
+// We read package.json's dependencies to find the real path for file: references.
+const fileLinkedPaths = new Map<string, string>()
+try {
+  const rootPj = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
+  for (const [name, spec] of Object.entries({ ...rootPj.dependencies, ...rootPj.overrides } as Record<string, string>)) {
+    if (spec.startsWith('file:')) {
+      const relPath = spec.slice(5)
+      const absPath = resolve(projectRoot, relPath)
+      if (existsSync(join(absPath, 'package.json'))) {
+        fileLinkedPaths.set(name, absPath)
+      }
+    }
+  }
+  if (fileLinkedPaths.size > 0) {
+    console.log(`[collect-externals] Resolved ${fileLinkedPaths.size} file: linked packages:`)
+    for (const [name, path] of fileLinkedPaths) console.log(`  ${name} → ${path}`)
+  }
+} catch (e) {
+  console.warn(`[collect-externals] WARN: Could not resolve file: links: ${e}`)
+}
 
 // Recursively collect all transitive dependencies
 const allDeps = new Set<string>(EXTERNALS)
@@ -118,7 +141,9 @@ function addNestedDeps(nestedPkgDir: string) {
 
 function addDeps(pkg: string) {
   try {
-    const pjPath = join(nmSource, pkg, 'package.json')
+    // For file: linked packages, read package.json from the actual source directory
+    const pkgDir = fileLinkedPaths.get(pkg) || join(nmSource, pkg)
+    const pjPath = join(pkgDir, 'package.json')
     const pj = JSON.parse(readFileSync(pjPath, 'utf8'))
     for (const dep of Object.keys(pj.dependencies || {})) {
       if (!allDeps.has(dep) && !DEV_BLOCKLIST.has(dep)) {
@@ -183,11 +208,19 @@ if (existsSync(nmDest)) {
 let copiedCount = 0
 
 for (const dep of sorted) {
-  const src = join(nmSource, dep)
+  // For file: linked packages, copy from the actual source directory
+  const src = fileLinkedPaths.get(dep) || join(nmSource, dep)
   const dst = join(nmDest, dep)
 
   if (!existsSync(src)) {
     console.warn(`  WARN: ${dep} not found in node_modules, skipping`)
+    continue
+  }
+
+  // Verify the source has actual content (not just an empty node_modules stub)
+  const hasPj = existsSync(join(src, 'package.json'))
+  if (!hasPj && fileLinkedPaths.has(dep)) {
+    console.warn(`  WARN: ${dep} file: link target has no package.json, skipping`)
     continue
   }
 
