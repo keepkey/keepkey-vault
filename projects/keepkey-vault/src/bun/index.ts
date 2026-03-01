@@ -1215,6 +1215,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				version: await Updater.localInfo.version(),
 				channel: await Updater.localInfo.channel(),
 			}),
+			// ── Window controls (for custom titlebar) ─────────────────
+			windowClose: async () => { _mainWindow?.close() },
+			windowMinimize: async () => { _mainWindow?.minimize() },
+			windowMaximize: async () => { _mainWindow?.maximize() },
 		},
 		messages: {},
 	},
@@ -1329,6 +1333,7 @@ ApplicationMenu.setApplicationMenu([
 	},
 ])
 
+let _mainWindow: BrowserWindow | null = null
 const mainWindow = new BrowserWindow({
 	title: "KeepKey Vault",
 	url,
@@ -1341,6 +1346,7 @@ const mainWindow = new BrowserWindow({
 		y: 100,
 	},
 })
+_mainWindow = mainWindow
 
 // Start engine (USB event listeners + initial device sync)
 await engine.start()

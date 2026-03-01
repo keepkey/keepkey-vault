@@ -136,6 +136,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applyUpdate: { params: void; response: void }
       getUpdateInfo: { params: void; response: UpdateInfo | null }
       getAppVersion: { params: void; response: { version: string; channel: string } }
+      // ── Window controls (custom titlebar) ──────────────────────
+      windowClose: { params: void; response: void }
+      windowMinimize: { params: void; response: void }
+      windowMaximize: { params: void; response: void }
     }
     messages: {
       'device-state': DeviceStateInfo
