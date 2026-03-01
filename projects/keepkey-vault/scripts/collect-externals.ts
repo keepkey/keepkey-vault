@@ -307,9 +307,22 @@ function pruneDir(dirPath: string) {
 pruneDir(nmDest)
 console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
 
-// Remove non-macOS prebuilds, build artifacts, and native source files
+// Remove prebuilds for OTHER platforms, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
-const REMOVE_PREBUILD_PREFIXES = ['linux', 'win32', 'android']
+// Platform-aware: keep prebuilds for the current build platform, strip the rest
+const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
+const REMOVE_PREBUILD_PREFIXES = isWindows
+  ? ['linux', 'darwin', 'android']
+  : isMac
+    ? ['linux', 'win32', 'android']
+    : ['darwin', 'win32', 'android'] // linux build
+// HID prebuild directory prefixes (node-hid uses HID-{platform}-{arch} naming)
+const REMOVE_HID_PREFIXES = isWindows
+  ? ['HID-linux', 'HID-darwin', 'HID_hidraw-linux']
+  : isMac
+    ? ['HID-win', 'HID-linux', 'HID_hidraw-linux']
+    : ['HID-win', 'HID-darwin']
 // C/C++ source and build artifacts not needed at runtime (~7MB)
 const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
 
@@ -320,10 +333,9 @@ function cleanNativeArtifacts(dirPath: string) {
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name)
       if (entry.isDirectory()) {
-        // Remove non-macOS prebuilds (HID-win32-*, HID-linux-*, etc.)
+        // Remove prebuilds for other platforms (HID-win32-*, linux-x64-*, etc.)
         if (REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
-            entry.name.startsWith('HID-win') || entry.name.startsWith('HID-linux') ||
-            entry.name.startsWith('HID_hidraw-linux')) {
+            REMOVE_HID_PREFIXES.some(p => entry.name.startsWith(p))) {
           try {
             const result = Bun.spawnSync(['du', '-sk', fullPath])
             nativePrunedSize += parseInt(result.stdout.toString().split('\t')[0] || '0', 10) * 1024
