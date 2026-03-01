@@ -151,8 +151,8 @@ export class EngineController extends EventEmitter {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   async start() {
-    await this.fetchFirmwareManifest()
-
+    // Register USB listeners BEFORE any await — if fetchFirmwareManifest() hangs
+    // or takes time, device attach/detach events during that window would be lost.
     usb.on('attach', (device) => {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB attached')
@@ -171,6 +171,8 @@ export class EngineController extends EventEmitter {
       this.lastError = null
       this.updateState('disconnected')
     })
+
+    await this.fetchFirmwareManifest()
 
     // Device may already be plugged in
     await this.syncState()
@@ -209,7 +211,7 @@ export class EngineController extends EventEmitter {
 
   private async fetchFirmwareManifest() {
     try {
-      const res = await fetch(MANIFEST_URL)
+      const res = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       this.manifest = await res.json() as FirmwareManifest
       this.latestFirmware = this.manifest.latest.firmware.version.replace(/^v/, '')
@@ -290,11 +292,14 @@ export class EngineController extends EventEmitter {
         this.attachTransportListeners()
         this.lastError = null
         try {
-          console.log('[Engine] Getting features...')
+          // Use initialize() instead of getFeatures() — getFeatures() sends
+          // GetFeatures which fails in bootloader mode with "Unknown message".
+          // initialize() sends Initialize → Features and works in both modes.
+          console.log('[Engine] Initializing device...')
           this.cachedFeatures = await withTimeout(
-            result.wallet.getFeatures(),
+            result.wallet.initialize(),
             PAIR_TIMEOUT_MS,
-            'getFeatures'
+            'initialize'
           )
           const hashVerification = this.verifyHashes(this.cachedFeatures)
           console.log('[Engine] Features:', JSON.stringify({
@@ -486,8 +491,24 @@ export class EngineController extends EventEmitter {
     const needsFw = fwVersion
       ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
       : false
-    const needsBl = blVersion
-      ? this.versionLessThan(blVersion, this.latestBootloader)
+
+    // Bootloader version check with hash-to-version fallback.
+    // Some firmware versions don't report blVersion in features, but DO report
+    // blHash. Use the manifest to resolve hash → version and avoid a false
+    // "needs bootloader update" that causes an infinite update loop.
+    let effectiveBlVersion = blVersion
+    if (!effectiveBlVersion && !bootloaderMode && features) {
+      const blHash = base64ToHex(features.bootloaderHash)
+      if (blHash && this.manifest?.hashes?.bootloader) {
+        const resolved = this.manifest.hashes.bootloader[blHash]
+        if (resolved) {
+          effectiveBlVersion = resolved.replace(/^v/, '')
+          console.log(`[Engine] Resolved BL hash ${blHash.slice(0, 8)}… → v${effectiveBlVersion}`)
+        }
+      }
+    }
+    const needsBl = effectiveBlVersion
+      ? this.versionLessThan(effectiveBlVersion, this.latestBootloader)
       : bootloaderMode
 
     const hashes = features ? this.verifyHashes(features) : {}
@@ -579,13 +600,19 @@ export class EngineController extends EventEmitter {
       if (!response.ok) throw new Error(`Failed to download firmware: ${response.status}`)
       const firmware = Buffer.from(await response.arrayBuffer())
 
-      // Binary integrity check — compare downloaded file hash against manifest
+      // Binary integrity check — compare downloaded file hash against manifest.
+      // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
+      // header before hashing — the manifest hash covers only the payload.
       if (this.manifest?.latest?.firmware?.hash) {
-        const downloadedHash = sha256Hex(firmware)
+        const hasKpkyHeader = firmware.length >= 256
+          && firmware[0] === 0x4B && firmware[1] === 0x50
+          && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
+        const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
+        const downloadedHash = sha256Hex(hashPayload)
         if (downloadedHash !== this.manifest.latest.firmware.hash) {
           throw new Error(`Firmware binary integrity check failed: expected ${this.manifest.latest.firmware.hash}, got ${downloadedHash}`)
         }
-        console.log('[Engine] Firmware binary integrity verified')
+        console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }
 
       this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })

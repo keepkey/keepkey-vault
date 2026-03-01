@@ -1348,6 +1348,26 @@ const mainWindow = new BrowserWindow({
 })
 _mainWindow = mainWindow
 
+// Set window icon (Electrobun doesn't call setWindowIcon on Windows)
+// import.meta.dir = Resources/app/bun/ → DLL at ../../bin/, icon at ../app.ico
+if (process.platform === 'win32') {
+	try {
+		const { dlopen, FFIType } = require("bun:ffi")
+		const path = require("path")
+		const appRoot = path.resolve(import.meta.dir, "..", "..", "..")
+		const dllPath = path.join(appRoot, "bin", "libNativeWrapper.dll")
+		const iconPath = path.join(appRoot, "Resources", "app.ico")
+		const lib = dlopen(dllPath, {
+			setWindowIcon: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.void },
+		})
+		const iconBuf = Buffer.from(iconPath + '\0', 'utf-8')
+		lib.symbols.setWindowIcon(mainWindow.ptr, iconBuf)
+		console.log('[Vault] Window icon set:', iconPath)
+	} catch (e: any) {
+		console.warn("[Vault] Failed to set window icon:", e.message)
+	}
+}
+
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
