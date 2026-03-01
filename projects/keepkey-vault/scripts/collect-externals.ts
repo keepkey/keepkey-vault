@@ -96,6 +96,8 @@ const DEV_BLOCKLIST = new Set([
   'test-exclude', 'throat', 'p-each-series',
   'growly', 'is-wsl', 'node-notifier',
   'node-int64', 'parse5',
+  // --- Dead chain SDK (Binance Beacon Chain is decommissioned) ---
+  'bnb-javascript-sdk-nobroadcast',
 ])
 
 // Read deps from a nested package dir and add them to allDeps (so they get collected at top level).

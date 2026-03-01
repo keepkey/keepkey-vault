@@ -455,11 +455,19 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 							)}
 							{loadingBalances
 								? t("refreshing")
-								: isStale
-									? t("refreshPrompt", { defaultValue: "Press to update balances" })
-									: cacheUpdatedAt
-										? t("lastUpdated", { time: formatTimeAgo(cacheUpdatedAt) })
-										: t("refreshBalances")}
+								: cacheUpdatedAt
+									? <>
+										<Text as="span" color={(() => {
+											const age = Date.now() - cacheUpdatedAt
+											if (age < 3_600_000) return "#4ADE80"
+											if (age < 86_400_000) return "#FBBF24"
+											return "#F87171"
+										})()}>
+											{formatTimeAgo(cacheUpdatedAt)}
+										</Text>
+										{" · "}{t("refreshBalances")}
+									</>
+									: t("refreshPrompt", { defaultValue: "Press to update balances" })}
 						</Flex>
 					</Box>
 				</Flex>
