@@ -6,13 +6,15 @@
 
 ## How It Works
 
-1. **Dependency collection**: Walks `package.json` `dependencies` recursively from the EXTERNALS list
+1. **Dependency collection**: Walks `package.json` `dependencies` recursively from the EXTERNALS list, filtering out ~100 dev packages via DEV_BLOCKLIST (jest, babel, istanbul, ts-proto, etc.)
 2. **Copy**: Copies each package from `node_modules/` to `build/_ext_modules/`
-3. **Prune**: Removes docs, tests, source maps, TypeScript declarations
-4. **Native cleanup**: Removes non-macOS prebuilds, C/C++ source, build artifacts
-5. **Nested dedup**: Strips nested `node_modules/` that duplicate top-level versions (keeps version-differing deps)
-6. **Directory strip**: Removes known-large unnecessary directories (protobufjs/cli, ethers/dist, etc.)
-7. **Code signing**: Signs all `.node` binaries with Apple Developer ID (for notarization)
+3. **@keepkey/* cleanup**: Strips `node_modules/` from `@keepkey/*` packages (lerna monorepo artifacts from `file:` resolution)
+4. **Version-aware nested dedup**: Copies nested `node_modules/` where versions differ from top-level; skips same-version duplicates
+5. **Prune**: Removes docs, tests, source maps, TypeScript declarations
+6. **Native cleanup**: Removes non-macOS prebuilds, C/C++ source, build artifacts
+7. **Directory strip**: Removes known-large unnecessary directories (protobufjs/cli, ethers/dist, etc.)
+8. **Banned package removal**: Recursively removes `node-notifier`, `growly`, `is-wsl` (contain unsigned macOS binaries that break notarization)
+9. **Code signing**: Signs all `.node`, `.dylib`, `.so` binaries AND extensionless Mach-O binaries (detected by reading first 4 bytes for magic numbers) with Apple Developer ID
 
 ## Critical Safety Rules
 
@@ -74,11 +76,11 @@ grep -r "require.*PACKAGE_NAME" build/_ext_modules/ | grep -v node_modules/PACKA
 
 ### Symptom: Notarization fails on `.node` binaries
 
-`collect-externals.ts` signs native binaries. Ensure `ELECTROBUN_DEVELOPER_ID` and `ELECTROBUN_TEAMID` env vars are set. Check that nested `node_modules/` don't contain unsigned binaries from devDependencies.
+`collect-externals.ts` signs native binaries. Ensure `ELECTROBUN_DEVELOPER_ID` and `ELECTROBUN_TEAMID` env vars are set. Check that nested `node_modules/` don't contain unsigned binaries from devDependencies. Also check that `BANNED_PACKAGES` list in the script covers packages with unsigned Mach-O binaries (e.g., `node-notifier` ships `terminal-notifier.app`).
 
 ### Symptom: Bundle too large
 
-Run `du -sh build/_ext_modules/` and compare to expected (~60MB). Check the collect-externals output for "Keeping nested" lines — version-differing deps may contain duplicated large packages. Consider adding overrides in `package.json` to align versions.
+Run `du -sh build/_ext_modules/` and compare to expected (~38MB). Check the collect-externals output for "Keeping nested" lines — version-differing deps may contain duplicated large packages. Consider adding overrides in `package.json` to align versions.
 
 ## Version Conflict Audit
 

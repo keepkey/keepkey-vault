@@ -36,5 +36,6 @@
 	"sendAnother": "Send Another",
 	"failedToBuild": "Failed to build transaction",
 	"signingFailed": "Signing failed",
-	"broadcastFailed": "Broadcast failed"
+	"broadcastFailed": "Broadcast failed",
+	"switchInput": "Switch between crypto and USD input"
 }

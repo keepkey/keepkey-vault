@@ -24,6 +24,7 @@ const messageListeners = new Map<string, Set<MessageListener>>()
 let sendPacket: ((packet: RPCPacket) => void) | null = null
 let reconnectAttempts = 0
 const MAX_RECONNECT_DELAY = 10000
+const MAX_RECONNECT_ATTEMPTS = 50
 
 // Handle incoming packets from the Bun process
 function handlePacket(packet: RPCPacket) {
@@ -150,8 +151,12 @@ function connectWebSocket(w: any) {
 
 function scheduleReconnect(w: any) {
   reconnectAttempts++
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    console.error(`[rpc] Giving up after ${MAX_RECONNECT_ATTEMPTS} reconnect attempts`)
+    return
+  }
   const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts - 1), MAX_RECONNECT_DELAY)
-  console.log(`[rpc] Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts})`)
+  console.log(`[rpc] Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
   setTimeout(() => connectWebSocket(w), delay)
 }
 

@@ -1,4 +1,13 @@
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+
+// ── Global error handlers (MUST be first — prevents silent crashes) ──
+process.on('uncaughtException', (err) => {
+	console.error('[Vault] UNCAUGHT EXCEPTION:', err)
+})
+process.on('unhandledRejection', (reason) => {
+	console.error('[Vault] UNHANDLED REJECTION:', reason)
+})
+
 import { EngineController } from "./engine-controller"
 import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
@@ -138,7 +147,7 @@ function cacheAddress(chainId: string, path: string, address: string) {
 	} catch { /* never block on cache failure */ }
 }
 
-const DEV_SERVER_PORT = 5173
+const DEV_SERVER_PORT = 5177
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`
 const REST_API_PORT = 1646
 
@@ -190,10 +199,30 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
-		return auth.requestSigningApproval(info.id)
+		// Bring window to front so user sees the approval prompt immediately
+		try {
+			mainWindow.setAlwaysOnTop(true)
+			mainWindow.focus()
+		} catch { /* window not ready */ }
+		try {
+			return await auth.requestSigningApproval(info.id)
+		} finally {
+			// Restore normal window level after user responds (or timeout)
+			try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+		}
 	},
 	onPairRequest: (info) => {
 		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
+		// Bring window to front so user sees the pairing approval prompt
+		try {
+			mainWindow.setAlwaysOnTop(true)
+			mainWindow.focus()
+		} catch { /* window not ready */ }
+	},
+	onPairDismissed: () => {
+		// Restore normal window level + dismiss frontend overlay (covers timeout case)
+		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+		try { rpc.send['pair-dismissed']({}) } catch { /* webview not ready */ }
 	},
 	getVersion: () => appVersionCache,
 }
@@ -382,6 +411,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return result
 			},
+			solanaSignMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.solanaSignMessage(params)
+				return {
+					signature: result.signature instanceof Uint8Array
+						? Buffer.from(result.signature).toString('base64')
+						: result.signature,
+					publicKey: result.publicKey instanceof Uint8Array
+						? Buffer.from(result.publicKey).toString('base64')
+						: result.publicKey,
+				}
+			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async () => {
@@ -393,6 +434,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pioneer = await getPioneer()
 				} catch (e: any) {
 					console.warn('[getBalances] Pioneer init failed (will return zero balances):', e.message)
+					// Notify UI so user can change server or get support
+					try { rpc.send['pioneer-error']({ message: e.message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
 				}
 
 				const wallet = engine.wallet as any
@@ -483,53 +526,81 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (chain.networkId) networkToChain.set(chain.networkId, chain.id)
 				}
 
-				// 3. Single API call for ALL balances + prices
+				// 3. Single API call — use GetPortfolio (charts endpoint) which returns
+				//    both native balances AND tokens (ERC-20, etc.)
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw new Error('Pioneer client not available')
 					const resp = await withTimeout(
-						pioneer.GetPortfolioBalances({
+						pioneer.GetPortfolio({
 							pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
 						}),
 						PIONEER_TIMEOUT_MS,
-						'GetPortfolioBalances'
+						'GetPortfolio'
 					)
-					// Defensive response unwrapping — handle all known Pioneer response shapes:
-					//   { data: { data: { balances: [...] } } }  (Swagger double-wrap)
-					//   { data: { balances: [...] } }             (Swagger single-wrap)
-					//   { data: [...] }                           (raw array)
-					const rawData = resp?.data?.data || resp?.data || {}
-					const data: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+					// Unwrap Swagger double-wrap: { data: { data: { balances, tokens } } }
+					const portfolio = resp?.data?.data || resp?.data || {}
+					const nativeEntries: any[] = portfolio.balances || (Array.isArray(portfolio) ? portfolio : [])
+					const portfolioTokens: any[] = portfolio.tokens || []
 
-					if (data.length === 0 && pubkeys.length > 0) {
-						console.warn(`[getBalances] Pioneer returned 0 balance entries for ${pubkeys.length} pubkeys — response shape:`, JSON.stringify(Object.keys(resp?.data || {})).slice(0, 200))
+					console.log(`[getBalances] GetPortfolio response: ${nativeEntries.length} balances, ${portfolioTokens.length} tokens`)
+
+					// Convert portfolio.tokens (different shape) into the same format as native entries
+					// so our existing token grouping logic works on them
+					const tokenEntries: any[] = []
+					for (const t of portfolioTokens) {
+						if (!t.assetCaip) continue
+						// Skip native assets that leaked into tokens array
+						if (t.assetCaip.includes('/slip44:')) continue
+						tokenEntries.push({
+							caip: t.assetCaip,
+							networkId: t.networkId,
+							symbol: t.token?.symbol || 'UNK',
+							name: t.token?.name || t.token?.coingeckoId || 'Unknown',
+							balance: t.token?.balance?.toString() || '0',
+							valueUsd: t.token?.balanceUSD || 0,
+							priceUsd: t.token?.price || 0,
+							decimals: t.token?.decimals ?? t.token?.decimal ?? 18,
+							type: 'token',
+							contract: t.assetCaip.match(/\/erc20:(0x[a-fA-F0-9]+)/)?.[1] || undefined,
+						})
 					}
 
-					// Separate native balances from token entries
-					const nativeEntries: any[] = []
-					const tokenEntries: any[] = []
-					for (const d of data) {
+					// Also scan nativeEntries for any tokens mixed in (belt + suspenders)
+					const pureNatives: any[] = []
+					for (const d of nativeEntries) {
 						const caip = d.caip || ''
-						if (caip.includes('/erc20:') || (d.type === 'token' && !d.isNative)) {
+						const caipPath = caip.split('/')[1] || ''
+						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:')
+						const isTokenByType = d.type === 'token' && d.isNative !== true
+						if (isTokenByCaip || isTokenByType) {
 							tokenEntries.push(d)
 						} else {
-							nativeEntries.push(d)
+							pureNatives.push(d)
 						}
 					}
 
-					console.log(`[getBalances] Portfolio response: ${nativeEntries.length} natives, ${tokenEntries.length} tokens`)
+					console.log(`[getBalances] After classification: ${pureNatives.length} natives, ${tokenEntries.length} tokens`)
 
 					// Group tokens by their parent chain (via networkId or CAIP prefix)
+					// Also log the networkToChain map so we can audit matching
+					console.log(`[getBalances] networkToChain map (${networkToChain.size} entries): ${JSON.stringify(Object.fromEntries(networkToChain))}`)
+
 					const tokensByChainId = new Map<string, TokenBalance[]>()
+					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensGrouped = 0
 					for (const tok of tokenEntries) {
 						const bal = parseFloat(String(tok.balance ?? '0'))
-						if (bal <= 0) continue
+						if (bal <= 0) { tokensSkippedZero++; continue }
 
 						// Determine parent chainId from networkId or CAIP-2 prefix
 						const tokNetworkId = tok.networkId || ''
 						const caipPrefix = (tok.caip || '').split('/')[0] // e.g. "eip155:1"
 						const parentChainId = networkToChain.get(tokNetworkId) || networkToChain.get(caipPrefix) || null
-						if (!parentChainId) continue // skip tokens for chains we don't track
+						if (!parentChainId) {
+							tokensSkippedNoChain++
+							console.warn(`[getBalances] Token DROPPED (no parent chain): ${tok.symbol} caip=${tok.caip} networkId=${tokNetworkId} caipPrefix=${caipPrefix} bal=${bal} usd=${tok.valueUsd}`)
+							continue
+						}
 
 						// Extract contract address from CAIP: "eip155:1/erc20:0xdac17..." → "0xdac17..."
 						const contractMatch = (tok.caip || '').match(/\/erc20:(0x[a-fA-F0-9]+)/)
@@ -552,6 +623,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const existing = tokensByChainId.get(parentChainId) || []
 						existing.push(token)
 						tokensByChainId.set(parentChainId, existing)
+						tokensGrouped++
+					}
+
+					console.log(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
+					for (const [chainId, toks] of tokensByChainId) {
+						console.log(`[getBalances]   ${chainId}: ${toks.length} tokens, $${toks.reduce((s, t) => s + t.balanceUsd, 0).toFixed(2)} — ${toks.map(t => t.symbol).join(', ')}`)
 					}
 
 					// Merge user-added custom tokens as placeholders
@@ -581,8 +658,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const entry of pubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
-							const match = nativeEntries.find((d: any) => d.pubkey === entry.pubkey)
-								|| nativeEntries.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
+							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
 							btcTotalBalance += bal
@@ -595,8 +672,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 						// EVM multi-address: aggregate per-chain, update per-address balance
 						if (evmAddressSet.has(entry.pubkey.toLowerCase())) {
-							const match = nativeEntries.find((d: any) => d.caip === entry.caip && d.pubkey === entry.pubkey)
-								|| nativeEntries.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
+							const match = pureNatives.find((d: any) => d.caip === entry.caip && d.pubkey === entry.pubkey)
+								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
 							// Accumulate per-address USD for EvmAddressManager
@@ -617,8 +694,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
-						const match = nativeEntries.find((d: any) => d.caip === entry.caip)
-							|| nativeEntries.find((d: any) => d.pubkey === entry.pubkey)
+						const match = pureNatives.find((d: any) => d.caip === entry.caip)
+							|| pureNatives.find((d: any) => d.pubkey === entry.pubkey)
 						const chainTokens = tokensByChainId.get(entry.chainId)
 						// Sum token USD values into the chain total
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
@@ -685,6 +762,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (seen.has(entry.chainId)) continue
 						seen.add(entry.chainId)
 						results.push({ chainId: entry.chainId, symbol: entry.symbol, balance: '0', balanceUsd: 0, address: entry.pubkey })
+					}
+				}
+
+				// ── Final audit log ──
+				const totalTokens = results.reduce((n, r) => n + (r.tokens?.length || 0), 0)
+				const totalUsd = results.reduce((n, r) => n + (r.balanceUsd || 0), 0)
+				console.log(`[getBalances] FINAL: ${results.length} chains, ${totalTokens} tokens, $${totalUsd.toFixed(2)}`)
+				for (const r of results) {
+					if (r.tokens && r.tokens.length > 0) {
+						console.log(`[getBalances]   ${r.chainId}: ${r.tokens.length} tokens attached`)
 					}
 				}
 
@@ -1011,10 +1098,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			approvePairing: async () => {
 				const apiKey = auth.approvePairing()
 				if (!apiKey) throw new Error('No pending pairing request')
+				try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 				return { apiKey }
 			},
 			rejectPairing: async () => {
 				auth.rejectPairing()
+				try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 			},
 			approveSigningRequest: async (params) => {
 				if (!auth.approveSigningRequest(params.id)) throw new Error('No pending signing request with that id')
@@ -1065,7 +1154,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return null
-				return getCachedBalances(deviceId)
+				const result = getCachedBalances(deviceId)
+				if (!result) return null
+				return { balances: result.balances, updatedAt: result.updatedAt }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
@@ -1077,7 +1168,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getWatchOnlyBalances: async () => {
 				const snap = getLatestDeviceSnapshot()
 				if (!snap) return null
-				return getCachedBalances(snap.deviceId)
+				const result = getCachedBalances(snap.deviceId)
+				return result?.balances ?? null
 			},
 			getWatchOnlyPubkeys: async () => {
 				const snap = getLatestDeviceSnapshot()
@@ -1123,6 +1215,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				version: await Updater.localInfo.version(),
 				channel: await Updater.localInfo.channel(),
 			}),
+			// ── Window controls (for custom titlebar) ─────────────────
+			windowClose: async () => { _mainWindow?.close() },
+			windowMinimize: async () => { _mainWindow?.minimize() },
+			windowMaximize: async () => { _mainWindow?.maximize() },
 		},
 		messages: {},
 	},
@@ -1159,11 +1255,19 @@ evmAddresses.on('change', (set: EvmAddressSet) => {
 	try { rpc.send['evm-addresses-update'](set) } catch { /* webview not ready yet */ }
 })
 
-// Updater status changes → push to WebView
+// Updater status changes → push to WebView (debounced to prevent spam)
+let lastUpdateStatus = ''
+let lastUpdateStatusTime = 0
 Updater.onStatusChange((entry: any) => {
 	try {
+		const status = entry.status || ''
+		const now = Date.now()
+		// Debounce: skip duplicate error statuses within 5 seconds
+		if ((status === 'error' || status === 'download-error') && status === lastUpdateStatus && now - lastUpdateStatusTime < 5000) return
+		lastUpdateStatus = status
+		lastUpdateStatusTime = now
 		rpc.send['update-status']({
-			status: entry.status,
+			status,
 			message: entry.message,
 			timestamp: entry.timestamp,
 			progress: entry.details?.progress,
@@ -1176,15 +1280,19 @@ Updater.onStatusChange((entry: any) => {
 
 // ── Window Setup ──────────────────────────────────────────────────────
 async function getMainViewUrl(): Promise<string> {
-	const channel = await Updater.localInfo.channel()
-	if (channel === "dev") {
-		try {
-			await fetch(DEV_SERVER_URL, { method: "HEAD" })
-			console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`)
-			return DEV_SERVER_URL
-		} catch {
-			console.log("Vite dev server not running. Run 'bun run dev:hmr' for HMR support.")
+	try {
+		const channel = await Updater.localInfo.channel()
+		if (channel === "dev") {
+			try {
+				await fetch(DEV_SERVER_URL, { method: "HEAD" })
+				console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`)
+				return DEV_SERVER_URL
+			} catch {
+				console.log("Vite dev server not running. Run 'bun run dev:hmr' for HMR support.")
+			}
 		}
+	} catch (e) {
+		console.warn('[Vault] Failed to detect channel, falling back to production view:', e)
 	}
 	return "views://mainview/index.html"
 }
@@ -1225,10 +1333,12 @@ ApplicationMenu.setApplicationMenu([
 	},
 ])
 
+let _mainWindow: BrowserWindow | null = null
 const mainWindow = new BrowserWindow({
 	title: "KeepKey Vault",
 	url,
 	rpc,
+	titleBarStyle: "hidden",
 	frame: {
 		width: 1200,
 		height: 800,
@@ -1236,6 +1346,67 @@ const mainWindow = new BrowserWindow({
 		y: 100,
 	},
 })
+_mainWindow = mainWindow
+
+// Set window icon on Windows via Win32 API (SendMessage WM_SETICON).
+// Electrobun's setWindowIcon is a no-op on Windows (stub in nativeWrapper.cpp).
+// mainWindow.ptr is the HWND, so we call user32.dll directly.
+if (process.platform === 'win32') {
+	try {
+		const { dlopen, FFIType, ptr: ffiPtr } = require("bun:ffi")
+		const path = require("path")
+		const appRoot = path.resolve(import.meta.dir, "..", "..", "..")
+		const { existsSync } = require("fs")
+		// Prefer app-real.ico (proper ICO from production build) over app.ico (may be renamed PNG)
+		const realIco = path.join(appRoot, "Resources", "app-real.ico")
+		const fallbackIco = path.join(appRoot, "Resources", "app.ico")
+		const iconPath = existsSync(realIco) ? realIco : fallbackIco
+
+		// LoadImageW from user32.dll to load .ico file
+		const user32 = dlopen("user32.dll", {
+			LoadImageW: {
+				args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.i32, FFIType.i32, FFIType.u32],
+				returns: FFIType.ptr,
+			},
+			SendMessageW: {
+				args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr],
+				returns: FFIType.ptr,
+			},
+			GetSystemMetrics: {
+				args: [FFIType.i32],
+				returns: FFIType.i32,
+			},
+		})
+
+		const IMAGE_ICON = 1
+		const LR_LOADFROMFILE = 0x00000010
+		const WM_SETICON = 0x0080
+		const ICON_BIG = 1
+		const ICON_SMALL = 0
+		const SM_CXICON = 11
+		const SM_CYICON = 12
+		const SM_CXSMICON = 49
+		const SM_CYSMICON = 50
+
+		// Encode icon path as UTF-16LE for LoadImageW
+		const iconPathW = Buffer.from(iconPath + '\0', 'utf16le')
+
+		const cxIcon = user32.symbols.GetSystemMetrics(SM_CXICON)
+		const cyIcon = user32.symbols.GetSystemMetrics(SM_CYICON)
+		const cxSmIcon = user32.symbols.GetSystemMetrics(SM_CXSMICON)
+		const cySmIcon = user32.symbols.GetSystemMetrics(SM_CYSMICON)
+
+		const bigIcon = user32.symbols.LoadImageW(null, iconPathW, IMAGE_ICON, cxIcon, cyIcon, LR_LOADFROMFILE)
+		const smallIcon = user32.symbols.LoadImageW(null, iconPathW, IMAGE_ICON, cxSmIcon, cySmIcon, LR_LOADFROMFILE)
+
+		const hwnd = mainWindow.ptr
+		if (bigIcon) user32.symbols.SendMessageW(hwnd, WM_SETICON, ICON_BIG, bigIcon)
+		if (smallIcon) user32.symbols.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, smallIcon)
+		console.log('[Vault] Window icon set via Win32 API:', iconPath)
+	} catch (e: any) {
+		console.warn("[Vault] Failed to set window icon:", e.message)
+	}
+}
 
 // Start engine (USB event listeners + initial device sync)
 await engine.start()

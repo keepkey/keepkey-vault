@@ -135,6 +135,14 @@ export const SolanaSignRequest = z.object({
   raw_tx: z.string().min(1),
 }).strip()
 
+/** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
+export const SolanaSignMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  message: z.string().min(1),
+  show_display: z.boolean().optional(),
+}).strip()
+
 
 /** POST /system/info/get-public-key */
 export const GetPublicKeyRequest = z.object({

@@ -6,7 +6,7 @@
  * Usage: bun scripts/collect-externals.ts
  */
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 
 const EXTERNALS = [
   '@keepkey/hdwallet-core',
@@ -24,6 +24,29 @@ const EXTERNALS = [
 const projectRoot = join(import.meta.dir, '..')
 const nmSource = join(projectRoot, 'node_modules')
 const nmDest = join(projectRoot, 'build', '_ext_modules')
+
+// Resolve file: linked packages to their actual source directories.
+// Bun's file: resolution can leave broken stubs in node_modules (empty dir with only node_modules/).
+// We read package.json's dependencies to find the real path for file: references.
+const fileLinkedPaths = new Map<string, string>()
+try {
+  const rootPj = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
+  for (const [name, spec] of Object.entries({ ...rootPj.dependencies, ...rootPj.overrides } as Record<string, string>)) {
+    if (spec.startsWith('file:')) {
+      const relPath = spec.slice(5)
+      const absPath = resolve(projectRoot, relPath)
+      if (existsSync(join(absPath, 'package.json'))) {
+        fileLinkedPaths.set(name, absPath)
+      }
+    }
+  }
+  if (fileLinkedPaths.size > 0) {
+    console.log(`[collect-externals] Resolved ${fileLinkedPaths.size} file: linked packages:`)
+    for (const [name, path] of fileLinkedPaths) console.log(`  ${name} → ${path}`)
+  }
+} catch (e) {
+  console.warn(`[collect-externals] WARN: Could not resolve file: links: ${e}`)
+}
 
 // Recursively collect all transitive dependencies
 const allDeps = new Set<string>(EXTERNALS)
@@ -96,6 +119,8 @@ const DEV_BLOCKLIST = new Set([
   'test-exclude', 'throat', 'p-each-series',
   'growly', 'is-wsl', 'node-notifier',
   'node-int64', 'parse5',
+  // --- Dead chain SDK (Binance Beacon Chain is decommissioned) ---
+  'bnb-javascript-sdk-nobroadcast',
 ])
 
 // Read deps from a nested package dir and add them to allDeps (so they get collected at top level).
@@ -116,7 +141,9 @@ function addNestedDeps(nestedPkgDir: string) {
 
 function addDeps(pkg: string) {
   try {
-    const pjPath = join(nmSource, pkg, 'package.json')
+    // For file: linked packages, read package.json from the actual source directory
+    const pkgDir = fileLinkedPaths.get(pkg) || join(nmSource, pkg)
+    const pjPath = join(pkgDir, 'package.json')
     const pj = JSON.parse(readFileSync(pjPath, 'utf8'))
     for (const dep of Object.keys(pj.dependencies || {})) {
       if (!allDeps.has(dep) && !DEV_BLOCKLIST.has(dep)) {
@@ -181,11 +208,19 @@ if (existsSync(nmDest)) {
 let copiedCount = 0
 
 for (const dep of sorted) {
-  const src = join(nmSource, dep)
+  // For file: linked packages, copy from the actual source directory
+  const src = fileLinkedPaths.get(dep) || join(nmSource, dep)
   const dst = join(nmDest, dep)
 
   if (!existsSync(src)) {
     console.warn(`  WARN: ${dep} not found in node_modules, skipping`)
+    continue
+  }
+
+  // Verify the source has actual content (not just an empty node_modules stub)
+  const hasPj = existsSync(join(src, 'package.json'))
+  if (!hasPj && fileLinkedPaths.has(dep)) {
+    console.warn(`  WARN: ${dep} file: link target has no package.json, skipping`)
     continue
   }
 
@@ -305,9 +340,22 @@ function pruneDir(dirPath: string) {
 pruneDir(nmDest)
 console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
 
-// Remove non-macOS prebuilds, build artifacts, and native source files
+// Remove prebuilds for OTHER platforms, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
-const REMOVE_PREBUILD_PREFIXES = ['linux', 'win32', 'android']
+// Platform-aware: keep prebuilds for the current build platform, strip the rest
+const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
+const REMOVE_PREBUILD_PREFIXES = isWindows
+  ? ['linux', 'darwin', 'android']
+  : isMac
+    ? ['linux', 'win32', 'android']
+    : ['darwin', 'win32', 'android'] // linux build
+// HID prebuild directory prefixes (node-hid uses HID-{platform}-{arch} naming)
+const REMOVE_HID_PREFIXES = isWindows
+  ? ['HID-linux', 'HID-darwin', 'HID_hidraw-linux']
+  : isMac
+    ? ['HID-win', 'HID-linux', 'HID_hidraw-linux']
+    : ['HID-win', 'HID-darwin']
 // C/C++ source and build artifacts not needed at runtime (~7MB)
 const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
 
@@ -318,10 +366,9 @@ function cleanNativeArtifacts(dirPath: string) {
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name)
       if (entry.isDirectory()) {
-        // Remove non-macOS prebuilds (HID-win32-*, HID-linux-*, etc.)
+        // Remove prebuilds for other platforms (HID-win32-*, linux-x64-*, etc.)
         if (REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
-            entry.name.startsWith('HID-win') || entry.name.startsWith('HID-linux') ||
-            entry.name.startsWith('HID_hidraw-linux')) {
+            REMOVE_HID_PREFIXES.some(p => entry.name.startsWith(p))) {
           try {
             const result = Bun.spawnSync(['du', '-sk', fullPath])
             nativePrunedSize += parseInt(result.stdout.toString().split('\t')[0] || '0', 10) * 1024

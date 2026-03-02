@@ -74,6 +74,8 @@ class KeepKeySdk {
         this.eth = {
             ethSignTransaction: (params) => this.client.post('/eth/sign-transaction', params),
             ethSignMessage: (params) => this.client.post('/eth/sign', params),
+            // v1 SDK compat alias (old clients call ethSign instead of ethSignMessage)
+            ethSign: (params) => this.client.post('/eth/sign', params),
             ethSignTypedData: (params) => this.client.post('/eth/sign-typed-data', params),
             ethVerifyMessage: (params) => this.client.post('/eth/verify', params),
         };

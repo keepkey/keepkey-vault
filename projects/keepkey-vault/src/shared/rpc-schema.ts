@@ -120,7 +120,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
-      getCachedBalances: { params: void; response: ChainBalance[] | null }
+      getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
 
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
@@ -136,6 +136,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applyUpdate: { params: void; response: void }
       getUpdateInfo: { params: void; response: UpdateInfo | null }
       getAppVersion: { params: void; response: { version: string; channel: string } }
+      // ── Window controls (custom titlebar) ──────────────────────
+      windowClose: { params: void; response: void }
+      windowMinimize: { params: void; response: void }
+      windowMaximize: { params: void; response: void }
     }
     messages: {
       'device-state': DeviceStateInfo
@@ -149,7 +153,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'camera-frame': string
       'camera-error': string
       'update-status': UpdateStatus
+      'pioneer-error': { message: string; url: string }
       'pair-request': PairingRequestInfo
+      'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry

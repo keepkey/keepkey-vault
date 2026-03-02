@@ -43,7 +43,11 @@
 		"methodThorchainDeposit": "THORChain Deposit",
 		"methodMayaTransfer": "Maya Transfer",
 		"methodMayaDeposit": "Maya Deposit",
-		"methodOsmosisSign": "Osmosis Sign"
+		"methodOsmosisSign": "Osmosis Sign",
+		"methodSolanaSignTx": "Solana Sign Transaction",
+		"domainName": "Domain",
+		"contract": "Contract",
+		"operationType": "Operation"
 	},
 	"recovery": {
 		"title": "Recover Your Wallet",

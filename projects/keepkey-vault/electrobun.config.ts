@@ -4,7 +4,7 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.0.1",
+		version: "1.0.5",
 		urlSchemes: ["keepkey"],
 	},
 	build: {
@@ -56,6 +56,6 @@ export default {
 		},
 	},
 	release: {
-		baseUrl: "https://github.com/BitHighlander/keepkey-vault-v11/releases/latest/download",
+		baseUrl: "https://github.com/keepkey/keepkey-vault/releases/latest/download",
 	},
 } satisfies ElectrobunConfig;

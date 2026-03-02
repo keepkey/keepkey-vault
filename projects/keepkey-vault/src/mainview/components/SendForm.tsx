@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import { formatBalance } from "../lib/formatting"
+import { formatBalance, formatUsd } from "../lib/formatting"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
@@ -42,6 +42,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const { t } = useTranslation("send")
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
+	const [usdAmount, setUsdAmount] = useState("")
+	const [inputMode, setInputMode] = useState<'crypto' | 'usd'>('crypto')
 	const [memo, setMemo] = useState("")
 	const [isMax, setIsMax] = useState(false)
 	const [feeLevel, setFeeLevel] = useState(5) // 1=slow, 5=avg, 10=fast
@@ -67,6 +69,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setError(null)
 		setRecipient("")
 		setAmount("")
+		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
 	}, [tokenCaip])
@@ -80,6 +83,61 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const amountNum = parseFloat(amount)
 	const balanceNum = parseFloat(displayBalance)
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
+
+	// Derive per-unit USD price from available balance data
+	const pricePerUnit = useMemo(() => {
+		if (isTokenSend && token?.priceUsd) return token.priceUsd
+		if (!isTokenSend && balance?.balanceUsd && balance.balance) {
+			const bal = parseFloat(balance.balance)
+			if (bal > 0) return balance.balanceUsd / bal
+		}
+		return 0
+	}, [isTokenSend, token?.priceUsd, balance?.balanceUsd, balance?.balance])
+
+	const hasPrice = pricePerUnit > 0
+
+	// Bidirectional conversion: crypto → USD
+	const handleCryptoChange = useCallback((v: string) => {
+		setIsMax(false)
+		setAmount(v)
+		if (hasPrice && v) {
+			const n = parseFloat(v)
+			if (!isNaN(n)) setUsdAmount((n * pricePerUnit).toFixed(2))
+			else setUsdAmount("")
+		} else {
+			setUsdAmount("")
+		}
+	}, [hasPrice, pricePerUnit])
+
+	// Bidirectional conversion: USD → crypto
+	const handleUsdChange = useCallback((v: string) => {
+		setIsMax(false)
+		setUsdAmount(v)
+		if (hasPrice && v) {
+			const n = parseFloat(v)
+			if (!isNaN(n)) {
+				const crypto = n / pricePerUnit
+				setAmount(crypto < 1 ? crypto.toPrecision(8) : crypto.toFixed(8).replace(/\.?0+$/, ''))
+			} else {
+				setAmount("")
+			}
+		} else {
+			setAmount("")
+		}
+	}, [hasPrice, pricePerUnit])
+
+	// Swap input mode
+	const toggleInputMode = useCallback(() => {
+		setInputMode(prev => prev === 'crypto' ? 'usd' : 'crypto')
+	}, [])
+
+	// USD equivalent of current amount for display
+	const amountUsdPreview = useMemo(() => {
+		if (!hasPrice || isMax) return null
+		const n = parseFloat(amount)
+		if (isNaN(n) || n <= 0) return null
+		return n * pricePerUnit
+	}, [amount, hasPrice, pricePerUnit, isMax])
 
 	const recipientTooShort = useMemo(() => {
 		if (!recipient) return false
@@ -159,6 +217,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setError(null)
 		setRecipient("")
 		setAmount("")
+		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
 	}, [])
@@ -236,9 +295,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* Balance display */}
 			<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
 				<Text fontSize="xs" color="kk.textMuted">{t("available")}</Text>
-				<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
-					{formatBalance(displayBalance)} {displaySymbol}
-				</Text>
+				<Flex direction="column" align="flex-end">
+					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
+						{formatBalance(displayBalance)} {displaySymbol}
+					</Text>
+					{hasPrice && (
+						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+							${formatUsd(parseFloat(displayBalance) * pricePerUnit)}
+						</Text>
+					)}
+				</Flex>
 			</Flex>
 			{/* Gas balance hint for token sends */}
 			{isTokenSend && balance && (
@@ -285,29 +351,70 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							</Button>
 						</Flex>
 					</Box>
-					<Flex gap="2" align="end">
-						<Box flex="1">
-							<Field
-								label={`${t("amount")} (${displaySymbol})`}
-								value={isMax ? 'MAX' : amount}
-								onChange={(v) => { setIsMax(false); setAmount(v) }}
-								placeholder={t("amountPlaceholder")}
-								disabled={isMax}
-							/>
-						</Box>
-						<Button
-							size="sm"
-							variant={isMax ? "solid" : "outline"}
-							bg={isMax ? "kk.gold" : "transparent"}
-							color={isMax ? "black" : "kk.textSecondary"}
-							borderColor="kk.border"
-							_hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
-							onClick={() => { setIsMax(!isMax); setAmount("") }}
-							mb="0.5"
-						>
-							{t("max")}
-						</Button>
-					</Flex>
+
+					{/* Amount input with USD conversion */}
+					<Box>
+						<Flex justify="space-between" align="center" mb="1">
+							<Text fontSize="xs" color="kk.textMuted">
+								{inputMode === 'crypto' ? `${t("amount")} (${displaySymbol})` : `${t("amount")} (USD)`}
+							</Text>
+							{hasPrice && (
+								<Button
+									size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" h="auto" py="0"
+									_hover={{ color: "kk.gold" }}
+									onClick={toggleInputMode}
+									title={t("switchInput")}
+								>
+									<SwapIcon />
+								</Button>
+							)}
+						</Flex>
+						<Flex gap="2" align="center">
+							<Box flex="1">
+								<Input
+									value={isMax ? 'MAX' : (inputMode === 'crypto' ? amount : usdAmount)}
+									onChange={(e) => inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleUsdChange(e.target.value)}
+									placeholder={inputMode === 'usd' ? '0.00' : t("amountPlaceholder")}
+									bg="kk.bg"
+									border="1px solid"
+									borderColor="kk.border"
+									color="kk.textPrimary"
+									size="sm"
+									fontFamily="mono"
+									disabled={isMax}
+									px="3"
+								/>
+							</Box>
+							<Button
+								size="sm"
+								variant={isMax ? "solid" : "outline"}
+								bg={isMax ? "kk.gold" : "transparent"}
+								color={isMax ? "black" : "kk.textSecondary"}
+								borderColor="kk.border"
+								_hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
+								onClick={() => { setIsMax(!isMax); setAmount(""); setUsdAmount("") }}
+								h="32px"
+							>
+								{t("max")}
+							</Button>
+						</Flex>
+
+						{/* Secondary display: shows the converted value */}
+						{!isMax && hasPrice && (
+							<Flex mt="1" px="1" justify="space-between">
+								{inputMode === 'crypto' && amountUsdPreview !== null ? (
+									<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">${formatUsd(amountUsdPreview)}</Text>
+								) : inputMode === 'usd' && amount ? (
+									<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">{formatBalance(amount)} {displaySymbol}</Text>
+								) : (
+									<Box />
+								)}
+								{pricePerUnit > 0 && (
+									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = ${formatUsd(pricePerUnit)}</Text>
+								)}
+							</Flex>
+						)}
+					</Box>
 
 					{needsMemo && (
 						<Field
@@ -370,11 +477,21 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
+							<Flex direction="column" align="flex-end">
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
+								{!isMax && amountUsdPreview !== null && (
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(amountUsdPreview)}</Text>
+								)}
+							</Flex>
 						</Flex>
 						<Flex justify="space-between">
 							<Text fontSize="xs" color="kk.textSecondary">{t("fee")}</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
+							<Flex direction="column" align="flex-end">
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
+								{buildResult.feeUsd != null && buildResult.feeUsd > 0 && (
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(buildResult.feeUsd)}</Text>
+								)}
+							</Flex>
 						</Flex>
 					</Box>
 
@@ -522,6 +639,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				<QrScannerOverlay onScan={handleQrScan} onClose={() => setShowScanner(false)} />
 			)}
 		</VStack>
+	)
+}
+
+function SwapIcon() {
+	return (
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
+		</svg>
 	)
 }
 
