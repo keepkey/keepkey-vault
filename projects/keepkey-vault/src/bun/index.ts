@@ -1206,7 +1206,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
-				await Updater.applyUpdate()
+				// Fire-and-forget: Updater.applyUpdate() extracts the new version,
+				// replaces the running app, spawns a relaunch shell, then calls quit().
+				// The quit() kills the Bun process before the RPC response can be sent,
+				// causing the frontend to see a timeout error. Instead, return immediately
+				// and let the status messages ('applying', 'replacing-app', 'complete')
+				// drive the frontend UI.
+				Updater.applyUpdate().catch(e => console.error('[Vault] applyUpdate failed:', e))
+				return { started: true }
 			},
 			getUpdateInfo: async () => {
 				return Updater.updateInfo() || null

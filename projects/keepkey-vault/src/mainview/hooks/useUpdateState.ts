@@ -32,8 +32,12 @@ function statusToPhase(status: string): UpdatePhaseUI {
     case 'delta-applied':
       return 'ready'
     case 'applying-update':
+    case 'applying':
+    case 'extracting':
     case 'replacing-app':
+    case 'launching-new-version':
     case 'relaunching':
+    case 'complete':
       return 'applying'
     case 'no-update-available':
     case 'up-to-date':
@@ -117,9 +121,13 @@ export function useUpdateState() {
   const applyUpdate = useCallback(async () => {
     setState(prev => ({ ...prev, phase: 'applying', error: undefined }))
     try {
-      await rpcRequest('applyUpdate', undefined, 60000)
-    } catch (e: any) {
-      setState(prev => ({ ...prev, phase: 'error', error: e.message }))
+      // Bun side fires-and-forgets Updater.applyUpdate() then returns immediately.
+      // The actual update progress comes via 'update-status' messages.
+      // The app will quit+relaunch during this process, so connection loss is expected.
+      await rpcRequest('applyUpdate', undefined, 10000)
+    } catch {
+      // Ignore errors — the app closing during update causes RPC disconnect,
+      // which is expected behavior, not a failure.
     }
   }, [])
 
