@@ -123,6 +123,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
 
   // Bootloader state
   const [waitingForBootloader, setWaitingForBootloader] = useState(false)
+  const [waitingForBootloaderFw, setWaitingForBootloaderFw] = useState(false)
   const bootloaderPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Hooks — use Electrobun RPC-based hooks
@@ -262,7 +263,48 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
 
   // ── Firmware step ──────────────────────────────────────────────────────
 
+  const handleEnterBootloaderForFirmware = () => {
+    setWaitingForBootloaderFw(true)
+    bootloaderPollRef.current = setInterval(async () => {
+      try {
+        const state = await rpcRequest('getDeviceState')
+        if (state.bootloaderMode) {
+          setWaitingForBootloaderFw(false)
+          if (bootloaderPollRef.current) clearInterval(bootloaderPollRef.current)
+          await startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
+        }
+      } catch {
+        // Device may be disconnecting/reconnecting
+      }
+    }, 2000)
+  }
+
+  // Event-driven: detect bootloader mode for firmware step
+  useEffect(() => {
+    if (step !== 'firmware') return
+    if (!waitingForBootloaderFw) return
+    if (updateState === 'updating') return
+
+    if (deviceStatus.bootloaderMode) {
+      setWaitingForBootloaderFw(false)
+      if (bootloaderPollRef.current) clearInterval(bootloaderPollRef.current)
+      startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
+    }
+  }, [step, waitingForBootloaderFw, deviceStatus.bootloaderMode, updateState, startFirmwareUpdate, deviceStatus.latestFirmware])
+
+  // Auto-start firmware update if already in bootloader mode
+  useEffect(() => {
+    if (step !== 'firmware') return
+    if (updateState !== 'idle') return
+    if (!inBootloader) return
+    startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
+  }, [step, updateState, inBootloader, startFirmwareUpdate, deviceStatus.latestFirmware])
+
   const handleStartFirmwareUpdate = async () => {
+    if (!inBootloader) {
+      handleEnterBootloaderForFirmware()
+      return
+    }
     await startFirmwareUpdate(deviceStatus.latestFirmware || undefined)
   }
 
@@ -786,8 +828,42 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   </HStack>
                 </Box>
 
-                {/* Important instructions — only before update starts */}
-                {updateState === 'idle' && (
+                {/* Needs bootloader mode — show entry instructions */}
+                {updateState === 'idle' && !inBootloader && (
+                  <>
+                    <Box maxW="240px" mx="auto">
+                      <img src={holdAndConnectSvg} alt="Hold button and connect USB" style={{ width: '100%' }} />
+                    </Box>
+                    <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
+                      <VStack align="start" gap={2}>
+                        <HStack gap={2}>
+                          <FaExclamationTriangle color="#ECC94B" size={18} />
+                          <Text fontSize="sm" fontWeight="bold" color="yellow.300">
+                            {t('bootloader.enterFirmwareUpdateMode')}
+                          </Text>
+                        </HStack>
+                        <VStack align="start" gap={1} pl={6}>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step4Release')}</Text>
+                        </VStack>
+                      </VStack>
+                    </Box>
+
+                    {waitingForBootloaderFw && (
+                      <HStack gap={3} w="100%" justify="center" py={2}>
+                        <Spinner size="sm" color="yellow.400" />
+                        <Text fontSize="sm" color="yellow.300">
+                          {t('bootloader.listeningForBootloader')}
+                        </Text>
+                      </HStack>
+                    )}
+                  </>
+                )}
+
+                {/* Ready to flash — device in bootloader mode */}
+                {updateState === 'idle' && inBootloader && (
                   <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
                     <VStack gap={2} align="start">
                       <Text color="orange.400" fontWeight="bold" fontSize="sm">
@@ -906,7 +982,7 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 )}
 
                 {/* Actions — idle */}
-                {updateState === 'idle' && (
+                {updateState === 'idle' && !waitingForBootloaderFw && (
                   <VStack gap={3} w="100%">
                     <Button
                       w="100%"
@@ -916,7 +992,9 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       _hover={{ bg: 'orange.600' }}
                       onClick={handleStartFirmwareUpdate}
                     >
-                      {t('firmware.updateFirmwareTo', { version: deviceStatus.latestFirmware || '?' })}
+                      {inBootloader
+                        ? t('firmware.updateFirmwareTo', { version: deviceStatus.latestFirmware || '?' })
+                        : t('bootloader.readyDetectBootloader')}
                     </Button>
                     {!isOobDevice && (
                       <Button
