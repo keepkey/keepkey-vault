@@ -154,7 +154,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           {/* Text */}
           <Box flex="1" minW="0">
             <Text fontSize="sm" color={accentColor} fontWeight="500" truncate>
-              {phase === "available" && (message || t("newVersionAvailable"))}
+              {phase === "available" && t("newVersionAvailable")}
               {phase === "downloading" && (
                 progress !== undefined
                   ? t("downloadingWithProgress", { progress: Math.round(progress) })

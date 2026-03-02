@@ -457,10 +457,23 @@ function App() {
 		</Flex>
 	)
 
+	// Always-visible update banner (all phases)
+	const updateBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" ? (
+		<UpdateBanner
+			phase={update.phase}
+			progress={update.progress}
+			message={update.message}
+			error={update.error}
+			onDownload={update.downloadUpdate}
+			onApply={update.applyUpdate}
+			onDismiss={() => setUpdateDismissed(true)}
+		/>
+	) : null
+
 	// Watch-only mode: render dashboard with cached data (read-only)
 	if (watchOnlyMode) {
 		return (
-			<>{windowControls}{firmwareDropZone}
+			<>{windowControls}{updateBanner}{firmwareDropZone}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
@@ -482,7 +495,7 @@ function App() {
 
 	if (phase === "claimed") {
 		return (
-			<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed">
 					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
@@ -496,7 +509,7 @@ function App() {
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
 		return (
-			<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
 						needsPin ? t("unlockYourKeepKey", { ns: "nav" })
@@ -523,7 +536,7 @@ function App() {
 
 	if (phase === "setup") {
 		return (
-			<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
 			</>
 		)
@@ -534,7 +547,7 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
 
 	return (
-		<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+		<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
@@ -551,17 +564,6 @@ function App() {
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 				/>
-				{showBanner && (
-					<UpdateBanner
-						phase={update.phase}
-						progress={update.progress}
-						message={update.message}
-						error={update.error}
-						onDownload={update.downloadUpdate}
-						onApply={update.applyUpdate}
-						onDismiss={() => setUpdateDismissed(true)}
-					/>
-				)}
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} />}
