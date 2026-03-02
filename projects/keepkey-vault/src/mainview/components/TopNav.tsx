@@ -29,30 +29,28 @@ const GridIcon = () => (
 	</svg>
 )
 
-/** macOS-style traffic light buttons */
-function TrafficLights() {
+/** Window control buttons — order: maximize (green), minimize (yellow), close (red) so X is rightmost */
+export function TrafficLights() {
 	const [hover, setHover] = useState(false)
-	const dots: { color: string; hoverColor: string; action: string; icon: JSX.Element | null }[] = [
-		{ color: "#FF5F57", hoverColor: "#FF5F57", action: "windowClose", icon: hover ? (
-			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l6 6M7 1L1 7" stroke="#4D0000" strokeWidth="1.2" strokeLinecap="round" /></svg>
+	const dots: { color: string; action: string; icon: JSX.Element | null }[] = [
+		{ color: "#28C840", action: "windowMaximize", icon: hover ? (
+			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 2.5L4 0.5L7 2.5V6L4 7.5L1 6z" fill="#006500" /></svg>
 		) : null },
-		{ color: "#FEBC2E", hoverColor: "#FEBC2E", action: "windowMinimize", icon: hover ? (
+		{ color: "#FEBC2E", action: "windowMinimize", icon: hover ? (
 			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4h6" stroke="#985600" strokeWidth="1.2" strokeLinecap="round" /></svg>
 		) : null },
-		{ color: "#28C840", hoverColor: "#28C840", action: "windowMaximize", icon: hover ? (
-			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 2.5L4 0.5L7 2.5V6L4 7.5L1 6z" fill="#006500" /></svg>
+		{ color: "#FF5F57", action: "windowClose", icon: hover ? (
+			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l6 6M7 1L1 7" stroke="#4D0000" strokeWidth="1.2" strokeLinecap="round" /></svg>
 		) : null },
 	]
 	return (
 		<Flex
 			align="center"
 			gap="8px"
-			pl="4px"
-			pr="4px"
+			px="4px"
 			h="100%"
 			onMouseEnter={() => setHover(true)}
 			onMouseLeave={() => setHover(false)}
-			style={{ appRegion: "no-drag" } as any}
 		>
 			{dots.map((d) => (
 				<Box
@@ -110,7 +108,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			align="center"
 			pr="4"
 			zIndex={Z.nav}
-			style={{ appRegion: "drag" } as any}
+			className="electrobun-webkit-app-region-drag"
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1" pl="14px">
@@ -157,7 +155,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			</Flex>
 
 			{/* Center: navigation tabs (icon above label) */}
-			<HStack gap="1" style={{ appRegion: "no-drag" } as any}>
+			<HStack gap="1">
 				{TAB_DEFS.map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
@@ -189,7 +187,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			</HStack>
 
 			{/* Right: settings gear + traffic lights */}
-			<Flex flex="1" justify="flex-end" align="center" gap="2" style={{ appRegion: "no-drag" } as any}>
+			<Flex flex="1" justify="flex-end" align="center" gap="2">
 				<IconButton
 					aria-label={t("deviceSettings")}
 					onClick={watchOnly ? undefined : onSettingsToggle}

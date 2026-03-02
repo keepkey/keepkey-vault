@@ -14,7 +14,7 @@ import { SplashScreen } from "./components/SplashScreen"
 import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
-import { TopNav } from "./components/TopNav"
+import { TopNav, TrafficLights } from "./components/TopNav"
 import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
 import { AppStore } from "./components/AppStore"
@@ -439,10 +439,28 @@ function App() {
 
 	// ── Render phases ───────────────────────────────────────────────
 
+	// Always-visible window controls + drag bar (all phases including splash/setup)
+	const windowControls = (
+		<Flex
+			position="fixed"
+			top={0}
+			right={0}
+			h="50px"
+			align="center"
+			pr="4"
+			zIndex={Z.nav + 1}
+			className="electrobun-webkit-app-region-drag"
+			left={0}
+		>
+			<Box flex="1" />
+			<TrafficLights />
+		</Flex>
+	)
+
 	// Watch-only mode: render dashboard with cached data (read-only)
 	if (watchOnlyMode) {
 		return (
-			<>{firmwareDropZone}
+			<>{windowControls}{firmwareDropZone}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
@@ -464,7 +482,7 @@ function App() {
 
 	if (phase === "claimed") {
 		return (
-			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed">
 					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
@@ -478,7 +496,7 @@ function App() {
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
 		return (
-			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
 						needsPin ? t("unlockYourKeepKey", { ns: "nav" })
@@ -505,7 +523,7 @@ function App() {
 
 	if (phase === "setup") {
 		return (
-			<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
 			</>
 		)
@@ -516,7 +534,7 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
 
 	return (
-		<>{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+		<>{windowControls}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
