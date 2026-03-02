@@ -439,7 +439,11 @@ function App() {
 
 	// ── Render phases ───────────────────────────────────────────────
 
-	// Always-visible window controls + drag bar (all phases including splash/setup)
+	// Always-visible window controls (all phases including splash/setup)
+	// NOTE: Do NOT add electrobun-webkit-app-region-drag here — this overlay sits at z-index
+	// above TopNav and would block all clicks on tabs/settings/etc. Dragging is handled
+	// by TopNav (or phase-specific drag areas). Traffic lights use onClick → rpcRequest
+	// which bypasses the drag system entirely.
 	const windowControls = (
 		<Flex
 			position="fixed"
@@ -449,10 +453,7 @@ function App() {
 			align="center"
 			pr="4"
 			zIndex={Z.nav + 1}
-			className="electrobun-webkit-app-region-drag"
-			left={0}
 		>
-			<Box flex="1" />
 			<TrafficLights />
 		</Flex>
 	)

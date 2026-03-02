@@ -154,8 +154,12 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 				) : null}
 			</Flex>
 
-			{/* Center: navigation tabs (icon above label) */}
-			<HStack gap="1">
+			{/* Center: navigation tabs (icon above label)
+			 * onMouseDown stopPropagation prevents Electrobun's document-level drag
+			 * handler from intercepting clicks on these buttons. Without this, every
+			 * mousedown inside .electrobun-webkit-app-region-drag triggers startWindowMove
+			 * which on Windows uses raw input tracking that swallows the click event. */}
+			<HStack gap="1" onMouseDown={e => e.stopPropagation()}>
 				{TAB_DEFS.map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
@@ -187,7 +191,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			</HStack>
 
 			{/* Right: settings gear + traffic lights */}
-			<Flex flex="1" justify="flex-end" align="center" gap="2">
+			<Flex flex="1" justify="flex-end" align="center" gap="2" onMouseDown={e => e.stopPropagation()}>
 				<IconButton
 					aria-label={t("deviceSettings")}
 					onClick={watchOnly ? undefined : onSettingsToggle}
