@@ -9,6 +9,7 @@ import {
   FaExclamationTriangle,
   FaPlus,
 } from 'react-icons/fa'
+import holdAndConnectSvg from '../assets/svg/hold-and-connect.svg'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
 import { rpcRequest } from '../lib/rpc'
@@ -26,6 +27,15 @@ const ANIMATIONS_CSS = `
     0%   { transform: scale(1); }
     50%  { transform: scale(1.1); }
     100% { transform: scale(1); }
+  }
+  @keyframes kkStripe {
+    0%   { background-position: 0 0; }
+    100% { background-position: 40px 0; }
+  }
+  @keyframes kkGlow {
+    0%   { box-shadow: 0 0 8px rgba(251, 146, 60, 0.4); }
+    50%  { box-shadow: 0 0 20px rgba(251, 146, 60, 0.7); }
+    100% { box-shadow: 0 0 8px rgba(251, 146, 60, 0.4); }
   }
 `
 
@@ -207,6 +217,14 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
       startBootloaderUpdate()
     }
   }, [waitingForBootloader, deviceStatus.bootloaderMode, updateState, startBootloaderUpdate])
+
+  // Auto-start: if device is already in bootloader mode when we reach this step
+  useEffect(() => {
+    if (step !== 'bootloader') return
+    if (updateState !== 'idle') return
+    if (!inBootloader) return
+    startBootloaderUpdate()
+  }, [step, updateState, inBootloader, startBootloaderUpdate])
 
   useEffect(() => {
     if (step !== 'bootloader') return
@@ -553,48 +571,148 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
             {/* ═══════════════ BOOTLOADER ════════════════════════════ */}
             {step === 'bootloader' && (
               <VStack gap={5} w="100%" maxW="500px" mx="auto">
-                <FaExclamationTriangle color="#ECC94B" size={48} />
-                <VStack gap={2}>
-                  <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
-                    {t('bootloader.title')}
-                  </Text>
-                  <Text fontSize="sm" color="gray.400" textAlign="center">
-                    {t('bootloader.description')}
-                  </Text>
-                </VStack>
+                {/* ── Not yet in bootloader: show instructions to enter it ── */}
+                {!inBootloader && updateState !== 'updating' && updateState !== 'error' && (
+                  <>
+                    {/* Animated hold-and-connect illustration */}
+                    <Box maxW="240px" mx="auto">
+                      <img src={holdAndConnectSvg} alt="Hold button and connect USB" style={{ width: '100%' }} />
+                    </Box>
+                    <VStack gap={2}>
+                      <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+                        {t('bootloader.title')}
+                      </Text>
+                      <Text fontSize="sm" color="gray.400" textAlign="center">
+                        {t('bootloader.description')}
+                      </Text>
+                    </VStack>
 
-                {/* Version info */}
-                {deviceStatus.latestBootloader && (
-                  <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
-                    <HStack justify="space-between">
-                      <VStack gap={1} align="start">
-                        <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
-                        <Text fontSize="md" color="orange.400" fontWeight="bold">
-                          {(deviceStatus.bootloaderVersion && !deviceStatus.bootloaderVersion.startsWith('hash:'))
-                            ? `v${deviceStatus.bootloaderVersion}`
-                            : inBootloader
-                              ? `v${deviceStatus.firmwareVersion}`
-                              : t('bootloader.outdated')}
-                        </Text>
+                    {/* Version info */}
+                    {deviceStatus.latestBootloader && (
+                      <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
+                        <HStack justify="space-between">
+                          <VStack gap={1} align="start">
+                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
+                            <Text fontSize="md" color="orange.400" fontWeight="bold">
+                              {(deviceStatus.bootloaderVersion && !deviceStatus.bootloaderVersion.startsWith('hash:'))
+                                ? `v${deviceStatus.bootloaderVersion}`
+                                : t('bootloader.outdated')}
+                            </Text>
+                          </VStack>
+                          <Text color="gray.500" fontSize="lg">&rarr;</Text>
+                          <VStack gap={1} align="end">
+                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
+                            <Text fontSize="md" color="green.400" fontWeight="bold">
+                              v{deviceStatus.latestBootloader}
+                            </Text>
+                          </VStack>
+                        </HStack>
+                      </Box>
+                    )}
+
+                    {/* Instructions to enter bootloader mode */}
+                    <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
+                      <VStack align="start" gap={2}>
+                        <HStack gap={2}>
+                          <FaExclamationTriangle color="#ECC94B" size={18} />
+                          <Text fontSize="sm" fontWeight="bold" color="yellow.300">
+                            {t('bootloader.enterFirmwareUpdateMode')}
+                          </Text>
+                        </HStack>
+                        <VStack align="start" gap={1} pl={6}>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
+                          <Text fontSize="sm" color="gray.200">{t('bootloader.step4Release')}</Text>
+                        </VStack>
                       </VStack>
-                      <Text color="gray.500" fontSize="lg">&rarr;</Text>
-                      <VStack gap={1} align="end">
-                        <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
-                        <Text fontSize="md" color="green.400" fontWeight="bold">
-                          v{deviceStatus.latestBootloader}
+                    </Box>
+
+                    {/* Waiting indicator */}
+                    {waitingForBootloader && (
+                      <HStack gap={3} w="100%" justify="center" py={2}>
+                        <Spinner size="sm" color="yellow.400" />
+                        <Text fontSize="sm" color="yellow.300">
+                          {t('bootloader.listeningForBootloader')}
                         </Text>
-                      </VStack>
-                    </HStack>
-                  </Box>
+                      </HStack>
+                    )}
+
+                    {/* Action buttons — idle only */}
+                    {!waitingForBootloader && (
+                      <>
+                        <Button
+                          w="100%"
+                          size="lg"
+                          bg={HIGHLIGHT}
+                          color="white"
+                          _hover={{ bg: 'orange.600' }}
+                          onClick={handleEnterBootloaderMode}
+                        >
+                          {t('bootloader.readyDetectBootloader')}
+                        </Button>
+
+                        <Button
+                          w="100%"
+                          variant="ghost"
+                          color="gray.400"
+                          _hover={{ color: 'white', bg: 'gray.700' }}
+                          onClick={() => {
+                            if (needsFirmware) setStep('firmware')
+                            else setStep('init-choose')
+                          }}
+                        >
+                          {t('bootloader.skipBootloaderUpdate')}
+                        </Button>
+                      </>
+                    )}
+                  </>
                 )}
 
-                {/* Updating */}
+                {/* ── Already in bootloader / updating ── */}
                 {updateState === 'updating' && (
                   <VStack gap={3} w="100%">
+                    <FaDownload color="#F59E0B" size={48} />
+                    <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+                      {t('bootloader.title')}
+                    </Text>
                     <Spinner size="lg" color="blue.400" />
                     <Text fontSize="sm" color="gray.300">
                       {updateProgress?.message || t('bootloader.updatingBootloader')}
                     </Text>
+
+                    {/* Version info during update */}
+                    {deviceStatus.latestBootloader && (
+                      <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
+                        <HStack justify="space-between">
+                          <VStack gap={1} align="start">
+                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
+                            <Text fontSize="md" color="orange.400" fontWeight="bold">
+                              v{deviceStatus.firmwareVersion || '?'}
+                            </Text>
+                          </VStack>
+                          <Text color="gray.500" fontSize="lg">&rarr;</Text>
+                          <VStack gap={1} align="end">
+                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
+                            <Text fontSize="md" color="green.400" fontWeight="bold">
+                              v{deviceStatus.latestBootloader}
+                            </Text>
+                          </VStack>
+                        </HStack>
+                      </Box>
+                    )}
+
+                    {/* Verify backup skip hint */}
+                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.500">
+                      <HStack gap={2} align="flex-start">
+                        <Box mt="2px" flexShrink={0}>
+                          <FaExclamationTriangle color="#63B3ED" size={14} />
+                        </Box>
+                        <Text fontSize="xs" color="blue.200">
+                          {t('bootloader.verifyBackupHint')}
+                        </Text>
+                      </HStack>
+                    </Box>
                     <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                       <HStack gap={2}>
                         <FaExclamationTriangle color="#FC8181" />
@@ -624,65 +742,6 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                       {t('bootloader.tryAgain')}
                     </Button>
                   </Box>
-                )}
-
-                {/* Instructions */}
-                {updateState !== 'updating' && updateState !== 'error' && (
-                  <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
-                    <VStack align="start" gap={2}>
-                      <HStack gap={2}>
-                        <FaExclamationTriangle color="#ECC94B" size={18} />
-                        <Text fontSize="sm" fontWeight="bold" color="yellow.300">
-                          {t('bootloader.enterFirmwareUpdateMode')}
-                        </Text>
-                      </HStack>
-                      <VStack align="start" gap={1} pl={6}>
-                        <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
-                        <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
-                        <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
-                        <Text fontSize="sm" color="gray.200">{t('bootloader.step4Release')}</Text>
-                      </VStack>
-                    </VStack>
-                  </Box>
-                )}
-
-                {/* Waiting indicator */}
-                {waitingForBootloader && updateState !== 'updating' && (
-                  <HStack gap={3} w="100%" justify="center" py={2}>
-                    <Spinner size="sm" color="yellow.400" />
-                    <Text fontSize="sm" color="yellow.300">
-                      {t('bootloader.listeningForBootloader')}
-                    </Text>
-                  </HStack>
-                )}
-
-                {/* Action buttons — idle only */}
-                {updateState !== 'updating' && updateState !== 'error' && !waitingForBootloader && (
-                  <>
-                    <Button
-                      w="100%"
-                      size="lg"
-                      bg={HIGHLIGHT}
-                      color="white"
-                      _hover={{ bg: 'orange.600' }}
-                      onClick={handleEnterBootloaderMode}
-                    >
-                      {t('bootloader.readyDetectBootloader')}
-                    </Button>
-
-                    <Button
-                      w="100%"
-                      variant="ghost"
-                      color="gray.400"
-                      _hover={{ color: 'white', bg: 'gray.700' }}
-                      onClick={() => {
-                        if (needsFirmware) setStep('firmware')
-                        else setStep('init-choose')
-                      }}
-                    >
-                      {t('bootloader.skipBootloaderUpdate')}
-                    </Button>
-                  </>
                 )}
               </VStack>
             )}
@@ -742,10 +801,72 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                 {/* Update in progress */}
                 {updateState === 'updating' && (
                   <VStack gap={3} w="100%">
-                    <Spinner size="lg" color={HIGHLIGHT} />
-                    <Text fontSize="sm" color="gray.300">
-                      {updateProgress?.message || t('firmware.updatingFirmware')}
-                    </Text>
+                    {/* Confirm on device — pulsing orange box */}
+                    <Box
+                      w="100%"
+                      p={4}
+                      bg="orange.900"
+                      borderRadius="lg"
+                      borderWidth="2px"
+                      borderColor={HIGHLIGHT}
+                      style={{ animation: 'kkGlow 2s ease-in-out infinite' }}
+                    >
+                      <VStack gap={2}>
+                        <Text fontSize="md" fontWeight="bold" color="orange.200">
+                          {t('firmware.confirmOnDevice')}
+                        </Text>
+                        <Text fontSize="sm" color="orange.100">
+                          {t('firmware.lookAtDeviceAndPress')}
+                        </Text>
+                      </VStack>
+                    </Box>
+
+                    {/* Verify backup note */}
+                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.500">
+                      <HStack gap={2} align="flex-start">
+                        <Box mt="2px" flexShrink={0}>
+                          <FaExclamationTriangle color="#63B3ED" size={14} />
+                        </Box>
+                        <Text fontSize="xs" color="blue.200">
+                          {t('firmware.verifyBackupNote')}
+                        </Text>
+                      </HStack>
+                    </Box>
+
+                    {/* Progress bar */}
+                    <Box w="100%">
+                      <Text fontSize="xs" color="gray.400" mb={1}>
+                        {t('firmware.uploadingFirmware')}
+                      </Text>
+                      <Box
+                        w="100%"
+                        h="12px"
+                        bg="gray.700"
+                        borderRadius="full"
+                        overflow="hidden"
+                        position="relative"
+                      >
+                        <Box
+                          h="100%"
+                          borderRadius="full"
+                          w={updateProgress?.percent != null ? `${updateProgress.percent}%` : '100%'}
+                          transition="width 0.3s"
+                          bg={HIGHLIGHT}
+                          backgroundImage="linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent)"
+                          backgroundSize="40px 40px"
+                          style={{ animation: 'kkStripe 1s linear infinite' }}
+                        />
+                      </Box>
+                      {updateProgress?.percent != null && (
+                        <Text fontSize="xs" color="gray.400" mt={1} textAlign="center">
+                          {Math.round(updateProgress.percent)}%
+                        </Text>
+                      )}
+                      <Text fontSize="xs" color="gray.500" mt={1} textAlign="center">
+                        {t('firmware.deviceWillRestart')}
+                      </Text>
+                    </Box>
+
                     <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                       <HStack gap={2}>
                         <FaExclamationTriangle color="#FC8181" />

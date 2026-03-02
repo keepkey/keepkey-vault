@@ -488,16 +488,25 @@ export class EngineController extends EventEmitter {
     const blVersion = features?.bootloaderVersion || undefined
     const bootloaderMode = features?.bootloaderMode ?? false
     const initialized = features?.initialized ?? false
-    const needsFw = fwVersion
-      ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
-      : false
+    // In bootloader mode, fwVersion is actually the BL version (from extractVersion).
+    // Firmware always needs flashing when device is in bootloader mode.
+    const needsFw = bootloaderMode
+      ? true
+      : fwVersion
+        ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
+        : false
 
     // Bootloader version check with hash-to-version fallback.
     // Some firmware versions don't report blVersion in features, but DO report
     // blHash. Use the manifest to resolve hash → version and avoid a false
     // "needs bootloader update" that causes an infinite update loop.
     let effectiveBlVersion = blVersion
-    if (!effectiveBlVersion && !bootloaderMode && features) {
+    if (!effectiveBlVersion && bootloaderMode && fwVersion) {
+      // In bootloader mode, majorVersion/minorVersion/patchVersion IS the BL version.
+      // extractVersion() returns it as fwVersion — use it for comparison.
+      effectiveBlVersion = fwVersion
+      console.log(`[Engine] Bootloader mode: using extractVersion ${fwVersion} as BL version`)
+    } else if (!effectiveBlVersion && !bootloaderMode && features) {
       const blHash = base64ToHex(features.bootloaderHash)
       if (blHash && this.manifest?.hashes?.bootloader) {
         const resolved = this.manifest.hashes.bootloader[blHash]
