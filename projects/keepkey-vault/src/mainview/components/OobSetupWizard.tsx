@@ -786,22 +786,24 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                   </HStack>
                 </Box>
 
-                {/* Important instructions */}
-                <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
-                  <VStack gap={2} align="start">
-                    <Text color="orange.400" fontWeight="bold" fontSize="sm">
-                      {t('firmware.important')}
-                    </Text>
-                    <Text fontSize="xs" color="gray.300">{t('firmware.doNotDisconnect')}</Text>
-                    <Text fontSize="xs" color="gray.300">{t('firmware.mayNeedConfirm')}</Text>
-                    <Text fontSize="xs" color="gray.300">{t('firmware.fundsRemainSafe')}</Text>
-                  </VStack>
-                </Box>
+                {/* Important instructions — only before update starts */}
+                {updateState === 'idle' && (
+                  <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
+                    <VStack gap={2} align="start">
+                      <Text color="orange.400" fontWeight="bold" fontSize="sm">
+                        {t('firmware.important')}
+                      </Text>
+                      <Text fontSize="xs" color="gray.300">{t('firmware.doNotDisconnect')}</Text>
+                      <Text fontSize="xs" color="gray.300">{t('firmware.mayNeedConfirm')}</Text>
+                      <Text fontSize="xs" color="gray.300">{t('firmware.fundsRemainSafe')}</Text>
+                    </VStack>
+                  </Box>
+                )}
 
                 {/* Update in progress */}
                 {updateState === 'updating' && (
                   <VStack gap={3} w="100%">
-                    {/* Confirm on device — pulsing orange box */}
+                    {/* Confirm on device + verify backup — single box */}
                     <Box
                       w="100%"
                       p={4}
@@ -818,33 +820,20 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                         <Text fontSize="sm" color="orange.100">
                           {t('firmware.lookAtDeviceAndPress')}
                         </Text>
-                      </VStack>
-                    </Box>
-
-                    {/* Verify backup note */}
-                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.500">
-                      <HStack gap={2} align="flex-start">
-                        <Box mt="2px" flexShrink={0}>
-                          <FaExclamationTriangle color="#63B3ED" size={14} />
-                        </Box>
-                        <Text fontSize="xs" color="blue.200">
+                        <Text fontSize="xs" color="orange.200" opacity={0.7}>
                           {t('firmware.verifyBackupNote')}
                         </Text>
-                      </HStack>
+                      </VStack>
                     </Box>
 
                     {/* Progress bar */}
                     <Box w="100%">
-                      <Text fontSize="xs" color="gray.400" mb={1}>
-                        {t('firmware.uploadingFirmware')}
-                      </Text>
                       <Box
                         w="100%"
                         h="12px"
                         bg="gray.700"
                         borderRadius="full"
                         overflow="hidden"
-                        position="relative"
                       >
                         <Box
                           h="100%"
@@ -857,20 +846,11 @@ export function OobSetupWizard({ onComplete }: OobSetupWizardProps) {
                           style={{ animation: 'kkStripe 1s linear infinite' }}
                         />
                       </Box>
-                      {updateProgress?.percent != null && (
-                        <Text fontSize="xs" color="gray.400" mt={1} textAlign="center">
-                          {Math.round(updateProgress.percent)}%
-                        </Text>
-                      )}
-                      <Text fontSize="xs" color="gray.500" mt={1} textAlign="center">
-                        {t('firmware.deviceWillRestart')}
-                      </Text>
-                    </Box>
-
-                    <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
-                      <HStack gap={2}>
-                        <FaExclamationTriangle color="#FC8181" />
-                        <Text fontSize="xs" color="red.200">{t('firmware.doNotUnplug')}</Text>
+                      <HStack justify="space-between" mt={1}>
+                        {updateProgress?.percent != null ? (
+                          <Text fontSize="xs" color="gray.400">{Math.round(updateProgress.percent)}%</Text>
+                        ) : <Box />}
+                        <Text fontSize="xs" color="red.300">{t('firmware.doNotUnplug')}</Text>
                       </HStack>
                     </Box>
                   </VStack>
