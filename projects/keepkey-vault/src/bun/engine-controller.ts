@@ -98,6 +98,19 @@ export class EngineController extends EventEmitter {
   }
 
   /**
+   * Clear the old wallet + keyring state so the next pairRawDevice starts fresh.
+   * Without this, the keyring still tracks the old connection and WebUSB
+   * rejects with "cannot connect an already-connected connection".
+   */
+  private clearWallet() {
+    this.cleanupTransportListeners()
+    this.wallet = null
+    this.activeTransport = null
+    this.cachedFeatures = null
+    this.keyring.removeAll().catch(() => {})
+  }
+
+  /**
    * Attach transport event listeners to catch PIN_REQUEST / BUTTON_REQUEST
    * events emitted mid-operation by the hdwallet transport layer.
    */
@@ -164,10 +177,7 @@ export class EngineController extends EventEmitter {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB detached')
       this.clearRetry()
-      this.cleanupTransportListeners()
-      this.wallet = null
-      this.activeTransport = null
-      this.cachedFeatures = null
+      this.clearWallet()
       this.lastError = null
       this.updateState('disconnected')
     })
@@ -288,9 +298,7 @@ export class EngineController extends EventEmitter {
           return
         } catch (err) {
           console.warn('[Engine] Lost connection to wallet:', err)
-          this.wallet = null
-          this.activeTransport = null
-          this.cachedFeatures = null
+          this.clearWallet()
         }
       }
 
@@ -325,8 +333,7 @@ export class EngineController extends EventEmitter {
           this.updateState(this.deriveState(this.cachedFeatures))
         } catch (err) {
           console.error('[Engine] Failed to get features after pairing:', err)
-          this.wallet = null
-          this.activeTransport = null
+          this.clearWallet()
           this.lastError = `Failed to read device: ${err}`
           this.updateState('error')
         }
@@ -591,9 +598,7 @@ export class EngineController extends EventEmitter {
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
       this.updatePhase = 'rebooting'
-      this.wallet = null
-      this.activeTransport = null
-      this.cachedFeatures = null
+      this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Bootloader update complete' })
     } catch (err: any) {
@@ -642,9 +647,7 @@ export class EngineController extends EventEmitter {
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
       this.updatePhase = 'rebooting'
-      this.wallet = null
-      this.activeTransport = null
-      this.cachedFeatures = null
+      this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Firmware update complete' })
     } catch (err: any) {
@@ -1041,9 +1044,7 @@ export class EngineController extends EventEmitter {
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
       this.updatePhase = 'rebooting'
-      this.wallet = null
-      this.activeTransport = null
-      this.cachedFeatures = null
+      this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Custom firmware flash complete' })
     } catch (err: any) {
