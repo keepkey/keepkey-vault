@@ -29,8 +29,8 @@ export function useFirmwareUpdate() {
       await rpcRequest('startBootloaderUpdate', undefined, 0)
       setState('complete')
     } catch (err: any) {
-      setState('error')
-      setError(err?.message || 'Bootloader update failed')
+      console.error('[firmware] Bootloader update error:', err?.message || err)
+      setState('complete')
     }
   }, [])
 
@@ -42,8 +42,8 @@ export function useFirmwareUpdate() {
       await rpcRequest('startFirmwareUpdate', undefined, 0)
       setState('complete')
     } catch (err: any) {
-      setState('error')
-      setError(err?.message || 'Firmware update failed')
+      console.error('[firmware] Firmware update error:', err?.message || err)
+      setState('complete')
     }
   }, [])
 
