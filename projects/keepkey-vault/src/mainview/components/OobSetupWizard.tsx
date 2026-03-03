@@ -171,10 +171,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
   const isVisibleStepCurrent = (vsId: string) => visibleId === vsId
 
-  // ── Signal setupInProgress for bootloader/firmware steps ───────────────
+  // ── Signal setupInProgress for entire wizard lifecycle ─────────────────
+  // Keeps wizard visible during device reboots (firmware → init-choose transition)
   useEffect(() => {
-    const inUpdateStep = step === 'bootloader' || step === 'firmware'
-    onSetupInProgress?.(inUpdateStep)
+    onSetupInProgress?.(step !== 'complete')
+    return () => onSetupInProgress?.(false)
   }, [step, onSetupInProgress])
 
   // ── Welcome → first real step ──────────────────────────────────────────
@@ -477,37 +478,39 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
       align="center"
       justify="center"
       zIndex={1000}
+      className="electrobun-webkit-app-region-drag"
     >
       <style>{ANIMATIONS_CSS}</style>
 
       <Box
         w={{ base: '100vw', md: '90vw', lg: '80vw' }}
-        maxW="1200px"
-        minH={{ base: '100vh', md: 'auto' }}
+        maxW="900px"
+        maxH="90vh"
         bg="gray.800"
         borderRadius={{ base: 'none', md: 'xl' }}
         boxShadow={{ base: 'none', md: '0 8px 32px rgba(0,0,0,0.5)' }}
         borderWidth={{ base: '0', md: '1px' }}
         borderColor="gray.700"
-        overflow="visible"
+        overflow="auto"
         display="flex"
         flexDirection="column"
+        onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}
       >
         {/* ── Header ─────────────────────────────────────────────────── */}
-        <Box p={6} borderBottomWidth="1px" borderColor="gray.700">
-          <VStack gap={2}>
-            <Text fontSize="2xl" fontWeight="bold" color={HIGHLIGHT}>
+        <Box px={4} py={2} borderBottomWidth="1px" borderColor="gray.700">
+          <VStack gap={0.5}>
+            <Text fontSize="md" fontWeight="bold" color={HIGHLIGHT}>
               {t('title')}
             </Text>
-            <Text fontSize="md" color="gray.400">
+            <Text fontSize="xs" color="gray.400">
               {STEP_DESCRIPTIONS[step]}
             </Text>
           </VStack>
         </Box>
 
         {/* ── Progress bar ───────────────────────────────────────────── */}
-        <Box px={6} py={2}>
-          <Box h="4px" bg="gray.700" borderRadius="full" overflow="hidden">
+        <Box px={4} py={1}>
+          <Box h="3px" bg="gray.700" borderRadius="full" overflow="hidden">
             <Box
               h="100%"
               bg={progressPercent > 0 ? 'green.500' : HIGHLIGHT}
@@ -519,18 +522,17 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
         </Box>
 
         {/* ── Step indicators ────────────────────────────────────────── */}
-        <Box px={4} py={3} overflowX="auto">
-          <HStack gap={{ base: 2, md: 3 }} justify="center" minW="fit-content">
+        <Box px={4} py={1.5} overflowX="auto">
+          <HStack gap={2} justify="center" minW="fit-content">
             {VISIBLE_STEPS.map((vs, idx) => {
               const completed = isVisibleStepCompleted(vs.id)
               const current = isVisibleStepCurrent(vs.id)
 
               return (
                 <Flex key={vs.id} align="center" flexShrink={0}>
-                  {/* Circle */}
                   <Box
-                    w={{ base: 8, md: 10 }}
-                    h={{ base: 8, md: 10 }}
+                    w={7}
+                    h={7}
                     borderRadius="full"
                     bg={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.600'}
                     display="flex"
@@ -539,34 +541,31 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                     transition="all 0.3s"
                     flexShrink={0}
                     transform={current ? 'scale(1.1)' : 'scale(1)'}
-                    boxShadow={current ? '0 0 0 4px rgba(251, 146, 60, 0.25)' : 'none'}
+                    boxShadow={current ? '0 0 0 3px rgba(251, 146, 60, 0.25)' : 'none'}
                   >
                     {completed ? (
-                      <FaCheckCircle color="white" size={16} />
+                      <FaCheckCircle color="white" size={12} />
                     ) : (
-                      <Text color="white" fontSize={{ base: 'sm', md: 'md' }} fontWeight="bold">
+                      <Text color="white" fontSize="xs" fontWeight="bold">
                         {vs.number}
                       </Text>
                     )}
                   </Box>
-                  {/* Label (hidden on small) */}
                   <Text
-                    ml={2}
-                    fontSize={{ base: 'xs', md: 'sm' }}
+                    ml={1.5}
+                    fontSize="xs"
                     fontWeight={current ? 'bold' : 'normal'}
                     color={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.400'}
-                    display={{ base: 'none', lg: 'block' }}
                     whiteSpace="nowrap"
                   >
                     {vs.label}
                   </Text>
-                  {/* Connector line */}
                   {idx < VISIBLE_STEPS.length - 1 && (
                     <Box
-                      w={{ base: 6, md: 10, lg: 12 }}
+                      w={8}
                       h="2px"
                       bg={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.600'}
-                      ml={2}
+                      ml={1.5}
                     />
                   )}
                 </Flex>
@@ -578,32 +577,29 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
         {/* ── Content ────────────────────────────────────────────────── */}
         <Box
           flex={1}
-          p={{ base: 4, md: 6, lg: 8 }}
-          minH={{ base: '50vh', md: '400px' }}
+          p={{ base: 3, md: 4 }}
           display="flex"
           alignItems="center"
           justifyContent="center"
           w="100%"
         >
-          <Box w="100%" maxW="900px">
+          <Box w="100%" maxW="800px">
             {/* ═══════════════ WELCOME ═══════════════════════════════ */}
             {step === 'welcome' && (
-              <VStack gap={6} textAlign="center" w="100%">
-                <Box>
-                  <FaWallet
-                    color="#F59E0B"
-                    size={80}
-                    style={{ animation: 'kkPulse 2s ease-in-out infinite' }}
-                  />
-                </Box>
-                <VStack gap={3}>
-                  <Text fontSize="3xl" fontWeight="bold" color="white">
+              <VStack gap={4} textAlign="center" w="100%">
+                <FaWallet
+                  color="#F59E0B"
+                  size={48}
+                  style={{ animation: 'kkPulse 2s ease-in-out infinite' }}
+                />
+                <VStack gap={1}>
+                  <Text fontSize="xl" fontWeight="bold" color="white">
                     {t('welcome.title')}
                   </Text>
-                  <Text fontSize="xl" color={HIGHLIGHT}>
+                  <Text fontSize="sm" color={HIGHLIGHT}>
                     {t('subtitle')}
                   </Text>
-                  <Text fontSize="md" color="gray.400" maxW="400px">
+                  <Text fontSize="sm" color="gray.400" maxW="360px">
                     {isOobDevice
                       ? t('welcome.oobIntro')
                       : t('welcome.intro')}
@@ -611,7 +607,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                 </VStack>
                 <HStack gap={2}>
                   <Spinner size="sm" color="gray.500" />
-                  <Text fontSize="sm" color="gray.500">
+                  <Text fontSize="xs" color="gray.500">
                     {deviceStatus.state !== 'disconnected' ? t('welcome.startingSetup') : t('welcome.detectingDevice')}
                   </Text>
                 </HStack>
@@ -620,39 +616,36 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
             {/* ═══════════════ BOOTLOADER ════════════════════════════ */}
             {step === 'bootloader' && (
-              <VStack gap={5} w="100%" maxW="500px" mx="auto">
-                {/* ── Not yet in bootloader: show instructions to enter it ── */}
+              <VStack gap={3} w="100%" maxW="460px" mx="auto">
                 {!inBootloader && updateState !== 'updating' && updateState !== 'error' && (
                   <>
-                    {/* Animated hold-and-connect illustration */}
-                    <Box maxW="140px" mx="auto" opacity={0.85}>
+                    <Box maxW="100px" mx="auto" opacity={0.85}>
                       <img src={holdAndConnectSvg} alt="Hold button and connect USB" style={{ width: '100%' }} />
                     </Box>
-                    <VStack gap={2}>
-                      <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                         {t('bootloader.title')}
                       </Text>
-                      <Text fontSize="sm" color="gray.400" textAlign="center">
+                      <Text fontSize="xs" color="gray.400" textAlign="center">
                         {t('bootloader.description')}
                       </Text>
                     </VStack>
 
-                    {/* Version info */}
                     {deviceStatus.latestBootloader && (
-                      <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
+                      <Box w="100%" p={3} bg="gray.700" borderRadius="lg">
                         <HStack justify="space-between">
-                          <VStack gap={1} align="start">
-                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
-                            <Text fontSize="md" color="orange.400" fontWeight="bold">
+                          <VStack gap={0.5} align="start">
+                            <Text fontSize="2xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
+                            <Text fontSize="sm" color="orange.400" fontWeight="bold">
                               {(deviceStatus.bootloaderVersion && !deviceStatus.bootloaderVersion.startsWith('hash:'))
                                 ? `v${deviceStatus.bootloaderVersion}`
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="gray.500" fontSize="lg">&rarr;</Text>
-                          <VStack gap={1} align="end">
-                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
-                            <Text fontSize="md" color="green.400" fontWeight="bold">
+                          <Text color="gray.500">&rarr;</Text>
+                          <VStack gap={0.5} align="end">
+                            <Text fontSize="2xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
+                            <Text fontSize="sm" color="green.400" fontWeight="bold">
                               v{deviceStatus.latestBootloader}
                             </Text>
                           </VStack>
@@ -660,40 +653,37 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                       </Box>
                     )}
 
-                    {/* Instructions to enter bootloader mode */}
-                    <Box w="100%" p={4} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
-                      <VStack align="start" gap={2}>
+                    <Box w="100%" p={3} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
+                      <VStack align="start" gap={1}>
                         <HStack gap={2}>
-                          <FaExclamationTriangle color="#ECC94B" size={18} />
-                          <Text fontSize="sm" fontWeight="bold" color="yellow.300">
+                          <FaExclamationTriangle color="#ECC94B" size={14} />
+                          <Text fontSize="xs" fontWeight="bold" color="yellow.300">
                             {t('bootloader.enterFirmwareUpdateMode')}
                           </Text>
                         </HStack>
-                        <VStack align="start" gap={1} pl={6}>
-                          <Text fontSize="sm" color="gray.200">{t('bootloader.step1Unplug')}</Text>
-                          <Text fontSize="sm" color="gray.200">{t('bootloader.step2Hold')}</Text>
-                          <Text fontSize="sm" color="gray.200">{t('bootloader.step3Plugin')}</Text>
-                          <Text fontSize="sm" color="gray.200">{t('bootloader.step4Release')}</Text>
+                        <VStack align="start" gap={0} pl={5}>
+                          <Text fontSize="xs" color="gray.200">{t('bootloader.step1Unplug')}</Text>
+                          <Text fontSize="xs" color="gray.200">{t('bootloader.step2Hold')}</Text>
+                          <Text fontSize="xs" color="gray.200">{t('bootloader.step3Plugin')}</Text>
+                          <Text fontSize="xs" color="gray.200">{t('bootloader.step4Release')}</Text>
                         </VStack>
                       </VStack>
                     </Box>
 
-                    {/* Waiting indicator */}
                     {waitingForBootloader && (
-                      <HStack gap={3} w="100%" justify="center" py={2}>
+                      <HStack gap={2} w="100%" justify="center">
                         <Spinner size="sm" color="yellow.400" />
-                        <Text fontSize="sm" color="yellow.300">
+                        <Text fontSize="xs" color="yellow.300">
                           {t('bootloader.listeningForBootloader')}
                         </Text>
                       </HStack>
                     )}
 
-                    {/* Action buttons — idle only */}
                     {!waitingForBootloader && (
                       <>
                         <Button
                           w="100%"
-                          size="lg"
+                          size="md"
                           bg={HIGHLIGHT}
                           color="white"
                           _hover={{ bg: 'orange.600' }}
@@ -701,9 +691,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                         >
                           {t('bootloader.readyDetectBootloader')}
                         </Button>
-
                         <Button
                           w="100%"
+                          size="sm"
                           variant="ghost"
                           color="gray.400"
                           _hover={{ color: 'white', bg: 'gray.700' }}
@@ -719,32 +709,30 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </>
                 )}
 
-                {/* ── Already in bootloader / updating ── */}
                 {updateState === 'updating' && (
-                  <VStack gap={3} w="100%">
-                    <FaDownload color="#F59E0B" size={48} />
-                    <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+                  <VStack gap={2} w="100%">
+                    <FaDownload color="#F59E0B" size={32} />
+                    <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                       {t('bootloader.title')}
                     </Text>
-                    <Spinner size="lg" color="blue.400" />
-                    <Text fontSize="sm" color="gray.300">
+                    <Spinner size="md" color="blue.400" />
+                    <Text fontSize="xs" color="gray.300">
                       {updateProgress?.message || t('bootloader.updatingBootloader')}
                     </Text>
 
-                    {/* Version info during update */}
                     {deviceStatus.latestBootloader && (
-                      <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
+                      <Box w="100%" p={3} bg="gray.700" borderRadius="lg">
                         <HStack justify="space-between">
-                          <VStack gap={1} align="start">
-                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
-                            <Text fontSize="md" color="orange.400" fontWeight="bold">
+                          <VStack gap={0.5} align="start">
+                            <Text fontSize="2xs" color="gray.400" textTransform="uppercase">{t('bootloader.current')}</Text>
+                            <Text fontSize="sm" color="orange.400" fontWeight="bold">
                               v{deviceStatus.firmwareVersion || '?'}
                             </Text>
                           </VStack>
-                          <Text color="gray.500" fontSize="lg">&rarr;</Text>
-                          <VStack gap={1} align="end">
-                            <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
-                            <Text fontSize="md" color="green.400" fontWeight="bold">
+                          <Text color="gray.500">&rarr;</Text>
+                          <VStack gap={0.5} align="end">
+                            <Text fontSize="2xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
+                            <Text fontSize="sm" color="green.400" fontWeight="bold">
                               v{deviceStatus.latestBootloader}
                             </Text>
                           </VStack>
@@ -752,21 +740,20 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                       </Box>
                     )}
 
-                    {/* Verify backup skip hint */}
-                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.500">
+                    <Box w="100%" p={2} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.500">
                       <HStack gap={2} align="flex-start">
                         <Box mt="2px" flexShrink={0}>
-                          <FaExclamationTriangle color="#63B3ED" size={14} />
+                          <FaExclamationTriangle color="#63B3ED" size={12} />
                         </Box>
-                        <Text fontSize="xs" color="blue.200">
+                        <Text fontSize="2xs" color="blue.200">
                           {t('bootloader.verifyBackupHint')}
                         </Text>
                       </HStack>
                     </Box>
-                    <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
+                    <Box w="100%" p={2} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                       <HStack gap={2}>
-                        <FaExclamationTriangle color="#FC8181" />
-                        <Text fontSize="xs" color="red.200">
+                        <FaExclamationTriangle color="#FC8181" size={12} />
+                        <Text fontSize="2xs" color="red.200">
                           {t('bootloader.doNotUnplugBrick')}
                         </Text>
                       </HStack>
@@ -774,15 +761,14 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </VStack>
                 )}
 
-                {/* Error */}
                 {updateState === 'error' && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
-                    <VStack gap={2} align="start">
+                    <VStack gap={1} align="start">
                       <Text fontSize="sm" color="red.300" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
                       <Text fontSize="xs" color="red.200">{updateError}</Text>
                     </VStack>
                     <Button
-                      mt={3}
+                      mt={2}
                       size="sm"
                       variant="outline"
                       borderColor="red.400"
@@ -798,110 +784,93 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
             {/* ═══════════════ FIRMWARE ══════════════════════════════ */}
             {step === 'firmware' && (
-              <VStack gap={5} w="100%" maxW="500px" mx="auto">
-                <FaDownload color="#F59E0B" size={48} />
-                <VStack gap={2}>
-                  <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+              <VStack gap={3} w="100%" maxW="460px" mx="auto">
+                <FaDownload color="#F59E0B" size={32} />
+                <VStack gap={1}>
+                  <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                     {t('firmware.title')}
                   </Text>
-                  <Text fontSize="sm" color="gray.400" textAlign="center">
-                    {isOobDevice
-                      ? t('firmware.oobDescription')
-                      : t('firmware.description')}
+                  <Text fontSize="xs" color="gray.400" textAlign="center">
+                    {isOobDevice ? t('firmware.oobDescription') : t('firmware.description')}
                   </Text>
                 </VStack>
 
-                {/* Version comparison */}
-                <Box w="100%" p={4} bg="gray.700" borderRadius="lg">
+                <Box w="100%" p={3} bg="gray.700" borderRadius="lg">
                   <HStack justify="space-between">
-                    <VStack gap={1} align="start">
-                      <Text fontSize="xs" color="gray.400" textTransform="uppercase">
+                    <VStack gap={0.5} align="start">
+                      <Text fontSize="2xs" color="gray.400" textTransform="uppercase">
                         {inBootloader ? t('firmware.firmwareLabel') : t('bootloader.current')}
                       </Text>
-                      <Text
-                        fontSize="md"
-                        color={isOobDevice ? 'red.400' : 'white'}
-                        fontWeight="bold"
-                      >
+                      <Text fontSize="sm" color={isOobDevice ? 'red.400' : 'white'} fontWeight="bold">
                         {inBootloader ? t('firmware.notInstalled') : `v${deviceStatus.firmwareVersion || '?'}`}
                       </Text>
                     </VStack>
-                    <Text color="gray.500" fontSize="lg">&rarr;</Text>
-                    <VStack gap={1} align="end">
-                      <Text fontSize="xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
-                      <Text fontSize="md" color="green.400" fontWeight="bold">
+                    <Text color="gray.500">&rarr;</Text>
+                    <VStack gap={0.5} align="end">
+                      <Text fontSize="2xs" color="gray.400" textTransform="uppercase">{t('bootloader.latest')}</Text>
+                      <Text fontSize="sm" color="green.400" fontWeight="bold">
                         v{deviceStatus.latestFirmware || '?'}
                       </Text>
                     </VStack>
                   </HStack>
                 </Box>
 
-                {/* Needs bootloader mode — show entry instructions */}
                 {updateState === 'idle' && !inBootloader && (
                   <>
-                    <Box maxW="140px" mx="auto" opacity={0.85}>
+                    <Box maxW="100px" mx="auto" opacity={0.85}>
                       <img src={holdAndConnectSvg} alt="Hold button and connect USB" style={{ width: '100%' }} />
                     </Box>
-                    <Box w="100%" p={3} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
-                      <VStack align="start" gap={1}>
+                    <Box w="100%" p={2} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
+                      <VStack align="start" gap={0.5}>
                         <HStack gap={2}>
-                          <FaExclamationTriangle color="#ECC94B" size={16} />
-                          <Text fontSize="sm" fontWeight="bold" color="yellow.300">
+                          <FaExclamationTriangle color="#ECC94B" size={12} />
+                          <Text fontSize="xs" fontWeight="bold" color="yellow.300">
                             {t('bootloader.enterFirmwareUpdateMode')}
                           </Text>
                         </HStack>
-                        <VStack align="start" gap={0} pl={6}>
-                          <Text fontSize="xs" color="gray.200">{t('bootloader.step1Unplug')}</Text>
-                          <Text fontSize="xs" color="gray.200">{t('bootloader.step2Hold')}</Text>
-                          <Text fontSize="xs" color="gray.200">{t('bootloader.step3Plugin')}</Text>
-                          <Text fontSize="xs" color="gray.200">{t('bootloader.step4Release')}</Text>
+                        <VStack align="start" gap={0} pl={5}>
+                          <Text fontSize="2xs" color="gray.200">{t('bootloader.step1Unplug')}</Text>
+                          <Text fontSize="2xs" color="gray.200">{t('bootloader.step2Hold')}</Text>
+                          <Text fontSize="2xs" color="gray.200">{t('bootloader.step3Plugin')}</Text>
+                          <Text fontSize="2xs" color="gray.200">{t('bootloader.step4Release')}</Text>
                         </VStack>
                       </VStack>
                     </Box>
-                    <HStack gap={3} w="100%" justify="center">
+                    <HStack gap={2} w="100%" justify="center">
                       <Spinner size="sm" color="yellow.400" />
-                      <Text fontSize="sm" color="yellow.300">
+                      <Text fontSize="xs" color="yellow.300">
                         {t('bootloader.listeningForBootloader')}
                       </Text>
                     </HStack>
                   </>
                 )}
 
-                {/* Update in progress */}
                 {updateState === 'updating' && (
-                  <VStack gap={3} w="100%">
-                    {/* Confirm on device + verify backup — single box */}
+                  <VStack gap={2} w="100%">
                     <Box
                       w="100%"
-                      p={4}
+                      p={3}
                       bg="orange.900"
                       borderRadius="lg"
                       borderWidth="2px"
                       borderColor={HIGHLIGHT}
                       style={{ animation: 'kkGlow 2s ease-in-out infinite' }}
                     >
-                      <VStack gap={2}>
-                        <Text fontSize="md" fontWeight="bold" color="orange.200">
+                      <VStack gap={1}>
+                        <Text fontSize="sm" fontWeight="bold" color="orange.200">
                           {t('firmware.confirmOnDevice')}
                         </Text>
-                        <Text fontSize="sm" color="orange.100">
+                        <Text fontSize="xs" color="orange.100">
                           {t('firmware.lookAtDeviceAndPress')}
                         </Text>
-                        <Text fontSize="xs" color="orange.200" opacity={0.7}>
+                        <Text fontSize="2xs" color="orange.200" opacity={0.7}>
                           {t('firmware.verifyBackupNote')}
                         </Text>
                       </VStack>
                     </Box>
 
-                    {/* Progress bar */}
                     <Box w="100%">
-                      <Box
-                        w="100%"
-                        h="12px"
-                        bg="gray.700"
-                        borderRadius="full"
-                        overflow="hidden"
-                      >
+                      <Box w="100%" h="8px" bg="gray.700" borderRadius="full" overflow="hidden">
                         <Box
                           h="100%"
                           borderRadius="full"
@@ -913,42 +882,41 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                           style={{ animation: 'kkStripe 1s linear infinite' }}
                         />
                       </Box>
-                      <HStack justify="space-between" mt={1}>
+                      <HStack justify="space-between" mt={0.5}>
                         {updateProgress?.percent != null ? (
-                          <Text fontSize="xs" color="gray.400">{Math.round(updateProgress.percent)}%</Text>
+                          <Text fontSize="2xs" color="gray.400">{Math.round(updateProgress.percent)}%</Text>
                         ) : <Box />}
-                        <Text fontSize="xs" color="red.300">{t('firmware.doNotUnplug')}</Text>
+                        <Text fontSize="2xs" color="red.300">{t('firmware.doNotUnplug')}</Text>
                       </HStack>
                     </Box>
                   </VStack>
                 )}
 
-                {/* Waiting for reboot */}
                 {updateState === 'complete' && (
-                  <Box w="100%" p={4} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
-                    <VStack gap={2} align="start">
+                  <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
+                    <VStack gap={1} align="start">
                       <HStack gap={2}>
                         <Spinner size="sm" color="blue.300" />
-                        <Text fontSize="sm" color="blue.300" fontWeight="bold">
+                        <Text fontSize="xs" color="blue.300" fontWeight="bold">
                           {t('firmware.deviceRebooting')}
                         </Text>
                       </HStack>
-                      <Text fontSize="xs" color="blue.200">
+                      <Text fontSize="2xs" color="blue.200">
                         {t('firmware.rebootingMessage')}
                       </Text>
                       {deviceStatus.firmwareVerified !== undefined && (
-                        <HStack gap={2} mt={1}>
+                        <HStack gap={2}>
                           {deviceStatus.firmwareVerified ? (
                             <>
-                              <FaCheckCircle color="#48BB78" size={14} />
-                              <Text fontSize="xs" color="green.300" fontWeight="bold">
+                              <FaCheckCircle color="#48BB78" size={12} />
+                              <Text fontSize="2xs" color="green.300" fontWeight="bold">
                                 {t('firmware.firmwareVerified')}
                               </Text>
                             </>
                           ) : (
                             <>
-                              <FaExclamationTriangle color="#FB923C" size={14} />
-                              <Text fontSize="xs" color="orange.300" fontWeight="bold">
+                              <FaExclamationTriangle color="#FB923C" size={12} />
+                              <Text fontSize="2xs" color="orange.300" fontWeight="bold">
                                 {t('firmware.firmwareHashNotFound')}
                               </Text>
                             </>
@@ -959,26 +927,24 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </Box>
                 )}
 
-                {/* Error */}
                 {updateState === 'error' && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
-                    <VStack gap={2} align="start">
+                    <VStack gap={1} align="start">
                       <Text fontSize="sm" color="red.300" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
                       <Text fontSize="xs" color="red.200">{updateError}</Text>
                     </VStack>
-                    <Button mt={3} size="sm" variant="outline" borderColor="red.400" color="red.300" onClick={resetUpdate}>
+                    <Button mt={2} size="sm" variant="outline" borderColor="red.400" color="red.300" onClick={resetUpdate}>
                       {t('bootloader.tryAgain')}
                     </Button>
                   </Box>
                 )}
 
-                {/* Skip — only for non-OOB devices, only when idle */}
                 {updateState === 'idle' && !isOobDevice && (
                   <Button
                     w="100%"
                     variant="ghost"
                     color="gray.500"
-                    size="sm"
+                    size="xs"
                     _hover={{ color: 'gray.300', bg: 'gray.700' }}
                     onClick={handleSkipFirmware}
                   >
@@ -990,24 +956,24 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
             {/* ═══════════════ INIT: CHOOSE ═════════════════════════ */}
             {step === 'init-choose' && (
-              <VStack gap={{ base: 4, md: 6, lg: 8 }} w="100%">
-                <VStack gap={2}>
-                  <Text fontSize={{ base: 'xl', md: '2xl' }} fontWeight="bold" color="white" textAlign="center">
+              <VStack gap={3} w="100%">
+                <VStack gap={0.5}>
+                  <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                     {t('initChoose.title')}
                   </Text>
-                  <Text fontSize={{ base: 'sm', md: 'md' }} color="gray.400" textAlign="center">
+                  <Text fontSize="xs" color="gray.400" textAlign="center">
                     {t('initChoose.description')}
                   </Text>
                 </VStack>
 
                 {setupError && (
-                  <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
-                    <Text fontSize="sm" color="red.300">{setupError}</Text>
+                  <Box w="100%" p={2} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
+                    <Text fontSize="xs" color="red.300">{setupError}</Text>
                   </Box>
                 )}
 
                 <HStack
-                  gap={{ base: 4, md: 6 }}
+                  gap={3}
                   w="100%"
                   flexDirection={{ base: 'column', md: 'row' }}
                   align="stretch"
@@ -1016,9 +982,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   <Box
                     flex={{ base: 'none', md: 1 }}
                     w={{ base: '100%', md: 'auto' }}
-                    maxW={{ base: '400px', md: 'none' }}
-                    mx={{ base: 'auto', md: 0 }}
-                    p={{ base: 4, md: 6 }}
+                    p={4}
                     borderRadius="lg"
                     borderWidth="2px"
                     borderColor="transparent"
@@ -1026,23 +990,22 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                     transition="all 0.2s"
                     _hover={{
                       borderColor: 'orange.500',
-                      transform: 'translateY(-2px)',
+                      transform: 'translateY(-1px)',
                     }}
                   >
-                    <VStack gap={4}>
-                      <Box p={{ base: 3, md: 4 }} borderRadius="full" bg="orange.500" color="white">
-                        <FaPlus size={32} />
+                    <VStack gap={3}>
+                      <Box p={2} borderRadius="full" bg="orange.500" color="white">
+                        <FaPlus size={20} />
                       </Box>
-                      <VStack gap={2}>
-                        <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="bold" color="white">
+                      <VStack gap={1}>
+                        <Text fontSize="md" fontWeight="bold" color="white">
                           {t('initChoose.createNewWallet')}
                         </Text>
-                        <Text fontSize={{ base: 'xs', md: 'sm' }} color="gray.400" textAlign="center">
+                        <Text fontSize="xs" color="gray.400" textAlign="center">
                           {t('initChoose.createDescription')}
                         </Text>
                       </VStack>
 
-                      {/* Collapsible seed length for create */}
                       <Box w="100%">
                         <Flex
                           as="button"
@@ -1050,7 +1013,6 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                           justify="center"
                           gap="1"
                           w="100%"
-                          py="1"
                           cursor="pointer"
                           onClick={(e: React.MouseEvent) => {
                             e.stopPropagation()
@@ -1058,23 +1020,23 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                           }}
                           _hover={{ opacity: 0.8 }}
                         >
-                          <Text fontSize="xs" color="gray.500">
+                          <Text fontSize="2xs" color="gray.500">
                             {t('initChoose.seedLength', { defaultValue: 'Seed length' })}: {wordCount} {t('initChoose.words', { defaultValue: 'words' })}
                           </Text>
                           {showCreateAdvanced
-                            ? <FaChevronUp color="#718096" size={10} />
-                            : <FaChevronDown color="#718096" size={10} />
+                            ? <FaChevronUp color="#718096" size={8} />
+                            : <FaChevronDown color="#718096" size={8} />
                           }
                         </Flex>
                         {showCreateAdvanced && (
-                          <VStack gap="2" mt="2">
+                          <VStack gap="1.5" mt="1.5">
                             <Flex gap="2" justify="center" w="100%">
                               {([12, 18, 24] as const).map((wc) => (
                                 <Box
                                   key={wc}
                                   as="button"
-                                  px="4"
-                                  py="1.5"
+                                  px="3"
+                                  py="1"
                                   borderRadius="md"
                                   fontSize="xs"
                                   fontWeight="600"
@@ -1094,7 +1056,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                                 </Box>
                               ))}
                             </Flex>
-                            <Text fontSize="xs" color="gray.500" textAlign="center" lineHeight="tall" px="2">
+                            <Text fontSize="2xs" color="gray.500" textAlign="center" lineHeight="tall" px="1">
                               {t('initChoose.entropyNote', { defaultValue: 'Added seed length does not improve overall wallet entropy.' })}{' '}
                               <Text
                                 as="a"
@@ -1115,7 +1077,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
                       <Button
                         w="100%"
-                        size={{ base: 'md', md: 'lg' }}
+                        size="md"
                         bg={HIGHLIGHT}
                         color="white"
                         _hover={{ bg: 'orange.600' }}
@@ -1133,9 +1095,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   <Box
                     flex={{ base: 'none', md: 1 }}
                     w={{ base: '100%', md: 'auto' }}
-                    maxW={{ base: '400px', md: 'none' }}
-                    mx={{ base: 'auto', md: 0 }}
-                    p={{ base: 4, md: 6 }}
+                    p={4}
                     borderRadius="lg"
                     borderWidth="2px"
                     borderColor="transparent"
@@ -1143,25 +1103,24 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                     transition="all 0.2s"
                     _hover={{
                       borderColor: 'blue.500',
-                      transform: 'translateY(-2px)',
+                      transform: 'translateY(-1px)',
                     }}
                   >
-                    <VStack gap={4}>
-                      <Box p={{ base: 3, md: 4 }} borderRadius="full" bg="blue.500" color="white">
-                        <FaKey size={32} />
+                    <VStack gap={3}>
+                      <Box p={2} borderRadius="full" bg="blue.500" color="white">
+                        <FaKey size={20} />
                       </Box>
-                      <VStack gap={2}>
-                        <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="bold" color="white">
+                      <VStack gap={1}>
+                        <Text fontSize="md" fontWeight="bold" color="white">
                           {t('initChoose.recoverExistingWallet')}
                         </Text>
-                        <Text fontSize={{ base: 'xs', md: 'sm' }} color="gray.400" textAlign="center">
+                        <Text fontSize="xs" color="gray.400" textAlign="center">
                           {t('initChoose.recoverDescription')}
                         </Text>
                       </VStack>
 
-                      {/* Prominent seed length selector for recovery */}
                       <Box w="100%">
-                        <Text fontSize="sm" color="gray.300" textAlign="center" mb="2" fontWeight="500">
+                        <Text fontSize="xs" color="gray.300" textAlign="center" mb="1.5" fontWeight="500">
                           {t('initChoose.howManyWords', { defaultValue: 'How many words in your seed?' })}
                         </Text>
                         <Flex gap="2" justify="center" w="100%">
@@ -1169,10 +1128,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                             <Box
                               key={wc}
                               as="button"
-                              px="5"
-                              py="2"
-                              borderRadius="lg"
-                              fontSize="sm"
+                              px="4"
+                              py="1.5"
+                              borderRadius="md"
+                              fontSize="xs"
                               fontWeight="600"
                               cursor="pointer"
                               bg={wordCount === wc ? 'blue.500' : 'gray.600'}
@@ -1194,7 +1153,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
                       <Button
                         w="100%"
-                        size={{ base: 'md', md: 'lg' }}
+                        size="md"
                         bg="blue.500"
                         color="white"
                         _hover={{ bg: 'blue.600' }}
@@ -1209,13 +1168,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </Box>
                 </HStack>
 
-                {/* Dev: Load Device — tiny link opens dialog */}
                 <Text
-                  fontSize="xs"
+                  fontSize="2xs"
                   color="gray.600"
                   cursor="pointer"
                   textAlign="center"
-                  mt="2"
                   _hover={{ color: 'gray.500' }}
                   onClick={() => setDevLoadOpen(true)}
                 >
@@ -1226,17 +1183,17 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
-              <VStack gap={6} textAlign="center" w="100%" maxW="500px" mx="auto">
+              <VStack gap={4} textAlign="center" w="100%" maxW="400px" mx="auto">
                 <Spinner
-                  size="xl"
+                  size="lg"
                   color={HIGHLIGHT}
-                  borderWidth="4px"
+                  borderWidth="3px"
                 />
-                <VStack gap={3}>
-                  <Text fontSize="xl" fontWeight="bold" color="white">
+                <VStack gap={1}>
+                  <Text fontSize="md" fontWeight="bold" color="white">
                     {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
                   </Text>
-                  <Text fontSize="sm" color="gray.400" maxW="360px">
+                  <Text fontSize="xs" color="gray.400" maxW="320px">
                     {setupType === 'create'
                       ? t('initProgress.followPromptsCreate')
                       : setupType === 'recover'
@@ -1245,10 +1202,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </Text>
                 </VStack>
 
-                <Box w="100%" p={4} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
+                <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
                   <HStack gap={2} justify="center">
-                    <FaExclamationTriangle color="#F59E0B" />
-                    <Text fontSize="sm" color="orange.200" fontWeight="bold">
+                    <FaExclamationTriangle color="#F59E0B" size={14} />
+                    <Text fontSize="xs" color="orange.200" fontWeight="bold">
                       {t('initProgress.lookAtDevice')}
                     </Text>
                   </HStack>
@@ -1258,40 +1215,38 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
             {/* ═══════════════ INIT: LABEL ══════════════════════════ */}
             {step === 'init-label' && (
-              <VStack gap={6} w="100%" maxW="400px" mx="auto">
-                <VStack gap={2}>
-                  <FaCheckCircle color="#48BB78" size={48} />
-                  <Text fontSize="2xl" fontWeight="bold" color="white" textAlign="center">
+              <VStack gap={4} w="100%" maxW="360px" mx="auto">
+                <VStack gap={1}>
+                  <FaCheckCircle color="#48BB78" size={32} />
+                  <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                     {setupType === 'create' ? t('initLabel.walletCreated') : t('initLabel.walletRecovered')}
                   </Text>
-                  <Text fontSize="md" color="gray.400" textAlign="center">
+                  <Text fontSize="xs" color="gray.400" textAlign="center">
                     {t('initLabel.giveAName')}
                   </Text>
                 </VStack>
 
-                <Box w="100%">
-                  <Input
-                    placeholder={t('initLabel.placeholder')}
-                    value={deviceLabel}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDeviceLabel(e.target.value)}
-                    bg="gray.700"
-                    borderColor="gray.600"
-                    color="white"
-                    size="lg"
-                    _hover={{ borderColor: 'gray.500' }}
-                    _focus={{ borderColor: 'orange.500', boxShadow: '0 0 0 1px orange.500' }}
-                    onKeyDown={(e: React.KeyboardEvent) => {
-                      if (e.key === 'Enter' && deviceLabel.trim()) {
-                        handleApplyLabel()
-                      }
-                    }}
-                  />
-                </Box>
+                <Input
+                  placeholder={t('initLabel.placeholder')}
+                  value={deviceLabel}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDeviceLabel(e.target.value)}
+                  bg="gray.700"
+                  borderColor="gray.600"
+                  color="white"
+                  size="md"
+                  _hover={{ borderColor: 'gray.500' }}
+                  _focus={{ borderColor: 'orange.500', boxShadow: '0 0 0 1px orange.500' }}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' && deviceLabel.trim()) {
+                      handleApplyLabel()
+                    }
+                  }}
+                />
 
-                <VStack gap={3} w="100%">
+                <VStack gap={2} w="100%">
                   <Button
                     w="100%"
-                    size="lg"
+                    size="md"
                     bg={HIGHLIGHT}
                     color="white"
                     _hover={{ bg: 'orange.600' }}
@@ -1302,6 +1257,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </Button>
                   <Button
                     w="100%"
+                    size="sm"
                     variant="ghost"
                     color="gray.400"
                     _hover={{ color: 'white', bg: 'gray.700' }}
@@ -1316,13 +1272,12 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
             {/* ═══════════════ COMPLETE ═════════════════════════════ */}
             {step === 'complete' && (
               <Box position="relative" w="100%" overflow="hidden">
-                {/* Confetti */}
                 {confettiPieces.map(piece => (
                   <Box
                     key={piece.id}
                     position="absolute"
-                    w="10px"
-                    h="10px"
+                    w="8px"
+                    h="8px"
                     bg={piece.color}
                     left={piece.left}
                     top="-10px"
@@ -1334,32 +1289,30 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   />
                 ))}
 
-                <VStack gap={6} textAlign="center" w="100%" position="relative" zIndex={1}>
-                  <Box>
-                    <FaCheckCircle
-                      color="#48BB78"
-                      size={80}
-                      style={{ animation: 'kkPulse 2s ease-in-out infinite' }}
-                    />
-                  </Box>
-                  <VStack gap={3}>
-                    <Text fontSize="3xl" fontWeight="bold" color="white">
+                <VStack gap={4} textAlign="center" w="100%" position="relative" zIndex={1}>
+                  <FaCheckCircle
+                    color="#48BB78"
+                    size={48}
+                    style={{ animation: 'kkPulse 2s ease-in-out infinite' }}
+                  />
+                  <VStack gap={1}>
+                    <Text fontSize="xl" fontWeight="bold" color="white">
                       {setupType === 'recover' ? t('complete.walletRecovered') : t('complete.walletCreated')}
                     </Text>
-                    <Text fontSize="lg" color="gray.300">
+                    <Text fontSize="sm" color="gray.300">
                       {t('complete.deviceReady', { label: deviceLabel.trim() ? ` "${deviceLabel.trim()}"` : '' })}
                     </Text>
-                    <Text fontSize="md" color="gray.400" maxW="400px">
+                    <Text fontSize="xs" color="gray.400" maxW="360px">
                       {setupType === 'recover'
                         ? t('complete.recoveredDescription')
                         : t('complete.createdDescription')}
                     </Text>
                   </VStack>
                   <Button
-                    size="lg"
+                    size="md"
                     bg="green.500"
                     color="white"
-                    _hover={{ bg: 'green.600', transform: 'scale(1.05)' }}
+                    _hover={{ bg: 'green.600', transform: 'scale(1.03)' }}
                     transition="all 0.2s"
                     onClick={onComplete}
                   >
@@ -1372,18 +1325,19 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
         </Box>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <Box p={6} borderTopWidth="1px" borderColor="gray.700">
+        <Box px={4} py={2} borderTopWidth="1px" borderColor="gray.700">
           <HStack justify="space-between">
-            <Text fontSize="sm" color="gray.400">
+            <Text fontSize="xs" color="gray.400">
               {visibleIndex >= 0
                 ? t('footer.stepOf', { current: visibleIndex + 1, total: VISIBLE_STEPS.length })
                 : step === 'welcome'
                   ? ''
                   : t('footer.settingUpWallet')}
             </Text>
-            <HStack gap={4}>
+            <HStack gap={3}>
               {showPrevious && (
                 <Button
+                  size="sm"
                   variant="outline"
                   onClick={handlePrevious}
                   borderColor="gray.600"
@@ -1395,7 +1349,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
               )}
               {showNext && (
                 <Button
-                  size="lg"
+                  size="sm"
                   bg={HIGHLIGHT}
                   color="white"
                   _hover={{ bg: 'orange.600' }}
@@ -1425,7 +1379,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
         >
           <Box
             w="100%"
-            maxW="480px"
+            maxW="420px"
             mx={4}
             bg="gray.900"
             borderRadius="xl"
@@ -1434,18 +1388,16 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
             boxShadow="0 8px 32px rgba(0,0,0,0.6)"
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
-            {/* Header */}
-            <Box p={5} borderBottomWidth="1px" borderColor="gray.700">
-              <HStack gap={3}>
-                <FaExclamationTriangle color="#FC8181" size={22} />
-                <Text fontSize="lg" fontWeight="bold" color="red.300">
+            <Box px={4} py={3} borderBottomWidth="1px" borderColor="gray.700">
+              <HStack gap={2}>
+                <FaExclamationTriangle color="#FC8181" size={16} />
+                <Text fontSize="sm" fontWeight="bold" color="red.300">
                   Developer Seed Loading
                 </Text>
               </HStack>
             </Box>
 
-            {/* Warning */}
-            <Box p={5}>
+            <Box px={4} py={3}>
               <Box p={4} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600" mb={4}>
                 <VStack gap={3} align="start">
                   <Text fontSize="sm" color="red.200" fontWeight="bold">
