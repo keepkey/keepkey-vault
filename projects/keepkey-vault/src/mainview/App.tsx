@@ -33,6 +33,7 @@ function App() {
 	const deviceState = useDeviceState()
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
+	const [setupInProgress, setSetupInProgress] = useState(false)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
@@ -390,6 +391,7 @@ function App() {
 
 	const phase: AppPhase =
 		isClaimed ? "claimed"
+		: !wizardComplete && setupInProgress && deviceState.state === "disconnected" ? "setup"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"
@@ -538,7 +540,7 @@ function App() {
 	if (phase === "setup") {
 		return (
 			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<OobSetupWizard onComplete={() => setWizardComplete(true)} />
+				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} />
 			</>
 		)
 	}
