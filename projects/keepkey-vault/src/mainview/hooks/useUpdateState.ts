@@ -108,7 +108,7 @@ export function useUpdateState() {
   const downloadUpdate = useCallback(async () => {
     setState(prev => ({ ...prev, phase: 'downloading', progress: 0, error: undefined }))
     try {
-      await rpcRequest('downloadUpdate', undefined, 600000)
+      await rpcRequest('downloadUpdate', undefined, 0)
     } catch (e: any) {
       setState(prev => ({ ...prev, phase: 'error', error: e.message }))
     }

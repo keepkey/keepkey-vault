@@ -140,6 +140,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       windowClose: { params: void; response: void }
       windowMinimize: { params: void; response: void }
       windowMaximize: { params: void; response: void }
+      windowGetFrame: { params: void; response: { x: number; y: number; width: number; height: number } }
+      windowSetPosition: { params: { x: number; y: number }; response: void }
+      windowSetFrame: { params: { x: number; y: number; width: number; height: number }; response: void }
     }
     messages: {
       'device-state': DeviceStateInfo

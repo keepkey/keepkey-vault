@@ -7,7 +7,13 @@
 		"createDescription": "KeepKey 화면을 보고 위치를 탭하여 새 PIN을 설정하세요",
 		"confirmDescription": "확인을 위해 동일한 PIN을 다시 입력하세요",
 		"backspace": "백스페이스",
-		"unlock": "잠금 해제"
+		"unlock": "잠금 해제",
+		"forgotPinWipe": "PIN을 잊으셨나요? 기기 초기화",
+		"wipeWarningTitle": "KeepKey 초기화",
+		"wipeWarningDescription": "KeepKey를 초기화하면 모든 키와 설정이 삭제됩니다. 복구 문구가 없으면 자금에 접근할 수 없게 됩니다.",
+		"wipeAcknowledge": "복구 문구를 백업했으며 제가 무엇을 하고 있는지 이해합니다",
+		"wipeDevice": "기기 초기화",
+		"wiping": "초기화 중..."
 	},
 	"passphrase": {
 		"title": "비밀번호 구문 입력",

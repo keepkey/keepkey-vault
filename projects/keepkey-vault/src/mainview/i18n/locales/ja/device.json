@@ -7,7 +7,13 @@
 		"createDescription": "KeepKeyの画面を見て、位置をタップして新しいPINを設定してください",
 		"confirmDescription": "確認のため同じPINをもう一度入力してください",
 		"backspace": "バックスペース",
-		"unlock": "ロック解除"
+		"unlock": "ロック解除",
+		"forgotPinWipe": "PINを忘れましたか？デバイスを消去",
+		"wipeWarningTitle": "KeepKeyを消去",
+		"wipeWarningDescription": "KeepKeyを消去すると、すべてのキーと設定が削除されます。リカバリーフレーズがない場合、資金へのアクセスを失います。",
+		"wipeAcknowledge": "リカバリーフレーズをバックアップしており、自分が何をしているか理解しています",
+		"wipeDevice": "デバイスを消去",
+		"wiping": "消去中..."
 	},
 	"passphrase": {
 		"title": "パスフレーズを入力",

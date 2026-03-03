@@ -7,7 +7,13 @@
 		"createDescription": "Guarda lo schermo del tuo KeepKey e tocca le posizioni per impostare un nuovo PIN",
 		"confirmDescription": "Inserisci lo stesso PIN di nuovo per confermare",
 		"backspace": "Cancella",
-		"unlock": "Sblocca"
+		"unlock": "Sblocca",
+		"forgotPinWipe": "PIN dimenticato? Cancella dispositivo",
+		"wipeWarningTitle": "Cancella il tuo KeepKey",
+		"wipeWarningDescription": "Cancellare il tuo KeepKey eliminerà tutte le chiavi e le impostazioni. Perderai l'accesso ai tuoi fondi se non hai la tua frase di recupero.",
+		"wipeAcknowledge": "Ho fatto il backup della mia frase di recupero e capisco cosa sto facendo",
+		"wipeDevice": "Cancella dispositivo",
+		"wiping": "Cancellazione..."
 	},
 	"passphrase": {
 		"title": "Inserisci passphrase",

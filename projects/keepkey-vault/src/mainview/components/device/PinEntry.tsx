@@ -8,6 +8,7 @@ interface PinEntryProps {
 	type?: PinRequestType
 	onSubmit: (pin: string) => void
 	onCancel: () => void
+	onWipe?: () => void
 }
 
 const TITLE_KEYS: Record<PinRequestType, string> = {
@@ -47,14 +48,25 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps) {
+export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEntryProps) {
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
+	const [showWipeConfirm, setShowWipeConfirm] = useState(false)
+	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
+	const [wiping, setWiping] = useState(false)
 
 	// Reset pin when type changes (e.g. new-first → new-second)
 	useEffect(() => {
 		setPin("")
+		setShowWipeConfirm(false)
+		setWipeAcknowledged(false)
 	}, [type])
+
+	const handleWipe = useCallback(async () => {
+		if (!onWipe) return
+		setWiping(true)
+		onWipe()
+	}, [onWipe])
 
 	const handleDigit = useCallback((digit: string) => {
 		setPin((p) => (p.length < 9 ? p + digit : p))
@@ -125,6 +137,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 					{t(DESCRIPTION_KEYS[type])}
 				</Text>
 
+				{!showWipeConfirm && (<>
 				{/* PIN display — masked dots */}
 				<Box
 					bg="kk.bg"
@@ -216,20 +229,103 @@ export function PinEntry({ type = "current", onSubmit, onCancel }: PinEntryProps
 						{type === "current" ? t("pin.unlock") : t("confirm", { ns: "common" })}
 					</Button>
 				</Flex>
+			</>)}
 
-				{type === "current" && (
-					<Button
-						onClick={onCancel}
-						size="sm"
-						variant="ghost"
-						color="kk.textMuted"
-						transition="color 0.15s ease"
-						_hover={{ color: "kk.error" }}
-						w="100%"
-						mt="3"
+				{type === "current" && !showWipeConfirm && (
+					<>
+						<Button
+							onClick={onCancel}
+							size="sm"
+							variant="ghost"
+							color="kk.textMuted"
+							transition="color 0.15s ease"
+							_hover={{ color: "kk.error" }}
+							w="100%"
+							mt="3"
+						>
+							{t("cancel", { ns: "common" })}
+						</Button>
+						{onWipe && (
+							<Text
+								fontSize="xs"
+								color="kk.textMuted"
+								textAlign="center"
+								mt="2"
+								cursor="pointer"
+								transition="color 0.15s ease"
+								_hover={{ color: "kk.error" }}
+								onClick={() => setShowWipeConfirm(true)}
+							>
+								{t("pin.forgotPinWipe")}
+							</Text>
+						)}
+					</>
+				)}
+
+				{/* Wipe confirmation panel */}
+				{showWipeConfirm && (
+					<Box
+						mt="4"
+						p="4"
+						bg="rgba(255, 59, 48, 0.06)"
+						borderRadius="lg"
+						border="1px solid"
+						borderColor="rgba(255, 59, 48, 0.3)"
 					>
-						{t("cancel", { ns: "common" })}
-					</Button>
+						<Text fontSize="sm" fontWeight="600" color="kk.error" mb="2">
+							{t("pin.wipeWarningTitle")}
+						</Text>
+						<Text fontSize="xs" color="kk.textSecondary" mb="3" lineHeight="1.5">
+							{t("pin.wipeWarningDescription")}
+						</Text>
+						<Flex
+							as="label"
+							align="flex-start"
+							gap="2"
+							mb="3"
+							cursor="pointer"
+							userSelect="none"
+						>
+							<Box
+								as="input"
+								type="checkbox"
+								checked={wipeAcknowledged}
+								onChange={(e: any) => setWipeAcknowledged(e.target.checked)}
+								mt="1"
+								accentColor="#FFD700"
+							/>
+							<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+								{t("pin.wipeAcknowledge")}
+							</Text>
+						</Flex>
+						<Flex gap="2">
+							<Button
+								size="sm"
+								variant="outline"
+								borderColor="rgba(255, 215, 0, 0.2)"
+								color="kk.textSecondary"
+								_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
+								flex={1}
+								onClick={() => { setShowWipeConfirm(false); setWipeAcknowledged(false) }}
+								disabled={wiping}
+							>
+								{t("cancel", { ns: "common" })}
+							</Button>
+							<Button
+								size="sm"
+								bg="kk.error"
+								color="white"
+								fontWeight="600"
+								_hover={{ opacity: 0.85 }}
+								_active={{ transform: "scale(0.97)" }}
+								flex={1}
+								onClick={handleWipe}
+								disabled={!wipeAcknowledged || wiping}
+							>
+								{wiping ? t("pin.wiping") : t("pin.wipeDevice")}
+							</Button>
+						</Flex>
+					</Box>
 				)}
 
 				<Flex justify="flex-end" mt="3">

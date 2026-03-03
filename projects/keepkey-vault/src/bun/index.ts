@@ -245,7 +245,7 @@ if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings 
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
-	maxRequestTime: 600000, // device-interactive ops (recovery, create) can take 5-10 minutes
+	maxRequestTime: Infinity, // no timeout — user can take as long as needed to confirm on device
 	handlers: {
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────
@@ -285,6 +285,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			wipeDevice: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
+				// Cancel any pending PIN/passphrase request before wiping —
+				// the transport lock is held while waiting for PIN input,
+				// so wipe() would deadlock without this.
+				await engine.wallet.cancel().catch(() => {})
 				await engine.wallet.wipe()
 				await engine.syncState()
 				return { success: true }
@@ -1219,6 +1223,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			windowClose: async () => { _mainWindow?.close() },
 			windowMinimize: async () => { _mainWindow?.minimize() },
 			windowMaximize: async () => { _mainWindow?.maximize() },
+			windowGetFrame: async () => _mainWindow!.getFrame(),
+			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
+			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
 		},
 		messages: {},
 	},
@@ -1338,7 +1345,7 @@ const mainWindow = new BrowserWindow({
 	title: "KeepKey Vault",
 	url,
 	rpc,
-	titleBarStyle: "hidden",
+	// titleBarStyle left as default — "hidden" breaks WKWebView keyboard input
 	frame: {
 		width: 1200,
 		height: 800,

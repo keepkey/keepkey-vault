@@ -123,8 +123,8 @@ export function FirmwareDropZone() {
 		setPhase("flashing")
 		setProgress({ percent: 0, message: "Starting firmware flash..." })
 		try {
-			// 10 min timeout — firmware erase + upload can be slow
-			await rpcRequest("flashCustomFirmware", { data: fileDataB64 }, 600000)
+			// No timeout — user must confirm on device, can take as long as needed
+			await rpcRequest("flashCustomFirmware", { data: fileDataB64 }, 0)
 			// Progress events drive phase to "complete" via the firmware-progress listener
 		} catch (err: any) {
 			setError(err?.message || "Firmware flash failed")

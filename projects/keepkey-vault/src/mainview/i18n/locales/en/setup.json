@@ -39,7 +39,10 @@
 		"step4Release": "4. Release when the bootloader screen appears",
 		"listeningForBootloader": "Listening for device in bootloader mode...",
 		"readyDetectBootloader": "I'm Ready — Detect Bootloader",
-		"skipBootloaderUpdate": "Skip Bootloader Update"
+		"skipBootloaderUpdate": "Skip Bootloader Update",
+		"verifyBackupHint": "On the KeepKey, it will ask you to verify backup. We will do this after updating — hold the button to skip this for now.",
+		"followDirectionsOnDevice": "Follow directions on device",
+		"deviceWillGuide": "Your KeepKey will guide you through the update process."
 	},
 	"firmware": {
 		"title": "Firmware Update",
@@ -58,7 +61,14 @@
 		"firmwareVerified": "Firmware verified as official release",
 		"firmwareHashNotFound": "Firmware hash not found in manifest",
 		"updateFirmwareTo": "Update Firmware to v{{version}}",
-		"skipUpdate": "Skip Update"
+		"skipUpdate": "Skip Update",
+		"confirmOnDevice": "Confirm action on device!",
+		"lookAtDeviceAndPress": "Look at your KeepKey screen and press the button to confirm.",
+		"verifyBackupNote": "If your device is not set up, you can safely ignore any \"verify backup\" screen.",
+		"uploadingFirmware": "Uploading firmware... Do not disconnect your device",
+		"estimatedTimeRemaining": "Estimated time remaining: {{seconds}}s",
+		"deviceWillRestart": "Your device will restart when complete.",
+		"skipWarning": "You can continue with older firmware. Some features may not work as expected."
 	},
 	"initChoose": {
 		"title": "Set Up Your Wallet",

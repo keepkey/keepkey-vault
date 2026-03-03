@@ -68,13 +68,17 @@ pub fn main() !void {
     var si = STARTUPINFOW{};
     var pi = PROCESS_INFORMATION{};
 
+    // CREATE_NO_WINDOW prevents a console host window from flashing on screen
+    // when launching the background bun/launcher process.
+    const CREATE_NO_WINDOW: DWORD = 0x08000000;
+
     const ok = CreateProcessW(
         null,
         cmd_w,
         null,
         null,
         0,
-        0,
+        CREATE_NO_WINDOW,
         null,
         cwd_w,
         &si,
