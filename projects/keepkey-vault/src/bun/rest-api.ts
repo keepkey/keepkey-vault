@@ -4,6 +4,11 @@ import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
 import { CHAINS } from '../shared/chains'
+import {
+  initializeOrchard, initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
+} from './txbuilder/zcash-shielded'
+import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -1449,6 +1454,62 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.SendPinRequest)
           await wallet.sendPin(body.pin)
           return json({ success: true })
+        }
+
+        // ── Zcash Shielded (Orchard) ────────────────────────────────
+
+        if (path === '/api/zcash/shielded/status' && method === 'GET') {
+          return json({ ready: isSidecarReady() })
+        }
+
+        if (path === '/api/zcash/shielded/init' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { seed_hex?: string; from_device?: boolean; account?: number }
+          if (body.from_device) {
+            const wallet = requireWallet(engine)
+            const result = await initializeOrchardFromDevice(wallet, body.account ?? 0)
+            return json(result)
+          }
+          if (!body.seed_hex) return json({ error: 'Missing seed_hex or from_device flag' }, 400)
+          const result = await initializeOrchard(body.seed_hex, body.account ?? 0)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/scan' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { start_height?: number }
+          const result = await scanOrchardNotes(body.start_height)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/balance' && method === 'GET') {
+          auth.requireAuth(req)
+          const result = await getShieldedBalance()
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/build' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { recipient: string; amount: number; account?: number }
+          if (!body.recipient || !body.amount) return json({ error: 'Missing recipient or amount' }, 400)
+          const result = await buildShieldedTx(body)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/finalize' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { signatures: string[] }
+          if (!body.signatures?.length) return json({ error: 'Missing signatures' }, 400)
+          const result = await finalizeShieldedTx(body.signatures)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/broadcast' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { raw_tx: string }
+          if (!body.raw_tx) return json({ error: 'Missing raw_tx' }, 400)
+          const result = await broadcastShieldedTx(body.raw_tx)
+          return json(result)
         }
 
         // ── Catch-all ────────────────────────────────────────────────

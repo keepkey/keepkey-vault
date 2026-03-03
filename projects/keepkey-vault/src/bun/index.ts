@@ -13,6 +13,8 @@ import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
+import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
+import { isSidecarReady, startSidecar, stopSidecar } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
@@ -1140,6 +1142,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return Object.fromEntries(map)
 			},
 
+			// ── Zcash Shielded (Orchard) ────────────────────────────
+			zcashShieldedStatus: async () => {
+				return { ready: isSidecarReady() }
+			},
+			zcashShieldedInit: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
+			},
+			zcashShieldedScan: async (params) => {
+				return await scanOrchardNotes(params?.startHeight)
+			},
+			zcashShieldedBalance: async () => {
+				return await getShieldedBalance()
+			},
+			zcashShieldedSend: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				return await sendShielded(engine.wallet as any, {
+					recipient: params.recipient,
+					amount: params.amount,
+					memo: params.memo,
+				})
+			},
+
 			// ── Camera / QR scanning ─────────────────────────────────
 			startQrScan: async () => {
 				startCamera(
@@ -1631,6 +1656,14 @@ if (process.platform === 'win32') {
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
+// Start Zcash sidecar (fire-and-forget — UI shows status via zcashShieldedStatus RPC)
+startSidecar().catch(e => {
+	console.error('[Vault] ZCASH SIDECAR FAILED TO START:', e.message)
+	if (e.message.includes('not found')) {
+		console.error('[Vault] Build it with: cd projects/keepkey-vault/zcash-cli && cargo build --release')
+	}
+})
+
 // Cache app version for REST health endpoint
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
@@ -1668,6 +1701,7 @@ function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
 	stopCamera()
+	stopSidecar()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()

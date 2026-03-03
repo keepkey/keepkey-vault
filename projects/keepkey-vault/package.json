@@ -16,6 +16,7 @@
   "dependencies": {
     "@chakra-ui/react": "^3.33.0",
     "@emotion/react": "^11.14.0",
+    "@keepkey/device-protocol": "file:../../modules/device-protocol",
     "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
     "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",
     "@keepkey/hdwallet-keepkey-nodehid": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodehid",
@@ -54,6 +55,7 @@
     "tiny-secp256k1"
   ],
   "overrides": {
+    "@keepkey/device-protocol": "file:../../modules/device-protocol",
     "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
     "@keepkey/hdwallet-keepkey": "file:../../modules/hdwallet/packages/hdwallet-keepkey",

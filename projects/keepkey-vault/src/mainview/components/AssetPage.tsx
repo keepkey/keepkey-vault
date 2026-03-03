@@ -11,6 +11,7 @@ import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance, formatUsd } from "../lib/formatting"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
+import { ZcashPrivacyTab } from "./ZcashPrivacyTab"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
@@ -18,7 +19,7 @@ import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { detectSpamToken, type SpamResult } from "../../shared/spamFilter"
 
-type AssetView = "receive" | "send"
+type AssetView = "receive" | "send" | "privacy"
 
 interface AssetPageProps {
 	chain: ChainDef
@@ -219,9 +220,12 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		}
 	}, [])
 
+	const isZcash = chain.id === 'zcash'
+
 	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: t("receive"), icon: FaArrowDown },
 		{ id: "send", label: t("send"), icon: FaArrowUp },
+		...(isZcash ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
 	]
 
 	// Shared token row renderer
@@ -503,6 +507,9 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
+					)}
+					{view === "privacy" && isZcash && (
+						<ZcashPrivacyTab />
 					)}
 				</Box>
 

@@ -202,7 +202,9 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 	const hasAnyBalance = chartData.length > 0
 
-	const sortedChains = useMemo(() => [...allChains].sort((a, b) => {
+	const visibleChains = useMemo(() => allChains.filter(c => !c.hidden), [allChains])
+
+	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
 		const bUsd = cleanBalanceUsd.get(b.id)?.usd || 0
 		const aHas = aUsd > 0 || parseFloat(balances.get(a.id)?.balance || '0') > 0
@@ -211,7 +213,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 		if (!aHas && bHas) return 1
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
-	}), [allChains, balances, cleanBalanceUsd])
+	}), [visibleChains, balances, cleanBalanceUsd])
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances

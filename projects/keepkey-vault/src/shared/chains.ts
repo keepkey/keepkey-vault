@@ -9,7 +9,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded'
   color: string
   rpcMethod: string
   signMethod: string
@@ -19,6 +19,7 @@ export interface ChainDef {
   chainId?: string
   explorerAddressUrl?: string  // e.g. "https://etherscan.io/address/{{address}}"
   explorerTxUrl?: string       // e.g. "https://etherscan.io/tx/{{txid}}"
+  hidden?: boolean             // If true, hide from Dashboard grid (used for internal-only chains)
 }
 
 // ── Bitcoin multi-account constants ─────────────────────────────────────
@@ -160,6 +161,13 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#ECB244',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
+  },
+  {
+    id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
+    chainFamily: 'zcash-shielded', color: '#ECB244',
+    rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
+    defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
+    hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
   },
   {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
