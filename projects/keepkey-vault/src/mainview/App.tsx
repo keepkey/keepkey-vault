@@ -391,7 +391,7 @@ function App() {
 
 	const phase: AppPhase =
 		isClaimed ? "claimed"
-		: !wizardComplete && setupInProgress && deviceState.state === "disconnected" ? "setup"
+		: !wizardComplete && setupInProgress ? "setup"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"
