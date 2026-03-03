@@ -167,7 +167,7 @@ initTransport()
  * Make an RPC request to the Bun main process.
  * @param method - RPC method name
  * @param params - Optional parameters
- * @param timeoutMs - Timeout in ms (default 30s, use longer for device-interactive ops)
+ * @param timeoutMs - Timeout in ms (default 30s). Pass 0 for no timeout (device-interactive ops).
  */
 export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -178,12 +178,15 @@ export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30
 
     const id = ++nextRequestId
 
-    const timer = setTimeout(() => {
-      if (pendingRequests.has(id)) {
-        pendingRequests.delete(id)
-        reject(new Error(`RPC request timed out: ${method}`))
-      }
-    }, timeoutMs)
+    // timeoutMs === 0 means no timeout (user-interactive operations like firmware flash)
+    const timer = timeoutMs > 0
+      ? setTimeout(() => {
+          if (pendingRequests.has(id)) {
+            pendingRequests.delete(id)
+            reject(new Error(`RPC request timed out: ${method}`))
+          }
+        }, timeoutMs)
+      : (undefined as any as ReturnType<typeof setTimeout>)
 
     pendingRequests.set(id, { resolve, reject, timer })
 

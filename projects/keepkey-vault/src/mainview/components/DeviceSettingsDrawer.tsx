@@ -209,7 +209,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setVerifying(true)
 		setVerifyResult(null)
 		try {
-			const result = await rpcRequest("verifySeed", { wordCount: verifyWordCount }, 600000) as { success: boolean; message: string }
+			const result = await rpcRequest("verifySeed", { wordCount: verifyWordCount }, 0) as { success: boolean; message: string }
 			setVerifyResult(result)
 		} catch (e: any) {
 			const msg = typeof e?.message === "string" ? e.message : t("verificationFailed")
@@ -221,7 +221,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const wipeDevice = useCallback(async () => {
 		setWiping(true)
 		try {
-			await rpcRequest("wipeDevice", undefined, 60000)
+			await rpcRequest("wipeDevice", undefined, 0)
 		} catch (e: any) { console.error("wipeDevice:", e) }
 		setWiping(false)
 		setWipeConfirm(false)
@@ -274,7 +274,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const handleChangePin = useCallback(async () => {
 		setChangingPin(true)
 		try {
-			await rpcRequest("changePin", undefined, 600000)
+			await rpcRequest("changePin", undefined, 0)
 		} catch (e: any) { console.error("changePin:", e) }
 		setChangingPin(false)
 		// Refresh features

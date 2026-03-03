@@ -245,7 +245,7 @@ if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings 
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
-	maxRequestTime: 600000, // device-interactive ops (recovery, create) can take 5-10 minutes
+	maxRequestTime: Infinity, // no timeout — user can take as long as needed to confirm on device
 	handlers: {
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────

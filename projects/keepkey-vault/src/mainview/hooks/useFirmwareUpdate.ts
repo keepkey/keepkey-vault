@@ -26,7 +26,7 @@ export function useFirmwareUpdate() {
     setError(null)
     setProgress({ percent: 0, message: 'Starting bootloader update...' })
     try {
-      await rpcRequest('startBootloaderUpdate')
+      await rpcRequest('startBootloaderUpdate', undefined, 0)
       setState('complete')
     } catch (err: any) {
       setState('error')
@@ -39,7 +39,7 @@ export function useFirmwareUpdate() {
     setError(null)
     setProgress({ percent: 0, message: 'Starting firmware update...' })
     try {
-      await rpcRequest('startFirmwareUpdate')
+      await rpcRequest('startFirmwareUpdate', undefined, 0)
       setState('complete')
     } catch (err: any) {
       setState('error')

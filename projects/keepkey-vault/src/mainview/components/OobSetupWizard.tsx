@@ -8,6 +8,8 @@ import {
   FaCheckCircle,
   FaExclamationTriangle,
   FaPlus,
+  FaChevronDown,
+  FaChevronUp,
 } from 'react-icons/fa'
 import holdAndConnectSvg from '../assets/svg/hold-and-connect.svg'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
@@ -116,6 +118,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
     { id: 'firmware', label: t('visibleSteps.firmware'), number: 2 },
     { id: 'init-choose', label: t('visibleSteps.setup'), number: 3 },
   ]
+
+  // Advanced seed length toggle for create wallet
+  const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
 
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
@@ -349,8 +354,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
   // ── Init: Create / Recover ─────────────────────────────────────────────
 
-  // Device-interactive ops need 10 min timeout — user enters seed words on device
-  const DEVICE_INTERACTION_TIMEOUT = 600000
+  // No timeout for device-interactive ops — user can take as long as needed
+  const DEVICE_INTERACTION_TIMEOUT = 0
 
   const handleCreateWallet = async () => {
     setSetupType('create')
@@ -995,36 +1000,6 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                   </Text>
                 </VStack>
 
-                {/* Word count selector */}
-                <Box w="100%" maxW="400px" mx="auto">
-                  <Text fontSize="xs" color="gray.400" textAlign="center" mb="2">
-                    {t('initChoose.seedLength', { defaultValue: 'Recovery seed length' })}
-                  </Text>
-                  <Flex gap="2" justify="center">
-                    {([12, 18, 24] as const).map((wc) => (
-                      <Box
-                        key={wc}
-                        as="button"
-                        px="5"
-                        py="2"
-                        borderRadius="lg"
-                        fontSize="sm"
-                        fontWeight="600"
-                        cursor="pointer"
-                        bg={wordCount === wc ? HIGHLIGHT : 'gray.700'}
-                        color={wordCount === wc ? 'white' : 'gray.400'}
-                        borderWidth="2px"
-                        borderColor={wordCount === wc ? HIGHLIGHT : 'transparent'}
-                        _hover={{ bg: wordCount === wc ? 'orange.600' : 'gray.600' }}
-                        transition="all 0.15s"
-                        onClick={() => setWordCount(wc)}
-                      >
-                        {wc} {t('initChoose.words', { defaultValue: 'words' })}
-                      </Box>
-                    ))}
-                  </Flex>
-                </Box>
-
                 {setupError && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="md" borderWidth="1px" borderColor="red.600">
                     <Text fontSize="sm" color="red.300">{setupError}</Text>
@@ -1048,13 +1023,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                     borderWidth="2px"
                     borderColor="transparent"
                     bg="gray.700"
-                    cursor="pointer"
                     transition="all 0.2s"
                     _hover={{
                       borderColor: 'orange.500',
                       transform: 'translateY(-2px)',
                     }}
-                    onClick={handleCreateWallet}
                   >
                     <VStack gap={4}>
                       <Box p={{ base: 3, md: 4 }} borderRadius="full" bg="orange.500" color="white">
@@ -1068,6 +1041,78 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                           {t('initChoose.createDescription')}
                         </Text>
                       </VStack>
+
+                      {/* Collapsible seed length for create */}
+                      <Box w="100%">
+                        <Flex
+                          as="button"
+                          align="center"
+                          justify="center"
+                          gap="1"
+                          w="100%"
+                          py="1"
+                          cursor="pointer"
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation()
+                            setShowCreateAdvanced(!showCreateAdvanced)
+                          }}
+                          _hover={{ opacity: 0.8 }}
+                        >
+                          <Text fontSize="xs" color="gray.500">
+                            {t('initChoose.seedLength', { defaultValue: 'Seed length' })}: {wordCount} {t('initChoose.words', { defaultValue: 'words' })}
+                          </Text>
+                          {showCreateAdvanced
+                            ? <FaChevronUp color="#718096" size={10} />
+                            : <FaChevronDown color="#718096" size={10} />
+                          }
+                        </Flex>
+                        {showCreateAdvanced && (
+                          <VStack gap="2" mt="2">
+                            <Flex gap="2" justify="center" w="100%">
+                              {([12, 18, 24] as const).map((wc) => (
+                                <Box
+                                  key={wc}
+                                  as="button"
+                                  px="4"
+                                  py="1.5"
+                                  borderRadius="md"
+                                  fontSize="xs"
+                                  fontWeight="600"
+                                  cursor="pointer"
+                                  bg={wordCount === wc ? HIGHLIGHT : 'gray.600'}
+                                  color={wordCount === wc ? 'white' : 'gray.400'}
+                                  borderWidth="1px"
+                                  borderColor={wordCount === wc ? HIGHLIGHT : 'transparent'}
+                                  _hover={{ bg: wordCount === wc ? 'orange.600' : 'gray.500' }}
+                                  transition="all 0.15s"
+                                  onClick={(e: React.MouseEvent) => {
+                                    e.stopPropagation()
+                                    setWordCount(wc)
+                                  }}
+                                >
+                                  {wc}
+                                </Box>
+                              ))}
+                            </Flex>
+                            <Text fontSize="xs" color="gray.500" textAlign="center" lineHeight="tall" px="2">
+                              {t('initChoose.entropyNote', { defaultValue: 'Added seed length does not improve overall wallet entropy.' })}{' '}
+                              <Text
+                                as="a"
+                                href="https://keepkey.com/blog/why_does_keepkey_only_generate_12_words_"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                color={HIGHLIGHT}
+                                textDecoration="underline"
+                                _hover={{ color: 'orange.300' }}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              >
+                                {t('initChoose.learnMore', { defaultValue: 'Learn more' })}
+                              </Text>
+                            </Text>
+                          </VStack>
+                        )}
+                      </Box>
+
                       <Button
                         w="100%"
                         size={{ base: 'md', md: 'lg' }}
@@ -1095,13 +1140,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                     borderWidth="2px"
                     borderColor="transparent"
                     bg="gray.700"
-                    cursor="pointer"
                     transition="all 0.2s"
                     _hover={{
                       borderColor: 'blue.500',
                       transform: 'translateY(-2px)',
                     }}
-                    onClick={handleRecoverWallet}
                   >
                     <VStack gap={4}>
                       <Box p={{ base: 3, md: 4 }} borderRadius="full" bg="blue.500" color="white">
@@ -1115,6 +1158,40 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
                           {t('initChoose.recoverDescription')}
                         </Text>
                       </VStack>
+
+                      {/* Prominent seed length selector for recovery */}
+                      <Box w="100%">
+                        <Text fontSize="sm" color="gray.300" textAlign="center" mb="2" fontWeight="500">
+                          {t('initChoose.howManyWords', { defaultValue: 'How many words in your seed?' })}
+                        </Text>
+                        <Flex gap="2" justify="center" w="100%">
+                          {([12, 18, 24] as const).map((wc) => (
+                            <Box
+                              key={wc}
+                              as="button"
+                              px="5"
+                              py="2"
+                              borderRadius="lg"
+                              fontSize="sm"
+                              fontWeight="600"
+                              cursor="pointer"
+                              bg={wordCount === wc ? 'blue.500' : 'gray.600'}
+                              color={wordCount === wc ? 'white' : 'gray.400'}
+                              borderWidth="2px"
+                              borderColor={wordCount === wc ? 'blue.500' : 'transparent'}
+                              _hover={{ bg: wordCount === wc ? 'blue.600' : 'gray.500' }}
+                              transition="all 0.15s"
+                              onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation()
+                                setWordCount(wc)
+                              }}
+                            >
+                              {wc} {t('initChoose.words', { defaultValue: 'words' })}
+                            </Box>
+                          ))}
+                        </Flex>
+                      </Box>
+
                       <Button
                         w="100%"
                         size={{ base: 'md', md: 'lg' }}
