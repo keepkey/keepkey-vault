@@ -199,11 +199,21 @@ export class EngineController extends EventEmitter {
       } catch { /* never block on cache failure */ }
     }
 
-    // Auto-trigger PIN matrix on device OLED when state becomes needs_pin
+    // Auto-trigger PIN matrix on device OLED when state becomes needs_pin.
+    // After a firmware/bootloader flash the device reboots — give the transport
+    // time to stabilise before firing getPublicKeys, otherwise the device may
+    // respond with Failure(7) "Invalid PIN" before the user even sees the overlay.
     if (state === 'needs_pin') {
-      this.promptPin().catch(err => {
-        console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
-      })
+      const delay = this.updatePhase === 'rebooting' ? 2000 : 0
+      if (this.updatePhase === 'rebooting') {
+        this.updatePhase = 'idle'
+        this.emit('state-change', this.getDeviceState())
+      }
+      setTimeout(() => {
+        this.promptPin().catch(err => {
+          console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
+        })
+      }, delay)
     }
   }
 
