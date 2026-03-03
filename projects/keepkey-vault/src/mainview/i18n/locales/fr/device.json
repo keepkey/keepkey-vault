@@ -7,7 +7,13 @@
 		"createDescription": "Regardez l'écran de votre KeepKey et appuyez sur les positions pour définir un nouveau PIN",
 		"confirmDescription": "Entrez le même PIN à nouveau pour confirmer",
 		"backspace": "Retour arrière",
-		"unlock": "Déverrouiller"
+		"unlock": "Déverrouiller",
+		"forgotPinWipe": "PIN oublié ? Effacer l'appareil",
+		"wipeWarningTitle": "Effacer votre KeepKey",
+		"wipeWarningDescription": "Effacer votre KeepKey supprimera toutes les clés et paramètres. Vous perdrez l'accès à vos fonds si vous n'avez pas votre phrase de récupération.",
+		"wipeAcknowledge": "J'ai sauvegardé ma phrase de récupération et je comprends ce que je fais",
+		"wipeDevice": "Effacer l'appareil",
+		"wiping": "Effacement..."
 	},
 	"passphrase": {
 		"title": "Entrer la phrase secrète",

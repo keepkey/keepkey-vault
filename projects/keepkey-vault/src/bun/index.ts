@@ -285,6 +285,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			wipeDevice: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
+				// Cancel any pending PIN/passphrase request before wiping —
+				// the transport lock is held while waiting for PIN input,
+				// so wipe() would deadlock without this.
+				await engine.wallet.cancel().catch(() => {})
 				await engine.wallet.wipe()
 				await engine.syncState()
 				return { success: true }
@@ -1341,7 +1345,7 @@ const mainWindow = new BrowserWindow({
 	title: "KeepKey Vault",
 	url,
 	rpc,
-	titleBarStyle: "hidden",
+	// titleBarStyle left as default — "hidden" breaks WKWebView keyboard input
 	frame: {
 		width: 1200,
 		height: 800,

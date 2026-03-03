@@ -7,7 +7,13 @@
 		"createDescription": "查看 KeepKey 屏幕并点击相应位置设置新 PIN",
 		"confirmDescription": "再次输入相同的 PIN 以确认",
 		"backspace": "退格",
-		"unlock": "解锁"
+		"unlock": "解锁",
+		"forgotPinWipe": "忘记 PIN？擦除设备",
+		"wipeWarningTitle": "擦除您的 KeepKey",
+		"wipeWarningDescription": "擦除您的 KeepKey 将删除所有密钥和设置。如果您没有恢复短语，将无法访问您的资金。",
+		"wipeAcknowledge": "我已备份恢复短语，并了解我正在做什么",
+		"wipeDevice": "擦除设备",
+		"wiping": "正在擦除..."
 	},
 	"passphrase": {
 		"title": "输入密码短语",

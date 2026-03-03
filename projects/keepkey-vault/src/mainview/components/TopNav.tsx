@@ -1,10 +1,6 @@
-import { useState } from "react"
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
-import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
-import { IS_WINDOWS } from "../lib/platform"
-import { useWindowDrag } from "../hooks/useWindowDrag"
 import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
@@ -31,54 +27,8 @@ const GridIcon = () => (
 	</svg>
 )
 
-/** Window control buttons — order: maximize (green), minimize (yellow), close (red) so X is rightmost */
-export function TrafficLights() {
-	const [hover, setHover] = useState(false)
-	const dots: { color: string; action: string; icon: JSX.Element | null }[] = [
-		{ color: "#28C840", action: "windowMaximize", icon: hover ? (
-			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 2.5L4 0.5L7 2.5V6L4 7.5L1 6z" fill="#006500" /></svg>
-		) : null },
-		{ color: "#FEBC2E", action: "windowMinimize", icon: hover ? (
-			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4h6" stroke="#985600" strokeWidth="1.2" strokeLinecap="round" /></svg>
-		) : null },
-		{ color: "#FF5F57", action: "windowClose", icon: hover ? (
-			<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l6 6M7 1L1 7" stroke="#4D0000" strokeWidth="1.2" strokeLinecap="round" /></svg>
-		) : null },
-	]
-	return (
-		<Flex
-			align="center"
-			gap="8px"
-			px="4px"
-			h="100%"
-			onMouseEnter={() => setHover(true)}
-			onMouseLeave={() => setHover(false)}
-		>
-			{dots.map((d) => (
-				<Box
-					key={d.action}
-					as="button"
-					w="12px"
-					h="12px"
-					borderRadius="full"
-					bg={d.color}
-					display="flex"
-					alignItems="center"
-					justifyContent="center"
-					cursor="pointer"
-					_hover={{ opacity: 0.9 }}
-					onClick={() => rpcRequest(d.action as any)}
-				>
-					{d.icon}
-				</Box>
-			))}
-		</Flex>
-	)
-}
-
-/** Minimal nav bar for splash / setup phases — drag region + traffic lights only */
+/** Minimal nav bar for splash / setup phases. */
 export function SplashNav() {
-	const windowDrag = useWindowDrag()
 	return (
 		<Flex
 			position="fixed"
@@ -91,13 +41,10 @@ export function SplashNav() {
 			borderBottom="1px solid"
 			borderColor="kk.border"
 			align="center"
-			pr="4"
+			px="4"
 			zIndex={Z.nav}
-			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
-			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
-			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
-			<Flex align="center" gap="2" flex="1" pl="14px">
+			<Flex align="center" gap="2">
 				<Image
 					src={kkIcon}
 					alt="KeepKey"
@@ -109,16 +56,12 @@ export function SplashNav() {
 					KeepKey Vault
 				</Text>
 			</Flex>
-			<Flex flex="1" justify="flex-end" align="center" onMouseDown={e => e.stopPropagation()}>
-				<TrafficLights />
-			</Flex>
 		</Flex>
 	)
 }
 
 export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
 	const { t } = useTranslation("nav")
-	const windowDrag = useWindowDrag()
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
@@ -149,14 +92,11 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			borderBottom="1px solid"
 			borderColor="kk.border"
 			align="center"
-			pr="4"
+			px="4"
 			zIndex={Z.nav}
-			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
-			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
-			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
 			{/* Left: device icon + label */}
-			<Flex align="center" gap="2" flex="1" pl="14px">
+			<Flex align="center" gap="2" flex="1">
 				<Box position="relative">
 					<Image
 						src={kkIcon}
@@ -199,12 +139,8 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 				) : null}
 			</Flex>
 
-			{/* Center: navigation tabs (icon above label)
-			 * onMouseDown stopPropagation prevents Electrobun's document-level drag
-			 * handler from intercepting clicks on these buttons. Without this, every
-			 * mousedown inside .electrobun-webkit-app-region-drag triggers startWindowMove
-			 * which on Windows uses raw input tracking that swallows the click event. */}
-			<HStack gap="1" onMouseDown={e => e.stopPropagation()}>
+			{/* Center: navigation tabs (icon above label) */}
+			<HStack gap="1">
 				{TAB_DEFS.map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
@@ -235,8 +171,8 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 				})}
 			</HStack>
 
-			{/* Right: settings gear + traffic lights */}
-			<Flex flex="1" justify="flex-end" align="center" gap="2" onMouseDown={e => e.stopPropagation()}>
+			{/* Right: settings gear */}
+			<Flex flex="1" justify="flex-end" align="center">
 				<IconButton
 					aria-label={t("deviceSettings")}
 					onClick={watchOnly ? undefined : onSettingsToggle}
@@ -252,7 +188,6 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 						<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
 					</svg>
 				</IconButton>
-				<TrafficLights />
 			</Flex>
 		</Flex>
 	)
