@@ -1,6 +1,6 @@
-import { Box, Text, Flex, VStack, Image } from "@chakra-ui/react"
+import { Box, Text, Flex, VStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
-import connectSvg from "../assets/svg/connect-keepkey.svg"
+import connectSvgRaw from "../assets/svg/connect-keepkey.svg?raw"
 
 export function DeviceClaimedDialog({ error }: { error: string }) {
   const { t } = useTranslation("device")
@@ -39,7 +39,7 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
         </Box>
 
         <Flex justify="center" py={2}>
-          <Image src={connectSvg} alt="Unplug and replug KeepKey" w="80px" h="80px" />
+          <Box w="80px" h="80px" dangerouslySetInnerHTML={{ __html: connectSvgRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
         </Flex>
 
         <Text fontSize="sm" color="gray.400" fontWeight="semibold">

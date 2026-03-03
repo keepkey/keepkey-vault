@@ -11,10 +11,12 @@ import {
   FaChevronDown,
   FaChevronUp,
 } from 'react-icons/fa'
-import holdAndConnectSvg from '../assets/svg/hold-and-connect.svg'
+import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
+import { useWindowDrag } from '../hooks/useWindowDrag'
 import { rpcRequest } from '../lib/rpc'
+import { IS_WINDOWS } from '../lib/platform'
 
 // ── Design tokens matching keepkey-bitcoin-only ─────────────────────────────
 const HIGHLIGHT = 'orange.500'
@@ -102,6 +104,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
   const [setupError, setSetupError] = useState<string | null>(null)
   const [, setSetupLoading] = useState(false)
   const { t } = useTranslation('setup')
+  const windowDrag = useWindowDrag()
 
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
     'welcome': t('stepDescriptions.welcome'),
@@ -481,14 +484,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
     >
       <style>{ANIMATIONS_CSS}</style>
 
-      {/* Drag backdrop — inset 6px from edges so native resize handles remain clickable */}
+      {/* Drag backdrop — inset 6px from edges so resize handles remain clickable */}
       <Box
         position="fixed"
         top="6px"
         left="6px"
         right="6px"
         bottom="6px"
-        className="electrobun-webkit-app-region-drag"
+        {...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+        {...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
         zIndex={-1}
       />
 
@@ -629,9 +633,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
               <VStack gap={3} w="100%" maxW="460px" mx="auto">
                 {!inBootloader && updateState !== 'updating' && updateState !== 'error' && (
                   <>
-                    <Box maxW="100px" mx="auto" opacity={0.85}>
-                      <img src={holdAndConnectSvg} alt="Hold button and connect USB" style={{ width: '100%' }} />
-                    </Box>
+                    <Box maxW="100px" mx="auto" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                         {t('bootloader.title')}
@@ -827,9 +829,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
 
                 {updateState === 'idle' && !inBootloader && (
                   <>
-                    <Box maxW="100px" mx="auto" opacity={0.85}>
-                      <img src={holdAndConnectSvg} alt="Hold button and connect USB" style={{ width: '100%' }} />
-                    </Box>
+                    <Box maxW="100px" mx="auto" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
                     <Box w="100%" p={2} bg="gray.700" borderRadius="lg" borderWidth="2px" borderColor="yellow.600">
                       <VStack align="start" gap={0.5}>
                         <HStack gap={2}>

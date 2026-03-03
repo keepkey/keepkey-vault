@@ -15,6 +15,9 @@ import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, TrafficLights } from "./components/TopNav"
+import { WindowResizeHandles } from "./components/WindowResizeHandles"
+import { IS_WINDOWS } from "./lib/platform"
+import { useWindowDrag } from "./hooks/useWindowDrag"
 import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
 import { AppStore } from "./components/AppStore"
@@ -32,6 +35,7 @@ function App() {
 	const { t } = useTranslation()
 	const deviceState = useDeviceState()
 	const update = useUpdateState()
+	const windowDrag = useWindowDrag()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
@@ -460,6 +464,17 @@ function App() {
 		</Flex>
 	)
 
+	const resizeHandles = <WindowResizeHandles />
+
+	// Drag props — spread onto full-viewport containers so clicking their
+	// background starts a window drag. On macOS uses Electrobun's class,
+	// on Windows uses the custom hook. The hook's interactive filter
+	// (button, a, input, etc.) protects buttons from triggering drag.
+	const dragProps = {
+		...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {}),
+		...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {}),
+	}
+
 	// Always-visible update banner (all phases)
 	const updateBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" ? (
 		<UpdateBanner
@@ -476,7 +491,7 @@ function App() {
 	// Watch-only mode: render dashboard with cached data (read-only)
 	if (watchOnlyMode) {
 		return (
-			<>{windowControls}{updateBanner}{firmwareDropZone}
+			<>{windowControls}{resizeHandles}{updateBanner}{firmwareDropZone}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
@@ -498,8 +513,8 @@ function App() {
 
 	if (phase === "claimed") {
 		return (
-			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed">
+			<>{windowControls}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed" dragProps={dragProps}>
 					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
 			</>
@@ -512,8 +527,9 @@ function App() {
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
 		return (
-			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
+					dragProps={dragProps}
 					statusText={
 						needsPin ? t("unlockYourKeepKey", { ns: "nav" })
 						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
@@ -539,7 +555,7 @@ function App() {
 
 	if (phase === "setup") {
 		return (
-			<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+			<>{windowControls}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} />
 			</>
 		)
@@ -550,9 +566,9 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
 
 	return (
-		<>{windowControls}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+		<>{windowControls}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
-				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
+				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" dragProps={dragProps} />
 			)}
 			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}

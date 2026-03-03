@@ -197,6 +197,19 @@ export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30
 /**
  * Listen for messages from the Bun main process.
  */
+/**
+ * Fire-and-forget RPC call — sends the packet but never registers a pending
+ * request. Used during drag/resize mousemove where latency matters and we
+ * don't need a response.
+ */
+export function rpcFire(method: string, params?: any): void {
+  if (!sendPacket) return
+  sendPacket({ type: 'request', id: ++nextRequestId, method, params })
+}
+
+/**
+ * Listen for messages from the Bun main process.
+ */
 export function onRpcMessage(messageName: string, listener: MessageListener): () => void {
   if (!messageListeners.has(messageName)) {
     messageListeners.set(messageName, new Set())

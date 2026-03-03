@@ -3,6 +3,8 @@ import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import { IS_WINDOWS } from "../lib/platform"
+import { useWindowDrag } from "../hooks/useWindowDrag"
 import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
@@ -76,6 +78,7 @@ export function TrafficLights() {
 
 export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
 	const { t } = useTranslation("nav")
+	const windowDrag = useWindowDrag()
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
@@ -108,7 +111,9 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			align="center"
 			pr="4"
 			zIndex={Z.nav}
-			className="electrobun-webkit-app-region-drag"
+			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
+			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1" pl="14px">
