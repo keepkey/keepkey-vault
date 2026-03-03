@@ -478,9 +478,19 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
       align="center"
       justify="center"
       zIndex={1000}
-      className="electrobun-webkit-app-region-drag"
     >
       <style>{ANIMATIONS_CSS}</style>
+
+      {/* Drag backdrop — inset 6px from edges so native resize handles remain clickable */}
+      <Box
+        position="fixed"
+        top="6px"
+        left="6px"
+        right="6px"
+        bottom="6px"
+        className="electrobun-webkit-app-region-drag"
+        zIndex={-1}
+      />
 
       <Box
         w={{ base: '100vw', md: '90vw', lg: '80vw' }}
