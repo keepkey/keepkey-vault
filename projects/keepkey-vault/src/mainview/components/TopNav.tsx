@@ -76,6 +76,46 @@ export function TrafficLights() {
 	)
 }
 
+/** Minimal nav bar for splash / setup phases — drag region + traffic lights only */
+export function SplashNav() {
+	const windowDrag = useWindowDrag()
+	return (
+		<Flex
+			position="fixed"
+			top={0}
+			left={0}
+			right={0}
+			h="50px"
+			bg="rgba(0,0,0,0.92)"
+			backdropFilter="blur(12px)"
+			borderBottom="1px solid"
+			borderColor="kk.border"
+			align="center"
+			pr="4"
+			zIndex={Z.nav}
+			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
+			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
+		>
+			<Flex align="center" gap="2" flex="1" pl="14px">
+				<Image
+					src={kkIcon}
+					alt="KeepKey"
+					w="24px"
+					h="24px"
+					borderRadius="4px"
+				/>
+				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
+					KeepKey Vault
+				</Text>
+			</Flex>
+			<Flex flex="1" justify="flex-end" align="center" onMouseDown={e => e.stopPropagation()}>
+				<TrafficLights />
+			</Flex>
+		</Flex>
+	)
+}
+
 export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()

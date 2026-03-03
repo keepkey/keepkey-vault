@@ -7,7 +7,6 @@ interface SplashScreenProps {
   hintText?: string
   children?: React.ReactNode
   variant?: 'searching' | 'connecting' | 'error' | 'claimed'
-  dragProps?: Record<string, any>
 }
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -17,7 +16,7 @@ const STATUS_DOT_COLORS: Record<string, string> = {
   claimed: '#3B82F6',
 }
 
-export function SplashScreen({ statusText, hintText, children, variant = 'searching', dragProps }: SplashScreenProps) {
+export function SplashScreen({ statusText, hintText, children, variant = 'searching' }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
 
   return (
@@ -26,7 +25,6 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
       width="100vw"
       bg="transparent"
       position="relative"
-      {...dragProps}
     >
       <Flex
         height="100%"

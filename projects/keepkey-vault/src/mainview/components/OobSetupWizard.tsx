@@ -14,9 +14,7 @@ import {
 import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
-import { useWindowDrag } from '../hooks/useWindowDrag'
 import { rpcRequest } from '../lib/rpc'
-import { IS_WINDOWS } from '../lib/platform'
 
 // ── Design tokens matching keepkey-bitcoin-only ─────────────────────────────
 const HIGHLIGHT = 'orange.500'
@@ -104,8 +102,6 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
   const [setupError, setSetupError] = useState<string | null>(null)
   const [, setSetupLoading] = useState(false)
   const { t } = useTranslation('setup')
-  const windowDrag = useWindowDrag()
-
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
     'welcome': t('stepDescriptions.welcome'),
     'bootloader': t('stepDescriptions.bootloader'),
@@ -487,20 +483,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
       align="center"
       justify="center"
       zIndex={1000}
+      pointerEvents="none"
     >
       <style>{ANIMATIONS_CSS}</style>
-
-      {/* Drag backdrop — inset 6px from edges so resize handles remain clickable */}
-      <Box
-        position="fixed"
-        top="6px"
-        left="6px"
-        right="6px"
-        bottom="6px"
-        {...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
-        {...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
-        zIndex={-1}
-      />
 
       <Box
         w={{ base: '100vw', md: '90vw', lg: '80vw' }}
@@ -514,7 +499,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress }: OobSetupWizard
         overflow="auto"
         display="flex"
         flexDirection="column"
-        onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}
+        pointerEvents="auto"
       >
         {/* ── Header ─────────────────────────────────────────────────── */}
         <Box px={4} py={2} borderBottomWidth="1px" borderColor="gray.700">
