@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Spinner } from "@chakra-ui/react"
-import { useTranslation } from "react-i18next"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { ReportMeta } from "../../shared/types"
@@ -10,13 +9,13 @@ interface ReportDialogProps {
 }
 
 export function ReportDialog({ onClose }: ReportDialogProps) {
-	const { t } = useTranslation("common")
 	const [generating, setGenerating] = useState(false)
 	const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
 	const [reports, setReports] = useState<ReportMeta[]>([])
 	const [error, setError] = useState<string | null>(null)
 	const [loadingReports, setLoadingReports] = useState(true)
 	const activeReportId = useRef<string | null>(null)
+	const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
 	// Load report list on mount
 	useEffect(() => {
@@ -62,6 +61,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 			await rpcRequest("deleteReport", { id }, 5000)
 			setReports(prev => prev.filter(r => r.id !== id))
 		} catch {}
+		setConfirmDeleteId(null)
 	}, [])
 
 	const [saving, setSaving] = useState<string | null>(null)
@@ -248,6 +248,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 													{(["JSON", "CSV", "PDF"] as const).map(fmt => {
 														const key = fmt.toLowerCase() as "json" | "csv" | "pdf"
 														const savingKey = `${r.id}-${key}`
+														const isSavingThis = saving === savingKey
 														return (
 															<Box
 																key={fmt}
@@ -261,34 +262,70 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 																border="1px solid"
 																borderColor="rgba(192,168,96,0.3)"
 																borderRadius="md"
-																cursor={saving ? "default" : "pointer"}
-																opacity={saving === savingKey ? 0.6 : 1}
-																_hover={saving ? {} : { bg: "rgba(192,168,96,0.2)" }}
-																onClick={() => !saving && handleDownload(r.id, key)}
+																cursor={isSavingThis ? "default" : "pointer"}
+																opacity={isSavingThis ? 0.6 : 1}
+																_hover={isSavingThis ? {} : { bg: "rgba(192,168,96,0.2)" }}
+																onClick={() => !isSavingThis && handleDownload(r.id, key)}
 															>
-																{saving === savingKey ? "Saving..." : fmt}
+																{isSavingThis ? "Saving..." : fmt}
 															</Box>
 														)
 													})}
 												</>
 											)}
-											<Box
-												as="button"
-												px="2.5"
-												py="1"
-												fontSize="10px"
-												fontWeight="600"
-												color="kk.textMuted"
-												bg="transparent"
-												border="1px solid"
-												borderColor="kk.border"
-												borderRadius="md"
-												cursor="pointer"
-												_hover={{ borderColor: "#DC3545", color: "#DC3545" }}
-												onClick={() => handleDelete(r.id)}
-											>
-												Delete
-											</Box>
+											{/* L8: Delete with confirmation */}
+											{confirmDeleteId === r.id ? (
+												<Flex gap="1" align="center">
+													<Box
+														as="button"
+														px="2"
+														py="1"
+														fontSize="10px"
+														fontWeight="600"
+														color="white"
+														bg="#DC3545"
+														borderRadius="md"
+														cursor="pointer"
+														onClick={() => handleDelete(r.id)}
+													>
+														Confirm
+													</Box>
+													<Box
+														as="button"
+														px="2"
+														py="1"
+														fontSize="10px"
+														fontWeight="600"
+														color="kk.textMuted"
+														bg="transparent"
+														border="1px solid"
+														borderColor="kk.border"
+														borderRadius="md"
+														cursor="pointer"
+														onClick={() => setConfirmDeleteId(null)}
+													>
+														Cancel
+													</Box>
+												</Flex>
+											) : (
+												<Box
+													as="button"
+													px="2.5"
+													py="1"
+													fontSize="10px"
+													fontWeight="600"
+													color="kk.textMuted"
+													bg="transparent"
+													border="1px solid"
+													borderColor="kk.border"
+													borderRadius="md"
+													cursor="pointer"
+													_hover={{ borderColor: "#DC3545", color: "#DC3545" }}
+													onClick={() => setConfirmDeleteId(r.id)}
+												>
+													Delete
+												</Box>
+											)}
 										</Flex>
 									</Box>
 								))}

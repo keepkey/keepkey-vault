@@ -16,7 +16,10 @@ import { getLatestDeviceSnapshot, getCachedPubkeys } from './db'
 import { getPioneerApiBase } from './pioneer'
 
 const REPORT_TIMEOUT_MS = 60_000
-const PIONEER_QUERY_KEY = process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
+
+function getPioneerQueryKey(): string {
+	return process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
+}
 
 function getPioneerBase(): string {
 	return getPioneerApiBase()
@@ -37,7 +40,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 async function fetchPubkeyInfo(baseUrl: string, xpub: string): Promise<any> {
 	const resp = await fetchWithTimeout(
 		`${baseUrl}/api/v1/utxo/pubkey-info/BTC/${xpub}`,
-		{ method: 'GET', headers: { 'Authorization': PIONEER_QUERY_KEY } },
+		{ method: 'GET', headers: { 'Authorization': getPioneerQueryKey() } },
 		REPORT_TIMEOUT_MS,
 	)
 	if (!resp.ok) throw new Error(`PubkeyInfo ${resp.status}`)
@@ -50,7 +53,7 @@ async function fetchTxHistory(baseUrl: string, xpub: string, caip: string): Prom
 		`${baseUrl}/api/v1/tx/history`,
 		{
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'Authorization': PIONEER_QUERY_KEY },
+			headers: { 'Content-Type': 'application/json', 'Authorization': getPioneerQueryKey() },
 			body: JSON.stringify({ queries: [{ pubkey: xpub, caip }] }),
 		},
 		REPORT_TIMEOUT_MS,
@@ -254,9 +257,9 @@ async function buildBtcSections(
 				xpub: x.xpub,
 				scriptType: x.scriptType,
 				label: `${x.scriptType}`,
-				balance: parseInt(String(info.balance || '0'), 10),
-				totalReceived: parseInt(String(info.totalReceived || '0'), 10),
-				totalSent: parseInt(String(info.totalSent || '0'), 10),
+				balance: Math.round(Number(info.balance || 0)),
+				totalReceived: Math.round(Number(info.totalReceived || 0)),
+				totalSent: Math.round(Number(info.totalSent || 0)),
 				txCount: info.txs || 0,
 				usedAddresses: used.map((t: any) => ({
 					name: t.name, path: t.path, transfers: t.transfers,
@@ -342,8 +345,8 @@ async function buildBtcSections(
 						confirmations: tx.confirmations || 0,
 						from: tx.from || [],
 						to: tx.to || [],
-						value: parseInt(String(tx.value || '0'), 10),
-						fee: parseInt(String(tx.fee || '0'), 10),
+						value: Math.round(Number(tx.value || 0)),
+						fee: Math.round(Number(tx.fee || 0)),
 						status: tx.status || 'confirmed',
 					})
 				}
@@ -404,28 +407,37 @@ async function buildBtcSections(
 			].filter(Boolean),
 		})
 
-		// Per-transaction details (first 50)
-		for (const tx of allTxs.slice(0, 50)) {
-			const date = tx.timestamp
-				? new Date(tx.timestamp * 1000).toISOString().replace('T', ' ').substring(0, 19)
-				: 'Pending'
+		// Per-transaction details as a single table (capped at 50 rows)
+		const MAX_TX_DETAILS = 50
+		const detailTxs = allTxs.slice(0, MAX_TX_DETAILS)
+		if (detailTxs.length > 0) {
 			sections.push({
-				title: `TX: ${tx.txid.substring(0, 20)}... (${tx.direction.toUpperCase()})`,
-				type: 'summary',
-				data: [
-					`Block: ${tx.blockHeight}`,
-					`Date: ${date}`,
-					`Confirmations: ${tx.confirmations}`,
-					`Value: ${(tx.value / 1e8).toFixed(8)} BTC`,
-					`Fee: ${(tx.fee / 1e8).toFixed(8)} BTC`,
-					`From: ${tx.from.join(', ') || 'N/A'}`,
-					`To: ${tx.to.join(', ') || 'N/A'}`,
-				],
+				title: `Transaction Details (${Math.min(allTxs.length, MAX_TX_DETAILS)}${allTxs.length > MAX_TX_DETAILS ? ` of ${allTxs.length}` : ''})`,
+				type: 'table',
+				data: {
+					headers: ['TXID', 'Dir', 'Block', 'Date', 'Value (BTC)', 'Fee (BTC)', 'From', 'To'],
+					widths: ['14%', '6%', '8%', '14%', '12%', '10%', '18%', '18%'],
+					rows: detailTxs.map(tx => {
+						const date = tx.timestamp
+							? new Date(tx.timestamp * 1000).toISOString().replace('T', ' ').substring(0, 19)
+							: 'Pending'
+						return [
+							`${tx.txid.substring(0, 16)}...`,
+							tx.direction.toUpperCase(),
+							tx.blockHeight.toString(),
+							date,
+							(tx.value / 1e8).toFixed(8),
+							(tx.fee / 1e8).toFixed(8),
+							tx.from.slice(0, 3).join(', ') || 'N/A',
+							tx.to.slice(0, 3).join(', ') || 'N/A',
+						]
+					}),
+				},
 			})
 		}
 
-		if (allTxs.length > 50) {
-			sections.push({ title: 'Note', type: 'text', data: `Showing 50 of ${allTxs.length} transactions.` })
+		if (allTxs.length > MAX_TX_DETAILS) {
+			sections.push({ title: 'Note', type: 'text', data: `Showing ${MAX_TX_DETAILS} of ${allTxs.length} transactions.` })
 		}
 	} else {
 		sections.push({ title: 'Transaction History', type: 'text', data: 'No transactions found' })
@@ -553,7 +565,7 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 				for (const x of btcXpubs) {
 					if (!x.xpub) continue
 					const info = await fetchPubkeyInfo(baseUrl, x.xpub)
-					totalSats += parseInt(String(info.balance || '0'), 10)
+					totalSats += Math.round(Number(info.balance || 0))
 				}
 				if (totalSats > 0) {
 					const btcBalance = totalSats / 1e8
@@ -564,7 +576,7 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 							`${baseUrl}/api/v1/market/info`,
 							{
 								method: 'POST',
-								headers: { 'Content-Type': 'application/json', 'Authorization': PIONEER_QUERY_KEY },
+								headers: { 'Content-Type': 'application/json', 'Authorization': getPioneerQueryKey() },
 								body: JSON.stringify([BTC_CAIP]),
 							},
 							10_000,
@@ -659,8 +671,9 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 /** Escape a cell value for CSV: quote wrapping + formula injection prevention */
 function csvCell(value: any): string {
 	let s = String(value ?? '').replace(/"/g, '""')
-	// Prevent formula injection: prefix dangerous chars so Excel/Sheets don't interpret them
-	if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
+	// Prevent formula injection: trim leading whitespace then prefix dangerous chars
+	const trimmed = s.trimStart()
+	if (/^[=+\-@\t\r\n]/.test(trimmed)) s = `'${s}`
 	return `"${s}"`
 }
 
@@ -768,12 +781,18 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 	function safeDrawText(text: string, x: number, yPos: number, f: any, s: number, c: { r: number; g: number; b: number }, maxW?: number) {
 		let t = sanitize(text)
-		if (maxW && maxW > 0) {
-			while (t.length > 1 && f.widthOfTextAtSize(t, s) > maxW) {
-				t = t.slice(0, -1)
+		if (maxW && maxW > 0 && t.length > 0 && f.widthOfTextAtSize(t, s) > maxW) {
+			// Binary search for the longest string that fits
+			let lo = 0, hi = t.length
+			while (lo < hi) {
+				const mid = (lo + hi + 1) >> 1
+				if (f.widthOfTextAtSize(t.slice(0, mid), s) <= maxW) lo = mid
+				else hi = mid - 1
 			}
-			if (t.length < sanitize(text).length && t.length > 0) {
-				t = t.slice(0, -1) + '..'
+			if (lo < t.length && lo > 2) {
+				t = t.slice(0, lo - 2) + '..'
+			} else if (lo < t.length) {
+				t = t.slice(0, lo)
 			}
 		}
 		if (!t) return
@@ -860,36 +879,13 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		const pieCenterY = y - pieRadius - 10
 		const legendX = pieCenterX + pieRadius + 60
 
-		// Draw pie chart using filled triangle fan approximation
+		// Draw pie chart using thick radial lines (optimized: ~4x fewer draw ops)
 		let startAngle = -Math.PI / 2 // start from top
 		for (const slice of slices) {
 			const fraction = slice.usd / totalPortfolioUsd
 			const sweepAngle = fraction * 2 * Math.PI
-			const steps = Math.max(2, Math.ceil(sweepAngle / 0.05))
-			const angleStep = sweepAngle / steps
-
-			for (let i = 0; i < steps; i++) {
-				const a1 = startAngle + i * angleStep
-				const a2 = startAngle + (i + 1) * angleStep
-				// Draw a thin triangle from center to arc segment
-				const x1 = pieCenterX + pieRadius * Math.cos(a1)
-				const y1 = pieCenterY + pieRadius * Math.sin(a1)
-				const x2 = pieCenterX + pieRadius * Math.cos(a2)
-				const y2 = pieCenterY + pieRadius * Math.sin(a2)
-
-				// Use drawLine for the two radii and arc
-				// Actually use filled rectangles rotated — pdf-lib doesn't have drawTriangle
-				// Instead, draw many thin lines from center
-				page.drawLine({
-					start: { x: pieCenterX, y: pieCenterY },
-					end: { x: x1, y: y1 },
-					thickness: 3,
-					color: rgb(slice.color.r, slice.color.g, slice.color.b),
-				})
-			}
-
-			// Fill the area with closely-spaced lines from center to arc
-			const fillSteps = Math.max(10, Math.ceil(sweepAngle / 0.015))
+			// Use thicker lines with wider steps to reduce draw operations
+			const fillSteps = Math.max(8, Math.ceil(sweepAngle / 0.04))
 			const fillStep = sweepAngle / fillSteps
 			for (let i = 0; i <= fillSteps; i++) {
 				const a = startAngle + i * fillStep
@@ -898,21 +894,20 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 				page.drawLine({
 					start: { x: pieCenterX, y: pieCenterY },
 					end: { x: ex, y: ey },
-					thickness: 2.5,
+					thickness: 4,
 					color: rgb(slice.color.r, slice.color.g, slice.color.b),
 				})
 			}
-
 			startAngle += sweepAngle
 		}
 
-		// Draw white circle in center for donut effect
+		// Draw white circle in center for donut effect (optimized: wider step)
 		const innerR = pieRadius * 0.45
-		for (let a = 0; a < Math.PI * 2; a += 0.01) {
+		for (let a = 0; a < Math.PI * 2; a += 0.03) {
 			page.drawLine({
 				start: { x: pieCenterX, y: pieCenterY },
 				end: { x: pieCenterX + innerR * Math.cos(a), y: pieCenterY + innerR * Math.sin(a) },
-				thickness: 2.5,
+				thickness: 4,
 				color: rgb(1, 1, 1),
 			})
 		}

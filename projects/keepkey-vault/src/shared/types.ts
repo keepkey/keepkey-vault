@@ -355,11 +355,11 @@ export interface ReportData {
   sections: ReportSection[]
 }
 
-export interface ReportSection {
-  title: string
-  type: 'table' | 'summary' | 'list' | 'text' | 'transactions' | 'xpub_details' | 'address_details'
-  data: any
-}
+export type ReportSection =
+  | { title: string; type: 'table'; data: { headers: string[]; rows: string[][]; widths?: string[] } }
+  | { title: string; type: 'summary'; data: string[] }
+  | { title: string; type: 'list'; data: string[] }
+  | { title: string; type: 'text'; data: string }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.

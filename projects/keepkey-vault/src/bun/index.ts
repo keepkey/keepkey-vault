@@ -17,8 +17,10 @@ import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists } from "./db"
 import { generateReport, reportToCsv, reportToPdfBuffer } from "./reports"
+import * as os from "os"
+import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet } from "../shared/types"
@@ -1280,7 +1282,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					})
 
 					const totalUsd = balances.reduce((s, b) => s + (b.balanceUsd || 0), 0)
-					saveReport(deviceId, reportId, 'all', 5, totalUsd, 'complete', JSON.stringify(reportData))
+					// M7: Only save final result if report wasn't deleted during generation
+					if (reportExists(reportId)) {
+						saveReport(deviceId, reportId, 'all', 5, totalUsd, 'complete', JSON.stringify(reportData))
+					}
 
 					try { rpc.send['report-progress']({ id: reportId, message: 'Complete', percent: 100 }) } catch {}
 
@@ -1292,9 +1297,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						status: 'complete' as const,
 					}
 				} catch (e: any) {
-					saveReport(deviceId, reportId, 'all', 5, 0, 'error', '{}', e.message)
-					try { rpc.send['report-progress']({ id: reportId, message: `Error: ${e.message}`, percent: 100 }) } catch {}
-					throw e
+					// M9: Sanitize error messages — strip auth keys and URLs
+					const safeMsg = e.message?.replace(/key:[^\s"',}]+/gi, 'key:***').replace(/https?:\/\/[^\s"',}]+/gi, '<url>') || 'Report generation failed'
+					saveReport(deviceId, reportId, 'all', 5, 0, 'error', '{}', safeMsg)
+					try { rpc.send['report-progress']({ id: reportId, message: `Error: ${safeMsg}`, percent: 100 }) } catch {}
+					throw new Error(safeMsg)
 				}
 			},
 
@@ -1304,46 +1311,59 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getReportsList(deviceId)
 			},
 
+			// H1: Scope getReport/deleteReport to the current device
 			getReport: async (params) => {
-				return getReportById(params.id)
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				return getReportById(params.id, deviceId)
 			},
 
 			deleteReport: async (params) => {
-				deleteReport(params.id)
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				deleteReport(params.id, deviceId)
 			},
 
 			saveReportFile: async (params) => {
-				const report = getReportById(params.id)
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				const report = getReportById(params.id, deviceId)
 				if (!report) throw new Error('Report not found')
 
-				const homedir = require('os').homedir()
-				const downloadsDir = require('path').join(homedir, 'Downloads')
+				// H2: Sanitize chain for path safety, append report ID for uniqueness
+				const safeChain = (report.meta.chain || 'all').replace(/[^a-zA-Z0-9_-]/g, '_')
 				const dateSuffix = new Date(report.meta.createdAt).toISOString().split('T')[0]
-				const baseName = `keepkey-report-${report.meta.chain}-${dateSuffix}`
+				const shortId = params.id.slice(-6)
+				const downloadsDir = path.join(os.homedir(), 'Downloads')
+				const baseName = `keepkey-report-${safeChain}-${dateSuffix}-${shortId}`
 
 				console.log(`[reports] saveReportFile: format=${params.format}, id=${params.id}`)
 
 				let filePath: string
 				if (params.format === 'csv') {
-					filePath = require('path').join(downloadsDir, `${baseName}.csv`)
+					filePath = path.join(downloadsDir, `${baseName}.csv`)
 					const csv = reportToCsv(report.data)
 					await Bun.write(filePath, csv)
 				} else if (params.format === 'pdf') {
-					filePath = require('path').join(downloadsDir, `${baseName}.pdf`)
+					filePath = path.join(downloadsDir, `${baseName}.pdf`)
 					console.log(`[reports] Generating PDF to ${filePath}...`)
 					const pdfBuffer = await reportToPdfBuffer(report.data)
 					console.log(`[reports] PDF buffer ready: ${pdfBuffer.length} bytes`)
 					await Bun.write(filePath, pdfBuffer)
 					console.log(`[reports] PDF written to disk`)
 				} else {
-					filePath = require('path').join(downloadsDir, `${baseName}.json`)
+					filePath = path.join(downloadsDir, `${baseName}.json`)
 					await Bun.write(filePath, JSON.stringify(report.data, null, 2))
 				}
 
-				// Reveal in Finder / file manager
-				const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'linux' ? 'xdg-open' : 'open'
-				const args = process.platform === 'darwin' ? ['-R', filePath] : [filePath]
-				Bun.spawn([cmd, ...args])
+				// L3: Reveal in Finder / file manager (with error handling)
+				try {
+					const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'linux' ? 'xdg-open' : 'open'
+					const args = process.platform === 'darwin' ? ['-R', filePath] : [filePath]
+					Bun.spawn([cmd, ...args])
+				} catch (e: any) {
+					console.warn('[reports] Failed to reveal file:', e.message)
+				}
 
 				console.log(`[reports] File saved: ${filePath}`)
 				return { filePath }
