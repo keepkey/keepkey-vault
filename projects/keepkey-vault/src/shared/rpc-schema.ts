@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -119,6 +119,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
 
+      // ── Reports ──────────────────────────────────────────────────────
+      generateReport: { params: void; response: ReportMeta }
+      listReports: { params: void; response: ReportMeta[] }
+      getReport: { params: { id: string }; response: { meta: ReportMeta; data: ReportData } | null }
+      deleteReport: { params: { id: string }; response: void }
+      saveReportFile: { params: { id: string; format: 'json' | 'csv' | 'pdf' }; response: { filePath: string } }
+
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
 
@@ -162,6 +169,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry
+      'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
     }
   }

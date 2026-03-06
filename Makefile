@@ -23,7 +23,7 @@ modules-install: submodules
 	cd modules/hdwallet && yarn install
 
 modules-build: modules-install
-	cd modules/hdwallet && yarn build
+	cd modules/hdwallet && yarn tsc --build --force
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules

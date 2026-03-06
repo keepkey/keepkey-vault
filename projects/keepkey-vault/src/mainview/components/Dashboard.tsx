@@ -8,6 +8,7 @@ import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
+import { ReportDialog } from "./ReportDialog"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainBalance, CustomChain } from "../../shared/types"
 
@@ -50,6 +51,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
+	const [showReports, setShowReports] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [tokenWarning, setTokenWarning] = useState(false)
@@ -423,9 +425,34 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 				</Box>
 			)}
 
-			{/* Refresh button — small, highlighted, below chart */}
+			{/* Refresh + Reports buttons — below chart */}
 			{!watchOnly && (
-				<Flex justify="center" mb="4">
+				<Flex justify="center" gap="3" mb="4">
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						fontSize="11px"
+						fontWeight="600"
+						color="kk.gold"
+						bg="transparent"
+						borderRadius="full"
+						cursor="pointer"
+						transition="all 0.2s"
+						_hover={{ color: "white", bg: "rgba(192,168,96,0.12)" }}
+						onClick={() => setShowReports(true)}
+					>
+						<Flex align="center" gap="1.5">
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+								<polyline points="14 2 14 8 20 8" />
+								<line x1="16" y1="13" x2="8" y2="13" />
+								<line x1="16" y1="17" x2="8" y2="17" />
+								<polyline points="10 9 9 9 8 9" />
+							</svg>
+							Reports
+						</Flex>
+					</Box>
 					<Box
 						as="button"
 						px="3"
@@ -605,6 +632,10 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 					}}
 					existingChainIds={existingChainIds}
 				/>
+			)}
+
+			{showReports && (
+				<ReportDialog onClose={() => setShowReports(false)} />
 			)}
 		</Box>
 	)

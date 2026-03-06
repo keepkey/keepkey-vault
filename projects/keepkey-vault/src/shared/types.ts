@@ -336,6 +336,31 @@ export interface UpdateStatus {
   errorMessage?: string
 }
 
+// ── Report types ────────────────────────────────────────────────────
+
+export interface ReportMeta {
+  id: string
+  createdAt: number
+  chain: string
+  totalUsd: number
+  status: 'generating' | 'complete' | 'error'
+  error?: string
+}
+
+export interface ReportData {
+  title: string
+  subtitle: string
+  generatedDate: string
+  chain?: string
+  sections: ReportSection[]
+}
+
+export interface ReportSection {
+  title: string
+  type: 'table' | 'summary' | 'list' | 'text' | 'transactions' | 'xpub_details' | 'address_details'
+  data: any
+}
+
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.
 // These aliases are for convenience in frontend code that doesn't need Electrobun types.
