@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData } from '../shared/types'
 
 const SCHEMA_VERSION = '7'
 
@@ -144,6 +144,21 @@ export function initDb() {
       )
     `)
 
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS reports (
+        id          TEXT PRIMARY KEY,
+        device_id   TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        chain       TEXT NOT NULL DEFAULT 'all',
+        lod         INTEGER NOT NULL DEFAULT 0,
+        total_usd   REAL NOT NULL DEFAULT 0,
+        status      TEXT NOT NULL DEFAULT 'complete',
+        error       TEXT,
+        data_json   TEXT NOT NULL
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC)`)
 
     // Migrations: add columns to existing tables (safe to re-run)
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
@@ -563,6 +578,106 @@ export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; pat
   } catch (e: any) {
     console.warn('[db] getCachedPubkeys failed:', e.message)
     return []
+  }
+}
+
+// ── Reports ──────────────────────────────────────────────────────────
+
+const MAX_REPORTS = 50
+
+export function saveReport(deviceId: string, id: string, chain: string, lod: number, totalUsd: number, status: string, dataJson: string, error?: string) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO reports (id, device_id, created_at, chain, lod, total_usd, status, error, data_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, deviceId, Date.now(), chain, lod, totalUsd, status, error || null, dataJson]
+    )
+    // Prune old reports beyond MAX_REPORTS per device
+    try {
+      db.run(
+        `DELETE FROM reports WHERE device_id = ? AND id NOT IN (
+          SELECT id FROM reports WHERE device_id = ? ORDER BY created_at DESC LIMIT ?
+        )`,
+        [deviceId, deviceId, MAX_REPORTS]
+      )
+    } catch { /* pruning is best-effort */ }
+  } catch (e: any) {
+    console.warn('[db] saveReport failed:', e.message)
+  }
+}
+
+export function getReportsList(deviceId: string, limit = 20): ReportMeta[] {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      'SELECT id, created_at, chain, lod, total_usd, status, error FROM reports WHERE device_id = ? ORDER BY created_at DESC LIMIT ?'
+    ).all(deviceId, limit) as Array<{ id: string; created_at: number; chain: string; lod: number; total_usd: number; status: string; error: string | null }>
+    return rows.map(r => ({
+      id: r.id,
+      createdAt: r.created_at,
+      chain: r.chain,
+      totalUsd: r.total_usd,
+      status: r.status as ReportMeta['status'],
+      error: r.error || undefined,
+    }))
+  } catch (e: any) {
+    console.warn('[db] getReportsList failed:', e.message)
+    return []
+  }
+}
+
+export function getReportById(id: string, deviceId?: string): { meta: ReportMeta; data: ReportData } | null {
+  try {
+    if (!db) return null
+    const query = deviceId
+      ? 'SELECT id, created_at, chain, lod, total_usd, status, error, data_json FROM reports WHERE id = ? AND device_id = ?'
+      : 'SELECT id, created_at, chain, lod, total_usd, status, error, data_json FROM reports WHERE id = ?'
+    const params = deviceId ? [id, deviceId] : [id]
+    const row = db.query(query).get(...params) as { id: string; created_at: number; chain: string; lod: number; total_usd: number; status: string; error: string | null; data_json: string } | null
+    if (!row) return null
+    const meta: ReportMeta = {
+      id: row.id,
+      createdAt: row.created_at,
+      chain: row.chain,
+      totalUsd: row.total_usd,
+      status: row.status as ReportMeta['status'],
+      error: row.error || undefined,
+    }
+    let data: ReportData
+    try {
+      data = JSON.parse(row.data_json)
+    } catch {
+      console.warn(`[db] Report ${id} has corrupted JSON data`)
+      return { meta: { ...meta, status: 'error', error: 'Report data corrupted' }, data: { title: 'Corrupted Report', subtitle: '', generatedDate: '', sections: [] } }
+    }
+    return { meta, data }
+  } catch (e: any) {
+    console.warn('[db] getReportById failed:', e.message)
+    return null
+  }
+}
+
+export function deleteReport(id: string, deviceId?: string) {
+  try {
+    if (!db) return
+    if (deviceId) {
+      db.run('DELETE FROM reports WHERE id = ? AND device_id = ?', [id, deviceId])
+    } else {
+      db.run('DELETE FROM reports WHERE id = ?', [id])
+    }
+  } catch (e: any) {
+    console.warn('[db] deleteReport failed:', e.message)
+  }
+}
+
+export function reportExists(id: string): boolean {
+  try {
+    if (!db) return false
+    const row = db.query('SELECT 1 FROM reports WHERE id = ?').get(id)
+    return !!row
+  } catch {
+    return false
   }
 }
 
