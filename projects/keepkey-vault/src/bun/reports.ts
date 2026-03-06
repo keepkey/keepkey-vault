@@ -529,7 +529,9 @@ export interface GenerateReportOptions {
 }
 
 export async function generateReport(opts: GenerateReportOptions): Promise<ReportData> {
-	const { balances, btcXpubs, deviceId, deviceLabel, onProgress } = opts
+	const { btcXpubs, deviceId, deviceLabel, onProgress } = opts
+	// Clone balances to avoid mutating the caller's data
+	const balances = opts.balances.map(b => ({ ...b }))
 	const baseUrl = getPioneerBase()
 	const sections: ReportSection[] = []
 	const now = new Date()
@@ -654,24 +656,32 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 
 // ── CSV Export ────────────────────────────────────────────────────────
 
+/** Escape a cell value for CSV: quote wrapping + formula injection prevention */
+function csvCell(value: any): string {
+	let s = String(value ?? '').replace(/"/g, '""')
+	// Prevent formula injection: prefix dangerous chars so Excel/Sheets don't interpret them
+	if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
+	return `"${s}"`
+}
+
 export function reportToCsv(data: ReportData): string {
 	const lines: string[] = []
 
-	lines.push(`"${data.title}"`)
-	lines.push(`"${data.subtitle}"`)
-	lines.push(`"Generated: ${data.generatedDate}"`)
+	lines.push(csvCell(data.title))
+	lines.push(csvCell(data.subtitle))
+	lines.push(csvCell(`Generated: ${data.generatedDate}`))
 	lines.push('')
 
 	for (const section of data.sections) {
-		lines.push(`"${section.title}"`)
+		lines.push(csvCell(section.title))
 
 		switch (section.type) {
 			case 'table': {
 				const headers = section.data.headers || []
 				const rows = section.data.rows || []
-				lines.push(headers.map((h: string) => `"${h}"`).join(','))
+				lines.push(headers.map((h: string) => csvCell(h)).join(','))
 				for (const row of rows) {
-					lines.push(row.map((cell: any) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+					lines.push(row.map((cell: any) => csvCell(cell)).join(','))
 				}
 				break
 			}
@@ -679,12 +689,12 @@ export function reportToCsv(data: ReportData): string {
 			case 'list': {
 				const items = Array.isArray(section.data) ? section.data : [section.data]
 				for (const item of items) {
-					lines.push(`"${String(item).replace(/"/g, '""')}"`)
+					lines.push(csvCell(item))
 				}
 				break
 			}
 			case 'text': {
-				lines.push(`"${String(section.data).replace(/"/g, '""')}"`)
+				lines.push(csvCell(section.data))
 				break
 			}
 		}

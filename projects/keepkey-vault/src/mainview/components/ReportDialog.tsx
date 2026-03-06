@@ -26,10 +26,14 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 			.finally(() => setLoadingReports(false))
 	}, [])
 
-	// Listen for progress messages
+	// Listen for progress messages — accept any progress while generating
 	useEffect(() => {
 		return onRpcMessage("report-progress", (payload: { id: string; message: string; percent: number }) => {
-			if (activeReportId.current && payload.id === activeReportId.current) {
+			// Capture report ID from first progress message (set before await resolves)
+			if (!activeReportId.current && payload.id) {
+				activeReportId.current = payload.id
+			}
+			if (payload.id === activeReportId.current) {
 				setProgress({ message: payload.message, percent: payload.percent })
 			}
 		})
