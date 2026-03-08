@@ -5,7 +5,7 @@
 //! and broadcast transactions.
 
 use anyhow::{Result, Context};
-use log::info;
+use log::{info, debug};
 use tonic::transport::{Channel, ClientTlsConfig};
 use tokio_stream::StreamExt;
 
@@ -52,6 +52,22 @@ impl LightwalletClient {
         Ok(Self { client })
     }
 
+    /// Get the current consensus branch ID from lightwalletd.
+    pub async fn get_consensus_branch_id(&mut self) -> Result<u32> {
+        let response = self.client
+            .get_lightd_info(proto::Empty {})
+            .await
+            .context("GetLightdInfo failed")?;
+
+        let info = response.into_inner();
+        let branch_str = info.consensus_branch_id.trim_start_matches("0x");
+        let branch_id = u32::from_str_radix(branch_str, 16)
+            .context(format!("Invalid consensus branch ID string: '{}'", info.consensus_branch_id))?;
+
+        info!("Current consensus branch ID: 0x{:08x}", branch_id);
+        Ok(branch_id)
+    }
+
     /// Get the current chain tip height.
     pub async fn get_latest_block_height(&mut self) -> Result<u64> {
         let response = self.client
@@ -84,6 +100,127 @@ impl LightwalletClient {
         Ok(send_resp.error_message)
     }
 
+    /// Fetch Orchard subtree roots from lightwalletd.
+    /// Returns Vec of (shard_index, root_hash, completing_height).
+    pub async fn get_subtree_roots(
+        &mut self,
+        start_index: u32,
+        max_entries: u32,
+    ) -> Result<Vec<(u32, [u8; 32], u64)>> {
+        let request = proto::GetSubtreeRootsArg {
+            start_index,
+            shielded_protocol: proto::ShieldedProtocol::Orchard as i32,
+            max_entries,
+        };
+
+        let mut stream = self.client
+            .get_subtree_roots(request)
+            .await
+            .context("GetSubtreeRoots failed")?
+            .into_inner();
+
+        let mut roots = Vec::new();
+        let mut index = start_index;
+        while let Some(root_result) = stream.next().await {
+            let root = root_result.context("Error reading subtree root")?;
+            if root.root_hash.len() == 32 {
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(&root.root_hash);
+                roots.push((index, hash, root.completing_block_height));
+                index += 1;
+            }
+        }
+
+        info!("Fetched {} Orchard subtree roots (start_index={})", roots.len(), start_index);
+        Ok(roots)
+    }
+
+    /// Get the Orchard tree state (frontier) at a specific block height.
+    /// Returns the orchardCommitmentTreeSize from ChainMetadata at that height.
+    pub async fn get_tree_state(&mut self, height: u64) -> Result<(u64, String)> {
+        let request = proto::BlockId {
+            height,
+            hash: vec![],
+        };
+
+        let response = self.client
+            .get_tree_state(request)
+            .await
+            .context("GetTreeState failed")?;
+
+        let state = response.into_inner();
+        info!("Tree state at height {}: orchard_tree len={}", height, state.orchard_tree.len());
+        Ok((state.height, state.orchard_tree))
+    }
+
+    /// Fetch compact blocks in a range and extract all Orchard action cmx values.
+    /// Returns Vec of (block_height, Vec of (tx_index, Vec of cmx_bytes)).
+    pub async fn fetch_block_actions(
+        &mut self,
+        start_height: u64,
+        end_height: u64,
+    ) -> Result<Vec<(u64, Vec<(u32, Vec<[u8; 32]>)>)>> {
+        let request = proto::BlockRange {
+            start: Some(proto::BlockId { height: start_height, hash: vec![] }),
+            end: Some(proto::BlockId { height: end_height, hash: vec![] }),
+        };
+
+        let mut stream = self.client
+            .get_block_range(request)
+            .await
+            .context("GetBlockRange for actions failed")?
+            .into_inner();
+
+        let mut blocks = Vec::new();
+        while let Some(block_result) = stream.next().await {
+            let block = block_result.context("Error reading compact block")?;
+            let mut txs = Vec::new();
+            for tx in &block.vtx {
+                let mut cmxs = Vec::new();
+                for action in &tx.actions {
+                    if action.cmx.len() == 32 {
+                        let mut cmx = [0u8; 32];
+                        cmx.copy_from_slice(&action.cmx);
+                        cmxs.push(cmx);
+                    }
+                }
+                if !cmxs.is_empty() {
+                    txs.push((tx.index as u32, cmxs));
+                }
+            }
+            blocks.push((block.height, txs));
+        }
+
+        let total_actions: usize = blocks.iter()
+            .flat_map(|(_, txs)| txs.iter().map(|(_, cmxs)| cmxs.len()))
+            .sum();
+        info!("Fetched {} blocks with {} total Orchard actions ({} to {})",
+            blocks.len(), total_actions, start_height, end_height);
+        Ok(blocks)
+    }
+
+    /// Get the Orchard commitment tree size at a given block height by fetching
+    /// the compact block's ChainMetadata.
+    pub async fn get_orchard_tree_size_at(&mut self, height: u64) -> Result<u64> {
+        let request = proto::BlockId {
+            height,
+            hash: vec![],
+        };
+
+        let response = self.client
+            .get_block(request)
+            .await
+            .context("GetBlock failed")?;
+
+        let block = response.into_inner();
+        let size = block.chain_metadata
+            .map(|m| m.orchard_commitment_tree_size as u64)
+            .unwrap_or(0);
+
+        debug!("Orchard tree size at height {}: {}", height, size);
+        Ok(size)
+    }
+
     /// Scan compact blocks with persistence — saves notes to wallet DB,
     /// tracks nullifiers for spend detection, supports incremental scanning.
     pub async fn scan_with_persistence(
@@ -101,7 +238,14 @@ impl LightwalletClient {
             Some(h) => h,
             None => db.last_scanned_height()?
                 .map(|h| h + 1)
-                .unwrap_or(ORCHARD_ACTIVATION_HEIGHT),
+                .unwrap_or_else(|| {
+                    // First scan: start from Orchard activation height to
+                    // catch all possible notes. This is slow (~2M blocks)
+                    // but necessary to avoid silently missing funds.
+                    info!("First scan — starting from Orchard activation height {} (tip={})",
+                           ORCHARD_ACTIVATION_HEIGHT, tip);
+                    ORCHARD_ACTIVATION_HEIGHT
+                }),
         };
 
         if start > tip {

@@ -86,6 +86,32 @@ message GetAddressUtxosReplyList {
     repeated GetAddressUtxosReply addressUtxos = 1;
 }
 
+enum ShieldedProtocol {
+    sapling = 0;
+    orchard = 1;
+}
+
+message SubtreeRoot {
+    bytes rootHash = 2;
+    bytes completingBlockHash = 3;
+    uint64 completingBlockHeight = 4;
+}
+
+message GetSubtreeRootsArg {
+    uint32 startIndex = 1;
+    ShieldedProtocol shieldedProtocol = 2;
+    uint32 maxEntries = 3;
+}
+
+message TreeState {
+    string network = 1;
+    uint64 height = 2;
+    string hash = 3;
+    uint32 time = 4;
+    string saplingTree = 5;
+    string orchardTree = 6;
+}
+
 service CompactTxStreamer {
     rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
     rpc GetBlock(BlockID) returns (CompactBlock) {}
@@ -98,4 +124,6 @@ service CompactTxStreamer {
     rpc GetAddressUtxos(GetAddressUtxosArg) returns (GetAddressUtxosReplyList) {}
     rpc GetAddressUtxosStream(GetAddressUtxosArg) returns (stream GetAddressUtxosReply) {}
     rpc GetLightdInfo(Empty) returns (LightdInfo) {}
+    rpc GetSubtreeRoots(GetSubtreeRootsArg) returns (stream SubtreeRoot) {}
+    rpc GetTreeState(BlockID) returns (TreeState) {}
 }

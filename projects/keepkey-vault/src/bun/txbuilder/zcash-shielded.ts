@@ -26,6 +26,9 @@ export interface ShieldedSendParams {
 
 export interface SigningRequest {
 	n_actions: number
+	account: number
+	branch_id: number
+	sighash: string
 	digests: {
 		header: string
 		transparent: string
@@ -219,6 +222,14 @@ export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
 ): Promise<{ txid: string }> {
+	// 0. Ensure sidecar is running and FVK is set from device
+	if (!isSidecarReady()) {
+		await startSidecar()
+	}
+	// Always refresh FVK from device to ensure ak matches device's ask
+	console.log("[zcash-shielded] Refreshing FVK from device before build...")
+	await initializeOrchardFromDevice(wallet, params.account ?? 0)
+
 	// 1. Build PCZT via sidecar
 	console.log("[zcash-shielded] Building PCZT...")
 	const { signing_request } = await buildShieldedTx(params)
@@ -232,6 +243,7 @@ export async function sendShielded(
 	//   For each action: ZcashPCZTAction (fields) → ZcashPCZTActionAck | ZcashSignedPCZT
 	console.log("[zcash-shielded] Requesting device signatures...")
 	const signatures = await deviceSign(wallet, signing_request)
+	console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
 
 	// 3. Finalize via sidecar (apply sigs + binding sig + serialize)
 	console.log("[zcash-shielded] Finalizing transaction...")
@@ -261,7 +273,7 @@ async function deviceSign(wallet: any, sr: SigningRequest): Promise<string[]> {
 
 	// The hdwallet zcashSignPczt method takes the signing request directly
 	// and handles the protobuf streaming internally
-	const signatures = await wallet.zcashSignPczt(sr, "" /* sighash computed on-device */)
+	const signatures = await wallet.zcashSignPczt(sr, sr.sighash)
 
 	if (!signatures || !Array.isArray(signatures)) {
 		throw new Error("Device did not return signatures")

@@ -14,7 +14,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar } from "./zcash-sidecar"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
@@ -1144,11 +1144,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Zcash Shielded (Orchard) ────────────────────────────
 			zcashShieldedStatus: async () => {
-				return { ready: isSidecarReady() }
+				const cached = getCachedFvk()
+				return {
+					ready: isSidecarReady(),
+					fvk_loaded: hasFvkLoaded(),
+					address: cached?.address ?? null,
+					fvk: cached?.fvk ?? null,
+				}
 			},
 			zcashShieldedInit: async (params) => {
+				// If FVK is already loaded from DB, return it immediately
+				const cached = getCachedFvk()
+				if (cached) return cached
+				// Otherwise get from device
 				if (!engine.wallet) throw new Error('No device connected')
-				return await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
+				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
+				setCachedFvk(result.address, result.fvk)
+				return result
 			},
 			zcashShieldedScan: async (params) => {
 				return await scanOrchardNotes(params?.startHeight)

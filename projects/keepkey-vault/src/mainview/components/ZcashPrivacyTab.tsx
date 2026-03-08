@@ -28,30 +28,6 @@ export function ZcashPrivacyTab() {
 	const [sendResult, setSendResult] = useState<string | null>(null)
 	const [sendError, setSendError] = useState<string | null>(null)
 
-	// ── Check sidecar status on mount ──────────────────────────────────
-	useEffect(() => {
-		rpcRequest<{ ready: boolean }>("zcashShieldedStatus", undefined, 5000)
-			.then(r => setStatus(r.ready ? "ready" : "not_running"))
-			.catch(() => setStatus("not_running"))
-	}, [])
-
-	// ── Initialize (FVK from device) ──────────────────────────────────
-	const handleInit = useCallback(async () => {
-		setStatus("initializing")
-		try {
-			const result = await rpcRequest<{ fvk: any; address: string }>(
-				"zcashShieldedInit", { account: 0 }, 60000
-			)
-			setOrchardAddress(result.address)
-			setStatus("ready")
-			// Auto-fetch balance after init
-			refreshBalance()
-		} catch (e: any) {
-			console.error("[ZcashPrivacyTab] Init failed:", e)
-			setStatus("ready") // sidecar is running, just init failed
-		}
-	}, [])
-
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
 		try {
@@ -64,13 +40,67 @@ export function ZcashPrivacyTab() {
 		}
 	}, [])
 
+	// ── Auto-initialize: check status, auto-init from device if needed ──
+	useEffect(() => {
+		let cancelled = false
+		;(async () => {
+			try {
+				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null }>(
+					"zcashShieldedStatus", undefined, 5000
+				)
+				if (cancelled) return
+				if (!r.ready) { setStatus("not_running"); return }
+
+				if (r.fvk_loaded && r.address) {
+					// FVK auto-loaded from DB — no device interaction needed
+					setOrchardAddress(r.address)
+					setStatus("ready")
+					refreshBalance()
+					return
+				}
+
+				// Sidecar ready but no FVK — auto-init from device
+				setStatus("initializing")
+				const result = await rpcRequest<{ fvk: any; address: string }>(
+					"zcashShieldedInit", { account: 0 }, 60000
+				)
+				if (cancelled) return
+				setOrchardAddress(result.address)
+				setStatus("ready")
+				refreshBalance()
+			} catch (e: any) {
+				if (cancelled) return
+				console.error("[ZcashPrivacyTab] Auto-init failed:", e)
+				setStatus("not_running")
+			}
+		})()
+		return () => { cancelled = true }
+	}, [refreshBalance])
+
+	// ── Manual re-init (fallback button, rarely needed) ───────────────
+	const handleInit = useCallback(async () => {
+		setStatus("initializing")
+		try {
+			const result = await rpcRequest<{ fvk: any; address: string }>(
+				"zcashShieldedInit", { account: 0 }, 60000
+			)
+			setOrchardAddress(result.address)
+			setStatus("ready")
+			refreshBalance()
+		} catch (e: any) {
+			console.error("[ZcashPrivacyTab] Init failed:", e)
+			setStatus("ready")
+		}
+	}, [refreshBalance])
+
 	// ── Scan for notes ────────────────────────────────────────────────
 	const handleScan = useCallback(async () => {
 		setScanState("scanning")
 		setScanResult(null)
 		try {
+			// TODO: DEV ONLY — remove startHeight before release. Skips to near-tip for fast dev scanning.
 			const result = await rpcRequest<{ balance: number; notes_found: number; synced_to: number }>(
-				"zcashShieldedScan", {}, 300000 // 5 min timeout for scan
+				"zcashShieldedScan", { startHeight: 3260068 }, 300000 // 5 min timeout for scan
 			)
 			setSyncedTo(result.synced_to)
 			setScanResult(t("notesFound", { count: result.notes_found }))
@@ -261,7 +291,7 @@ export function ZcashPrivacyTab() {
 					</Text>
 					<Flex direction="column" gap="2">
 						<Input
-							placeholder={t("recipientAddress")}
+							placeholder="u1... (Unified) or t1... (transparent)"
 							value={recipient}
 							onChange={(e) => setRecipient(e.target.value)}
 							size="sm"

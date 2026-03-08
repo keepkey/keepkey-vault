@@ -7,7 +7,7 @@
 //! The sidecar NEVER opens the device — it only does crypto/proving.
 
 use anyhow::{Result, Context};
-use log::info;
+use log::{info, debug};
 use rand::rngs::OsRng;
 use serde::Serialize;
 
@@ -25,10 +25,10 @@ use ff::PrimeField;
 use incrementalmerkletree::{Marking, Retention};
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
 
-use crate::wallet_db::SpendableNote;
+use crate::scanner::LightwalletClient;
+use crate::wallet_db::{SpendableNote, WalletDb};
 use crate::zip244;
 
-const NU5_BRANCH_ID: u32 = 0x37519621;
 const DEFAULT_FEE: u64 = 10000; // 0.0001 ZEC
 
 /// Per-action fields needed by the device for signing + digest verification.
@@ -63,6 +63,10 @@ pub struct ActionFields {
 #[derive(Debug, Serialize)]
 pub struct SigningRequest {
     pub n_actions: u32,
+    pub account: u32,
+    pub branch_id: u32,
+    #[serde(with = "hex_bytes")]
+    pub sighash: Vec<u8>,
     pub digests: DigestFields,
     pub bundle_meta: BundleMeta,
     pub actions: Vec<ActionFields>,
@@ -109,18 +113,23 @@ mod hex_bytes {
 pub struct PcztState {
     pub pczt_bundle: orchard::pczt::Bundle,
     pub sighash: [u8; 32],
+    pub branch_id: u32,
     pub signing_request: SigningRequest,
 }
 
 /// Build a PCZT and extract the signing request.
 ///
 /// Returns a PcztState that can be finalized with device signatures.
-pub fn build_pczt(
+/// Now async — fetches real chain data to build a valid Merkle tree anchor.
+pub async fn build_pczt(
     fvk: &FullViewingKey,
     notes: Vec<SpendableNote>,
     recipient: Address,
     amount: u64,
     account: u32,
+    branch_id: u32,
+    lwd_client: &mut LightwalletClient,
+    db: &WalletDb,
 ) -> Result<PcztState> {
     let mut rng = OsRng;
     let fee = DEFAULT_FEE;
@@ -131,17 +140,197 @@ pub fn build_pczt(
             total_input, amount + fee, amount, fee
         ))?;
 
+    // ── DEBUG: Log the FVK ak being used for PCZT construction ──
+    let fvk_bytes = fvk.to_bytes();
+    let ak_bytes = &fvk_bytes[..32];
+    debug!("DEBUG FVK ak (used for PCZT): {}", hex::encode(ak_bytes));
+    debug!("DEBUG FVK nk:                 {}", hex::encode(&fvk_bytes[32..64]));
+
     info!("Building Orchard transaction:");
     info!("  Inputs:  {} ZAT from {} notes", total_input, notes.len());
     info!("  Amount:  {} ZAT", amount);
     info!("  Fee:     {} ZAT", fee);
     info!("  Change:  {} ZAT", change);
 
-    // Step 1: Reconstruct notes and build Merkle tree
-    let mut orchard_notes: Vec<Note> = Vec::new();
+    // Step 1: Compute note positions in the global commitment tree
+    // For each note, we need its absolute position:
+    //   position = tree_size_at(block_height - 1) + actions_in_block_before_note
+    //
+    // tree_size_at(h) comes from CompactBlock.chainMetadata.orchardCommitmentTreeSize at height h,
+    // which gives the CUMULATIVE tree size AFTER that block's actions are added.
+    // So tree_size_at(h-1) is the size BEFORE block h's actions.
+
+    let mut note_positions: Vec<u64> = Vec::new();
+
+    for (i, spendable) in notes.iter().enumerate() {
+        if let Some(pos) = spendable.position {
+            info!("Note {} already has position {} (cached)", i, pos);
+            note_positions.push(pos);
+            continue;
+        }
+
+        // Get tree size at the block BEFORE this note's block
+        let tree_size_before = if spendable.block_height > 0 {
+            lwd_client.get_orchard_tree_size_at(spendable.block_height - 1).await?
+        } else {
+            0
+        };
+
+        // Fetch the note's block to count actions before our note
+        let blocks = lwd_client.fetch_block_actions(
+            spendable.block_height,
+            spendable.block_height,
+        ).await?;
+
+        let mut actions_before = 0u64;
+        if let Some((_, txs)) = blocks.first() {
+            for (tx_idx, cmxs) in txs {
+                if *tx_idx < spendable.tx_index {
+                    actions_before += cmxs.len() as u64;
+                } else if *tx_idx == spendable.tx_index {
+                    actions_before += spendable.action_index as u64;
+                    break;
+                }
+            }
+        }
+
+        let position = tree_size_before + actions_before;
+        info!("Note {}: block={}, tx_idx={}, action_idx={}, tree_before={}, actions_before={}, position={}",
+            i, spendable.block_height, spendable.tx_index, spendable.action_index,
+            tree_size_before, actions_before, position);
+
+        // Cache the position in the database
+        db.update_note_position(spendable.id, position)?;
+        note_positions.push(position);
+    }
+
+    // Step 2: Determine which shards contain our notes
+    // Each level-16 shard contains 2^16 = 65536 leaves
+    const SHARD_SIZE: u64 = 1 << 16; // 65536
+    let mut note_shards: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    for pos in &note_positions {
+        note_shards.insert((*pos / SHARD_SIZE) as u32);
+    }
+    info!("Notes span {} shard(s): {:?}", note_shards.len(), note_shards);
+
+    // Step 3: Fetch all subtree roots
+    let subtree_roots = lwd_client.get_subtree_roots(0, 0).await?;
+    let num_shards = subtree_roots.len();
+    info!("Chain has {} completed Orchard subtree shards", num_shards);
+
+    if subtree_roots.is_empty() {
+        return Err(anyhow::anyhow!("No Orchard subtree roots available from lightwalletd"));
+    }
+
+    // Step 4: Build position-ordered checkpoint map
+    // ShardTree requires checkpoint IDs to be monotonically increasing with position.
+    // Sort note positions and assign checkpoint IDs in ascending position order.
+    let mut sorted_by_pos: Vec<(u64, usize)> = note_positions.iter()
+        .enumerate()
+        .map(|(i, &pos)| (pos, i))
+        .collect();
+    sorted_by_pos.sort_by_key(|(pos, _)| *pos);
+
+    let mut pos_to_checkpoint: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    for (ckpt_id, (pos, _)) in sorted_by_pos.iter().enumerate() {
+        pos_to_checkpoint.insert(*pos, ckpt_id as u32);
+        debug!("Checkpoint {}: position {} (note index {})", ckpt_id, pos, sorted_by_pos[ckpt_id].1);
+    }
+    let last_checkpoint_id = (notes.len() - 1) as u32;
+
+    // Step 5: Build ShardTree with real chain data
     let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
         ShardTree::new(MemoryShardStore::empty(), 100);
 
+    // For shards NOT containing our notes, insert pre-computed roots
+    for (shard_idx, root_hash, completing_height) in &subtree_roots {
+        if note_shards.contains(shard_idx) {
+            // We need to fill this shard with individual leaves
+            continue;
+        }
+
+        let root = MerkleHashOrchard::from_bytes(&root_hash);
+        if bool::from(root.is_none()) {
+            continue;
+        }
+        let addr = incrementalmerkletree::Address::above_position(
+            16.into(),
+            incrementalmerkletree::Position::from((*shard_idx as u64) * SHARD_SIZE),
+        );
+        tree.insert(addr, root.unwrap())
+            .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx, e))?;
+        debug!("Inserted shard {} root (completing_height={})", shard_idx, completing_height);
+    }
+
+    // For shards containing our notes, fetch all leaves and append
+    for shard_idx in &note_shards {
+        let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
+
+        // Find the height range for this shard
+        let shard_start_height = if *shard_idx == 0 {
+            1687104 // Orchard activation height
+        } else {
+            // The previous shard's completing height + 1
+            subtree_roots.iter()
+                .find(|(idx, _, _)| *idx == shard_idx - 1)
+                .map(|(_, _, h)| *h + 1)
+                .unwrap_or(1687104)
+        };
+
+        let shard_end_height = subtree_roots.iter()
+            .find(|(idx, _, _)| idx == shard_idx)
+            .map(|(_, _, h)| *h)
+            .unwrap_or_else(|| {
+                // This shard is not yet complete — use the latest note's block
+                notes.iter().map(|n| n.block_height).max().unwrap_or(0)
+            });
+
+        info!("Fetching leaves for shard {} (heights {} to {})", shard_idx, shard_start_height, shard_end_height);
+
+        let chunk_size = 10000u64;
+        let mut current_pos = shard_start_pos;
+        let mut current_height = shard_start_height;
+
+        while current_height <= shard_end_height {
+            let end = std::cmp::min(current_height + chunk_size - 1, shard_end_height);
+            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+
+            for (block_height, txs) in &blocks {
+                for (tx_idx, cmxs) in txs {
+                    for (action_idx, cmx_bytes) in cmxs.iter().enumerate() {
+                        let cmx = ExtractedNoteCommitment::from_bytes(cmx_bytes);
+                        if bool::from(cmx.is_none()) {
+                            continue;
+                        }
+                        let leaf = MerkleHashOrchard::from_cmx(&cmx.unwrap());
+
+                        // Use position-ordered checkpoint IDs (monotonically increasing)
+                        let retention = if let Some(&ckpt_id) = pos_to_checkpoint.get(&current_pos) {
+                            Retention::Checkpoint {
+                                id: ckpt_id,
+                                marking: Marking::Marked,
+                            }
+                        } else {
+                            Retention::Ephemeral
+                        };
+
+                        tree.append(leaf, retention)
+                            .context(format!("Failed to append leaf at position {} (block {} tx {} action {})",
+                                current_pos, block_height, tx_idx, action_idx))?;
+
+                        current_pos += 1;
+                    }
+                }
+            }
+
+            current_height = end + 1;
+        }
+
+        info!("Shard {}: inserted {} leaves", shard_idx, current_pos - shard_start_pos);
+    }
+
+    // Step 6: Reconstruct notes and get anchor + witnesses
+    let mut orchard_notes: Vec<Note> = Vec::new();
     for (i, spendable) in notes.iter().enumerate() {
         let recipient_arr: [u8; 43] = spendable.recipient.clone().try_into()
             .map_err(|_| anyhow::anyhow!("Invalid recipient bytes for note {}", i))?;
@@ -165,33 +354,23 @@ pub fn build_pczt(
         ).into_option()
             .ok_or_else(|| anyhow::anyhow!("Failed to reconstruct note {}", i))?;
 
-        let cmx: ExtractedNoteCommitment = note.commitment().into();
-        let leaf = MerkleHashOrchard::from_cmx(&cmx);
-        tree.append(
-            leaf,
-            Retention::Checkpoint {
-                id: i as u32,
-                marking: Marking::Marked,
-            },
-        ).context("Failed to append to Merkle tree")?;
-
         orchard_notes.push(note);
     }
 
-    let last_checkpoint = (notes.len() - 1) as u32;
-    let root = tree.root_at_checkpoint_id(&last_checkpoint)
+    let root = tree.root_at_checkpoint_id(&last_checkpoint_id)
         .context("Failed to get Merkle root")?
-        .ok_or_else(|| anyhow::anyhow!("Empty Merkle tree"))?;
+        .ok_or_else(|| anyhow::anyhow!("Empty Merkle tree — no checkpoint found"))?;
     let anchor: Anchor = root.into();
+    info!("Computed anchor: {}", hex::encode(&anchor.to_bytes()));
 
-    // Step 2: Build PCZT bundle
+    // Step 7: Build PCZT bundle
     let mut builder = Builder::new(BundleType::DEFAULT, anchor);
 
     for (i, note) in orchard_notes.iter().enumerate() {
-        let position = incrementalmerkletree::Position::from(i as u64);
-        let merkle_path = tree.witness_at_checkpoint_id(position, &last_checkpoint)
-            .context("Failed to get Merkle witness")?
-            .ok_or_else(|| anyhow::anyhow!("No witness for note {}", i))?;
+        let position = incrementalmerkletree::Position::from(note_positions[i]);
+        let merkle_path = tree.witness_at_checkpoint_id(position, &last_checkpoint_id)
+            .context(format!("Failed to get Merkle witness for note {} at position {}", i, note_positions[i]))?
+            .ok_or_else(|| anyhow::anyhow!("No witness for note {} at position {}", i, note_positions[i]))?;
 
         builder.add_spend(fvk.clone(), note.clone(), merkle_path.into())
             .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", i, e))?;
@@ -216,12 +395,37 @@ pub fn build_pczt(
         .map_err(|e| anyhow::anyhow!("Failed to extract effects: {:?}", e))?
         .ok_or_else(|| anyhow::anyhow!("Empty effects bundle"))?;
 
-    let digests = zip244::compute_zip244_digests_effects(&effects_bundle, NU5_BRANCH_ID, 0, 0);
-    let sighash = zip244::compute_sighash(&digests, NU5_BRANCH_ID);
+    let digests = zip244::compute_zip244_digests_effects(&effects_bundle, branch_id, 0, 0);
+    let sighash = zip244::compute_sighash(&digests, branch_id);
+
+    // ── DEBUG: Log all digest components ──
+    debug!("DEBUG sighash:     {}", hex::encode(&sighash));
+    debug!("DEBUG header:      {}", hex::encode(&digests.header_digest));
+    debug!("DEBUG transparent: {}", hex::encode(&digests.transparent_digest));
+    debug!("DEBUG sapling:     {}", hex::encode(&digests.sapling_digest));
+    debug!("DEBUG orchard:     {}", hex::encode(&digests.orchard_digest));
+
+    // Log effects rk before randomization
+    for (i, action) in effects_bundle.actions().iter().enumerate() {
+        let rk_bytes: [u8; 32] = action.rk().into();
+        debug!("DEBUG effects_rk[{}]: {}", i, hex::encode(&rk_bytes));
+    }
 
     // Step 4: Finalize IO
     pczt_bundle.finalize_io(sighash, &mut rng)
         .map_err(|e| anyhow::anyhow!("IO finalization failed: {:?}", e))?;
+
+    // Log PCZT rk after randomization + alpha
+    for (i, action) in pczt_bundle.actions().iter().enumerate() {
+        let rk = action.spend().rk();
+        let rk_arr: [u8; 32] = rk.clone().into();
+        debug!("DEBUG pczt_rk[{}]:    {}", i, hex::encode(&rk_arr));
+        if let Some(alpha) = action.spend().alpha() {
+            debug!("DEBUG alpha[{}]:      {}", i, hex::encode(&alpha.to_repr()));
+        } else {
+            debug!("DEBUG alpha[{}]:      NONE (dummy action)", i);
+        }
+    }
 
     // Step 5: Generate Halo2 proof
     info!("Generating Halo2 proof (this may take a while on first run)...");
@@ -240,7 +444,11 @@ pub fn build_pczt(
             .unwrap_or_else(|| vec![0u8; 32]);
 
         let cv_net_bytes = pczt_bundle.actions()[i].cv_net().to_bytes().to_vec();
-        let is_spend = pczt_bundle.actions()[i].spend().value().is_some();
+        // After finalize_io(), dummy spends already have spend_auth_sig set
+        // (signed by finalize_io with their dummy_sk). Real spends have
+        // spend_auth_sig=None, waiting for the device signature.
+        // alpha().is_some() is NOT reliable — builder sets alpha for ALL actions.
+        let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
         let value = pczt_bundle.actions()[i].spend().value()
             .map(|v| v.inner())
             .unwrap_or(0);
@@ -279,6 +487,9 @@ pub fn build_pczt(
 
     let signing_request = SigningRequest {
         n_actions: n_actions as u32,
+        account,
+        branch_id,
+        sighash: sighash.to_vec(),
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
@@ -301,6 +512,7 @@ pub fn build_pczt(
     Ok(PcztState {
         pczt_bundle,
         sighash,
+        branch_id,
         signing_request,
     })
 }
@@ -309,13 +521,24 @@ pub fn build_pczt(
 pub fn finalize_pczt(
     mut pczt_bundle: orchard::pczt::Bundle,
     sighash: [u8; 32],
+    branch_id: u32,
     signatures: &[Vec<u8>],
 ) -> Result<(Vec<u8>, String)> {
     let mut rng = OsRng;
 
     info!("Applying {} signatures...", signatures.len());
+    debug!("DEBUG finalize sighash: {}", hex::encode(&sighash));
 
     for (i, sig_bytes) in signatures.iter().enumerate() {
+        // Check if this action is a real spend or a dummy (output-only).
+        // Dummy spends were already signed by finalize_io — skip them.
+        // After finalize_io(), dummies have spend_auth_sig=Some, real spends have None.
+        let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
+        if !is_spend {
+            info!("Action {}: dummy spend (already signed by finalize_io) — skipping device sig", i);
+            continue;
+        }
+
         if sig_bytes.len() != 64 {
             return Err(anyhow::anyhow!(
                 "Invalid signature length for action {}: expected 64, got {}",
@@ -323,10 +546,30 @@ pub fn finalize_pczt(
             ));
         }
 
+        info!("Action {}: real spend — applying device signature", i);
+
+        // Diagnostic: log all inputs to signature verification
+        let rk = pczt_bundle.actions()[i].spend().rk();
+        let rk_arr: [u8; 32] = rk.clone().into();
+        let sig_r = hex::encode(&sig_bytes[..32]);
+        let sig_s = hex::encode(&sig_bytes[32..]);
+        info!("  rk:      {}", hex::encode(&rk_arr));
+        info!("  sighash: {}", hex::encode(&sighash));
+        info!("  sig_R:   {}", sig_r);
+        info!("  sig_S:   {}", sig_s);
+
+        // Log alpha for cross-check
+        if let Some(alpha) = pczt_bundle.actions()[i].spend().alpha() {
+            info!("  alpha:   {}", hex::encode(&alpha.to_repr()));
+        }
+
+        // Manual reddsa verify before apply_signature
         let mut sig_arr = [0u8; 64];
         sig_arr.copy_from_slice(sig_bytes);
-
         let signature: redpallas::Signature<SpendAuth> = sig_arr.into();
+
+        let verify_result = rk.verify(&sighash, &signature);
+        info!("  manual verify: {:?}", verify_result);
 
         pczt_bundle.actions_mut()[i]
             .apply_signature(sighash, signature)
@@ -343,13 +586,16 @@ pub fn finalize_pczt(
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
 
     // Serialize as v5 transaction
-    let tx_bytes = serialize_v5_shielded_tx(&authorized_bundle)?;
+    let tx_bytes = serialize_v5_shielded_tx(&authorized_bundle, branch_id)?;
 
-    // Compute txid (double SHA256 of tx bytes, reversed)
+    // Compute txid
     use blake2b_simd::Params;
+    let mut txid_personal = [0u8; 16];
+    txid_personal[..12].copy_from_slice(b"ZcashTxHash_");
+    txid_personal[12..16].copy_from_slice(&branch_id.to_le_bytes());
     let txid_hash = Params::new()
         .hash_length(32)
-        .personal(b"ZcashTxHash_\x21\x96\x51\x37") // NU5 branch
+        .personal(&txid_personal)
         .hash(&tx_bytes);
     let txid = hex::encode(txid_hash.as_bytes());
 
@@ -360,6 +606,7 @@ pub fn finalize_pczt(
 /// Serialize an authorized Orchard bundle as a v5 Zcash transaction.
 fn serialize_v5_shielded_tx(
     bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>,
+    branch_id: u32,
 ) -> Result<Vec<u8>> {
     let mut tx = Vec::new();
 
@@ -370,8 +617,8 @@ fn serialize_v5_shielded_tx(
     // version_group_id for v5
     tx.extend_from_slice(&0x26A7270Au32.to_le_bytes());
 
-    // consensus_branch_id (NU5)
-    tx.extend_from_slice(&NU5_BRANCH_ID.to_le_bytes());
+    // consensus_branch_id
+    tx.extend_from_slice(&branch_id.to_le_bytes());
 
     // lock_time
     tx.extend_from_slice(&0u32.to_le_bytes());

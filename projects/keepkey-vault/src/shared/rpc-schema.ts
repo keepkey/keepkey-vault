@@ -99,7 +99,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getTokenVisibilityMap: { params: void; response: Record<string, TokenVisibilityStatus> }
 
       // ── Zcash Shielded (Orchard) ──────────────────────────────────────
-      zcashShieldedStatus: { params: void; response: { ready: boolean } }
+      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
       zcashShieldedScan: { params: { startHeight?: number }; response: { balance: number; notes_found: number; synced_to: number } }
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number } }

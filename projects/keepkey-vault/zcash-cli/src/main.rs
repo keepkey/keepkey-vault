@@ -16,7 +16,7 @@ use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
 use orchard::keys::FullViewingKey;
-use zcash_address::unified::{self, Encoding};
+use zcash_address::unified::{self, Container, Encoding};
 use zcash_protocol::consensus::NetworkType;
 
 /// Global state persisted across IPC commands within a single sidecar session.
@@ -41,6 +41,28 @@ impl State {
             self.db = Some(wallet_db::WalletDb::open_default()?);
         }
         Ok(self.db.as_ref().unwrap())
+    }
+
+    /// Try to load a previously saved FVK from the database.
+    fn try_load_fvk(&mut self) -> Result<bool> {
+        let db = self.ensure_db()?;
+        if let Some(fvk_bytes) = db.load_fvk()? {
+            match FullViewingKey::from_bytes(&fvk_bytes) {
+                Some(fvk) => {
+                    let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
+                    let ua = encode_unified_address(&addr)?;
+                    info!("Auto-loaded FVK from database, UA: {}...", &ua[..20]);
+                    self.fvk = Some(fvk);
+                    Ok(true)
+                }
+                None => {
+                    error!("Saved FVK is corrupt — ignoring");
+                    Ok(false)
+                }
+            }
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -80,6 +102,51 @@ fn encode_unified_address(addr: &orchard::Address) -> Result<String> {
     Ok(ua.encode(&NetworkType::Main))
 }
 
+/// Parse a recipient address string into an Orchard Address.
+///
+/// Supports:
+///   - Unified Address (`u1...`) — extracts the Orchard receiver
+///   - Transparent (`t1...`) — returns error (deshielding not yet supported)
+///   - Raw hex (86 chars = 43 bytes) — legacy/debug path
+fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
+    let trimmed = addr.trim();
+
+    // Unified Address (u1...)
+    if trimmed.starts_with("u1") {
+        let (network, ua) = unified::Address::decode(trimmed)
+            .map_err(|e| anyhow::anyhow!("Invalid Unified Address: {:?}", e))?;
+        if network != NetworkType::Main {
+            return Err(anyhow::anyhow!("Expected mainnet address, got {:?}", network));
+        }
+        // Look for the Orchard receiver
+        for receiver in ua.items() {
+            if let unified::Receiver::Orchard(raw) = receiver {
+                return orchard::Address::from_raw_address_bytes(&raw)
+                    .into_option()
+                    .ok_or_else(|| anyhow::anyhow!("Corrupt Orchard receiver in UA"));
+            }
+        }
+        return Err(anyhow::anyhow!("Unified Address has no Orchard receiver — cannot send from shielded pool"));
+    }
+
+    // Transparent address (t1... / t3...)
+    if trimmed.starts_with("t1") || trimmed.starts_with("t3") {
+        return Err(anyhow::anyhow!(
+            "Deshielding (Orchard → transparent) is not yet supported. \
+             Please send to a Unified Address (u1...) that contains an Orchard receiver."
+        ));
+    }
+
+    // Raw hex fallback (43 bytes = 86 hex chars)
+    let bytes = hex::decode(trimmed)
+        .map_err(|_| anyhow::anyhow!("Invalid address — expected u1... (Unified) or t1... (transparent)"))?;
+    let arr: [u8; 43] = bytes.try_into()
+        .map_err(|_| anyhow::anyhow!("Raw hex address must be 43 bytes (86 hex chars)"))?;
+    orchard::Address::from_raw_address_bytes(&arr)
+        .into_option()
+        .ok_or_else(|| anyhow::anyhow!("Invalid raw Orchard address bytes"))
+}
+
 // ── Command handlers ───────────────────────────────────────────────────
 
 async fn handle_derive_fvk(state: &mut State, params: &Value) -> Result<Value> {
@@ -104,10 +171,11 @@ async fn handle_derive_fvk(state: &mut State, params: &Value) -> Result<Value> {
     let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
     let ua_string = encode_unified_address(&addr)?;
 
-    // Store FVK for later use
+    // Store FVK for later use + persist to DB
     state.fvk = Some(fvk.clone());
-
     let fvk_bytes = fvk.to_bytes();
+    let _ = state.ensure_db().and_then(|db| db.save_fvk(&fvk_bytes));
+
     let ak = hex::encode(&fvk_bytes[..32]);
     let nk = hex::encode(&fvk_bytes[32..64]);
     let rivk = hex::encode(&fvk_bytes[64..96]);
@@ -145,8 +213,62 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
     fvk_bytes[32..64].copy_from_slice(&nk_bytes);
     fvk_bytes[64..96].copy_from_slice(&rivk_bytes);
 
+    info!("set_fvk: ak  = {}", ak_hex);
+    info!("set_fvk: nk  = {}", nk_hex);
+    info!("set_fvk: rivk= {}", rivk_hex);
+
+    // Diagnostic: try decompressing ak as a Pallas point
+    let ak_valid = {
+        use pasta_curves::group::GroupEncoding;
+        let ak_arr: [u8; 32] = ak_bytes.clone().try_into().unwrap();
+        let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_arr);
+        let valid = bool::from(ak_point.is_some());
+        info!("set_fvk: ak decompresses as valid Pallas point? {}", valid);
+
+        if !valid {
+            // Check: is the x-coord on the curve? (x^3 + 5 must be a QR)
+            let mut x_bytes = ak_arr;
+            x_bytes[31] &= 0x7f; // clear sign bit
+            info!("set_fvk: ak x-coord (sign cleared) = {}", hex::encode(&x_bytes));
+
+            // Also verify SpendAuth basepoint bytes are valid
+            let spendauth_bytes: [u8; 32] = [
+                0x63, 0xc9, 0x75, 0xb8, 0x84, 0x72, 0x1a, 0x8d,
+                0x0c, 0xa1, 0x70, 0x7b, 0xe3, 0x0c, 0x7f, 0x0c,
+                0x5f, 0x44, 0x5f, 0x3e, 0x7c, 0x18, 0x8d, 0x3b,
+                0x06, 0xd6, 0xf1, 0x28, 0xb3, 0x23, 0x55, 0xb7,
+            ];
+            let sa_point = pasta_curves::pallas::Affine::from_bytes(&spendauth_bytes);
+            let sa_valid = bool::from(sa_point.is_some());
+            info!("set_fvk: SpendAuth basepoint decompresses? {}", sa_valid);
+        }
+        valid
+    };
+
+    // Diagnostic: validate each FVK component individually
+    let nk_valid = {
+        use ff::PrimeField;
+        let nk_arr: [u8; 32] = nk_bytes.clone().try_into().unwrap();
+        let nk_field = pasta_curves::pallas::Base::from_repr(nk_arr);
+        let valid = bool::from(nk_field.is_some());
+        info!("set_fvk: nk valid as Pallas base field element? {}", valid);
+        valid
+    };
+    let rivk_valid = {
+        use ff::PrimeField;
+        let rivk_arr: [u8; 32] = rivk_bytes.clone().try_into().unwrap();
+        let rivk_scalar = pasta_curves::pallas::Scalar::from_repr(rivk_arr);
+        let valid = bool::from(rivk_scalar.is_some());
+        info!("set_fvk: rivk valid as Pallas scalar? {}", valid);
+        valid
+    };
+
     let fvk = FullViewingKey::from_bytes(&fvk_bytes)
-        .ok_or_else(|| anyhow::anyhow!("Invalid FVK bytes — decoding failed"))?;
+        .ok_or_else(|| anyhow::anyhow!(
+            "Invalid FVK bytes — decode failed. ak_valid={}, nk_valid={}, rivk_valid={}. \
+             ak={}, nk={}, rivk={}",
+            ak_valid, nk_valid, rivk_valid, ak_hex, nk_hex, rivk_hex
+        ))?;
 
     // Get default address and encode as Unified Address (u1...)
     let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
@@ -154,6 +276,15 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
 
     info!("FVK set from device, UA: {}...", &ua_string[..20]);
     state.fvk = Some(fvk);
+
+    // Check if FVK changed (e.g. firmware basepoint fix) and auto-reset if so
+    if let Ok(db) = state.ensure_db() {
+        if let Ok(false) = db.fvk_matches(&fvk_bytes) {
+            info!("FVK ak fingerprint changed (firmware update?) — resetting wallet DB");
+            let _ = db.reset();
+        }
+        let _ = db.save_fvk(&fvk_bytes);
+    }
 
     Ok(serde_json::json!({
         "fvk": { "ak": ak_hex, "nk": nk_hex, "rivk": rivk_hex },
@@ -210,14 +341,8 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
 
-    // Parse recipient address
-    let recipient_bytes = hex::decode(recipient_str)
-        .map_err(|_| anyhow::anyhow!("Invalid recipient hex"))?;
-    let recipient_arr: [u8; 43] = recipient_bytes.try_into()
-        .map_err(|_| anyhow::anyhow!("Recipient must be 43 bytes"))?;
-    let recipient = orchard::Address::from_raw_address_bytes(&recipient_arr)
-        .into_option()
-        .ok_or_else(|| anyhow::anyhow!("Invalid Orchard address"))?;
+    // Parse recipient address — supports UA (u1...), transparent (t1...), or raw hex
+    let recipient = parse_recipient_address(recipient_str)?;
 
     // Get spendable notes
     let db = state.ensure_db()?;
@@ -226,8 +351,16 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
         return Err(anyhow::anyhow!("No spendable notes — scan first"));
     }
 
-    // Build PCZT
-    let pczt_state = pczt_builder::build_pczt(&fvk, notes, recipient, amount, account)?;
+    // Query current consensus branch ID from lightwalletd
+    let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
+    let branch_id = lwd_client.get_consensus_branch_id().await?;
+    info!("Using consensus branch ID: 0x{:08x}", branch_id);
+
+    // Build PCZT with real chain tree data
+    let pczt_state = pczt_builder::build_pczt(
+        &fvk, notes, recipient, amount, account, branch_id,
+        &mut lwd_client, db,
+    ).await?;
 
     let signing_request = serde_json::to_value(&pczt_state.signing_request)?;
 
@@ -258,6 +391,7 @@ async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
     let (raw_tx, txid) = pczt_builder::finalize_pczt(
         pczt_state.pczt_bundle,
         pczt_state.sighash,
+        pczt_state.branch_id,
         &signatures,
     )?;
 
@@ -299,11 +433,36 @@ async fn main() {
     let stdin = io::stdin();
     let stdout = io::stdout();
 
+    // Try to auto-load FVK from database
+    let has_fvk = match state.try_load_fvk() {
+        Ok(loaded) => loaded,
+        Err(e) => { error!("Failed to auto-load FVK: {}", e); false }
+    };
+
+    // Build ready signal with FVK status
+    let ready_data = if has_fvk {
+        let fvk = state.fvk.as_ref().unwrap();
+        let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
+        let ua = encode_unified_address(&addr).unwrap_or_default();
+        let fvk_bytes = fvk.to_bytes();
+        serde_json::json!({
+            "ok": true, "ready": true, "version": "0.1.0",
+            "fvk_loaded": true,
+            "address": ua,
+            "fvk": {
+                "ak": hex::encode(&fvk_bytes[..32]),
+                "nk": hex::encode(&fvk_bytes[32..64]),
+                "rivk": hex::encode(&fvk_bytes[64..96]),
+            }
+        })
+    } else {
+        serde_json::json!({"ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false})
+    };
+
     // Send ready signal
     {
         let mut out = stdout.lock();
-        let ready = serde_json::json!({"ok": true, "ready": true, "version": "0.1.0"});
-        serde_json::to_writer(&mut out, &ready).ok();
+        serde_json::to_writer(&mut out, &ready_data).ok();
         writeln!(out).ok();
         out.flush().ok();
     }

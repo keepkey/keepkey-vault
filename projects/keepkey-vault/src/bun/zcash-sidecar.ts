@@ -25,6 +25,10 @@ let pendingRequests: PendingRequest[] = []
 let ready = false
 let buffer = ""
 
+/** Cached FVK + address from auto-load or set_fvk */
+let cachedAddress: string | null = null
+let cachedFvk: { ak: string; nk: string; rivk: string } | null = null
+
 /**
  * Resolve the path to the zcash-cli binary.
  *
@@ -126,7 +130,15 @@ export async function startSidecar(): Promise<void> {
 	}
 
 	ready = true
-	console.log(`[zcash-sidecar] Ready (version ${readyResponse.version})`)
+
+	// Capture auto-loaded FVK if the sidecar had one persisted
+	if (readyResponse.fvk_loaded && readyResponse.address) {
+		cachedAddress = readyResponse.address
+		cachedFvk = readyResponse.fvk || null
+		console.log(`[zcash-sidecar] Ready (version ${readyResponse.version}) — FVK auto-loaded, UA: ${cachedAddress?.slice(0, 20)}...`)
+	} else {
+		console.log(`[zcash-sidecar] Ready (version ${readyResponse.version}) — no saved FVK`)
+	}
 }
 
 /**
@@ -187,6 +199,29 @@ export function stopSidecar(): void {
  */
 export function isSidecarReady(): boolean {
 	return ready && sidecarProc !== null
+}
+
+/**
+ * Check if the sidecar has a FVK loaded (either auto-loaded from DB or set via device).
+ */
+export function hasFvkLoaded(): boolean {
+	return cachedAddress !== null
+}
+
+/**
+ * Get the cached address + FVK (from auto-load or set_fvk).
+ */
+export function getCachedFvk(): { address: string; fvk: { ak: string; nk: string; rivk: string } } | null {
+	if (!cachedAddress || !cachedFvk) return null
+	return { address: cachedAddress, fvk: cachedFvk }
+}
+
+/**
+ * Update the cached FVK (called after set_fvk succeeds).
+ */
+export function setCachedFvk(address: string, fvk: { ak: string; nk: string; rivk: string }): void {
+	cachedAddress = address
+	cachedFvk = fvk
 }
 
 // ── Internal I/O ────────────────────────────────────────────────────────

@@ -33,6 +33,9 @@ pub struct SpendableNote {
     pub cmx: [u8; 32],
     pub nullifier: [u8; 32],
     pub block_height: u64,
+    pub tx_index: u32,
+    pub action_index: u32,
+    pub position: Option<u64>,
 }
 
 pub struct WalletDb {
@@ -77,7 +80,8 @@ impl WalletDb {
                 block_height INTEGER NOT NULL,
                 tx_index INTEGER NOT NULL,
                 action_index INTEGER NOT NULL,
-                is_spent INTEGER NOT NULL DEFAULT 0
+                is_spent INTEGER NOT NULL DEFAULT 0,
+                position INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS scan_state (
@@ -90,10 +94,30 @@ impl WalletDb {
                 data BLOB NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS fvk_store (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                ak BLOB NOT NULL,
+                nk BLOB NOT NULL,
+                rivk BLOB NOT NULL,
+                ak_hash TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_notes_nullifier ON notes(nullifier);
             CREATE INDEX IF NOT EXISTS idx_notes_unspent ON notes(is_spent) WHERE is_spent = 0;
             "
         ).context("Failed to initialize database schema")?;
+
+        // Migration: add position column if missing (for existing databases)
+        let has_position = self.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='position'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0);
+        if has_position == 0 {
+            self.conn.execute("ALTER TABLE notes ADD COLUMN position INTEGER", [])
+                .context("Failed to add position column")?;
+            info!("Migrated notes table: added position column");
+        }
 
         debug!("Database schema initialized");
         Ok(())
@@ -160,7 +184,7 @@ impl WalletDb {
     /// Get all unspent notes that can be used for spending.
     pub fn get_spendable_notes(&self) -> Result<Vec<SpendableNote>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, value, recipient, rho, rseed, cmx, nullifier, block_height
+            "SELECT id, value, recipient, rho, rseed, cmx, nullifier, block_height, tx_index, action_index, position
              FROM notes WHERE is_spent = 0 ORDER BY value DESC"
         )?;
 
@@ -188,11 +212,24 @@ impl WalletDb {
                 cmx,
                 nullifier,
                 block_height: row.get::<_, i64>(7)? as u64,
+                tx_index: row.get::<_, i64>(8)? as u32,
+                action_index: row.get::<_, i64>(9)? as u32,
+                position: row.get::<_, Option<i64>>(10)?.map(|p| p as u64),
             })
         })?.collect::<std::result::Result<Vec<_>, _>>()
         .context("Failed to read spendable notes")?;
 
         Ok(notes)
+    }
+
+    /// Update the tree position for a note after computing it from the chain.
+    pub fn update_note_position(&self, note_id: i64, position: u64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE notes SET position = ?1 WHERE id = ?2",
+            params![position as i64, note_id],
+        ).context("Failed to update note position")?;
+        debug!("Updated note {} position to {}", note_id, position);
+        Ok(())
     }
 
     /// Get the total balance of unspent notes (in zatoshis).
@@ -216,14 +253,77 @@ impl WalletDb {
         Ok((total as u64, unspent as u64))
     }
 
-    /// Delete all data for a full rescan.
+    /// Save the FVK to the database for auto-loading on restart.
+    /// Stores an ak_hash fingerprint to detect firmware/basepoint changes.
+    pub fn save_fvk(&self, fvk_bytes: &[u8; 96]) -> Result<()> {
+        let ak_hash = hex::encode(&fvk_bytes[..8]); // First 8 bytes of ak as fingerprint
+        self.conn.execute(
+            "INSERT OR REPLACE INTO fvk_store (id, ak, nk, rivk, ak_hash) VALUES (1, ?1, ?2, ?3, ?4)",
+            params![
+                &fvk_bytes[..32],
+                &fvk_bytes[32..64],
+                &fvk_bytes[64..96],
+                &ak_hash,
+            ],
+        ).context("Failed to save FVK")?;
+        info!("FVK saved to database (ak_hash={})", ak_hash);
+        Ok(())
+    }
+
+    /// Load a previously saved FVK, or None if no FVK has been stored.
+    pub fn load_fvk(&self) -> Result<Option<[u8; 96]>> {
+        let result = self.conn.query_row(
+            "SELECT ak, nk, rivk FROM fvk_store WHERE id = 1",
+            [],
+            |row| {
+                let ak: Vec<u8> = row.get(0)?;
+                let nk: Vec<u8> = row.get(1)?;
+                let rivk: Vec<u8> = row.get(2)?;
+                Ok((ak, nk, rivk))
+            },
+        );
+
+        match result {
+            Ok((ak, nk, rivk)) => {
+                if ak.len() != 32 || nk.len() != 32 || rivk.len() != 32 {
+                    return Err(anyhow::anyhow!("Corrupt FVK in database"));
+                }
+                let mut fvk_bytes = [0u8; 96];
+                fvk_bytes[..32].copy_from_slice(&ak);
+                fvk_bytes[32..64].copy_from_slice(&nk);
+                fvk_bytes[64..96].copy_from_slice(&rivk);
+                Ok(Some(fvk_bytes))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(anyhow::anyhow!("Failed to load FVK: {}", e)),
+        }
+    }
+
+    /// Delete all data for a full rescan, including stored FVK.
     pub fn reset(&self) -> Result<()> {
         self.conn.execute_batch(
             "DELETE FROM notes;
              DELETE FROM scan_state;
-             DELETE FROM tree_state;"
+             DELETE FROM tree_state;
+             DELETE FROM fvk_store;"
         ).context("Failed to reset wallet database")?;
-        info!("Wallet database reset for rescan");
+        info!("Wallet database reset for rescan (FVK cleared)");
         Ok(())
+    }
+
+    /// Check if a new FVK matches the stored one (by ak fingerprint).
+    /// Returns true if they match or no FVK is stored yet.
+    pub fn fvk_matches(&self, new_fvk_bytes: &[u8; 96]) -> Result<bool> {
+        let new_hash = hex::encode(&new_fvk_bytes[..8]);
+        let result = self.conn.query_row(
+            "SELECT ak_hash FROM fvk_store WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        match result {
+            Ok(Some(stored_hash)) => Ok(stored_hash == new_hash),
+            Ok(None) | Err(rusqlite::Error::QueryReturnedNoRows) => Ok(true),
+            Err(e) => Err(anyhow::anyhow!("Failed to check FVK: {}", e)),
+        }
     }
 }
