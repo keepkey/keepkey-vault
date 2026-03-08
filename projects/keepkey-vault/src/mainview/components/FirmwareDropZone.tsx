@@ -30,10 +30,13 @@ export function FirmwareDropZone() {
 	const [warningAcknowledged, setWarningAcknowledged] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
 	const dragCounter = useRef(0)
+	const phaseRef = useRef(phase)
+	phaseRef.current = phase
 
-	// Listen for firmware progress
+	// Listen for firmware progress — only react when THIS component initiated the flash (C1 fix)
 	useEffect(() => {
 		return onRpcMessage("firmware-progress", (payload: FirmwareProgress) => {
+			if (phaseRef.current !== "flashing") return
 			setProgress(payload)
 			if (payload.percent >= 100) {
 				setPhase("complete")

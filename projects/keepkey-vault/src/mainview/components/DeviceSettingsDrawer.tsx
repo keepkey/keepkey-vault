@@ -23,6 +23,7 @@ interface DeviceSettingsDrawerProps {
 	onOpenAuditLog?: () => void
 	onOpenPairedApps?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
+	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
 
 // ── Collapsible Section ─────────────────────────────────────────────
@@ -125,7 +126,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -208,6 +209,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const verifySeed = useCallback(async () => {
 		setVerifying(true)
 		setVerifyResult(null)
+		onWordCountChange?.(verifyWordCount)
 		try {
 			const result = await rpcRequest("verifySeed", { wordCount: verifyWordCount }, 0) as { success: boolean; message: string }
 			setVerifyResult(result)
@@ -390,6 +392,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 				{/* Content */}
 				<VStack gap="3" align="stretch" p="4">
+
+					{/* ── Language ────────────────────────────────────── */}
+					<Section title={t("language")}>
+						<LanguageSelector />
+					</Section>
 
 					{/* ── Device Identity ─────────────────────────────── */}
 					<Section title={t("device")}>
@@ -802,11 +809,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)}
 							</Box>
 
-							{/* ── Language ────────────────────── */}
-							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
-								<Text fontSize="sm" color="kk.textPrimary" fontWeight="500" mb="3">{t("language")}</Text>
-								<LanguageSelector />
-							</Box>
 						</VStack>
 					</Section>
 

@@ -1,8 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Box, Flex, Text, Spinner } from "@chakra-ui/react"
+import { Box, Flex, Text, Spinner, Image } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { ReportMeta } from "../../shared/types"
+
+import keepkeyLogo from "../assets/icon.png"
+import coinTrackerLogo from "../assets/logo/cointracker.png"
+import zenLedgerLogo from "../assets/logo/zenledger.png"
+
+type ExportFormat = "pdf" | "cointracker" | "zenledger"
+
+const EXPORT_OPTIONS: { key: ExportFormat; label: string; sub: string; logo: string; bg: string }[] = [
+	{ key: "pdf", label: "KeepKey PDF", sub: "Full portfolio report", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
+	{ key: "cointracker", label: "CoinTracker", sub: "Tax CSV export", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
+	{ key: "zenledger", label: "ZenLedger", sub: "Tax CSV export", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
+]
 
 interface ReportDialogProps {
 	onClose: () => void
@@ -66,7 +78,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 
 	const [saving, setSaving] = useState<string | null>(null)
 
-	const handleDownload = useCallback(async (id: string, format: "json" | "csv" | "pdf") => {
+	const handleDownload = useCallback(async (id: string, format: ExportFormat) => {
 		try {
 			setSaving(`${id}-${format}`)
 			await rpcRequest<{ filePath: string }>("saveReportFile", { id, format }, 30000)
@@ -115,7 +127,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 					flexShrink={0}
 				>
 					<Text fontSize="lg" fontWeight="700" color="kk.gold">
-						Portfolio Reports
+						Reports &amp; Tax Export
 					</Text>
 					{!generating && (
 						<Box
@@ -143,8 +155,9 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 						borderRadius="lg"
 					>
 						<Text fontSize="10px" color="kk.gold" lineHeight="1.5">
-							Full Detail Report — includes device info, all chain balances, cached pubkeys,
-							token details, BTC transaction history, and address flow analysis.
+							Generate a report then export as KeepKey branded PDF, CoinTracker CSV,
+							or ZenLedger CSV for tax filing. Reports include device info, chain balances,
+							BTC transaction history, and address flow analysis.
 							Store securely and never share with untrusted parties.
 						</Text>
 					</Box>
@@ -218,7 +231,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 							<Text fontSize="xs" color="kk.textSecondary" mb="2" fontWeight="600">
 								Previous Reports
 							</Text>
-							<Flex direction="column" gap="2">
+							<Flex direction="column" gap="3">
 								{reports.map(r => (
 									<Box
 										key={r.id}
@@ -236,44 +249,63 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 												{r.status === "error" ? "Failed" : `$${r.totalUsd.toFixed(2)}`}
 											</Text>
 										</Flex>
-										<Text fontSize="10px" color="kk.textMuted" mb="2">
+										<Text fontSize="10px" color="kk.textMuted" mb="3">
 											{new Date(r.createdAt).toLocaleString()}
 										</Text>
 										{r.error && (
-											<Text fontSize="10px" color="#DC3545" mb="2">{r.error}</Text>
+											<Text fontSize="10px" color="#DC3545" mb="3">{r.error}</Text>
 										)}
-										<Flex gap="2">
-											{r.status === "complete" && (
-												<>
-													{(["JSON", "CSV", "PDF"] as const).map(fmt => {
-														const key = fmt.toLowerCase() as "json" | "csv" | "pdf"
-														const savingKey = `${r.id}-${key}`
-														const isSavingThis = saving === savingKey
-														return (
-															<Box
-																key={fmt}
-																as="button"
-																px="2.5"
-																py="1"
-																fontSize="10px"
-																fontWeight="600"
-																color="kk.gold"
-																bg="rgba(192,168,96,0.1)"
-																border="1px solid"
-																borderColor="rgba(192,168,96,0.3)"
-																borderRadius="md"
-																cursor={isSavingThis ? "default" : "pointer"}
-																opacity={isSavingThis ? 0.6 : 1}
-																_hover={isSavingThis ? {} : { bg: "rgba(192,168,96,0.2)" }}
-																onClick={() => !isSavingThis && handleDownload(r.id, key)}
-															>
-																{isSavingThis ? "Saving..." : fmt}
-															</Box>
-														)
-													})}
-												</>
-											)}
-											{/* L8: Delete with confirmation */}
+
+										{/* Export buttons with logos */}
+										{r.status === "complete" && (
+											<Flex gap="2" mb="2" wrap="wrap">
+												{EXPORT_OPTIONS.map(({ key, label, sub, logo, bg }) => {
+													const savingKey = `${r.id}-${key}`
+													const isSavingThis = saving === savingKey
+													return (
+														<Box
+															key={key}
+															as="button"
+															flex="1"
+															minW="130px"
+															p="2"
+															bg={bg}
+															border="1px solid"
+															borderColor="rgba(192,168,96,0.2)"
+															borderRadius="lg"
+															cursor={isSavingThis ? "default" : "pointer"}
+															opacity={isSavingThis ? 0.5 : 1}
+															_hover={isSavingThis ? {} : { borderColor: "kk.gold", bg: "rgba(192,168,96,0.15)" }}
+															transition="all 0.15s"
+															onClick={() => !isSavingThis && handleDownload(r.id, key)}
+														>
+															<Flex align="center" gap="2">
+																<Image
+																	src={logo}
+																	alt={label}
+																	h="20px"
+																	w="auto"
+																	maxW="20px"
+																	objectFit="contain"
+																	borderRadius="3px"
+																/>
+																<Box textAlign="left">
+																	<Text fontSize="10px" fontWeight="700" color="white" lineHeight="1.2">
+																		{isSavingThis ? "Saving..." : label}
+																	</Text>
+																	<Text fontSize="8px" color="kk.textMuted" lineHeight="1.2">
+																		{sub}
+																	</Text>
+																</Box>
+															</Flex>
+														</Box>
+													)
+												})}
+											</Flex>
+										)}
+
+										{/* Delete with confirmation */}
+										<Flex>
 											{confirmDeleteId === r.id ? (
 												<Flex gap="1" align="center">
 													<Box

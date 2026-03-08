@@ -1249,6 +1249,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 } else if (coinType === 118 || coinType === 931) {
                   const r = await wallet.cosmosGetAddress({ addressNList: addrNList, showDisplay: false })
                   address = typeof r === 'string' ? r : r?.address || ''
+                } else if (coinType === 501) {
+                  // Solana uses ed25519 with 4-element path (m/44'/501'/0'/0') — don't extend to 5
+                  const solNList = p.address_n
+                  const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : (r as any)?.address || ''
                 }
 
                 if (address) {

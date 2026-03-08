@@ -31,6 +31,7 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
   firmwareVerified?: boolean

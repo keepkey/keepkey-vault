@@ -190,6 +190,8 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 
 	const hiddenCount = spamTokens.length + zeroValueTokens.length
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
+	const spamTotalUsd = useMemo(() => spamTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [spamTokens])
+	const cleanBalanceUsd = (balance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
 	const isEvmChain = chain.chainFamily === 'evm'
@@ -390,8 +392,8 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							<Text fontSize={{ base: "xs", md: "sm" }} fontFamily="mono" color="kk.textPrimary">
 								{balance.balance} {chain.symbol}
 							</Text>
-							{balance.balanceUsd > 0 && (
-								<AnimatedUsd value={balance.balanceUsd} prefix="($" suffix=")" fontSize="xs" color="white" fontWeight="500" display={{ base: "none", sm: "block" }} />
+							{cleanBalanceUsd > 0 && (
+								<AnimatedUsd value={cleanBalanceUsd} prefix="($" suffix=")" fontSize="xs" color="white" fontWeight="500" display={{ base: "none", sm: "block" }} />
 							)}
 						</Flex>
 					)}

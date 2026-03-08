@@ -8,7 +8,7 @@ process.on('unhandledRejection', (reason) => {
 	console.error('[Vault] UNHANDLED REJECTION:', reason)
 })
 
-import { EngineController } from "./engine-controller"
+import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
@@ -18,7 +18,8 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists } from "./db"
-import { generateReport, reportToCsv, reportToPdfBuffer } from "./reports"
+import { generateReport, reportToPdfBuffer } from "./reports"
+import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
@@ -26,17 +27,7 @@ import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
-/** Timeout wrapper for external API calls */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-	let timer: ReturnType<typeof setTimeout>
-	return Promise.race([
-		promise,
-		new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-		}),
-	]).finally(() => clearTimeout(timer!))
-}
-
+// L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
@@ -421,6 +412,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const result = await engine.wallet.solanaSignMessage(params)
+				if (!result) throw new Error('solanaSignMessage returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
 						? Buffer.from(result.signature).toString('base64')
@@ -1330,30 +1322,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const report = getReportById(params.id, deviceId)
 				if (!report) throw new Error('Report not found')
 
-				// H2: Sanitize chain for path safety, append report ID for uniqueness
-				const safeChain = (report.meta.chain || 'all').replace(/[^a-zA-Z0-9_-]/g, '_')
 				const dateSuffix = new Date(report.meta.createdAt).toISOString().split('T')[0]
-				const shortId = params.id.slice(-6)
+				const year = new Date(report.meta.createdAt).getFullYear()
 				const downloadsDir = path.join(os.homedir(), 'Downloads')
-				const baseName = `keepkey-report-${safeChain}-${dateSuffix}-${shortId}`
 
 				console.log(`[reports] saveReportFile: format=${params.format}, id=${params.id}`)
 
 				let filePath: string
-				if (params.format === 'csv') {
-					filePath = path.join(downloadsDir, `${baseName}.csv`)
-					const csv = reportToCsv(report.data)
-					await Bun.write(filePath, csv)
+				if (params.format === 'cointracker') {
+					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
+					const txs = extractTransactionsFromReport(report.data)
+					await Bun.write(filePath, toCoinTrackerCsv(txs))
+				} else if (params.format === 'zenledger') {
+					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
+					const txs = extractTransactionsFromReport(report.data)
+					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
-					filePath = path.join(downloadsDir, `${baseName}.pdf`)
+					const shortId = params.id.slice(-6)
+					const safeChain = (report.meta.chain || 'all').replace(/[^a-zA-Z0-9_-]/g, '_')
+					filePath = path.join(downloadsDir, `keepkey-report-${safeChain}-${dateSuffix}-${shortId}.pdf`)
 					console.log(`[reports] Generating PDF to ${filePath}...`)
 					const pdfBuffer = await reportToPdfBuffer(report.data)
 					console.log(`[reports] PDF buffer ready: ${pdfBuffer.length} bytes`)
 					await Bun.write(filePath, pdfBuffer)
 					console.log(`[reports] PDF written to disk`)
 				} else {
-					filePath = path.join(downloadsDir, `${baseName}.json`)
-					await Bun.write(filePath, JSON.stringify(report.data, null, 2))
+					throw new Error(`Unknown export format: ${params.format}`)
 				}
 
 				// L3: Reveal in Finder / file manager (with error handling)
@@ -1438,7 +1432,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			windowClose: async () => { _mainWindow?.close() },
 			windowMinimize: async () => { _mainWindow?.minimize() },
 			windowMaximize: async () => { _mainWindow?.maximize() },
-			windowGetFrame: async () => _mainWindow!.getFrame(),
+			windowGetFrame: async () => { if (!_mainWindow) throw new Error('Window not ready'); return _mainWindow.getFrame() },
 			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
 			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
 		},

@@ -124,7 +124,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       listReports: { params: void; response: ReportMeta[] }
       getReport: { params: { id: string }; response: { meta: ReportMeta; data: ReportData } | null }
       deleteReport: { params: { id: string }; response: void }
-      saveReportFile: { params: { id: string; format: 'json' | 'csv' | 'pdf' }; response: { filePath: string } }
+      saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
