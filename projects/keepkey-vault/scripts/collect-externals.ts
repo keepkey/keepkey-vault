@@ -226,7 +226,7 @@ for (const dep of sorted) {
 
   // Ensure parent dir exists for scoped packages (@keepkey/...)
   mkdirSync(dirname(dst), { recursive: true })
-  cpSync(src, dst, { recursive: true })
+  cpSync(src, dst, { recursive: true, dereference: true })
   copiedCount++
 }
 
@@ -259,7 +259,7 @@ let nestedCount = 0
 for (const { src, dst } of nestedCopies) {
   if (!existsSync(src)) continue
   mkdirSync(dirname(dst), { recursive: true })
-  cpSync(src, dst, { recursive: true })
+  cpSync(src, dst, { recursive: true, dereference: true })
   nestedCount++
 }
 if (nestedCount > 0) {

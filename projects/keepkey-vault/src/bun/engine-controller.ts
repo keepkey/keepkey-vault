@@ -403,16 +403,27 @@ export class EngineController extends EventEmitter {
    * so this ensures the device is re-detected via periodic scanning.
    * The existing `syncing` guard prevents concurrent runs.
    */
+  private rebootPollCount = 0
+  private static readonly MAX_REBOOT_POLLS = 60 // 60 × 5s = 5 minutes max
+
   private startRebootPoll() {
     this.stopRebootPoll()
-    console.log('[Engine] Starting reboot poll (5s interval)')
+    this.rebootPollCount = 0
+    console.log('[Engine] Starting reboot poll (5s interval, max 5 min)')
     this.rebootPollTimer = setInterval(() => {
       if (this.updatePhase !== 'rebooting') {
         console.log('[Engine] Reboot poll: updatePhase is no longer rebooting, stopping')
         this.stopRebootPoll()
         return
       }
-      console.log('[Engine] Reboot poll: calling syncState()')
+      this.rebootPollCount++
+      if (this.rebootPollCount >= EngineController.MAX_REBOOT_POLLS) {
+        console.warn('[Engine] Reboot poll: max attempts reached (5 min), stopping')
+        this.updatePhase = null
+        this.stopRebootPoll()
+        return
+      }
+      console.log(`[Engine] Reboot poll ${this.rebootPollCount}/${EngineController.MAX_REBOOT_POLLS}: calling syncState()`)
       this.syncState()
     }, 5000)
   }

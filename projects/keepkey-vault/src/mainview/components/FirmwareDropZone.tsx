@@ -107,9 +107,13 @@ export function FirmwareDropZone() {
 
 		try {
 			const arrayBuf = await file.arrayBuffer()
-			const b64 = btoa(
-				new Uint8Array(arrayBuf).reduce((s, b) => s + String.fromCharCode(b), "")
-			)
+			const bytes = new Uint8Array(arrayBuf)
+			const CHUNK = 8192
+			let binary = ''
+			for (let i = 0; i < bytes.length; i += CHUNK) {
+				binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+			}
+			const b64 = btoa(binary)
 			setFileDataB64(b64)
 
 			const result = await rpcRequest<FirmwareAnalysis>("analyzeFirmware", { data: b64 })

@@ -4,7 +4,7 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.1.0",
+		version: "1.1.1",
 		urlSchemes: ["keepkey"],
 	},
 	build: {
@@ -35,9 +35,10 @@ export default {
 			bundleCEF: false,
 			icons: "icon.iconset",
 			// Code signing — requires ELECTROBUN_DEVELOPER_ID, ELECTROBUN_TEAMID env vars
-			codesign: true,
+			// Disabled in CI (no Apple certs on Linux runners)
+			codesign: process.env.CI !== 'true',
 			// Notarization — requires ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS env vars
-			notarize: true,
+			notarize: process.env.CI !== 'true',
 			// Entitlements for native USB modules (node-hid, usb, hdwallet)
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,

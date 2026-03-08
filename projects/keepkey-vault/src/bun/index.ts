@@ -239,7 +239,7 @@ if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings 
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
-	maxRequestTime: Infinity, // no timeout — user can take as long as needed to confirm on device
+	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────
@@ -248,10 +248,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
+				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
 				const buf = Buffer.from(params.data, 'base64')
 				return engine.analyzeFirmware(buf)
 			},
 			flashCustomFirmware: async (params) => {
+				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
 				const buf = Buffer.from(params.data, 'base64')
 				await engine.flashCustomFirmware(buf)
 			},
@@ -1338,7 +1340,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const txs = extractTransactionsFromReport(report.data)
 					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
-					const shortId = params.id.slice(-6)
+					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
 					const safeChain = (report.meta.chain || 'all').replace(/[^a-zA-Z0-9_-]/g, '_')
 					filePath = path.join(downloadsDir, `keepkey-report-${safeChain}-${dateSuffix}-${shortId}.pdf`)
 					console.log(`[reports] Generating PDF to ${filePath}...`)
@@ -1659,7 +1661,10 @@ mainWindow.on("open-url", (e: any) => {
 })
 
 // Cleanup and quit helper — shared between window close and app quit
+let quitting = false
 function cleanupAndQuit() {
+	if (quitting) return
+	quitting = true
 	stopCamera()
 	engine.stop()
 	restServer?.stop()
