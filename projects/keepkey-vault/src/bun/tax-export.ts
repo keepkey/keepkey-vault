@@ -72,7 +72,7 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 	for (const row of rows) {
 		if (useDetailed) {
 			// Transaction Details: [TXID, Dir, Block, Date, Value (BTC), Fee (BTC), From, To]
-			const txid = cleanTxid(String(row[0] || ''))
+			const txid = String(row[0] || '')
 			const dir = String(row[1] || '').toLowerCase()
 			const date = String(row[3] || '')
 			const value = parseNum(row[4])
@@ -83,7 +83,7 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 			txs.push(buildBtcTx(txid, dir, date, value, fee, from, to))
 		} else {
 			// Transaction History: [#, Dir, TXID, Block, Date, Value (BTC), Fee (BTC)]
-			const txid = cleanTxid(String(row[2] || ''))
+			const txid = String(row[2] || '')
 			const dir = String(row[1] || '').toLowerCase()
 			const date = String(row[4] || '')
 			const value = parseNum(row[5])
@@ -96,9 +96,7 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 	return txs
 }
 
-function cleanTxid(txid: string): string {
-	return txid.replace(/\.+$/, '')  // strip trailing ".." from truncation
-}
+
 
 function parseNum(val: any): number {
 	const n = parseFloat(String(val ?? '0'))

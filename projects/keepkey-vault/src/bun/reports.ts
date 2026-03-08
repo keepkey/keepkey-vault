@@ -371,7 +371,7 @@ async function buildBtcSections(
 			return [
 				(idx + 1).toString(),
 				tx.direction.toUpperCase(),
-				`${tx.txid.substring(0, 16)}...`,
+				tx.txid,
 				tx.blockHeight.toString(),
 				date,
 				(tx.value / 1e8).toFixed(8),
@@ -422,7 +422,7 @@ async function buildBtcSections(
 							? new Date(tx.timestamp * 1000).toISOString().replace('T', ' ').substring(0, 19)
 							: 'Pending'
 						return [
-							`${tx.txid.substring(0, 16)}...`,
+							tx.txid,
 							tx.direction.toUpperCase(),
 							tx.blockHeight.toString(),
 							date,
