@@ -80,7 +80,7 @@ dmg:
 	echo "Verifying extracted app..."; \
 	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
 	ln -s /Applications "$$STAGING/Applications"; \
-	DMG_OUT="$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
+	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	rm -f "$$DMG_OUT"; \
 	echo "Creating DMG..."; \
 	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
