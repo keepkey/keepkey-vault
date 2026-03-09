@@ -8,8 +8,10 @@ import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
+import { ReportDialog } from "./ReportDialog"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
-import type { ChainBalance, CustomChain } from "../../shared/types"
+import { categorizeTokens } from "../../shared/spamFilter"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus } from "../../shared/types"
 
 const DASHBOARD_ANIMATIONS = `
 	@keyframes pulseGold {
@@ -29,16 +31,16 @@ interface DashboardProps {
 	onOpenSettings?: () => void
 }
 
-/** Format a timestamp as a relative "time ago" string */
-function formatTimeAgo(ts: number): string {
+/** Format a timestamp as a relative "time ago" string (i18n-aware) */
+function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
 	const diff = Date.now() - ts
 	const mins = Math.floor(diff / 60_000)
-	if (mins < 1) return 'just now'
-	if (mins < 60) return `${mins}m ago`
+	if (mins < 1) return t('timeJustNow')
+	if (mins < 60) return t('timeMinutesAgo', { count: mins })
 	const hours = Math.floor(mins / 60)
-	if (hours < 24) return `${hours}h ago`
+	if (hours < 24) return t('timeHoursAgo', { count: hours })
 	const days = Math.floor(hours / 24)
-	return `${days}d ago`
+	return t('timeDaysAgo', { count: days })
 }
 
 export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProps) {
@@ -50,10 +52,19 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
+	const [showReports, setShowReports] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [tokenWarning, setTokenWarning] = useState(false)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
+	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
+
+	// Load token visibility overrides (for spam filtering)
+	useEffect(() => {
+		rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
+			.then(setVisibilityMap)
+			.catch(() => {})
+	}, [])
 
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
@@ -110,7 +121,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 					for (const b of cached.balances) map.set(b.chainId, b)
 					setBalances(map)
 					setCacheUpdatedAt(cached.updatedAt)
-					console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt)}`)
+					console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
 				}
 			} catch { /* cache unavailable */ }
 
@@ -155,7 +166,24 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 		setLoadingBalances(false)
 	}, [loadingBalances, watchOnly])
 
-	const totalUsd = useMemo(() => Array.from(balances.values()).reduce((sum, b) => sum + (b.balanceUsd || 0), 0), [balances])
+	// Compute spam-filtered USD per chain: subtract spam token values from chain totals
+	const cleanBalanceUsd = useMemo(() => {
+		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v]))
+		const result = new Map<string, { usd: number; cleanTokenCount: number }>()
+		for (const [chainId, bal] of balances) {
+			if (!bal.tokens || bal.tokens.length === 0) {
+				result.set(chainId, { usd: bal.balanceUsd || 0, cleanTokenCount: 0 })
+				continue
+			}
+			const { spam } = categorizeTokens(bal.tokens, overrides)
+			const spamUsd = spam.reduce((s, t) => s + (t.balanceUsd || 0), 0)
+			const cleanTokens = (bal.tokens?.length || 0) - spam.length
+			result.set(chainId, { usd: (bal.balanceUsd || 0) - spamUsd, cleanTokenCount: cleanTokens })
+		}
+		return result
+	}, [balances, visibilityMap])
+
+	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
 	const allChains = useMemo(() => [...CHAINS, ...customChainDefs], [customChainDefs])
 
@@ -166,24 +194,24 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 	const chartData = useMemo<DonutChartItem[]>(() => allChains
 		.map((chain) => {
-			const bal = balances.get(chain.id)
-			return { name: chain.coin, value: bal?.balanceUsd || 0, color: chain.color, chainId: chain.id }
+			const clean = cleanBalanceUsd.get(chain.id)
+			return { name: chain.coin, value: clean?.usd || 0, color: chain.color, chainId: chain.id }
 		})
 		.filter((d) => d.value > 0)
-		.sort((a, b) => b.value - a.value), [allChains, balances])
+		.sort((a, b) => b.value - a.value), [allChains, cleanBalanceUsd])
 
 	const hasAnyBalance = chartData.length > 0
 
 	const sortedChains = useMemo(() => [...allChains].sort((a, b) => {
-		const aUsd = balances.get(a.id)?.balanceUsd || 0
-		const bUsd = balances.get(b.id)?.balanceUsd || 0
+		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
+		const bUsd = cleanBalanceUsd.get(b.id)?.usd || 0
 		const aHas = aUsd > 0 || parseFloat(balances.get(a.id)?.balance || '0') > 0
 		const bHas = bUsd > 0 || parseFloat(balances.get(b.id)?.balance || '0') > 0
 		if (aHas && !bHas) return -1
 		if (!aHas && bHas) return 1
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
-	}), [allChains, balances])
+	}), [allChains, balances, cleanBalanceUsd])
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
@@ -240,11 +268,11 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 								<line x1="12" y1="16" x2="12.01" y2="16" />
 							</svg>
 							<Text fontSize="sm" fontWeight="600" color="#DC3545">
-								{t("pioneerOfflineTitle", { defaultValue: "Balance server offline" })}
+								{t("pioneerOfflineTitle")}
 							</Text>
 						</Flex>
 						<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-							{t("pioneerOfflineDesc", { defaultValue: "Unable to connect to {{url}}. Balances may be unavailable.", url: pioneerError.url })}
+							{t("pioneerOfflineDesc", { url: pioneerError.url })}
 						</Text>
 						<Flex gap="2" mt="1">
 							{onOpenSettings && (
@@ -266,7 +294,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 										onOpenSettings()
 									}}
 								>
-									{t("changeServer", { defaultValue: "Change Server" })}
+									{t("changeServer")}
 								</Box>
 							)}
 							<Box
@@ -284,7 +312,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 								_hover={{ borderColor: "kk.textMuted", color: "white" }}
 								onClick={() => window.open("https://support.keepkey.com", "_blank")}
 							>
-								{t("getSupport", { defaultValue: "Get Support" })}
+								{t("getSupport")}
 							</Box>
 							<Box
 								as="button"
@@ -301,7 +329,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 									refreshBalances()
 								}}
 							>
-								{t("retry", { defaultValue: "Retry" })}
+								{t("retry")}
 							</Box>
 						</Flex>
 					</Flex>
@@ -392,10 +420,10 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 						<Box>
 							<Text fontSize="md" fontWeight="600" color="white" mb="1">
-								{t("welcomeTitle", { defaultValue: "Welcome to KeepKey Vault" })}
+								{t("welcomeTitle")}
 							</Text>
 							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-								{t("welcomeSubtitle", { defaultValue: "Your wallet is ready. Here's how to get started:" })}
+								{t("welcomeSubtitle")}
 							</Text>
 						</Box>
 
@@ -403,19 +431,19 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 							<Flex align="flex-start" gap="2.5" textAlign="left">
 								<Text fontSize="sm" mt="0.5">1.</Text>
 								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip1", { defaultValue: "Tap any chain below, then hit Receive to get your deposit address" })}
+									{t("welcomeTip1")}
 								</Text>
 							</Flex>
 							<Flex align="flex-start" gap="2.5" textAlign="left">
 								<Text fontSize="sm" mt="0.5">2.</Text>
 								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip2", { defaultValue: "Send crypto to your address — your balance will appear here automatically" })}
+									{t("welcomeTip2")}
 								</Text>
 							</Flex>
 							<Flex align="flex-start" gap="2.5" textAlign="left">
 								<Text fontSize="sm" mt="0.5">3.</Text>
 								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip3", { defaultValue: "Add custom EVM chains with the + card to track any network" })}
+									{t("welcomeTip3")}
 								</Text>
 							</Flex>
 						</Flex>
@@ -423,9 +451,34 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 				</Box>
 			)}
 
-			{/* Refresh button — small, highlighted, below chart */}
+			{/* Refresh + Reports buttons — below chart */}
 			{!watchOnly && (
-				<Flex justify="center" mb="4">
+				<Flex justify="center" gap="3" mb="4">
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						fontSize="11px"
+						fontWeight="600"
+						color="kk.gold"
+						bg="transparent"
+						borderRadius="full"
+						cursor="pointer"
+						transition="all 0.2s"
+						_hover={{ color: "white", bg: "rgba(192,168,96,0.12)" }}
+						onClick={() => setShowReports(true)}
+					>
+						<Flex align="center" gap="1.5">
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+								<polyline points="14 2 14 8 20 8" />
+								<line x1="16" y1="13" x2="8" y2="13" />
+								<line x1="16" y1="17" x2="8" y2="17" />
+								<polyline points="10 9 9 9 8 9" />
+							</svg>
+							{t("reports")}
+						</Flex>
+					</Box>
 					<Box
 						as="button"
 						px="3"
@@ -463,11 +516,11 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 											if (age < 86_400_000) return "#FBBF24"
 											return "#F87171"
 										})()}>
-											{formatTimeAgo(cacheUpdatedAt)}
+											{formatTimeAgo(cacheUpdatedAt, t)}
 										</Text>
 										{" · "}{t("refreshBalances")}
 									</>
-									: t("refreshPrompt", { defaultValue: "Press to update balances" })}
+									: t("refreshPrompt")}
 						</Flex>
 					</Box>
 				</Flex>
@@ -476,10 +529,11 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 			<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
 				{sortedChains.map((chain) => {
 					const bal = balances.get(chain.id)
+					const clean = cleanBalanceUsd.get(chain.id)
 					const balNum = parseFloat(bal?.balance || '0')
-					const usdNum = bal?.balanceUsd || 0
+					const usdNum = clean?.usd || 0
 					const hasBalance = balNum > 0 || usdNum > 0
-					const tokenCount = bal?.tokens?.length || 0
+					const tokenCount = clean?.cleanTokenCount || 0
 
 					return (
 						<Box
@@ -605,6 +659,10 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 					}}
 					existingChainIds={existingChainIds}
 				/>
+			)}
+
+			{showReports && (
+				<ReportDialog onClose={() => setShowReports(false)} />
 			)}
 		</Box>
 	)

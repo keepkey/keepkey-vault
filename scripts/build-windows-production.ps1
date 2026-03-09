@@ -80,7 +80,7 @@ if ($PSCommandPath) {
 }
 $RepoRoot = Split-Path -Path $ScriptDir -Parent
 $ProjectDir = Join-Path $RepoRoot "projects\keepkey-vault"
-$BuildDir = Join-Path $ProjectDir "build\dev-win-x64\keepkey-vault-dev"
+$BuildDir = Join-Path $ProjectDir "_build\dev-win-x64\keepkey-vault-dev"
 $ArtifactsDir = Join-Path $RepoRoot $OutputDir
 
 # Read version from package.json
@@ -249,7 +249,7 @@ if (-not $SkipBuild) {
     # Only init the submodules we actually need — recursive init pulls deeply
     # nested firmware deps whose paths exceed Windows MAX_PATH (260 chars)
     git submodule update --init modules/hdwallet
-    git submodule update --init modules/proto-tx-builder-vendored
+    git submodule update --init modules/proto-tx-builder
     git submodule update --init modules/keepkey-firmware
     Pop-Location
 

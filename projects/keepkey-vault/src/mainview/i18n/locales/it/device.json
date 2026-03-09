@@ -20,7 +20,9 @@
 		"description": "Il tuo dispositivo ha la protezione passphrase abilitata. Inserisci la tua passphrase BIP-39 per sbloccare. Lascia vuoto per il portafoglio predefinito.",
 		"placeholder": "Passphrase (facoltativa)",
 		"warning": "Le passphrase distinguono maiuscole e minuscole. Una passphrase diversa genera un portafoglio completamente diverso.",
-		"unlock": "Sblocca"
+		"unlock": "Sblocca",
+		"confirmOnDevice": "Conferma sul tuo KeepKey",
+		"confirmOnDeviceHint": "Controlla lo schermo del dispositivo e premi il pulsante per confermare."
 	},
 	"pairing": {
 		"wantsToConnect": "vuole connettersi al tuo KeepKey",

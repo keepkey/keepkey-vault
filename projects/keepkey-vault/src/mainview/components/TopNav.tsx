@@ -1,6 +1,9 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
+import { IS_WINDOWS } from "../lib/platform"
+import { useWindowDrag } from "../hooks/useWindowDrag"
+import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
@@ -10,12 +13,31 @@ interface TopNavProps {
 	connected: boolean
 	firmwareVersion?: string
 	firmwareVerified?: boolean
+	needsFirmwareUpdate?: boolean
+	latestFirmware?: string
 	onSettingsToggle: () => void
 	settingsOpen?: boolean
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
 }
+
+/** Construction/hard-hat icon for dev firmware */
+const ConstructionIcon = () => (
+	<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+		<path d="M2 20h20v2H2zM4 18h16v-2H4z" fill="#A78BFA" />
+		<path d="M12 2C8.69 2 6 4.69 6 8v2h12V8c0-3.31-2.69-6-6-6z" fill="#A78BFA" />
+		<rect x="5" y="10" width="14" height="3" rx="1" fill="#C4B5FD" />
+	</svg>
+)
+
+/** Shield icon for verified/signed firmware */
+const ShieldCheckIcon = ({ color }: { color: string }) => (
+	<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+		<path d="M12 2L3 7v5c0 5.25 3.75 10.14 9 11.25C17.25 22.14 21 17.25 21 12V7l-9-5z" fill={color} fillOpacity="0.2" stroke={color} strokeWidth="2" />
+		<path d="M9 12l2 2 4-4" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+	</svg>
+)
 
 /** Grid icon (11px) for Apps tab */
 const GridIcon = () => (
@@ -29,6 +51,7 @@ const GridIcon = () => (
 
 /** Minimal nav bar for splash / setup phases. */
 export function SplashNav() {
+	const windowDrag = useWindowDrag()
 	return (
 		<Flex
 			position="fixed"
@@ -43,6 +66,9 @@ export function SplashNav() {
 			align="center"
 			px="4"
 			zIndex={Z.nav}
+			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
+			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
 			<Flex align="center" gap="2">
 				<Image
@@ -60,8 +86,9 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
 	const { t } = useTranslation("nav")
+	const windowDrag = useWindowDrag()
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
@@ -94,6 +121,9 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			align="center"
 			px="4"
 			zIndex={Z.nav}
+			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
+			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1">
@@ -126,15 +156,33 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 					</Text>
 				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
-						{firmwareVerified === false && (
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-								<path d="M12 2L1 21h22L12 2z" fill="#FB923C" />
-								<path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
-							</svg>
+						{firmwareVerified === false ? (
+							<>
+								<ConstructionIcon />
+								<Text fontSize="xs" color="#A78BFA" fontWeight="400">
+									v{firmwareVersion} (dev)
+								</Text>
+							</>
+						) : needsFirmwareUpdate ? (
+							<>
+								<ShieldCheckIcon color="#FB923C" />
+								<Text fontSize="xs" color="#FB923C" fontWeight="400">
+									v{firmwareVersion}
+								</Text>
+								{latestFirmware && (
+									<Text fontSize="9px" color="#FB923C" fontWeight="400" opacity={0.7}>
+										→ v{latestFirmware}
+									</Text>
+								)}
+							</>
+						) : (
+							<>
+								<ShieldCheckIcon color="#4ADE80" />
+								<Text fontSize="xs" color="#4ADE80" fontWeight="400">
+									v{firmwareVersion}
+								</Text>
+							</>
 						)}
-						<Text fontSize="xs" color={firmwareVerified === false ? "#FB923C" : "#4ADE80"} fontWeight="400">
-							v{firmwareVersion}
-						</Text>
 					</Flex>
 				) : null}
 			</Flex>
@@ -175,13 +223,11 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, on
 			<Flex flex="1" justify="flex-end" align="center">
 				<IconButton
 					aria-label={t("deviceSettings")}
-					onClick={watchOnly ? undefined : onSettingsToggle}
+					onClick={onSettingsToggle}
 					size="sm"
 					variant="ghost"
 					color={settingsOpen ? "kk.gold" : "kk.textSecondary"}
-					_hover={watchOnly ? {} : { color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
-					disabled={watchOnly}
-					opacity={watchOnly ? 0.4 : 1}
+					_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
 				>
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<circle cx="12" cy="12" r="3" />

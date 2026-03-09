@@ -5,6 +5,7 @@ import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
 import { saveDeviceSnapshot } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType } from '../shared/types'
+import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -52,7 +53,7 @@ function extractErrorMessage(err: any): string {
   return String(err)
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
   return Promise.race([
     promise,
@@ -79,6 +80,7 @@ export class EngineController extends EventEmitter {
   private syncing = false
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private rebootPollTimer: ReturnType<typeof setInterval> | null = null
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
@@ -177,6 +179,13 @@ export class EngineController extends EventEmitter {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB detached')
       this.clearRetry()
+      // M1 fix: During firmware reboot, device disconnects/reconnects — don't
+      // clear wallet state or emit disconnected (reboot poll handles reconnection)
+      if (this.updatePhase === 'rebooting') {
+        console.log('[Engine] Detach during reboot phase — ignoring (reboot poll active)')
+        this.clearWallet()
+        return
+      }
       this.clearWallet()
       this.lastError = null
       this.updateState('disconnected')
@@ -190,6 +199,7 @@ export class EngineController extends EventEmitter {
 
   stop() {
     this.clearRetry()
+    this.stopRebootPoll()
     usb.removeAllListeners('attach')
     usb.removeAllListeners('detach')
   }
@@ -224,6 +234,16 @@ export class EngineController extends EventEmitter {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
         })
       }, delay)
+    }
+
+    // Same for needs_passphrase — device has passphrase protection but PIN is
+    // already cached (or disabled).  We must call promptPin() → getPublicKeys()
+    // so the device sends PASSPHRASE_REQUEST; without it, the UI overlay shows
+    // but sendPassphrase() has no pending device request to respond to.
+    if (state === 'needs_passphrase' && !this.promptPinActive) {
+      this.promptPin().catch(err => {
+        console.warn('[Engine] Auto prompt-passphrase failed:', err?.message)
+      })
     }
   }
 
@@ -321,15 +341,22 @@ export class EngineController extends EventEmitter {
           )
           const hashVerification = this.verifyHashes(this.cachedFeatures)
           console.log('[Engine] Features:', JSON.stringify({
-            initialized: this.cachedFeatures?.initialized,
+            deviceId: this.cachedFeatures?.deviceId || '(empty)',
+            initialized: this.cachedFeatures?.initialized ?? '(undefined)',
             firmwareVersion: this.extractVersion(this.cachedFeatures),
             bootloaderMode: this.cachedFeatures?.bootloaderMode,
-            label: this.cachedFeatures?.label,
+            label: this.cachedFeatures?.label || '(none)',
             firmwareHash: hashVerification.firmwareHash,
             firmwareVerified: hashVerification.firmwareVerified,
             bootloaderHash: hashVerification.bootloaderHash,
             bootloaderVerified: hashVerification.bootloaderVerified,
           }))
+          // Device reconnected after firmware/bootloader flash — stop polling
+          if (this.updatePhase === 'rebooting') {
+            console.log('[Engine] Device reconnected after reboot, clearing reboot phase')
+            this.updatePhase = 'idle'
+            this.stopRebootPoll()
+          }
           this.updateState(this.deriveState(this.cachedFeatures))
         } catch (err) {
           console.error('[Engine] Failed to get features after pairing:', err)
@@ -342,6 +369,14 @@ export class EngineController extends EventEmitter {
         console.warn(`[Engine] Device seen but not paired: ${this.lastError}`)
         this.updateState('connected_unpaired')
       } else if (this.lastState !== 'disconnected') {
+        // During reboot phase, device is expected to be absent — don't emit
+        // 'disconnected' which would cause unnecessary state churn in the UI.
+        // The detach handler already suppresses for the USB event; this covers
+        // the rebootPoll → syncState() path.
+        if (this.updatePhase === 'rebooting') {
+          console.log('[Engine] syncState: no device during reboot phase — suppressing disconnected')
+          return
+        }
         this.lastError = null
         this.updateState('disconnected')
       }
@@ -369,6 +404,45 @@ export class EngineController extends EventEmitter {
     if (this.retryTimer) {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
+    }
+  }
+
+  /**
+   * Start polling syncState() every 5s while updatePhase === 'rebooting'.
+   * On Windows 10, usb.on('attach') may not fire after a device reboot,
+   * so this ensures the device is re-detected via periodic scanning.
+   * The existing `syncing` guard prevents concurrent runs.
+   */
+  private rebootPollCount = 0
+  private static readonly MAX_REBOOT_POLLS = 60 // 60 × 5s = 5 minutes max
+
+  private startRebootPoll() {
+    this.stopRebootPoll()
+    this.rebootPollCount = 0
+    console.log('[Engine] Starting reboot poll (5s interval, max 5 min)')
+    this.rebootPollTimer = setInterval(() => {
+      if (this.updatePhase !== 'rebooting') {
+        console.log('[Engine] Reboot poll: updatePhase is no longer rebooting, stopping')
+        this.stopRebootPoll()
+        return
+      }
+      this.rebootPollCount++
+      if (this.rebootPollCount >= EngineController.MAX_REBOOT_POLLS) {
+        console.warn('[Engine] Reboot poll: max attempts reached (5 min), stopping')
+        this.updatePhase = 'idle'
+        this.stopRebootPoll()
+        this.updateState('disconnected')
+        return
+      }
+      if (this.rebootPollCount % 6 === 0) console.log(`[Engine] Reboot poll ${this.rebootPollCount}/${EngineController.MAX_REBOOT_POLLS}: calling syncState()`)
+      this.syncState()
+    }, 5000)
+  }
+
+  private stopRebootPoll() {
+    if (this.rebootPollTimer) {
+      clearInterval(this.rebootPollTimer)
+      this.rebootPollTimer = null
     }
   }
 
@@ -539,6 +613,14 @@ export class EngineController extends EventEmitter {
 
     const hashes = features ? this.verifyHashes(features) : {}
 
+    // In bootloader mode, resolve installed firmware version from on-device hash.
+    // Known official hashes → version string; unknown hash → custom firmware.
+    const resolvedFwVersion = bootloaderMode
+      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
+      : undefined
+    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
+    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
+
     return {
       state: this.lastState,
       activeTransport: this.activeTransport,
@@ -554,7 +636,11 @@ export class EngineController extends EventEmitter {
       needsFirmwareUpdate: needsFw,
       needsInit: !initialized,
       initialized,
-      isOob: bootloaderMode || fwVersion === '4.0.0',
+      // In bootloader mode the device can't report `initialized` — use firmware
+      // hash presence instead. If firmware bytes exist on flash, the device has
+      // been set up before and entered bootloader for an update (not OOB).
+      isOob: bootloaderMode ? !firmwarePresent : fwVersion === '4.0.0',
+      resolvedFwVersion,
       firmwareHash: hashes.firmwareHash,
       bootloaderHash: hashes.bootloaderHash,
       firmwareVerified: hashes.firmwareVerified,
@@ -601,6 +687,7 @@ export class EngineController extends EventEmitter {
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Bootloader update complete' })
+      this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
@@ -650,6 +737,7 @@ export class EngineController extends EventEmitter {
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Firmware update complete' })
+      this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
@@ -804,7 +892,11 @@ export class EngineController extends EventEmitter {
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
     this.cachedFeatures = await this.wallet.getFeatures()
-    this.emit('state-change', this.getDeviceState())
+    // Route through updateState so needs_passphrase triggers promptPin() →
+    // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
+    // so enabling passphrase from settings showed the overlay but the device
+    // never received the passphrase (no pending request to respond to).
+    this.updateState(this.deriveState(this.cachedFeatures))
   }
 
   async changePin() {
@@ -1047,6 +1139,7 @@ export class EngineController extends EventEmitter {
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Custom firmware flash complete' })
+      this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())

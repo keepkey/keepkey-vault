@@ -16,8 +16,18 @@
 	"balancesStale": "Balances may be outdated",
 	"lastUpdated": "Last updated {{time}}",
 	"lastUpdatedNever": "Never loaded",
-	"refreshPrompt": "Press Refresh to load latest balances",
+	"refreshPrompt": "Press to update balances",
 	"tokenWarningTitle": "Token balances unavailable",
 	"tokenWarningDesc": "No token data was returned. Your native balances are shown but ERC-20 / token balances may be missing.",
-	"refreshing": "Refreshing..."
+	"refreshing": "Refreshing...",
+	"reports": "Reports",
+	"pioneerOfflineTitle": "Balance server offline",
+	"pioneerOfflineDesc": "Unable to connect to {{url}}. Balances may be unavailable.",
+	"changeServer": "Change Server",
+	"getSupport": "Get Support",
+	"retry": "Retry",
+	"timeJustNow": "just now",
+	"timeMinutesAgo": "{{count}}m ago",
+	"timeHoursAgo": "{{count}}h ago",
+	"timeDaysAgo": "{{count}}d ago"
 }

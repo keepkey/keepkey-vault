@@ -9,7 +9,7 @@ const DEFAULT_STATE: DeviceStateInfo = {
   bootloaderMode: false,
   needsBootloaderUpdate: false,
   needsFirmwareUpdate: false,
-  needsInit: true,
+  needsInit: false, // L8 fix: default false prevents brief wizard flash before features arrive
   initialized: false,
   isOob: false,
 }

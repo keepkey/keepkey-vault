@@ -8,7 +8,7 @@ process.on('unhandledRejection', (reason) => {
 	console.error('[Vault] UNHANDLED REJECTION:', reason)
 })
 
-import { EngineController } from "./engine-controller"
+import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
@@ -17,24 +17,18 @@ import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists } from "./db"
+import { generateReport, reportToPdfBuffer } from "./reports"
+import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
+import * as os from "os"
+import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
-/** Timeout wrapper for external API calls */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-	let timer: ReturnType<typeof setTimeout>
-	return Promise.race([
-		promise,
-		new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-		}),
-	]).finally(() => clearTimeout(timer!))
-}
-
-const PIONEER_TIMEOUT_MS = 30_000
+// L3 fix: withTimeout imported from engine-controller (was duplicated here)
+const PIONEER_TIMEOUT_MS = 60_000
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
 function getDiscoveryUrl(): string {
@@ -245,7 +239,7 @@ if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings 
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
-	maxRequestTime: Infinity, // no timeout — user can take as long as needed to confirm on device
+	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────
@@ -254,11 +248,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
+				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
 				const buf = Buffer.from(params.data, 'base64')
+				if (buf.length > 7_500_000) throw new Error('Decoded firmware exceeds 7.5MB limit')
 				return engine.analyzeFirmware(buf)
 			},
 			flashCustomFirmware: async (params) => {
+				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
 				const buf = Buffer.from(params.data, 'base64')
+				if (buf.length > 7_500_000) throw new Error('Decoded firmware exceeds 7.5MB limit')
 				await engine.flashCustomFirmware(buf)
 			},
 			resetDevice: async (params) => { await engine.resetDevice(params) },
@@ -418,6 +416,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const result = await engine.wallet.solanaSignMessage(params)
+				if (!result) throw new Error('solanaSignMessage returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
 						? Buffer.from(result.signature).toString('base64')
@@ -515,7 +514,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// 3. Add ALL BTC xpubs from multi-account manager
 				const btcChain = allChains.find(c => c.id === 'bitcoin')!
-				const btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(btcChain.caip)
+				let btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(btcChain.caip)
+
+				// Fallback: if btcAccounts didn't initialize, try cached pubkeys from DB
+				if (btcPubkeyEntries.length === 0) {
+					const devId = engine.getDeviceState().deviceId
+					if (devId) {
+						const cachedPks = getCachedPubkeys(devId)
+						const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
+						if (btcPks.length > 0) {
+							btcPubkeyEntries = btcPks.map(p => ({ caip: btcChain.caip, pubkey: p.xpub }))
+							console.log(`[getBalances] BTC xpubs from cached_pubkeys DB fallback: ${btcPubkeyEntries.length}`)
+						}
+					}
+				}
+
 				// Track BTC entries separately for per-xpub balance update
 				const btcPubkeySet = new Set(btcPubkeyEntries.map(e => e.pubkey))
 				for (const entry of btcPubkeyEntries) {
@@ -548,6 +561,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const portfolioTokens: any[] = portfolio.tokens || []
 
 					console.log(`[getBalances] GetPortfolio response: ${nativeEntries.length} balances, ${portfolioTokens.length} tokens`)
+					// Log BTC-specific entries for debugging
+					const btcNatives = nativeEntries.filter((d: any) => d.caip?.includes('bip122') || d.pubkey?.startsWith('xpub') || d.pubkey?.startsWith('ypub') || d.pubkey?.startsWith('zpub'))
+					console.log(`[getBalances] BTC native entries from Pioneer: ${btcNatives.length}`)
+					for (const b of btcNatives) {
+						console.log(`  BTC: caip=${b.caip}, pubkey=${String(b.pubkey).substring(0, 24)}..., balance=${b.balance}, valueUsd=${b.valueUsd}, address=${b.address}`)
+					}
 
 					// Convert portfolio.tokens (different shape) into the same format as native entries
 					// so our existing token grouping logic works on them
@@ -652,6 +671,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					} catch { /* custom tokens lookup failed, non-fatal */ }
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
+					console.log(`[getBalances] pureNatives count: ${pureNatives.length}`)
+					for (const n of pureNatives) {
+						if (n.caip?.includes('bip122') || n.pubkey?.startsWith('xpub') || n.pubkey?.startsWith('ypub') || n.pubkey?.startsWith('zpub')) {
+							console.log(`[getBalances] BTC native entry: caip=${n.caip}, pubkey=${n.pubkey?.substring(0, 20)}..., balance=${n.balance}, usd=${n.valueUsd}`)
+						}
+					}
 					let btcTotalBalance = 0
 					let btcTotalUsd = 0
 					let btcAddress = ''
@@ -664,6 +689,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
+							console.log(`[getBalances] BTC match for ${entry.pubkey?.substring(0, 20)}...: ${match ? `balance=${match.balance}, usd=${match.valueUsd}` : 'NO MATCH'}`)
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
 							btcTotalBalance += bal
@@ -725,6 +751,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							address: agg.address,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
 						})
+					}
+
+					// BTC fallback: GetPortfolio (charts/portfolio) returns empty for BTC xpubs.
+					// Use GetPortfolioBalances (/portfolio) which correctly returns BTC data.
+					if (btcTotalBalance === 0 && btcPubkeyEntries.length > 0 && pioneer) {
+						console.log('[getBalances] BTC zero from GetPortfolio (charts) — trying GetPortfolioBalances fallback')
+						try {
+							const btcResp = await withTimeout(
+								pioneer.GetPortfolioBalances({
+									pubkeys: btcPubkeyEntries.map(e => ({ caip: e.caip, pubkey: e.pubkey }))
+								}),
+								PIONEER_TIMEOUT_MS,
+								'GetPortfolioBalances-BTC'
+							)
+							const btcBalances = btcResp?.data?.balances || btcResp?.data || []
+							for (const b of (Array.isArray(btcBalances) ? btcBalances : [])) {
+								const bal = parseFloat(String(b.balance ?? '0'))
+								const usd = Number(b.valueUsd ?? 0)
+								btcTotalBalance += bal
+								btcTotalUsd += usd
+								if (!btcAddress && b.address) btcAddress = b.address
+								if (b.pubkey) btcAccounts.updateXpubBalance(b.pubkey, String(b.balance ?? '0'), usd)
+							}
+							console.log(`[getBalances] BTC fallback result: ${btcTotalBalance.toFixed(8)} BTC, $${btcTotalUsd.toFixed(2)}`)
+						} catch (e: any) {
+							console.warn('[getBalances] BTC GetPortfolioBalances fallback failed:', e.message)
+						}
 					}
 
 					// Push one aggregated BTC entry
@@ -1154,6 +1207,166 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				clearApiLogs()
 			},
 
+			// ── Reports ─────────────────────────────────────────────
+			generateReport: async () => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+
+				const reportId = `rpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+				// Get cached balances for report data
+				const cached = getCachedBalances(deviceId)
+				const balances = cached?.balances || []
+				if (balances.length === 0) {
+					throw new Error('No cached balances available. Please refresh your portfolio first.')
+				}
+
+				// Gather BTC xpubs from BtcAccountManager (try init if needed)
+				let btcXpubs: Array<{ xpub: string; scriptType: string; path: number[] }> | undefined
+				console.log(`[generateReport] btcAccounts.isInitialized=${btcAccounts.isInitialized}`)
+				if (!btcAccounts.isInitialized && engine.wallet) {
+					try {
+						console.log('[generateReport] Initializing BTC accounts for report...')
+						await btcAccounts.initialize(engine.wallet as any)
+					} catch (e: any) {
+						console.warn('[generateReport] BTC accounts init failed:', e.message)
+					}
+				}
+				if (btcAccounts.isInitialized) {
+					const btcSet = btcAccounts.toAccountSet()
+					btcXpubs = []
+					for (const acct of btcSet.accounts) {
+						for (const x of acct.xpubs) {
+							if (x.xpub) btcXpubs.push({ xpub: x.xpub, scriptType: x.scriptType, path: x.path })
+						}
+					}
+					console.log(`[generateReport] btcXpubs from BtcAccountManager: ${btcXpubs.length}`)
+				}
+				// Fallback: check cached_pubkeys DB for BTC xpubs
+				if (!btcXpubs || btcXpubs.length === 0) {
+					const cachedPks = getCachedPubkeys(deviceId)
+					const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
+					if (btcPks.length > 0) {
+						btcXpubs = btcPks.map(p => ({
+							xpub: p.xpub,
+							scriptType: p.scriptType || 'p2wpkh',
+							path: p.path ? p.path.split('/').filter(Boolean).map(s => parseInt(s.replace("'", ''), 10)) : [],
+						}))
+						console.log(`[generateReport] btcXpubs from cached_pubkeys DB: ${btcXpubs.length}`)
+					} else {
+						console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
+					}
+				}
+
+				const deviceLabel = engine.getDeviceState().label || 'KeepKey'
+
+				// Save placeholder (lod=5 always)
+				saveReport(deviceId, reportId, 'all', 5, 0, 'generating', '{}')
+
+				// Send initial progress
+				try { rpc.send['report-progress']({ id: reportId, message: 'Starting...', percent: 0 }) } catch {}
+
+				try {
+					const reportData = await generateReport({
+						balances,
+						btcXpubs,
+						deviceId,
+						deviceLabel,
+						onProgress: (message, percent) => {
+							try { rpc.send['report-progress']({ id: reportId, message, percent }) } catch {}
+						},
+					})
+
+					const totalUsd = balances.reduce((s, b) => s + (b.balanceUsd || 0), 0)
+					// M7: Only save final result if report wasn't deleted during generation
+					if (reportExists(reportId)) {
+						saveReport(deviceId, reportId, 'all', 5, totalUsd, 'complete', JSON.stringify(reportData))
+					}
+
+					try { rpc.send['report-progress']({ id: reportId, message: 'Complete', percent: 100 }) } catch {}
+
+					return {
+						id: reportId,
+						createdAt: Date.now(),
+						chain: 'all',
+						totalUsd,
+						status: 'complete' as const,
+					}
+				} catch (e: any) {
+					// M9: Sanitize error messages — strip auth keys and URLs
+					const safeMsg = e.message?.replace(/key:[^\s"',}]+/gi, 'key:***').replace(/https?:\/\/[^\s"',}]+/gi, '<url>') || 'Report generation failed'
+					saveReport(deviceId, reportId, 'all', 5, 0, 'error', '{}', safeMsg)
+					try { rpc.send['report-progress']({ id: reportId, message: `Error: ${safeMsg}`, percent: 100 }) } catch {}
+					throw new Error(safeMsg)
+				}
+			},
+
+			listReports: async () => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) return []
+				return getReportsList(deviceId)
+			},
+
+			// H1: Scope getReport/deleteReport to the current device
+			getReport: async (params) => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				return getReportById(params.id, deviceId)
+			},
+
+			deleteReport: async (params) => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				deleteReport(params.id, deviceId)
+			},
+
+			saveReportFile: async (params) => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				const report = getReportById(params.id, deviceId)
+				if (!report) throw new Error('Report not found')
+
+				const dateSuffix = new Date(report.meta.createdAt).toISOString().split('T')[0]
+				const year = new Date(report.meta.createdAt).getFullYear()
+				const downloadsDir = path.join(os.homedir(), 'Downloads')
+
+				console.log(`[reports] saveReportFile: format=${params.format}, id=${params.id}`)
+
+				let filePath: string
+				if (params.format === 'cointracker') {
+					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
+					const txs = extractTransactionsFromReport(report.data)
+					await Bun.write(filePath, toCoinTrackerCsv(txs))
+				} else if (params.format === 'zenledger') {
+					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
+					const txs = extractTransactionsFromReport(report.data)
+					await Bun.write(filePath, toZenLedgerCsv(txs))
+				} else if (params.format === 'pdf') {
+					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
+					const safeChain = (report.meta.chain || 'all').replace(/[^a-zA-Z0-9_-]/g, '_')
+					filePath = path.join(downloadsDir, `keepkey-report-${safeChain}-${dateSuffix}-${shortId}.pdf`)
+					console.log(`[reports] Generating PDF to ${filePath}...`)
+					const pdfBuffer = await reportToPdfBuffer(report.data)
+					console.log(`[reports] PDF buffer ready: ${pdfBuffer.length} bytes`)
+					await Bun.write(filePath, pdfBuffer)
+					console.log(`[reports] PDF written to disk`)
+				} else {
+					throw new Error(`Unknown export format: ${params.format}`)
+				}
+
+				// L3: Reveal in Finder / file manager (with error handling)
+				try {
+					const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'linux' ? 'xdg-open' : 'open'
+					const args = process.platform === 'darwin' ? ['-R', filePath] : [filePath]
+					Bun.spawn([cmd, ...args])
+				} catch (e: any) {
+					console.warn('[reports] Failed to reveal file:', e.message)
+				}
+
+				console.log(`[reports] File saved: ${filePath}`)
+				return { filePath }
+			},
+
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
@@ -1223,7 +1436,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			windowClose: async () => { _mainWindow?.close() },
 			windowMinimize: async () => { _mainWindow?.minimize() },
 			windowMaximize: async () => { _mainWindow?.maximize() },
-			windowGetFrame: async () => _mainWindow!.getFrame(),
+			windowGetFrame: async () => { if (!_mainWindow) throw new Error('Window not ready'); return _mainWindow.getFrame() },
 			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
 			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
 		},
@@ -1450,7 +1663,10 @@ mainWindow.on("open-url", (e: any) => {
 })
 
 // Cleanup and quit helper — shared between window close and app quit
+let quitting = false
 function cleanupAndQuit() {
+	if (quitting) return
+	quitting = true
 	stopCamera()
 	engine.stop()
 	restServer?.stop()

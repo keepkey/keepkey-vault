@@ -31,6 +31,7 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
   firmwareVerified?: boolean
@@ -335,6 +336,31 @@ export interface UpdateStatus {
   totalBytes?: number
   errorMessage?: string
 }
+
+// ── Report types ────────────────────────────────────────────────────
+
+export interface ReportMeta {
+  id: string
+  createdAt: number
+  chain: string
+  totalUsd: number
+  status: 'generating' | 'complete' | 'error'
+  error?: string
+}
+
+export interface ReportData {
+  title: string
+  subtitle: string
+  generatedDate: string
+  chain?: string
+  sections: ReportSection[]
+}
+
+export type ReportSection =
+  | { title: string; type: 'table'; data: { headers: string[]; rows: string[][]; widths?: string[] } }
+  | { title: string; type: 'summary'; data: string[] }
+  | { title: string; type: 'list'; data: string[] }
+  | { title: string; type: 'text'; data: string }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.

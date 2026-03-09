@@ -4,10 +4,11 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.1.0",
+		version: "1.1.2",
 		urlSchemes: ["keepkey"],
 	},
 	build: {
+		buildFolder: "_build",
 		bun: {
 			// Mark native addons and protobuf-dependent packages as external
 			// so Bun loads them at runtime instead of bundling them.
@@ -29,15 +30,16 @@ export default {
 		copy: {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
-			"build/_ext_modules": "node_modules",
+			"_build/_ext_modules": "node_modules",
 		},
 		mac: {
 			bundleCEF: false,
 			icons: "icon.iconset",
 			// Code signing — requires ELECTROBUN_DEVELOPER_ID, ELECTROBUN_TEAMID env vars
-			codesign: true,
+			// Disabled in CI (no Apple certs on Linux runners)
+			codesign: process.env.CI !== 'true',
 			// Notarization — requires ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS env vars
-			notarize: true,
+			notarize: process.env.CI !== 'true',
 			// Entitlements for native USB modules (node-hid, usb, hdwallet)
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,

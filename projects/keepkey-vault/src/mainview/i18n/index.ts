@@ -32,6 +32,7 @@ i18n
 	.init({
 		lng: savedLang,
 		fallbackLng: "en",
+		partialBundledLanguages: true,
 		defaultNS: "common",
 		ns: [
 			"common",

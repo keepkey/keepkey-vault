@@ -23,7 +23,7 @@ modules-install: submodules
 	cd modules/hdwallet && yarn install
 
 modules-build: modules-install
-	cd modules/hdwallet && yarn build
+	cd modules/hdwallet && yarn tsc --build --force
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
@@ -80,7 +80,7 @@ dmg:
 	echo "Verifying extracted app..."; \
 	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
 	ln -s /Applications "$$STAGING/Applications"; \
-	DMG_OUT="$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
+	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	rm -f "$$DMG_OUT"; \
 	echo "Creating DMG..."; \
 	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
@@ -96,7 +96,7 @@ dmg:
 	echo "DMG ready: $$DMG_OUT"
 
 clean: modules-clean
-	cd $(PROJECT_DIR) && rm -rf dist node_modules build artifacts
+	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
 
 # --- Audit & SBOM ---
 
@@ -118,8 +118,8 @@ sign-check:
 	@security find-identity -v -p codesigning | grep "$$ELECTROBUN_DEVELOPER_ID" || echo "WARNING: Certificate not found in keychain"
 
 verify:
-	@APP=$$(find $(PROJECT_DIR)/build -name "*.app" -maxdepth 2 | head -1); \
-	if [ -z "$$APP" ]; then echo "No .app bundle found in build/"; exit 1; fi; \
+	@APP=$$(find $(PROJECT_DIR)/_build -name "*.app" -maxdepth 2 | head -1); \
+	if [ -z "$$APP" ]; then echo "No .app bundle found in _build/"; exit 1; fi; \
 	echo "Verifying: $$APP"; \
 	echo "--- codesign ---"; \
 	codesign --verify --deep --strict "$$APP" && echo "codesign: PASS" || echo "codesign: FAIL"; \

@@ -113,16 +113,21 @@ function App() {
 
 	const handlePassphraseSubmit = useCallback(async (passphrase: string) => {
 		try { await rpcRequest("sendPassphrase", { passphrase }) } catch (e) { console.error("sendPassphrase:", e) }
-		setPinRequestType(null) // ensure PIN overlay stays cleared
-		setPassphraseRequested(false)
+		setPinRequestType(null)
+		// Don't dismiss overlay here — sendPassphrase returns instantly (omitLock/noWait)
+		// but the device still needs physical confirmation. The overlay stays visible
+		// showing "Confirm on your KeepKey" until state transitions to 'ready'.
 	}, [])
 
 	const handlePassphraseCancel = useCallback(() => { setPinRequestType(null); setPassphraseRequested(false) }, [])
 
-	// Auto-show passphrase overlay when device needs passphrase
+	// Auto-show passphrase overlay when device needs passphrase;
+	// auto-dismiss when device leaves needs_passphrase (e.g. → ready).
 	useEffect(() => {
 		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
 			setPassphraseRequested(true)
+		} else if (deviceState.state !== "needs_passphrase" && passphraseRequested) {
+			setPassphraseRequested(false)
 		}
 	}, [deviceState.state, passphraseRequested])
 
@@ -154,15 +159,13 @@ function App() {
 	const [signingRequest, setSigningRequest] = useState<SigningRequestInfo | null>(null)
 
 	useEffect(() => {
-		return onRpcMessage("signing-request", (payload) => {
+		const unsub1 = onRpcMessage("signing-request", (payload) => {
 			setSigningRequest(payload as SigningRequestInfo)
 		})
-	}, [])
-
-	useEffect(() => {
-		return onRpcMessage("signing-dismissed", () => {
+		const unsub2 = onRpcMessage("signing-dismissed", () => {
 			setSigningRequest(null)
 		})
+		return () => { unsub1(); unsub2() }
 	}, [])
 
 	const handleApproveSign = useCallback(async () => {
@@ -183,8 +186,6 @@ function App() {
 	// ── API Audit Log ───────────────────────────────────────────────
 	const [auditLogOpen, setAuditLogOpen] = useState(false)
 	const [auditLogEntries, setAuditLogEntries] = useState<ApiLogEntry[]>([])
-	const auditAutoOpened = useCallback(() => {}, []) // placeholder ref
-
 	// Load persisted API logs from SQLite on mount
 	useEffect(() => {
 		rpcRequest<ApiLogEntry[]>("getApiLogs", { limit: 200 })
@@ -257,9 +258,12 @@ function App() {
 	}, [])
 
 	// Auto-show PIN for locked device (only once — respect user dismiss)
+	// Skip auto-show during any firmware operation phase — backend promptPin handles it with a delay
 	useEffect(() => {
-		if (deviceState.state === "needs_pin" && !pinRequestType && !pinDismissed) setPinRequestType("current")
-	}, [deviceState.state, pinRequestType, pinDismissed])
+		if (deviceState.state === "needs_pin" && !pinRequestType && !pinDismissed && (!deviceState.updatePhase || deviceState.updatePhase === "idle")) {
+			setPinRequestType("current")
+		}
+	}, [deviceState.state, deviceState.updatePhase, pinRequestType, pinDismissed])
 
 	// Clear overlays on ready or disconnect
 	useEffect(() => {
@@ -399,11 +403,14 @@ function App() {
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
 
 	const phase: AppPhase =
-		isClaimed ? "claimed"
-		: !wizardComplete && setupInProgress ? "setup"
+		// Setup lock takes top priority — during OOB, transient states like
+		// isClaimed (LIBUSB_ERROR_ACCESS race) must not unmount the wizard.
+		!wizardComplete && setupInProgress ? "setup"
+		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"
+		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
 		: "splash"
 
 	// ── Overlays (render above everything, only one at a time) ──────
@@ -479,7 +486,8 @@ function App() {
 						connected={false}
 						firmwareVersion={undefined}
 						firmwareVerified={undefined}
-						onSettingsToggle={() => {}}
+						onSettingsToggle={() => setSettingsOpen((o) => !o)}
+						settingsOpen={settingsOpen}
 						activeTab="vault"
 						onTabChange={() => {}}
 						watchOnly
@@ -488,6 +496,14 @@ function App() {
 						<Dashboard watchOnly onLoaded={() => {}} />
 					</Flex>
 				</Flex>
+				<DeviceSettingsDrawer
+					open={settingsOpen}
+					onClose={() => setSettingsOpen(false)}
+					deviceState={deviceState}
+					appVersion={appVersion}
+					onCheckForUpdate={update.checkForUpdate}
+					updatePhase={update.phase}
+				/>
 			</>
 		)
 	}
@@ -536,7 +552,7 @@ function App() {
 	if (phase === "setup") {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} />
+				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
 			</>
 		)
 	}
@@ -555,9 +571,11 @@ function App() {
 			>
 				<TopNav
 					label={deviceState.label}
-					connected={deviceState.state === "ready" || deviceState.state === "needs_pin" || deviceState.state === "needs_passphrase"}
+					connected={deviceState.state === "ready"}
 					firmwareVersion={deviceState.firmwareVersion}
 					firmwareVerified={deviceState.firmwareVerified}
+					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
+					latestFirmware={deviceState.latestFirmware}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					settingsOpen={settingsOpen}
 					activeTab={activeTab}
@@ -579,6 +597,7 @@ function App() {
 				onOpenAuditLog={() => setAuditLogOpen(true)}
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
 				onRestApiChanged={setRestApiEnabled}
+				onWordCountChange={setRecoveryWordCount}
 			/>
 			<ApiAuditLog
 				open={auditLogOpen}
