@@ -258,9 +258,9 @@ function App() {
 	}, [])
 
 	// Auto-show PIN for locked device (only once — respect user dismiss)
-	// M3 fix: skip auto-show during reboot phase — backend promptPin handles it with a delay
+	// Skip auto-show during any firmware operation phase — backend promptPin handles it with a delay
 	useEffect(() => {
-		if (deviceState.state === "needs_pin" && !pinRequestType && !pinDismissed && deviceState.updatePhase !== "rebooting") {
+		if (deviceState.state === "needs_pin" && !pinRequestType && !pinDismissed && (!deviceState.updatePhase || deviceState.updatePhase === "idle")) {
 			setPinRequestType("current")
 		}
 	}, [deviceState.state, deviceState.updatePhase, pinRequestType, pinDismissed])

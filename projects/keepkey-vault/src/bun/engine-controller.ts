@@ -429,11 +429,12 @@ export class EngineController extends EventEmitter {
       this.rebootPollCount++
       if (this.rebootPollCount >= EngineController.MAX_REBOOT_POLLS) {
         console.warn('[Engine] Reboot poll: max attempts reached (5 min), stopping')
-        this.updatePhase = null
+        this.updatePhase = 'idle'
         this.stopRebootPoll()
+        this.updateState('disconnected')
         return
       }
-      console.log(`[Engine] Reboot poll ${this.rebootPollCount}/${EngineController.MAX_REBOOT_POLLS}: calling syncState()`)
+      if (this.rebootPollCount % 6 === 0) console.log(`[Engine] Reboot poll ${this.rebootPollCount}/${EngineController.MAX_REBOOT_POLLS}: calling syncState()`)
       this.syncState()
     }, 5000)
   }

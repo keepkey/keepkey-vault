@@ -250,11 +250,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			analyzeFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
 				const buf = Buffer.from(params.data, 'base64')
+				if (buf.length > 7_500_000) throw new Error('Decoded firmware exceeds 7.5MB limit')
 				return engine.analyzeFirmware(buf)
 			},
 			flashCustomFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
 				const buf = Buffer.from(params.data, 'base64')
+				if (buf.length > 7_500_000) throw new Error('Decoded firmware exceeds 7.5MB limit')
 				await engine.flashCustomFirmware(buf)
 			},
 			resetDevice: async (params) => { await engine.resetDevice(params) },

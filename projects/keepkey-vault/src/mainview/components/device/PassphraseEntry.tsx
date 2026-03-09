@@ -27,7 +27,12 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 	const handleSubmit = useCallback(async () => {
 		if (submitting) return
 		setSubmitting(true)
-		await onSubmit(passphrase)
+		try {
+			await onSubmit(passphrase)
+		} catch {
+			// If sendPassphrase fails (e.g. device disconnected), reset so user can retry or cancel
+			setSubmitting(false)
+		}
 		// Stay in "Confirm on device" state — the parent will unmount us
 		// when the device state transitions away from needs_passphrase.
 	}, [passphrase, onSubmit, submitting])
