@@ -89,7 +89,7 @@ export function ZcashPrivacyTab() {
 			refreshBalance()
 		} catch (e: any) {
 			console.error("[ZcashPrivacyTab] Init failed:", e)
-			setStatus("ready")
+			setStatus("not_running")
 		}
 	}, [refreshBalance])
 
@@ -98,9 +98,8 @@ export function ZcashPrivacyTab() {
 		setScanState("scanning")
 		setScanResult(null)
 		try {
-			// TODO: DEV ONLY — remove startHeight before release. Skips to near-tip for fast dev scanning.
 			const result = await rpcRequest<{ balance: number; notes_found: number; synced_to: number }>(
-				"zcashShieldedScan", { startHeight: 3260068 }, 300000 // 5 min timeout for scan
+				"zcashShieldedScan", {}, 300000 // 5 min timeout for scan
 			)
 			setSyncedTo(result.synced_to)
 			setScanResult(t("notesFound", { count: result.notes_found }))

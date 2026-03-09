@@ -341,6 +341,12 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
 
+    // Parse optional memo (UTF-8 text, max 512 bytes)
+    let memo = params.get("memo")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     // Parse recipient address — supports UA (u1...), transparent (t1...), or raw hex
     let recipient = parse_recipient_address(recipient_str)?;
 
@@ -359,7 +365,7 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
     // Build PCZT with real chain tree data
     let pczt_state = pczt_builder::build_pczt(
         &fvk, notes, recipient, amount, account, branch_id,
-        &mut lwd_client, db,
+        &mut lwd_client, db, memo,
     ).await?;
 
     let signing_request = serde_json::to_value(&pczt_state.signing_request)?;

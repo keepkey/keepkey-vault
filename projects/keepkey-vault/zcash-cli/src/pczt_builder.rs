@@ -33,6 +33,7 @@ const DEFAULT_FEE: u64 = 10000; // 0.0001 ZEC
 
 /// Per-action fields needed by the device for signing + digest verification.
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct ActionFields {
     pub index: u32,
     #[serde(with = "hex_bytes")]
@@ -130,6 +131,7 @@ pub async fn build_pczt(
     branch_id: u32,
     lwd_client: &mut LightwalletClient,
     db: &WalletDb,
+    memo: Option<String>,
 ) -> Result<PcztState> {
     let mut rng = OsRng;
     let fee = DEFAULT_FEE;
@@ -140,11 +142,9 @@ pub async fn build_pczt(
             total_input, amount + fee, amount, fee
         ))?;
 
-    // ── DEBUG: Log the FVK ak being used for PCZT construction ──
     let fvk_bytes = fvk.to_bytes();
     let ak_bytes = &fvk_bytes[..32];
-    debug!("DEBUG FVK ak (used for PCZT): {}", hex::encode(ak_bytes));
-    debug!("DEBUG FVK nk:                 {}", hex::encode(&fvk_bytes[32..64]));
+    debug!("FVK ak (first 4 bytes): {}", hex::encode(&ak_bytes[..4]));
 
     info!("Building Orchard transaction:");
     info!("  Inputs:  {} ZAT from {} notes", total_input, notes.len());
@@ -376,8 +376,19 @@ pub async fn build_pczt(
             .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", i, e))?;
     }
 
+    // Encode memo: UTF-8 text zero-padded to 512 bytes (Zcash memo field spec)
+    let memo_bytes: [u8; 512] = {
+        let mut buf = [0u8; 512];
+        if let Some(ref text) = memo {
+            let bytes = text.as_bytes();
+            let len = std::cmp::min(bytes.len(), 512);
+            buf[..len].copy_from_slice(&bytes[..len]);
+        }
+        buf
+    };
+
     let ovk = fvk.to_ovk(Scope::External);
-    builder.add_output(Some(ovk.clone()), recipient, NoteValue::from_raw(amount), [0u8; 512])
+    builder.add_output(Some(ovk.clone()), recipient, NoteValue::from_raw(amount), memo_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to add output: {:?}", e))?;
 
     if change > 0 {
@@ -458,6 +469,12 @@ pub async fn build_pczt(
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
         let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
+        if enc.len() != 580 {
+            return Err(anyhow::anyhow!(
+                "Invalid enc_ciphertext length for action {}: expected 580, got {}",
+                i, enc.len()
+            ));
+        }
         let enc_compact = enc[..52].to_vec();
         let enc_memo = enc[52..564].to_vec();
         let enc_noncompact = enc[564..].to_vec();
@@ -548,19 +565,14 @@ pub fn finalize_pczt(
 
         info!("Action {}: real spend — applying device signature", i);
 
-        // Diagnostic: log all inputs to signature verification
         let rk = pczt_bundle.actions()[i].spend().rk();
         let rk_arr: [u8; 32] = rk.clone().into();
-        let sig_r = hex::encode(&sig_bytes[..32]);
-        let sig_s = hex::encode(&sig_bytes[32..]);
-        info!("  rk:      {}", hex::encode(&rk_arr));
-        info!("  sighash: {}", hex::encode(&sighash));
-        info!("  sig_R:   {}", sig_r);
-        info!("  sig_S:   {}", sig_s);
-
-        // Log alpha for cross-check
+        debug!("  rk:      {}", hex::encode(&rk_arr));
+        debug!("  sighash: {}", hex::encode(&sighash));
+        debug!("  sig_R:   {}", hex::encode(&sig_bytes[..32]));
+        debug!("  sig_S:   {}", hex::encode(&sig_bytes[32..]));
         if let Some(alpha) = pczt_bundle.actions()[i].spend().alpha() {
-            info!("  alpha:   {}", hex::encode(&alpha.to_repr()));
+            debug!("  alpha:   {}", hex::encode(&alpha.to_repr()));
         }
 
         // Manual reddsa verify before apply_signature

@@ -6,7 +6,8 @@
 
 use blake2b_simd::Params;
 
-/// NU5 consensus branch ID
+/// NU5 consensus branch ID (used in tests)
+#[allow(dead_code)]
 pub const NU5_BRANCH_ID: u32 = 0x37519621;
 
 /// v5 transaction version (with overwintered flag)
@@ -67,6 +68,7 @@ pub fn digest_header(
 }
 
 /// Compute the ZIP-244 orchard digest from an authorized Orchard bundle.
+#[allow(dead_code)]
 pub fn digest_orchard(bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>) -> [u8; 32] {
     let (compact_hash, memos_hash, noncompact_hash) =
         compute_orchard_action_hashes(bundle);
@@ -83,6 +85,7 @@ pub fn digest_orchard(bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>
 }
 
 /// Compute the three orchard action sub-hashes (compact, memos, noncompact).
+#[allow(dead_code)]
 fn compute_orchard_action_hashes(
     bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>,
 ) -> ([u8; 32], [u8; 32], [u8; 32]) {
@@ -189,6 +192,7 @@ pub fn compute_sighash(digests: &Zip244Digests, branch_id: u32) -> [u8; 32] {
 
 /// Compute orchard digest from raw action data (hex strings).
 /// Used by the IPC layer to compute digests from JSON fields.
+#[allow(dead_code)]
 pub fn digest_orchard_from_raw(
     actions: &[crate::pczt_builder::ActionFields],
     flags: u8,

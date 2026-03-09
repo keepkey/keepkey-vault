@@ -137,6 +137,7 @@ impl LightwalletClient {
 
     /// Get the Orchard tree state (frontier) at a specific block height.
     /// Returns the orchardCommitmentTreeSize from ChainMetadata at that height.
+    #[allow(dead_code)]
     pub async fn get_tree_state(&mut self, height: u64) -> Result<(u64, String)> {
         let request = proto::BlockId {
             height,

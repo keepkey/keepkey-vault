@@ -1471,6 +1471,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json(result)
           }
           if (!body.seed_hex) return json({ error: 'Missing seed_hex or from_device flag' }, 400)
+          if (!/^[0-9a-fA-F]{128}$/.test(body.seed_hex)) return json({ error: 'seed_hex must be 128 hex chars (64 bytes)' }, 400)
           const result = await initializeOrchard(body.seed_hex, body.account ?? 0)
           return json(result)
         }
@@ -1490,8 +1491,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/zcash/shielded/build' && method === 'POST') {
           auth.requireAuth(req)
-          const body = await req.json() as { recipient: string; amount: number; account?: number }
+          const body = await req.json() as { recipient: string; amount: number; account?: number; memo?: string }
           if (!body.recipient || !body.amount) return json({ error: 'Missing recipient or amount' }, 400)
+          if (typeof body.amount !== 'number' || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            return json({ error: 'Amount must be > 0 and <= 21M ZEC in zatoshis' }, 400)
+          }
           const result = await buildShieldedTx(body)
           return json(result)
         }
@@ -1500,6 +1504,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await req.json() as { signatures: string[] }
           if (!body.signatures?.length) return json({ error: 'Missing signatures' }, 400)
+          const hexRe = /^[0-9a-fA-F]{128}$/
+          if (!body.signatures.every(s => hexRe.test(s))) {
+            return json({ error: 'Each signature must be 128 hex chars (64 bytes)' }, 400)
+          }
           const result = await finalizeShieldedTx(body.signatures)
           return json(result)
         }

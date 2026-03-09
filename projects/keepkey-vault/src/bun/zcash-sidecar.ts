@@ -144,7 +144,7 @@ export async function startSidecar(): Promise<void> {
 /**
  * Send a command to the sidecar and wait for the response.
  */
-export async function sendCommand(cmd: string, params: Record<string, any> = {}): Promise<any> {
+export async function sendCommand(cmd: string, params: Record<string, any> = {}, timeoutMs: number = 300000): Promise<any> {
 	if (!sidecarProc || !ready) {
 		throw new Error("Sidecar not running — call startSidecar() first")
 	}
@@ -152,21 +152,31 @@ export async function sendCommand(cmd: string, params: Record<string, any> = {})
 	const request = JSON.stringify({ cmd, ...params }) + "\n"
 
 	return new Promise<any>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			const idx = pendingRequests.findIndex(p => p.resolve === wrappedResolve)
+			if (idx !== -1) pendingRequests.splice(idx, 1)
+			reject(new Error(`Sidecar command '${cmd}' timed out after ${timeoutMs}ms`))
+		}, timeoutMs)
+
+		const wrappedResolve = (response: IpcResponse) => {
+			clearTimeout(timeout)
+			if (response.ok) {
+				resolve(response)
+			} else {
+				reject(new Error(response.error || "Sidecar command failed"))
+			}
+		}
+
 		pendingRequests.push({
-			resolve: (response) => {
-				if (response.ok) {
-					resolve(response)
-				} else {
-					reject(new Error(response.error || "Sidecar command failed"))
-				}
-			},
-			reject,
+			resolve: wrappedResolve,
+			reject: (e) => { clearTimeout(timeout); reject(e) },
 		})
 
 		try {
 			sidecarProc!.stdin.write(request)
 			sidecarProc!.stdin.flush()
 		} catch (e: any) {
+			clearTimeout(timeout)
 			reject(new Error(`Failed to write to sidecar stdin: ${e.message}`))
 		}
 	})
@@ -254,6 +264,10 @@ function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 						}
 					} catch (e) {
 						console.error("[zcash-sidecar] Invalid JSON from sidecar:", line.slice(0, 200))
+						const pending = pendingRequests.shift()
+						if (pending) {
+							pending.reject(new Error("Invalid JSON response from sidecar"))
+						}
 					}
 				}
 			}

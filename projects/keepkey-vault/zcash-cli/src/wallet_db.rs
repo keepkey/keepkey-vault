@@ -24,6 +24,7 @@ pub struct ScannedNote {
 
 /// A spendable (unspent) note with its database ID.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SpendableNote {
     pub id: i64,
     pub value: u64,

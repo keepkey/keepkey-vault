@@ -179,6 +179,7 @@ export async function buildShieldedTx(params: ShieldedSendParams): Promise<{
 		recipient: params.recipient,
 		amount: params.amount,
 		account: params.account ?? 0,
+		memo: params.memo,
 	})
 }
 
