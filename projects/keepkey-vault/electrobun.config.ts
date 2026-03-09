@@ -8,6 +8,7 @@ export default {
 		urlSchemes: ["keepkey"],
 	},
 	build: {
+		buildFolder: "_build",
 		bun: {
 			// Mark native addons and protobuf-dependent packages as external
 			// so Bun loads them at runtime instead of bundling them.
@@ -29,7 +30,7 @@ export default {
 		copy: {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
-			"build/_ext_modules": "node_modules",
+			"_build/_ext_modules": "node_modules",
 		},
 		mac: {
 			bundleCEF: false,

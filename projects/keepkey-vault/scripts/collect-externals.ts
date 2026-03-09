@@ -23,7 +23,7 @@ const EXTERNALS = [
 
 const projectRoot = join(import.meta.dir, '..')
 const nmSource = join(projectRoot, 'node_modules')
-const nmDest = join(projectRoot, 'build', '_ext_modules')
+const nmDest = join(projectRoot, '_build', '_ext_modules')
 
 // Resolve file: linked packages to their actual source directories.
 // Bun's file: resolution can leave broken stubs in node_modules (empty dir with only node_modules/).
