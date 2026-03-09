@@ -20,7 +20,9 @@
 		"description": "您的设备已启用密码短语保护。输入您的 BIP-39 密码短语以解锁。留空则使用默认钱包。",
 		"placeholder": "密码短语（可选）",
 		"warning": "密码短语区分大小写。不同的密码短语会生成完全不同的钱包。",
-		"unlock": "解锁"
+		"unlock": "解锁",
+		"confirmOnDevice": "在 KeepKey 上确认",
+		"confirmOnDeviceHint": "请检查设备屏幕并按下按钮确认。"
 	},
 	"pairing": {
 		"wantsToConnect": "想要连接到您的 KeepKey",

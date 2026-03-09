@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Box, Text, Flex, Button, Input } from "@chakra-ui/react"
+import { Box, Text, Flex, Button, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 
 interface PassphraseEntryProps {
-	onSubmit: (passphrase: string) => void
+	onSubmit: (passphrase: string) => Promise<void>
 	onCancel: () => void
 }
 
@@ -16,17 +16,21 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 	const { t } = useTranslation("device")
 	const [passphrase, setPassphrase] = useState("")
 	const [showPassphrase, setShowPassphrase] = useState(false)
+	const [submitting, setSubmitting] = useState(false)
 	const inputRef = useRef<HTMLInputElement>(null)
 
 	// Auto-focus the input on mount
 	useEffect(() => {
-		setTimeout(() => inputRef.current?.focus(), 100)
-	}, [])
+		if (!submitting) setTimeout(() => inputRef.current?.focus(), 100)
+	}, [submitting])
 
-	const handleSubmit = useCallback(() => {
-		onSubmit(passphrase)
-		setPassphrase("")
-	}, [passphrase, onSubmit])
+	const handleSubmit = useCallback(async () => {
+		if (submitting) return
+		setSubmitting(true)
+		await onSubmit(passphrase)
+		// Stay in "Confirm on device" state — the parent will unmount us
+		// when the device state transitions away from needs_passphrase.
+	}, [passphrase, onSubmit, submitting])
 
 	// Keyboard: Enter on input submits; Escape anywhere dismisses
 	const handleInputKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -38,11 +42,11 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") onCancel()
+			if (e.key === "Escape" && !submitting) onCancel()
 		}
 		window.addEventListener("keydown", onKeyDown)
 		return () => window.removeEventListener("keydown", onKeyDown)
-	}, [onCancel])
+	}, [onCancel, submitting])
 
 	return (
 		<Flex
@@ -66,93 +70,116 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 				w="90%"
 				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
 			>
-				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
-					{t("passphrase.title")}
-				</Text>
-				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
-					{t("passphrase.description")}
-				</Text>
-
-				{/* Passphrase input */}
-				<Box position="relative" mb="5">
-					<Input
-						ref={inputRef}
-						type={showPassphrase ? "text" : "password"}
-						value={passphrase}
-						onChange={(e) => setPassphrase(e.target.value)}
-						onKeyDown={handleInputKeyDown}
-						placeholder={t("passphrase.placeholder")}
-						bg="kk.bg"
-						border="1px solid"
-						borderColor="kk.border"
-						color="kk.textPrimary"
-						fontSize="md"
-						px="4"
-						py="3"
-						pr="14"
-						borderRadius="md"
-						_focus={{ borderColor: "kk.gold", outline: "none" }}
-						_placeholder={{ color: "kk.textMuted" }}
-						autoComplete="off"
-						autoCorrect="off"
-						spellCheck={false}
-					/>
-					<Box
-						as="button"
-						position="absolute"
-						right="3"
-						top="50%"
-						transform="translateY(-50%)"
-						onClick={() => setShowPassphrase((v) => !v)}
-						color="kk.textSecondary"
-						_hover={{ color: "kk.textPrimary" }}
-						cursor="pointer"
-						p="1"
-					>
-						{showPassphrase ? (
-							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-								<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-								<line x1="1" y1="1" x2="23" y2="23" />
+				{submitting ? (
+					/* ── Confirm on device state ── */
+					<Flex direction="column" align="center" gap="5" py="4">
+						<Box color="kk.gold">
+							<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+								<rect x="2" y="6" width="20" height="12" rx="2" />
+								<circle cx="12" cy="12" r="2" />
+								<path d="M6 12h.01M18 12h.01" />
 							</svg>
-						) : (
-							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-								<circle cx="12" cy="12" r="3" />
-							</svg>
-						)}
-					</Box>
-				</Box>
+						</Box>
+						<Text fontSize="lg" fontWeight="bold" color="kk.textPrimary" textAlign="center">
+							{t("passphrase.confirmOnDevice")}
+						</Text>
+						<Text color="kk.textSecondary" fontSize="sm" textAlign="center">
+							{t("passphrase.confirmOnDeviceHint")}
+						</Text>
+						<Spinner size="sm" color="kk.gold" />
+					</Flex>
+				) : (
+					/* ── Passphrase input state ── */
+					<>
+						<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
+							{t("passphrase.title")}
+						</Text>
+						<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
+							{t("passphrase.description")}
+						</Text>
 
-				<Text color="kk.textMuted" fontSize="xs" mb="5" textAlign="center">
-					{t("passphrase.warning")}
-				</Text>
+						{/* Passphrase input */}
+						<Box position="relative" mb="5">
+							<Input
+								ref={inputRef}
+								type={showPassphrase ? "text" : "password"}
+								value={passphrase}
+								onChange={(e) => setPassphrase(e.target.value)}
+								onKeyDown={handleInputKeyDown}
+								placeholder={t("passphrase.placeholder")}
+								bg="kk.bg"
+								border="1px solid"
+								borderColor="kk.border"
+								color="kk.textPrimary"
+								fontSize="md"
+								px="4"
+								py="3"
+								pr="14"
+								borderRadius="md"
+								_focus={{ borderColor: "kk.gold", outline: "none" }}
+								_placeholder={{ color: "kk.textMuted" }}
+								autoComplete="off"
+								autoCorrect="off"
+								spellCheck={false}
+							/>
+							<Box
+								as="button"
+								position="absolute"
+								right="3"
+								top="50%"
+								transform="translateY(-50%)"
+								onClick={() => setShowPassphrase((v) => !v)}
+								color="kk.textSecondary"
+								_hover={{ color: "kk.textPrimary" }}
+								cursor="pointer"
+								p="1"
+							>
+								{showPassphrase ? (
+									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+										<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+										<line x1="1" y1="1" x2="23" y2="23" />
+									</svg>
+								) : (
+									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+										<circle cx="12" cy="12" r="3" />
+									</svg>
+								)}
+							</Box>
+						</Box>
 
-				{/* Action buttons */}
-				<Flex gap="3" justifyContent="center">
-					<Button
-						onClick={onCancel}
-						size="md"
-						variant="outline"
-						borderColor="kk.border"
-						color="kk.textSecondary"
-						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
-						flex={1}
-					>
-						{t("cancel", { ns: "common" })}
-					</Button>
-					<Button
-						onClick={handleSubmit}
-						size="md"
-						bg="kk.gold"
-						color="black"
-						fontWeight="semibold"
-						_hover={{ bg: "kk.goldHover" }}
-						flex={1}
-					>
-						{t("passphrase.unlock")}
-					</Button>
-				</Flex>
+						<Text color="kk.textMuted" fontSize="xs" mb="5" textAlign="center">
+							{t("passphrase.warning")}
+						</Text>
+
+						{/* Action buttons */}
+						<Flex gap="3" justifyContent="center">
+							<Button
+								onClick={onCancel}
+								size="md"
+								variant="outline"
+								borderColor="kk.border"
+								color="kk.textSecondary"
+								_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
+								flex={1}
+							>
+								{t("cancel", { ns: "common" })}
+							</Button>
+							<Button
+								onClick={handleSubmit}
+								size="md"
+								bg="kk.gold"
+								color="black"
+								fontWeight="semibold"
+								_hover={{ bg: "kk.goldHover" }}
+								flex={1}
+							>
+								{t("passphrase.unlock")}
+							</Button>
+						</Flex>
+					</>
+				)}
 			</Box>
 		</Flex>
 	)

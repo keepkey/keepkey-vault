@@ -235,6 +235,16 @@ export class EngineController extends EventEmitter {
         })
       }, delay)
     }
+
+    // Same for needs_passphrase — device has passphrase protection but PIN is
+    // already cached (or disabled).  We must call promptPin() → getPublicKeys()
+    // so the device sends PASSPHRASE_REQUEST; without it, the UI overlay shows
+    // but sendPassphrase() has no pending device request to respond to.
+    if (state === 'needs_passphrase' && !this.promptPinActive) {
+      this.promptPin().catch(err => {
+        console.warn('[Engine] Auto prompt-passphrase failed:', err?.message)
+      })
+    }
   }
 
   // ── Firmware Manifest ──────────────────────────────────────────────────
@@ -881,7 +891,11 @@ export class EngineController extends EventEmitter {
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
     this.cachedFeatures = await this.wallet.getFeatures()
-    this.emit('state-change', this.getDeviceState())
+    // Route through updateState so needs_passphrase triggers promptPin() →
+    // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
+    // so enabling passphrase from settings showed the overlay but the device
+    // never received the passphrase (no pending request to respond to).
+    this.updateState(this.deriveState(this.cachedFeatures))
   }
 
   async changePin() {

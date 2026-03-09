@@ -20,7 +20,9 @@
 		"description": "Your device has passphrase protection enabled. Enter your BIP-39 passphrase to unlock. Leave empty for the default wallet.",
 		"placeholder": "Passphrase (optional)",
 		"warning": "Passphrases are case-sensitive. A different passphrase generates a completely different wallet.",
-		"unlock": "Unlock"
+		"unlock": "Unlock",
+		"confirmOnDevice": "Confirm on Your KeepKey",
+		"confirmOnDeviceHint": "Check your device screen and press the button to confirm."
 	},
 	"pairing": {
 		"wantsToConnect": "wants to connect to your KeepKey",

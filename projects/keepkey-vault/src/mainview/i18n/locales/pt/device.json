@@ -20,7 +20,9 @@
 		"description": "Seu dispositivo tem proteção por frase-senha ativada. Insira sua frase-senha BIP-39 para desbloquear. Deixe vazio para a carteira padrão.",
 		"placeholder": "Frase-senha (opcional)",
 		"warning": "Frases-senha diferenciam maiúsculas de minúsculas. Uma frase-senha diferente gera uma carteira completamente diferente.",
-		"unlock": "Desbloquear"
+		"unlock": "Desbloquear",
+		"confirmOnDevice": "Confirmar no seu KeepKey",
+		"confirmOnDeviceHint": "Verifique a tela do seu dispositivo e pressione o botão para confirmar."
 	},
 	"pairing": {
 		"wantsToConnect": "quer se conectar ao seu KeepKey",

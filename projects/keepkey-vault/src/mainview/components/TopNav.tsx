@@ -212,13 +212,11 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 			<Flex flex="1" justify="flex-end" align="center">
 				<IconButton
 					aria-label={t("deviceSettings")}
-					onClick={watchOnly ? undefined : onSettingsToggle}
+					onClick={onSettingsToggle}
 					size="sm"
 					variant="ghost"
 					color={settingsOpen ? "kk.gold" : "kk.textSecondary"}
-					_hover={watchOnly ? {} : { color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
-					disabled={watchOnly}
-					opacity={watchOnly ? 0.4 : 1}
+					_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
 				>
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<circle cx="12" cy="12" r="3" />

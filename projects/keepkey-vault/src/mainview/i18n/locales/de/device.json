@@ -20,7 +20,9 @@
 		"description": "Ihr Gerät hat den Passphrase-Schutz aktiviert. Geben Sie Ihre BIP-39-Passphrase ein, um zu entsperren. Lassen Sie das Feld leer für die Standard-Wallet.",
 		"placeholder": "Passphrase (optional)",
 		"warning": "Passphrasen unterscheiden Groß- und Kleinschreibung. Eine andere Passphrase erzeugt eine völlig andere Wallet.",
-		"unlock": "Entsperren"
+		"unlock": "Entsperren",
+		"confirmOnDevice": "Auf deinem KeepKey bestätigen",
+		"confirmOnDeviceHint": "Überprüfe den Bildschirm deines Geräts und drücke die Taste zum Bestätigen."
 	},
 	"pairing": {
 		"wantsToConnect": "möchte sich mit Ihrem KeepKey verbinden",

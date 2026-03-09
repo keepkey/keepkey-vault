@@ -113,16 +113,21 @@ function App() {
 
 	const handlePassphraseSubmit = useCallback(async (passphrase: string) => {
 		try { await rpcRequest("sendPassphrase", { passphrase }) } catch (e) { console.error("sendPassphrase:", e) }
-		setPinRequestType(null) // ensure PIN overlay stays cleared
-		setPassphraseRequested(false)
+		setPinRequestType(null)
+		// Don't dismiss overlay here — sendPassphrase returns instantly (omitLock/noWait)
+		// but the device still needs physical confirmation. The overlay stays visible
+		// showing "Confirm on your KeepKey" until state transitions to 'ready'.
 	}, [])
 
 	const handlePassphraseCancel = useCallback(() => { setPinRequestType(null); setPassphraseRequested(false) }, [])
 
-	// Auto-show passphrase overlay when device needs passphrase
+	// Auto-show passphrase overlay when device needs passphrase;
+	// auto-dismiss when device leaves needs_passphrase (e.g. → ready).
 	useEffect(() => {
 		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
 			setPassphraseRequested(true)
+		} else if (deviceState.state !== "needs_passphrase" && passphraseRequested) {
+			setPassphraseRequested(false)
 		}
 	}, [deviceState.state, passphraseRequested])
 
@@ -404,7 +409,8 @@ function App() {
 		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
-		: ["ready", "needs_pin", "needs_passphrase"].includes(deviceState.state) ? "ready"
+		: deviceState.state === "ready" ? "ready"
+		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
 		: "splash"
 
 	// ── Overlays (render above everything, only one at a time) ──────
@@ -480,7 +486,8 @@ function App() {
 						connected={false}
 						firmwareVersion={undefined}
 						firmwareVerified={undefined}
-						onSettingsToggle={() => {}}
+						onSettingsToggle={() => setSettingsOpen((o) => !o)}
+						settingsOpen={settingsOpen}
 						activeTab="vault"
 						onTabChange={() => {}}
 						watchOnly
@@ -489,6 +496,14 @@ function App() {
 						<Dashboard watchOnly onLoaded={() => {}} />
 					</Flex>
 				</Flex>
+				<DeviceSettingsDrawer
+					open={settingsOpen}
+					onClose={() => setSettingsOpen(false)}
+					deviceState={deviceState}
+					appVersion={appVersion}
+					onCheckForUpdate={update.checkForUpdate}
+					updatePhase={update.phase}
+				/>
 			</>
 		)
 	}
@@ -556,7 +571,7 @@ function App() {
 			>
 				<TopNav
 					label={deviceState.label}
-					connected={deviceState.state === "ready" || deviceState.state === "needs_pin" || deviceState.state === "needs_passphrase"}
+					connected={deviceState.state === "ready"}
 					firmwareVersion={deviceState.firmwareVersion}
 					firmwareVerified={deviceState.firmwareVerified}
 					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
