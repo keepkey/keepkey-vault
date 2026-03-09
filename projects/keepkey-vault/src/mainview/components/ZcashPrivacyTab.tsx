@@ -118,8 +118,17 @@ export function ZcashPrivacyTab() {
 		setSendError(null)
 		setSendResult(null)
 		try {
-			const zatoshis = Math.round(parseFloat(amount) * 1e8)
-			if (isNaN(zatoshis) || zatoshis <= 0) throw new Error("Invalid amount")
+			// String-based decimal conversion to avoid floating-point precision loss
+			const parts = amount.split(".")
+			const whole = BigInt(parts[0] || "0") * 100_000_000n
+			const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
+			const frac = BigInt(fracStr)
+			const zatoshis = Number(whole + frac)
+			if (!Number.isFinite(zatoshis) || zatoshis <= 0) throw new Error("Invalid amount")
+		// Validate memo length (Orchard memo field is 512 bytes max)
+			if (memo && new TextEncoder().encode(memo).length > 512) {
+				throw new Error(t("memoTooLong"))
+			}
 			const result = await rpcRequest<{ txid: string }>(
 				"zcashShieldedSend",
 				{ recipient, amount: zatoshis, memo: memo || undefined },
@@ -178,7 +187,7 @@ export function ZcashPrivacyTab() {
 					</Button>
 				)}
 				{status === "not_running" && (
-					<Text fontSize="10px" color="kk.textMuted">Build zcash-cli to enable</Text>
+					<Text fontSize="10px" color="kk.textMuted">{t("zcashCliRequired")}</Text>
 				)}
 				{status === "initializing" && <Spinner size="xs" color="kk.gold" />}
 			</Flex>
@@ -250,7 +259,7 @@ export function ZcashPrivacyTab() {
 								w="fit-content"
 							>
 								<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
-								{copied ? "Copied" : t("copyAddress")}
+								{copied ? t("copied") : t("copyAddress")}
 							</Button>
 						</Flex>
 					</Flex>

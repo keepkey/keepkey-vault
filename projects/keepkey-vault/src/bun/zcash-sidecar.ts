@@ -12,18 +12,22 @@ import { existsSync } from "fs"
 
 interface IpcResponse {
 	ok: boolean
+	_req_id?: number
 	[key: string]: any
 }
 
 type PendingRequest = {
 	resolve: (value: IpcResponse) => void
 	reject: (error: Error) => void
+	timeout: ReturnType<typeof setTimeout>
 }
 
 let sidecarProc: Subprocess<"pipe", "pipe", "pipe"> | null = null
-let pendingRequests: PendingRequest[] = []
+let pendingRequests = new Map<number, PendingRequest>()
+let nextReqId = 1
 let ready = false
 let buffer = ""
+let initPromise: Promise<void> | null = null
 
 /** Cached FVK + address from auto-load or set_fvk */
 let cachedAddress: string | null = null
@@ -46,9 +50,6 @@ function getBinaryPath(): string {
 		return process.env.ZCASH_CLI_BIN
 	}
 
-	// In electrobun, import.meta.dir points inside the app bundle:
-	//   .../build/dev-macos-arm64/keepkey-vault-dev.app/Contents/Resources/app/bun/
-	// We need to find the binary relative to the actual source project root.
 	const candidates: string[] = []
 
 	// 1. cwd-relative (works if cwd is the project root)
@@ -57,9 +58,6 @@ function getBinaryPath(): string {
 	candidates.push(join(cwdRoot, "zcash-cli", "target", "debug", "zcash-cli"))
 
 	// 2. Walk up from app bundle to source project root.
-	//    import.meta.dir = .../projects/keepkey-vault/build/dev-macos-arm64/app.app/Contents/Resources/app/bun/
-	//    project root    = .../projects/keepkey-vault/
-	//    That's 7 levels up: bun → app → Resources → Contents → *.app → dev-macos-arm64 → build → project root
 	const fromBundle = resolve(import.meta.dir, "..", "..", "..", "..", "..", "..", "..")
 	candidates.push(join(fromBundle, "zcash-cli", "target", "release", "zcash-cli"))
 	candidates.push(join(fromBundle, "zcash-cli", "target", "debug", "zcash-cli"))
@@ -72,7 +70,7 @@ function getBinaryPath(): string {
 	const appBundleDir = resolve(import.meta.dir, "..", "..", "..")
 	candidates.push(join(appBundleDir, "zcash-cli"))
 
-	console.log(`[zcash-sidecar] cwd=${cwdRoot}, import.meta.dir=${import.meta.dir}`)
+	console.log(`[zcash-sidecar] Searching for binary (cwd=${cwdRoot})`)
 
 	for (const p of candidates) {
 		if (existsSync(p)) {
@@ -90,86 +88,102 @@ function getBinaryPath(): string {
 
 /**
  * Start the Zcash sidecar process.
+ * Guards against concurrent startup calls.
  */
 export async function startSidecar(): Promise<void> {
-	if (sidecarProc) {
-		console.log("[zcash-sidecar] Already running")
+	if (sidecarProc && ready) {
 		return
 	}
-
-	const binPath = getBinaryPath()
-	console.log(`[zcash-sidecar] Starting: ${binPath}`)
-
-	sidecarProc = Bun.spawn([binPath], {
-		stdin: "pipe",
-		stdout: "pipe",
-		stderr: "pipe",
-		env: {
-			...process.env,
-			RUST_LOG: "info",
-		},
-	})
-
-	// Read stderr for logs (Rust logs go to stderr)
-	readStderr(sidecarProc)
-
-	// Read stdout for NDJSON responses
-	readStdout(sidecarProc)
-
-	// Wait for ready signal
-	const readyResponse = await new Promise<IpcResponse>((resolve, reject) => {
-		const timeout = setTimeout(() => reject(new Error("Sidecar startup timeout")), 10000)
-		pendingRequests.push({
-			resolve: (r) => { clearTimeout(timeout); resolve(r) },
-			reject: (e) => { clearTimeout(timeout); reject(e) },
-		})
-	})
-
-	if (!readyResponse.ok || !readyResponse.ready) {
-		throw new Error("Sidecar failed to start")
+	// Prevent concurrent startSidecar() calls
+	if (initPromise) {
+		return initPromise
 	}
 
-	ready = true
+	initPromise = (async () => {
+		try {
+			const binPath = getBinaryPath()
+			console.log(`[zcash-sidecar] Starting: ${binPath}`)
 
-	// Capture auto-loaded FVK if the sidecar had one persisted
-	if (readyResponse.fvk_loaded && readyResponse.address) {
-		cachedAddress = readyResponse.address
-		cachedFvk = readyResponse.fvk || null
-		console.log(`[zcash-sidecar] Ready (version ${readyResponse.version}) — FVK auto-loaded, UA: ${cachedAddress?.slice(0, 20)}...`)
-	} else {
-		console.log(`[zcash-sidecar] Ready (version ${readyResponse.version}) — no saved FVK`)
-	}
+			sidecarProc = Bun.spawn([binPath], {
+				stdin: "pipe",
+				stdout: "pipe",
+				stderr: "pipe",
+				env: {
+					...process.env,
+					RUST_LOG: "info",
+				},
+			})
+
+			// Read stderr for logs (Rust logs go to stderr)
+			readStderr(sidecarProc)
+
+			// Read stdout for NDJSON responses
+			readStdout(sidecarProc)
+
+			// Wait for ready signal (startup uses req_id 0)
+			const readyResponse = await new Promise<IpcResponse>((resolve, reject) => {
+				const timeout = setTimeout(() => {
+					pendingRequests.delete(0)
+					reject(new Error("Sidecar startup timeout"))
+				}, 10000)
+				pendingRequests.set(0, {
+					resolve: (r) => { clearTimeout(timeout); resolve(r) },
+					reject: (e) => { clearTimeout(timeout); reject(e) },
+					timeout,
+				})
+			})
+
+			if (!readyResponse.ok || !readyResponse.ready) {
+				throw new Error("Sidecar failed to start")
+			}
+
+			ready = true
+
+			// Capture auto-loaded FVK if the sidecar had one persisted
+			if (readyResponse.fvk_loaded && readyResponse.address) {
+				cachedAddress = readyResponse.address
+				cachedFvk = readyResponse.fvk || null
+				console.log(`[zcash-sidecar] Ready (version ${readyResponse.version}) — FVK auto-loaded, UA: ${cachedAddress?.slice(0, 20)}...`)
+			} else {
+				console.log(`[zcash-sidecar] Ready (version ${readyResponse.version}) — no saved FVK`)
+			}
+		} finally {
+			initPromise = null
+		}
+	})()
+
+	return initPromise
 }
 
 /**
  * Send a command to the sidecar and wait for the response.
+ * Uses request IDs to correctly match responses to requests.
  */
 export async function sendCommand(cmd: string, params: Record<string, any> = {}, timeoutMs: number = 300000): Promise<any> {
 	if (!sidecarProc || !ready) {
 		throw new Error("Sidecar not running — call startSidecar() first")
 	}
 
-	const request = JSON.stringify({ cmd, ...params }) + "\n"
+	const reqId = nextReqId++
+	const request = JSON.stringify({ cmd, _req_id: reqId, ...params }) + "\n"
 
 	return new Promise<any>((resolve, reject) => {
 		const timeout = setTimeout(() => {
-			const idx = pendingRequests.findIndex(p => p.resolve === wrappedResolve)
-			if (idx !== -1) pendingRequests.splice(idx, 1)
+			pendingRequests.delete(reqId)
 			reject(new Error(`Sidecar command '${cmd}' timed out after ${timeoutMs}ms`))
 		}, timeoutMs)
 
-		const wrappedResolve = (response: IpcResponse) => {
-			clearTimeout(timeout)
-			if (response.ok) {
-				resolve(response)
-			} else {
-				reject(new Error(response.error || "Sidecar command failed"))
-			}
-		}
-
-		pendingRequests.push({
-			resolve: wrappedResolve,
+		pendingRequests.set(reqId, {
+			resolve: (response) => {
+				clearTimeout(timeout)
+				if (response.ok) {
+					resolve(response)
+				} else {
+					reject(new Error(response.error || "Sidecar command failed"))
+				}
+			},
 			reject: (e) => { clearTimeout(timeout); reject(e) },
+			timeout,
 		})
 
 		try {
@@ -177,6 +191,7 @@ export async function sendCommand(cmd: string, params: Record<string, any> = {},
 			sidecarProc!.stdin.flush()
 		} catch (e: any) {
 			clearTimeout(timeout)
+			pendingRequests.delete(reqId)
 			reject(new Error(`Failed to write to sidecar stdin: ${e.message}`))
 		}
 	})
@@ -234,6 +249,14 @@ export function setCachedFvk(address: string, fvk: { ak: string; nk: string; riv
 	cachedFvk = fvk
 }
 
+/**
+ * Clear the cached FVK (call on device disconnect to prevent stale state).
+ */
+export function clearCachedFvk(): void {
+	cachedAddress = null
+	cachedFvk = null
+}
+
 // ── Internal I/O ────────────────────────────────────────────────────────
 
 function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
@@ -256,29 +279,36 @@ function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 
 					try {
 						const response: IpcResponse = JSON.parse(line)
-						const pending = pendingRequests.shift()
-						if (pending) {
+						// Match by request ID if present, otherwise use FIFO for startup
+						const reqId = response._req_id
+						if (reqId !== undefined && pendingRequests.has(reqId)) {
+							const pending = pendingRequests.get(reqId)!
+							pendingRequests.delete(reqId)
+							pending.resolve(response)
+						} else if (reqId === undefined && pendingRequests.has(0)) {
+							// Startup ready signal (no req_id) — matched to id 0
+							const pending = pendingRequests.get(0)!
+							pendingRequests.delete(0)
 							pending.resolve(response)
 						} else {
-							console.warn("[zcash-sidecar] Unexpected response:", line.slice(0, 200))
+							console.warn("[zcash-sidecar] Unexpected response (req_id:", reqId, "):", line.slice(0, 200))
 						}
 					} catch (e) {
 						console.error("[zcash-sidecar] Invalid JSON from sidecar:", line.slice(0, 200))
-						const pending = pendingRequests.shift()
-						if (pending) {
-							pending.reject(new Error("Invalid JSON response from sidecar"))
-						}
 					}
 				}
 			}
-		} catch { /* process exited */ }
+		} catch (e) {
+			console.error("[zcash-sidecar] stdout reader error:", e)
+		}
 		try { reader.releaseLock() } catch { /* already released */ }
 
 		// Process exited — reject any pending requests
-		for (const pending of pendingRequests) {
+		for (const [, pending] of pendingRequests) {
+			clearTimeout(pending.timeout)
 			pending.reject(new Error("Sidecar process exited"))
 		}
-		pendingRequests = []
+		pendingRequests.clear()
 		ready = false
 		sidecarProc = null
 		console.log("[zcash-sidecar] Process exited")
@@ -309,7 +339,9 @@ function readStderr(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 				// Prevent unbounded growth
 				if (stderrBuf.length > 4096) stderrBuf = stderrBuf.slice(-2048)
 			}
-		} catch { /* process exited */ }
+		} catch (e) {
+			console.error("[zcash-sidecar] stderr reader error:", e)
+		}
 		try { reader.releaseLock() } catch { /* already released */ }
 	})()
 }

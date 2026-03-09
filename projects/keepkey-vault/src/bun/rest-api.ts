@@ -5,7 +5,7 @@ import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shar
 import { decodeEIP712 } from './eip712-decoder'
 import { CHAINS } from '../shared/chains'
 import {
-  initializeOrchard, initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady } from './zcash-sidecar'
@@ -1470,10 +1470,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const result = await initializeOrchardFromDevice(wallet, body.account ?? 0)
             return json(result)
           }
-          if (!body.seed_hex) return json({ error: 'Missing seed_hex or from_device flag' }, 400)
-          if (!/^[0-9a-fA-F]{128}$/.test(body.seed_hex)) return json({ error: 'seed_hex must be 128 hex chars (64 bytes)' }, 400)
-          const result = await initializeOrchard(body.seed_hex, body.account ?? 0)
-          return json(result)
+          // seed_hex path is dev/test only — reject in production builds
+          return json({ error: 'seed_hex init disabled — use from_device: true' }, 403)
         }
 
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {

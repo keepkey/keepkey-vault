@@ -37,5 +37,8 @@
 	"initializing": "Initializing...",
 	"sending": "Sending...",
 	"txSent": "Transaction sent",
-	"copyAddress": "Copy address"
+	"copyAddress": "Copy address",
+	"copied": "Copied",
+	"zcashCliRequired": "Build zcash-cli to enable",
+	"memoTooLong": "Memo exceeds 512 bytes"
 }

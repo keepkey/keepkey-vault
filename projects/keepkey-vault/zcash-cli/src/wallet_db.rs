@@ -255,9 +255,9 @@ impl WalletDb {
     }
 
     /// Save the FVK to the database for auto-loading on restart.
-    /// Stores an ak_hash fingerprint to detect firmware/basepoint changes.
+    /// Stores a full ak hash to detect firmware/basepoint changes.
     pub fn save_fvk(&self, fvk_bytes: &[u8; 96]) -> Result<()> {
-        let ak_hash = hex::encode(&fvk_bytes[..8]); // First 8 bytes of ak as fingerprint
+        let ak_hash = hex::encode(&fvk_bytes[..32]); // Full 32-byte ak as fingerprint
         self.conn.execute(
             "INSERT OR REPLACE INTO fvk_store (id, ak, nk, rivk, ak_hash) VALUES (1, ?1, ?2, ?3, ?4)",
             params![
@@ -312,10 +312,10 @@ impl WalletDb {
         Ok(())
     }
 
-    /// Check if a new FVK matches the stored one (by ak fingerprint).
+    /// Check if a new FVK matches the stored one (by full ak comparison).
     /// Returns true if they match or no FVK is stored yet.
     pub fn fvk_matches(&self, new_fvk_bytes: &[u8; 96]) -> Result<bool> {
-        let new_hash = hex::encode(&new_fvk_bytes[..8]);
+        let new_hash = hex::encode(&new_fvk_bytes[..32]);
         let result = self.conn.query_row(
             "SELECT ak_hash FROM fvk_store WHERE id = 1",
             [],

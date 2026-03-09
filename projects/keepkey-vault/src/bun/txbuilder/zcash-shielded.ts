@@ -219,7 +219,24 @@ export async function broadcastShieldedTx(rawTxHex: string): Promise<{
  * @param params - Send parameters
  * @returns Transaction ID
  */
+let sendInProgress = false
+
 export async function sendShielded(
+	wallet: any,
+	params: ShieldedSendParams,
+): Promise<{ txid: string }> {
+	if (sendInProgress) {
+		throw new Error("A shielded send is already in progress — wait for it to complete")
+	}
+	sendInProgress = true
+	try {
+		return await _sendShieldedInner(wallet, params)
+	} finally {
+		sendInProgress = false
+	}
+}
+
+async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
 ): Promise<{ txid: string }> {
@@ -278,6 +295,12 @@ async function deviceSign(wallet: any, sr: SigningRequest): Promise<string[]> {
 
 	if (!signatures || !Array.isArray(signatures)) {
 		throw new Error("Device did not return signatures")
+	}
+
+	if (signatures.length !== sr.n_actions) {
+		throw new Error(
+			`Signature count mismatch: got ${signatures.length} signatures for ${sr.n_actions} actions`
+		)
 	}
 
 	return signatures

@@ -364,16 +364,19 @@ pub async fn build_pczt(
     info!("Computed anchor: {}", hex::encode(&anchor.to_bytes()));
 
     // Step 7: Build PCZT bundle
+    // CRITICAL: Add spends in position-sorted order so checkpoint IDs match witnesses.
+    // ShardTree checkpoint IDs are assigned by ascending position, so witnesses must
+    // be requested in the same order.
     let mut builder = Builder::new(BundleType::DEFAULT, anchor);
 
-    for (i, note) in orchard_notes.iter().enumerate() {
-        let position = incrementalmerkletree::Position::from(note_positions[i]);
+    for &(pos, orig_idx) in &sorted_by_pos {
+        let position = incrementalmerkletree::Position::from(pos);
         let merkle_path = tree.witness_at_checkpoint_id(position, &last_checkpoint_id)
-            .context(format!("Failed to get Merkle witness for note {} at position {}", i, note_positions[i]))?
-            .ok_or_else(|| anyhow::anyhow!("No witness for note {} at position {}", i, note_positions[i]))?;
+            .context(format!("Failed to get Merkle witness for note {} at position {}", orig_idx, pos))?
+            .ok_or_else(|| anyhow::anyhow!("No witness for note {} at position {}", orig_idx, pos))?;
 
-        builder.add_spend(fvk.clone(), note.clone(), merkle_path.into())
-            .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", i, e))?;
+        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), merkle_path.into())
+            .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", orig_idx, e))?;
     }
 
     // Encode memo: UTF-8 text zero-padded to 512 bytes (Zcash memo field spec)
@@ -542,9 +545,17 @@ pub fn finalize_pczt(
     signatures: &[Vec<u8>],
 ) -> Result<(Vec<u8>, String)> {
     let mut rng = OsRng;
+    let n_actions = pczt_bundle.actions().len();
+
+    if signatures.len() != n_actions {
+        return Err(anyhow::anyhow!(
+            "Signature count mismatch: got {} signatures for {} actions",
+            signatures.len(), n_actions
+        ));
+    }
 
     info!("Applying {} signatures...", signatures.len());
-    debug!("DEBUG finalize sighash: {}", hex::encode(&sighash));
+    debug!("finalize sighash: {}", hex::encode(&sighash));
 
     for (i, sig_bytes) in signatures.iter().enumerate() {
         // Check if this action is a real spend or a dummy (output-only).
@@ -581,7 +592,11 @@ pub fn finalize_pczt(
         let signature: redpallas::Signature<SpendAuth> = sig_arr.into();
 
         let verify_result = rk.verify(&sighash, &signature);
-        info!("  manual verify: {:?}", verify_result);
+        if verify_result.is_err() {
+            return Err(anyhow::anyhow!(
+                "Signature verification failed for action {}: {:?}", i, verify_result
+            ));
+        }
 
         pczt_bundle.actions_mut()[i]
             .apply_signature(sighash, signature)

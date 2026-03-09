@@ -71,6 +71,8 @@ impl State {
 #[derive(Deserialize)]
 struct IpcRequest {
     cmd: String,
+    #[serde(default)]
+    _req_id: Option<u64>,
     #[serde(flatten)]
     params: Value,
 }
@@ -78,17 +80,20 @@ struct IpcRequest {
 #[derive(Serialize)]
 struct IpcResponse {
     ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    _req_id: Option<u64>,
     #[serde(flatten)]
     data: Value,
 }
 
-fn ok_response(data: Value) -> IpcResponse {
-    IpcResponse { ok: true, data }
+fn ok_response_with_id(data: Value, req_id: Option<u64>) -> IpcResponse {
+    IpcResponse { ok: true, _req_id: req_id, data }
 }
 
-fn err_response(msg: &str) -> IpcResponse {
+fn err_response_with_id(msg: &str, req_id: Option<u64>) -> IpcResponse {
     IpcResponse {
         ok: false,
+        _req_id: req_id,
         data: serde_json::json!({ "error": msg }),
     }
 }
@@ -489,7 +494,7 @@ async fn main() {
         let request: IpcRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = err_response(&format!("Invalid JSON: {}", e));
+                let resp = err_response_with_id(&format!("Invalid JSON: {}", e), None);
                 let mut out = stdout.lock();
                 serde_json::to_writer(&mut out, &resp).ok();
                 writeln!(out).ok();
@@ -517,10 +522,10 @@ async fn main() {
         };
 
         let response = match result {
-            Ok(data) => ok_response(data),
+            Ok(data) => ok_response_with_id(data, request._req_id),
             Err(e) => {
                 error!("Command {} failed: {}", request.cmd, e);
-                err_response(&e.to_string())
+                err_response_with_id(&e.to_string(), request._req_id)
             }
         };
 

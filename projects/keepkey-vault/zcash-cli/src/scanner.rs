@@ -383,26 +383,22 @@ fn try_decrypt_action(
         return None;
     }
 
-    let nullifier = Nullifier::from_bytes(
-        &action.nullifier.clone().try_into().unwrap()
-    );
+    let nf_arr: [u8; 32] = action.nullifier.clone().try_into().ok()?;
+    let nullifier = Nullifier::from_bytes(&nf_arr);
     if nullifier.is_none().into() {
         return None;
     }
 
-    let cmx = ExtractedNoteCommitment::from_bytes(
-        &action.cmx.clone().try_into().unwrap()
-    );
+    let cmx_arr: [u8; 32] = action.cmx.clone().try_into().ok()?;
+    let cmx = ExtractedNoteCommitment::from_bytes(&cmx_arr);
     if cmx.is_none().into() {
         return None;
     }
 
-    let ephemeral_key = EphemeralKeyBytes(
-        action.ephemeral_key.clone().try_into().unwrap()
-    );
+    let ek_arr: [u8; 32] = action.ephemeral_key.clone().try_into().ok()?;
+    let ephemeral_key = EphemeralKeyBytes(ek_arr);
 
-    let enc_ciphertext: [u8; 52] =
-        action.ciphertext.clone().try_into().unwrap();
+    let enc_ciphertext: [u8; 52] = action.ciphertext.clone().try_into().ok()?;
 
     let compact = CompactAction::from_parts(
         nullifier.unwrap(),
