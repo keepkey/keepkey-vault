@@ -1,6 +1,9 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
+import { IS_WINDOWS } from "../lib/platform"
+import { useWindowDrag } from "../hooks/useWindowDrag"
+import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
@@ -48,6 +51,7 @@ const GridIcon = () => (
 
 /** Minimal nav bar for splash / setup phases. */
 export function SplashNav() {
+	const windowDrag = useWindowDrag()
 	return (
 		<Flex
 			position="fixed"
@@ -62,6 +66,9 @@ export function SplashNav() {
 			align="center"
 			px="4"
 			zIndex={Z.nav}
+			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
+			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
 			<Flex align="center" gap="2">
 				<Image
@@ -81,6 +88,7 @@ export function SplashNav() {
 
 export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
 	const { t } = useTranslation("nav")
+	const windowDrag = useWindowDrag()
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
@@ -113,6 +121,9 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 			align="center"
 			px="4"
 			zIndex={Z.nav}
+			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
+			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1">
