@@ -4,7 +4,7 @@ import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@cha
 import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
-import { BTC_SCRIPT_TYPES, btcAccountPath } from "../../shared/chains"
+import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -25,9 +25,10 @@ interface AssetPageProps {
 	chain: ChainDef
 	balance?: ChainBalance
 	onBack: () => void
+	firmwareVersion?: string
 }
 
-export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
@@ -221,11 +222,13 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	}, [])
 
 	const isZcash = chain.id === 'zcash'
+	const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
+	const zcashShieldedSupported = isZcash && zcashShieldedDef && isChainSupported(zcashShieldedDef, firmwareVersion)
 
 	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: t("receive"), icon: FaArrowDown },
 		{ id: "send", label: t("send"), icon: FaArrowUp },
-		...(isZcash ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
+		...(zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
 	]
 
 	// Shared token row renderer

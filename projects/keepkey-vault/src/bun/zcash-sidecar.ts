@@ -28,6 +28,9 @@ let nextReqId = 1
 let ready = false
 let buffer = ""
 let initPromise: Promise<void> | null = null
+let scanProgressCallback: ((progress: { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }) => void) | null = null
+let lastProgressTime = 0
+let lastProgressHeight = 0
 
 /** Cached FVK + address from auto-load or set_fvk */
 let cachedAddress: string | null = null
@@ -257,6 +260,15 @@ export function clearCachedFvk(): void {
 	cachedFvk = null
 }
 
+/**
+ * Register a callback for scan progress events parsed from sidecar stderr.
+ */
+export function onScanProgress(cb: typeof scanProgressCallback): void {
+	scanProgressCallback = cb
+	lastProgressTime = 0
+	lastProgressHeight = 0
+}
+
 // ── Internal I/O ────────────────────────────────────────────────────────
 
 function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
@@ -315,6 +327,9 @@ function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 	})()
 }
 
+// Regex to parse: "Scan progress: 0.6% (1697103/3266985)"
+const PROGRESS_RE = /Scan progress:\s+([\d.]+)%\s+\((\d+)\/(\d+)\)/
+
 function readStderr(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 	;(async () => {
 		const reader = proc.stderr.getReader()
@@ -333,6 +348,33 @@ function readStderr(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 					stderrBuf = stderrBuf.slice(nlIdx + 1)
 					if (line) {
 						console.log(`[zcash-sidecar] ${line}`)
+
+						// Parse scan progress for UI updates
+						const match = line.match(PROGRESS_RE)
+						if (match && scanProgressCallback) {
+							const percent = parseFloat(match[1])
+							const scannedHeight = parseInt(match[2], 10)
+							const tipHeight = parseInt(match[3], 10)
+
+							const now = Date.now()
+							let blocksPerSec = 0
+							let etaSeconds = 0
+
+							if (lastProgressTime > 0 && lastProgressHeight > 0) {
+								const elapsed = (now - lastProgressTime) / 1000
+								const blocksDone = scannedHeight - lastProgressHeight
+								if (elapsed > 0 && blocksDone > 0) {
+									blocksPerSec = Math.round(blocksDone / elapsed)
+									const remaining = tipHeight - scannedHeight
+									etaSeconds = blocksPerSec > 0 ? Math.round(remaining / blocksPerSec) : 0
+								}
+							}
+
+							lastProgressTime = now
+							lastProgressHeight = scannedHeight
+
+							scanProgressCallback({ percent, scannedHeight, tipHeight, blocksPerSec, etaSeconds })
+						}
 					}
 				}
 

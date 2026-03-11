@@ -1,12 +1,33 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
 import { FaShieldAlt, FaCopy, FaCheck } from "react-icons/fa"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { generateQRSvg } from "../lib/qr"
 
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
+
+interface ScanProgress {
+	percent: number
+	scannedHeight: number
+	tipHeight: number
+	blocksPerSec: number
+	etaSeconds: number
+}
+
+function formatEta(seconds: number): string {
+	if (seconds <= 0) return "calculating..."
+	if (seconds < 60) return `${seconds}s`
+	if (seconds < 3600) {
+		const m = Math.floor(seconds / 60)
+		const s = seconds % 60
+		return s > 0 ? `${m}m ${s}s` : `${m}m`
+	}
+	const h = Math.floor(seconds / 3600)
+	const m = Math.floor((seconds % 3600) / 60)
+	return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
 
 export function ZcashPrivacyTab() {
 	const { t } = useTranslation("asset")
@@ -93,13 +114,61 @@ export function ZcashPrivacyTab() {
 		}
 	}, [refreshBalance])
 
-	// ── Scan for notes ────────────────────────────────────────────────
-	const handleScan = useCallback(async () => {
+	// ── Scan progress (pushed from bun via RPC message) ──────────────
+	const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
+	const smoothPercent = useRef(0)
+	const [displayPercent, setDisplayPercent] = useState(0)
+
+	useEffect(() => {
+		return onRpcMessage("scan-progress", (payload: ScanProgress) => {
+			setScanProgress(payload)
+		})
+	}, [])
+
+	// Smooth the progress bar animation
+	useEffect(() => {
+		if (!scanProgress) return
+		const target = scanProgress.percent
+		if (target <= smoothPercent.current) {
+			// Reset on new scan
+			smoothPercent.current = 0
+		}
+		const id = setInterval(() => {
+			const diff = target - smoothPercent.current
+			if (diff < 0.05) {
+				smoothPercent.current = target
+				setDisplayPercent(target)
+				clearInterval(id)
+			} else {
+				smoothPercent.current += diff * 0.3
+				setDisplayPercent(smoothPercent.current)
+			}
+		}, 50)
+		return () => clearInterval(id)
+	}, [scanProgress])
+
+	// Clear progress when scan finishes
+	useEffect(() => {
+		if (scanState !== "scanning") {
+			setScanProgress(null)
+			smoothPercent.current = 0
+			setDisplayPercent(0)
+		}
+	}, [scanState])
+
+	// ── Scan for payments ─────────────────────────────────────────────
+	const [scanFromHeight, setScanFromHeight] = useState("")
+
+	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean) => {
 		setScanState("scanning")
 		setScanResult(null)
 		try {
+			const params: { startHeight?: number; fullRescan?: boolean } = {}
+			if (startHeight != null) params.startHeight = startHeight
+			if (fullRescan) params.fullRescan = true
+			const timeout = startHeight != null ? 300000 : 1800000 // 5 min partial, 30 min full
 			const result = await rpcRequest<{ balance: number; notes_found: number; synced_to: number }>(
-				"zcashShieldedScan", {}, 300000 // 5 min timeout for scan
+				"zcashShieldedScan", params, timeout
 			)
 			setSyncedTo(result.synced_to)
 			setScanResult(t("notesFound", { count: result.notes_found }))
@@ -268,27 +337,113 @@ export function ZcashPrivacyTab() {
 
 			{/* Section D: Scan controls */}
 			{orchardAddress && (
-				<Flex align="center" gap="3" px="3">
-					<Button
-						size="sm"
-						variant="outline"
-						borderColor="kk.border"
-						color="kk.textSecondary"
-						_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
-						onClick={handleScan}
-						disabled={scanState === "scanning"}
-						flex="1"
-					>
-						{scanState === "scanning" ? (
-							<><Spinner size="xs" mr="2" /> {t("scanning")}</>
-						) : (
-							t("scanNotes")
-						)}
-					</Button>
-					{scanResult && (
-						<Text fontSize="xs" color="kk.textMuted">{scanResult}</Text>
+				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
+					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
+						{t("scanPayments")}
+					</Text>
+
+					{/* Progress bar — visible during scan */}
+					{scanState === "scanning" && (
+						<Box mb="3">
+							{/* Bar track */}
+							<Box
+								w="100%"
+								h="6px"
+								bg="rgba(255,255,255,0.06)"
+								borderRadius="full"
+								overflow="hidden"
+								mb="2"
+							>
+								{/* Filled portion */}
+								<Box
+									h="100%"
+									bg="kk.gold"
+									borderRadius="full"
+									w={`${Math.max(displayPercent, 0.5)}%`}
+									transition="width 0.15s ease-out"
+								/>
+							</Box>
+
+							{/* Stats row */}
+							<Flex justify="space-between" align="center">
+								<Text fontSize="11px" fontWeight="600" fontFamily="mono" color="kk.gold">
+									{displayPercent.toFixed(1)}%
+								</Text>
+								{scanProgress ? (
+									<Flex gap="3" align="center">
+										<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
+											{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()}
+										</Text>
+										{scanProgress.blocksPerSec > 0 && (
+											<Text fontSize="10px" color="kk.textMuted">
+												{scanProgress.blocksPerSec.toLocaleString()} blk/s
+											</Text>
+										)}
+										<Text fontSize="10px" color="kk.textSecondary" fontWeight="500">
+											ETA {formatEta(scanProgress.etaSeconds)}
+										</Text>
+									</Flex>
+								) : (
+									<Flex align="center" gap="1.5">
+										<Spinner size="xs" color="kk.gold" />
+										<Text fontSize="10px" color="kk.textMuted">Connecting...</Text>
+									</Flex>
+								)}
+							</Flex>
+						</Box>
 					)}
-				</Flex>
+
+					{/* Scan buttons — hidden during scan */}
+					{scanState !== "scanning" && (
+						<Flex direction="column" gap="2">
+							<Flex gap="2" align="center">
+								<Input
+									placeholder={t("scanFromHeightPlaceholder")}
+									value={scanFromHeight}
+									onChange={(e) => setScanFromHeight(e.target.value.replace(/\D/g, ""))}
+									size="sm"
+									type="text"
+									bg="rgba(255,255,255,0.03)"
+									borderColor="kk.border"
+									color="white"
+									fontFamily="mono"
+									fontSize="12px"
+									_hover={{ borderColor: "kk.textMuted" }}
+									_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
+									flex="1"
+								/>
+								<Button
+									size="sm"
+									variant="outline"
+									borderColor="kk.border"
+									color="kk.textSecondary"
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={() => handleScan(scanFromHeight ? parseInt(scanFromHeight, 10) : undefined)}
+									disabled={!scanFromHeight}
+									whiteSpace="nowrap"
+								>
+									{t("scanFromHeight")}
+								</Button>
+							</Flex>
+							<Button
+								size="sm"
+								variant="outline"
+								borderColor="kk.border"
+								color="kk.textSecondary"
+								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+								onClick={() => handleScan(undefined, true)}
+							>
+								{t("fullScan")}
+							</Button>
+						</Flex>
+					)}
+
+					{scanResult && (
+						<Text fontSize="xs" color={scanState === "done" ? "#4ADE80" : "kk.textMuted"} mt="2">
+							{scanResult}
+						</Text>
+					)}
+				</Box>
 			)}
 
 			{/* Section E: Send shielded */}

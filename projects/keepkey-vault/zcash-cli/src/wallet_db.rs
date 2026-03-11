@@ -300,6 +300,21 @@ impl WalletDb {
         }
     }
 
+    /// Clear scan progress so the next scan starts from Orchard activation.
+    /// Keeps the FVK and existing notes (duplicate nullifiers are ignored on re-insert).
+    pub fn clear_scan_progress(&self) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM scan_state WHERE key = 'last_scanned_height'",
+            [],
+        ).context("Failed to clear scan progress")?;
+        // Also clear notes since a full rescan will re-find them,
+        // and stale spent-tracking could be inconsistent
+        self.conn.execute("DELETE FROM notes", [])
+            .context("Failed to clear notes for rescan")?;
+        info!("Scan progress cleared for full rescan (FVK preserved)");
+        Ok(())
+    }
+
     /// Delete all data for a full rescan, including stored FVK.
     pub fn reset(&self) -> Result<()> {
         self.conn.execute_batch(

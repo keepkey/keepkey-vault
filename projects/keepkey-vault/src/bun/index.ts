@@ -14,8 +14,8 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef } from "../shared/chains"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
+import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
@@ -1144,6 +1144,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Zcash Shielded (Orchard) ────────────────────────────
 			zcashShieldedStatus: async () => {
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef || !isChainSupported(zcashDef, engine.state?.firmwareVersion)) {
+					return { ready: false, fvk_loaded: false, address: null, fvk: null }
+				}
+				// Lazy-start sidecar on first status check
+				if (!isSidecarReady()) {
+					try { await startSidecar() } catch { /* binary not found — will show not_running */ }
+				}
 				const cached = getCachedFvk()
 				return {
 					ready: isSidecarReady(),
@@ -1153,6 +1161,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			zcashShieldedInit: async (params) => {
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef || !isChainSupported(zcashDef, engine.state?.firmwareVersion)) {
+					throw new Error('Zcash shielded requires firmware >= 7.11.0')
+				}
 				// If FVK is already loaded from DB, return it immediately
 				const cached = getCachedFvk()
 				if (cached) return cached
@@ -1163,13 +1175,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return result
 			},
 			zcashShieldedScan: async (params) => {
-				return await scanOrchardNotes(params?.startHeight)
+				return await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 			},
 			zcashShieldedBalance: async () => {
 				return await getShieldedBalance()
 			},
 			zcashShieldedSend: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef || !isChainSupported(zcashDef, engine.state?.firmwareVersion)) {
+					throw new Error('Zcash shielded requires firmware >= 7.11.0')
+				}
 				return await sendShielded(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
@@ -1489,6 +1505,9 @@ engine.on('state-change', (state) => {
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
 })
+onScanProgress((progress) => {
+	try { rpc.send['scan-progress'](progress) } catch { /* webview not ready yet */ }
+})
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
 })
@@ -1668,13 +1687,7 @@ if (process.platform === 'win32') {
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
-// Start Zcash sidecar (fire-and-forget — UI shows status via zcashShieldedStatus RPC)
-startSidecar().catch(e => {
-	console.error('[Vault] ZCASH SIDECAR FAILED TO START:', e.message)
-	if (e.message.includes('not found')) {
-		console.error('[Vault] Build it with: cd projects/keepkey-vault/zcash-cli && cargo build --release')
-	}
-})
+// Zcash sidecar is started lazily on first zcash RPC call (requires firmware >= 7.11.0)
 
 // Cache app version for REST health endpoint
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})

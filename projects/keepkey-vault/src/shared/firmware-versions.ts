@@ -146,7 +146,7 @@ export function resolveOndeviceFirmwareVersion(hash: string | undefined): string
 }
 
 /** Compare semver strings: returns -1 (a<b), 0 (a==b), 1 (a>b) */
-function versionCompare(a: string, b: string): number {
+export function versionCompare(a: string, b: string): number {
   const pa = a.split('.').map(Number)
   const pb = b.split('.').map(Number)
   for (let i = 0; i < 3; i++) {

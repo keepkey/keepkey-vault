@@ -304,8 +304,17 @@ async fn handle_scan(state: &mut State, params: &Value) -> Result<Value> {
 
     let start_height = params.get("start_height")
         .and_then(|v| v.as_u64());
+    let full_rescan = params.get("full_rescan")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let db = state.ensure_db()?;
+
+    // Full rescan: clear DB scan progress so scanner starts from Orchard activation
+    if full_rescan {
+        info!("Full rescan requested — clearing scan progress");
+        db.clear_scan_progress()?;
+    }
 
     let mut client = scanner::LightwalletClient::connect(None).await?;
     let result = client.scan_with_persistence(&fvk, db, start_height).await?;

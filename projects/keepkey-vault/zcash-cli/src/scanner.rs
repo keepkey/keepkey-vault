@@ -346,11 +346,9 @@ impl LightwalletClient {
             db.set_last_scanned_height(end)?;
             current = end + 1;
 
-            // Log progress
+            // Log progress every chunk (parsed by sidecar manager for UI)
             let progress = ((end - start + 1) as f64 / (tip - start + 1) as f64) * 100.0;
-            if blocks_scanned % 10000 == 0 || end == tip {
-                info!("Scan progress: {:.1}% ({}/{})", progress, end, tip);
-            }
+            info!("Scan progress: {:.1}% ({}/{})", progress, end, tip);
         }
 
         let balance = db.get_balance()?;

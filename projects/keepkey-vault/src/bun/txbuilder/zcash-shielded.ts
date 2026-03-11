@@ -133,7 +133,7 @@ export async function initializeOrchardFromDevice(wallet: any, account: number =
  * Scan the Zcash chain for Orchard notes.
  * Resumes from last scan position automatically.
  */
-export async function scanOrchardNotes(startHeight?: number): Promise<{
+export async function scanOrchardNotes(startHeight?: number, fullRescan?: boolean): Promise<{
 	balance: number
 	notes_found: number
 	synced_to: number
@@ -144,6 +144,7 @@ export async function scanOrchardNotes(startHeight?: number): Promise<{
 
 	const params: Record<string, any> = {}
 	if (startHeight !== undefined) params.start_height = startHeight
+	if (fullRescan) params.full_rescan = true
 
 	return await sendCommand("scan", params)
 }

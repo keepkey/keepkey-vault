@@ -101,7 +101,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Zcash Shielded (Orchard) ──────────────────────────────────────
       zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
-      zcashShieldedScan: { params: { startHeight?: number }; response: { balance: number; notes_found: number; synced_to: number } }
+      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number } }
       zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
 
@@ -178,6 +178,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
+      'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
     }
   }
   webview: {
