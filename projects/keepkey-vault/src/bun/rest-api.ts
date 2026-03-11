@@ -43,7 +43,7 @@ function requireWallet(engine: EngineController) {
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
   20: 'DigiByte', 60: 'Ethereum', 118: 'Cosmos', 144: 'Ripple',
-  145: 'BitcoinCash', 195: 'Tron', 501: 'Solana', 931: 'Rune',
+  145: 'BitcoinCash', 195: 'Tron', 501: 'Solana', 607: 'Ton', 931: 'Rune',
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -320,7 +320,7 @@ const startTime = Date.now()
 /** Set of signing endpoints that require user approval */
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
-  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction',
+  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction', '/ton/sign-transaction',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
   '/cosmos/sign-amino-ibc-transfer',
@@ -799,6 +799,24 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/addresses/ton' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = 'ton:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.tonGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
@@ -1113,6 +1131,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           })
         }
 
+        // ── TON SIGNING (1 endpoint) ──────────────────────────────────
+        if (path === '/ton/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TonSignRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
+          const result = await wallet.tonSignTx({
+            addressNList,
+            rawTx: body.raw_tx,
+          })
+          if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
+          return json(result)
+        }
+
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
         if (path === '/system/info/get-features' && method === 'POST') {
           auth.requireAuth(req)
@@ -1300,6 +1332,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   address = typeof r === 'string' ? r : (r as any)?.address || ''
                 } else if (coinType === 195) {
                   const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                } else if (coinType === 607) {
+                  // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
+                  const tonNList = p.address_n
+                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false })
                   address = typeof r === 'string' ? r : (r as any)?.address || ''
                 }
 

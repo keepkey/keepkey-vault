@@ -142,6 +142,13 @@ export const TronSignRequest = z.object({
   raw_tx: z.string().min(1),
 }).strip()
 
+/** POST /ton/sign-transaction — sign a raw TON transaction */
+export const TonSignRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  raw_tx: z.string().min(1),
+}).strip()
+
 /** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
 export const SolanaSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
