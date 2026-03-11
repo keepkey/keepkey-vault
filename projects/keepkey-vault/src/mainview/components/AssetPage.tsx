@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
+import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, TokenVisibilityStatus } from "../../shared/types"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance, formatUsd } from "../lib/formatting"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
+import { SwapDialog } from "./SwapDialog"
 import { ZcashPrivacyTab } from "./ZcashPrivacyTab"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
@@ -36,6 +37,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
+
+	// Feature flag: swaps
+	const [swapsEnabled, setSwapsEnabled] = useState(false)
+	useEffect(() => {
+		rpcRequest<AppSettings>("getAppSettings")
+			.then(s => setSwapsEnabled(s.swapsEnabled))
+			.catch(() => {})
+	}, [])
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
@@ -196,6 +205,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const cleanBalanceUsd = (balance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
+	const [showSwapDialog, setShowSwapDialog] = useState(false)
 	const isEvmChain = chain.chainFamily === 'evm'
 
 	// Toggle token visibility via RPC
@@ -225,9 +235,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
 	const zcashShieldedSupported = isZcash && zcashShieldedDef && isChainSupported(zcashShieldedDef, firmwareVersion)
 
-	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
+	const PILLS: { id: AssetView | 'swap'; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: t("receive"), icon: FaArrowDown },
 		{ id: "send", label: t("send"), icon: FaArrowUp },
+		...(swapsEnabled ? [{ id: "swap" as const, label: t("swap"), icon: FaExchangeAlt }] : []),
 		...(zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
 	]
 
@@ -428,7 +439,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								px={{ base: "5", md: "6" }}
 								py="2"
 								borderRadius="md"
-								onClick={() => { setView(p.id); if (p.id === 'receive') setSelectedToken(null) }}
+								onClick={() => {
+								if (p.id === 'swap') { setShowSwapDialog(true); return }
+								setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
+							}}
 								display="flex"
 								alignItems="center"
 								gap="1.5"
@@ -511,6 +525,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
 					)}
+					{/* SwapDialog rendered as overlay */}
+					<SwapDialog
+						open={showSwapDialog}
+						onClose={() => setShowSwapDialog(false)}
+						chain={chain}
+						balance={balance}
+						address={address}
+					/>
 					{view === "privacy" && isZcash && (
 						<ZcashPrivacyTab />
 					)}

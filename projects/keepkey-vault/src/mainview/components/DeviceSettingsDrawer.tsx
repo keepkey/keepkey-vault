@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
+import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
@@ -144,8 +145,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removingPin, setRemovingPin] = useState(false)
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '' })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
+	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
 	const [pioneerUrl, setPioneerUrl] = useState("")
@@ -239,6 +241,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { console.error("setRestApiEnabled:", e) }
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
+
+	const toggleSwaps = useCallback(async (enabled: boolean) => {
+		setTogglingSwaps(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setSwapsEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setSwapsEnabled:", e) }
+		setTogglingSwaps(false)
+	}, [])
 
 	const openSwagger = useCallback(async () => {
 		try {
@@ -393,9 +404,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				{/* Content */}
 				<VStack gap="3" align="stretch" p="4">
 
-					{/* ── Language ────────────────────────────────────── */}
+					{/* ── Language & Currency ─────────────────────────── */}
 					<Section title={t("language")}>
 						<LanguageSelector />
+						<Box mt="4" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+							<CurrencySelector />
+						</Box>
 					</Section>
 
 					{/* ── Device Identity ─────────────────────────────── */}
@@ -809,6 +823,36 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)}
 							</Box>
 
+						</VStack>
+					</Section>
+
+					{/* ── Feature Flags ──────────────────────────────── */}
+					<Section title={t("featureFlags")} defaultOpen={false}>
+						<VStack gap="4" align="stretch">
+							{/* Swaps toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M16 3l5 5-5 5" />
+											<path d="M21 8H9" />
+											<path d="M8 21l-5-5 5-5" />
+											<path d="M3 16h12" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("swapsFeature")}</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+											{t("swapsFeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.swapsEnabled}
+									onChange={toggleSwaps}
+									disabled={togglingSwaps}
+								/>
+							</Flex>
 						</VStack>
 					</Section>
 

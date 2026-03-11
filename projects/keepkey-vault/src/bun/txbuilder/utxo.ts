@@ -112,9 +112,15 @@ function getUtxoScriptPubKeyHex(utxo: any): string | undefined {
 
 // Derive scriptType from xpub prefix (Pioneer SDK pattern)
 function getScriptTypeFromXpub(xpub: string): string | undefined {
+  // BTC
   if (xpub.startsWith('zpub')) return 'p2wpkh'
   if (xpub.startsWith('ypub')) return 'p2sh-p2wpkh'
   if (xpub.startsWith('xpub')) return 'p2pkh'
+  // DOGE (dgub), BCH, DASH (drkp) — all legacy p2pkh
+  if (xpub.startsWith('dgub') || xpub.startsWith('drkp')) return 'p2pkh'
+  // LTC
+  if (xpub.startsWith('Mtub')) return 'p2wpkh'
+  if (xpub.startsWith('Ltub')) return 'p2sh-p2wpkh'
   return undefined // unknown prefix — let caller fall back
 }
 
@@ -229,19 +235,34 @@ export async function buildUtxoTx(
 
   let { inputs, outputs, fee } = result
 
-  // DOGE: enforce minimum 1 DOGE fee
+  // DOGE: enforce minimum 1 DOGE fee (network consensus rule)
+  // Pioneer SDK: DOGE_MIN_FEE = 100000000 (1 DOGE), dust = 1000000 (0.01 DOGE)
   if (chain.id === 'dogecoin' && fee < 100000000) {
     const increase = 100000000 - fee
     const changeIdx = outputs.findIndex((o: any) => !o.address)
     if (changeIdx >= 0 && outputs[changeIdx].value >= increase) {
+      // Absorb fee deficit from change output
       outputs[changeIdx].value -= increase
       if (outputs[changeIdx].value < 1000000) {
+        // Change is dust — consolidate into fee
         fee = 100000000 + outputs[changeIdx].value
         outputs.splice(changeIdx, 1)
       } else {
         fee = 100000000
       }
+    } else {
+      // No change output (or change too small) — reduce spend output to cover fee.
+      // For swaps this is fine: THORChain swaps whatever it receives.
+      const spendIdx = outputs.findIndex((o: any) => o.address)
+      if (spendIdx >= 0 && outputs[spendIdx].value > increase + 1000000) {
+        console.log(`${TAG} DOGE: no change output — reducing spend by ${increase} sats to enforce 1 DOGE min fee`)
+        outputs[spendIdx].value -= increase
+        fee = 100000000
+      } else {
+        throw new Error(`Insufficient DOGE to cover minimum 1 DOGE network fee`)
+      }
     }
+    console.log(`${TAG} DOGE: enforced minimum fee = ${fee} sats (${fee / 1e8} DOGE)`)
   }
 
   // 4. Get pubkey info — used for both address→path lookup AND change address index
@@ -391,14 +412,12 @@ export async function buildUtxoTx(
     })
     .filter(Boolean)
 
-  // OP_RETURN memo
-  if (memo && memo.trim()) {
-    preparedOutputs.push({
-      amount: '0',
-      addressType: 'opreturn',
-      opReturnData: memo,
-    })
-  }
+  // OP_RETURN memo — pass raw UTF-8 string as top-level opReturnData ONLY.
+  // hdwallet-keepkey btcSignTx() does its own base64 encoding (line 296):
+  //   Buffer.from(msg.opReturnData).toString("base64")
+  // Do NOT add to preparedOutputs — hdwallet creates the output internally.
+  // Do NOT pre-encode (hex/base64) — causes double-encoding → garbled on-chain.
+  const memoRaw = memo && memo.trim() ? memo.trim() : undefined
 
   // Safety validation — prevent fee burn or empty transactions
   if (!preparedInputs.length) throw new Error('No inputs selected — cannot build transaction')
@@ -433,7 +452,7 @@ export async function buildUtxoTx(
     } : {}),
     fee: String(fee / 10 ** chain.decimals),
     memo,
-    // opReturnData at top-level for v1 server contract
-    ...(memo && memo.trim() ? { opReturnData: memo } : {}),
+    // opReturnData at top-level — raw UTF-8 string (hdwallet base64-encodes internally)
+    ...(memoRaw ? { opReturnData: memoRaw } : {}),
   }
 }

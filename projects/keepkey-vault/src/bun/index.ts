@@ -19,7 +19,7 @@ import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chain
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -33,9 +33,6 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 const PIONEER_TIMEOUT_MS = 60_000
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
-function getDiscoveryUrl(): string {
-	return `${getPioneerApiBase()}/api/v1/discovery/search`
-}
 const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
 let chainCatalog: PioneerChainInfo[] = []
 let catalogLoadedAt = 0
@@ -76,22 +73,22 @@ async function loadChainCatalog(): Promise<void> {
 	if (catalogLoading) return catalogLoading
 	catalogLoading = (async () => {
 		try {
+			const pioneer = await getPioneer()
 			const results: PioneerChainInfo[] = []
 
-			// Fetch all queries in parallel for speed
-			const baseUrl = getDiscoveryUrl()
+			// Fetch all queries in parallel via Pioneer client
 			const fetches = CATALOG_QUERIES.map(async (q) => {
 				try {
-					const resp = await fetch(`${baseUrl}?q=${q}&limit=2000`, { signal: AbortSignal.timeout(15_000) })
-					if (!resp.ok) return []
-					return (await resp.json()) as any[]
+					const resp = await pioneer.SearchAssets({ q, limit: 2000 })
+					return resp?.data || resp || []
 				} catch { return [] }
 			})
 			const batches = await Promise.all(fetches)
 
 			const byChainId = new Map<number, PioneerChainInfo>()
 			for (const raw of batches) {
-				for (const entry of raw) {
+				const entries = Array.isArray(raw) ? raw : []
+				for (const entry of entries) {
 					const parsed = parseRawEntry(entry)
 					if (!parsed) continue
 					const existing = byChainId.get(parsed.chainId)
@@ -180,11 +177,18 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 // ── REST API Server (opt-in, persisted in DB, default OFF) ─────────────
 const auth = new AuthStore()
 let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF
+let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
 function getAppSettings() {
-	return { restApiEnabled, pioneerApiBase: getPioneerApiBase() }
+	return {
+		restApiEnabled,
+		pioneerApiBase: getPioneerApiBase(),
+		fiatCurrency: getSetting('fiat_currency') || 'USD',
+		numberLocale: getSetting('number_locale') || 'en-US',
+		swapsEnabled,
+	}
 }
 
 // Callbacks bridge REST → RPC UI
@@ -238,6 +242,10 @@ function applyRestApiState() {
 // Start REST if previously enabled
 applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings → Application)')
+
+// ── Swap quote cache (last 10 quotes for tracker data) ───────────────
+import type { SwapQuote } from '../shared/types'
+const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -1281,6 +1289,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] Pioneer API base set to:', url || '(default)')
 				return getAppSettings()
 			},
+			setFiatCurrency: async (params) => {
+				setSetting('fiat_currency', params.currency || 'USD')
+				console.log('[settings] Fiat currency set to:', params.currency)
+				return getAppSettings()
+			},
+			setNumberLocale: async (params) => {
+				setSetting('number_locale', params.locale || 'en-US')
+				console.log('[settings] Number locale set to:', params.locale)
+				return getAppSettings()
+			},
+			setSwapsEnabled: async (params) => {
+				swapsEnabled = params.enabled
+				setSetting('swaps_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Swaps enabled:', params.enabled)
+				return getAppSettings()
+			},
 
 			// ── API Audit Log ────────────────────────────────────────
 			getApiLogs: async (params) => {
@@ -1450,6 +1474,169 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { filePath }
 			},
 
+			// ── Swap (quote cache for tracker) ──────────────────────
+			getSwapAssets: async () => {
+				const { getSwapAssets } = await import('./swap')
+				return await getSwapAssets()
+			},
+			getSwapQuote: async (params) => {
+				const { getSwapQuote, THOR_TO_CHAIN, parseThorAsset } = await import('./swap')
+
+				// Resolve xpub addresses to real receive addresses for UTXO chains.
+				// ChainBalance.address can be an xpub when Pioneer doesn't return
+				// an address field — THORChain rejects xpubs as destination addresses.
+				// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
+				const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
+
+				if (engine.wallet) {
+					const resolveAddr = async (thorAsset: string, addr: string): Promise<string> => {
+						if (!isXpub(addr)) return addr
+						const parsed = parseThorAsset(thorAsset)
+						const chainId = THOR_TO_CHAIN[parsed.chain]
+						if (!chainId) return addr
+						const chainDef = getAllChains().find(c => c.id === chainId)
+						if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
+						try {
+							const result = await engine.wallet.btcGetAddress({
+								addressNList: chainDef.defaultPath,
+								coin: chainDef.coin,
+								scriptType: chainDef.scriptType,
+								showDisplay: false,
+							})
+							const resolved = typeof result === 'string' ? result : result?.address
+							if (resolved) {
+								console.log(`[swap] Resolved xpub → ${resolved} for ${thorAsset}`)
+								return resolved
+							}
+						} catch (e: any) {
+							console.warn(`[swap] Failed to resolve xpub for ${thorAsset}: ${e.message}`)
+						}
+						return addr
+					}
+					params = {
+						...params,
+						fromAddress: await resolveAddr(params.fromAsset, params.fromAddress),
+						toAddress: await resolveAddr(params.toAsset, params.toAddress),
+					}
+				}
+
+				// Fail fast if addresses are still xpubs after resolution attempt
+				if (isXpub(params.fromAddress)) {
+					throw new Error(`Could not resolve source address for ${params.fromAsset} — device may be locked or disconnected`)
+				}
+				if (isXpub(params.toAddress)) {
+					throw new Error(`Could not resolve destination address for ${params.toAsset} — device may be locked or disconnected`)
+				}
+
+				const quote = await getSwapQuote(params)
+				// Cache quote so executeSwap can pass real data to the tracker
+				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
+				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
+				swapQuoteCache.set(cacheKey, quote)
+				// Keep cache small (last 10 quotes)
+				if (swapQuoteCache.size > 10) {
+					const oldest = swapQuoteCache.keys().next().value
+					if (oldest) swapQuoteCache.delete(oldest)
+				}
+				return quote
+			},
+			executeSwap: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const { executeSwap } = await import('./swap')
+				const { trackSwap } = await import('./swap-tracker')
+				const result = await executeSwap(params, {
+					wallet: engine.wallet,
+					getAllChains,
+					getRpcUrl,
+					getBtcXpub: () => {
+						if (btcAccounts.isInitialized) {
+							const selected = btcAccounts.getSelectedXpub()
+							if (selected) return selected.xpub
+						}
+						return undefined
+					},
+				})
+				// Look up cached quote for real tracker data (match by asset+amount, addresses from getSwapQuote context)
+				// Try exact match first, then fallback to base key without addresses
+				const baseKey = `${params.fromAsset}-${params.toAsset}-${params.amount}`
+				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
+				for (const [key, val] of swapQuoteCache) {
+					if (key.startsWith(baseKey) && val.inboundAddress === params.inboundAddress) {
+						cachedQuote = val
+						break
+					}
+				}
+				if (!cachedQuote) {
+					// Fallback: find any quote matching the base key
+					for (const [key, val] of swapQuoteCache) {
+						if (key.startsWith(baseKey)) { cachedQuote = val; break }
+					}
+				}
+				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
+				// Register swap for tracking (non-blocking)
+				try {
+					trackSwap(result, params, {
+						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
+						minimumOutput: cachedQuote?.minimumOutput || '0',
+						inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
+						router: cachedQuote?.router || params.router,
+						memo: cachedQuote?.memo || params.memo,
+						expiry: cachedQuote?.expiry || params.expiry,
+						fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
+						estimatedTime: cachedQuote?.estimatedTime || 600,
+						slippageBps: cachedQuote?.slippageBps || 300,
+						fromAsset: params.fromAsset,
+						toAsset: params.toAsset,
+						integration: cachedQuote?.integration || 'thorchain',
+					})
+				} catch (e: any) {
+					console.warn('[index] Failed to register swap for tracking:', e.message)
+				}
+				return result
+			},
+			getPendingSwaps: async () => {
+				const { getPendingSwaps } = await import('./swap-tracker')
+				return getPendingSwaps()
+			},
+			dismissSwap: async (params) => {
+				const { dismissSwap } = await import('./swap-tracker')
+				dismissSwap(params.txid)
+			},
+
+			// ── Swap History (SQLite-persisted) ─────────────────────
+			getSwapHistory: async (params) => {
+				return getSwapHistory(params || undefined)
+			},
+			getSwapHistoryStats: async () => {
+				return getSwapHistoryStats()
+			},
+			exportSwapReport: async (params) => {
+				const records = getSwapHistory({
+					fromDate: params.fromDate,
+					toDate: params.toDate,
+					limit: 10000,
+				})
+				if (records.length === 0) throw new Error('No swap records to export')
+
+				const dir = path.join(os.homedir(), 'Downloads')
+
+				if (params.format === 'csv') {
+					const { generateSwapCsv } = await import('./swap-report')
+					const csv = generateSwapCsv(records)
+					const fileName = `keepkey-swaps-${new Date().toISOString().slice(0, 10)}.csv`
+					const filePath = path.join(dir, fileName)
+					await Bun.write(filePath, csv)
+					return { filePath }
+				} else {
+					const { generateSwapPdf } = await import('./swap-report')
+					const pdfBuffer = await generateSwapPdf(records)
+					const fileName = `keepkey-swaps-${new Date().toISOString().slice(0, 10)}.pdf`
+					const filePath = path.join(dir, fileName)
+					await Bun.write(filePath, pdfBuffer)
+					return { filePath }
+				}
+			},
+
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
@@ -1525,6 +1712,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		},
 		messages: {},
 	},
+})
+
+// Initialize swap tracker with typed RPC message sender
+// FAIL FAST: If Pioneer SDK doesn't have swap tracking methods, crash the app
+import('./swap-tracker').then(async ({ initSwapTracker }) => {
+	await initSwapTracker((msg: string, data: any) => {
+		try {
+			if (msg === 'swap-update') rpc.send['swap-update'](data)
+			else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+			else console.error(`[swap-tracker] Unknown message: ${msg}`)
+		} catch (e: any) {
+			console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+		}
+	})
+}).catch((e) => {
+	console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
 })
 
 // Push engine events to WebView
