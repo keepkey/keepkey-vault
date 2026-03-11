@@ -355,6 +355,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
+			tronGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tronGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr)
+				return result
+			},
 
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
@@ -426,6 +433,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					publicKey: result.publicKey instanceof Uint8Array
 						? Buffer.from(result.publicKey).toString('base64')
 						: result.publicKey,
+				}
+			},
+			tronSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tronSignTx(params)
+				if (!result) throw new Error('tronSignTx returned no result')
+				return {
+					signature: result.signature instanceof Uint8Array
+						? Buffer.from(result.signature).toString('hex')
+						: result.signature,
 				}
 			},
 

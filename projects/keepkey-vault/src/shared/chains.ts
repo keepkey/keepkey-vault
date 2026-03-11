@@ -10,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron'
   color: string
   rpcMethod: string
   signMethod: string
@@ -193,16 +193,31 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://solscan.io/account/{{address}}',
     explorerTxUrl: 'https://solscan.io/tx/{{txid}}',
   },
+  {
+    id: 'tron', chain: 'TRX' as any, coin: 'Tron', symbol: 'TRX',
+    chainFamily: 'tron', color: '#FF0013',
+    rpcMethod: 'tronGetAddress', signMethod: 'tronSignTx',
+    defaultPath: [0x8000002C, 0x800000C3, 0x80000000, 0, 0],
+    explorerAddressUrl: 'https://tronscan.org/#/address/{{address}}',
+    explorerTxUrl: 'https://tronscan.org/#/transaction/{{txid}}',
+  },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
-const CAIP_FALLBACKS: Record<string, string> = {}
-const DECIMAL_FALLBACKS: Record<string, number> = {}
+const CAIP_FALLBACKS: Record<string, string> = {
+  TRX: 'tron:27Lqcw/slip44:195',
+}
+const NETWORKID_FALLBACKS: Record<string, string> = {
+  TRX: 'tron:27Lqcw',
+}
+const DECIMAL_FALLBACKS: Record<string, number> = {
+  TRX: 6,
+}
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth
 export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   ...c,
-  networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId],
+  networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId] || NETWORKID_FALLBACKS[c.chain] || '',
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
