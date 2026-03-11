@@ -362,6 +362,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
+			tonGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tonGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('ton', JSON.stringify(params.addressNList || []), addr)
+				return result
+			},
 
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
@@ -444,6 +451,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						? Buffer.from(result.signature).toString('hex')
 						: result.signature,
 				}
+			},
+			tonSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tonSignTx(params)
+				if (!result) throw new Error('tonSignTx returned no result')
+				return result
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────

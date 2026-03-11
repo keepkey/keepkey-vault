@@ -10,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton'
   color: string
   rpcMethod: string
   signMethod: string
@@ -201,17 +201,28 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://tronscan.org/#/address/{{address}}',
     explorerTxUrl: 'https://tronscan.org/#/transaction/{{txid}}',
   },
+  {
+    id: 'ton', chain: Chain.TON, coin: 'Ton', symbol: 'TON',
+    chainFamily: 'ton', color: '#0088CC',
+    rpcMethod: 'tonGetAddress', signMethod: 'tonSignTx',
+    defaultPath: [0x8000002C, 0x8000025F, 0x80000000],
+    explorerAddressUrl: 'https://tonscan.org/address/{{address}}',
+    explorerTxUrl: 'https://tonscan.org/tx/{{txid}}',
+  },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
 const CAIP_FALLBACKS: Record<string, string> = {
   TRX: 'tron:27Lqcw/slip44:195',
+  TON: 'ton:-239/slip44:607',
 }
 const NETWORKID_FALLBACKS: Record<string, string> = {
   TRX: 'tron:27Lqcw',
+  TON: 'ton:-239',
 }
 const DECIMAL_FALLBACKS: Record<string, number> = {
   TRX: 6,
+  TON: 9,
 }
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth
