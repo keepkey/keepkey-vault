@@ -276,6 +276,7 @@ export interface AppSettings {
   pioneerApiBase: string    // current Pioneer API base URL
   fiatCurrency: FiatCurrency  // display currency (default 'USD')
   numberLocale: string        // number formatting locale (default 'en-US')
+  swapsEnabled: boolean       // feature flag: cross-chain swaps (default OFF)
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────

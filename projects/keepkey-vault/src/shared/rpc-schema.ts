@@ -120,6 +120,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setSwapsEnabled: { params: { enabled: boolean }; response: AppSettings }
 
       // ── Reports ──────────────────────────────────────────────────────
       generateReport: { params: void; response: ReportMeta }

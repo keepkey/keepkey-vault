@@ -5,7 +5,7 @@ import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShi
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { BTC_SCRIPT_TYPES, btcAccountPath } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, TokenVisibilityStatus } from "../../shared/types"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance, formatUsd } from "../lib/formatting"
@@ -35,6 +35,14 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
+
+	// Feature flag: swaps
+	const [swapsEnabled, setSwapsEnabled] = useState(false)
+	useEffect(() => {
+		rpcRequest<AppSettings>("getAppSettings")
+			.then(s => setSwapsEnabled(s.swapsEnabled))
+			.catch(() => {})
+	}, [])
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
@@ -224,7 +232,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const PILLS: { id: AssetView | 'swap'; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: t("receive"), icon: FaArrowDown },
 		{ id: "send", label: t("send"), icon: FaArrowUp },
-		{ id: "swap", label: t("swap"), icon: FaExchangeAlt },
+		...(swapsEnabled ? [{ id: "swap" as const, label: t("swap"), icon: FaExchangeAlt }] : []),
 	]
 
 	// Shared token row renderer

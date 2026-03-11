@@ -175,6 +175,7 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 // ── REST API Server (opt-in, persisted in DB, default OFF) ─────────────
 const auth = new AuthStore()
 let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF
+let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
@@ -184,6 +185,7 @@ function getAppSettings() {
 		pioneerApiBase: getPioneerApiBase(),
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
+		swapsEnabled,
 	}
 }
 
@@ -1212,6 +1214,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setNumberLocale: async (params) => {
 				setSetting('number_locale', params.locale || 'en-US')
 				console.log('[settings] Number locale set to:', params.locale)
+				return getAppSettings()
+			},
+			setSwapsEnabled: async (params) => {
+				swapsEnabled = params.enabled
+				setSetting('swaps_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Swaps enabled:', params.enabled)
 				return getAppSettings()
 			},
 
