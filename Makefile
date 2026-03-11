@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -28,6 +28,14 @@ modules-build: modules-install
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
 	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf packages/*/dist node_modules)
+
+# --- Zcash CLI Sidecar (Rust) ---
+
+build-zcash-cli:
+	cd $(PROJECT_DIR)/zcash-cli && cargo build --release
+
+build-zcash-cli-debug:
+	cd $(PROJECT_DIR)/zcash-cli && cargo build
 
 # --- Vault ---
 
@@ -184,6 +192,8 @@ help:
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
+	@echo "  make build-zcash-cli      - Build Zcash CLI sidecar (release)"
+	@echo "  make build-zcash-cli-debug - Build Zcash CLI sidecar (debug)"
 	@echo "  make audit          - Generate dependency manifest + SBOM"
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"

@@ -13,7 +13,9 @@ import { startRestApi, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
-import { CHAINS, customChainToChainDef } from "../shared/chains"
+import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
+import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
@@ -1148,6 +1150,57 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return Object.fromEntries(map)
 			},
 
+			// ── Zcash Shielded (Orchard) ────────────────────────────
+			zcashShieldedStatus: async () => {
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef || !isChainSupported(zcashDef, engine.state?.firmwareVersion)) {
+					return { ready: false, fvk_loaded: false, address: null, fvk: null }
+				}
+				// Lazy-start sidecar on first status check
+				if (!isSidecarReady()) {
+					try { await startSidecar() } catch { /* binary not found — will show not_running */ }
+				}
+				const cached = getCachedFvk()
+				return {
+					ready: isSidecarReady(),
+					fvk_loaded: hasFvkLoaded(),
+					address: cached?.address ?? null,
+					fvk: cached?.fvk ?? null,
+				}
+			},
+			zcashShieldedInit: async (params) => {
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef || !isChainSupported(zcashDef, engine.state?.firmwareVersion)) {
+					throw new Error('Zcash shielded requires firmware >= 7.11.0')
+				}
+				// If FVK is already loaded from DB, return it immediately
+				const cached = getCachedFvk()
+				if (cached) return cached
+				// Otherwise get from device
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
+				setCachedFvk(result.address, result.fvk)
+				return result
+			},
+			zcashShieldedScan: async (params) => {
+				return await scanOrchardNotes(params?.startHeight, params?.fullRescan)
+			},
+			zcashShieldedBalance: async () => {
+				return await getShieldedBalance()
+			},
+			zcashShieldedSend: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef || !isChainSupported(zcashDef, engine.state?.firmwareVersion)) {
+					throw new Error('Zcash shielded requires firmware >= 7.11.0')
+				}
+				return await sendShielded(engine.wallet as any, {
+					recipient: params.recipient,
+					amount: params.amount,
+					memo: params.memo,
+				})
+			},
+
 			// ── Camera / QR scanning ─────────────────────────────────
 			startQrScan: async () => {
 				startCamera(
@@ -1655,6 +1708,9 @@ engine.on('state-change', (state) => {
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
 })
+onScanProgress((progress) => {
+	try { rpc.send['scan-progress'](progress) } catch { /* webview not ready yet */ }
+})
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
 })
@@ -1834,6 +1890,8 @@ if (process.platform === 'win32') {
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
+// Zcash sidecar is started lazily on first zcash RPC call (requires firmware >= 7.11.0)
+
 // Cache app version for REST health endpoint
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
@@ -1871,6 +1929,7 @@ function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
 	stopCamera()
+	stopSidecar()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()

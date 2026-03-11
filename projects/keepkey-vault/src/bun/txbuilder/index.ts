@@ -7,6 +7,7 @@ import { buildUtxoTx, type BuildUtxoParams } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
+import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 
 export type { BuildTxParams }
 
@@ -146,6 +147,10 @@ export async function signTx(
       return wallet.rippleSignTx(unsignedTx)
     case 'solana':
       return wallet.solanaSignTx(unsignedTx)
+    case 'zcash-shielded':
+      // Shielded signing is handled by the zcash-shielded module (sidecar + device)
+      // The full flow is orchestrated by sendShielded() — this should not be called directly
+      throw new Error('Zcash shielded transactions use sendShielded() — not the standard sign flow')
     default:
       throw new Error(`Cannot sign for chain family: ${chain.chainFamily}`)
   }

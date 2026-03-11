@@ -638,6 +638,24 @@ if (DEVELOPER_ID) {
   console.log(`[collect-externals] ELECTROBUN_DEVELOPER_ID not set, skipping native binary signing`)
 }
 
+// Remove dangling symlinks (left behind after pruning/stripping)
+function removeDanglingSymlinks(dirPath: string) {
+  try {
+    const entries = readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name)
+      if (entry.isSymbolicLink()) {
+        try { statSync(fullPath) } catch {
+          rmSync(fullPath)
+        }
+      } else if (entry.isDirectory()) {
+        removeDanglingSymlinks(fullPath)
+      }
+    }
+  } catch {}
+}
+removeDanglingSymlinks(nmDest)
+
 // Report final size
 const { stdout } = Bun.spawnSync(['du', '-sh', nmDest])
 console.log(`[collect-externals] Final size: ${stdout.toString().trim().split('\t')[0]}`)

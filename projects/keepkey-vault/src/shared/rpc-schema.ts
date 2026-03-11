@@ -98,6 +98,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       removeTokenVisibility: { params: { caip: string }; response: void }
       getTokenVisibilityMap: { params: void; response: Record<string, TokenVisibilityStatus> }
 
+      // ── Zcash Shielded (Orchard) ──────────────────────────────────────
+      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null } }
+      zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
+      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
+      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number } }
+      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
+
       // ── Camera / QR scanning ──────────────────────────────────────────
       startQrScan: { params: void; response: void }
       stopQrScan: { params: void; response: void }
@@ -188,6 +195,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'walletconnect-uri': string
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
+      'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
     }
   }
   webview: {

@@ -3,7 +3,12 @@ import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
-import { CHAINS } from '../shared/chains'
+import { CHAINS, isChainSupported } from '../shared/chains'
+import {
+  initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
+} from './txbuilder/zcash-shielded'
+import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -888,6 +893,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             outputs: body.outputs,
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
+            ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
+            ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
+            ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
+            ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
           })
           return json(validateResponse(result, S.UtxoSignTransactionResponse, path))
         }
@@ -1445,6 +1454,77 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.SendPinRequest)
           await wallet.sendPin(body.pin)
           return json({ success: true })
+        }
+
+        // ── Zcash Shielded (Orchard) ────────────────────────────────
+
+        const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
+        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.state?.firmwareVersion)
+
+        if (path === '/api/zcash/shielded/status' && method === 'GET') {
+          if (!zcashFwSupported) return json({ ready: false, error: 'Zcash requires firmware >= 7.11.0' })
+          return json({ ready: isSidecarReady() })
+        }
+
+        // All mutating zcash endpoints require firmware support
+        if (path.startsWith('/api/zcash/shielded/') && path !== '/api/zcash/shielded/status' && !zcashFwSupported) {
+          return json({ error: 'Zcash requires firmware >= 7.11.0' }, 503)
+        }
+
+        if (path === '/api/zcash/shielded/init' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { seed_hex?: string; from_device?: boolean; account?: number }
+          if (body.from_device) {
+            const wallet = requireWallet(engine)
+            const result = await initializeOrchardFromDevice(wallet, body.account ?? 0)
+            return json(result)
+          }
+          // seed_hex path is dev/test only — reject in production builds
+          return json({ error: 'seed_hex init disabled — use from_device: true' }, 403)
+        }
+
+        if (path === '/api/zcash/shielded/scan' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { start_height?: number }
+          const result = await scanOrchardNotes(body.start_height)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/balance' && method === 'GET') {
+          auth.requireAuth(req)
+          const result = await getShieldedBalance()
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/build' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { recipient: string; amount: number; account?: number; memo?: string }
+          if (!body.recipient || !body.amount) return json({ error: 'Missing recipient or amount' }, 400)
+          if (typeof body.amount !== 'number' || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            return json({ error: 'Amount must be > 0 and <= 21M ZEC in zatoshis' }, 400)
+          }
+          const result = await buildShieldedTx(body)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/finalize' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { signatures: string[] }
+          if (!body.signatures?.length) return json({ error: 'Missing signatures' }, 400)
+          const hexRe = /^[0-9a-fA-F]{128}$/
+          if (!body.signatures.every(s => hexRe.test(s))) {
+            return json({ error: 'Each signature must be 128 hex chars (64 bytes)' }, 400)
+          }
+          const result = await finalizeShieldedTx(body.signatures)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/broadcast' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json() as { raw_tx: string }
+          if (!body.raw_tx) return json({ error: 'Missing raw_tx' }, 400)
+          const result = await broadcastShieldedTx(body.raw_tx)
+          return json(result)
         }
 
         // ── Catch-all ────────────────────────────────────────────────
