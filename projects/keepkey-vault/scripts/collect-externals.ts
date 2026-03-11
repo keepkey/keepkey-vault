@@ -19,6 +19,7 @@ const EXTERNALS = [
   'node-hid',
   'usb',
   'ethers',
+  '@pioneer-platform/pioneer-client',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
@@ -267,38 +268,53 @@ if (nestedCount > 0) {
 }
 
 // Prune unnecessary files to reduce bundle size
-const PRUNE_PATTERNS = [
-  // Docs & metadata
+// SAFE_PRUNE: can be removed anywhere in the tree (files/config that are never runtime code)
+const SAFE_PRUNE = new Set([
   'README.md', 'readme.md', 'README', 'CHANGELOG.md', 'CHANGELOG', 'HISTORY.md',
-  'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'license', 'LICENCE', 'LICENCE.md',
+  'LICENSE.md', 'LICENSE.txt', 'LICENCE.md',
   'CONTRIBUTING.md', '.npmignore', '.eslintrc', '.eslintrc.js', '.eslintrc.json',
   '.prettierrc', '.prettierrc.js', '.editorconfig', '.travis.yml', '.github',
   'tsconfig.json', 'tsconfig.tsbuildinfo', '.babelrc', 'babel.config.js',
   'jest.config.js', 'jest.config.ts', 'karma.conf.js', '.nyc_output',
-  'coverage', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'AUTHORS',
-  // Test directories
-  'test', 'tests', '__tests__', '__mocks__', 'spec', 'benchmark', 'benchmarks',
-  // NOTE: Do NOT prune 'src' — many packages (bip32, etc.) use src/ as their main entry point
-  // TypeScript source maps
-  '*.map',
-]
+  'SECURITY.md', 'CODE_OF_CONDUCT.md', 'AUTHORS',
+])
+
+// ROOT_ONLY_PRUNE: directories that should ONLY be pruned at a package root (direct child
+// of a dir with package.json). Some packages (e.g. @swaggerexpert/json-pointer,
+// @swagger-api/apidom-ns-openapi-3-0) ship runtime code inside dirs named "test" or "license",
+// so we can't blindly remove these deep in the tree.
+const ROOT_ONLY_PRUNE = new Set([
+  'test', 'tests', '__tests__', '__mocks__', 'spec',
+  'benchmark', 'benchmarks', 'coverage',
+  'LICENSE', 'license', 'LICENCE',
+])
 
 let prunedCount = 0
 let prunedSize = 0
 
-function pruneDir(dirPath: string) {
+function pruneDir(dirPath: string, isPackageRoot: boolean) {
   try {
     const entries = readdirSync(dirPath, { withFileTypes: true })
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name)
-      // Prune by name
-      if (PRUNE_PATTERNS.includes(entry.name)) {
+      // Always-safe prune (docs, config, metadata)
+      if (SAFE_PRUNE.has(entry.name)) {
         try {
           const stat = statSync(fullPath)
           const size = entry.isDirectory() ? 0 : stat.size
           rmSync(fullPath, { recursive: true })
           prunedCount++
           prunedSize += size
+        } catch (e) {
+          console.warn(`  WARN: Failed to prune ${fullPath}: ${e}`)
+        }
+        continue
+      }
+      // Root-only prune: only remove test/coverage dirs at package root level
+      if (isPackageRoot && entry.isDirectory() && ROOT_ONLY_PRUNE.has(entry.name)) {
+        try {
+          rmSync(fullPath, { recursive: true })
+          prunedCount++
         } catch (e) {
           console.warn(`  WARN: Failed to prune ${fullPath}: ${e}`)
         }
@@ -327,9 +343,10 @@ function pruneDir(dirPath: string) {
           continue
         }
       }
-      // Recurse into directories
+      // Recurse into directories — mark as package root if it has a package.json
       if (entry.isDirectory()) {
-        pruneDir(fullPath)
+        const childIsRoot = existsSync(join(fullPath, 'package.json'))
+        pruneDir(fullPath, childIsRoot)
       }
     }
   } catch (e) {
@@ -337,7 +354,7 @@ function pruneDir(dirPath: string) {
   }
 }
 
-pruneDir(nmDest)
+pruneDir(nmDest, false)
 console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize / 1024 / 1024).toFixed(1)}MB removed)`)
 
 // Remove prebuilds for OTHER platforms, build artifacts, and native source files

@@ -1,6 +1,7 @@
 {
 	"receive": "Receive",
 	"send": "Send",
+	"swap": "Swap",
 	"tokens": "Tokens",
 	"tokenCount_one": "{{count}} token",
 	"tokenCount_other": "{{count}} tokens",

@@ -11,16 +11,24 @@ import { getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 const TAG = '[txbuilder:evm]'
 
 /** String-based decimal→BigInt to avoid floating-point precision loss */
-function parseUnits(amount: string, decimals: number): bigint {
+export function parseUnits(amount: string, decimals: number): bigint {
   const [whole = '0', frac = ''] = amount.split('.')
   const padded = (frac + '0'.repeat(decimals)).slice(0, decimals)
   return BigInt(whole + padded)
 }
 
-const toHex = (value: bigint | number): string => {
+export const toHex = (value: bigint | number): string => {
   let hex = BigInt(value).toString(16)
   if (hex.length % 2) hex = '0' + hex
   return '0x' + hex
+}
+
+/** Encode ERC-20 approve(spender, amount) call data */
+export function encodeApprove(spender: string, amount: bigint): string {
+  const selector = '095ea7b3' // approve(address,uint256)
+  const spenderPad = spender.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const amountPad = amount.toString(16).padStart(64, '0')
+  return '0x' + selector + spenderPad + amountPad
 }
 
 /** Encode ERC-20 transfer(address,uint256) call data */
@@ -29,6 +37,39 @@ function encodeTransferData(toAddress: string, amountBaseUnits: bigint): string 
   const addrPadded = toAddress.toLowerCase().replace(/^0x/, '').padStart(64, '0')
   const amtPadded = amountBaseUnits.toString(16).padStart(64, '0')
   return '0x' + selector + addrPadded + amtPadded
+}
+
+/**
+ * Encode THORChain router depositWithExpiry(address,address,uint256,string,uint256)
+ * Selector: 0x44bc937b
+ *
+ * For native ETH swaps: asset = 0x0...0, value = amount
+ * For ERC-20 swaps: asset = token contract, value = 0 (requires prior approval)
+ */
+export function encodeDepositWithExpiry(
+  vault: string,
+  asset: string, // 0x0...0 for native, token address for ERC-20
+  amount: bigint,
+  memo: string,
+  expiry: number,
+): string {
+  const selector = '44bc937b'
+  const vaultPad = vault.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const assetPad = asset.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const amountPad = amount.toString(16).padStart(64, '0')
+  // String offset: 5 head words × 32 bytes = 160 = 0xa0
+  const stringOffset = (5 * 32).toString(16).padStart(64, '0')
+  const expiryPad = BigInt(expiry).toString(16).padStart(64, '0')
+
+  // Encode memo string: length prefix + UTF-8 bytes padded to 32-byte boundary
+  // Empty memo is valid ABI — zero length + no data words
+  const memoBytes = Buffer.from(memo, 'utf8')
+  const memoLen = memoBytes.length.toString(16).padStart(64, '0')
+  const memoPadded = memoBytes.length === 0
+    ? '' // zero-length string: only the length word (0x00...00) is needed
+    : memoBytes.toString('hex').padEnd(Math.ceil(memoBytes.length / 32) * 64, '0')
+
+  return '0x' + selector + vaultPad + assetPad + amountPad + stringOffset + expiryPad + memoLen + memoPadded
 }
 
 /** Extract contract address from CAIP-19 like "eip155:1/erc20:0xdac17f..." */

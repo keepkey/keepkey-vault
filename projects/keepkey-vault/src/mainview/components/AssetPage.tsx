@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
+import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { BTC_SCRIPT_TYPES, btcAccountPath } from "../../shared/chains"
@@ -11,6 +11,7 @@ import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance, formatUsd } from "../lib/formatting"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
+import { SwapDialog } from "./SwapDialog"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
@@ -194,6 +195,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const cleanBalanceUsd = (balance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
+	const [showSwapDialog, setShowSwapDialog] = useState(false)
 	const isEvmChain = chain.chainFamily === 'evm'
 
 	// Toggle token visibility via RPC
@@ -219,9 +221,10 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		}
 	}, [])
 
-	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
+	const PILLS: { id: AssetView | 'swap'; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: t("receive"), icon: FaArrowDown },
 		{ id: "send", label: t("send"), icon: FaArrowUp },
+		{ id: "swap", label: t("swap"), icon: FaExchangeAlt },
 	]
 
 	// Shared token row renderer
@@ -421,7 +424,10 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								px={{ base: "5", md: "6" }}
 								py="2"
 								borderRadius="md"
-								onClick={() => { setView(p.id); if (p.id === 'receive') setSelectedToken(null) }}
+								onClick={() => {
+								if (p.id === 'swap') { setShowSwapDialog(true); return }
+								setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
+							}}
 								display="flex"
 								alignItems="center"
 								gap="1.5"
@@ -504,6 +510,14 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
 					)}
+					{/* SwapDialog rendered as overlay */}
+					<SwapDialog
+						open={showSwapDialog}
+						onClose={() => setShowSwapDialog(false)}
+						chain={chain}
+						balance={balance}
+						address={address}
+					/>
 				</Box>
 
 				{/* Tokens Section — with spam filter */}

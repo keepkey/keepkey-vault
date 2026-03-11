@@ -25,12 +25,24 @@ const FEES: Record<string, number> = {
   osmosis: 0.035,
 }
 
-// Chain-specific msg types
-const MSG_TYPES: Record<string, string> = {
+// Chain-specific msg types (MsgSend)
+const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
   mayachain: 'mayachain/MsgSend',
   cosmos: 'cosmos-sdk/MsgSend',
   osmosis: 'cosmos-sdk/MsgSend',
+}
+
+// Chain-specific msg types (MsgDeposit — used for swaps/LP on THORChain/Maya)
+const MSG_DEPOSIT_TYPES: Record<string, string> = {
+  thorchain: 'thorchain/MsgDeposit',
+  mayachain: 'mayachain/MsgDeposit',
+}
+
+// MsgDeposit asset identifiers (CHAIN.SYMBOL format)
+const DEPOSIT_ASSETS: Record<string, string> = {
+  thorchain: 'THOR.RUNE',
+  mayachain: 'MAYA.CACAO',
 }
 
 // Fee templates
@@ -46,6 +58,7 @@ export interface BuildCosmosParams {
   amount: string    // human-readable (e.g. "1.5")
   memo?: string
   isMax?: boolean
+  isSwapDeposit?: boolean // use MsgDeposit instead of MsgSend (for THORChain/Maya swaps)
   fromAddress: string
 }
 
@@ -54,7 +67,7 @@ export async function buildCosmosTx(
   chain: ChainDef,
   params: BuildCosmosParams,
 ) {
-  const { to, memo = '', isMax = false, fromAddress } = params
+  const { to, memo = '', isMax = false, isSwapDeposit = false, fromAddress } = params
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
@@ -97,11 +110,39 @@ export async function buildCosmosTx(
 
   // 3. Build unsigned tx
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
-  const msgType = MSG_TYPES[chain.id] || 'cosmos-sdk/MsgSend'
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+
+  // Determine message type: MsgDeposit for THORChain/Maya swaps (explicit flag), MsgSend otherwise
+  // NOTE: Do NOT infer from !!memo — normal sends with memos (e.g. exchange deposits) must use MsgSend
+  const isDeposit = isSwapDeposit && (chain.id === 'thorchain' || chain.id === 'mayachain')
+  let msg: { type: string; value: Record<string, unknown> }
+
+  if (isDeposit) {
+    const depositType = MSG_DEPOSIT_TYPES[chain.id]!
+    const depositAsset = DEPOSIT_ASSETS[chain.id]!
+    console.log(`${TAG} Building MsgDeposit: asset=${depositAsset}, amount=${baseAmount}, memo=${memo}`)
+    msg = {
+      type: depositType,
+      value: {
+        coins: [{ asset: depositAsset, amount: String(baseAmount) }],
+        memo,
+        signer: fromAddress,
+      },
+    }
+  } else {
+    const sendType = MSG_SEND_TYPES[chain.id] || 'cosmos-sdk/MsgSend'
+    msg = {
+      type: sendType,
+      value: {
+        amount: [{ denom, amount: String(baseAmount) }],
+        from_address: fromAddress,
+        to_address: to,
+      },
+    }
+  }
 
   return {
     signerAddress: fromAddress,
@@ -109,16 +150,7 @@ export async function buildCosmosTx(
     tx: {
       fee,
       memo: memo || '',
-      msg: [
-        {
-          type: msgType,
-          value: {
-            amount: [{ denom, amount: String(baseAmount) }],
-            from_address: fromAddress,
-            to_address: to,
-          },
-        },
-      ],
+      msg: [msg],
       signatures: [],
     },
     chain_id,

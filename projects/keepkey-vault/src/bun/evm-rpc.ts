@@ -70,6 +70,23 @@ export async function getTokenMetadata(rpcUrl: string, contractAddress: string):
   return { symbol, name, decimals: isNaN(decimals) ? 18 : decimals }
 }
 
+/** Check ERC-20 allowance(owner, spender) via eth_call */
+export async function getErc20Allowance(rpcUrl: string, tokenContract: string, owner: string, spender: string): Promise<bigint> {
+  const selector = 'dd62ed3e' // allowance(address,address)
+  const ownerPad = owner.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const spenderPad = spender.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const data = '0x' + selector + ownerPad + spenderPad
+  const result = await ethCall(rpcUrl, tokenContract, data)
+  return BigInt(result || '0x0')
+}
+
+/** Get ERC-20 decimals via eth_call */
+export async function getErc20Decimals(rpcUrl: string, tokenContract: string): Promise<number> {
+  const result = await ethCall(rpcUrl, tokenContract, '0x313ce567') // decimals()
+  // Fallback 0x12 = 18 decimal (the standard ERC-20 default)
+  return Number(BigInt(result || '0x12'))
+}
+
 // ── Direct RPC methods for custom chains ─────────────────────────────
 
 export async function getEvmBalance(rpcUrl: string, address: string): Promise<bigint> {
@@ -85,6 +102,21 @@ export async function getEvmGasPrice(rpcUrl: string): Promise<bigint> {
 export async function getEvmNonce(rpcUrl: string, address: string): Promise<number> {
   const result = await ethRpc(rpcUrl, 'eth_getTransactionCount', [address, 'latest'])
   return Number(BigInt(result || '0x0'))
+}
+
+/** Estimate gas for a tx, returning fallback on failure. Adds 20% buffer. */
+export async function estimateGas(
+  rpcUrl: string,
+  tx: { to: string; from: string; data: string; value?: string },
+  fallbackGas: bigint,
+): Promise<bigint> {
+  try {
+    const result = await ethRpc(rpcUrl, 'eth_estimateGas', [tx])
+    const estimated = BigInt(result || '0x0')
+    return estimated > 0n ? estimated * 120n / 100n : fallbackGas // 20% buffer
+  } catch {
+    return fallbackGas
+  }
 }
 
 export async function broadcastEvmTx(rpcUrl: string, signedTxHex: string): Promise<string> {

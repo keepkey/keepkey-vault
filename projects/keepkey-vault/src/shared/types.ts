@@ -108,6 +108,7 @@ export interface BuildTxParams {
   memo?: string
   feeLevel?: number   // 1=slow, 5=avg, 10=fast
   isMax?: boolean
+  isSwapDeposit?: boolean // THORChain/Maya: use MsgDeposit instead of MsgSend (for swaps/LP)
   caip?: string        // Token CAIP-19 — triggers token transfer mode when contains 'erc20'
   tokenBalance?: string  // human-readable token balance (from frontend) — avoids re-fetch on max send
   tokenDecimals?: number // token decimals (from frontend) — avoids re-fetch
@@ -361,6 +362,117 @@ export type ReportSection =
   | { title: string; type: 'summary'; data: string[] }
   | { title: string; type: 'list'; data: string[] }
   | { title: string; type: 'text'; data: string }
+
+// ── Swap types ─────────────────────────────────────────────────────────
+
+/** An asset available for swapping (THORChain pool asset) */
+export interface SwapAsset {
+  asset: string            // THORChain asset name (e.g. "BTC.BTC", "ETH.USDT-0xDAC...")
+  chainId: string          // our chain id (e.g. "bitcoin", "ethereum")
+  symbol: string           // display symbol ("BTC", "USDT")
+  name: string             // display name ("Bitcoin", "Tether USD")
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp'
+  decimals: number
+  caip?: string            // CAIP-19 if known
+  icon?: string            // icon URL
+  contractAddress?: string // for ERC-20 tokens
+}
+
+/** Quote response from Pioneer (aggregated across DEXes) */
+export interface SwapQuote {
+  expectedOutput: string     // human-readable amount out
+  minimumOutput: string      // after slippage
+  inboundAddress: string     // vault address to send to
+  router?: string            // EVM router contract (for depositWithExpiry)
+  memo: string               // THORChain routing memo (empty for memoless integrations)
+  expiry?: number            // unix timestamp — deadline for depositWithExpiry
+  fees: {
+    affiliate: string        // affiliate fee (human-readable)
+    outbound: string         // outbound gas fee
+    totalBps: number         // total fee in basis points
+  }
+  estimatedTime: number      // seconds
+  warning?: string           // streaming swap note, dust threshold, etc.
+  slippageBps: number        // actual slippage in bps
+  fromAsset: string          // THORChain asset identifier
+  toAsset: string            // THORChain asset identifier
+  integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", etc.
+}
+
+/** Parameters for getSwapQuote RPC */
+export interface SwapQuoteParams {
+  fromAsset: string   // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
+  toAsset: string     // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
+  amount: string      // human-readable amount
+  fromAddress: string // sender address
+  toAddress: string   // destination address
+  slippageBps?: number // slippage tolerance (default 300 = 3%)
+}
+
+/** Parameters for executeSwap RPC */
+export interface ExecuteSwapParams {
+  fromChainId: string       // our chain id
+  toChainId: string         // our chain id
+  fromAsset: string         // THORChain asset id
+  toAsset: string           // THORChain asset id
+  amount: string            // human-readable amount
+  memo: string              // THORChain routing memo
+  inboundAddress: string    // vault address
+  router?: string           // EVM router (for token approvals)
+  expiry?: number           // unix timestamp for depositWithExpiry
+  expectedOutput: string    // for display
+  isMax?: boolean
+  feeLevel?: number
+}
+
+/** Result of executeSwap RPC */
+export interface SwapResult {
+  txid: string
+  fromAsset: string
+  toAsset: string
+  fromAmount: string
+  expectedOutput: string
+  approvalTxid?: string
+}
+
+// ── Swap tracking types ───────────────────────────────────────────────
+
+export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
+
+export interface PendingSwap {
+  txid: string
+  fromAsset: string       // THORChain asset id (e.g. "BASE.ETH")
+  toAsset: string         // THORChain asset id (e.g. "ETH.ETH")
+  fromSymbol: string
+  toSymbol: string
+  fromChainId: string     // our chain id
+  toChainId: string
+  fromAmount: string      // human-readable
+  expectedOutput: string  // human-readable
+  memo: string
+  inboundAddress: string
+  router?: string
+  integration: string     // "thorchain", "shapeshift", etc.
+  status: SwapTrackingStatus
+  confirmations: number
+  outboundConfirmations?: number
+  outboundRequiredConfirmations?: number
+  outboundTxid?: string
+  createdAt: number       // unix ms
+  updatedAt: number       // unix ms
+  estimatedTime: number   // seconds
+  error?: string
+}
+
+export interface SwapStatusUpdate {
+  txid: string
+  status: SwapTrackingStatus
+  confirmations?: number
+  outboundConfirmations?: number
+  outboundRequiredConfirmations?: number
+  outboundTxid?: string
+  error?: string
+}
 
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.

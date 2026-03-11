@@ -25,6 +25,7 @@ import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
+import { SwapTracker } from "./components/SwapTracker"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
@@ -614,6 +615,7 @@ function App() {
 				wcUri={wcUri}
 				onClose={handleCloseWalletConnect}
 			/>
+			<SwapTracker />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{(pendingAppUrl || pendingWcOpen) && (
 				<>

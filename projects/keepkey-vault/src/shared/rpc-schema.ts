@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -126,6 +126,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       deleteReport: { params: { id: string }; response: void }
       saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
 
+      // ── Swap ──────────────────────────────────────────────────────────
+      getSwapAssets: { params: void; response: SwapAsset[] }
+      getSwapQuote: { params: SwapQuoteParams; response: SwapQuote }
+      executeSwap: { params: ExecuteSwapParams; response: SwapResult }
+      getPendingSwaps: { params: void; response: PendingSwap[] }
+      dismissSwap: { params: { txid: string }; response: void }
+
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
 
@@ -171,6 +178,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
+      'swap-update': SwapStatusUpdate
+      'swap-complete': PendingSwap
     }
   }
   webview: {

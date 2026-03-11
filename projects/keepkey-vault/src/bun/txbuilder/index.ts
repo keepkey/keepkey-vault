@@ -62,6 +62,7 @@ export async function buildTx(
         amount: params.amount,
         memo: params.memo,
         isMax: params.isMax,
+        isSwapDeposit: params.isSwapDeposit,
         fromAddress: params.fromAddress,
       })
       const { fee: cosmosFee, ...cosmosTx } = cosmosResult
