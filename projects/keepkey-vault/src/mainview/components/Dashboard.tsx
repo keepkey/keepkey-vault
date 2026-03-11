@@ -166,6 +166,16 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 		setLoadingBalances(false)
 	}, [loadingBalances, watchOnly])
 
+	// Auto-refresh balances when a swap completes (both chains affected)
+	useEffect(() => {
+		const handler = () => {
+			console.log('[Dashboard] Swap completed — refreshing balances')
+			refreshBalances()
+		}
+		window.addEventListener('keepkey-swap-completed', handler)
+		return () => window.removeEventListener('keepkey-swap-completed', handler)
+	}, [refreshBalances])
+
 	// Compute spam-filtered USD per chain: subtract spam token values from chain totals
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v]))

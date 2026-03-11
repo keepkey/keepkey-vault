@@ -7,12 +7,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-ui/react"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
 import { getAssetIcon } from "../../shared/assetLookup"
-import { CHAINS } from "../../shared/chains"
+import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
-import type { SwapAsset, SwapQuote, ChainBalance } from "../../shared/types"
+import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTrackingStatus } from "../../shared/types"
 import { Z } from "../lib/z-index"
 
 // ── Phase state machine ─────────────────────────────────────────────
@@ -31,11 +31,16 @@ const DEFAULT_OUTPUT: Record<string, string> = {
   litecoin: 'BTC.BTC',
   dogecoin: 'BTC.BTC',
   bitcoincash: 'BTC.BTC',
+  dash: 'BTC.BTC',
   cosmos: 'ETH.ETH',
   thorchain: 'ETH.ETH',
+  mayachain: 'ETH.ETH',
   avalanche: 'ETH.ETH',
   bsc: 'ETH.ETH',
   base: 'ETH.ETH',
+  arbitrum: 'ETH.ETH',
+  optimism: 'ETH.ETH',
+  polygon: 'ETH.ETH',
 }
 
 // ── Icons ───────────────────────────────────────────────────────────
@@ -77,6 +82,76 @@ const ShieldIcon = () => (
   </svg>
 )
 
+// ── External link icon ──────────────────────────────────────────────
+const ExternalLinkIcon = () => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+)
+
+// ── Confetti burst (CSS-only, 30 particles) ─────────────────────────
+function ConfettiBurst() {
+  const colors = ['#4ADE80', '#23DCC8', '#FFD700', '#FF6B6B', '#A78BFA', '#3B82F6', '#FB923C', '#F472B6']
+  const particles = Array.from({ length: 30 }, (_, i) => {
+    const angle = (i / 30) * 360
+    const dist = 80 + Math.random() * 100
+    const x = Math.cos(angle * Math.PI / 180) * dist
+    const y = Math.sin(angle * Math.PI / 180) * dist - 40
+    const color = colors[i % colors.length]
+    const size = 4 + Math.random() * 5
+    const delay = Math.random() * 0.2
+    const rotation = Math.random() * 720
+    return { x, y, color, size, delay, rotation, id: i }
+  })
+  return (
+    <Box position="absolute" top="50%" left="50%" pointerEvents="none" zIndex={10}>
+      {particles.map(p => (
+        <Box
+          key={p.id}
+          position="absolute"
+          w={`${p.size}px`}
+          h={`${p.size}px`}
+          bg={p.color}
+          borderRadius={p.id % 3 === 0 ? 'full' : p.id % 3 === 1 ? '1px' : '0'}
+          style={{
+            animation: `kkConfetti 1s ease-out ${p.delay}s forwards`,
+            '--cx': `${p.x}px`,
+            '--cy': `${p.y}px`,
+            '--cr': `${p.rotation}deg`,
+            opacity: 0,
+          } as any}
+        />
+      ))}
+    </Box>
+  )
+}
+
+// ── Play completion chime via Web Audio API ─────────────────────────
+function playCompletionSound() {
+  try {
+    const ctx = new AudioContext()
+    const now = ctx.currentTime
+    // Play a pleasant two-note chime (G5 → C6)
+    const notes = [784, 1047]
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0, now + i * 0.15)
+      gain.gain.linearRampToValueAtTime(0.15, now + i * 0.15 + 0.03)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.5)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now + i * 0.15)
+      osc.stop(now + i * 0.15 + 0.6)
+    })
+    setTimeout(() => ctx.close(), 1500)
+  } catch { /* audio not available */ }
+}
+
 const DIALOG_CSS = `
   @keyframes kkSwapPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(35,220,200,0.5); }
@@ -94,6 +169,10 @@ const DIALOG_CSS = `
   @keyframes kkSwapFadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes kkConfetti {
+    0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+    100% { transform: translate(var(--cx), var(--cy)) rotate(var(--cr)) scale(0.3); opacity: 0; }
   }
 `
 
@@ -294,6 +373,106 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // ── Live swap tracking state ────────────────────────────────────
+  const [liveStatus, setLiveStatus] = useState<SwapTrackingStatus>('pending')
+  const [liveConfirmations, setLiveConfirmations] = useState(0)
+  const [liveOutboundConfirmations, setLiveOutboundConfirmations] = useState<number | undefined>()
+  const [liveOutboundRequired, setLiveOutboundRequired] = useState<number | undefined>()
+  const [liveOutboundTxid, setLiveOutboundTxid] = useState<string | undefined>()
+
+  // ── Before/after balance tracking ─────────────────────────────────
+  const [beforeFromBal, setBeforeFromBal] = useState<string | null>(null)
+  const [beforeToBal, setBeforeToBal] = useState<string | null>(null)
+  const [afterFromBal, setAfterFromBal] = useState<string | null>(null)
+  const [afterToBal, setAfterToBal] = useState<string | null>(null)
+  const [showConfetti, setShowConfetti] = useState(false)
+  const completionFiredRef = useRef(false)
+
+  // ── Derived terminal status (must be before effects that depend on them) ──
+  const isSwapComplete = liveStatus === 'completed'
+  const isSwapFailed = liveStatus === 'failed' || liveStatus === 'refunded'
+
+  // ── Listen for swap-update + swap-complete RPC messages ─────────
+  useEffect(() => {
+    if (!txid || phase !== 'submitted') return
+
+    const unsub1 = onRpcMessage('swap-update', (update: SwapStatusUpdate) => {
+      if (update.txid !== txid) return
+      setLiveStatus(update.status)
+      if (update.confirmations !== undefined) setLiveConfirmations(update.confirmations)
+      if (update.outboundConfirmations !== undefined) setLiveOutboundConfirmations(update.outboundConfirmations)
+      if (update.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(update.outboundRequiredConfirmations)
+      if (update.outboundTxid) setLiveOutboundTxid(update.outboundTxid)
+    })
+
+    const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
+      if (swap.txid !== txid) return
+      setLiveStatus(swap.status || 'completed')
+    })
+
+    return () => { unsub1(); unsub2() }
+  }, [txid, phase])
+
+  // Reset live tracking when phase changes away from submitted
+  useEffect(() => {
+    if (phase !== 'submitted') {
+      setLiveStatus('pending')
+      setLiveConfirmations(0)
+      setLiveOutboundConfirmations(undefined)
+      setLiveOutboundRequired(undefined)
+      setLiveOutboundTxid(undefined)
+      setAfterFromBal(null)
+      setAfterToBal(null)
+      setShowConfetti(false)
+      completionFiredRef.current = false
+    }
+  }, [phase])
+
+  // Fire confetti + sound + fetch after-balances when swap completes
+  useEffect(() => {
+    if (!isSwapComplete || completionFiredRef.current) return
+    completionFiredRef.current = true
+    setShowConfetti(true)
+    playCompletionSound()
+    setTimeout(() => setShowConfetti(false), 1500)
+    // Fetch updated balances to show before/after diff
+    rpcRequest<ChainBalance[]>('getBalances', undefined, 60000)
+      .then((result) => {
+        if (!result || !fromAsset || !toAsset) return
+        const fromCb = result.find(b => b.chainId === fromAsset.chainId)
+        const toCb = result.find(b => b.chainId === toAsset.chainId)
+        if (fromCb) {
+          if (fromAsset.contractAddress && fromCb.tokens) {
+            const tok = fromCb.tokens.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
+            setAfterFromBal(tok?.balance || '0')
+          } else {
+            setAfterFromBal(fromCb.balance)
+          }
+        }
+        if (toCb) {
+          if (toAsset.contractAddress && toCb.tokens) {
+            const tok = toCb.tokens.find(t => t.contractAddress?.toLowerCase() === toAsset.contractAddress?.toLowerCase())
+            setAfterToBal(tok?.balance || '0')
+          } else {
+            setAfterToBal(toCb.balance)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [isSwapComplete, fromAsset, toAsset])
+
+  // ── Derived: which step are we on? ──────────────────────────────
+  // Step 0: Input (pending/confirming) — inbound tx being confirmed
+  // Step 1: Protocol (confirming with enough confs) — THORChain processing
+  // Step 2: Output (output_detected/output_confirming) — outbound tx
+  // Step 3: Done (completed)
+  const swapStep = useMemo(() => {
+    if (liveStatus === 'completed') return 3
+    if (liveStatus === 'output_detected' || liveStatus === 'output_confirming' || liveStatus === 'output_confirmed') return 2
+    if (liveStatus === 'confirming') return 1
+    return 0 // pending
+  }, [liveStatus])
+
   // ── Load cached balances ──────────────────────────────────────────
   useEffect(() => {
     if (!open) return
@@ -440,6 +619,21 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     setPhase(isErc20 ? 'approving' : 'signing')
     setError(null)
 
+    // Capture before-balances
+    const fromBal = fromBalance || '0'
+    setBeforeFromBal(fromBal)
+    const toCb = balances.find(b => b.chainId === toAsset.chainId)
+    if (toCb) {
+      if (toAsset.contractAddress && toCb.tokens) {
+        const tok = toCb.tokens.find(t => t.contractAddress?.toLowerCase() === toAsset.contractAddress?.toLowerCase())
+        setBeforeToBal(tok?.balance || '0')
+      } else {
+        setBeforeToBal(toCb.balance)
+      }
+    } else {
+      setBeforeToBal('0')
+    }
+
     try {
       const result = await rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
         fromChainId: fromAsset.chainId,
@@ -463,7 +657,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
       setError(e.message || t("errorSwap"))
       setPhase('review')
     }
-  }, [quote, fromAsset, toAsset, amount, isMax, fromBalance])
+  }, [quote, fromAsset, toAsset, amount, isMax, fromBalance, balances])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -475,6 +669,12 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     setQuote(null)
     setError(null)
     setTxid(null)
+    setBeforeFromBal(null)
+    setBeforeToBal(null)
+    setAfterFromBal(null)
+    setAfterToBal(null)
+    setShowConfetti(false)
+    completionFiredRef.current = false
     hasAutoSelected.current = false
   }, [])
 
@@ -565,40 +765,137 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
             </Box>
           )}
 
-          {/* ── SUBMITTED — swap broadcast, awaiting confirmations ─ */}
+          {/* ── SUBMITTED — live tracking with step progress ──── */}
           {phase === 'submitted' && txid && fromAsset && toAsset && (
-            <VStack gap="4" py="2" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
-              {/* Pulsing broadcast indicator — NOT a checkmark */}
-              <Box
-                w="80px" h="80px"
-                borderRadius="full"
-                bg="rgba(35,220,200,0.08)"
-                border="2px solid"
-                borderColor="rgba(35,220,200,0.3)"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-                style={{ animation: 'kkSwapPulse 2s ease-in-out infinite' }}
-              >
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" opacity="0.3" />
-                  <path d="M12 6v6l4 2" />
-                </svg>
-              </Box>
+            <VStack gap="4" py="2" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }} position="relative">
+              {/* Confetti burst on completion */}
+              {showConfetti && <ConfettiBurst />}
 
-              <VStack gap="1">
-                <Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{t("swapSubmitted")}</Text>
-                <Text fontSize="xs" color="#FBBF24" fontWeight="500">{t("waitingForConfirmations")}</Text>
-                <Text fontSize="10px" color="kk.textMuted">{t("swapSubmittedDesc")}</Text>
+              {/* Top icon — checkmark when done, pulsing clock when in progress */}
+              {isSwapComplete ? (
+                <Box w="64px" h="64px" borderRadius="full" bg="rgba(74,222,128,0.1)" border="2px solid" borderColor="rgba(74,222,128,0.4)"
+                  display="flex" alignItems="center" justifyContent="center"
+                  style={{ animation: 'kkSwapCheckPop 0.4s ease-out' }}>
+                  <CheckIcon />
+                </Box>
+              ) : isSwapFailed ? (
+                <Box w="64px" h="64px" borderRadius="full" bg="rgba(255,23,68,0.1)" border="2px solid" borderColor="rgba(255,23,68,0.3)"
+                  display="flex" alignItems="center" justifyContent="center">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FF1744" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </Box>
+              ) : (
+                <Box w="64px" h="64px" borderRadius="full" bg="rgba(35,220,200,0.08)" border="2px solid" borderColor="rgba(35,220,200,0.3)"
+                  display="flex" alignItems="center" justifyContent="center"
+                  style={{ animation: 'kkSwapPulse 2s ease-in-out infinite' }}>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" opacity="0.3" /><path d="M12 6v6l4 2" />
+                  </svg>
+                </Box>
+              )}
+
+              {/* Status title */}
+              <VStack gap="0.5">
+                <Text fontSize="md" fontWeight="700" color={isSwapComplete ? "#4ADE80" : isSwapFailed ? "#FF1744" : "kk.textPrimary"}>
+                  {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
+                </Text>
+                {!isSwapComplete && !isSwapFailed && (
+                  <Text fontSize="xs" color="#FBBF24" fontWeight="500">{t("waitingForConfirmations")}</Text>
+                )}
               </VStack>
 
-              {/* ETA */}
-              {quote?.estimatedTime && quote.estimatedTime > 0 && (
-                <Flex
-                  w="full" justify="center" align="center" gap="2"
+              {/* ── 3-Step Progress ───────────────────────────────── */}
+              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" p="4">
+                <VStack gap="0" align="stretch">
+                  {/* Step 0: Input Transaction */}
+                  <Flex align="flex-start" gap="3">
+                    <VStack gap="0" align="center" minW="24px">
+                      <Box w="24px" h="24px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+                        bg={swapStep > 0 ? "rgba(74,222,128,0.15)" : "rgba(35,220,200,0.15)"}
+                        border="2px solid" borderColor={swapStep > 0 ? "#4ADE80" : swapStep === 0 ? "#23DCC8" : "kk.border"}>
+                        {swapStep > 0 ? (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                        ) : (
+                          <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={swapStep === 0 ? { animation: 'kkSwapPulse 1.5s ease-in-out infinite' } : {}} />
+                        )}
+                      </Box>
+                      <Box w="2px" h="20px" bg={swapStep > 0 ? "#4ADE80" : "kk.border"} />
+                    </VStack>
+                    <Box pb="3" flex="1">
+                      <Text fontSize="xs" fontWeight="600" color={swapStep >= 0 ? "kk.textPrimary" : "kk.textMuted"}>{t("stageInput")}</Text>
+                      {swapStep === 0 && liveConfirmations > 0 && (
+                        <Text fontSize="11px" fontFamily="mono" color="#23DCC8">{liveConfirmations} {t("confirmations")}</Text>
+                      )}
+                      {swapStep > 0 && (
+                        <Text fontSize="11px" color="#4ADE80">{t("statusCompleted")}</Text>
+                      )}
+                    </Box>
+                  </Flex>
+
+                  {/* Step 1: Protocol Processing */}
+                  <Flex align="flex-start" gap="3">
+                    <VStack gap="0" align="center" minW="24px">
+                      <Box w="24px" h="24px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+                        bg={swapStep > 1 ? "rgba(74,222,128,0.15)" : swapStep === 1 ? "rgba(35,220,200,0.15)" : "rgba(255,255,255,0.04)"}
+                        border="2px solid" borderColor={swapStep > 1 ? "#4ADE80" : swapStep === 1 ? "#23DCC8" : "kk.border"}>
+                        {swapStep > 1 ? (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                        ) : swapStep === 1 ? (
+                          <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
+                        ) : (
+                          <Box w="8px" h="8px" borderRadius="full" bg="kk.border" />
+                        )}
+                      </Box>
+                      <Box w="2px" h="20px" bg={swapStep > 1 ? "#4ADE80" : "kk.border"} />
+                    </VStack>
+                    <Box pb="3" flex="1">
+                      <Text fontSize="xs" fontWeight="600" color={swapStep >= 1 ? "kk.textPrimary" : "kk.textMuted"}>{t("stageProtocol")}</Text>
+                      {swapStep === 1 && (
+                        <Text fontSize="11px" color="#23DCC8">{t("statusConfirming")}...</Text>
+                      )}
+                      {swapStep > 1 && (
+                        <Text fontSize="11px" color="#4ADE80">{t("statusCompleted")}</Text>
+                      )}
+                    </Box>
+                  </Flex>
+
+                  {/* Step 2: Output Transaction */}
+                  <Flex align="flex-start" gap="3">
+                    <VStack gap="0" align="center" minW="24px">
+                      <Box w="24px" h="24px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+                        bg={swapStep > 2 ? "rgba(74,222,128,0.15)" : swapStep === 2 ? "rgba(35,220,200,0.15)" : "rgba(255,255,255,0.04)"}
+                        border="2px solid" borderColor={swapStep > 2 ? "#4ADE80" : swapStep === 2 ? "#23DCC8" : "kk.border"}>
+                        {swapStep > 2 ? (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                        ) : swapStep === 2 ? (
+                          <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
+                        ) : (
+                          <Box w="8px" h="8px" borderRadius="full" bg="kk.border" />
+                        )}
+                      </Box>
+                    </VStack>
+                    <Box flex="1">
+                      <Text fontSize="xs" fontWeight="600" color={swapStep >= 2 ? "kk.textPrimary" : "kk.textMuted"}>{t("stageOutput")}</Text>
+                      {swapStep === 2 && liveOutboundConfirmations !== undefined && (
+                        <Text fontSize="11px" fontFamily="mono" color="#23DCC8">
+                          {liveOutboundConfirmations}{liveOutboundRequired ? `/${liveOutboundRequired}` : ''} {t("confirmations")}
+                        </Text>
+                      )}
+                      {swapStep === 2 && liveOutboundConfirmations === undefined && (
+                        <Text fontSize="11px" color="#23DCC8">{t("statusOutputDetected")}</Text>
+                      )}
+                      {swapStep > 2 && (
+                        <Text fontSize="11px" color="#4ADE80">{t("statusCompleted")}</Text>
+                      )}
+                    </Box>
+                  </Flex>
+                </VStack>
+              </Box>
+
+              {/* ETA — only show when not complete */}
+              {!isSwapComplete && !isSwapFailed && quote?.estimatedTime && quote.estimatedTime > 0 && (
+                <Flex w="full" justify="center" align="center" gap="2"
                   bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="rgba(255,215,0,0.15)"
-                  borderRadius="lg" px="4" py="2"
-                >
+                  borderRadius="lg" px="4" py="2">
                   <Text fontSize="xs" color="#FBBF24" fontWeight="600">
                     {t("estimatedTime")}: {formatTime(quote.estimatedTime)}
                   </Text>
@@ -606,33 +903,20 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
               )}
 
               {/* Amount summary */}
-              <Flex
-                w="full"
-                bg="rgba(35,220,200,0.06)"
-                border="1px solid"
-                borderColor="rgba(35,220,200,0.15)"
-                borderRadius="lg"
-                p="4"
-                justify="center"
-                align="center"
-                gap="3"
-              >
+              <Flex w="full" bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="rgba(35,220,200,0.15)"
+                borderRadius="lg" p="3" justify="center" align="center" gap="3">
                 <HStack gap="2">
                   <Image src={chainIcon(fromAsset)} w="20px" h="20px" borderRadius="full" />
-                  <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-                    {displayAmount} {fromAsset.symbol}
-                  </Text>
+                  <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{displayAmount} {fromAsset.symbol}</Text>
                 </HStack>
                 <Text color="kk.textMuted" fontSize="lg">&rarr;</Text>
                 <HStack gap="2">
                   <Image src={chainIcon(toAsset)} w="20px" h="20px" borderRadius="full" />
-                  <Text fontSize="sm" fontWeight="600" color="#23DCC8">
-                    ~{quote?.expectedOutput} {toAsset.symbol}
-                  </Text>
+                  <Text fontSize="sm" fontWeight="600" color="#23DCC8">~{quote?.expectedOutput} {toAsset.symbol}</Text>
                 </HStack>
               </Flex>
 
-              {/* Txid */}
+              {/* Input Txid */}
               <Box w="full" bg="rgba(255,255,255,0.04)" borderRadius="lg" p="3">
                 <Flex justify="space-between" align="center">
                   <HStack gap="1.5" minW="0" flex="1">
@@ -641,35 +925,117 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                       {txid.slice(0, 12)}...{txid.slice(-8)}
                     </Text>
                   </HStack>
-                  <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={copyTxid} px="1.5" minW="auto">
-                    {copied ? t("copied") : t("copy")}
-                  </Button>
+                  <HStack gap="1">
+                    <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={copyTxid} px="1.5" minW="auto">
+                      {copied ? t("copied") : t("copy")}
+                    </Button>
+                    {(() => {
+                      const url = getExplorerTxUrl(fromAsset.chainId, txid)
+                      return url ? (
+                        <Button size="xs" variant="ghost" color="#23DCC8" px="1.5" minW="auto"
+                          onClick={() => window.open(url, '_blank')} title="View on explorer">
+                          <ExternalLinkIcon />
+                        </Button>
+                      ) : null
+                    })()}
+                  </HStack>
                 </Flex>
               </Box>
 
-              <Text fontSize="10px" color="kk.textMuted">{t("trackingSwap")}</Text>
+              {/* Outbound Txid — shown when THORChain sends the output */}
+              {liveOutboundTxid && (
+                <Box w="full" bg="rgba(74,222,128,0.06)" border="1px solid" borderColor="rgba(74,222,128,0.15)" borderRadius="lg" p="3">
+                  <Flex justify="space-between" align="center">
+                    <HStack gap="1.5" minW="0" flex="1">
+                      <Text fontSize="10px" color="#4ADE80" flexShrink={0}>{t("stageOutput")}</Text>
+                      <Text fontSize="11px" fontFamily="mono" color="#4ADE80" truncate title={liveOutboundTxid}>
+                        {liveOutboundTxid.slice(0, 12)}...{liveOutboundTxid.slice(-8)}
+                      </Text>
+                    </HStack>
+                    <HStack gap="1">
+                      <Button size="xs" variant="ghost" color="#4ADE80" px="1.5" minW="auto"
+                        onClick={() => { navigator.clipboard.writeText(liveOutboundTxid) }}>
+                        {t("copy")}
+                      </Button>
+                      {(() => {
+                        const url = getExplorerTxUrl(toAsset.chainId, liveOutboundTxid)
+                        return url ? (
+                          <Button size="xs" variant="ghost" color="#4ADE80" px="1.5" minW="auto"
+                            onClick={() => window.open(url, '_blank')} title="View on explorer">
+                            <ExternalLinkIcon />
+                          </Button>
+                        ) : null
+                      })()}
+                    </HStack>
+                  </Flex>
+                </Box>
+              )}
+
+              {/* Before / After balance comparison — shown on completion */}
+              {isSwapComplete && (beforeFromBal || beforeToBal) && (
+                <Box w="full" bg="rgba(74,222,128,0.04)" border="1px solid" borderColor="rgba(74,222,128,0.12)" borderRadius="lg" p="3">
+                  <Text fontSize="10px" fontWeight="600" color="#4ADE80" mb="2" textTransform="uppercase" letterSpacing="0.05em">
+                    Balance Changes
+                  </Text>
+                  <VStack gap="1.5" align="stretch">
+                    {/* From asset balance change */}
+                    <Flex justify="space-between" align="center">
+                      <HStack gap="1.5">
+                        <Image src={chainIcon(fromAsset)} w="14px" h="14px" borderRadius="full" />
+                        <Text fontSize="11px" color="kk.textSecondary">{fromAsset.symbol}</Text>
+                      </HStack>
+                      <HStack gap="2">
+                        <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
+                          {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
+                        </Text>
+                        <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
+                        <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? '#FB923C' : 'kk.textMuted'}>
+                          {afterFromBal ? formatBalance(afterFromBal) : '...'}
+                        </Text>
+                        {afterFromBal && beforeFromBal && (
+                          <Text fontSize="10px" fontFamily="mono" color="#EF4444">
+                            ({formatBalance((parseFloat(afterFromBal) - parseFloat(beforeFromBal)).toFixed(8))})
+                          </Text>
+                        )}
+                      </HStack>
+                    </Flex>
+                    {/* To asset balance change */}
+                    <Flex justify="space-between" align="center">
+                      <HStack gap="1.5">
+                        <Image src={chainIcon(toAsset)} w="14px" h="14px" borderRadius="full" />
+                        <Text fontSize="11px" color="kk.textSecondary">{toAsset.symbol}</Text>
+                      </HStack>
+                      <HStack gap="2">
+                        <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
+                          {beforeToBal ? formatBalance(beforeToBal) : '-'}
+                        </Text>
+                        <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
+                        <Text fontSize="11px" fontFamily="mono" color={afterToBal ? '#4ADE80' : 'kk.textMuted'}>
+                          {afterToBal ? formatBalance(afterToBal) : '...'}
+                        </Text>
+                        {afterToBal && beforeToBal && (
+                          <Text fontSize="10px" fontFamily="mono" color="#4ADE80">
+                            (+{formatBalance((parseFloat(afterToBal) - parseFloat(beforeToBal)).toFixed(8))})
+                          </Text>
+                        )}
+                      </HStack>
+                    </Flex>
+                  </VStack>
+                </Box>
+              )}
 
               {/* Actions */}
               <Flex gap="2" w="full">
-                <Button
-                  size="sm" flex="1"
-                  variant="outline"
-                  color="kk.textSecondary"
-                  borderColor="kk.border"
+                <Button size="sm" flex="1" variant="outline" color="kk.textSecondary" borderColor="kk.border"
                   _hover={{ bg: "rgba(255,255,255,0.06)" }}
-                  onClick={() => { reset(); /* stay open for new swap */ }}
-                >
+                  onClick={() => { reset(); }}>
                   {t("newSwap")}
                 </Button>
-                <Button
-                  size="sm" flex="1"
-                  bg="kk.gold"
-                  color="black"
-                  fontWeight="600"
-                  _hover={{ bg: "kk.goldHover" }}
-                  onClick={() => { onClose(); setTimeout(reset, 200) }}
-                >
-                  {t("close")}
+                <Button size="sm" flex="1"
+                  bg={isSwapComplete ? "#4ADE80" : "kk.gold"} color="black" fontWeight="600"
+                  _hover={{ opacity: 0.9 }}
+                  onClick={() => { onClose(); setTimeout(reset, 200) }}>
+                  {isSwapComplete ? t("done") : t("close")}
                 </Button>
               </Flex>
             </VStack>

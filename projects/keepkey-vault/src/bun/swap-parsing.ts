@@ -74,12 +74,33 @@ export function parseQuoteResponse(
   const memo = txParams.memo || quote.memo || raw.memo || ''
   // Router: raw.router or txParams.recipientAddress (Pioneer sets recipient = router for EVM)
   const router = raw.router || quote.router || txParams.recipientAddress
-  // Vault/inbound address
-  const inboundAddress = quote.inbound_address || raw.inbound_address || txParams.vaultAddress
+  // Vault/inbound address — check both snake_case and camelCase across all layers
+  let inboundAddress = quote.inbound_address || quote.inboundAddress
+    || raw.inbound_address || raw.inboundAddress
+    || txParams.vaultAddress || txParams.vault_address
+    || txParams.to
+    || best.inbound_address || best.inboundAddress
+
+  // Last-resort fallback: for UTXO swaps, THORChain's "router" IS the vault address
+  // (EVM router is a contract, but UTXO "router" is the inbound vault)
+  if (!inboundAddress && router) {
+    console.warn(`${TAG} No explicit inbound_address — falling back to router: ${router}`)
+    inboundAddress = router
+  }
+
   // Expiry for depositWithExpiry
   const expiry = raw.expiry || quote.expiry || 0
 
-  if (!inboundAddress) throw new Error('Quote response missing inbound address')
+  if (!inboundAddress) {
+    // Dump full response structure to help diagnose missing field
+    console.error(`${TAG} MISSING inbound address — dumping response structure:`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
+    console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
+    throw new Error('Quote response missing inbound address')
+  }
   if (!memo) console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
 
   // Extract fees from raw THORNode response

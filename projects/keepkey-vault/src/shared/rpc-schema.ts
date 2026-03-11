@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -132,6 +132,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       executeSwap: { params: ExecuteSwapParams; response: SwapResult }
       getPendingSwaps: { params: void; response: PendingSwap[] }
       dismissSwap: { params: { txid: string }; response: void }
+
+      // ── Swap History (SQLite-persisted) ─────────────────────────────
+      getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
+      getSwapHistoryStats: { params: void; response: SwapHistoryStats }
+      exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }

@@ -11,9 +11,10 @@
  *   - CreatePendingSwap  (POST /swaps/pending)
  *   - GetPendingSwap     (GET  /swaps/pending/{txHash})
  */
-import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote } from '../shared/types'
+import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { assetToCaip } from './swap-parsing'
+import { insertSwapHistory, updateSwapHistoryStatus } from './db'
 
 const TAG = '[swap-tracker]'
 
@@ -67,6 +68,7 @@ export function trackSwap(
   params: ExecuteSwapParams,
   quote: SwapQuote,
 ): void {
+  const now = Date.now()
   const swap: PendingSwap = {
     txid: result.txid,
     fromAsset: params.fromAsset,
@@ -83,13 +85,41 @@ export function trackSwap(
     integration: quote.integration || 'thorchain',
     status: 'pending',
     confirmations: 0,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     estimatedTime: quote.estimatedTime,
   }
 
   pendingSwaps.set(result.txid, swap)
   console.log(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
+
+  // Persist to SQLite — full lifecycle record
+  const historyRecord: SwapHistoryRecord = {
+    id: crypto.randomUUID(),
+    txid: result.txid,
+    fromAsset: params.fromAsset,
+    toAsset: params.toAsset,
+    fromSymbol: swap.fromSymbol,
+    toSymbol: swap.toSymbol,
+    fromChainId: params.fromChainId,
+    toChainId: params.toChainId,
+    fromAmount: params.amount,
+    quotedOutput: quote.expectedOutput || params.expectedOutput,
+    minimumOutput: quote.minimumOutput || '0',
+    slippageBps: quote.slippageBps || 300,
+    feeBps: quote.fees?.totalBps || 0,
+    feeOutbound: quote.fees?.outbound || '0',
+    integration: quote.integration || 'thorchain',
+    memo: params.memo,
+    inboundAddress: params.inboundAddress,
+    router: params.router,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
+    estimatedTimeSeconds: quote.estimatedTime || 0,
+    approvalTxid: result.approvalTxid,
+  }
+  insertSwapHistory(historyRecord)
 
   // Push immediate update to frontend FIRST (user sees "pending" instantly)
   pushUpdate(swap)
@@ -113,7 +143,11 @@ export function getPendingSwaps(): PendingSwap[] {
 /** Dismiss a swap from the tracker (user clicked dismiss) */
 export function dismissSwap(txid: string): void {
   pendingSwaps.delete(txid)
-  if (pendingSwaps.size === 0) {
+  // Only stop polling when no ACTIVE swaps remain — don't kill polling for other pending swaps
+  const hasActive = Array.from(pendingSwaps.values()).some(s =>
+    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
+  )
+  if (pendingSwaps.size === 0 || !hasActive) {
     stopPolling()
   }
 }
@@ -211,6 +245,66 @@ function stopPolling(): void {
   }
 }
 
+/** Apply remote swap data to local swap, push updates if changed */
+function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
+  const newStatus = mapPioneerStatus(remoteSwap.status)
+  const confirmations = remoteSwap.confirmations ?? swap.confirmations
+  const outboundConfirmations = remoteSwap.outboundConfirmations
+  const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
+  const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
+    || remoteSwap.mayachainData?.outboundTxHash
+    || remoteSwap.relayData?.outTxHashes?.[0]
+  const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
+    || (remoteSwap.error ? String(remoteSwap.error) : undefined)
+  const timeEstimate = remoteSwap.timeEstimate
+
+  const changed =
+    newStatus !== swap.status ||
+    confirmations !== swap.confirmations ||
+    (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
+    (outboundTxid && outboundTxid !== swap.outboundTxid)
+
+  if (changed) {
+    swap.status = newStatus
+    swap.updatedAt = Date.now()
+    swap.confirmations = confirmations
+    if (outboundConfirmations !== undefined) swap.outboundConfirmations = outboundConfirmations
+    if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
+    if (outboundTxid) swap.outboundTxid = outboundTxid
+    if (errorMsg) swap.error = errorMsg
+
+    if (timeEstimate?.total_swap_seconds && timeEstimate.total_swap_seconds > 0) {
+      swap.estimatedTime = timeEstimate.total_swap_seconds
+    }
+
+    const receivedOutput = (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
+      ? remoteSwap.buyAsset.amount
+      : undefined
+    if (receivedOutput) {
+      swap.expectedOutput = receivedOutput
+    }
+
+    console.log(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
+
+    // Persist status change to SQLite
+    const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
+    const now = Date.now()
+    updateSwapHistoryStatus(swap.txid, newStatus, {
+      outboundTxid: outboundTxid || undefined,
+      error: errorMsg || undefined,
+      receivedOutput,
+      completedAt: isFinal ? now : undefined,
+      actualTimeSeconds: isFinal ? Math.round((now - swap.createdAt) / 1000) : undefined,
+    })
+
+    pushUpdate(swap)
+
+    if (isFinal) {
+      pushComplete(swap)
+    }
+  }
+}
+
 async function pollAllSwaps(): Promise<void> {
   const active = Array.from(pendingSwaps.values()).filter(s =>
     s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
@@ -251,49 +345,19 @@ async function pollAllSwaps(): Promise<void> {
 
       console.log(`${TAG} GetPendingSwap ${swap.txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
 
-      const newStatus = mapPioneerStatus(remoteSwap.status)
-      const confirmations = remoteSwap.confirmations ?? swap.confirmations
-      const outboundConfirmations = remoteSwap.outboundConfirmations
-      const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
-      const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
-        || remoteSwap.mayachainData?.outboundTxHash
-        || remoteSwap.relayData?.outTxHashes?.[0]
-      const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
-        || (remoteSwap.error ? String(remoteSwap.error) : undefined)
+      applyRemoteSwapData(swap, remoteSwap)
 
-      // Check for time estimation data from Pioneer
-      const timeEstimate = remoteSwap.timeEstimate
-
-      const changed =
-        newStatus !== swap.status ||
-        confirmations !== swap.confirmations ||
-        (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
-        (outboundTxid && outboundTxid !== swap.outboundTxid)
-
-      if (changed) {
-        swap.status = newStatus
-        swap.updatedAt = Date.now()
-        swap.confirmations = confirmations
-        if (outboundConfirmations !== undefined) swap.outboundConfirmations = outboundConfirmations
-        if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
-        if (outboundTxid) swap.outboundTxid = outboundTxid
-        if (errorMsg) swap.error = errorMsg
-
-        // Update estimated time if Pioneer has better data
-        if (timeEstimate?.total_swap_seconds && timeEstimate.total_swap_seconds > 0) {
-          swap.estimatedTime = timeEstimate.total_swap_seconds
-        }
-
-        // Update expected output if Pioneer reports actual amount
-        if (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0) {
-          swap.expectedOutput = remoteSwap.buyAsset.amount
-        }
-
-        console.log(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'})`)
-        pushUpdate(swap)
-
-        if (newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded') {
-          pushComplete(swap)
+      // When swap just completed and we don't have outbound txid, do a rescan to get it
+      if (swap.status === 'completed' && !swap.outboundTxid) {
+        try {
+          console.log(`${TAG} Swap completed but no outbound txid — requesting rescan...`)
+          const rescanResp = await pioneer.GetPendingSwap({ txHash: swap.txid, rescan: true })
+          const rescanData = rescanResp?.data || rescanResp
+          if (rescanData && rescanData.status !== 'not_found') {
+            applyRemoteSwapData(swap, rescanData)
+          }
+        } catch (e: any) {
+          console.warn(`${TAG} Rescan failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
         }
       }
     } catch (e: any) {

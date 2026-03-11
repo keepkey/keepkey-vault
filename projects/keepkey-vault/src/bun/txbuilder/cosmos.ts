@@ -57,6 +57,7 @@ export interface BuildCosmosParams {
   to: string
   amount: string    // human-readable (e.g. "1.5")
   memo?: string
+  feeLevel?: number // 1=slow, 5=fast (default 5)
   isMax?: boolean
   isSwapDeposit?: boolean // use MsgDeposit instead of MsgSend (for THORChain/Maya swaps)
   fromAddress: string
@@ -67,7 +68,7 @@ export async function buildCosmosTx(
   chain: ChainDef,
   params: BuildCosmosParams,
 ) {
-  const { to, memo = '', isMax = false, isSwapDeposit = false, fromAddress } = params
+  const { to, memo = '', feeLevel = 5, isMax = false, isSwapDeposit = false, fromAddress } = params
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
@@ -108,8 +109,15 @@ export async function buildCosmosTx(
 
   if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
 
-  // 3. Build unsigned tx
-  const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
+  // 3. Build unsigned tx — apply feeLevel multiplier to gas
+  const baseFee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
+  const gasMultiplier = feeLevel <= 2 ? 1 : feeLevel <= 4 ? 1.5 : 2
+  const adjustedGas = String(Math.ceil(Number(baseFee.gas) * gasMultiplier))
+  const adjustedFeeAmount = baseFee.amount.map(a => ({
+    ...a,
+    amount: String(Math.ceil(Number(a.amount) * gasMultiplier)),
+  }))
+  const fee = { gas: adjustedGas, amount: adjustedFeeAmount }
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 

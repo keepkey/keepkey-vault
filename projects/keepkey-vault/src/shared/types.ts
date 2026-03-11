@@ -474,6 +474,57 @@ export interface SwapStatusUpdate {
   error?: string
 }
 
+/** Persisted swap history record (SQLite) — tracks the full lifecycle */
+export interface SwapHistoryRecord {
+  id: string                     // unique row id (UUID)
+  txid: string                   // inbound transaction hash
+  fromAsset: string              // THORChain asset id
+  toAsset: string
+  fromSymbol: string
+  toSymbol: string
+  fromChainId: string
+  toChainId: string
+  fromAmount: string             // human-readable amount sent
+  quotedOutput: string           // expected output at quote time
+  minimumOutput: string          // minimum after slippage at quote time
+  receivedOutput?: string        // actual received (filled on completion)
+  slippageBps: number            // slippage tolerance used
+  feeBps: number                 // total fee in basis points
+  feeOutbound: string            // outbound gas fee quoted
+  integration: string            // "thorchain", "shapeshift", "chainflip"
+  memo: string
+  inboundAddress: string         // vault address
+  router?: string
+  status: SwapTrackingStatus
+  outboundTxid?: string
+  error?: string
+  createdAt: number              // unix ms — when swap was initiated
+  updatedAt: number              // unix ms — last status update
+  completedAt?: number           // unix ms — when terminal status reached
+  estimatedTimeSeconds: number   // estimated time at quote time
+  actualTimeSeconds?: number     // actual duration (completedAt - createdAt)
+  approvalTxid?: string          // ERC-20 approval tx (if applicable)
+}
+
+/** Filter params for getSwapHistory RPC */
+export interface SwapHistoryFilter {
+  status?: SwapTrackingStatus | 'all'
+  fromDate?: number       // unix ms
+  toDate?: number         // unix ms
+  asset?: string          // filter by fromAsset or toAsset containing this
+  limit?: number
+  offset?: number
+}
+
+/** Stats summary for swap history */
+export interface SwapHistoryStats {
+  totalSwaps: number
+  completed: number
+  failed: number
+  refunded: number
+  pending: number
+}
+
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.
 // These aliases are for convenience in frontend code that doesn't need Electrobun types.

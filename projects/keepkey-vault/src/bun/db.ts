@@ -8,9 +8,9 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats } from '../shared/types'
 
-const SCHEMA_VERSION = '7'
+const SCHEMA_VERSION = '8'
 
 let db: Database | null = null
 
@@ -159,6 +159,42 @@ export function initDb() {
       )
     `)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC)`)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS swap_history (
+        id                  TEXT PRIMARY KEY,
+        txid                TEXT NOT NULL,
+        from_asset          TEXT NOT NULL,
+        to_asset            TEXT NOT NULL,
+        from_symbol         TEXT NOT NULL,
+        to_symbol           TEXT NOT NULL,
+        from_chain_id       TEXT NOT NULL,
+        to_chain_id         TEXT NOT NULL,
+        from_amount         TEXT NOT NULL,
+        quoted_output       TEXT NOT NULL,
+        minimum_output      TEXT NOT NULL DEFAULT '0',
+        received_output     TEXT,
+        slippage_bps        INTEGER NOT NULL DEFAULT 300,
+        fee_bps             INTEGER NOT NULL DEFAULT 0,
+        fee_outbound        TEXT NOT NULL DEFAULT '0',
+        integration         TEXT NOT NULL DEFAULT 'thorchain',
+        memo                TEXT NOT NULL DEFAULT '',
+        inbound_address     TEXT NOT NULL DEFAULT '',
+        router              TEXT,
+        status              TEXT NOT NULL DEFAULT 'pending',
+        outbound_txid       TEXT,
+        error               TEXT,
+        created_at          INTEGER NOT NULL,
+        updated_at          INTEGER NOT NULL,
+        completed_at        INTEGER,
+        estimated_time_secs INTEGER NOT NULL DEFAULT 0,
+        actual_time_secs    INTEGER,
+        approval_txid       TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_created ON swap_history(created_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_status ON swap_history(status)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_txid ON swap_history(txid)`)
 
     // Migrations: add columns to existing tables (safe to re-run)
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
@@ -678,6 +714,200 @@ export function reportExists(id: string): boolean {
     return !!row
   } catch {
     return false
+  }
+}
+
+// ── Swap History ──────────────────────────────────────────────────────
+
+/** Insert a new swap history record (called when swap is first tracked) */
+export function insertSwapHistory(record: SwapHistoryRecord) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO swap_history
+        (id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
+         from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
+         fee_outbound, integration, memo, inbound_address, router, status, outbound_txid,
+         error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id, record.txid, record.fromAsset, record.toAsset,
+        record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
+        record.fromAmount, record.quotedOutput, record.minimumOutput,
+        record.receivedOutput || null,
+        record.slippageBps, record.feeBps, record.feeOutbound,
+        record.integration, record.memo, record.inboundAddress,
+        record.router || null, record.status, record.outboundTxid || null,
+        record.error || null, record.createdAt, record.updatedAt,
+        record.completedAt || null, record.estimatedTimeSeconds,
+        record.actualTimeSeconds || null, record.approvalTxid || null,
+      ]
+    )
+  } catch (e: any) {
+    console.warn('[db] insertSwapHistory failed:', e.message)
+  }
+}
+
+/** Update swap status and related fields (called on every status change) */
+export function updateSwapHistoryStatus(
+  txid: string,
+  status: SwapTrackingStatus,
+  extra?: {
+    outboundTxid?: string
+    error?: string
+    receivedOutput?: string
+    completedAt?: number
+    actualTimeSeconds?: number
+  }
+) {
+  try {
+    if (!db) return
+    const now = Date.now()
+    const isFinal = status === 'completed' || status === 'failed' || status === 'refunded'
+
+    let sql = `UPDATE swap_history SET status = ?, updated_at = ?`
+    const params: any[] = [status, now]
+
+    if (extra?.outboundTxid) {
+      sql += `, outbound_txid = ?`
+      params.push(extra.outboundTxid)
+    }
+    if (extra?.error) {
+      sql += `, error = ?`
+      params.push(extra.error)
+    }
+    if (extra?.receivedOutput) {
+      sql += `, received_output = ?`
+      params.push(extra.receivedOutput)
+    }
+    if (isFinal) {
+      const completedAt = extra?.completedAt || now
+      sql += `, completed_at = ?`
+      params.push(completedAt)
+      if (extra?.actualTimeSeconds !== undefined) {
+        sql += `, actual_time_secs = ?`
+        params.push(extra.actualTimeSeconds)
+      }
+    }
+
+    sql += ` WHERE txid = ?`
+    params.push(txid)
+
+    db.run(sql, params)
+  } catch (e: any) {
+    console.warn('[db] updateSwapHistoryStatus failed:', e.message)
+  }
+}
+
+/** Query swap history with optional filters */
+export function getSwapHistory(filter?: SwapHistoryFilter): SwapHistoryRecord[] {
+  try {
+    if (!db) return []
+
+    let sql = `SELECT * FROM swap_history WHERE 1=1`
+    const params: any[] = []
+
+    if (filter?.status && filter.status !== 'all') {
+      sql += ` AND status = ?`
+      params.push(filter.status)
+    }
+    if (filter?.fromDate) {
+      sql += ` AND created_at >= ?`
+      params.push(filter.fromDate)
+    }
+    if (filter?.toDate) {
+      sql += ` AND created_at <= ?`
+      params.push(filter.toDate)
+    }
+    if (filter?.asset) {
+      sql += ` AND (from_symbol LIKE ? OR to_symbol LIKE ? OR from_asset LIKE ? OR to_asset LIKE ?)`
+      const q = `%${filter.asset}%`
+      params.push(q, q, q, q)
+    }
+
+    sql += ` ORDER BY created_at DESC`
+
+    const limit = filter?.limit || 100
+    const offset = filter?.offset || 0
+    sql += ` LIMIT ? OFFSET ?`
+    params.push(limit, offset)
+
+    const rows = db.query(sql).all(...params) as any[]
+    return rows.map(mapSwapRow)
+  } catch (e: any) {
+    console.warn('[db] getSwapHistory failed:', e.message)
+    return []
+  }
+}
+
+/** Get a single swap history record by txid */
+export function getSwapHistoryByTxid(txid: string): SwapHistoryRecord | null {
+  try {
+    if (!db) return null
+    const row = db.query('SELECT * FROM swap_history WHERE txid = ?').get(txid) as any
+    return row ? mapSwapRow(row) : null
+  } catch (e: any) {
+    console.warn('[db] getSwapHistoryByTxid failed:', e.message)
+    return null
+  }
+}
+
+/** Get aggregate stats for swap history */
+export function getSwapHistoryStats(): SwapHistoryStats {
+  try {
+    if (!db) return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+    const row = db.query(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'refunded' THEN 1 ELSE 0 END) as refunded,
+        SUM(CASE WHEN status NOT IN ('completed', 'failed', 'refunded') THEN 1 ELSE 0 END) as pending
+      FROM swap_history
+    `).get() as any
+    return {
+      totalSwaps: row?.total || 0,
+      completed: row?.completed || 0,
+      failed: row?.failed || 0,
+      refunded: row?.refunded || 0,
+      pending: row?.pending || 0,
+    }
+  } catch (e: any) {
+    console.warn('[db] getSwapHistoryStats failed:', e.message)
+    return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+  }
+}
+
+function mapSwapRow(r: any): SwapHistoryRecord {
+  return {
+    id: r.id,
+    txid: r.txid,
+    fromAsset: r.from_asset,
+    toAsset: r.to_asset,
+    fromSymbol: r.from_symbol,
+    toSymbol: r.to_symbol,
+    fromChainId: r.from_chain_id,
+    toChainId: r.to_chain_id,
+    fromAmount: r.from_amount,
+    quotedOutput: r.quoted_output,
+    minimumOutput: r.minimum_output,
+    receivedOutput: r.received_output || undefined,
+    slippageBps: r.slippage_bps,
+    feeBps: r.fee_bps,
+    feeOutbound: r.fee_outbound,
+    integration: r.integration,
+    memo: r.memo,
+    inboundAddress: r.inbound_address,
+    router: r.router || undefined,
+    status: r.status as SwapTrackingStatus,
+    outboundTxid: r.outbound_txid || undefined,
+    error: r.error || undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    completedAt: r.completed_at || undefined,
+    estimatedTimeSeconds: r.estimated_time_secs,
+    actualTimeSeconds: r.actual_time_secs || undefined,
+    approvalTxid: r.approval_txid || undefined,
   }
 }
 

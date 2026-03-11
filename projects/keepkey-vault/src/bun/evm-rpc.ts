@@ -125,6 +125,29 @@ export async function broadcastEvmTx(rpcUrl: string, signedTxHex: string): Promi
   return result
 }
 
+/** Poll for tx receipt, returning null if not mined within maxWaitMs */
+export async function waitForTxReceipt(
+  rpcUrl: string,
+  txHash: string,
+  maxWaitMs = 60_000,
+  pollMs = 3_000,
+): Promise<{ status: boolean; gasUsed: bigint } | null> {
+  const start = Date.now()
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const receipt = await ethRpc(rpcUrl, 'eth_getTransactionReceipt', [txHash])
+      if (receipt && receipt.status !== undefined) {
+        return {
+          status: receipt.status === '0x1',
+          gasUsed: BigInt(receipt.gasUsed || '0x0'),
+        }
+      }
+    } catch { /* not mined yet */ }
+    await new Promise(r => setTimeout(r, pollMs))
+  }
+  return null // timed out
+}
+
 export async function getEvmChainId(rpcUrl: string): Promise<number> {
   const result = await ethRpc(rpcUrl, 'eth_chainId', [])
   return Number(BigInt(result || '0x0'))

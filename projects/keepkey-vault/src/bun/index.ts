@@ -17,7 +17,7 @@ import { CHAINS, customChainToChainDef } from "../shared/chains"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -1424,7 +1424,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				const quote = await getSwapQuote(params)
 				// Cache quote so executeSwap can pass real data to the tracker
-				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}`
+				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}`
 				swapQuoteCache.set(cacheKey, quote)
 				// Keep cache small (last 10 quotes)
 				if (swapQuoteCache.size > 10) {
@@ -1450,7 +1450,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					},
 				})
 				// Look up cached quote for real tracker data
-				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}`
+				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}`
 				const cachedQuote = swapQuoteCache.get(cacheKey)
 				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
 				// Register swap for tracking (non-blocking)
@@ -1481,6 +1481,40 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			dismissSwap: async (params) => {
 				const { dismissSwap } = await import('./swap-tracker')
 				dismissSwap(params.txid)
+			},
+
+			// ── Swap History (SQLite-persisted) ─────────────────────
+			getSwapHistory: async (params) => {
+				return getSwapHistory(params || undefined)
+			},
+			getSwapHistoryStats: async () => {
+				return getSwapHistoryStats()
+			},
+			exportSwapReport: async (params) => {
+				const records = getSwapHistory({
+					fromDate: params.fromDate,
+					toDate: params.toDate,
+					limit: 10000,
+				})
+				if (records.length === 0) throw new Error('No swap records to export')
+
+				const dir = path.join(os.homedir(), 'Downloads')
+
+				if (params.format === 'csv') {
+					const { generateSwapCsv } = await import('./swap-report')
+					const csv = generateSwapCsv(records)
+					const fileName = `keepkey-swaps-${new Date().toISOString().slice(0, 10)}.csv`
+					const filePath = path.join(dir, fileName)
+					await Bun.write(filePath, csv)
+					return { filePath }
+				} else {
+					const { generateSwapPdf } = await import('./swap-report')
+					const pdfBuffer = await generateSwapPdf(records)
+					const fileName = `keepkey-swaps-${new Date().toISOString().slice(0, 10)}.pdf`
+					const filePath = path.join(dir, fileName)
+					await Bun.write(filePath, pdfBuffer)
+					return { filePath }
+				}
 			},
 
 			// ── Balance cache (instant portfolio) ────────────────────

@@ -13,7 +13,7 @@ import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
-import { getEvmGasPrice, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Decimals, broadcastEvmTx } from './evm-rpc'
+import { getEvmGasPrice, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
 export { parseQuoteResponse, parseAssetsResponse, parseThorAsset, assetToCaip, THOR_TO_CHAIN } from './swap-parsing'
@@ -116,17 +116,29 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   const buyCaip = assetToCaip(params.toAsset)
   const slippage = params.slippageBps ? params.slippageBps / 100 : 3 // Pioneer uses % not bps
 
+  // Normalize BCH CashAddr: strip "bitcoincash:" prefix — THORChain uses short form
+  const normalizeBchAddr = (addr: string) =>
+    addr.startsWith('bitcoincash:') ? addr.slice('bitcoincash:'.length) : addr
+  const senderAddress = normalizeBchAddr(params.fromAddress)
+  const recipientAddress = normalizeBchAddr(params.toAddress)
+
   console.log(`${TAG} Fetching quote: ${params.fromAsset} → ${params.toAsset} (${params.amount})`)
   console.log(`${TAG} CAIP: ${sellCaip} → ${buyCaip}`)
+  console.log(`${TAG} sender=${senderAddress}, recipient=${recipientAddress}`)
 
   const quoteResp = await pioneer.Quote({
     sellAsset: sellCaip,
     sellAmount: params.amount, // Pioneer expects DECIMAL format (human-readable)
     buyAsset: buyCaip,
-    recipientAddress: params.toAddress,
-    senderAddress: params.fromAddress,
+    recipientAddress,
+    senderAddress,
     slippage,
   })
+
+  // Log raw response structure for debugging quote parsing issues
+  const qDebug = quoteResp?.data?.data || quoteResp?.data || quoteResp
+  const firstQuote = Array.isArray(qDebug) ? qDebug[0] : qDebug
+  console.log(`${TAG} Raw quote response keys: ${firstQuote ? Object.keys(firstQuote).join(', ') : 'EMPTY'}`)
 
   const result = parseQuoteResponse(quoteResp, params)
   console.log(`${TAG} Quote: ${result.expectedOutput} (via ${result.integration}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
@@ -190,7 +202,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   // Validate the memo contains our destination address (only for UTXO/Cosmos — EVM memos use shorthand/aggregator formats)
-  if (params.memo && fromChain.chainFamily !== 'evm' && !params.memo.toLowerCase().includes(toAddress.toLowerCase())) {
+  // Normalize BCH CashAddr: strip "bitcoincash:" prefix for comparison — THORChain memos use short form
+  const toAddrNorm = toAddress.startsWith('bitcoincash:') ? toAddress.slice('bitcoincash:'.length) : toAddress
+  if (params.memo && fromChain.chainFamily !== 'evm' && !params.memo.toLowerCase().includes(toAddrNorm.toLowerCase())) {
     console.warn(`${TAG} WARNING: Swap memo does not contain derived destination address. Memo may use a different format.`)
   }
 
@@ -220,7 +234,15 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── UTXO chains: send to vault, memo in OP_RETURN ──
   } else if (fromChain.chainFamily === 'utxo') {
-    let xpub: string | undefined = getBtcXpub()
+    // Only use BTC multi-account xpub for Bitcoin — other UTXO chains (DOGE, LTC, etc.)
+    // have their own xpub formats and must derive their own
+    let xpub: string | undefined
+    if (fromChain.id === 'bitcoin') {
+      try { xpub = getBtcXpub() } catch { /* BTC account manager not ready */ }
+      if (!xpub) {
+        console.warn(`${TAG} BTC multi-account xpub unavailable — falling back to default account 0`)
+      }
+    }
     if (!xpub) {
       try {
         const result = await wallet.getPublicKeys([{
@@ -231,7 +253,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         }])
         xpub = result?.[0]?.xpub
       } catch (e: any) {
-        throw new Error(`Failed to get xpub: ${e.message}`)
+        throw new Error(`Failed to get xpub for ${fromChain.coin}: ${e.message}`)
       }
     }
 
@@ -458,18 +480,26 @@ async function buildEvmSwapTx(
       if (rpcUrl) {
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
         console.log(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
+
+        // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts
+        console.log(`${TAG} Waiting for approval receipt (up to 90s)...`)
+        const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 90_000)
+        if (receipt && !receipt.status) {
+          throw new Error(`ERC-20 approve tx reverted on-chain (txid: ${approvalTxid}). Swap aborted — no deposit was sent.`)
+        }
+        if (!receipt) {
+          console.warn(`${TAG} Approval receipt not confirmed within 90s — proceeding with deposit (nonce gap risk)`)
+        } else {
+          console.log(`${TAG} Approval confirmed on-chain (gas used: ${receipt.gasUsed})`)
+        }
       } else {
         const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
         approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
         console.log(`${TAG} Approve tx broadcast (Pioneer): ${approvalTxid}`)
+        // No receipt check available without RPC — warn user
+        console.warn(`${TAG} No direct RPC — cannot verify approval receipt. Proceeding with deposit.`)
       }
 
-      // NONCE ORDERING: Approval=nonce N, deposit=nonce N+1 — deposit can't mine before approval.
-      // RISK: If approval reverts, the deposit tx stays pending forever (nonce gap).
-      // RECOVERY: User must send a 0-value tx to themselves with nonce N to consume the gap,
-      // or the deposit will eventually be dropped from the mempool.
-      console.warn(`${TAG} Approval broadcast (nonce=${nonce}) — deposit will use nonce=${nonce + 1}. ` +
-        `If approval fails, send a 0-value self-tx with nonce ${nonce} to unstick.`)
       nonce += 1
     }
 
@@ -482,11 +512,20 @@ async function buildEvmSwapTx(
       expiry,
     )
 
+    // Dynamic gas estimation with static fallback
+    let erc20DepositGas = depositGasLimit
+    if (rpcUrl) {
+      erc20DepositGas = await estimateGas(rpcUrl, {
+        to: params.router!, from: fromAddress, data: depositData, value: '0x0',
+      }, depositGasLimit)
+      console.log(`${TAG} Estimated deposit gas: ${erc20DepositGas} (fallback: ${depositGasLimit})`)
+    }
+
     const unsignedTx = {
       chainId,
       addressNList: fromChain.defaultPath,
       nonce: toHex(nonce),
-      gasLimit: toHex(depositGasLimit),
+      gasLimit: toHex(erc20DepositGas),
       gasPrice: toHex(gasPrice),
       to: params.router,     // ROUTER contract, NOT vault
       value: '0x0',          // no ETH value for ERC-20 swaps
@@ -499,15 +538,7 @@ async function buildEvmSwapTx(
   } else {
     // ── Native asset swap: asset = 0x0, value = amountWei ──
     const amountWei = parseUnits(params.amount, fromChain.decimals)
-    const gasLimit = DEPOSIT_GAS_LIMITS[fromChain.id] || 120000n
-    const gasFee = gasPrice * gasLimit
-
-    if (nativeBalance < amountWei + gasFee) {
-      throw new Error(
-        `Insufficient ${fromChain.symbol}: need ${Number(amountWei + gasFee) / 1e18}, ` +
-        `have ${Number(nativeBalance) / 1e18}`
-      )
-    }
+    const staticGasLimit = DEPOSIT_GAS_LIMITS[fromChain.id] || 120000n
 
     const data = encodeDepositWithExpiry(
       params.inboundAddress, // vault address
@@ -516,6 +547,24 @@ async function buildEvmSwapTx(
       params.memo,
       expiry,
     )
+
+    // Dynamic gas estimation with static fallback
+    let gasLimit = staticGasLimit
+    if (rpcUrl) {
+      gasLimit = await estimateGas(rpcUrl, {
+        to: params.router!, from: fromAddress, data, value: toHex(amountWei),
+      }, staticGasLimit)
+      console.log(`${TAG} Estimated native deposit gas: ${gasLimit} (fallback: ${staticGasLimit})`)
+    }
+
+    const gasFee = gasPrice * gasLimit
+
+    if (nativeBalance < amountWei + gasFee) {
+      throw new Error(
+        `Insufficient ${fromChain.symbol}: need ${Number(amountWei + gasFee) / 1e18}, ` +
+        `have ${Number(nativeBalance) / 1e18}`
+      )
+    }
 
     const unsignedTx = {
       chainId,

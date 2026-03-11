@@ -102,9 +102,15 @@ function getUtxoScriptPubKeyHex(utxo: any): string | undefined {
 
 // Derive scriptType from xpub prefix (Pioneer SDK pattern)
 function getScriptTypeFromXpub(xpub: string): string | undefined {
+  // BTC
   if (xpub.startsWith('zpub')) return 'p2wpkh'
   if (xpub.startsWith('ypub')) return 'p2sh-p2wpkh'
   if (xpub.startsWith('xpub')) return 'p2pkh'
+  // DOGE (dgub), BCH, DASH (drkp) — all legacy p2pkh
+  if (xpub.startsWith('dgub') || xpub.startsWith('drkp')) return 'p2pkh'
+  // LTC
+  if (xpub.startsWith('Mtub')) return 'p2wpkh'
+  if (xpub.startsWith('Ltub')) return 'p2sh-p2wpkh'
   return undefined // unknown prefix — let caller fall back
 }
 
@@ -381,12 +387,15 @@ export async function buildUtxoTx(
     })
     .filter(Boolean)
 
-  // OP_RETURN memo
-  if (memo && memo.trim()) {
+  // OP_RETURN memo — hex-encode for hdwallet-keepkey protobuf layer
+  const memoHex = memo && memo.trim()
+    ? Buffer.from(memo.trim(), 'utf8').toString('hex')
+    : undefined
+  if (memoHex) {
     preparedOutputs.push({
       amount: '0',
       addressType: 'opreturn',
-      opReturnData: memo,
+      opReturnData: memoHex,
     })
   }
 
@@ -417,7 +426,7 @@ export async function buildUtxoTx(
     locktime: 0,
     fee: String(fee / 10 ** chain.decimals),
     memo,
-    // opReturnData at top-level for v1 server contract
-    ...(memo && memo.trim() ? { opReturnData: memo } : {}),
+    // opReturnData at top-level for v1 server contract (hex-encoded)
+    ...(memoHex ? { opReturnData: memoHex } : {}),
   }
 }
