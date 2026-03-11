@@ -230,8 +230,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // 2. Validate required fields
   if (!params.inboundAddress) throw new Error('Missing inbound vault address from quote')
   if (!params.memo) throw new Error('Missing swap memo from quote')
-  if (params.memo.length > MEMO_LIMIT) {
-    throw new Error(`Swap memo too long (${params.memo.length} bytes, THORChain max ${MEMO_LIMIT})`)
+  const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
+  if (memoByteLength > MEMO_LIMIT) {
+    throw new Error(`Swap memo too long (${memoByteLength} bytes, THORChain max ${MEMO_LIMIT})`)
   }
 
   console.log(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)
@@ -372,18 +373,22 @@ async function buildEvmSwapTx(
   if (params.feeLevel != null && params.feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
   else if (params.feeLevel != null && params.feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
 
-  let nonce = 0
+  let nonce: number | undefined
   if (rpcUrl) {
     try { nonce = await getEvmNonce(rpcUrl, fromAddress) } catch (e: any) {
       console.warn(`${TAG} Failed to fetch nonce via RPC: ${e.message}`)
     }
-  } else {
+  }
+  if (nonce === undefined) {
     try {
       const nd = await pioneer.GetNonceByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      nonce = nd?.data?.nonce ?? 0
+      nonce = nd?.data?.nonce
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch nonce via Pioneer: ${e.message}`)
     }
+  }
+  if (nonce === undefined || nonce === null) {
+    throw new Error(`Failed to fetch nonce for ${fromAddress} on ${fromChain.id} — cannot safely build swap transaction`)
   }
 
   let nativeBalance = 0n

@@ -571,6 +571,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
     if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
+    // If resuming a terminal swap, suppress confetti/sound
+    const isTerminal = resumeSwap.status === 'completed' || resumeSwap.status === 'failed' || resumeSwap.status === 'refunded'
+    if (isTerminal) completionFiredRef.current = true
+
     setQuote({
       expectedOutput: resumeSwap.expectedOutput,
       minimumOutput: resumeSwap.expectedOutput,

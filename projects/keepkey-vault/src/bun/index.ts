@@ -1439,7 +1439,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				const quote = await getSwapQuote(params)
 				// Cache quote so executeSwap can pass real data to the tracker
-				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}`
+				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
+				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
 				swapQuoteCache.set(cacheKey, quote)
 				// Keep cache small (last 10 quotes)
 				if (swapQuoteCache.size > 10) {
@@ -1464,9 +1465,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						return undefined
 					},
 				})
-				// Look up cached quote for real tracker data
-				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}`
-				const cachedQuote = swapQuoteCache.get(cacheKey)
+				// Look up cached quote for real tracker data (match by asset+amount, addresses from getSwapQuote context)
+				// Try exact match first, then fallback to base key without addresses
+				const baseKey = `${params.fromAsset}-${params.toAsset}-${params.amount}`
+				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
+				for (const [key, val] of swapQuoteCache) {
+					if (key.startsWith(baseKey) && val.inboundAddress === params.inboundAddress) {
+						cachedQuote = val
+						break
+					}
+				}
+				if (!cachedQuote) {
+					// Fallback: find any quote matching the base key
+					for (const [key, val] of swapQuoteCache) {
+						if (key.startsWith(baseKey)) { cachedQuote = val; break }
+					}
+				}
 				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
 				// Register swap for tracking (non-blocking)
 				try {
@@ -1622,8 +1636,7 @@ import('./swap-tracker').then(async ({ initSwapTracker }) => {
 		}
 	})
 }).catch((e) => {
-	console.error('[swap-tracker] FATAL: Failed to initialize swap tracker:', e)
-	process.exit(1)
+	console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
 })
 
 // Push engine events to WebView
