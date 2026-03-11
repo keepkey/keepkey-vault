@@ -10,6 +10,7 @@
  */
 
 import type { ReportData, ReportSection } from '../shared/types'
+import { SECTION_TITLES } from './reports'
 
 // ── Internal canonical transaction model ────────────────────────────
 
@@ -52,14 +53,14 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 
 	// Find the detailed transaction table first (has From/To)
 	let txSection = data.sections.find(
-		s => s.type === 'table' && s.title.startsWith('Transaction Details'),
+		s => s.type === 'table' && s.title.startsWith(SECTION_TITLES.TX_DETAILS),
 	)
 	let useDetailed = true
 
 	// Fallback to Transaction History (less detail)
 	if (!txSection) {
 		txSection = data.sections.find(
-			s => s.type === 'table' && s.title.startsWith('Transaction History'),
+			s => s.type === 'table' && s.title.startsWith(SECTION_TITLES.TX_HISTORY),
 		)
 		useDetailed = false
 	}
@@ -72,6 +73,7 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 	for (const row of rows) {
 		if (useDetailed) {
 			// Transaction Details: [TXID, Dir, Block, Date, Value (BTC), Fee (BTC), From, To]
+			if (row.length < 8) { console.warn(`[TaxExport] Skipping row with ${row.length} cols, expected 8`); continue }
 			const txid = String(row[0] || '')
 			const dir = String(row[1] || '').toLowerCase()
 			const date = String(row[3] || '')
@@ -83,6 +85,7 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 			txs.push(buildBtcTx(txid, dir, date, value, fee, from, to))
 		} else {
 			// Transaction History: [#, Dir, TXID, Block, Date, Value (BTC), Fee (BTC)]
+			if (row.length < 7) { console.warn(`[TaxExport] Skipping row with ${row.length} cols, expected 7`); continue }
 			const txid = String(row[2] || '')
 			const dir = String(row[1] || '').toLowerCase()
 			const date = String(row[4] || '')

@@ -20,7 +20,9 @@
 		"description": "Votre appareil a la protection par phrase secrète activée. Entrez votre phrase secrète BIP-39 pour déverrouiller. Laissez vide pour le portefeuille par défaut.",
 		"placeholder": "Phrase secrète (facultatif)",
 		"warning": "Les phrases secrètes sont sensibles à la casse. Une phrase secrète différente génère un portefeuille complètement différent.",
-		"unlock": "Déverrouiller"
+		"unlock": "Déverrouiller",
+		"confirmOnDevice": "Confirmer sur votre KeepKey",
+		"confirmOnDeviceHint": "Vérifiez l'écran de votre appareil et appuyez sur le bouton pour confirmer."
 	},
 	"pairing": {
 		"wantsToConnect": "veut se connecter à votre KeepKey",

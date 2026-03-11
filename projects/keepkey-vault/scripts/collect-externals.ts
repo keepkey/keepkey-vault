@@ -23,7 +23,7 @@ const EXTERNALS = [
 
 const projectRoot = join(import.meta.dir, '..')
 const nmSource = join(projectRoot, 'node_modules')
-const nmDest = join(projectRoot, 'build', '_ext_modules')
+const nmDest = join(projectRoot, '_build', '_ext_modules')
 
 // Resolve file: linked packages to their actual source directories.
 // Bun's file: resolution can leave broken stubs in node_modules (empty dir with only node_modules/).
@@ -620,6 +620,24 @@ if (DEVELOPER_ID) {
 } else {
   console.log(`[collect-externals] ELECTROBUN_DEVELOPER_ID not set, skipping native binary signing`)
 }
+
+// Remove dangling symlinks (left behind after pruning/stripping)
+function removeDanglingSymlinks(dirPath: string) {
+  try {
+    const entries = readdirSync(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name)
+      if (entry.isSymbolicLink()) {
+        try { statSync(fullPath) } catch {
+          rmSync(fullPath)
+        }
+      } else if (entry.isDirectory()) {
+        removeDanglingSymlinks(fullPath)
+      }
+    }
+  } catch {}
+}
+removeDanglingSymlinks(nmDest)
 
 // Report final size
 const { stdout } = Bun.spawnSync(['du', '-sh', nmDest])

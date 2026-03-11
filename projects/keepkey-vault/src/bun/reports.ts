@@ -17,6 +17,24 @@ import { getPioneerApiBase } from './pioneer'
 
 const REPORT_TIMEOUT_MS = 60_000
 
+/** Section title prefixes — shared with tax-export.ts for reliable extraction. */
+export const SECTION_TITLES = {
+	TX_DETAILS: 'Transaction Details',
+	TX_HISTORY: 'Transaction History',
+} as const
+
+/** Safely round a satoshi string/number to integer, guarding against values beyond Number.MAX_SAFE_INTEGER. */
+function safeRoundSats(value: unknown): number {
+	if (value === undefined || value === null) return 0
+	const n = Number(value)
+	if (!Number.isFinite(n)) return 0
+	if (Math.abs(n) > Number.MAX_SAFE_INTEGER) {
+		console.warn(`[Report] safeRoundSats: value ${value} exceeds MAX_SAFE_INTEGER, clamping`)
+		return n > 0 ? Number.MAX_SAFE_INTEGER : -Number.MAX_SAFE_INTEGER
+	}
+	return Math.round(n)
+}
+
 function getPioneerQueryKey(): string {
 	return process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
 }
@@ -45,7 +63,12 @@ async function fetchPubkeyInfo(baseUrl: string, xpub: string): Promise<any> {
 	)
 	if (!resp.ok) throw new Error(`PubkeyInfo ${resp.status}`)
 	const json = await resp.json()
-	return json.data || json
+	const result = json.data || json
+	if (typeof result !== 'object' || result === null) {
+		console.warn('[Report] fetchPubkeyInfo: unexpected response shape, returning empty object')
+		return {}
+	}
+	return result
 }
 
 async function fetchTxHistory(baseUrl: string, xpub: string, caip: string): Promise<any[]> {
@@ -60,6 +83,10 @@ async function fetchTxHistory(baseUrl: string, xpub: string, caip: string): Prom
 	)
 	if (!resp.ok) throw new Error(`TxHistory ${resp.status}`)
 	const json = await resp.json()
+	if (typeof json !== 'object' || json === null) {
+		console.warn('[Report] fetchTxHistory: unexpected response shape, returning empty array')
+		return []
+	}
 	const histories = json.histories || json.data?.histories || []
 	return histories[0]?.transactions || []
 }
@@ -257,9 +284,9 @@ async function buildBtcSections(
 				xpub: x.xpub,
 				scriptType: x.scriptType,
 				label: `${x.scriptType}`,
-				balance: Math.round(Number(info.balance || 0)),
-				totalReceived: Math.round(Number(info.totalReceived || 0)),
-				totalSent: Math.round(Number(info.totalSent || 0)),
+				balance: safeRoundSats(info.balance),
+				totalReceived: safeRoundSats(info.totalReceived),
+				totalSent: safeRoundSats(info.totalSent),
 				txCount: info.txs || 0,
 				usedAddresses: used.map((t: any) => ({
 					name: t.name, path: t.path, transfers: t.transfers,
@@ -380,7 +407,7 @@ async function buildBtcSections(
 		})
 
 		sections.push({
-			title: `Transaction History (${allTxs.length})`,
+			title: `${SECTION_TITLES.TX_HISTORY} (${allTxs.length})`,
 			type: 'table',
 			data: {
 				headers: ['#', 'Dir', 'TXID', 'Block', 'Date', 'Value (BTC)', 'Fee (BTC)'],
@@ -412,7 +439,7 @@ async function buildBtcSections(
 		const detailTxs = allTxs.slice(0, MAX_TX_DETAILS)
 		if (detailTxs.length > 0) {
 			sections.push({
-				title: `Transaction Details (${Math.min(allTxs.length, MAX_TX_DETAILS)}${allTxs.length > MAX_TX_DETAILS ? ` of ${allTxs.length}` : ''})`,
+				title: `${SECTION_TITLES.TX_DETAILS} (${Math.min(allTxs.length, MAX_TX_DETAILS)}${allTxs.length > MAX_TX_DETAILS ? ` of ${allTxs.length}` : ''})`,
 				type: 'table',
 				data: {
 					headers: ['TXID', 'Dir', 'Block', 'Date', 'Value (BTC)', 'Fee (BTC)', 'From', 'To'],
@@ -440,7 +467,7 @@ async function buildBtcSections(
 			sections.push({ title: 'Note', type: 'text', data: `Showing ${MAX_TX_DETAILS} of ${allTxs.length} transactions.` })
 		}
 	} else {
-		sections.push({ title: 'Transaction History', type: 'text', data: 'No transactions found' })
+		sections.push({ title: SECTION_TITLES.TX_HISTORY, type: 'text', data: 'No transactions found' })
 	}
 
 	// 3. Address flow analysis from tx data

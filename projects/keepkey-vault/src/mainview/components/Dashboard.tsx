@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Box, Flex, Text, Spinner, Image, SimpleGrid } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
-import { CHAINS, customChainToChainDef, type ChainDef } from "../../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
@@ -29,6 +29,7 @@ interface DashboardProps {
 	onLoaded?: () => void
 	watchOnly?: boolean
 	onOpenSettings?: () => void
+	firmwareVersion?: string
 }
 
 /** Format a timestamp as a relative "time ago" string (i18n-aware) */
@@ -43,7 +44,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -202,7 +203,9 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 	const hasAnyBalance = chartData.length > 0
 
-	const sortedChains = useMemo(() => [...allChains].sort((a, b) => {
+	const visibleChains = useMemo(() => allChains.filter(c => !c.hidden && isChainSupported(c, firmwareVersion)), [allChains, firmwareVersion])
+
+	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
 		const bUsd = cleanBalanceUsd.get(b.id)?.usd || 0
 		const aHas = aUsd > 0 || parseFloat(balances.get(a.id)?.balance || '0') > 0
@@ -211,14 +214,14 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 		if (!aHas && bHas) return 1
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
-	}), [allChains, balances, cleanBalanceUsd])
+	}), [visibleChains, balances, cleanBalanceUsd])
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
 
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
-		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
+		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} firmwareVersion={firmwareVersion} />
 	}
 
 	return (

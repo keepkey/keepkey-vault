@@ -47,11 +47,12 @@ const DEFAULT_FEES: Record<string, { slow: number; average: number; fast: number
   'bip122:00000000001a91e3dace36e2be3bf030': { slow: 10, average: 10, fast: 10 }, // DOGE
   'bip122:000000000000000000651ef99cb9fcbe': { slow: 1, average: 1, fast: 3 }, // BCH
   'bip122:000007d91d1254d60e2dd1ae58038307': { slow: 1, average: 1, fast: 3 }, // DASH
+  'bip122:00040fe8ec8471911baa1db1266ea15d': { slow: 1, average: 2, fast: 5 }, // ZEC
 }
 
 // SLIP-44 coin type by chain id
 const COIN_TYPE: Record<string, number> = {
-  bitcoin: 0, litecoin: 2, dogecoin: 3, dash: 5, bitcoincash: 145,
+  bitcoin: 0, litecoin: 2, dogecoin: 3, dash: 5, bitcoincash: 145, zcash: 133,
 }
 
 // Purpose by scriptType
@@ -75,6 +76,15 @@ function addressToScriptPubKeyHex(address: string): string | undefined {
       const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
       if (program.length === 20) return `0014${hex}` // p2wpkh
       if (program.length === 32) return `0020${hex}` // p2wsh
+      return undefined
+    }
+    // Zcash t1... (P2PKH) and t3... (P2SH) — 2-byte version prefix
+    if (address.startsWith('t1') || address.startsWith('t3')) {
+      const payload = bs58check.decode(address)
+      if (payload.length < 22) return undefined
+      const hash = Buffer.from(payload.slice(2)).toString('hex')
+      if (address.startsWith('t1')) return `76a914${hash}88ac`
+      if (address.startsWith('t3')) return `a914${hash}87`
       return undefined
     }
     // Base58Check addresses (1..., 3..., L..., D..., X..., etc.)
@@ -413,8 +423,14 @@ export async function buildUtxoTx(
     coin: chain.coin,
     inputs: preparedInputs,
     outputs: preparedOutputs,
-    version: 1,    // keepkey-desktop always passes these explicitly
+    version: chain.coin === 'Zcash' ? 4 : 1,
     locktime: 0,
+    ...(chain.coin === 'Zcash' ? {
+      overwintered: true,
+      versionGroupId: 0x892F2085,
+      branchId: 0x4dec4df0,   // NU6.1 (current Zcash mainnet)
+      expiry: 0,
+    } : {}),
     fee: String(fee / 10 ** chain.decimals),
     memo,
     // opReturnData at top-level for v1 server contract

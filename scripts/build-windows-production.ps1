@@ -80,7 +80,7 @@ if ($PSCommandPath) {
 }
 $RepoRoot = Split-Path -Path $ScriptDir -Parent
 $ProjectDir = Join-Path $RepoRoot "projects\keepkey-vault"
-$BuildDir = Join-Path $ProjectDir "build\dev-win-x64\keepkey-vault-dev"
+$BuildDir = Join-Path $ProjectDir "_build\dev-win-x64\keepkey-vault-dev"
 $ArtifactsDir = Join-Path $RepoRoot $OutputDir
 
 # Read version from package.json

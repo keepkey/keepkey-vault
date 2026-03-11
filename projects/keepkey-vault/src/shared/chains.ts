@@ -1,5 +1,6 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
 import type { BtcScriptType, CustomChain } from './types'
+import { versionCompare } from './firmware-versions'
 
 export interface ChainDef {
   id: string
@@ -9,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded'
   color: string
   rpcMethod: string
   signMethod: string
@@ -19,6 +20,8 @@ export interface ChainDef {
   chainId?: string
   explorerAddressUrl?: string  // e.g. "https://etherscan.io/address/{{address}}"
   explorerTxUrl?: string       // e.g. "https://etherscan.io/tx/{{txid}}"
+  hidden?: boolean             // If true, hide from Dashboard grid (used for internal-only chains)
+  minFirmware?: string         // Minimum firmware version required (e.g. '7.11.0')
 }
 
 // ── Bitcoin multi-account constants ─────────────────────────────────────
@@ -156,6 +159,21 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x80000005, 0x80000000, 0, 0], scriptType: 'p2pkh',
   },
   {
+    id: 'zcash', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
+    chainFamily: 'utxo', color: '#ECB244',
+    rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
+    defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    minFirmware: '7.11.0',
+  },
+  {
+    id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
+    chainFamily: 'zcash-shielded', color: '#ECB244',
+    rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
+    defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
+    hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
+    minFirmware: '7.11.0',
+  },
+  {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
     chainFamily: 'utxo', color: '#315BCA',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
@@ -188,6 +206,13 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
+
+/** Check if a chain is supported by the given firmware version. Chains without minFirmware are always supported. */
+export function isChainSupported(chain: ChainDef, firmwareVersion?: string): boolean {
+  if (!chain.minFirmware) return true
+  if (!firmwareVersion) return false
+  return versionCompare(firmwareVersion, chain.minFirmware) >= 0
+}
 
 /** Convert a user-added custom EVM chain into a ChainDef */
 export function customChainToChainDef(c: CustomChain): ChainDef {

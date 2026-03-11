@@ -20,7 +20,9 @@
 		"description": "기기에 비밀번호 구문 보호가 활성화되어 있습니다. 잠금 해제하려면 BIP-39 비밀번호 구문을 입력하세요. 기본 지갑을 사용하려면 비워두세요.",
 		"placeholder": "비밀번호 구문 (선택사항)",
 		"warning": "비밀번호 구문은 대소문자를 구분합니다. 다른 비밀번호 구문은 완전히 다른 지갑을 생성합니다.",
-		"unlock": "잠금 해제"
+		"unlock": "잠금 해제",
+		"confirmOnDevice": "KeepKey에서 확인",
+		"confirmOnDeviceHint": "기기 화면을 확인하고 버튼을 눌러 승인하세요."
 	},
 	"pairing": {
 		"wantsToConnect": "이(가) KeepKey에 연결하려고 합니다",

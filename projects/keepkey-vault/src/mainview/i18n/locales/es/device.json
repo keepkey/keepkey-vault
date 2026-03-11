@@ -20,7 +20,9 @@
 		"description": "Tu dispositivo tiene protección por contraseña habilitada. Ingresa tu contraseña BIP-39 para desbloquear. Déjalo vacío para la billetera predeterminada.",
 		"placeholder": "Contraseña (opcional)",
 		"warning": "Las contraseñas distinguen entre mayúsculas y minúsculas. Una contraseña diferente genera una billetera completamente diferente.",
-		"unlock": "Desbloquear"
+		"unlock": "Desbloquear",
+		"confirmOnDevice": "Confirmar en tu KeepKey",
+		"confirmOnDeviceHint": "Revisa la pantalla de tu dispositivo y presiona el botón para confirmar."
 	},
 	"pairing": {
 		"wantsToConnect": "quiere conectarse a tu KeepKey",

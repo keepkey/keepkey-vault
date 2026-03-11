@@ -1,0 +1,59 @@
+[package]
+name = "zcash-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "zcash-cli"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+
+# Hex encoding/decoding
+hex = "0.4"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# BLAKE2b for ZIP-244 sighash computation
+blake2b_simd = "1.0"
+
+# Zcash crates
+orchard = "0.12"
+zcash_address = "0.10"
+zcash_protocol = "0.7"
+zcash_note_encryption = "0.4"
+zcash_primitives = "0.19"
+zcash_keys = "0.8"
+
+# Lightwalletd gRPC client
+tonic = { version = "0.12", features = ["tls", "tls-roots"] }
+prost = "0.13"
+tokio-stream = "0.1"
+
+# Wallet database (note persistence)
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "5.0"
+
+# Orchard spending (PCZT construction + proofs)
+rand = "0.8"
+pasta_curves = "0.5"
+ff = "0.13"
+incrementalmerkletree = "0.8"
+shardtree = "0.6"
+
+# ZIP-32 key derivation types
+zip32 = "0.2"
+
+[build-dependencies]
+tonic-build = "0.12"

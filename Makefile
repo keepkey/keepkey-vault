@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -28,6 +28,14 @@ modules-build: modules-install
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
 	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf packages/*/dist node_modules)
+
+# --- Zcash CLI Sidecar (Rust) ---
+
+build-zcash-cli:
+	cd $(PROJECT_DIR)/zcash-cli && cargo build --release
+
+build-zcash-cli-debug:
+	cd $(PROJECT_DIR)/zcash-cli && cargo build
 
 # --- Vault ---
 
@@ -80,7 +88,7 @@ dmg:
 	echo "Verifying extracted app..."; \
 	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
 	ln -s /Applications "$$STAGING/Applications"; \
-	DMG_OUT="$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
+	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	rm -f "$$DMG_OUT"; \
 	echo "Creating DMG..."; \
 	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
@@ -96,7 +104,7 @@ dmg:
 	echo "DMG ready: $$DMG_OUT"
 
 clean: modules-clean
-	cd $(PROJECT_DIR) && rm -rf dist node_modules build artifacts
+	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
 
 # --- Audit & SBOM ---
 
@@ -118,8 +126,8 @@ sign-check:
 	@security find-identity -v -p codesigning | grep "$$ELECTROBUN_DEVELOPER_ID" || echo "WARNING: Certificate not found in keychain"
 
 verify:
-	@APP=$$(find $(PROJECT_DIR)/build -name "*.app" -maxdepth 2 | head -1); \
-	if [ -z "$$APP" ]; then echo "No .app bundle found in build/"; exit 1; fi; \
+	@APP=$$(find $(PROJECT_DIR)/_build -name "*.app" -maxdepth 2 | head -1); \
+	if [ -z "$$APP" ]; then echo "No .app bundle found in _build/"; exit 1; fi; \
 	echo "Verifying: $$APP"; \
 	echo "--- codesign ---"; \
 	codesign --verify --deep --strict "$$APP" && echo "codesign: PASS" || echo "codesign: FAIL"; \
@@ -184,6 +192,8 @@ help:
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
+	@echo "  make build-zcash-cli      - Build Zcash CLI sidecar (release)"
+	@echo "  make build-zcash-cli-debug - Build Zcash CLI sidecar (debug)"
 	@echo "  make audit          - Generate dependency manifest + SBOM"
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
