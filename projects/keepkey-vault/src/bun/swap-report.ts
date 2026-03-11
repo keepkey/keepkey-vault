@@ -177,11 +177,11 @@ export async function generateSwapPdf(records: SwapHistoryRecord[]): Promise<Buf
   y -= 20
 
   // Data rows
-  for (const r of records) {
+  for (let rowIdx = 0; rowIdx < records.length; rowIdx++) {
+    const r = records[rowIdx]
     needSpace(18)
 
     // Alternate row shading
-    const rowIdx = records.indexOf(r)
     if (rowIdx % 2 === 0) {
       page.drawRectangle({ x: ML, y: y - 4, width: contentW, height: 16, color: rgb(0.96, 0.96, 0.97) })
     }

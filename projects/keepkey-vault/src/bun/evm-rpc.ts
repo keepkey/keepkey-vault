@@ -83,7 +83,7 @@ export async function getErc20Allowance(rpcUrl: string, tokenContract: string, o
 /** Get ERC-20 decimals via eth_call */
 export async function getErc20Decimals(rpcUrl: string, tokenContract: string): Promise<number> {
   const result = await ethCall(rpcUrl, tokenContract, '0x313ce567') // decimals()
-  // Fallback 0x12 = 18 decimal (the standard ERC-20 default)
+  // If RPC returns empty/zero, fall back to 18 (0x12 hex = 18 decimal, the ERC-20 standard default)
   return Number(BigInt(result || '0x12'))
 }
 

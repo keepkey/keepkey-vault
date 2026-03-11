@@ -765,33 +765,24 @@ export function updateSwapHistoryStatus(
     const now = Date.now()
     const isFinal = status === 'completed' || status === 'failed' || status === 'refunded'
 
-    let sql = `UPDATE swap_history SET status = ?, updated_at = ?`
-    const params: any[] = [status, now]
+    // Build SET clauses and params together to prevent misalignment
+    const setClauses: Array<{ col: string; value: any }> = [
+      { col: 'status', value: status },
+      { col: 'updated_at', value: now },
+    ]
 
-    if (extra?.outboundTxid) {
-      sql += `, outbound_txid = ?`
-      params.push(extra.outboundTxid)
-    }
-    if (extra?.error) {
-      sql += `, error = ?`
-      params.push(extra.error)
-    }
-    if (extra?.receivedOutput) {
-      sql += `, received_output = ?`
-      params.push(extra.receivedOutput)
-    }
+    if (extra?.outboundTxid) setClauses.push({ col: 'outbound_txid', value: extra.outboundTxid })
+    if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
+    if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
     if (isFinal) {
-      const completedAt = extra?.completedAt || now
-      sql += `, completed_at = ?`
-      params.push(completedAt)
+      setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
       if (extra?.actualTimeSeconds !== undefined) {
-        sql += `, actual_time_secs = ?`
-        params.push(extra.actualTimeSeconds)
+        setClauses.push({ col: 'actual_time_secs', value: extra.actualTimeSeconds })
       }
     }
 
-    sql += ` WHERE txid = ?`
-    params.push(txid)
+    const sql = `UPDATE swap_history SET ${setClauses.map(c => `${c.col} = ?`).join(', ')} WHERE txid = ?`
+    const params = [...setClauses.map(c => c.value), txid]
 
     db.run(sql, params)
   } catch (e: any) {

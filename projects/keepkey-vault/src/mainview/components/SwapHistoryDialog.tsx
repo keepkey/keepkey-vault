@@ -473,7 +473,7 @@ export function SwapHistoryDialog({ open, onClose }: SwapHistoryDialogProps) {
       status: statusFilter === 'all' ? undefined : statusFilter,
       asset: searchQuery || undefined,
       limit: 200,
-    } as any, 10000)
+    }, 10000)
       .then((result) => { if (result) setHistory(result) })
       .catch(() => {})
 

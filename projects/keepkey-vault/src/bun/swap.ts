@@ -17,7 +17,7 @@ import { getEvmGasPrice, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20
 import * as txb from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
 export { parseQuoteResponse, parseAssetsResponse, parseThorAsset, assetToCaip, THOR_TO_CHAIN } from './swap-parsing'
-import { parseQuoteResponse, parseAssetsResponse, parseThorAsset, assetToCaip, THOR_TO_CHAIN } from './swap-parsing'
+import { parseQuoteResponse, parseAssetsResponse, assetToCaip } from './swap-parsing'
 
 const TAG = '[swap]'
 
@@ -30,6 +30,14 @@ const THORCHAIN_ROUTERS: Record<string, string[]> = {
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/** Format a bigint wei value as a human-readable string (avoids Number() precision loss for large values) */
+function formatWei(wei: bigint, decimals = 18): string {
+  const whole = wei / 10n ** BigInt(decimals)
+  const frac = wei % 10n ** BigInt(decimals)
+  const fracStr = frac.toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '')
+  return fracStr ? `${whole}.${fracStr}` : `${whole}`
+}
 
 /** Chain-aware minimum gas price fallbacks (gwei) — used when RPC/Pioneer both fail */
 const MIN_GAS_GWEI: Record<string, number> = {
@@ -66,6 +74,12 @@ const MEMO_LIMITS: Record<string, number> = {
 let assetCache: SwapAsset[] = []
 let assetCacheTime = 0
 const ASSET_CACHE_TTL = 5 * 60_000 // 5 minutes
+
+/** Invalidate the asset cache (e.g., after Pioneer reconnects) */
+export function clearSwapCache(): void {
+  assetCache = []
+  assetCacheTime = 0
+}
 
 /** Fetch available swap assets from Pioneer GetAvailableAssets */
 export async function getSwapAssets(): Promise<SwapAsset[]> {
@@ -147,9 +161,16 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
 
 // ── Swap execution ──────────────────────────────────────────────────
 
+/** Wallet methods used during swap execution (subset of hdwallet interface) */
+export interface SwapWallet {
+  getPublicKeys(params: any[]): Promise<Array<{ xpub: string }> | null>
+  ethSignTx(params: any): Promise<any>
+  [method: string]: (...args: any[]) => Promise<any>  // dynamic address/sign methods
+}
+
 /** Dependencies injected by the caller (index.ts) to avoid circular imports */
 export interface SwapContext {
-  wallet: any
+  wallet: SwapWallet
   getAllChains: () => ChainDef[]
   getRpcUrl: (chain: ChainDef) => string | undefined
   getBtcXpub: () => string | undefined  // selected BTC xpub if available
@@ -351,8 +372,8 @@ async function buildEvmSwapTx(
       gasPrice = fallbackGasPrice
     }
   }
-  if (params.feeLevel && params.feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
-  else if (params.feeLevel && params.feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
+  if (params.feeLevel != null && params.feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
+  else if (params.feeLevel != null && params.feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
 
   let nonce = 0
   if (rpcUrl) {
@@ -427,8 +448,8 @@ async function buildEvmSwapTx(
     const totalGas = gasPrice * (approveGasLimit + depositGasLimit)
     if (nativeBalance < totalGas) {
       throw new Error(
-        `Insufficient ${fromChain.symbol} for gas: need ~${Number(totalGas) / 1e18}, ` +
-        `have ${Number(nativeBalance) / 1e18}`
+        `Insufficient ${fromChain.symbol} for gas: need ~${formatWei(totalGas)}, ` +
+        `have ${formatWei(nativeBalance)}`
       )
     }
 
@@ -436,7 +457,7 @@ async function buildEvmSwapTx(
     let needsApproval = true
     if (rpcUrl) {
       try {
-        const currentAllowance = await getErc20Allowance(rpcUrl, tokenContract, fromAddress, params.router!)
+        const currentAllowance = await getErc20Allowance(rpcUrl, tokenContract, fromAddress, params.router)
         needsApproval = currentAllowance < amountBaseUnits
         console.log(`${TAG} Current allowance: ${currentAllowance}, needed: ${amountBaseUnits}, needsApproval: ${needsApproval}`)
       } catch (e: any) {
@@ -447,7 +468,7 @@ async function buildEvmSwapTx(
     // e) If allowance insufficient, sign + broadcast approve tx
     //    H2 fix: approve exact amount (not MaxUint256) — safer for hardware wallet users
     if (needsApproval) {
-      const approveData = encodeApprove(params.router!, amountBaseUnits)
+      const approveData = encodeApprove(params.router, amountBaseUnits)
 
       const approveTx = {
         chainId,
@@ -516,7 +537,7 @@ async function buildEvmSwapTx(
     let erc20DepositGas = depositGasLimit
     if (rpcUrl) {
       erc20DepositGas = await estimateGas(rpcUrl, {
-        to: params.router!, from: fromAddress, data: depositData, value: '0x0',
+        to: params.router, from: fromAddress, data: depositData, value: '0x0',
       }, depositGasLimit)
       console.log(`${TAG} Estimated deposit gas: ${erc20DepositGas} (fallback: ${depositGasLimit})`)
     }
@@ -552,7 +573,7 @@ async function buildEvmSwapTx(
     let gasLimit = staticGasLimit
     if (rpcUrl) {
       gasLimit = await estimateGas(rpcUrl, {
-        to: params.router!, from: fromAddress, data, value: toHex(amountWei),
+        to: params.router, from: fromAddress, data, value: toHex(amountWei),
       }, staticGasLimit)
       console.log(`${TAG} Estimated native deposit gas: ${gasLimit} (fallback: ${staticGasLimit})`)
     }
@@ -561,8 +582,8 @@ async function buildEvmSwapTx(
 
     if (nativeBalance < amountWei + gasFee) {
       throw new Error(
-        `Insufficient ${fromChain.symbol}: need ${Number(amountWei + gasFee) / 1e18}, ` +
-        `have ${Number(nativeBalance) / 1e18}`
+        `Insufficient ${fromChain.symbol}: need ${formatWei(amountWei + gasFee)}, ` +
+        `have ${formatWei(nativeBalance)}`
       )
     }
 

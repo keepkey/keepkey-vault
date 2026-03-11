@@ -14,14 +14,14 @@
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { assetToCaip } from './swap-parsing'
-import { insertSwapHistory, updateSwapHistoryStatus } from './db'
+import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory } from './db'
 
 const TAG = '[swap-tracker]'
 
 // ── In-memory swap registry ─────────────────────────────────────────
 
 const pendingSwaps = new Map<string, PendingSwap>()
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollTimer: ReturnType<typeof setTimeout> | null = null
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 
@@ -60,6 +60,44 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
 
   pioneerVerified = true
   console.log(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+
+  // Rehydrate active swaps from SQLite (survives app restart)
+  try {
+    const activeStatuses: SwapTrackingStatus[] = ['pending', 'confirming', 'output_detected', 'output_confirming', 'output_confirmed']
+    for (const status of activeStatuses) {
+      const records = getSwapHistory({ status, limit: 50 })
+      for (const r of records) {
+        if (pendingSwaps.has(r.txid)) continue
+        const swap: PendingSwap = {
+          txid: r.txid,
+          fromAsset: r.fromAsset,
+          toAsset: r.toAsset,
+          fromSymbol: r.fromSymbol,
+          toSymbol: r.toSymbol,
+          fromChainId: r.fromChainId,
+          toChainId: r.toChainId,
+          fromAmount: r.fromAmount,
+          expectedOutput: r.quotedOutput,
+          memo: r.memo,
+          inboundAddress: r.inboundAddress,
+          router: r.router,
+          integration: r.integration,
+          status: r.status,
+          confirmations: 0,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          estimatedTime: r.estimatedTimeSeconds,
+        }
+        pendingSwaps.set(r.txid, swap)
+      }
+    }
+    if (pendingSwaps.size > 0) {
+      console.log(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
+      startPolling()
+    }
+  } catch (e: any) {
+    console.warn(`${TAG} Failed to rehydrate swaps from SQLite: ${e.message}`)
+  }
 }
 
 /** Register a newly broadcast swap for tracking */
@@ -217,29 +255,31 @@ function getPollInterval(): number {
 
 function startPolling(): void {
   if (pollTimer) return
-  schedulePoll()
-  // Poll immediately on start
-  pollAllSwaps()
+  // Poll immediately on start, then schedule next
+  pollAllSwaps().then(scheduleNextPoll)
 }
 
-/** Schedule next poll with adaptive interval */
-function schedulePoll(): void {
-  if (pollTimer) clearInterval(pollTimer)
+/** Schedule next poll using setTimeout (prevents stacking if pollAllSwaps is slow) */
+function scheduleNextPoll(): void {
+  if (pollTimer) clearTimeout(pollTimer)
+  // Don't schedule if no active swaps remain
+  const hasActive = Array.from(pendingSwaps.values()).some(s =>
+    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
+  )
+  if (pendingSwaps.size === 0 || !hasActive) {
+    pollTimer = null
+    return
+  }
   const interval = getPollInterval()
-  console.log(`${TAG} Next poll in ${interval / 1000}s`)
-  pollTimer = setInterval(async () => {
+  pollTimer = setTimeout(async () => {
     await pollAllSwaps()
-    // Re-schedule if interval should change (swap aged into next phase)
-    const newInterval = getPollInterval()
-    if (newInterval !== interval) {
-      schedulePoll()
-    }
+    scheduleNextPoll()
   }, interval)
 }
 
 function stopPolling(): void {
   if (pollTimer) {
-    clearInterval(pollTimer)
+    clearTimeout(pollTimer)
     pollTimer = null
     console.log(`${TAG} Stopped polling (no active swaps)`)
   }
