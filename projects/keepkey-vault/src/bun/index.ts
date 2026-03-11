@@ -179,7 +179,12 @@ let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
 function getAppSettings() {
-	return { restApiEnabled, pioneerApiBase: getPioneerApiBase() }
+	return {
+		restApiEnabled,
+		pioneerApiBase: getPioneerApiBase(),
+		fiatCurrency: getSetting('fiat_currency') || 'USD',
+		numberLocale: getSetting('number_locale') || 'en-US',
+	}
 }
 
 // Callbacks bridge REST → RPC UI
@@ -1197,6 +1202,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				chainCatalog = []
 				catalogLoadedAt = 0
 				console.log('[settings] Pioneer API base set to:', url || '(default)')
+				return getAppSettings()
+			},
+			setFiatCurrency: async (params) => {
+				setSetting('fiat_currency', params.currency || 'USD')
+				console.log('[settings] Fiat currency set to:', params.currency)
+				return getAppSettings()
+			},
+			setNumberLocale: async (params) => {
+				setSetting('number_locale', params.locale || 'en-US')
+				console.log('[settings] Number locale set to:', params.locale)
 				return getAppSettings()
 			},
 

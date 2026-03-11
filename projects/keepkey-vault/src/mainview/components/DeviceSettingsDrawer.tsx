@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
+import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
@@ -393,9 +394,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				{/* Content */}
 				<VStack gap="3" align="stretch" p="4">
 
-					{/* ── Language ────────────────────────────────────── */}
+					{/* ── Language & Currency ─────────────────────────── */}
 					<Section title={t("language")}>
 						<LanguageSelector />
+						<Box mt="4" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+							<CurrencySelector />
+						</Box>
 					</Section>
 
 					{/* ── Device Identity ─────────────────────────────── */}

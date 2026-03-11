@@ -81,5 +81,7 @@
 	"swapCompleted": "Swap completed!",
 	"swapFailed": "Swap failed",
 	"trackingSwap": "Tracking swap via THORChain...",
-	"waitingForConfirmations": "Waiting for confirmations — swap is NOT complete yet"
+	"waitingForConfirmations": "Waiting for confirmations — swap is NOT complete yet",
+	"switchToFiat": "Switch to fiat input",
+	"switchToCrypto": "Switch to crypto input"
 }

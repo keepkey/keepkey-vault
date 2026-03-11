@@ -9,6 +9,7 @@ import { Box, Text } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { SwapHistoryDialog } from "./SwapHistoryDialog"
+import { SwapDialog } from "./SwapDialog"
 import type { PendingSwap, SwapStatusUpdate } from "../../shared/types"
 
 const TRACKER_CSS = `
@@ -23,6 +24,7 @@ export function SwapTracker() {
   const [swaps, setSwaps] = useState<PendingSwap[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [hasNew, setHasNew] = useState(false)
+  const [resumeSwap, setResumeSwap] = useState<PendingSwap | null>(null)
   const lastCountRef = useRef(0)
 
   const fetchSwaps = useCallback(() => {
@@ -115,6 +117,11 @@ export function SwapTracker() {
     setHasNew(false)
   }
 
+  const handleResumeSwap = useCallback((swap: PendingSwap) => {
+    setHistoryOpen(false)
+    setResumeSwap(swap)
+  }, [])
+
   // Don't render if no swaps
   if (swaps.length === 0) return null
 
@@ -153,7 +160,14 @@ export function SwapTracker() {
       </Box>
 
       {/* History dialog */}
-      <SwapHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <SwapHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} onResumeSwap={handleResumeSwap} />
+
+      {/* Resume swap dialog — opened from history */}
+      <SwapDialog
+        open={!!resumeSwap}
+        onClose={() => setResumeSwap(null)}
+        resumeSwap={resumeSwap}
+      />
     </>
   )
 }

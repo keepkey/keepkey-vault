@@ -61,13 +61,11 @@ const DEPOSIT_GAS_LIMITS: Record<string, bigint> = {
   optimism: 200000n,
 }
 
-/** Memo length limits by chain family — UTXO OP_RETURN is 80 bytes, others are generous */
-const MEMO_LIMITS: Record<string, number> = {
-  utxo: 80,
-  evm: 1000,
-  cosmos: 512,
-  xrp: 512,
-}
+/** Memo length limits — THORChain global limit is 250 bytes.
+ *  THORNode constructs memos optimized for source chain constraints (e.g. short
+ *  asset names like AVAX.USDT instead of AVAX.USDT-0x...) so we trust the memo
+ *  from Pioneer/THORNode and only enforce the THORChain protocol limit. */
+const MEMO_LIMIT = 250
 
 // ── Pool/Asset fetching via Pioneer ─────────────────────────────────
 
@@ -232,9 +230,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // 2. Validate required fields
   if (!params.inboundAddress) throw new Error('Missing inbound vault address from quote')
   if (!params.memo) throw new Error('Missing swap memo from quote')
-  const memoLimit = MEMO_LIMITS[fromChain.chainFamily] || 512
-  if (params.memo.length > memoLimit) {
-    throw new Error(`Swap memo too long for ${fromChain.chainFamily} (${params.memo.length} chars, max ${memoLimit})`)
+  if (params.memo.length > MEMO_LIMIT) {
+    throw new Error(`Swap memo too long (${params.memo.length} bytes, THORChain max ${MEMO_LIMIT})`)
   }
 
   console.log(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)

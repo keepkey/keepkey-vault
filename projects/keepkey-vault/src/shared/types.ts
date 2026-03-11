@@ -267,10 +267,15 @@ export interface ApiLogEntry {
   responseBody?: any     // parsed JSON response
 }
 
+// Supported fiat currencies
+export type FiatCurrency = 'USD' | 'EUR' | 'GBP' | 'JPY' | 'CHF' | 'CAD' | 'AUD' | 'CNY' | 'KRW' | 'BRL' | 'RUB' | 'INR' | 'MXN' | 'SEK' | 'NOK' | 'DKK' | 'PLN' | 'CZK' | 'HUF' | 'TRY'
+
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   restApiEnabled: boolean   // controls entire REST API server on/off
   pioneerApiBase: string    // current Pioneer API base URL
+  fiatCurrency: FiatCurrency  // display currency (default 'USD')
+  numberLocale: string        // number formatting locale (default 'en-US')
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────

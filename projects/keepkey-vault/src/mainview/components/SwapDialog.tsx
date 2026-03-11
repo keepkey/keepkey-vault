@@ -9,10 +9,11 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
-import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTrackingStatus } from "../../shared/types"
+import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTrackingStatus, PendingSwap } from "../../shared/types"
 import { Z } from "../lib/z-index"
 
 // ── Phase state machine ─────────────────────────────────────────────
@@ -79,6 +80,13 @@ const CheckIcon = () => (
 const ShieldIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+)
+
+const SwapInputIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
+    <polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" />
   </svg>
 )
 
@@ -190,6 +198,7 @@ interface AssetSelectorProps {
 
 function AssetSelector({ label, selected, assets, onSelect, balances, exclude, disabled, nativeOnly }: AssetSelectorProps) {
   const { t } = useTranslation("swap")
+  const { fmtCompact } = useFiat()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -212,7 +221,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
     return list.slice(0, 50)
   }, [assets, search, exclude, nativeOnly])
 
-  const getBalance = useCallback((asset: SwapAsset): string | null => {
+  const getBalance = useCallback((asset: SwapAsset): { balance: string; usd: number } | null => {
     if (!balances) return null
     const chain = balances.find(b => b.chainId === asset.chainId)
     if (!chain) return null
@@ -220,9 +229,9 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
       const token = chain.tokens.find(t =>
         t.contractAddress?.toLowerCase() === asset.contractAddress?.toLowerCase()
       )
-      return token ? token.balance : null
+      return token ? { balance: token.balance, usd: token.balanceUsd || 0 } : null
     }
-    return chain.balance
+    return { balance: chain.balance, usd: chain.balanceUsd || 0 }
   }, [balances])
 
   const chainIcon = useCallback((asset: SwapAsset) => {
@@ -262,7 +271,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
               <Text fontSize="xs" color="kk.textMuted" p="3" textAlign="center">{t("noAssets")}</Text>
             ) : (
               filtered.map((asset) => {
-                const bal = getBalance(asset)
+                const balInfo = getBalance(asset)
                 return (
                   <Flex
                     key={asset.asset}
@@ -287,8 +296,13 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
                       <Text fontSize="sm" fontWeight="500" color="kk.textPrimary">{asset.symbol}</Text>
                       <Text fontSize="10px" color="kk.textMuted" truncate>{asset.name}</Text>
                     </Flex>
-                    {bal && (
-                      <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">{formatBalance(bal)}</Text>
+                    {balInfo && (
+                      <Flex direction="column" align="flex-end" gap="0">
+                        <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">{formatBalance(balInfo.balance)}</Text>
+                        {balInfo.usd > 0 && (
+                          <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(balInfo.usd)}</Text>
+                        )}
+                      </Flex>
                     )}
                   </Flex>
                 )
@@ -351,11 +365,13 @@ interface SwapDialogProps {
   chain?: ChainDef
   balance?: ChainBalance
   address?: string | null
+  resumeSwap?: PendingSwap | null
 }
 
 // ── Main SwapDialog ─────────────────────────────────────────────────
-export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialogProps) {
+export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap }: SwapDialogProps) {
   const { t } = useTranslation("swap")
+  const { fmtCompact, symbol: fiatSymbol } = useFiat()
 
   // ── State ─────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SwapPhase>('input')
@@ -366,6 +382,8 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
   const [amount, setAmount] = useState("")
+  const [fiatAmount, setFiatAmount] = useState("")
+  const [inputMode, setInputMode] = useState<'crypto' | 'fiat'>('crypto')
   const [isMax, setIsMax] = useState(false)
 
   const [quote, setQuote] = useState<SwapQuote | null>(null)
@@ -520,6 +538,55 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     }
   }, [assets, chain])
 
+  // ── Resume from swap history ──────────────────────────────────────
+  const hasResumedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!open || !resumeSwap || hasResumedRef.current === resumeSwap.txid) return
+    hasResumedRef.current = resumeSwap.txid
+
+    // Build minimal SwapAsset objects from PendingSwap data
+    const from: SwapAsset = {
+      asset: resumeSwap.fromAsset,
+      chainId: resumeSwap.fromChainId,
+      symbol: resumeSwap.fromSymbol,
+      name: resumeSwap.fromSymbol,
+      chainFamily: 'utxo', // not critical for submitted phase display
+      decimals: 8,
+    }
+    const to: SwapAsset = {
+      asset: resumeSwap.toAsset,
+      chainId: resumeSwap.toChainId,
+      symbol: resumeSwap.toSymbol,
+      name: resumeSwap.toSymbol,
+      chainFamily: 'utxo',
+      decimals: 8,
+    }
+
+    setFromAsset(from)
+    setToAsset(to)
+    setAmount(resumeSwap.fromAmount)
+    setTxid(resumeSwap.txid)
+    setLiveStatus(resumeSwap.status)
+    setLiveConfirmations(resumeSwap.confirmations)
+    if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
+    if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
+    if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
+    setQuote({
+      expectedOutput: resumeSwap.expectedOutput,
+      minimumOutput: resumeSwap.expectedOutput,
+      inboundAddress: resumeSwap.inboundAddress,
+      router: resumeSwap.router,
+      memo: resumeSwap.memo,
+      fees: { affiliate: '0', outbound: '0', totalBps: 0 },
+      estimatedTime: resumeSwap.estimatedTime,
+      integration: resumeSwap.integration,
+      slippageBps: 0,
+      fromAsset: resumeSwap.fromAsset,
+      toAsset: resumeSwap.toAsset,
+    })
+    setPhase('submitted')
+  }, [open, resumeSwap])
+
   // ── Derived values ────────────────────────────────────────────────
   const fromBalance = useMemo(() => {
     if (!fromAsset) return null
@@ -536,6 +603,76 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     }
     return cb.balance
   }, [fromAsset, balance, chain, balances])
+
+  // Derive per-unit USD price for from/to assets from cached balances
+  const fromPriceUsd = useMemo(() => {
+    if (!fromAsset) return 0
+    const cb = balance && chain && fromAsset.chainId === chain.id ? balance : balances.find(b => b.chainId === fromAsset.chainId)
+    if (!cb) return 0
+    if (fromAsset.contractAddress && cb.tokens) {
+      const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
+      return tok?.priceUsd || 0
+    }
+    const bal = parseFloat(cb.balance)
+    return bal > 0 ? (cb.balanceUsd || 0) / bal : 0
+  }, [fromAsset, balance, chain, balances])
+
+  const toPriceUsd = useMemo(() => {
+    if (!toAsset) return 0
+    const cb = balances.find(b => b.chainId === toAsset.chainId)
+    if (!cb) return 0
+    if (toAsset.contractAddress && cb.tokens) {
+      const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === toAsset.contractAddress?.toLowerCase())
+      return tok?.priceUsd || 0
+    }
+    const bal = parseFloat(cb.balance)
+    return bal > 0 ? (cb.balanceUsd || 0) / bal : 0
+  }, [toAsset, balances])
+
+  const hasFromPrice = fromPriceUsd > 0
+  const hasToPrice = toPriceUsd > 0
+
+  // Bidirectional conversion: crypto → fiat
+  const handleCryptoChange = useCallback((v: string) => {
+    setAmount(v)
+    setIsMax(false)
+    if (hasFromPrice && v) {
+      const n = parseFloat(v)
+      if (!isNaN(n)) setFiatAmount((n * fromPriceUsd).toFixed(2))
+      else setFiatAmount("")
+    } else {
+      setFiatAmount("")
+    }
+  }, [hasFromPrice, fromPriceUsd])
+
+  // Bidirectional conversion: fiat → crypto
+  const handleFiatChange = useCallback((v: string) => {
+    setFiatAmount(v)
+    setIsMax(false)
+    if (hasFromPrice && v) {
+      const n = parseFloat(v)
+      if (!isNaN(n)) {
+        const crypto = n / fromPriceUsd
+        setAmount(crypto < 1 ? crypto.toPrecision(8) : crypto.toFixed(8).replace(/\.?0+$/, ''))
+      } else {
+        setAmount("")
+      }
+    } else {
+      setAmount("")
+    }
+  }, [hasFromPrice, fromPriceUsd])
+
+  const toggleInputMode = useCallback(() => {
+    setInputMode(prev => prev === 'crypto' ? 'fiat' : 'crypto')
+  }, [])
+
+  // USD preview of the entered amount
+  const amountUsdPreview = useMemo(() => {
+    if (!hasFromPrice || isMax) return null
+    const n = parseFloat(amount)
+    if (isNaN(n) || n <= 0) return null
+    return n * fromPriceUsd
+  }, [amount, hasFromPrice, fromPriceUsd, isMax])
 
   const amountNum = parseFloat(amount)
   const balanceNum = fromBalance ? parseFloat(fromBalance) : 0
@@ -606,6 +743,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     setFromAsset(toAsset)
     setToAsset(prev)
     setAmount("")
+    setFiatAmount("")
     setIsMax(false)
     setQuote(null)
     setPhase('input')
@@ -665,6 +803,8 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     setFromAsset(null)
     setToAsset(null)
     setAmount("")
+    setFiatAmount("")
+    setInputMode('crypto')
     setIsMax(false)
     setQuote(null)
     setError(null)
@@ -676,6 +816,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
     setShowConfetti(false)
     completionFiredRef.current = false
     hasAutoSelected.current = false
+    hasResumedRef.current = null
   }, [])
 
   const handleClose = useCallback(() => {
@@ -711,7 +852,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
   if (!open) return null
 
   // ── Not swappable ─────────────────────────────────────────────────
-  if (chain && !SWAP_CHAIN_IDS.has(chain.id)) {
+  if (chain && !resumeSwap && !SWAP_CHAIN_IDS.has(chain.id)) {
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={handleClose}>
         <Box position="absolute" inset="0" bg="blackAlpha.700" />
@@ -734,15 +875,15 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
         border="1px solid"
         borderColor={phase === 'submitted' ? 'rgba(35,220,200,0.3)' : busy ? 'rgba(255,215,0,0.3)' : 'kk.border'}
         borderRadius="xl"
-        w="480px"
-        maxW="90vw"
+        w="640px"
+        maxW="94vw"
         maxH="90vh"
         overflow="auto"
         onClick={(e) => e.stopPropagation()}
         style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}
       >
         {/* ── Header ──────────────────────────────────────────────── */}
-        <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
+        <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
           <HStack gap="2">
             <ThorchainIcon size={18} />
             <Text fontSize="md" fontWeight="600" color="kk.textPrimary">
@@ -757,7 +898,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
-        <Box px="5" py="4">
+        <Box px="5" py="3">
           {/* Loading state */}
           {loadingAssets && (
             <Box py="8" textAlign="center">
@@ -767,128 +908,120 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
 
           {/* ── SUBMITTED — live tracking with step progress ──── */}
           {phase === 'submitted' && txid && fromAsset && toAsset && (
-            <VStack gap="4" py="2" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }} position="relative">
+            <VStack gap="3" py="1" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }} position="relative">
               {/* Confetti burst on completion */}
               {showConfetti && <ConfettiBurst />}
 
-              {/* Top icon — checkmark when done, pulsing clock when in progress */}
-              {isSwapComplete ? (
-                <Box w="64px" h="64px" borderRadius="full" bg="rgba(74,222,128,0.1)" border="2px solid" borderColor="rgba(74,222,128,0.4)"
-                  display="flex" alignItems="center" justifyContent="center"
-                  style={{ animation: 'kkSwapCheckPop 0.4s ease-out' }}>
-                  <CheckIcon />
-                </Box>
-              ) : isSwapFailed ? (
-                <Box w="64px" h="64px" borderRadius="full" bg="rgba(255,23,68,0.1)" border="2px solid" borderColor="rgba(255,23,68,0.3)"
-                  display="flex" alignItems="center" justifyContent="center">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FF1744" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </Box>
-              ) : (
-                <Box w="64px" h="64px" borderRadius="full" bg="rgba(35,220,200,0.08)" border="2px solid" borderColor="rgba(35,220,200,0.3)"
-                  display="flex" alignItems="center" justifyContent="center"
-                  style={{ animation: 'kkSwapPulse 2s ease-in-out infinite' }}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" opacity="0.3" /><path d="M12 6v6l4 2" />
-                  </svg>
-                </Box>
-              )}
-
-              {/* Status title */}
-              <VStack gap="0.5">
-                <Text fontSize="md" fontWeight="700" color={isSwapComplete ? "#4ADE80" : isSwapFailed ? "#FF1744" : "kk.textPrimary"}>
-                  {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
-                </Text>
-                {!isSwapComplete && !isSwapFailed && (
-                  <Text fontSize="xs" color="#FBBF24" fontWeight="500">{t("waitingForConfirmations")}</Text>
+              {/* Status icon + title inline */}
+              <Flex align="center" gap="3">
+                {isSwapComplete ? (
+                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(74,222,128,0.1)" border="2px solid" borderColor="rgba(74,222,128,0.4)"
+                    display="flex" alignItems="center" justifyContent="center" flexShrink={0}
+                    style={{ animation: 'kkSwapCheckPop 0.4s ease-out' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </Box>
+                ) : isSwapFailed ? (
+                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(255,23,68,0.1)" border="2px solid" borderColor="rgba(255,23,68,0.3)"
+                    display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF1744" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </Box>
+                ) : (
+                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(35,220,200,0.08)" border="2px solid" borderColor="rgba(35,220,200,0.3)"
+                    display="flex" alignItems="center" justifyContent="center" flexShrink={0}
+                    style={{ animation: 'kkSwapPulse 2s ease-in-out infinite' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" opacity="0.3" /><path d="M12 6v6l4 2" />
+                    </svg>
+                  </Box>
                 )}
-              </VStack>
+                <VStack gap="0" align="flex-start">
+                  <Text fontSize="md" fontWeight="700" color={isSwapComplete ? "#4ADE80" : isSwapFailed ? "#FF1744" : "kk.textPrimary"}>
+                    {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
+                  </Text>
+                  {!isSwapComplete && !isSwapFailed && (
+                    <Text fontSize="xs" color="#FBBF24" fontWeight="500">{t("waitingForConfirmations")}</Text>
+                  )}
+                </VStack>
+              </Flex>
 
-              {/* ── 3-Step Progress ───────────────────────────────── */}
-              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" p="4">
-                <VStack gap="0" align="stretch">
+              {/* ── 3-Step Horizontal Progress ─────────────────────── */}
+              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="4" py="3">
+                <Flex align="flex-start" gap="0">
                   {/* Step 0: Input Transaction */}
-                  <Flex align="flex-start" gap="3">
-                    <VStack gap="0" align="center" minW="24px">
-                      <Box w="24px" h="24px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
-                        bg={swapStep > 0 ? "rgba(74,222,128,0.15)" : "rgba(35,220,200,0.15)"}
-                        border="2px solid" borderColor={swapStep > 0 ? "#4ADE80" : swapStep === 0 ? "#23DCC8" : "kk.border"}>
-                        {swapStep > 0 ? (
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-                        ) : (
-                          <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={swapStep === 0 ? { animation: 'kkSwapPulse 1.5s ease-in-out infinite' } : {}} />
-                        )}
-                      </Box>
-                      <Box w="2px" h="20px" bg={swapStep > 0 ? "#4ADE80" : "kk.border"} />
-                    </VStack>
-                    <Box pb="3" flex="1">
-                      <Text fontSize="xs" fontWeight="600" color={swapStep >= 0 ? "kk.textPrimary" : "kk.textMuted"}>{t("stageInput")}</Text>
-                      {swapStep === 0 && liveConfirmations > 0 && (
-                        <Text fontSize="11px" fontFamily="mono" color="#23DCC8">{liveConfirmations} {t("confirmations")}</Text>
-                      )}
-                      {swapStep > 0 && (
-                        <Text fontSize="11px" color="#4ADE80">{t("statusCompleted")}</Text>
+                  <Flex direction="column" align="center" flex="1" gap="1">
+                    <Box w="28px" h="28px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+                      bg={swapStep > 0 ? "rgba(74,222,128,0.15)" : "rgba(35,220,200,0.15)"}
+                      border="2px solid" borderColor={swapStep > 0 ? "#4ADE80" : swapStep === 0 ? "#23DCC8" : "kk.border"}>
+                      {swapStep > 0 ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                      ) : (
+                        <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={swapStep === 0 ? { animation: 'kkSwapPulse 1.5s ease-in-out infinite' } : {}} />
                       )}
                     </Box>
+                    <Text fontSize="11px" fontWeight="600" color={swapStep >= 0 ? "kk.textPrimary" : "kk.textMuted"} textAlign="center">{t("stageInput")}</Text>
+                    {swapStep === 0 && liveConfirmations > 0 && (
+                      <Text fontSize="10px" fontFamily="mono" color="#23DCC8" textAlign="center">{liveConfirmations} {t("confirmations")}</Text>
+                    )}
+                    {swapStep > 0 && (
+                      <Text fontSize="10px" color="#4ADE80" textAlign="center">{t("statusCompleted")}</Text>
+                    )}
                   </Flex>
+
+                  {/* Connector line 0→1 */}
+                  <Box h="2px" flex="1" bg={swapStep > 0 ? "#4ADE80" : "kk.border"} mt="14px" mx="-2" />
 
                   {/* Step 1: Protocol Processing */}
-                  <Flex align="flex-start" gap="3">
-                    <VStack gap="0" align="center" minW="24px">
-                      <Box w="24px" h="24px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
-                        bg={swapStep > 1 ? "rgba(74,222,128,0.15)" : swapStep === 1 ? "rgba(35,220,200,0.15)" : "rgba(255,255,255,0.04)"}
-                        border="2px solid" borderColor={swapStep > 1 ? "#4ADE80" : swapStep === 1 ? "#23DCC8" : "kk.border"}>
-                        {swapStep > 1 ? (
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-                        ) : swapStep === 1 ? (
-                          <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
-                        ) : (
-                          <Box w="8px" h="8px" borderRadius="full" bg="kk.border" />
-                        )}
-                      </Box>
-                      <Box w="2px" h="20px" bg={swapStep > 1 ? "#4ADE80" : "kk.border"} />
-                    </VStack>
-                    <Box pb="3" flex="1">
-                      <Text fontSize="xs" fontWeight="600" color={swapStep >= 1 ? "kk.textPrimary" : "kk.textMuted"}>{t("stageProtocol")}</Text>
-                      {swapStep === 1 && (
-                        <Text fontSize="11px" color="#23DCC8">{t("statusConfirming")}...</Text>
-                      )}
-                      {swapStep > 1 && (
-                        <Text fontSize="11px" color="#4ADE80">{t("statusCompleted")}</Text>
+                  <Flex direction="column" align="center" flex="1" gap="1">
+                    <Box w="28px" h="28px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+                      bg={swapStep > 1 ? "rgba(74,222,128,0.15)" : swapStep === 1 ? "rgba(35,220,200,0.15)" : "rgba(255,255,255,0.04)"}
+                      border="2px solid" borderColor={swapStep > 1 ? "#4ADE80" : swapStep === 1 ? "#23DCC8" : "kk.border"}>
+                      {swapStep > 1 ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                      ) : swapStep === 1 ? (
+                        <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
+                      ) : (
+                        <Box w="8px" h="8px" borderRadius="full" bg="kk.border" />
                       )}
                     </Box>
+                    <Text fontSize="11px" fontWeight="600" color={swapStep >= 1 ? "kk.textPrimary" : "kk.textMuted"} textAlign="center">{t("stageProtocol")}</Text>
+                    {swapStep === 1 && (
+                      <Text fontSize="10px" color="#23DCC8" textAlign="center">{t("statusConfirming")}...</Text>
+                    )}
+                    {swapStep > 1 && (
+                      <Text fontSize="10px" color="#4ADE80" textAlign="center">{t("statusCompleted")}</Text>
+                    )}
                   </Flex>
 
+                  {/* Connector line 1→2 */}
+                  <Box h="2px" flex="1" bg={swapStep > 1 ? "#4ADE80" : "kk.border"} mt="14px" mx="-2" />
+
                   {/* Step 2: Output Transaction */}
-                  <Flex align="flex-start" gap="3">
-                    <VStack gap="0" align="center" minW="24px">
-                      <Box w="24px" h="24px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
-                        bg={swapStep > 2 ? "rgba(74,222,128,0.15)" : swapStep === 2 ? "rgba(35,220,200,0.15)" : "rgba(255,255,255,0.04)"}
-                        border="2px solid" borderColor={swapStep > 2 ? "#4ADE80" : swapStep === 2 ? "#23DCC8" : "kk.border"}>
-                        {swapStep > 2 ? (
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
-                        ) : swapStep === 2 ? (
-                          <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
-                        ) : (
-                          <Box w="8px" h="8px" borderRadius="full" bg="kk.border" />
-                        )}
-                      </Box>
-                    </VStack>
-                    <Box flex="1">
-                      <Text fontSize="xs" fontWeight="600" color={swapStep >= 2 ? "kk.textPrimary" : "kk.textMuted"}>{t("stageOutput")}</Text>
-                      {swapStep === 2 && liveOutboundConfirmations !== undefined && (
-                        <Text fontSize="11px" fontFamily="mono" color="#23DCC8">
-                          {liveOutboundConfirmations}{liveOutboundRequired ? `/${liveOutboundRequired}` : ''} {t("confirmations")}
-                        </Text>
-                      )}
-                      {swapStep === 2 && liveOutboundConfirmations === undefined && (
-                        <Text fontSize="11px" color="#23DCC8">{t("statusOutputDetected")}</Text>
-                      )}
-                      {swapStep > 2 && (
-                        <Text fontSize="11px" color="#4ADE80">{t("statusCompleted")}</Text>
+                  <Flex direction="column" align="center" flex="1" gap="1">
+                    <Box w="28px" h="28px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+                      bg={swapStep > 2 ? "rgba(74,222,128,0.15)" : swapStep === 2 ? "rgba(35,220,200,0.15)" : "rgba(255,255,255,0.04)"}
+                      border="2px solid" borderColor={swapStep > 2 ? "#4ADE80" : swapStep === 2 ? "#23DCC8" : "kk.border"}>
+                      {swapStep > 2 ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                      ) : swapStep === 2 ? (
+                        <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
+                      ) : (
+                        <Box w="8px" h="8px" borderRadius="full" bg="kk.border" />
                       )}
                     </Box>
+                    <Text fontSize="11px" fontWeight="600" color={swapStep >= 2 ? "kk.textPrimary" : "kk.textMuted"} textAlign="center">{t("stageOutput")}</Text>
+                    {swapStep === 2 && liveOutboundConfirmations !== undefined && (
+                      <Text fontSize="10px" fontFamily="mono" color="#23DCC8" textAlign="center">
+                        {liveOutboundConfirmations}{liveOutboundRequired ? `/${liveOutboundRequired}` : ''} {t("confirmations")}
+                      </Text>
+                    )}
+                    {swapStep === 2 && liveOutboundConfirmations === undefined && (
+                      <Text fontSize="10px" color="#23DCC8" textAlign="center">{t("statusOutputDetected")}</Text>
+                    )}
+                    {swapStep > 2 && (
+                      <Text fontSize="10px" color="#4ADE80" textAlign="center">{t("statusCompleted")}</Text>
+                    )}
                   </Flex>
-                </VStack>
+                </Flex>
               </Box>
 
               {/* ETA — only show when not complete */}
@@ -905,15 +1038,25 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
               {/* Amount summary */}
               <Flex w="full" bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="rgba(35,220,200,0.15)"
                 borderRadius="lg" p="3" justify="center" align="center" gap="3">
-                <HStack gap="2">
-                  <Image src={chainIcon(fromAsset)} w="20px" h="20px" borderRadius="full" />
-                  <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{displayAmount} {fromAsset.symbol}</Text>
-                </HStack>
+                <VStack gap="0">
+                  <HStack gap="2">
+                    <Image src={chainIcon(fromAsset)} w="20px" h="20px" borderRadius="full" />
+                    <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{displayAmount} {fromAsset.symbol}</Text>
+                  </HStack>
+                  {hasFromPrice && (
+                    <Text fontSize="10px" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
+                  )}
+                </VStack>
                 <Text color="kk.textMuted" fontSize="lg">&rarr;</Text>
-                <HStack gap="2">
-                  <Image src={chainIcon(toAsset)} w="20px" h="20px" borderRadius="full" />
-                  <Text fontSize="sm" fontWeight="600" color="#23DCC8">~{quote?.expectedOutput} {toAsset.symbol}</Text>
-                </HStack>
+                <VStack gap="0">
+                  <HStack gap="2">
+                    <Image src={chainIcon(toAsset)} w="20px" h="20px" borderRadius="full" />
+                    <Text fontSize="sm" fontWeight="600" color="#23DCC8">~{quote?.expectedOutput} {toAsset.symbol}</Text>
+                  </HStack>
+                  {hasToPrice && quote?.expectedOutput && (
+                    <Text fontSize="10px" color="kk.textMuted">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
+                  )}
+                </VStack>
               </Flex>
 
               {/* Input Txid */}
@@ -933,7 +1076,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                       const url = getExplorerTxUrl(fromAsset.chainId, txid)
                       return url ? (
                         <Button size="xs" variant="ghost" color="#23DCC8" px="1.5" minW="auto"
-                          onClick={() => window.open(url, '_blank')} title="View on explorer">
+                          onClick={() => rpcRequest('openUrl', { url }).catch(() => {})} title="View on explorer">
                           <ExternalLinkIcon />
                         </Button>
                       ) : null
@@ -961,7 +1104,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                         const url = getExplorerTxUrl(toAsset.chainId, liveOutboundTxid)
                         return url ? (
                           <Button size="xs" variant="ghost" color="#4ADE80" px="1.5" minW="auto"
-                            onClick={() => window.open(url, '_blank')} title="View on explorer">
+                            onClick={() => rpcRequest('openUrl', { url }).catch(() => {})} title="View on explorer">
                             <ExternalLinkIcon />
                           </Button>
                         ) : null
@@ -984,20 +1127,27 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                         <Image src={chainIcon(fromAsset)} w="14px" h="14px" borderRadius="full" />
                         <Text fontSize="11px" color="kk.textSecondary">{fromAsset.symbol}</Text>
                       </HStack>
-                      <HStack gap="2">
-                        <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
-                          {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
-                        </Text>
-                        <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
-                        <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? '#FB923C' : 'kk.textMuted'}>
-                          {afterFromBal ? formatBalance(afterFromBal) : '...'}
-                        </Text>
-                        {afterFromBal && beforeFromBal && (
-                          <Text fontSize="10px" fontFamily="mono" color="#EF4444">
-                            ({formatBalance((parseFloat(afterFromBal) - parseFloat(beforeFromBal)).toFixed(8))})
+                      <VStack gap="0" align="flex-end">
+                        <HStack gap="2">
+                          <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
+                            {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
+                          </Text>
+                          <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
+                          <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? '#FB923C' : 'kk.textMuted'}>
+                            {afterFromBal ? formatBalance(afterFromBal) : '...'}
+                          </Text>
+                          {afterFromBal && beforeFromBal && (
+                            <Text fontSize="10px" fontFamily="mono" color="#EF4444">
+                              ({formatBalance((parseFloat(afterFromBal) - parseFloat(beforeFromBal)).toFixed(8))})
+                            </Text>
+                          )}
+                        </HStack>
+                        {hasFromPrice && afterFromBal && beforeFromBal && (
+                          <Text fontSize="9px" fontFamily="mono" color="#EF4444">
+                            {fmtCompact((parseFloat(afterFromBal) - parseFloat(beforeFromBal)) * fromPriceUsd)}
                           </Text>
                         )}
-                      </HStack>
+                      </VStack>
                     </Flex>
                     {/* To asset balance change */}
                     <Flex justify="space-between" align="center">
@@ -1005,20 +1155,27 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                         <Image src={chainIcon(toAsset)} w="14px" h="14px" borderRadius="full" />
                         <Text fontSize="11px" color="kk.textSecondary">{toAsset.symbol}</Text>
                       </HStack>
-                      <HStack gap="2">
-                        <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
-                          {beforeToBal ? formatBalance(beforeToBal) : '-'}
-                        </Text>
-                        <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
-                        <Text fontSize="11px" fontFamily="mono" color={afterToBal ? '#4ADE80' : 'kk.textMuted'}>
-                          {afterToBal ? formatBalance(afterToBal) : '...'}
-                        </Text>
-                        {afterToBal && beforeToBal && (
-                          <Text fontSize="10px" fontFamily="mono" color="#4ADE80">
-                            (+{formatBalance((parseFloat(afterToBal) - parseFloat(beforeToBal)).toFixed(8))})
+                      <VStack gap="0" align="flex-end">
+                        <HStack gap="2">
+                          <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
+                            {beforeToBal ? formatBalance(beforeToBal) : '-'}
+                          </Text>
+                          <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
+                          <Text fontSize="11px" fontFamily="mono" color={afterToBal ? '#4ADE80' : 'kk.textMuted'}>
+                            {afterToBal ? formatBalance(afterToBal) : '...'}
+                          </Text>
+                          {afterToBal && beforeToBal && (
+                            <Text fontSize="10px" fontFamily="mono" color="#4ADE80">
+                              (+{formatBalance((parseFloat(afterToBal) - parseFloat(beforeToBal)).toFixed(8))})
+                            </Text>
+                          )}
+                        </HStack>
+                        {hasToPrice && afterToBal && beforeToBal && (
+                          <Text fontSize="9px" fontFamily="mono" color="#4ADE80">
+                            +{fmtCompact((parseFloat(afterToBal) - parseFloat(beforeToBal)) * toPriceUsd)}
                           </Text>
                         )}
-                      </HStack>
+                      </VStack>
                     </Flex>
                   </VStack>
                 </Box>
@@ -1043,46 +1200,56 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
 
           {/* ── SIGNING / APPROVING / BROADCASTING ───────────────── */}
           {busy && fromAsset && toAsset && (
-            <VStack gap="4" py="6" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
-              {/* Device icon with pulse */}
-              <Box
-                w="80px" h="80px"
-                borderRadius="xl"
-                bg="rgba(255,215,0,0.08)"
-                border="2px solid"
-                borderColor="rgba(255,215,0,0.2)"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-                style={{ animation: 'kkSwapDevicePulse 2s ease-in-out infinite' }}
-              >
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-                  <path d="M12 18h.01" />
-                </svg>
-              </Box>
-
-              <VStack gap="1">
-                <Text fontSize="md" fontWeight="600" color="kk.textPrimary">
-                  {phase === 'approving' ? t("approvingToken") : phase === 'signing' ? t("confirmOnDevice") : t("broadcasting")}
-                </Text>
-                <Text fontSize="xs" color="kk.textMuted" textAlign="center">
-                  {phase === 'signing' ? t("confirmOnDeviceDesc") : phase === 'approving' ? t("approvalRequired") : t("broadcastingDesc")}
-                </Text>
-              </VStack>
+            <VStack gap="3" py="4" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+              {/* Device icon with label inline */}
+              <Flex align="center" gap="4">
+                <Box
+                  w="56px" h="56px"
+                  borderRadius="xl"
+                  bg="rgba(255,215,0,0.08)"
+                  border="2px solid"
+                  borderColor="rgba(255,215,0,0.2)"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  flexShrink={0}
+                  style={{ animation: 'kkSwapDevicePulse 2s ease-in-out infinite' }}
+                >
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                    <path d="M12 18h.01" />
+                  </svg>
+                </Box>
+                <VStack gap="0" align="flex-start">
+                  <Text fontSize="md" fontWeight="600" color="kk.textPrimary">
+                    {phase === 'approving' ? t("approvingToken") : phase === 'signing' ? t("confirmOnDevice") : t("broadcasting")}
+                  </Text>
+                  <Text fontSize="xs" color="kk.textMuted">
+                    {phase === 'signing' ? t("confirmOnDeviceDesc") : phase === 'approving' ? t("approvalRequired") : t("broadcastingDesc")}
+                  </Text>
+                </VStack>
+              </Flex>
 
               {/* Mini summary */}
-              <Flex align="center" gap="2" bg="rgba(255,255,255,0.04)" px="4" py="2" borderRadius="lg">
-                <Text fontSize="sm" color="kk.textSecondary">{displayAmount} {fromAsset.symbol}</Text>
-                <Text color="kk.textMuted">&rarr;</Text>
-                <Text fontSize="sm" color="#23DCC8">~{quote?.expectedOutput} {toAsset.symbol}</Text>
-              </Flex>
+              <VStack gap="0.5">
+                <Flex align="center" gap="2" bg="rgba(255,255,255,0.04)" px="4" py="2" borderRadius="lg">
+                  <Text fontSize="sm" color="kk.textSecondary">{displayAmount} {fromAsset.symbol}</Text>
+                  <Text color="kk.textMuted">&rarr;</Text>
+                  <Text fontSize="sm" color="#23DCC8">~{quote?.expectedOutput} {toAsset.symbol}</Text>
+                </Flex>
+                {hasFromPrice && (
+                  <Text fontSize="10px" color="kk.textMuted">
+                    {fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}
+                    {hasToPrice && quote?.expectedOutput ? ` \u2192 ${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}` : ''}
+                  </Text>
+                )}
+              </VStack>
             </VStack>
           )}
 
           {/* ── REVIEW ───────────────────────────────────────────── */}
           {phase === 'review' && quote && fromAsset && toAsset && !busy && (
-            <VStack gap="4" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
+            <VStack gap="3" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
               {/* You Send / You Receive */}
               <Box w="full">
                 <Text fontSize="xs" color="kk.textMuted" mb="1.5">{t("youSend")}</Text>
@@ -1093,7 +1260,12 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                   <Image src={chainIcon(fromAsset)} w="28px" h="28px" borderRadius="full" />
                   <Box flex="1">
                     <Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{displayAmount} {fromAsset.symbol}</Text>
-                    <Text fontSize="10px" color="kk.textMuted">{fromAsset.name}</Text>
+                    <Flex gap="2" align="center">
+                      <Text fontSize="10px" color="kk.textMuted">{fromAsset.name}</Text>
+                      {hasFromPrice && (
+                        <Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
+                      )}
+                    </Flex>
                   </Box>
                 </Flex>
               </Box>
@@ -1115,7 +1287,12 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                   <Image src={chainIcon(toAsset)} w="28px" h="28px" borderRadius="full" />
                   <Box flex="1">
                     <Text fontSize="lg" fontWeight="700" color="#23DCC8">~{quote.expectedOutput} {toAsset.symbol}</Text>
-                    <Text fontSize="10px" color="kk.textMuted">{toAsset.name}</Text>
+                    <Flex gap="2" align="center">
+                      <Text fontSize="10px" color="kk.textMuted">{toAsset.name}</Text>
+                      {hasToPrice && (
+                        <Text fontSize="11px" fontFamily="mono" color="#23DCC8">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
+                      )}
+                    </Flex>
                   </Box>
                 </Flex>
               </Box>
@@ -1132,23 +1309,44 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                 <VStack gap="1.5" align="stretch">
                   <Flex justify="space-between">
                     <Text fontSize="xs" color="kk.textMuted">{t("rate")}</Text>
-                    <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">
-                      1 {fromAsset.symbol} = {formatBalance(
-                        (parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString()
-                      )} {toAsset.symbol}
-                    </Text>
+                    <Flex direction="column" align="flex-end" gap="0">
+                      <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">
+                        1 {fromAsset.symbol} = {formatBalance(
+                          (parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString()
+                        )} {toAsset.symbol}
+                      </Text>
+                      {hasFromPrice && (
+                        <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+                          1 {fromAsset.symbol} = {fmtCompact(fromPriceUsd)}
+                        </Text>
+                      )}
+                    </Flex>
                   </Flex>
                   <Flex justify="space-between">
                     <Text fontSize="xs" color="kk.textMuted">{t("minimumReceived")}</Text>
-                    <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">
-                      {formatBalance(quote.minimumOutput)} {toAsset.symbol}
-                    </Text>
+                    <Flex direction="column" align="flex-end" gap="0">
+                      <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">
+                        {formatBalance(quote.minimumOutput)} {toAsset.symbol}
+                      </Text>
+                      {hasToPrice && (
+                        <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+                          {fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)}
+                        </Text>
+                      )}
+                    </Flex>
                   </Flex>
                   <Flex justify="space-between">
                     <Text fontSize="xs" color="kk.textMuted">{t("networkFee")}</Text>
-                    <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">
-                      {formatBalance(quote.fees.outbound)} ({quote.fees.totalBps / 100}%)
-                    </Text>
+                    <Flex direction="column" align="flex-end" gap="0">
+                      <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">
+                        {formatBalance(quote.fees.outbound)} ({quote.fees.totalBps / 100}%)
+                      </Text>
+                      {hasToPrice && (
+                        <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+                          {fmtCompact(parseFloat(quote.fees.outbound) * toPriceUsd)}
+                        </Text>
+                      )}
+                    </Flex>
                   </Flex>
                   <Flex justify="space-between">
                     <Text fontSize="xs" color="kk.textMuted">{t("slippage")}</Text>
@@ -1223,9 +1421,9 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
 
           {/* ── INPUT ────────────────────────────────────────────── */}
           {!loadingAssets && (phase === 'input' || phase === 'quoting') && (
-            <VStack gap="3" align="stretch">
+            <VStack gap="2.5" align="stretch">
               {/* FROM card */}
-              <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="3">
+              <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="2.5">
                 <AssetSelector
                   label={t("from")}
                   selected={fromAsset}
@@ -1243,9 +1441,14 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                       <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" fontWeight="500">
                         {fromBalance ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
                       </Text>
+                      {fromBalance && hasFromPrice && (
+                        <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+                          ({fmtCompact(parseFloat(fromBalance) * fromPriceUsd)})
+                        </Text>
+                      )}
                     </HStack>
                     {fromAddress && (
-                      <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" truncate maxW="140px" title={fromAddress}>
+                      <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" truncate maxW="120px" title={fromAddress}>
                         {fromAddress.slice(0, 8)}...{fromAddress.slice(-6)}
                       </Text>
                     )}
@@ -1253,38 +1456,72 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                 )}
 
                 {fromAsset && (
-                  <Flex gap="2" align="center" mt="2">
-                    <Input
-                      value={isMax ? (fromBalance ? formatBalance(fromBalance) : 'MAX') : amount}
-                      onChange={(e) => { setAmount(e.target.value); setIsMax(false) }}
-                      placeholder={t("amountPlaceholder")}
-                      bg="rgba(0,0,0,0.3)"
-                      border="1px solid"
-                      borderColor={exceedsBalance ? "kk.error" : "kk.border"}
-                      color="kk.textPrimary"
-                      size="sm"
-                      fontFamily="mono"
-                      fontSize="md"
-                      disabled={isMax || busy}
-                      px="3"
-                      flex="1"
-                      _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold" }}
-                    />
-                    <Button
-                      size="sm"
-                      variant={isMax ? "solid" : "outline"}
-                      bg={isMax ? "kk.gold" : "transparent"}
-                      color={isMax ? "black" : "kk.textSecondary"}
-                      borderColor="kk.border"
-                      _hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
-                      onClick={() => { setIsMax(!isMax); setAmount("") }}
-                      h="32px"
-                      fontSize="xs"
-                      disabled={busy}
-                    >
-                      {t("max")}
-                    </Button>
-                  </Flex>
+                  <>
+                    {/* Amount input label with toggle */}
+                    <Flex justify="space-between" align="center" mt="2" mb="1" px="1">
+                      <Text fontSize="10px" color="kk.textMuted">
+                        {inputMode === 'crypto' ? `${t("amount")} (${fromAsset.symbol})` : `${t("amount")} (${fiatSymbol})`}
+                      </Text>
+                      {hasFromPrice && (
+                        <Box
+                          as="button"
+                          display="flex"
+                          alignItems="center"
+                          gap="1"
+                          color="kk.textMuted"
+                          cursor="pointer"
+                          _hover={{ color: "kk.gold" }}
+                          onClick={toggleInputMode}
+                          title={inputMode === 'crypto' ? t("switchToFiat") : t("switchToCrypto")}
+                        >
+                          <SwapInputIcon />
+                          <Text fontSize="10px">{inputMode === 'crypto' ? fiatSymbol : fromAsset.symbol}</Text>
+                        </Box>
+                      )}
+                    </Flex>
+                    <Flex gap="2" align="center">
+                      <Input
+                        value={isMax ? (fromBalance ? formatBalance(fromBalance) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
+                        onChange={(e) => inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value)}
+                        placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
+                        bg="rgba(0,0,0,0.3)"
+                        border="1px solid"
+                        borderColor={exceedsBalance ? "kk.error" : "kk.border"}
+                        color="kk.textPrimary"
+                        size="sm"
+                        fontFamily="mono"
+                        fontSize="md"
+                        disabled={isMax || busy}
+                        px="3"
+                        flex="1"
+                        _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold" }}
+                      />
+                      <Button
+                        size="sm"
+                        variant={isMax ? "solid" : "outline"}
+                        bg={isMax ? "kk.gold" : "transparent"}
+                        color={isMax ? "black" : "kk.textSecondary"}
+                        borderColor="kk.border"
+                        _hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
+                        onClick={() => { setIsMax(!isMax); setAmount(""); setFiatAmount("") }}
+                        h="32px"
+                        fontSize="xs"
+                        disabled={busy}
+                      >
+                        {t("max")}
+                      </Button>
+                    </Flex>
+                    {/* Secondary display: converted value */}
+                    {!isMax && hasFromPrice && (
+                      <Flex mt="1" px="1">
+                        {inputMode === 'crypto' && amountUsdPreview !== null ? (
+                          <Text fontSize="11px" color="kk.textMuted" fontFamily="mono">{fmtCompact(amountUsdPreview)}</Text>
+                        ) : inputMode === 'fiat' && amount ? (
+                          <Text fontSize="11px" color="kk.textMuted" fontFamily="mono">{formatBalance(amount)} {fromAsset.symbol}</Text>
+                        ) : null}
+                      </Flex>
+                    )}
+                  </>
                 )}
 
                 {exceedsBalance && (
@@ -1315,7 +1552,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
               </Flex>
 
               {/* TO card */}
-              <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="3" mt="-2">
+              <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="2.5" mt="-2">
                 <AssetSelector
                   label={t("to")}
                   selected={toAsset}
@@ -1329,9 +1566,16 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
                 {toAsset && quote && (
                   <Flex mt="2" justify="space-between" align="center" px="1">
                     <Text fontSize="10px" color="kk.textMuted">{t("expectedOutput")}:</Text>
-                    <Text fontSize="sm" fontFamily="mono" fontWeight="600" color="#23DCC8">
-                      {formatBalance(quote.expectedOutput)} {toAsset.symbol}
-                    </Text>
+                    <Flex direction="column" align="flex-end" gap="0">
+                      <Text fontSize="sm" fontFamily="mono" fontWeight="600" color="#23DCC8">
+                        {formatBalance(quote.expectedOutput)} {toAsset.symbol}
+                      </Text>
+                      {hasToPrice && (
+                        <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+                          {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
+                        </Text>
+                      )}
+                    </Flex>
                   </Flex>
                 )}
                 {toAsset && toAddress && (
@@ -1370,7 +1614,7 @@ export function SwapDialog({ open, onClose, chain, balance, address }: SwapDialo
 
         {/* ── Footer ──────────────────────────────────────────────── */}
         {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && (
-          <Flex px="5" py="3" borderTop="1px solid" borderColor="kk.border" justify="center">
+          <Flex px="5" py="2" borderTop="1px solid" borderColor="kk.border" justify="center">
             <HStack gap="1">
               <ThorchainIcon />
               <Text fontSize="10px" color="kk.textMuted">

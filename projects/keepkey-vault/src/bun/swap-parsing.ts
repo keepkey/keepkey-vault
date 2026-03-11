@@ -116,9 +116,10 @@ export function parseQuoteResponse(
     ? parseFloat(quote.amountOutMin)
     : expectedNum * (1 - actualSlippageBps / 10000)
 
-  // Estimated time from raw THORNode data
-  const estimatedTime = raw.inbound_confirmation_seconds || raw.total_swap_seconds
-    || quote.totalSwapSeconds || quote.estimatedTime || 600
+  // Estimated time — prefer total_swap_seconds (full swap duration) over
+  // inbound_confirmation_seconds (just the inbound leg, much shorter)
+  const estimatedTime = raw.total_swap_seconds || quote.totalSwapSeconds
+    || quote.estimatedTime || raw.inbound_confirmation_seconds || 600
 
   const minOutStr = minOut > 0 ? minOut.toFixed(8).replace(/\.?0+$/, '') : '0'
 
