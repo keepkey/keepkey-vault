@@ -48,6 +48,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       osmosisGetAddress: { params: any; response: any } // TODO: type
       xrpGetAddress: { params: any; response: any } // TODO: type
       solanaGetAddress: { params: any; response: any }
+      tonGetAddress: { params: any; response: any }
 
       // ── Transaction signing ───────────────────────────────────────
       btcSignTx: { params: any; response: any }
@@ -61,6 +62,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       osmosisSignTx: { params: any; response: any } // TODO: type
       xrpSignTx: { params: any; response: any } // TODO: type
       solanaSignTx: { params: any; response: any }
+      tonSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: void; response: ChainBalance[] }

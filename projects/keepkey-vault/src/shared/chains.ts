@@ -10,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'ton'
   color: string
   rpcMethod: string
   signMethod: string
@@ -193,16 +193,32 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://solscan.io/account/{{address}}',
     explorerTxUrl: 'https://solscan.io/tx/{{txid}}',
   },
+  {
+    id: 'ton', chain: Chain.TON, coin: 'Ton', symbol: 'TON',
+    chainFamily: 'ton', color: '#0088CC',
+    rpcMethod: 'tonGetAddress', signMethod: 'tonSignTx',
+    defaultPath: [0x8000002C, 0x8000025F, 0x80000000],
+    explorerAddressUrl: 'https://tonscan.org/address/{{address}}',
+    explorerTxUrl: 'https://tonscan.org/tx/{{txid}}',
+  },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
-const CAIP_FALLBACKS: Record<string, string> = {}
-const DECIMAL_FALLBACKS: Record<string, number> = {}
+const CAIP_FALLBACKS: Record<string, string> = {
+  TON: 'ton:-239/slip44:607',
+}
+const DECIMAL_FALLBACKS: Record<string, number> = {
+  TON: 9,
+}
+
+const NETWORK_ID_FALLBACKS: Record<string, string> = {
+  TON: 'ton:-239',
+}
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth
 export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   ...c,
-  networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId],
+  networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId] || NETWORK_ID_FALLBACKS[c.chain] || '',
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
