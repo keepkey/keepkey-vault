@@ -15,6 +15,7 @@ import setup from "./locales/en/setup.json"
 import update from "./locales/en/update.json"
 import appstore from "./locales/en/appstore.json"
 import dialogs from "./locales/en/dialogs.json"
+import swap from "./locales/en/swap.json"
 
 const STORAGE_KEY = "keepkey-vault-lang"
 
@@ -47,6 +48,7 @@ i18n
 			"update",
 			"appstore",
 			"dialogs",
+			"swap",
 		],
 		resources: {
 			en: {
@@ -62,6 +64,7 @@ i18n
 				update,
 				appstore,
 				dialogs,
+				swap,
 			},
 		},
 		interpolation: { escapeValue: false },

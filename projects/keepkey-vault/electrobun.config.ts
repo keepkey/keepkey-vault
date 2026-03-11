@@ -23,6 +23,7 @@ export default {
 				"node-hid",
 				"usb",
 				"ethers",
+				"@pioneer-platform/pioneer-client",
 			],
 		},
 		// Vite builds to dist/, we copy from there

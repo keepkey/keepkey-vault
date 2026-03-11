@@ -37,15 +37,19 @@ export async function buildXrpTx(
   let memoData: string | undefined
 
   if (memo && memo.trim()) {
-    if (/^\d+$/.test(memo.trim())) {
-      const tagNum = parseInt(memo.trim(), 10)
+    const trimmed = memo.trim()
+    // THORChain/swap memos (e.g. "=:ETH.ETH:0x...") are always memo data, never a destination tag.
+    // Only treat as destination tag if purely numeric AND not a swap routing memo.
+    const isSwapMemo = /^[=+\-~]?:/.test(trimmed)
+    if (!isSwapMemo && /^\d+$/.test(trimmed)) {
+      const tagNum = parseInt(trimmed, 10)
       if (tagNum >= 0 && tagNum <= 4294967295) {
         destinationTag = String(tagNum)
       } else {
         throw new Error(`XRP destination tag must be 0-4294967295, got: ${memo}`)
       }
     } else {
-      memoData = memo.trim()
+      memoData = trimmed
     }
   }
 

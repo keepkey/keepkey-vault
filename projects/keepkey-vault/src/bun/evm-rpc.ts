@@ -70,6 +70,23 @@ export async function getTokenMetadata(rpcUrl: string, contractAddress: string):
   return { symbol, name, decimals: isNaN(decimals) ? 18 : decimals }
 }
 
+/** Check ERC-20 allowance(owner, spender) via eth_call */
+export async function getErc20Allowance(rpcUrl: string, tokenContract: string, owner: string, spender: string): Promise<bigint> {
+  const selector = 'dd62ed3e' // allowance(address,address)
+  const ownerPad = owner.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const spenderPad = spender.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const data = '0x' + selector + ownerPad + spenderPad
+  const result = await ethCall(rpcUrl, tokenContract, data)
+  return BigInt(result || '0x0')
+}
+
+/** Get ERC-20 decimals via eth_call */
+export async function getErc20Decimals(rpcUrl: string, tokenContract: string): Promise<number> {
+  const result = await ethCall(rpcUrl, tokenContract, '0x313ce567') // decimals()
+  // If RPC returns empty/zero, fall back to 18 (0x12 hex = 18 decimal, the ERC-20 standard default)
+  return Number(BigInt(result || '0x12'))
+}
+
 // ── Direct RPC methods for custom chains ─────────────────────────────
 
 export async function getEvmBalance(rpcUrl: string, address: string): Promise<bigint> {
@@ -87,10 +104,48 @@ export async function getEvmNonce(rpcUrl: string, address: string): Promise<numb
   return Number(BigInt(result || '0x0'))
 }
 
+/** Estimate gas for a tx, returning fallback on failure. Adds 20% buffer. */
+export async function estimateGas(
+  rpcUrl: string,
+  tx: { to: string; from: string; data: string; value?: string },
+  fallbackGas: bigint,
+): Promise<bigint> {
+  try {
+    const result = await ethRpc(rpcUrl, 'eth_estimateGas', [tx])
+    const estimated = BigInt(result || '0x0')
+    return estimated > 0n ? estimated * 120n / 100n : fallbackGas // 20% buffer
+  } catch {
+    return fallbackGas
+  }
+}
+
 export async function broadcastEvmTx(rpcUrl: string, signedTxHex: string): Promise<string> {
   const hex = signedTxHex.startsWith('0x') ? signedTxHex : `0x${signedTxHex}`
   const result = await ethRpc(rpcUrl, 'eth_sendRawTransaction', [hex])
   return result
+}
+
+/** Poll for tx receipt, returning null if not mined within maxWaitMs */
+export async function waitForTxReceipt(
+  rpcUrl: string,
+  txHash: string,
+  maxWaitMs = 60_000,
+  pollMs = 3_000,
+): Promise<{ status: boolean; gasUsed: bigint } | null> {
+  const start = Date.now()
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const receipt = await ethRpc(rpcUrl, 'eth_getTransactionReceipt', [txHash])
+      if (receipt && receipt.status !== undefined) {
+        return {
+          status: receipt.status === '0x1',
+          gasUsed: BigInt(receipt.gasUsed || '0x0'),
+        }
+      }
+    } catch { /* not mined yet */ }
+    await new Promise(r => setTimeout(r, pollMs))
+  }
+  return null // timed out
 }
 
 export async function getEvmChainId(rpcUrl: string): Promise<number> {

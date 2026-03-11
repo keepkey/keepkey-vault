@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -125,6 +125,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getAppSettings: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
+      setFiatCurrency: { params: { currency: string }; response: AppSettings }
+      setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setSwapsEnabled: { params: { enabled: boolean }; response: AppSettings }
 
       // ── Reports ──────────────────────────────────────────────────────
       generateReport: { params: void; response: ReportMeta }
@@ -132,6 +135,18 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getReport: { params: { id: string }; response: { meta: ReportMeta; data: ReportData } | null }
       deleteReport: { params: { id: string }; response: void }
       saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
+
+      // ── Swap ──────────────────────────────────────────────────────────
+      getSwapAssets: { params: void; response: SwapAsset[] }
+      getSwapQuote: { params: SwapQuoteParams; response: SwapQuote }
+      executeSwap: { params: ExecuteSwapParams; response: SwapResult }
+      getPendingSwaps: { params: void; response: PendingSwap[] }
+      dismissSwap: { params: { txid: string }; response: void }
+
+      // ── Swap History (SQLite-persisted) ─────────────────────────────
+      getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
+      getSwapHistoryStats: { params: void; response: SwapHistoryStats }
+      exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
@@ -178,6 +193,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
+      'swap-update': SwapStatusUpdate
+      'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
     }
   }

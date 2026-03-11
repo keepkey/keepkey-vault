@@ -13,9 +13,7 @@
 
 import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
 import { getLatestDeviceSnapshot, getCachedPubkeys } from './db'
-import { getPioneerApiBase } from './pioneer'
-
-const REPORT_TIMEOUT_MS = 60_000
+import { getPioneer } from './pioneer'
 
 /** Section title prefixes — shared with tax-export.ts for reliable extraction. */
 export const SECTION_TITLES = {
@@ -35,35 +33,12 @@ function safeRoundSats(value: unknown): number {
 	return Math.round(n)
 }
 
-function getPioneerQueryKey(): string {
-	return process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
-}
+// ── Pioneer API Helpers (via SDK client) ─────────────────────────────
 
-function getPioneerBase(): string {
-	return getPioneerApiBase()
-}
-
-// ── Pioneer API Helpers ──────────────────────────────────────────────
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-	const controller = new AbortController()
-	const timer = setTimeout(() => controller.abort(), timeoutMs)
-	try {
-		return await fetch(url, { ...init, signal: controller.signal })
-	} finally {
-		clearTimeout(timer)
-	}
-}
-
-async function fetchPubkeyInfo(baseUrl: string, xpub: string): Promise<any> {
-	const resp = await fetchWithTimeout(
-		`${baseUrl}/api/v1/utxo/pubkey-info/BTC/${xpub}`,
-		{ method: 'GET', headers: { 'Authorization': getPioneerQueryKey() } },
-		REPORT_TIMEOUT_MS,
-	)
-	if (!resp.ok) throw new Error(`PubkeyInfo ${resp.status}`)
-	const json = await resp.json()
-	const result = json.data || json
+async function fetchPubkeyInfo(xpub: string): Promise<any> {
+	const pioneer = await getPioneer()
+	const resp = await pioneer.GetPubkeyInfo({ network: 'BTC', xpub })
+	const result = resp?.data || resp
 	if (typeof result !== 'object' || result === null) {
 		console.warn('[Report] fetchPubkeyInfo: unexpected response shape, returning empty object')
 		return {}
@@ -71,23 +46,15 @@ async function fetchPubkeyInfo(baseUrl: string, xpub: string): Promise<any> {
 	return result
 }
 
-async function fetchTxHistory(baseUrl: string, xpub: string, caip: string): Promise<any[]> {
-	const resp = await fetchWithTimeout(
-		`${baseUrl}/api/v1/tx/history`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'Authorization': getPioneerQueryKey() },
-			body: JSON.stringify({ queries: [{ pubkey: xpub, caip }] }),
-		},
-		REPORT_TIMEOUT_MS,
-	)
-	if (!resp.ok) throw new Error(`TxHistory ${resp.status}`)
-	const json = await resp.json()
-	if (typeof json !== 'object' || json === null) {
+async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
+	const pioneer = await getPioneer()
+	const resp = await pioneer.GetTxHistory({ queries: [{ pubkey: xpub, caip }] })
+	const data = resp?.data || resp
+	if (typeof data !== 'object' || data === null) {
 		console.warn('[Report] fetchTxHistory: unexpected response shape, returning empty array')
 		return []
 	}
-	const histories = json.histories || json.data?.histories || []
+	const histories = data.histories || data?.data?.histories || []
 	return histories[0]?.transactions || []
 }
 
@@ -265,7 +232,6 @@ interface BtcTx {
 }
 
 async function buildBtcSections(
-	baseUrl: string,
 	btcXpubs: Array<{ xpub: string; scriptType: string; path: number[] }>,
 	onProgress?: (msg: string, pct: number) => void,
 ): Promise<ReportSection[]> {
@@ -277,7 +243,7 @@ async function buildBtcSections(
 	for (const x of btcXpubs) {
 		if (!x.xpub) continue
 		try {
-			const info = await fetchPubkeyInfo(baseUrl, x.xpub)
+			const info = await fetchPubkeyInfo(x.xpub)
 			const tokens = info.tokens || []
 			const used = tokens.filter((t: any) => (t.transfers || 0) > 0)
 			xpubInfos.push({
@@ -360,7 +326,7 @@ async function buildBtcSections(
 	for (const x of btcXpubs) {
 		if (!x.xpub) continue
 		try {
-			const txs = await fetchTxHistory(baseUrl, x.xpub, BTC_CAIP)
+			const txs = await fetchTxHistory(x.xpub, BTC_CAIP)
 			for (const tx of txs) {
 				if (!seenTxids.has(tx.txid)) {
 					seenTxids.add(tx.txid)
@@ -571,7 +537,7 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 	const { btcXpubs, deviceId, deviceLabel, onProgress } = opts
 	// Clone balances to avoid mutating the caller's data
 	const balances = opts.balances.map(b => ({ ...b }))
-	const baseUrl = getPioneerBase()
+	// Pioneer client handles routing internally — no base URL needed
 	const sections: ReportSection[] = []
 	const now = new Date()
 
@@ -591,28 +557,19 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 				let totalSats = 0
 				for (const x of btcXpubs) {
 					if (!x.xpub) continue
-					const info = await fetchPubkeyInfo(baseUrl, x.xpub)
+					const info = await fetchPubkeyInfo(x.xpub)
 					totalSats += Math.round(Number(info.balance || 0))
 				}
 				if (totalSats > 0) {
 					const btcBalance = totalSats / 1e8
-					// Fetch BTC price from Pioneer market endpoint
+					// Fetch BTC price via Pioneer client
 					let btcUsd = 0
 					try {
-						const priceResp = await fetchWithTimeout(
-							`${baseUrl}/api/v1/market/info`,
-							{
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json', 'Authorization': getPioneerQueryKey() },
-								body: JSON.stringify([BTC_CAIP]),
-							},
-							10_000,
-						)
-						if (priceResp.ok) {
-							const priceData = await priceResp.json()
-							const price = priceData?.data?.[0] || priceData?.[0] || 0
-							btcUsd = btcBalance * (typeof price === 'number' ? price : parseFloat(String(price)) || 0)
-						}
+						const pioneer = await getPioneer()
+						const priceResp = await pioneer.GetMarketInfo([BTC_CAIP])
+						const priceData = priceResp?.data || priceResp
+						const price = Array.isArray(priceData) ? priceData[0] : priceData?.data?.[0] || 0
+						btcUsd = btcBalance * (typeof price === 'number' ? price : parseFloat(String(price)) || 0)
 					} catch (e: any) {
 						console.warn('[reports] BTC price fetch failed:', e.message)
 					}
@@ -662,7 +619,7 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 	console.log(`[reports] BTC section check: btcXpubs=${btcXpubs?.length ?? 0}`)
 	if (btcXpubs && btcXpubs.length > 0) {
 		try {
-			const btcSections = await buildBtcSections(baseUrl, btcXpubs, onProgress)
+			const btcSections = await buildBtcSections(btcXpubs, onProgress)
 			sections.push(...btcSections)
 			onProgress?.('BTC report complete', 80)
 		} catch (e: any) {

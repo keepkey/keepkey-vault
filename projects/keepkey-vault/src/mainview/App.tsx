@@ -25,6 +25,7 @@ import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
+import { SwapTracker } from "./components/SwapTracker"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
@@ -41,6 +42,7 @@ function App() {
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
+	const [swapsEnabled, setSwapsEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
@@ -62,7 +64,7 @@ function App() {
 			.then(setAppVersion)
 			.catch(() => {})
 		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => setRestApiEnabled(s.restApiEnabled))
+			.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
 			.catch(() => {})
 	}, [])
 
@@ -589,7 +591,12 @@ function App() {
 			</Flex>
 			<DeviceSettingsDrawer
 				open={settingsOpen}
-				onClose={() => setSettingsOpen(false)}
+				onClose={() => {
+					setSettingsOpen(false)
+					rpcRequest<AppSettings>("getAppSettings")
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
+						.catch(() => {})
+				}}
 				deviceState={deviceState}
 				onCheckForUpdate={update.checkForUpdate}
 				updatePhase={update.phase}
@@ -614,6 +621,7 @@ function App() {
 				wcUri={wcUri}
 				onClose={handleCloseWalletConnect}
 			/>
+			{swapsEnabled && <SwapTracker />}
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{(pendingAppUrl || pendingWcOpen) && (
 				<>
