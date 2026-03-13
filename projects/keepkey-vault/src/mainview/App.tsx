@@ -123,13 +123,13 @@ function App() {
 
 	const handlePassphraseCancel = useCallback(() => { setPinRequestType(null); setPassphraseRequested(false) }, [])
 
-	// Auto-show passphrase overlay when device needs passphrase;
-	// auto-dismiss when device leaves needs_passphrase (e.g. → ready).
+	// Auto-show passphrase overlay when device needs passphrase.
+	// Do NOT auto-dismiss here — the dialog must stay visible showing
+	// "Confirm on device" after the user submits until state reaches 'ready'.
+	// Dismissal is handled by the 'ready'/'disconnected' cleanup effect below.
 	useEffect(() => {
 		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
 			setPassphraseRequested(true)
-		} else if (deviceState.state !== "needs_passphrase" && passphraseRequested) {
-			setPassphraseRequested(false)
 		}
 	}, [deviceState.state, passphraseRequested])
 
@@ -582,6 +582,7 @@ function App() {
 					settingsOpen={settingsOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
+					passphraseActive={deviceState.passphraseProtection}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
@@ -596,6 +597,7 @@ function App() {
 					rpcRequest<AppSettings>("getAppSettings")
 						.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
 						.catch(() => {})
+					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
 				deviceState={deviceState}
 				onCheckForUpdate={update.checkForUpdate}
