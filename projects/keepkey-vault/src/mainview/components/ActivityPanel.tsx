@@ -1,8 +1,8 @@
 /**
- * ActivityPanel — drawer showing recent transaction activity across all chains.
+ * ActivityPanel — drawer showing recent transaction activity per network.
  *
- * Network selector with chain icons + "Scan" button fetches history from Pioneer.
- * Shows: txids, chain, type (send/receive/swap/sign), timestamp, status.
+ * Forced network select dropdown + refresh icon triggers Pioneer scan.
+ * No "All" — user must pick a network. Only shows that network's txids.
  */
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { Box, Text, Flex, VStack, HStack, Image } from "@chakra-ui/react"
@@ -20,11 +20,9 @@ interface ActivityPanelProps {
   onRefresh: () => void
 }
 
-// Chain color lookup
 const CHAIN_COLORS: Record<string, string> = {}
 CHAINS.forEach(c => { CHAIN_COLORS[c.symbol] = c.color; CHAIN_COLORS[c.id] = c.color })
 
-// Type labels and colors
 const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
   send: { label: 'Sent', color: '#E53E3E' },
   receive: { label: 'Received', color: '#23DCC8' },
@@ -60,50 +58,6 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400_000)}d ago`
 }
 
-function SwapRow({ swap }: { swap: PendingSwap }) {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
-
-  const statusColor = swap.status === 'completed' ? '#23DCC8'
-    : swap.status === 'failed' ? '#E53E3E'
-    : swap.status === 'refunded' ? '#F7931A'
-    : '#627EEA'
-
-  return (
-    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3" _hover={{ bg: "rgba(255,255,255,0.06)" }} transition="background 0.15s">
-      <Flex justify="space-between" align="center" mb="1">
-        <HStack gap="2">
-          <Box w="6px" h="6px" borderRadius="full" bg={CHAIN_COLORS[swap.fromSymbol] || '#888'} />
-          <Text fontSize="xs" fontWeight="600" color="white">{swap.fromSymbol} → {swap.toSymbol}</Text>
-          <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
-        </HStack>
-        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${statusColor}22`} color={statusColor}>{swap.status}</Box>
-      </Flex>
-      {swap.fromAmount && (
-        <Text fontSize="2xs" color="whiteAlpha.500" mb="1">
-          {swap.fromAmount} {swap.fromSymbol}{swap.expectedOutput ? ` → ${swap.expectedOutput} ${swap.toSymbol}` : ''}
-        </Text>
-      )}
-      <Flex justify="space-between" align="center">
-        <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "#23DCC8" }} onClick={() => handleCopy(swap.txid)} title={copied ? 'Copied!' : 'Click to copy'}>
-          {copied ? 'Copied!' : truncateTxid(swap.txid)}
-        </Text>
-        <HStack gap="2">
-          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={() => rpcRequest('openUrl', { url: explorerUrl })}>Explorer</Text>}
-          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
-        </HStack>
-      </Flex>
-    </Box>
-  )
-}
-
 function ActivityRow({ activity }: { activity: RecentActivity }) {
   const [copied, setCopied] = useState(false)
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
@@ -121,19 +75,17 @@ function ActivityRow({ activity }: { activity: RecentActivity }) {
     <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3" _hover={{ bg: "rgba(255,255,255,0.06)" }} transition="background 0.15s">
       <Flex justify="space-between" align="center" mb="1">
         <HStack gap="2">
-          <Box w="6px" h="6px" borderRadius="full" bg={CHAIN_COLORS[activity.chain] || '#888'} />
-          <Text fontSize="xs" fontWeight="600" color="white">{activity.chain}</Text>
           <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
           {activity.source === 'api' && (
             <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>
           )}
         </HStack>
-        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{statusConf.label}</Box>
+        <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
       </Flex>
       {(activity.amount || activity.to || activity.appName) && (
         <Text fontSize="2xs" color="whiteAlpha.500" mb="1" truncate>
           {activity.amount && `${activity.amount} ${activity.asset || activity.chain}`}
-          {activity.to && ` → ${activity.to.slice(0, 12)}...`}
+          {activity.to && ` \u2192 ${activity.to.slice(0, 16)}...`}
           {activity.appName && activity.source === 'api' && ` via ${activity.appName}`}
         </Text>
       )}
@@ -145,59 +97,73 @@ function ActivityRow({ activity }: { activity: RecentActivity }) {
         ) : (
           <Text fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
         )}
+        {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={() => rpcRequest('openUrl', { url: explorerUrl })}>Explorer</Text>}
+      </Flex>
+    </Box>
+  )
+}
+
+function SwapRow({ swap }: { swap: PendingSwap }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
+  const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
+  const statusColor = swap.status === 'completed' ? '#23DCC8' : swap.status === 'failed' ? '#E53E3E' : swap.status === 'refunded' ? '#F7931A' : '#627EEA'
+
+  return (
+    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3" _hover={{ bg: "rgba(255,255,255,0.06)" }} transition="background 0.15s">
+      <Flex justify="space-between" align="center" mb="1">
+        <HStack gap="2">
+          <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
+          <Text fontSize="xs" fontWeight="600" color="white">{swap.fromSymbol} \u2192 {swap.toSymbol}</Text>
+        </HStack>
+        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${statusColor}22`} color={statusColor}>{swap.status}</Box>
+      </Flex>
+      {swap.fromAmount && <Text fontSize="2xs" color="whiteAlpha.500" mb="1">{swap.fromAmount} {swap.fromSymbol}{swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}</Text>}
+      <Flex justify="space-between" align="center">
+        <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "#23DCC8" }} onClick={() => handleCopy(swap.txid)} title={copied ? 'Copied!' : 'Click to copy'}>
+          {copied ? 'Copied!' : truncateTxid(swap.txid)}
+        </Text>
         <HStack gap="2">
           {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={() => rpcRequest('openUrl', { url: explorerUrl })}>Explorer</Text>}
-          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
+          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
         </HStack>
       </Flex>
     </Box>
   )
 }
 
-/** Network selector pill */
-function ChainPill({ chain, selected, onClick }: { chain: { id: string; symbol: string; caip: string; color: string }; selected: boolean; onClick: () => void }) {
-  return (
-    <Box
-      as="button"
-      display="flex"
-      alignItems="center"
-      gap="1.5"
-      px="2.5"
-      py="1"
-      borderRadius="full"
-      border="1px solid"
-      borderColor={selected ? chain.color : 'rgba(255,255,255,0.1)'}
-      bg={selected ? `${chain.color}22` : 'transparent'}
-      cursor="pointer"
-      _hover={{ bg: `${chain.color}15`, borderColor: chain.color }}
-      transition="all 0.15s"
-      onClick={onClick}
-      flexShrink={0}
-    >
-      <Image src={caipToIcon(chain.caip)} w="14px" h="14px" borderRadius="full" fallback={<Box w="14px" h="14px" borderRadius="full" bg={chain.color} />} />
-      <Text fontSize="2xs" fontWeight="600" color={selected ? 'white' : 'whiteAlpha.600'}>{chain.symbol}</Text>
-    </Box>
-  )
-}
+/** Refresh/scan icon SVG */
+const RefreshIcon = ({ spinning }: { spinning?: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={spinning ? { animation: 'spin 1s linear infinite' } : {}}>
+    <path d="M13.65 2.35A7.96 7.96 0 0 0 8 0C3.58 0 0 3.58 0 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 8 14 6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z" fill="currentColor" />
+  </svg>
+)
 
 export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefresh }: ActivityPanelProps) {
   const [tab, setTab] = useState<'activity' | 'swaps'>('activity')
-  const [selectedChain, setSelectedChain] = useState<string | null>(null)
+  const [selectedChain, setSelectedChain] = useState<string>('')
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState<string | null>(null)
   const [availableChains, setAvailableChains] = useState<ChainBalance[]>([])
 
-  // Load chains that have balances (these are the ones worth scanning)
+  // Load chains that have balances
   useEffect(() => {
     if (!open) return
     rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances')
       .then(result => {
-        if (result?.balances) setAvailableChains(result.balances)
+        if (result?.balances) {
+          setAvailableChains(result.balances)
+          // Auto-select first chain if none selected
+          if (!selectedChain && result.balances.length > 0) {
+            const sorted = [...result.balances].sort((a, b) => b.balanceUsd - a.balanceUsd)
+            const first = CHAINS.find(c => c.id === sorted[0].chainId)
+            if (first) setSelectedChain(first.id)
+          }
+        }
       })
       .catch(() => {})
   }, [open])
 
-  // Map available chains to their CHAINS config for icons/colors
   const chainOptions = useMemo(() => {
     return availableChains
       .map(b => {
@@ -209,21 +175,24 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       .sort((a, b) => b.balanceUsd - a.balanceUsd)
   }, [availableChains])
 
-  // Filtered activities by selected chain
-  const filteredActivities = useMemo(() => {
-    if (!selectedChain) return activities
-    const chainDef = CHAINS.find(c => c.id === selectedChain)
-    if (!chainDef) return activities
-    return activities.filter(a => a.chain === chainDef.symbol)
-  }, [activities, selectedChain])
+  const selectedDef = useMemo(() => CHAINS.find(c => c.id === selectedChain), [selectedChain])
 
-  // Filtered swaps
+  // Filter activities to selected chain
+  const filteredActivities = useMemo(() => {
+    if (!selectedDef) return []
+    return activities.filter(a => a.chain === selectedDef.symbol)
+  }, [activities, selectedDef])
+
   const activeSwaps = useMemo(() =>
     pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'),
     [pendingSwaps]
   )
 
-  // Dedupe swaps from activity list
+  const filteredSwaps = useMemo(() => {
+    if (!selectedDef) return activeSwaps
+    return activeSwaps.filter(s => s.fromSymbol === selectedDef.symbol)
+  }, [activeSwaps, selectedDef])
+
   const nonSwapActivities = useMemo(() => {
     const swapTxids = new Set(pendingSwaps.map(s => s.txid))
     return filteredActivities.filter(a => !(a.type === 'swap' && a.txid && swapTxids.has(a.txid)))
@@ -235,27 +204,24 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
     setScanResult(null)
     try {
       const result = await rpcRequest<{ count: number }>('scanChainHistory', { chainId: selectedChain }, 60000)
-      const chainDef = CHAINS.find(c => c.id === selectedChain)
-      setScanResult(result.count > 0 ? `Found ${result.count} new tx${result.count > 1 ? 's' : ''}` : `No new transactions for ${chainDef?.symbol || selectedChain}`)
+      setScanResult(result.count > 0 ? `+${result.count} tx${result.count > 1 ? 's' : ''}` : 'Up to date')
       onRefresh()
     } catch (e: any) {
-      setScanResult(`Scan failed: ${e.message || 'unknown error'}`)
+      setScanResult(e.message?.slice(0, 40) || 'Failed')
     } finally {
       setScanning(false)
     }
   }, [selectedChain, scanning, onRefresh])
 
-  // Clear scan result when chain changes
   useEffect(() => { setScanResult(null) }, [selectedChain])
 
   if (!open) return null
 
   return (
     <>
-      {/* Backdrop */}
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <Box position="fixed" inset="0" bg="blackAlpha.600" zIndex={Z.drawerBackdrop} onClick={onClose} />
 
-      {/* Panel */}
       <Box
         position="fixed" bottom="0" left="0"
         w="420px" maxW="100vw" h="75vh" maxH="650px"
@@ -265,9 +231,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
         {/* Header */}
         <Flex px="4" pt="4" pb="2" justify="space-between" align="center" flexShrink={0}>
           <Text fontSize="sm" fontWeight="700" color="white">Recent Activity</Text>
-          <HStack gap="2">
-            <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">&times;</Text>
-          </HStack>
+          <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">&times;</Text>
         </Flex>
 
         {/* Tabs */}
@@ -294,45 +258,73 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
           )}
         </Flex>
 
-        {/* Network selector (activity tab only) */}
+        {/* Network selector + refresh */}
         {tab === 'activity' && (
-          <Box px="4" pb="2" flexShrink={0}>
-            <Flex gap="1.5" overflowX="auto" pb="1" css={{ '&::-webkit-scrollbar': { display: 'none' } }}>
-              <ChainPill
-                chain={{ id: '', symbol: 'All', caip: '', color: '#23DCC8' }}
-                selected={selectedChain === null}
-                onClick={() => setSelectedChain(null)}
-              />
-              {chainOptions.map(c => (
-                <ChainPill key={c.id} chain={c} selected={selectedChain === c.id} onClick={() => setSelectedChain(c.id)} />
-              ))}
+          <Flex px="4" pb="3" gap="2" align="center" flexShrink={0}>
+            {/* Select dropdown with chain icon */}
+            <Flex
+              flex="1" align="center" gap="2"
+              bg="rgba(255,255,255,0.05)" border="1px solid" borderColor="rgba(255,255,255,0.1)"
+              borderRadius="lg" px="3" py="1.5" position="relative"
+            >
+              {selectedDef && (
+                <Image src={caipToIcon(selectedDef.caip)} w="18px" h="18px" borderRadius="full" flexShrink={0}
+                  fallback={<Box w="18px" h="18px" borderRadius="full" bg={selectedDef.color} flexShrink={0} />}
+                />
+              )}
+              <Box
+                as="select"
+                flex="1"
+                bg="transparent"
+                border="none"
+                color="white"
+                fontSize="xs"
+                fontWeight="600"
+                outline="none"
+                cursor="pointer"
+                value={selectedChain}
+                onChange={(e: any) => setSelectedChain(e.target.value)}
+                css={{
+                  '& option': { background: '#1a1a2e', color: 'white' },
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                }}
+              >
+                <option value="" disabled>Select network...</option>
+                {chainOptions.map(c => (
+                  <option key={c.id} value={c.id}>{c.symbol}</option>
+                ))}
+              </Box>
+              {/* Dropdown arrow */}
+              <Text fontSize="2xs" color="whiteAlpha.400" flexShrink={0}>{'\u25BC'}</Text>
             </Flex>
 
-            {/* Scan button — only when a specific chain is selected */}
-            {selectedChain && (
-              <Flex mt="2" gap="2" align="center">
-                <Box
-                  as="button"
-                  px="3" py="1" borderRadius="md" fontSize="xs" fontWeight="600"
-                  bg={scanning ? 'rgba(255,255,255,0.05)' : 'rgba(35,220,200,0.15)'}
-                  color={scanning ? 'whiteAlpha.400' : '#23DCC8'}
-                  border="1px solid"
-                  borderColor={scanning ? 'rgba(255,255,255,0.05)' : 'rgba(35,220,200,0.3)'}
-                  cursor={scanning ? 'not-allowed' : 'pointer'}
-                  _hover={scanning ? {} : { bg: 'rgba(35,220,200,0.25)' }}
-                  transition="all 0.15s"
-                  onClick={handleScan}
-                >
-                  {scanning ? 'Scanning...' : `Scan ${CHAINS.find(c => c.id === selectedChain)?.symbol || ''} History`}
-                </Box>
-                {scanResult && (
-                  <Text fontSize="2xs" color={scanResult.startsWith('Found') ? '#23DCC8' : scanResult.startsWith('Scan failed') ? '#E53E3E' : 'whiteAlpha.500'}>
-                    {scanResult}
-                  </Text>
-                )}
-              </Flex>
+            {/* Refresh/scan icon */}
+            <Box
+              as="button"
+              display="flex" alignItems="center" justifyContent="center"
+              w="36px" h="36px" borderRadius="lg" flexShrink={0}
+              bg={scanning ? 'rgba(255,255,255,0.03)' : 'rgba(35,220,200,0.12)'}
+              border="1px solid"
+              borderColor={scanning ? 'rgba(255,255,255,0.05)' : 'rgba(35,220,200,0.3)'}
+              color={scanning ? 'whiteAlpha.300' : '#23DCC8'}
+              cursor={scanning || !selectedChain ? 'not-allowed' : 'pointer'}
+              opacity={!selectedChain ? 0.3 : 1}
+              _hover={scanning || !selectedChain ? {} : { bg: 'rgba(35,220,200,0.2)' }}
+              transition="all 0.15s"
+              onClick={handleScan}
+              title={scanning ? 'Scanning...' : `Scan ${selectedDef?.symbol || ''} history`}
+            >
+              <RefreshIcon spinning={scanning} />
+            </Box>
+
+            {/* Scan result toast */}
+            {scanResult && (
+              <Text fontSize="2xs" flexShrink={0} color={scanResult.startsWith('+') ? '#23DCC8' : scanResult === 'Up to date' ? 'whiteAlpha.500' : '#E53E3E'}>
+                {scanResult}
+              </Text>
             )}
-          </Box>
+          </Flex>
         )}
 
         {/* Content */}
@@ -340,16 +332,25 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
           <VStack gap="2" align="stretch">
             {tab === 'activity' && (
               <>
-                {activeSwaps.filter(s => !selectedChain || CHAINS.find(c => c.id === selectedChain)?.symbol === s.fromSymbol).map(swap => (
-                  <SwapRow key={`swap-${swap.txid}`} swap={swap} />
-                ))}
-                {nonSwapActivities.map(activity => (
-                  <ActivityRow key={activity.id} activity={activity} />
-                ))}
-                {nonSwapActivities.length === 0 && activeSwaps.length === 0 && (
+                {!selectedChain && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
-                    {selectedChain ? `No activity for ${CHAINS.find(c => c.id === selectedChain)?.symbol || selectedChain} — try scanning` : 'No recent activity'}
+                    Select a network to view transaction history
                   </Text>
+                )}
+                {selectedChain && (
+                  <>
+                    {filteredSwaps.map(swap => (
+                      <SwapRow key={`swap-${swap.txid}`} swap={swap} />
+                    ))}
+                    {nonSwapActivities.map(activity => (
+                      <ActivityRow key={activity.id} activity={activity} />
+                    ))}
+                    {nonSwapActivities.length === 0 && filteredSwaps.length === 0 && (
+                      <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
+                        No activity for {selectedDef?.symbol} — hit refresh to scan
+                      </Text>
+                    )}
+                  </>
                 )}
               </>
             )}
