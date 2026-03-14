@@ -139,7 +139,7 @@ const RefreshIcon = ({ spinning }: { spinning?: boolean }) => (
   </svg>
 )
 
-type ChainOption = { id: string; symbol: string; caip: string; color: string; balanceUsd: number }
+type ChainOption = { id: string; symbol: string; coin: string; caip: string; networkId: string; color: string; balanceUsd: number }
 
 /** Custom dropdown with chain logos */
 function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, scanResult, onSelect, onScan }: {
@@ -171,9 +171,10 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
         ) : (
           <Box w="18px" h="18px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
         )}
-        <Text flex="1" fontSize="xs" fontWeight="600" color={selectedDef ? 'white' : 'whiteAlpha.400'}>
-          {selectedDef?.symbol || 'Select network...'}
+        <Text flex="1" fontSize="xs" fontWeight="600" color={selectedDef ? 'white' : 'whiteAlpha.400'} truncate>
+          {selectedDef ? `${selectedDef.coin} (${selectedDef.symbol})` : 'Select network...'}
         </Text>
+        {selectedDef && <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} truncate maxW="100px">{selectedDef.networkId}</Text>}
         <Text fontSize="2xs" color="whiteAlpha.400" flexShrink={0}>{dropdownOpen ? '\u25B2' : '\u25BC'}</Text>
       </Flex>
 
@@ -229,7 +230,9 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
                   <Image src={caipToIcon(c.caip)} w="18px" h="18px" borderRadius="full" flexShrink={0}
                     fallback={<Box w="18px" h="18px" borderRadius="full" bg={c.color} flexShrink={0} />}
                   />
-                  <Text fontSize="xs" fontWeight="600" color="white" flex="1">{c.symbol}</Text>
+                  <Text fontSize="xs" fontWeight="600" color="white">{c.symbol}</Text>
+                  <Text fontSize="2xs" color="whiteAlpha.400" flex="1" truncate>{c.coin}</Text>
+                  <Text fontSize="2xs" color="whiteAlpha.200" flexShrink={0} truncate maxW="90px" fontFamily="mono">{c.networkId}</Text>
                   {selectedChain === c.id && <Text fontSize="2xs" color="#23DCC8">{'\u2713'}</Text>}
                 </Flex>
               ))}
@@ -271,7 +274,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       .map(b => {
         const def = CHAINS.find(c => c.id === b.chainId)
         if (!def) return null
-        return { id: def.id, symbol: def.symbol, caip: def.caip, color: def.color, balanceUsd: b.balanceUsd }
+        return { id: def.id, symbol: def.symbol, coin: def.coin, caip: def.caip, networkId: def.networkId, color: def.color, balanceUsd: b.balanceUsd }
       })
       .filter((c): c is NonNullable<typeof c> => c !== null)
       .sort((a, b) => b.balanceUsd - a.balanceUsd)
