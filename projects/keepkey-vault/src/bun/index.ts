@@ -19,14 +19,14 @@ import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chain
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -178,6 +178,7 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 const auth = new AuthStore()
 let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF
 let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
+let bip85Enabled = getSetting('bip85_enabled') === '1' // default OFF
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
@@ -188,6 +189,7 @@ function getAppSettings() {
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
 		swapsEnabled,
+		bip85Enabled,
 	}
 }
 
@@ -281,6 +283,55 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			sendCharacter: async (params) => { await engine.sendCharacter(params.character) },
 			sendCharacterDelete: async () => { await engine.sendCharacterDelete() },
 			sendCharacterDone: async () => { await engine.sendCharacterDone() },
+
+			// ── BIP-85 Derived Seeds ──────────────────────────────────
+			getBip85Mnemonic: async (params) => {
+				const result = await engine.getBip85Mnemonic(params)
+
+				// Save metadata when label is provided (atomic with derive)
+				if (params.label !== undefined) {
+					const meta: Bip85SeedMeta = {
+						walletFingerprint: '',
+						wordCount: params.wordCount as 12 | 18 | 24,
+						index: params.index,
+						derivationPath: result.derivationPath,
+						label: params.label || '',
+						createdAt: Date.now(),
+					}
+					const saved = saveBip85Seed(meta)
+					console.log('[bip85] seed meta saved:', saved, 'wc:', params.wordCount, 'idx:', params.index)
+					return { ...result, saved }
+				}
+				return result
+			},
+			getWalletFingerprint: async () => {
+				const fingerprint = await engine.getWalletFingerprint()
+				return { fingerprint }
+			},
+			// Pure DB read — no device needed
+			listBip85Seeds: async () => {
+				const seeds = getBip85Seeds()
+				console.log('[bip85] listBip85Seeds — found:', seeds.length)
+				return seeds
+			},
+			// Pure DB write — no device needed
+			saveBip85SeedMeta: async (params) => {
+				const meta: Bip85SeedMeta = {
+					walletFingerprint: '',
+					wordCount: params.wordCount as 12 | 18 | 24,
+					index: params.index,
+					derivationPath: `m/83696968'/39'/0'/${params.wordCount}'/${params.index}'`,
+					label: params.label || '',
+					createdAt: Date.now(),
+				}
+				const saved = saveBip85Seed(meta)
+				if (!saved) throw new Error('Failed to persist seed metadata to database')
+				return meta
+			},
+			// Pure DB delete — no device needed
+			deleteBip85SeedMeta: async (params) => {
+				deleteBip85Seed(params.wordCount, params.index)
+			},
 
 			// ── Wallet operations (hdwallet pass-through) ─────────────
 			getFeatures: async () => {
@@ -709,6 +760,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							tokensByChainId.set(ct.chainId, existing)
 						}
 					} catch { /* custom tokens lookup failed, non-fatal */ }
+
+					// Fallback: if GetPortfolio returned zero native balances, try GetPortfolioBalances for ALL pubkeys
+					if (pureNatives.length === 0 && pioneer && pubkeys.length > 0) {
+						console.log('[getBalances] GetPortfolio returned 0 natives — falling back to GetPortfolioBalances for all pubkeys')
+						try {
+							const fallbackResp = await withTimeout(
+								pioneer.GetPortfolioBalances({
+									pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
+								}),
+								PIONEER_TIMEOUT_MS,
+								'GetPortfolioBalances-all'
+							)
+							const fallbackData = fallbackResp?.data?.data || fallbackResp?.data || {}
+							const fallbackBalances = fallbackData.balances || (Array.isArray(fallbackData) ? fallbackData : [])
+							if (Array.isArray(fallbackBalances)) {
+								for (const b of fallbackBalances) {
+									pureNatives.push(b)
+								}
+								console.log(`[getBalances] GetPortfolioBalances fallback returned ${pureNatives.length} native entries`)
+							}
+						} catch (e: any) {
+							console.warn('[getBalances] GetPortfolioBalances fallback failed:', e.message)
+						}
+					}
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.log(`[getBalances] pureNatives count: ${pureNatives.length}`)
@@ -1303,6 +1378,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				swapsEnabled = params.enabled
 				setSetting('swaps_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] Swaps enabled:', params.enabled)
+				// Initialize tracker on-demand when user enables swaps mid-session
+				if (params.enabled) {
+					import('./swap-tracker').then(async ({ initSwapTracker }) => {
+						await initSwapTracker((msg: string, data: any) => {
+							try {
+								if (msg === 'swap-update') rpc.send['swap-update'](data)
+								else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+								else console.error(`[swap-tracker] Unknown message: ${msg}`)
+							} catch (e: any) {
+								console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+							}
+						})
+					}).catch((e) => {
+						console.error('[swap-tracker] Failed to initialize swap tracker:', e.message || e)
+					})
+				}
+				return getAppSettings()
+			},
+			setBip85Enabled: async (params) => {
+				bip85Enabled = params.enabled
+				setSetting('bip85_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] BIP-85 enabled:', params.enabled)
 				return getAppSettings()
 			},
 
@@ -1714,26 +1811,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	},
 })
 
-// Initialize swap tracker with typed RPC message sender
-// FAIL FAST: If Pioneer SDK doesn't have swap tracking methods, crash the app
-import('./swap-tracker').then(async ({ initSwapTracker }) => {
-	await initSwapTracker((msg: string, data: any) => {
-		try {
-			if (msg === 'swap-update') rpc.send['swap-update'](data)
-			else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-			else console.error(`[swap-tracker] Unknown message: ${msg}`)
-		} catch (e: any) {
-			console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-		}
+// Initialize swap tracker with typed RPC message sender (only if swaps feature is ON)
+if (swapsEnabled) {
+	import('./swap-tracker').then(async ({ initSwapTracker }) => {
+		await initSwapTracker((msg: string, data: any) => {
+			try {
+				if (msg === 'swap-update') rpc.send['swap-update'](data)
+				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+				else console.error(`[swap-tracker] Unknown message: ${msg}`)
+			} catch (e: any) {
+				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+			}
+		})
+	}).catch((e) => {
+		console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
 	})
-}).catch((e) => {
-	console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
-})
+} else {
+	console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
+}
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
+	// When entering passphrase mode, the seed is about to change — clear all
+	// cached addresses so they get re-derived from the new passphrase seed.
+	if (state.state === 'needs_passphrase') {
+		btcAccounts.reset()
+		evmAddresses.reset()
+		const deviceId = state.deviceId
+		if (deviceId) clearCachedPubkeys(deviceId)
+		console.log('[Vault] Passphrase mode: cleared address caches — will re-derive after passphrase entry')
+	}
 })
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }

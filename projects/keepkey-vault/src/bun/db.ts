@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta } from '../shared/types'
 
 const SCHEMA_VERSION = '8'
 
@@ -195,6 +195,18 @@ export function initDb() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_created ON swap_history(created_at DESC)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_status ON swap_history(status)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_txid ON swap_history(txid)`)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bip85_seeds (
+        wallet_fingerprint TEXT NOT NULL,
+        word_count         INTEGER NOT NULL,
+        derivation_index   INTEGER NOT NULL,
+        derivation_path    TEXT NOT NULL,
+        label              TEXT NOT NULL DEFAULT '',
+        created_at         INTEGER NOT NULL,
+        PRIMARY KEY (wallet_fingerprint, word_count, derivation_index)
+      )
+    `)
 
     // Migrations: add columns to existing tables (safe to re-run)
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
@@ -617,6 +629,17 @@ export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; pat
   }
 }
 
+/** Clear all cached pubkeys for a device (e.g. when passphrase changes the seed). */
+export function clearCachedPubkeys(deviceId: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
+    console.log(`[db] Cleared cached pubkeys for device ${deviceId}`)
+  } catch (e: any) {
+    console.warn('[db] clearCachedPubkeys failed:', e.message)
+  }
+}
+
 // ── Reports ──────────────────────────────────────────────────────────
 
 const MAX_REPORTS = 50
@@ -899,6 +922,67 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     estimatedTimeSeconds: r.estimated_time_secs,
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
+  }
+}
+
+// ── BIP-85 Seed Metadata ────────────────────────────────────────────
+
+export function getBip85Seeds(): Bip85SeedMeta[] {
+  try {
+    if (!db) { console.warn('[db] getBip85Seeds — db is null'); return [] }
+    const rows = db.query(
+      'SELECT wallet_fingerprint, word_count, derivation_index, derivation_path, label, created_at FROM bip85_seeds ORDER BY created_at DESC'
+    ).all() as Array<{
+      wallet_fingerprint: string; word_count: number; derivation_index: number;
+      derivation_path: string; label: string; created_at: number
+    }>
+    console.log('[db] getBip85Seeds — found:', rows.length, 'rows')
+    return rows.map(r => ({
+      walletFingerprint: r.wallet_fingerprint,
+      wordCount: r.word_count as 12 | 18 | 24,
+      index: r.derivation_index,
+      derivationPath: r.derivation_path,
+      label: r.label,
+      createdAt: r.created_at,
+    }))
+  } catch (e: any) {
+    console.error('[db] getBip85Seeds FAILED:', e.message)
+    return []
+  }
+}
+
+export function saveBip85Seed(meta: Bip85SeedMeta): boolean {
+  try {
+    if (!db) { console.error('[db] saveBip85Seed — db is null, cannot save'); return false }
+    console.log('[db] saveBip85Seed — fp:', meta.walletFingerprint, 'wc:', meta.wordCount, 'idx:', meta.index, 'label:', meta.label)
+    db.run(
+      `INSERT OR REPLACE INTO bip85_seeds (wallet_fingerprint, word_count, derivation_index, derivation_path, label, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [meta.walletFingerprint, meta.wordCount, meta.index, meta.derivationPath, meta.label, meta.createdAt]
+    )
+    // Verify the write
+    const check = db.query(
+      'SELECT COUNT(*) as count FROM bip85_seeds WHERE wallet_fingerprint = ? AND word_count = ? AND derivation_index = ?'
+    ).get(meta.walletFingerprint, meta.wordCount, meta.index) as { count: number } | null
+    const verified = (check?.count ?? 0) > 0
+    console.log('[db] saveBip85Seed — verified:', verified, 'total in table:', (db.query('SELECT COUNT(*) as c FROM bip85_seeds').get() as any)?.c)
+    return verified
+  } catch (e: any) {
+    console.error('[db] saveBip85Seed FAILED:', e.message, e.stack)
+    return false
+  }
+}
+
+
+export function deleteBip85Seed(wordCount: number, index: number) {
+  try {
+    if (!db) return
+    db.run(
+      'DELETE FROM bip85_seeds WHERE word_count = ? AND derivation_index = ?',
+      [wordCount, index]
+    )
+  } catch (e: any) {
+    console.warn('[db] deleteBip85Seed failed:', e.message)
   }
 }
 
