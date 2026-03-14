@@ -19,7 +19,7 @@ import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chain
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -509,6 +509,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					signature: result.signature instanceof Uint8Array
 						? Buffer.from(result.signature).toString('hex')
 						: result.signature,
+					// Pass rawTx + tronGridTx through for broadcast
+					rawTx: typeof params.rawTx === 'string' ? params.rawTx
+						: params.rawTx instanceof Uint8Array ? Buffer.from(params.rawTx).toString('hex')
+						: undefined,
+					tronGridTx: (params as any).tronGridTx,
 				}
 			},
 			tonSignTx: async (params) => {
@@ -597,7 +602,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 						const result = await wallet[method](addrParams)
 						const address = typeof result === 'string' ? result : result?.address || ''
-						if (address) pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
+						if (address) {
+							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
+							if (chain.id === 'tron') console.log(`[getBalances] TRON address derived: ${address}, caip: ${chain.caip}, networkId: ${chain.networkId}`)
+						} else {
+							if (chain.id === 'tron') console.warn(`[getBalances] TRON address derivation returned empty! result:`, JSON.stringify(result))
+						}
 					} catch (e: any) {
 						console.warn(`[getBalances] ${chain.coin} address failed:`, e.message)
 					}
@@ -652,6 +662,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const portfolioTokens: any[] = portfolio.tokens || []
 
 					console.log(`[getBalances] GetPortfolio response: ${nativeEntries.length} balances, ${portfolioTokens.length} tokens`)
+					// Log TRON-specific entries for debugging
+					const tronEntries = nativeEntries.filter((d: any) => d.caip?.includes('tron') || d.networkId?.includes('tron'))
+					const tronTokenEntries = portfolioTokens.filter((t: any) => t.assetCaip?.includes('tron') || t.networkId?.includes('tron'))
+					if (tronEntries.length > 0 || tronTokenEntries.length > 0) {
+						console.log(`[getBalances] TRON entries from Pioneer: ${tronEntries.length} natives, ${tronTokenEntries.length} tokens`)
+						for (const t of tronEntries) console.log(`  TRON native: caip=${t.caip}, pubkey=${t.pubkey}, address=${t.address}, balance=${t.balance}, usd=${t.valueUsd}, type=${t.type}`)
+						for (const t of tronTokenEntries) console.log(`  TRON token: caip=${t.assetCaip}, balance=${t.token?.balance}, usd=${t.token?.balanceUSD}`)
+					} else {
+						console.warn(`[getBalances] TRON: NO entries returned from Pioneer (neither in balances nor tokens)`)
+					}
 					// Log BTC-specific entries for debugging
 					const btcNatives = nativeEntries.filter((d: any) => d.caip?.includes('bip122') || d.pubkey?.startsWith('xpub') || d.pubkey?.startsWith('ypub') || d.pubkey?.startsWith('zpub'))
 					console.log(`[getBalances] BTC native entries from Pioneer: ${btcNatives.length}`)
@@ -685,7 +705,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const d of nativeEntries) {
 						const caip = d.caip || ''
 						const caipPath = caip.split('/')[1] || ''
-						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:')
+						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
 						const isTokenByType = d.type === 'token' && d.isNative !== true
 						if (isTokenByCaip || isTokenByType) {
 							tokenEntries.push(d)
@@ -839,8 +859,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
+						// Match by CAIP, then by networkId prefix (handles slip44 vs native CAIP variants),
+						// then pubkey, then address field (Pioneer may use either)
+						const entryNetwork = entry.caip.split('/')[0] // e.g. "tron:0x2b6653dc"
 						const match = pureNatives.find((d: any) => d.caip === entry.caip)
+							|| pureNatives.find((d: any) => d.caip && d.caip.split('/')[0] === entryNetwork)
 							|| pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+							|| pureNatives.find((d: any) => d.address === entry.pubkey)
 						const chainTokens = tokensByChainId.get(entry.chainId)
 						// Sum token USD values into the chain total
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
@@ -984,7 +1009,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
 				}
-				return { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address: pubkey }
+				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address: pubkey }
+
+				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				try {
+					const deviceId = engine.getDeviceState().deviceId || 'unknown'
+					updateCachedBalance(deviceId, result)
+				} catch { /* never block on cache failure */ }
+				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
+
+				return result
 			},
 
 			buildTx: async (params) => {
@@ -1780,35 +1814,47 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					return { count: 0 }
 				}
 
-				// Insert each tx as an api_log entry (dedupe by txid)
+					// Insert new txs, update confirmations on existing ones
 				let inserted = 0
+				let updated = 0
 				for (const tx of txs) {
 					const txid = tx.txid || tx.hash || tx.txHash
 					if (!txid) continue
 
-					// Skip if already in api_log
-					const existing = apiLogTxidExists(txid)
-					if (existing) continue
-
 					const direction = tx.direction || (tx.value < 0 ? 'sent' : 'received')
 					const activityType = direction === 'sent' ? 'send' : 'receive'
 					const ts = tx.timestamp ? tx.timestamp * 1000 : tx.blockTime ? tx.blockTime * 1000 : Date.now()
+					const confirmations = typeof tx.confirmations === 'number' ? tx.confirmations : 0
+					const blockHeight = tx.blockHeight || tx.block_height || tx.height || 0
+					const value = tx.value != null ? String(tx.value) : undefined
+					const fee = tx.fee != null ? String(tx.fee) : undefined
 
-					insertApiLog({
-						method: 'SCAN',
-						route: `history/${params.chainId}`,
-						timestamp: ts,
-						durationMs: 0,
-						status: 200,
-						appName: 'vault',
-						txid,
-						chain: chain.symbol,
-						activityType,
-					})
-					inserted++
+					// Tx metadata stored in response_body
+					const meta = { confirmations, blockHeight, value, fee, direction }
+
+					if (apiLogTxidExists(txid)) {
+						// Update confirmation count on existing entry
+						updateApiLogTxMeta(txid, meta)
+						updated++
+					} else {
+						// New tx — insert
+						insertApiLog({
+							method: 'SCAN',
+							route: `history/${params.chainId}`,
+							timestamp: ts,
+							durationMs: 0,
+							status: 200,
+							appName: 'vault',
+							txid,
+							chain: chain.symbol,
+							activityType,
+							responseBody: meta,
+						})
+						inserted++
+					}
 				}
 
-				console.log(`[activity] Scanned ${chain.symbol}: ${txs.length} txs, ${inserted} new`)
+				console.log(`[activity] Scanned ${chain.symbol}: ${txs.length} txs, ${inserted} new, ${updated} updated`)
 				return { count: inserted }
 			},
 			dismissActivity: async (_params) => {

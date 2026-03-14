@@ -283,6 +283,21 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
   }
 }
 
+/** Update a single chain's cached balance (upsert). */
+export function updateCachedBalance(deviceId: string, balance: ChainBalance) {
+  try {
+    if (!db) return
+    const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
+    db.run(
+      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] updateCachedBalance failed:', e.message)
+  }
+}
+
 export function clearBalances(deviceId?: string) {
   try {
     if (!db) return
@@ -595,6 +610,16 @@ export function apiLogTxidExists(txid: string): boolean {
   } catch { return false }
 }
 
+/** Update response_body metadata for an existing api_log entry by txid (used to refresh confirmation counts) */
+export function updateApiLogTxMeta(txid: string, meta: Record<string, any>) {
+  try {
+    if (!db) return
+    db.run('UPDATE api_log SET response_body = ? WHERE txid = ?', [JSON.stringify(meta), txid])
+  } catch (e: any) {
+    console.warn('[db] updateApiLogTxMeta failed:', e.message)
+  }
+}
+
 const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
@@ -603,7 +628,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
     if (!db) return []
 
     // Build query with optional chain filter
-    let logSql = `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method
+    let logSql = `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
        FROM api_log WHERE activity_type IS NOT NULL`
     const logParams: any[] = []
     if (chainFilter) {
@@ -615,19 +640,28 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
 
     const logRows = db.query(logSql).all(...logParams) as Array<{
       id: number; txid: string | null; chain: string | null; activity_type: string;
-      app_name: string; timestamp: number; route: string; method: string
+      app_name: string; timestamp: number; route: string; method: string; response_body: string | null
     }>
 
-    const logActivities: RecentActivity[] = logRows.map(r => ({
-      id: String(r.id),
-      txid: r.txid || undefined,
-      chain: r.chain || '?',
-      type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
-      source: (r.method === 'RPC' ? 'app' : 'api') as 'app' | 'api',
-      appName: r.method === 'RPC' ? undefined : r.app_name,
-      status: r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed',
-      createdAt: r.timestamp,
-    }))
+    const logActivities: RecentActivity[] = logRows.map(r => {
+      // Parse tx metadata from response_body (stored by scan)
+      let meta: any = null
+      if (r.response_body) { try { meta = JSON.parse(r.response_body) } catch {} }
+      return {
+        id: String(r.id),
+        txid: r.txid || undefined,
+        chain: r.chain || '?',
+        type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
+        source: (r.method === 'RPC' ? 'app' : 'api') as 'app' | 'api',
+        appName: r.method === 'RPC' ? undefined : r.app_name,
+        status: r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed',
+        createdAt: r.timestamp,
+        confirmations: meta?.confirmations ?? undefined,
+        blockHeight: meta?.blockHeight ?? undefined,
+        amount: meta?.value ?? undefined,
+        fee: meta?.fee ?? undefined,
+      }
+    })
 
     // Swap history entries (dedupe by txid against logActivities)
     let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at

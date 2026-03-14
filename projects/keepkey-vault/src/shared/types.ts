@@ -553,6 +553,10 @@ export interface RecentActivity {
   appName?: string           // for API-originating activities
   status: 'signed' | 'broadcast' | 'failed'
   createdAt: number
+  // ── On-chain confirmation data (populated by scan, updated on rescan) ──
+  confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
+  blockHeight?: number       // block the tx was mined in (0 = unconfirmed)
+  fee?: string               // tx fee (human-readable)
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts

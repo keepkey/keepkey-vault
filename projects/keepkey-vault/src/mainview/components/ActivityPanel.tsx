@@ -38,6 +38,31 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   failed: { label: 'Failed', color: '#E53E3E' },
 }
 
+// Required confirmations per chain family before considered "confirmed"
+const CONF_REQUIRED: Record<string, number> = {
+  BTC: 6, LTC: 6, DOGE: 6, DASH: 6, BCH: 6, DGB: 6, ZEC: 24,
+  ETH: 12, MATIC: 128, AVAX: 12, BNB: 15, ARB: 12, OP: 12, BASE: 12,
+  ATOM: 1, RUNE: 1, CACAO: 1, OSMO: 1,
+  XRP: 1, SOL: 32, TRX: 19, TON: 1, MON: 12, HYPE: 12,
+}
+function getRequiredConfs(symbol: string): number { return CONF_REQUIRED[symbol] || 6 }
+
+/** Confirmation badge: red = unconfirmed, yellow = partial, green = confirmed */
+function ConfBadge({ confirmations, chain }: { confirmations?: number; chain: string }) {
+  if (confirmations === undefined) return null
+  const required = getRequiredConfs(chain)
+  const isConfirmed = confirmations >= required
+  const isUnconfirmed = confirmations === 0
+  const color = isUnconfirmed ? '#E53E3E' : isConfirmed ? '#23DCC8' : '#F7931A'
+  const label = isUnconfirmed ? 'Unconfirmed' : isConfirmed ? 'Confirmed' : `${confirmations}/${required}`
+  return (
+    <HStack gap="1">
+      <Box w="6px" h="6px" borderRadius="full" bg={color} flexShrink={0} />
+      <Text fontSize="9px" color={color} fontWeight="600">{label}</Text>
+    </HStack>
+  )
+}
+
 function getExplorerUrl(chainSymbol: string, txid: string): string | null {
   if (!chainSymbol || !txid) return null
   const chain = CHAINS.find(c => c.symbol === chainSymbol || c.id === chainSymbol)
@@ -71,23 +96,32 @@ function ActivityRow({ activity }: { activity: RecentActivity }) {
 
   const explorerUrl = activity.txid ? getExplorerUrl(activity.chain, activity.txid) : null
 
+  const isUnconfirmed = activity.confirmations !== undefined && activity.confirmations === 0
+
   return (
-    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3" _hover={{ bg: "rgba(255,255,255,0.06)" }} transition="background 0.15s">
+    <Box
+      bg="rgba(255,255,255,0.03)"
+      border="1px solid"
+      borderColor={isUnconfirmed ? 'rgba(229,62,62,0.3)' : 'rgba(255,255,255,0.06)'}
+      borderRadius="lg" p="3"
+      _hover={{ bg: "rgba(255,255,255,0.06)" }}
+      transition="background 0.15s"
+    >
       <Flex justify="space-between" align="center" mb="1">
         <HStack gap="2">
           <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
           {activity.source === 'api' && (
             <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>
           )}
+          <ConfBadge confirmations={activity.confirmations} chain={activity.chain} />
         </HStack>
         <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
       </Flex>
-      {(activity.amount || activity.to || activity.appName) && (
-        <Text fontSize="2xs" color="whiteAlpha.500" mb="1" truncate>
-          {activity.amount && `${activity.amount} ${activity.asset || activity.chain}`}
-          {activity.to && ` \u2192 ${activity.to.slice(0, 16)}...`}
-          {activity.appName && activity.source === 'api' && ` via ${activity.appName}`}
-        </Text>
+      {(activity.amount || activity.fee) && (
+        <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="2">
+          {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
+          {activity.fee && <Text color="whiteAlpha.300">fee: {activity.fee}</Text>}
+        </Flex>
       )}
       <Flex justify="space-between" align="center">
         {activity.txid ? (
@@ -97,7 +131,10 @@ function ActivityRow({ activity }: { activity: RecentActivity }) {
         ) : (
           <Text fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
         )}
-        {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={() => rpcRequest('openUrl', { url: explorerUrl })}>Explorer</Text>}
+        <HStack gap="2">
+          {activity.blockHeight ? <Text fontSize="9px" color="whiteAlpha.200" fontFamily="mono">blk {activity.blockHeight}</Text> : null}
+          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={() => rpcRequest('openUrl', { url: explorerUrl })}>Explorer</Text>}
+        </HStack>
       </Flex>
     </Box>
   )
