@@ -212,6 +212,11 @@ export function initDb() {
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    // Activity tracking columns on api_log (sign/broadcast ops)
+    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT']) {
+      try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -511,8 +516,8 @@ export function insertApiLog(entry: ApiLogEntry) {
   try {
     if (!db) return
     db.run(
-      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body, txid, chain, activity_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entry.method,
         entry.route,
@@ -523,6 +528,9 @@ export function insertApiLog(entry: ApiLogEntry) {
         entry.imageUrl || null,
         entry.requestBody ? JSON.stringify(entry.requestBody) : null,
         entry.responseBody ? JSON.stringify(entry.responseBody) : null,
+        entry.txid || null,
+        entry.chain || null,
+        entry.activityType || null,
       ]
     )
     // Periodic prune (every ~100 inserts, check if over limit)
@@ -573,6 +581,74 @@ export function clearApiLogs() {
   }
 }
 
+
+// ── Recent Activity (unified from api_log + swap_history) ─────────────
+
+import type { RecentActivity, ActivityType } from '../shared/types'
+
+/** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
+export function getRecentActivityFromLog(limit = 50): RecentActivity[] {
+  try {
+    if (!db) return []
+
+    const logRows = db.query(
+      `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method
+       FROM api_log
+       WHERE activity_type IS NOT NULL
+       ORDER BY timestamp DESC
+       LIMIT ?`
+    ).all(limit) as Array<{
+      id: number; txid: string | null; chain: string | null; activity_type: string;
+      app_name: string; timestamp: number; route: string; method: string
+    }>
+
+    const VALID_TYPES = new Set(['send', 'swap', 'sign', 'message', 'approve'])
+    const logActivities: RecentActivity[] = logRows.map(r => ({
+      id: String(r.id),
+      txid: r.txid || undefined,
+      chain: r.chain || '?',
+      type: (VALID_TYPES.has(r.activity_type) ? r.activity_type : 'sign') as ActivityType,
+      source: (r.method === 'RPC' ? 'app' : 'api') as 'app' | 'api',
+      appName: r.method === 'RPC' ? undefined : r.app_name,
+      status: r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed',
+      createdAt: r.timestamp,
+    }))
+
+    // Swap history entries (dedupe by txid against logActivities)
+    const swapRows = db.query(
+      `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at
+       FROM swap_history
+       ORDER BY created_at DESC
+       LIMIT ?`
+    ).all(limit) as Array<{
+      id: string; txid: string; from_symbol: string; to_symbol: string;
+      from_chain_id: string; from_amount: string; status: string; created_at: number
+    }>
+
+    const logTxids = new Set(logActivities.filter(a => a.txid).map(a => a.txid))
+    const swapActivities: RecentActivity[] = swapRows
+      .filter(r => !logTxids.has(r.txid))
+      .map(r => ({
+        id: r.id,
+        txid: r.txid,
+        chain: r.from_symbol,
+        chainId: r.from_chain_id,
+        type: 'swap' as const,
+        source: 'app' as const,
+        amount: r.from_amount,
+        asset: `${r.from_symbol}\u2192${r.to_symbol}`,
+        status: r.status === 'completed' ? 'broadcast' as const : r.status === 'failed' ? 'failed' as const : 'broadcast' as const,
+        createdAt: r.created_at,
+      }))
+
+    return [...logActivities, ...swapActivities]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+  } catch (e: any) {
+    console.warn('[db] getRecentActivityFromLog failed:', e.message)
+    return []
+  }
+}
 
 // ── Device Snapshot (watch-only cache) ──────────────────────────────
 

@@ -19,7 +19,7 @@ import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chain
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -1068,17 +1068,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 
+				let result: { txid: string }
+
 				// Custom chains: broadcast via direct RPC
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
 				if (rpcUrl) {
 					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
 					if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
 					const txid = await broadcastEvmTx(rpcUrl, serialized)
-					return { txid }
+					result = { txid }
+				} else {
+					const pioneer = await getPioneer()
+					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
 
-				const pioneer = await getPioneer()
-				return await broadcastTx(pioneer, chain, params.signedTx)
+				// Track broadcast in api_log
+				insertApiLog({ method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' })
+
+				return result
 			},
 
 			getMarketData: async (params) => {
@@ -1689,6 +1696,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
 				}
+				// Track swap in api_log
+				const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+				insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
 				return result
 			},
 			getPendingSwaps: async () => {
@@ -1732,6 +1742,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					await Bun.write(filePath, pdfBuffer)
 					return { filePath }
 				}
+			},
+
+			// ── Recent Activity (from api_log + swap_history) ────────
+			getRecentActivity: async (params) => {
+				return getRecentActivityFromLog(params?.limit || 50)
+			},
+			dismissActivity: async (_params) => {
+				// No-op: api_log entries are audit records, not dismissible
+			},
+			clearRecentActivity: async () => {
+				// No-op: api_log entries are audit records
 			},
 
 			// ── Balance cache (instant portfolio) ────────────────────

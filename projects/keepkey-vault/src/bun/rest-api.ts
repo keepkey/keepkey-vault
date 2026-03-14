@@ -317,6 +317,13 @@ function addressNListToBIP32(addressNList: number[]): string {
 /** Start time for uptime calculation */
 const startTime = Date.now()
 
+/** Route prefix → chain symbol for activity tracking */
+const ROUTE_TO_CHAIN: Record<string, string> = {
+  eth: 'ETH', utxo: 'BTC', cosmos: 'ATOM', osmosis: 'OSMO',
+  thorchain: 'RUNE', mayachain: 'CACAO', xrp: 'XRP',
+  solana: 'SOL', tron: 'TRX', ton: 'TON',
+}
+
 /** Set of signing endpoints that require user approval */
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
@@ -360,10 +367,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let reqBody: any = undefined
 
       // Per-request response helpers (capture req for CORS origin check)
-      const json = (data: unknown, status = 200) => {
+      const json = (data: unknown, status = 200, activity?: { txid?: string; chain?: string; activityType?: string }) => {
         const resp = new Response(JSON.stringify(data), {
           status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
         })
+        // Auto-detect activity type from route if not explicitly provided
+        let resolvedActivity = activity
+        if (!resolvedActivity && method === 'POST' && SIGNING_ROUTES.has(path)) {
+          const chainForRoute = ROUTE_TO_CHAIN[path.split('/')[1]]
+          if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
+        }
         // Log the request with body + response + duration
         if (callbacks?.onApiLog) {
           const { appName, imageUrl } = resolveAppInfo()
@@ -373,6 +386,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status, appName, imageUrl: imageUrl || undefined,
             requestBody: reqBody,
             responseBody: data,
+            ...resolvedActivity,
           })
         }
         return resp
@@ -934,7 +948,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
             ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
           })
-          return json(validateResponse(result, S.UtxoSignTransactionResponse, path))
+          // Explicit chain for UTXO — auto-detect defaults to BTC but could be LTC/DOGE/etc
+          const coinSymbol = coin === 'Bitcoin' ? 'BTC' : coin === 'Litecoin' ? 'LTC' : coin === 'Dogecoin' ? 'DOGE' : coin === 'Dash' ? 'DASH' : coin === 'BitcoinCash' ? 'BCH' : coin
+          return json(validateResponse(result, S.UtxoSignTransactionResponse, path), 200, { chain: coinSymbol, activityType: 'sign' })
         }
 
         // ── COSMOS SIGNING (6 endpoints) ──────────────────────────────
