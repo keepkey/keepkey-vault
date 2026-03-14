@@ -13,5 +13,6 @@
 	"loadingPortfolio": "Loading portfolio",
 	"errorWithMessage": "Error: {{error}}",
 	"tryUnplugging": "Try unplugging and replugging your KeepKey.",
-	"watchOnlyConnectPrompt": "Watch Only — Connect device for full access"
+	"watchOnlyConnectPrompt": "Watch Only — Connect device for full access",
+	"passphraseMode": "Passphrase"
 }

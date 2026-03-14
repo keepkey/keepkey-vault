@@ -1,4 +1,4 @@
-import { Box, Text, Flex, VStack } from "@chakra-ui/react"
+import { Box, Text, Flex, VStack, Link } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import connectSvgRaw from "../assets/svg/connect-keepkey.svg?raw"
 
@@ -11,19 +11,19 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
       left="50%"
       transform="translate(-50%, -50%)"
       mt="60px"
-      bg="rgba(10, 15, 30, 0.95)"
+      bg="rgba(0, 0, 0, 0.95)"
       border="1px solid"
-      borderColor="blue.700"
+      borderColor="#B8860B"
       borderRadius="lg"
       px={6}
       py={5}
       maxW="420px"
       w="90%"
-      boxShadow="0 0 30px rgba(59, 130, 246, 0.15)"
+      boxShadow="0 0 30px rgba(184, 134, 11, 0.2)"
     >
       <VStack gap={3} align="stretch">
         <Flex align="center" gap={2}>
-          <Text fontSize="lg" fontWeight="bold" color="blue.300">
+          <Text fontSize="lg" fontWeight="bold" color="#D4A017">
             {t("claimed.title")}
           </Text>
         </Flex>
@@ -32,7 +32,7 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
           {t("claimed.description")}
         </Text>
 
-        <Box bg="rgba(0,0,0,0.3)" borderRadius="md" px={3} py={2}>
+        <Box bg="rgba(184, 134, 11, 0.08)" border="1px solid" borderColor="rgba(184, 134, 11, 0.25)" borderRadius="md" px={3} py={2}>
           <Text fontSize="xs" color="gray.500" fontFamily="mono" wordBreak="break-word">
             {error}
           </Text>
@@ -42,7 +42,7 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
           <Box w="80px" h="80px" dangerouslySetInnerHTML={{ __html: connectSvgRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
         </Flex>
 
-        <Text fontSize="sm" color="gray.400" fontWeight="semibold">
+        <Text fontSize="sm" color="#D4A017" fontWeight="semibold">
           {t("claimed.toConnect")}
         </Text>
         <VStack gap={1} align="stretch" pl={2}>
@@ -54,6 +54,17 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
         <Text fontSize="xs" color="gray.600" textAlign="center" mt={1}>
           {t("claimed.waiting")}
         </Text>
+
+        <Link
+          href="https://support.keepkey.com"
+          target="_blank"
+          fontSize="xs"
+          color="blue.400"
+          textAlign="center"
+          _hover={{ color: "blue.300", textDecoration: "underline" }}
+        >
+          {t("claimed.supportLink")}
+        </Link>
       </VStack>
     </Box>
   )

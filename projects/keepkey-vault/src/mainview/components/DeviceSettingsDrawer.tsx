@@ -145,14 +145,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removingPin, setRemovingPin] = useState(false)
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false, bip85Enabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
+	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
-	const [pioneerUrl, setPioneerUrl] = useState("")
-	const [savingPioneerUrl, setSavingPioneerUrl] = useState(false)
-	const [pioneerUrlMsg, setPioneerUrlMsg] = useState<{ text: string; ok: boolean } | null>(null)
+	const [newServerUrl, setNewServerUrl] = useState("")
+	const [newServerLabel, setNewServerLabel] = useState("")
+	const [addingServer, setAddingServer] = useState(false)
+	const [serverMsg, setServerMsg] = useState<{ text: string; ok: boolean } | null>(null)
+	const [switchingServer, setSwitchingServer] = useState("")
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -165,7 +168,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				.catch(() => setFeaturesError(true))
 		}
 		rpcRequest<AppSettings>("getAppSettings")
-			.then(s => { setAppSettings(s); setPioneerUrl(s.pioneerApiBase || "") })
+			.then(s => setAppSettings(s))
 			.catch(() => {})
 	}, [open, deviceState.state])
 
@@ -251,6 +254,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingSwaps(false)
 	}, [])
 
+	const toggleBip85 = useCallback(async (enabled: boolean) => {
+		setTogglingBip85(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setBip85Enabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setBip85Enabled:", e) }
+		setTogglingBip85(false)
+	}, [])
+
 	const openSwagger = useCallback(async () => {
 		try {
 			await rpcRequest("openUrl", { url: "http://localhost:1646/docs" }, 5000)
@@ -316,20 +328,45 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingPassphrase(false)
 	}, [])
 
-	const savePioneerUrl = useCallback(async (url: string) => {
-		setSavingPioneerUrl(true)
-		setPioneerUrlMsg(null)
+	const addServer = useCallback(async () => {
+		setAddingServer(true)
+		setServerMsg({ text: "Checking server health...", ok: true })
 		try {
-			const result = await rpcRequest<AppSettings>("setPioneerApiBase", { url }, 10000)
+			const result = await rpcRequest<AppSettings>("addPioneerServer", { url: newServerUrl, label: newServerLabel }, 15000)
 			setAppSettings(result)
-			setPioneerUrl(result.pioneerApiBase || "")
-			setPioneerUrlMsg({ text: url ? "Saved" : "Reset to default", ok: true })
-			setTimeout(() => setPioneerUrlMsg(null), 3000)
+			setNewServerUrl("")
+			setNewServerLabel("")
+			setServerMsg({ text: "Server added", ok: true })
+			setTimeout(() => setServerMsg(null), 3000)
 		} catch (e: any) {
-			setPioneerUrlMsg({ text: e.message || "Failed", ok: false })
-			setTimeout(() => setPioneerUrlMsg(null), 4000)
+			setServerMsg({ text: e.message || "Failed", ok: false })
+			setTimeout(() => setServerMsg(null), 5000)
 		}
-		setSavingPioneerUrl(false)
+		setAddingServer(false)
+	}, [newServerUrl, newServerLabel])
+
+	const removeServer = useCallback(async (url: string) => {
+		try {
+			const result = await rpcRequest<AppSettings>("removePioneerServer", { url }, 10000)
+			setAppSettings(result)
+		} catch (e: any) {
+			setServerMsg({ text: e.message || "Failed to remove", ok: false })
+			setTimeout(() => setServerMsg(null), 3000)
+		}
+	}, [])
+
+	const switchServer = useCallback(async (url: string) => {
+		setSwitchingServer(url)
+		setServerMsg({ text: "Verifying server...", ok: true })
+		try {
+			const result = await rpcRequest<AppSettings>("setActivePioneerServer", { url }, 15000)
+			setAppSettings(result)
+			setServerMsg(null)
+		} catch (e: any) {
+			setServerMsg({ text: e.message || "Failed to switch", ok: false })
+			setTimeout(() => setServerMsg(null), 5000)
+		}
+		setSwitchingServer("")
 	}, [])
 
 	const securityValue = (val: boolean | undefined): string => {
@@ -405,9 +442,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				<VStack gap="3" align="stretch" p="4">
 
 					{/* ── Language & Currency ─────────────────────────── */}
-					<Section title={t("language")}>
+					<Section title={t("language")} defaultOpen={false}>
 						<LanguageSelector />
-						<Box mt="4" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+						<Box mt="2">
 							<CurrencySelector />
 						</Box>
 					</Section>
@@ -853,52 +890,153 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingSwaps}
 								/>
 							</Flex>
+
+							{/* BIP-85 Derived Seeds toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+											{t("bip85FeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.bip85Enabled}
+									onChange={toggleBip85}
+									disabled={togglingBip85}
+								/>
+							</Flex>
 						</VStack>
 					</Section>
 
-					{/* ── Developer ───────────────────────────────────── */}
-					<Section title="Developer" defaultOpen={false}>
-						<VStack gap="3" align="stretch">
+					{/* ── API Services ────────────────────────────────── */}
+					<Section title="API Services" defaultOpen={false}>
+						<VStack gap="4" align="stretch">
 							<Box>
-								<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Pioneer API Server</Text>
+								<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Pioneer API Servers</Text>
 								<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-									Override the Pioneer API base URL. Leave empty for the default production server.
+									Manage which Pioneer API server the vault connects to.
 								</Text>
 							</Box>
-							<Flex gap="2">
-								<Input
-									value={pioneerUrl}
-									onChange={(e) => setPioneerUrl(e.target.value)}
-									placeholder="https://api.keepkey.info"
-									bg="kk.bg"
-									border="1px solid"
-									borderColor="kk.border"
-									color="kk.textPrimary"
-									size="sm"
-									flex="1"
-									fontFamily="mono"
-									fontSize="xs"
-								/>
-								<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => savePioneerUrl(pioneerUrl)} disabled={savingPioneerUrl}>
-									{savingPioneerUrl ? "..." : "Save"}
-								</Button>
-							</Flex>
-							{pioneerUrl && (
-								<Box
-									as="button"
-									fontSize="xs"
-									color="kk.textSecondary"
-									cursor="pointer"
-									_hover={{ color: "kk.gold" }}
-									textAlign="left"
-									onClick={() => { setPioneerUrl(""); savePioneerUrl("") }}
-								>
-									Reset to default
-								</Box>
-							)}
-							{pioneerUrlMsg && (
-								<Text fontSize="xs" color={pioneerUrlMsg.ok ? "kk.success" : "kk.error"}>
-									{pioneerUrlMsg.text}
+
+							{/* Server list */}
+							<VStack gap="2" align="stretch">
+								{(appSettings.pioneerServers || []).map(server => {
+									const isActive = server.url === appSettings.activePioneerServer
+									return (
+										<Flex
+											key={server.url}
+											align="center"
+											gap="2"
+											px="3"
+											py="2"
+											bg={isActive ? "rgba(198,170,107,0.08)" : "kk.bg"}
+											border="1px solid"
+											borderColor={isActive ? "kk.gold" : "kk.border"}
+											borderRadius="lg"
+											cursor={isActive ? "default" : "pointer"}
+											_hover={isActive ? {} : { borderColor: "kk.gold", bg: "rgba(198,170,107,0.04)" }}
+											onClick={() => !isActive && switchServer(server.url)}
+										>
+											{/* Radio indicator */}
+											<Box
+												w="14px" h="14px" borderRadius="full"
+												border="2px solid"
+												borderColor={isActive ? "kk.gold" : "kk.border"}
+												display="flex" alignItems="center" justifyContent="center"
+												flexShrink={0}
+											>
+												{isActive && <Box w="7px" h="7px" borderRadius="full" bg="kk.gold" />}
+											</Box>
+
+											<Box flex="1" minW="0">
+												<Flex align="center" gap="2">
+													<Text fontSize="xs" fontWeight="500" color="kk.textPrimary" truncate>{server.label}</Text>
+													{server.isDefault && (
+														<Text fontSize="9px" color="kk.gold" fontWeight="600" px="1.5" py="0.5" bg="rgba(198,170,107,0.12)" borderRadius="md">DEFAULT</Text>
+													)}
+												</Flex>
+												<Text fontSize="10px" color="kk.textSecondary" fontFamily="mono" truncate>{server.url}</Text>
+											</Box>
+
+											{switchingServer === server.url && (
+												<Text fontSize="xs" color="kk.textSecondary">...</Text>
+											)}
+
+											{/* Remove button (not for default) */}
+											{!server.isDefault && (
+												<Box
+													as="button"
+													onClick={(e: React.MouseEvent) => { e.stopPropagation(); removeServer(server.url) }}
+													color="kk.textSecondary"
+													_hover={{ color: "kk.error" }}
+													p="1"
+													flexShrink={0}
+												>
+													<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+														<line x1="18" y1="6" x2="6" y2="18" />
+														<line x1="6" y1="6" x2="18" y2="18" />
+													</svg>
+												</Box>
+											)}
+										</Flex>
+									)
+								})}
+							</VStack>
+
+							{/* Add new server */}
+							<Box borderTop="1px solid" borderColor="kk.border" pt="3">
+								<Text fontSize="xs" color="kk.textSecondary" mb="2">Add Server</Text>
+								<VStack gap="2" align="stretch">
+									<Input
+										value={newServerLabel}
+										onChange={(e) => setNewServerLabel(e.target.value)}
+										placeholder="My Server"
+										bg="kk.bg"
+										border="1px solid"
+										borderColor="kk.border"
+										color="kk.textPrimary"
+										size="sm"
+										fontSize="xs"
+									/>
+									<Flex gap="2">
+										<Input
+											value={newServerUrl}
+											onChange={(e) => setNewServerUrl(e.target.value)}
+											placeholder="https://my-server.example.com"
+											bg="kk.bg"
+											border="1px solid"
+											borderColor="kk.border"
+											color="kk.textPrimary"
+											size="sm"
+											flex="1"
+											fontFamily="mono"
+											fontSize="xs"
+										/>
+										<Button
+											size="sm"
+											bg="kk.gold"
+											color="black"
+											_hover={{ bg: "kk.goldHover" }}
+											onClick={addServer}
+											disabled={addingServer || !newServerUrl.trim() || !newServerLabel.trim()}
+										>
+											{addingServer ? "..." : "Add"}
+										</Button>
+									</Flex>
+								</VStack>
+							</Box>
+
+							{serverMsg && (
+								<Text fontSize="xs" color={serverMsg.ok ? "kk.success" : "kk.error"}>
+									{serverMsg.text}
 								</Text>
 							)}
 						</VStack>

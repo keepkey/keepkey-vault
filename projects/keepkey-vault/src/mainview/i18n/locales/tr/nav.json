@@ -1,0 +1,18 @@
+{
+	"apps": "Uygulamalar",
+	"keepkey": "KeepKey",
+	"swap": "Takas",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "Yalnızca İzleme",
+	"deviceSettings": "Cihaz ayarları",
+	"searchingForKeepKey": "KeepKey aranıyor",
+	"keepkeyDetected": "KeepKey algılandı",
+	"keepkeyDetectedConnecting": "KeepKey algılandı — bağlanıyor",
+	"unlockYourKeepKey": "KeepKey'inizin kilidini açın",
+	"passphraseRequired": "Parola gerekli",
+	"loadingPortfolio": "Portföy yükleniyor",
+	"errorWithMessage": "Hata: {{error}}",
+	"tryUnplugging": "KeepKey'i çıkarıp yeniden takmayı deneyin.",
+	"watchOnlyConnectPrompt": "Yalnızca izleme — Tam erişim için cihazı bağlayın",
+	"passphraseMode": "Parola"
+}

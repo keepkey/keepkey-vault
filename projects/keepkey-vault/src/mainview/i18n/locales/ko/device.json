@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "THORChain 입금",
 		"methodMayaTransfer": "Maya 전송",
 		"methodMayaDeposit": "Maya 입금",
-		"methodOsmosisSign": "Osmosis 서명"
+		"methodOsmosisSign": "Osmosis 서명",
+		"methodSolanaSignTx": "Solana 트랜잭션 서명",
+		"methodSolanaSignMessage": "Solana 메시지 서명",
+		"methodTronSignTx": "Tron 트랜잭션 서명",
+		"methodTonSignTx": "TON 트랜잭션 서명"
 	},
 	"claimed": {
 		"title": "기기 사용 중",
@@ -61,6 +65,7 @@
 		"step2": "2. 기기를 분리했다가 다시 연결하세요",
 		"step3": "3. 이 앱이 자동으로 재연결됩니다",
 		"waiting": "기기가 사용 가능해질 때까지 대기 중...",
+		"supportLink": "아직 문제가 있나요? 지원 티켓 제출",
 		"defaultError": "다른 프로세스가 기기를 사용 중입니다"
 	},
 	"recovery": {

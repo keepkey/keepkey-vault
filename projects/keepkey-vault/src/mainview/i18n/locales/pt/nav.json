@@ -12,5 +12,6 @@
 	"loadingPortfolio": "Carregando portfólio",
 	"errorWithMessage": "Erro: {{error}}",
 	"tryUnplugging": "Tente desconectar e reconectar seu KeepKey.",
-	"watchOnlyConnectPrompt": "Somente leitura — Conecte o dispositivo para acesso completo"
+	"watchOnlyConnectPrompt": "Somente leitura — Conecte o dispositivo para acesso completo",
+	"passphraseMode": "Frase-senha"
 }

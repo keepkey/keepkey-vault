@@ -1,0 +1,10 @@
+{
+	"title": "Uygulamalar",
+	"subtitle": "KeepKey cihazınızı desteklenen uygulamalarla bağlayın",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "KeepKey donanım cüzdanınızı yönetin",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "Birden fazla ağda kripto ticareti yapın, takip edin ve yönetin",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "WalletConnect uyumlu herhangi bir uygulamaya bağlanın"
+}

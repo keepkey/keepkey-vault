@@ -12,5 +12,6 @@
 	"loadingPortfolio": "正在加载投资组合",
 	"errorWithMessage": "错误：{{error}}",
 	"tryUnplugging": "请尝试拔出并重新插入您的 KeepKey。",
-	"watchOnlyConnectPrompt": "仅查看 — 连接设备以获得完整访问权限"
+	"watchOnlyConnectPrompt": "仅查看 — 连接设备以获得完整访问权限",
+	"passphraseMode": "密码短语"
 }

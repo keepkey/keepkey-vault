@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "มีเวอร์ชันใหม่พร้อมใช้งาน",
+	"downloadingWithProgress": "กำลังดาวน์โหลดการอัปเดต... {{progress}}%",
+	"downloading": "กำลังดาวน์โหลดการอัปเดต...",
+	"readyToInstall": "ดาวน์โหลดการอัปเดตเรียบร้อยและพร้อมติดตั้ง",
+	"applying": "กำลังติดตั้งการอัปเดต กำลังรีสตาร์ท...",
+	"errorWithMessage": "ข้อผิดพลาดในการอัปเดต: {{error}}",
+	"download": "ดาวน์โหลด",
+	"later": "ภายหลัง",
+	"restartToUpdate": "รีสตาร์ทเพื่ออัปเดต"
+}

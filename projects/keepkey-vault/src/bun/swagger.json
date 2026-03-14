@@ -457,6 +457,129 @@
         ]
       }
     },
+    "/addresses/solana": {
+      "post": {
+        "operationId": "SolanaGetAddress",
+        "summary": "Get Solana Address",
+        "description": "Get a Solana address, loading it into the current session and optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": { "type": "boolean" },
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" }
+                },
+                "required": ["address_n"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "address": { "type": "string" } },
+                  "required": ["address"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Address"]
+      }
+    },
+    "/addresses/tron": {
+      "post": {
+        "operationId": "TronGetAddress",
+        "summary": "Get Tron Address",
+        "description": "Get a Tron (TRX) address, loading it into the current session and optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": { "type": "boolean" },
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" }
+                },
+                "required": ["address_n"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "address": { "type": "string" } },
+                  "required": ["address"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Address"]
+      }
+    },
+    "/addresses/ton": {
+      "post": {
+        "operationId": "TonGetAddress",
+        "summary": "Get TON Address",
+        "description": "Get a TON address, loading it into the current session and optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": { "type": "boolean" },
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" }
+                },
+                "required": ["address_n"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "address": { "type": "string" } },
+                  "required": ["address"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Address"]
+      }
+    },
     "/addresses/xrp": {
       "post": {
         "operationId": "XrpGetAddress",
@@ -3287,6 +3410,181 @@
         "tags": [
           "XRP"
         ]
+      }
+    },
+    "/solana/sign-transaction": {
+      "post": {
+        "operationId": "solana_signTransaction",
+        "summary": "Sign a Solana transaction",
+        "description": "Sign a raw Solana transaction on the KeepKey device. The raw_tx is a base64-encoded serialized Solana transaction.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "addressNList": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "raw_tx": { "type": "string", "description": "Base64-encoded raw Solana transaction" }
+                },
+                "required": ["raw_tx"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": { "type": "string" },
+                    "serializedTx": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Solana"]
+      }
+    },
+    "/solana/sign-message": {
+      "post": {
+        "operationId": "solana_signMessage",
+        "summary": "Sign a Solana message",
+        "description": "Sign an arbitrary message with a Solana key on the KeepKey device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "addressNList": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "message": { "type": "string", "description": "Message to sign (utf-8 or base64)" },
+                  "show_display": { "type": "boolean" }
+                },
+                "required": ["message"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": { "type": "string" },
+                    "publicKey": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Solana"]
+      }
+    },
+    "/tron/sign-transaction": {
+      "post": {
+        "operationId": "tron_signTransaction",
+        "summary": "Sign a Tron transaction",
+        "description": "Sign a raw Tron transaction on the KeepKey device. The raw_tx is a hex-encoded serialized Tron protobuf transaction.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "addressNList": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "raw_tx": { "type": "string", "description": "Hex-encoded raw Tron transaction" }
+                },
+                "required": ["raw_tx"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Tron"]
+      }
+    },
+    "/ton/sign-transaction": {
+      "post": {
+        "operationId": "ton_signTransaction",
+        "summary": "Sign a TON transaction",
+        "description": "Sign a raw TON transaction on the KeepKey device. The raw_tx is a base64-encoded BOC cell.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "addressNList": { "$ref": "#/components/schemas/types.AddressNList" },
+                  "raw_tx": { "type": "string", "description": "Base64-encoded raw TON transaction (BOC)" }
+                },
+                "required": ["raw_tx"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["TON"]
       }
     },
     "/admin/wallets": {

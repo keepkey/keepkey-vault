@@ -25,12 +25,15 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 
-/** Adaptive polling: fast at first, backs off as swap ages */
+/** Adaptive polling: fast at first, backs off as swap ages, gives up after 1 hour */
 const FAST_POLL_MS = 10_000       // 10s for first 2 minutes
 const NORMAL_POLL_MS = 20_000     // 20s for 2-10 minutes
-const SLOW_POLL_MS = 30_000       // 30s after 10 minutes
+const SLOW_POLL_MS = 30_000       // 30s for 10-20 minutes
+const BACKOFF_POLL_MS = 60_000    // 60s after 20 minutes
 const FAST_PHASE_MS = 2 * 60_000  // 2 min
 const NORMAL_PHASE_MS = 10 * 60_000 // 10 min
+const BACKOFF_PHASE_MS = 20 * 60_000 // 20 min — start backing off
+const MAX_TRACKING_MS = 60 * 60_000  // 1 hour — give up, user can manually refresh
 const COMPLETED_GRACE_MS = 120_000 // keep completed swaps visible for 2 min
 
 // Required Pioneer SDK methods — app MUST NOT start without these
@@ -250,7 +253,8 @@ function getPollInterval(): number {
   }
   if (oldestAge < FAST_PHASE_MS) return FAST_POLL_MS
   if (oldestAge < NORMAL_PHASE_MS) return NORMAL_POLL_MS
-  return SLOW_POLL_MS
+  if (oldestAge < BACKOFF_PHASE_MS) return SLOW_POLL_MS
+  return BACKOFF_POLL_MS
 }
 
 function startPolling(): void {
@@ -346,13 +350,28 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
 }
 
 async function pollAllSwaps(): Promise<void> {
+  const now = Date.now()
+
+  // Expire swaps older than 1 hour — stop tracking, user can manually refresh
+  for (const [txid, swap] of pendingSwaps) {
+    if (swap.status !== 'completed' && swap.status !== 'failed' && swap.status !== 'refunded') {
+      if (now - swap.createdAt > MAX_TRACKING_MS) {
+        console.log(`${TAG} Swap ${txid.slice(0, 10)}... exceeded 1h tracking limit — stopping (status was: ${swap.status})`)
+        swap.status = 'failed'
+        swap.error = 'Tracking timed out after 1 hour. Use refresh to check status manually.'
+        swap.updatedAt = now
+        updateSwapHistoryStatus(txid, 'failed', { error: swap.error })
+        pushUpdate(swap)
+      }
+    }
+  }
+
   const active = Array.from(pendingSwaps.values()).filter(s =>
     s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
   )
 
   if (active.length === 0) {
     // Clean up completed swaps past grace period
-    const now = Date.now()
     for (const [txid, swap] of pendingSwaps) {
       if ((swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded') &&
           now - swap.updatedAt > COMPLETED_GRACE_MS) {

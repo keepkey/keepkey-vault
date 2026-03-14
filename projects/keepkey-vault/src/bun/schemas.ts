@@ -4,8 +4,8 @@ import { z } from 'zod'
 // Shared primitives
 // ═══════════════════════════════════════════════════════════════════════
 
-/** BIP32 address path — array of 3-5 hardened/unhardened integers */
-export const AddressNList = z.array(z.number().int()).min(3).max(5)
+/** BIP32 address path — array of 3-6 hardened/unhardened integers (TON uses 6) */
+export const AddressNList = z.array(z.number().int()).min(3).max(6)
 
 /** 0x-prefixed Ethereum address (40 hex chars) */
 export const EthAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/)

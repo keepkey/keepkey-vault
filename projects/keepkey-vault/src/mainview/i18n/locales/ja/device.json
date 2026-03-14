@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "THORChain入金",
 		"methodMayaTransfer": "Maya送金",
 		"methodMayaDeposit": "Maya入金",
-		"methodOsmosisSign": "Osmosis署名"
+		"methodOsmosisSign": "Osmosis署名",
+		"methodSolanaSignTx": "Solanaトランザクション署名",
+		"methodSolanaSignMessage": "Solanaメッセージ署名",
+		"methodTronSignTx": "Tronトランザクション署名",
+		"methodTonSignTx": "TONトランザクション署名"
 	},
 	"claimed": {
 		"title": "デバイス使用中",
@@ -61,6 +65,7 @@
 		"step2": "2. デバイスを抜いて再接続してください",
 		"step3": "3. このアプリは自動的に再接続します",
 		"waiting": "デバイスが利用可能になるまで待機中...",
+		"supportLink": "まだ問題がありますか？サポートチケットを送信",
 		"defaultError": "別のプロセスがデバイスを使用しています"
 	},
 	"recovery": {

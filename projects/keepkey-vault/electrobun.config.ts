@@ -32,6 +32,8 @@ export default {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
 			"_build/_ext_modules": "node_modules",
+			// Zcash privacy engine sidecar (Rust binary)
+			"zcash-cli/target/release/zcash-cli": "zcash-cli",
 		},
 		mac: {
 			bundleCEF: false,

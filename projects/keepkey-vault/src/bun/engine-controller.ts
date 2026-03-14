@@ -4,7 +4,7 @@ import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
 import { saveDeviceSnapshot } from './db'
-import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType } from '../shared/types'
+import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DeriveResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -109,6 +109,7 @@ export class EngineController extends EventEmitter {
     this.wallet = null
     this.activeTransport = null
     this.cachedFeatures = null
+    this.cachedFingerprint = null
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -636,6 +637,7 @@ export class EngineController extends EventEmitter {
       needsFirmwareUpdate: needsFw,
       needsInit: !initialized,
       initialized,
+      passphraseProtection: features?.passphraseProtection ?? false,
       // In bootloader mode the device can't report `initialized` — use firmware
       // hash presence instead. If firmware bytes exist on flash, the device has
       // been set up before and entered bootloader for an update (not OOB).
@@ -1114,6 +1116,46 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+    }
+  }
+
+  // ── Wallet Fingerprint (0th BTC address — identifies seed+passphrase) ───
+
+  private cachedFingerprint: string | null = null
+
+  async getWalletFingerprint(): Promise<string> {
+    if (this.cachedFingerprint) return this.cachedFingerprint
+    if (!this.wallet) throw new Error('No device connected')
+    const result = await (this.wallet as any).btcGetAddress({
+      addressNList: [0x80000000 + 44, 0x80000000 + 0, 0x80000000 + 0, 0, 0],
+      coin: 'Bitcoin',
+      scriptType: 'p2pkh',
+      showDisplay: false,
+    })
+    if (!result?.address) throw new Error('Failed to derive fingerprint address')
+    this.cachedFingerprint = result.address
+    return result.address
+  }
+
+  // ── BIP-85 Derived Seeds ────────────────────────────────────────────────
+
+  async getBip85Mnemonic(opts: Bip85DeriveParams): Promise<Bip85DeriveResult> {
+    if (!this.wallet) throw new Error('No device connected')
+    if (![12, 18, 24].includes(opts.wordCount))
+      throw new Error('wordCount must be 12, 18, or 24')
+    if (!Number.isInteger(opts.index) || opts.index < 0 || opts.index > 2147483647)
+      throw new Error('Index must be 0–2147483647')
+
+    const result = await (this.wallet as any).bip85GetMnemonic({
+      wordCount: opts.wordCount,
+      index: opts.index,
+    })
+
+    return {
+      mnemonic: result.mnemonic,
+      wordCount: opts.wordCount,
+      index: opts.index,
+      derivationPath: `m/83696968'/39'/0'/${opts.wordCount}'/${opts.index}'`,
     }
   }
 

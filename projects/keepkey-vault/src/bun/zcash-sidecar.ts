@@ -69,7 +69,11 @@ function getBinaryPath(): string {
 	const srcRelRoot = dirname(dirname(import.meta.dir))
 	candidates.push(join(srcRelRoot, "zcash-cli", "target", "release", "zcash-cli"))
 
-	// 4. Production: bundled next to the app binary
+	// 4. Production: Electrobun copies into app/ dir, bun code runs from app/bun/
+	const appDir = resolve(import.meta.dir, "..")
+	candidates.push(join(appDir, "zcash-cli"))
+
+	// 5. Fallback: walk further up in case bundle structure differs
 	const appBundleDir = resolve(import.meta.dir, "..", "..", "..")
 	candidates.push(join(appBundleDir, "zcash-cli"))
 

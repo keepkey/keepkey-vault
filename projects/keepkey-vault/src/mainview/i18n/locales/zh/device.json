@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "THORChain 存款",
 		"methodMayaTransfer": "Maya 转账",
 		"methodMayaDeposit": "Maya 存款",
-		"methodOsmosisSign": "Osmosis 签名"
+		"methodOsmosisSign": "Osmosis 签名",
+		"methodSolanaSignTx": "Solana 签署交易",
+		"methodSolanaSignMessage": "Solana 签署消息",
+		"methodTronSignTx": "Tron 签署交易",
+		"methodTonSignTx": "TON 签署交易"
 	},
 	"claimed": {
 		"title": "设备正在使用中",
@@ -61,6 +65,7 @@
 		"step2": "2. 拔出设备并重新插入",
 		"step3": "3. 此应用将自动重新连接",
 		"waiting": "等待设备变为可用...",
+		"supportLink": "仍然有问题？提交支持工单",
 		"defaultError": "设备被另一个进程占用"
 	},
 	"recovery": {

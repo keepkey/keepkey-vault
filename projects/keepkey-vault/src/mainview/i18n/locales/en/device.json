@@ -53,6 +53,9 @@
 		"methodMayaDeposit": "Maya Deposit",
 		"methodOsmosisSign": "Osmosis Sign",
 		"methodSolanaSignTx": "Solana Sign Transaction",
+		"methodSolanaSignMessage": "Solana Sign Message",
+		"methodTronSignTx": "Tron Sign Transaction",
+		"methodTonSignTx": "TON Sign Transaction",
 		"domainName": "Domain",
 		"contract": "Contract",
 		"operationType": "Operation"
@@ -96,6 +99,7 @@
 		"step2": "2. Unplug and replug the device",
 		"step3": "3. This app will reconnect automatically",
 		"waiting": "Waiting for device to become available...",
+		"supportLink": "Still having trouble? Submit a support ticket",
 		"defaultError": "Device claimed by another process"
 	}
 }

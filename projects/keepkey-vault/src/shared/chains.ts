@@ -195,7 +195,7 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#ECB244',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
-    minFirmware: '7.11.0',
+    minFirmware: '7.14.0',
   },
   {
     id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
@@ -203,7 +203,7 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
     defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
     hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
-    minFirmware: '7.11.0',
+    minFirmware: '7.14.0',
   },
   {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',

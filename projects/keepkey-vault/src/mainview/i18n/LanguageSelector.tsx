@@ -14,39 +14,74 @@ export const LANGUAGES = [
 	{ code: "pt", label: "Português" },
 	{ code: "ru", label: "Русский" },
 	{ code: "it", label: "Italiano" },
+	{ code: "pl", label: "Polski" },
+	{ code: "nl", label: "Nederlands" },
+	{ code: "th", label: "ไทย" },
+	{ code: "tr", label: "Türkçe" },
+	{ code: "vi", label: "Tiếng Việt" },
 ] as const
 
 export function LanguageSelector() {
 	const { i18n } = useTranslation()
+	const [expanded, setExpanded] = useState(false)
+	const current = LANGUAGES.find(l => l.code === i18n.language) || LANGUAGES[0]
 
 	return (
-		<Flex flexWrap="wrap" gap="2">
-			{LANGUAGES.map(({ code, label }) => {
-				const active = i18n.language === code
-				return (
-					<Button
-						key={code}
-						size="xs"
-						px="3"
-						py="1"
-						borderRadius="full"
-						fontWeight={active ? "600" : "400"}
-						fontSize="xs"
-						bg={active ? "kk.gold" : "transparent"}
-						color={active ? "black" : "kk.textSecondary"}
-						border="1px solid"
-						borderColor={active ? "kk.gold" : "kk.border"}
-						_hover={{
-							bg: active ? "kk.goldHover" : "rgba(192,168,96,0.1)",
-							borderColor: active ? "kk.goldHover" : "kk.textMuted",
-						}}
-						onClick={() => i18n.changeLanguage(code)}
+		<Box>
+			<Flex
+				as="button"
+				align="center"
+				justify="space-between"
+				w="100%"
+				cursor="pointer"
+				onClick={() => setExpanded(o => !o)}
+				py="1"
+			>
+				<Text fontSize="xs" color="kk.textMuted">Language</Text>
+				<Flex align="center" gap="1.5">
+					<Text fontSize="xs" color="kk.textPrimary" fontWeight="500">{current.label}</Text>
+					<svg
+						width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+						strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+						style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s", color: "var(--chakra-colors-kk-textSecondary)" }}
 					>
-						{label}
-					</Button>
-				)
-			})}
-		</Flex>
+						<polyline points="6 9 12 15 18 9" />
+					</svg>
+				</Flex>
+			</Flex>
+			{expanded && (
+				<Flex flexWrap="wrap" gap="1" mt="2">
+					{LANGUAGES.map(({ code, label }) => {
+						const active = i18n.language === code
+						return (
+							<Box
+								key={code}
+								as="button"
+								px="2"
+								py="0.5"
+								borderRadius="md"
+								fontWeight={active ? "600" : "400"}
+								fontSize="11px"
+								lineHeight="1.4"
+								bg={active ? "kk.gold" : "transparent"}
+								color={active ? "black" : "kk.textSecondary"}
+								border="1px solid"
+								borderColor={active ? "kk.gold" : "kk.border"}
+								cursor="pointer"
+								_hover={{
+									bg: active ? "kk.goldHover" : "rgba(192,168,96,0.1)",
+									borderColor: active ? "kk.goldHover" : "kk.textMuted",
+								}}
+								transition="all 0.12s"
+								onClick={() => i18n.changeLanguage(code)}
+							>
+								{label}
+							</Box>
+						)
+					})}
+				</Flex>
+			)}
+		</Box>
 	)
 }
 

@@ -29,5 +29,7 @@
 	"timeJustNow": "just now",
 	"timeMinutesAgo": "{{count}}m ago",
 	"timeHoursAgo": "{{count}}h ago",
-	"timeDaysAgo": "{{count}}d ago"
+	"timeDaysAgo": "{{count}}d ago",
+	"staleCtaTitle": "Press to refresh balances",
+	"staleCtaSubtitle": "Last checked {{time}}"
 }

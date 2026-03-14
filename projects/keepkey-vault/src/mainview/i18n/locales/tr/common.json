@@ -1,0 +1,23 @@
+{
+	"cancel": "İptal",
+	"save": "Kaydet",
+	"back": "Geri",
+	"next": "İleri",
+	"done": "Tamam",
+	"close": "Kapat",
+	"confirm": "Onayla",
+	"copy": "Kopyala",
+	"copied": "Kopyalandı",
+	"loading": "Yükleniyor...",
+	"retry": "Yeniden Dene",
+	"dismiss": "Kapat",
+	"enabled": "Etkin",
+	"disabled": "Devre Dışı",
+	"notSet": "Ayarlanmadı",
+	"change": "Değiştir",
+	"remove": "Kaldır",
+	"add": "Ekle",
+	"verify": "Doğrula",
+	"skip": "Atla",
+	"previous": "Önceki"
+}

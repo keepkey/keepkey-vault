@@ -8,6 +8,14 @@ import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
 
+/** Lock icon for passphrase mode */
+const PassphraseLockIcon = () => (
+	<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+		<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+		<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+	</svg>
+)
+
 interface TopNavProps {
 	label?: string
 	connected: boolean
@@ -20,6 +28,7 @@ interface TopNavProps {
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
+	passphraseActive?: boolean
 }
 
 /** Construction/hard-hat icon for dev firmware */
@@ -86,7 +95,7 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly, passphraseActive }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -185,6 +194,14 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 						)}
 					</Flex>
 				) : null}
+				{passphraseActive && (
+					<Flex align="center" gap="0.5" bg="rgba(251,146,60,0.12)" px="1.5" py="0.5" borderRadius="sm">
+						<PassphraseLockIcon />
+						<Text fontSize="9px" color="#FB923C" fontWeight="500" letterSpacing="0.02em">
+							{t("passphraseMode")}
+						</Text>
+					</Flex>
+				)}
 			</Flex>
 
 			{/* Center: navigation tabs (icon above label) */}

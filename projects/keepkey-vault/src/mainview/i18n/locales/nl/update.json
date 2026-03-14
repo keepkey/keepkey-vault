@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "Nieuwe versie beschikbaar",
+	"downloadingWithProgress": "Update downloaden... {{progress}}%",
+	"downloading": "Update downloaden...",
+	"readyToInstall": "Update gedownload en klaar",
+	"applying": "Update installeren, opnieuw opstarten...",
+	"errorWithMessage": "Updatefout: {{error}}",
+	"download": "Downloaden",
+	"later": "Later",
+	"restartToUpdate": "Herstart om bij te werken"
+}

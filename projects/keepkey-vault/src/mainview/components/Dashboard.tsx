@@ -9,14 +9,20 @@ import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
+import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
-import type { ChainBalance, CustomChain, TokenVisibilityStatus } from "../../shared/types"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 
 const DASHBOARD_ANIMATIONS = `
 	@keyframes pulseGold {
 		0%, 100% { box-shadow: 0 0 12px rgba(192,168,96,0.4); }
 		50% { box-shadow: 0 0 24px rgba(192,168,96,0.7); }
+	}
+	@keyframes glowCta {
+		0% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
+		50% { box-shadow: 0 0 16px rgba(192,168,96,0.5), 0 0 40px rgba(192,168,96,0.2); }
+		100% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
 	}
 `
 
@@ -54,6 +60,8 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
+	const [showBip85, setShowBip85] = useState(false)
+	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [tokenWarning, setTokenWarning] = useState(false)
@@ -66,6 +74,20 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 			.then(setVisibilityMap)
 			.catch(() => {})
 	}, [])
+
+	// Load BIP-85 feature flag (re-check when settings change)
+	const refreshBip85Flag = useCallback(() => {
+		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
+			.then(s => setBip85Enabled(s.bip85Enabled))
+			.catch(() => {})
+	}, [])
+
+	useEffect(() => { refreshBip85Flag() }, [refreshBip85Flag])
+
+	useEffect(() => {
+		window.addEventListener('keepkey-settings-changed', refreshBip85Flag)
+		return () => window.removeEventListener('keepkey-settings-changed', refreshBip85Flag)
+	}, [refreshBip85Flag])
 
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
@@ -228,6 +250,11 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
+
+	// Show big CTA when last check is older than 24 hours
+	const cacheOlderThanDay = !loadingBalances && !watchOnly && initialLoaded && (
+		!cacheUpdatedAt || (Date.now() - cacheUpdatedAt > 86_400_000)
+	)
 
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
@@ -539,7 +566,61 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 				</Flex>
 			)}
 
-			<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
+			{/* Big glowing CTA when balances haven't been checked in over a day */}
+			{cacheOlderThanDay && (
+				<Box
+					as="button"
+					w="100%"
+					mb="4"
+					px="5"
+					py="4"
+					bg="rgba(192,168,96,0.08)"
+					border="1px solid"
+					borderColor="rgba(192,168,96,0.35)"
+					borderRadius="xl"
+					cursor="pointer"
+					transition="all 0.3s ease-out"
+					css={{ animation: "glowCta 3s ease-in-out infinite" }}
+					_hover={{
+						bg: "rgba(192,168,96,0.15)",
+						borderColor: "kk.gold",
+						transform: "scale(1.02)",
+						boxShadow: "0 0 24px rgba(192,168,96,0.5), 0 0 48px rgba(192,168,96,0.2)",
+					}}
+					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
+					onClick={refreshBalances}
+				>
+					<Flex align="center" justify="center" gap="3">
+						<Box
+							w="40px"
+							h="40px"
+							borderRadius="full"
+							bg="rgba(192,168,96,0.15)"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+							flexShrink={0}
+						>
+							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+							</svg>
+						</Box>
+						<Flex direction="column" align="flex-start">
+							<Text fontSize="md" fontWeight="700" color="kk.gold" lineHeight="1.3">
+								{t("staleCtaTitle")}
+							</Text>
+							<Text fontSize="xs" color="kk.textMuted" lineHeight="1.3">
+								{cacheUpdatedAt
+									? t("staleCtaSubtitle", { time: formatTimeAgo(cacheUpdatedAt, t) })
+									: t("lastUpdatedNever")}
+							</Text>
+						</Flex>
+					</Flex>
+				</Box>
+			)}
+
+		<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
 				{sortedChains.map((chain) => {
 					const bal = balances.get(chain.id)
 					const clean = cleanBalanceUsd.get(chain.id)
@@ -676,6 +757,46 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 
 			{showReports && (
 				<ReportDialog onClose={() => setShowReports(false)} />
+			)}
+
+			{showBip85 && (
+				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
+			)}
+
+			{/* BIP-85 lock icon — bottom right (only when feature enabled) */}
+			{bip85Enabled && !watchOnly && (
+				<Box
+					as="button"
+					position="fixed"
+					bottom="24px"
+					right="24px"
+					w="52px"
+					h="52px"
+					borderRadius="full"
+					bg="rgba(192,168,96,0.15)"
+					border="1px solid"
+					borderColor="rgba(192,168,96,0.3)"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					cursor="pointer"
+					transition="all 0.2s"
+					_hover={{
+						bg: "rgba(192,168,96,0.25)",
+						borderColor: "kk.gold",
+						transform: "scale(1.08)",
+						boxShadow: "0 0 20px rgba(192,168,96,0.3)",
+					}}
+					_active={{ transform: "scale(0.95)" }}
+					onClick={() => setShowBip85(true)}
+					zIndex={10}
+					title="BIP-85 Seed Vault"
+				>
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+					</svg>
+				</Box>
 			)}
 		</Box>
 	)

@@ -12,5 +12,6 @@
 	"loadingPortfolio": "Caricamento portafoglio",
 	"errorWithMessage": "Errore: {{error}}",
 	"tryUnplugging": "Prova a scollegare e ricollegare il tuo KeepKey.",
-	"watchOnlyConnectPrompt": "Solo visualizzazione — Collega il dispositivo per l'accesso completo"
+	"watchOnlyConnectPrompt": "Solo visualizzazione — Collega il dispositivo per l'accesso completo",
+	"passphraseMode": "Passphrase"
 }
