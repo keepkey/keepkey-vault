@@ -586,28 +586,43 @@ export function clearApiLogs() {
 
 import type { RecentActivity, ActivityType } from '../shared/types'
 
+/** Check if a txid already exists in api_log */
+export function apiLogTxidExists(txid: string): boolean {
+  try {
+    if (!db) return false
+    const row = db.query('SELECT 1 FROM api_log WHERE txid = ? LIMIT 1').get(txid)
+    return !!row
+  } catch { return false }
+}
+
+const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
+
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
-export function getRecentActivityFromLog(limit = 50): RecentActivity[] {
+export function getRecentActivityFromLog(limit = 50, chainFilter?: string): RecentActivity[] {
   try {
     if (!db) return []
 
-    const logRows = db.query(
-      `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method
-       FROM api_log
-       WHERE activity_type IS NOT NULL
-       ORDER BY timestamp DESC
-       LIMIT ?`
-    ).all(limit) as Array<{
+    // Build query with optional chain filter
+    let logSql = `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method
+       FROM api_log WHERE activity_type IS NOT NULL`
+    const logParams: any[] = []
+    if (chainFilter) {
+      logSql += ` AND chain = ?`
+      logParams.push(chainFilter)
+    }
+    logSql += ` ORDER BY timestamp DESC LIMIT ?`
+    logParams.push(limit)
+
+    const logRows = db.query(logSql).all(...logParams) as Array<{
       id: number; txid: string | null; chain: string | null; activity_type: string;
       app_name: string; timestamp: number; route: string; method: string
     }>
 
-    const VALID_TYPES = new Set(['send', 'swap', 'sign', 'message', 'approve'])
     const logActivities: RecentActivity[] = logRows.map(r => ({
       id: String(r.id),
       txid: r.txid || undefined,
       chain: r.chain || '?',
-      type: (VALID_TYPES.has(r.activity_type) ? r.activity_type : 'sign') as ActivityType,
+      type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
       source: (r.method === 'RPC' ? 'app' : 'api') as 'app' | 'api',
       appName: r.method === 'RPC' ? undefined : r.app_name,
       status: r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed',
@@ -615,12 +630,18 @@ export function getRecentActivityFromLog(limit = 50): RecentActivity[] {
     }))
 
     // Swap history entries (dedupe by txid against logActivities)
-    const swapRows = db.query(
-      `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at
-       FROM swap_history
-       ORDER BY created_at DESC
-       LIMIT ?`
-    ).all(limit) as Array<{
+    let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at
+       FROM swap_history`
+    const swapParams: any[] = []
+    if (chainFilter) {
+      // Match swap by from_symbol (chain filter is a symbol like 'BTC')
+      swapSql += ` WHERE from_symbol = ?`
+      swapParams.push(chainFilter)
+    }
+    swapSql += ` ORDER BY created_at DESC LIMIT ?`
+    swapParams.push(limit)
+
+    const swapRows = db.query(swapSql).all(...swapParams) as Array<{
       id: string; txid: string; from_symbol: string; to_symbol: string;
       from_chain_id: string; from_amount: string; status: string; created_at: number
     }>

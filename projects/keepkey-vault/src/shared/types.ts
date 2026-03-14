@@ -537,7 +537,7 @@ export interface SwapHistoryStats {
 
 // ── Recent Activity types ──────────────────────────────────────────────
 
-export type ActivityType = 'send' | 'swap' | 'sign' | 'message' | 'approve'
+export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve'
 export type ActivitySource = 'app' | 'api'
 
 export interface RecentActivity {

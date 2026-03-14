@@ -19,7 +19,7 @@ import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chain
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -1082,8 +1082,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
 
-				// Track broadcast in api_log
-				insertApiLog({ method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' })
+				// Track broadcast in api_log + notify frontend
+				const logEntry: ApiLogEntry = { method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
+				insertApiLog(logEntry)
+				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
 				return result
 			},
@@ -1746,7 +1748,68 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
-				return getRecentActivityFromLog(params?.limit || 50)
+				return getRecentActivityFromLog(params?.limit || 50, params?.chainId)
+			},
+			scanChainHistory: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// Get the address/xpub for this chain from cached balances
+				// UTXO chains store xpub, account-based chains store address
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				const cachedBalances = getCachedBalances(deviceId)
+				const chainBalance = cachedBalances?.balances?.find(b => b.chainId === params.chainId)
+				const pubkey = chainBalance?.address
+				if (!pubkey) throw new Error(`No cached address for ${chain.symbol} — load balances first`)
+
+				const pioneer = await getPioneer()
+				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
+
+				const resp = await withTimeout(
+					pioneer.GetTxHistory({ queries: [{ pubkey, caip: chain.caip }] }),
+					PIONEER_TIMEOUT_MS,
+					`GetTxHistory(${chain.symbol})`
+				)
+				const data = resp?.data || resp
+				const histories = data?.histories || data?.data?.histories || []
+				const txs: any[] = histories[0]?.transactions || []
+
+				if (txs.length === 0) {
+					console.log(`[activity] No transactions found for ${chain.symbol}`)
+					return { count: 0 }
+				}
+
+				// Insert each tx as an api_log entry (dedupe by txid)
+				let inserted = 0
+				for (const tx of txs) {
+					const txid = tx.txid || tx.hash || tx.txHash
+					if (!txid) continue
+
+					// Skip if already in api_log
+					const existing = apiLogTxidExists(txid)
+					if (existing) continue
+
+					const direction = tx.direction || (tx.value < 0 ? 'sent' : 'received')
+					const activityType = direction === 'sent' ? 'send' : 'receive'
+					const ts = tx.timestamp ? tx.timestamp * 1000 : tx.blockTime ? tx.blockTime * 1000 : Date.now()
+
+					insertApiLog({
+						method: 'SCAN',
+						route: `history/${params.chainId}`,
+						timestamp: ts,
+						durationMs: 0,
+						status: 200,
+						appName: 'vault',
+						txid,
+						chain: chain.symbol,
+						activityType,
+					})
+					inserted++
+				}
+
+				console.log(`[activity] Scanned ${chain.symbol}: ${txs.length} txs, ${inserted} new`)
+				return { count: inserted }
 			},
 			dismissActivity: async (_params) => {
 				// No-op: api_log entries are audit records, not dismissible

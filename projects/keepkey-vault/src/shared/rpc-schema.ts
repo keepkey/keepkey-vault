@@ -153,7 +153,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
 
       // ── Recent Activity ──────────────────────────────────────────────────
-      getRecentActivity: { params: { limit?: number } | void; response: RecentActivity[] }
+      getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
+      scanChainHistory: { params: { chainId: string }; response: { count: number } }
       dismissActivity: { params: { id: string }; response: void }
       clearRecentActivity: { params: void; response: void }
 
