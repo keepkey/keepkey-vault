@@ -139,6 +139,108 @@ const RefreshIcon = ({ spinning }: { spinning?: boolean }) => (
   </svg>
 )
 
+type ChainOption = { id: string; symbol: string; caip: string; color: string; balanceUsd: number }
+
+/** Custom dropdown with chain logos */
+function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, scanResult, onSelect, onScan }: {
+  chainOptions: ChainOption[]
+  selectedChain: string
+  selectedDef: ReturnType<typeof CHAINS['find']>
+  scanning: boolean
+  scanResult: string | null
+  onSelect: (id: string) => void
+  onScan: () => void
+}) {
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+
+  return (
+    <Flex px="4" pb="3" gap="2" align="center" flexShrink={0} position="relative">
+      {/* Trigger */}
+      <Flex
+        flex="1" align="center" gap="2" cursor="pointer"
+        bg="rgba(255,255,255,0.05)" border="1px solid" borderColor={dropdownOpen ? 'rgba(35,220,200,0.4)' : 'rgba(255,255,255,0.1)'}
+        borderRadius="lg" px="3" py="1.5"
+        _hover={{ borderColor: 'rgba(35,220,200,0.3)' }}
+        transition="border-color 0.15s"
+        onClick={() => setDropdownOpen(!dropdownOpen)}
+      >
+        {selectedDef ? (
+          <Image src={caipToIcon(selectedDef.caip)} w="18px" h="18px" borderRadius="full" flexShrink={0}
+            fallback={<Box w="18px" h="18px" borderRadius="full" bg={selectedDef.color} flexShrink={0} />}
+          />
+        ) : (
+          <Box w="18px" h="18px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
+        )}
+        <Text flex="1" fontSize="xs" fontWeight="600" color={selectedDef ? 'white' : 'whiteAlpha.400'}>
+          {selectedDef?.symbol || 'Select network...'}
+        </Text>
+        <Text fontSize="2xs" color="whiteAlpha.400" flexShrink={0}>{dropdownOpen ? '\u25B2' : '\u25BC'}</Text>
+      </Flex>
+
+      {/* Refresh icon */}
+      <Box
+        as="button"
+        display="flex" alignItems="center" justifyContent="center"
+        w="34px" h="34px" borderRadius="lg" flexShrink={0}
+        bg={scanning ? 'rgba(255,255,255,0.03)' : 'rgba(35,220,200,0.12)'}
+        border="1px solid"
+        borderColor={scanning ? 'rgba(255,255,255,0.05)' : 'rgba(35,220,200,0.3)'}
+        color={scanning ? 'whiteAlpha.300' : '#23DCC8'}
+        cursor={scanning || !selectedChain ? 'not-allowed' : 'pointer'}
+        opacity={!selectedChain ? 0.3 : 1}
+        _hover={scanning || !selectedChain ? {} : { bg: 'rgba(35,220,200,0.2)' }}
+        transition="all 0.15s"
+        onClick={onScan}
+        title={scanning ? 'Scanning...' : `Scan ${selectedDef?.symbol || ''} history`}
+      >
+        <RefreshIcon spinning={scanning} />
+      </Box>
+
+      {/* Scan result */}
+      {scanResult && (
+        <Text fontSize="2xs" flexShrink={0} color={scanResult.startsWith('+') ? '#23DCC8' : scanResult === 'Up to date' ? 'whiteAlpha.500' : '#E53E3E'}>
+          {scanResult}
+        </Text>
+      )}
+
+      {/* Dropdown list */}
+      {dropdownOpen && (
+        <>
+          {/* Click-away */}
+          <Box position="fixed" inset="0" zIndex={0} onClick={() => setDropdownOpen(false)} />
+          <Box
+            position="absolute" top="100%" left="16px" right="60px"
+            mt="2px" zIndex={1}
+            bg="kk.bg" border="1px solid" borderColor="rgba(35,220,200,0.3)"
+            borderRadius="lg" overflow="hidden"
+            boxShadow="0 8px 24px rgba(0,0,0,0.5)"
+          >
+            <Box maxH="180px" overflowY="auto" py="1">
+              {chainOptions.map(c => (
+                <Flex
+                  key={c.id}
+                  align="center" gap="2" px="3" py="1.5"
+                  cursor="pointer"
+                  bg={selectedChain === c.id ? 'rgba(35,220,200,0.1)' : 'transparent'}
+                  _hover={{ bg: 'rgba(255,255,255,0.06)' }}
+                  transition="background 0.1s"
+                  onClick={() => { onSelect(c.id); setDropdownOpen(false) }}
+                >
+                  <Image src={caipToIcon(c.caip)} w="18px" h="18px" borderRadius="full" flexShrink={0}
+                    fallback={<Box w="18px" h="18px" borderRadius="full" bg={c.color} flexShrink={0} />}
+                  />
+                  <Text fontSize="xs" fontWeight="600" color="white" flex="1">{c.symbol}</Text>
+                  {selectedChain === c.id && <Text fontSize="2xs" color="#23DCC8">{'\u2713'}</Text>}
+                </Flex>
+              ))}
+            </Box>
+          </Box>
+        </>
+      )}
+    </Flex>
+  )
+}
+
 export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefresh }: ActivityPanelProps) {
   const [tab, setTab] = useState<'activity' | 'swaps'>('activity')
   const [selectedChain, setSelectedChain] = useState<string>('')
@@ -224,7 +326,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
       <Box
         position="fixed" bottom="0" left="0"
-        w="420px" maxW="100vw" h="75vh" maxH="650px"
+        w="380px" maxW="100vw" h="55vh" maxH="480px"
         bg="kk.bg" border="1px solid" borderColor="kk.border" borderTopRightRadius="xl"
         zIndex={Z.drawerPanel} display="flex" flexDirection="column" overflow="hidden"
       >
@@ -260,71 +362,15 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
         {/* Network selector + refresh */}
         {tab === 'activity' && (
-          <Flex px="4" pb="3" gap="2" align="center" flexShrink={0}>
-            {/* Select dropdown with chain icon */}
-            <Flex
-              flex="1" align="center" gap="2"
-              bg="rgba(255,255,255,0.05)" border="1px solid" borderColor="rgba(255,255,255,0.1)"
-              borderRadius="lg" px="3" py="1.5" position="relative"
-            >
-              {selectedDef && (
-                <Image src={caipToIcon(selectedDef.caip)} w="18px" h="18px" borderRadius="full" flexShrink={0}
-                  fallback={<Box w="18px" h="18px" borderRadius="full" bg={selectedDef.color} flexShrink={0} />}
-                />
-              )}
-              <Box
-                as="select"
-                flex="1"
-                bg="transparent"
-                border="none"
-                color="white"
-                fontSize="xs"
-                fontWeight="600"
-                outline="none"
-                cursor="pointer"
-                value={selectedChain}
-                onChange={(e: any) => setSelectedChain(e.target.value)}
-                css={{
-                  '& option': { background: '#1a1a2e', color: 'white' },
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                }}
-              >
-                <option value="" disabled>Select network...</option>
-                {chainOptions.map(c => (
-                  <option key={c.id} value={c.id}>{c.symbol}</option>
-                ))}
-              </Box>
-              {/* Dropdown arrow */}
-              <Text fontSize="2xs" color="whiteAlpha.400" flexShrink={0}>{'\u25BC'}</Text>
-            </Flex>
-
-            {/* Refresh/scan icon */}
-            <Box
-              as="button"
-              display="flex" alignItems="center" justifyContent="center"
-              w="36px" h="36px" borderRadius="lg" flexShrink={0}
-              bg={scanning ? 'rgba(255,255,255,0.03)' : 'rgba(35,220,200,0.12)'}
-              border="1px solid"
-              borderColor={scanning ? 'rgba(255,255,255,0.05)' : 'rgba(35,220,200,0.3)'}
-              color={scanning ? 'whiteAlpha.300' : '#23DCC8'}
-              cursor={scanning || !selectedChain ? 'not-allowed' : 'pointer'}
-              opacity={!selectedChain ? 0.3 : 1}
-              _hover={scanning || !selectedChain ? {} : { bg: 'rgba(35,220,200,0.2)' }}
-              transition="all 0.15s"
-              onClick={handleScan}
-              title={scanning ? 'Scanning...' : `Scan ${selectedDef?.symbol || ''} history`}
-            >
-              <RefreshIcon spinning={scanning} />
-            </Box>
-
-            {/* Scan result toast */}
-            {scanResult && (
-              <Text fontSize="2xs" flexShrink={0} color={scanResult.startsWith('+') ? '#23DCC8' : scanResult === 'Up to date' ? 'whiteAlpha.500' : '#E53E3E'}>
-                {scanResult}
-              </Text>
-            )}
-          </Flex>
+          <NetworkSelector
+            chainOptions={chainOptions}
+            selectedChain={selectedChain}
+            selectedDef={selectedDef}
+            scanning={scanning}
+            scanResult={scanResult}
+            onSelect={setSelectedChain}
+            onScan={handleScan}
+          />
         )}
 
         {/* Content */}
