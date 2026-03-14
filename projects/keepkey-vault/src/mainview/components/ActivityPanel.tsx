@@ -174,7 +174,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
         <Text flex="1" fontSize="xs" fontWeight="600" color={selectedDef ? 'white' : 'whiteAlpha.400'} truncate>
           {selectedDef ? `${selectedDef.coin} (${selectedDef.symbol})` : 'Select network...'}
         </Text>
-        {selectedDef && <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} truncate maxW="100px">{selectedDef.networkId}</Text>}
+        {selectedDef && <Text fontSize="9px" color="whiteAlpha.300" flexShrink={0} truncate maxW="100px" fontFamily="mono">{selectedDef.networkId}</Text>}
         <Text fontSize="2xs" color="whiteAlpha.400" flexShrink={0}>{dropdownOpen ? '\u25B2' : '\u25BC'}</Text>
       </Flex>
 
@@ -232,7 +232,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
                   />
                   <Text fontSize="xs" fontWeight="600" color="white">{c.symbol}</Text>
                   <Text fontSize="2xs" color="whiteAlpha.400" flex="1" truncate>{c.coin}</Text>
-                  <Text fontSize="2xs" color="whiteAlpha.200" flexShrink={0} truncate maxW="90px" fontFamily="mono">{c.networkId}</Text>
+                  <Text fontSize="9px" color="whiteAlpha.200" flexShrink={0} truncate maxW="90px" fontFamily="mono">{c.networkId}</Text>
                   {selectedChain === c.id && <Text fontSize="2xs" color="#23DCC8">{'\u2713'}</Text>}
                 </Flex>
               ))}
