@@ -44,5 +44,6 @@
 	"copyAddress": "Adresi kopyala",
 	"copied": "Kopyalandı",
 	"zcashCliRequired": "Etkinleştirmek için zcash-cli derleyin",
-	"memoTooLong": "Not 512 baytı aşıyor"
+	"memoTooLong": "Not 512 baytı aşıyor",
+	"invalidZcashRecipient": "Geçersiz adres — u1... (unified) veya t1.../t3... (transparent) olmalıdır"
 }

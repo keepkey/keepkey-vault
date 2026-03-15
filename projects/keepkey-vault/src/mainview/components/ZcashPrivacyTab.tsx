@@ -1,9 +1,20 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
 import { FaShieldAlt, FaCopy, FaCheck } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { generateQRSvg } from "../lib/qr"
+
+/** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
+function validateZcashRecipient(addr: string): { valid: boolean; error?: string } {
+	const s = addr.trim()
+	if (!s) return { valid: false }
+	if (s.startsWith('u1') && s.length >= 70) return { valid: true }
+	if (s.startsWith('zs1') && s.length >= 70) return { valid: true }
+	const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
+	if ((s.startsWith('t1') || s.startsWith('t3')) && s.length === 35 && BASE58.test(s)) return { valid: true }
+	return { valid: false, error: 'invalidZcashRecipient' }
+}
 
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
@@ -48,6 +59,12 @@ export function ZcashPrivacyTab() {
 	const [sending, setSending] = useState(false)
 	const [sendResult, setSendResult] = useState<string | null>(null)
 	const [sendError, setSendError] = useState<string | null>(null)
+
+	// Address validation
+	const recipientValidation = useMemo(() => {
+		if (!recipient) return null
+		return validateZcashRecipient(recipient)
+	}, [recipient])
 
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
@@ -183,6 +200,10 @@ export function ZcashPrivacyTab() {
 	// ── Send shielded ─────────────────────────────────────────────────
 	const handleSend = useCallback(async () => {
 		if (!recipient || !amount) return
+		if (recipientValidation && !recipientValidation.valid) {
+			setSendError(recipientValidation.error ? t(recipientValidation.error) : t("invalidZcashRecipient"))
+			return
+		}
 		setSending(true)
 		setSendError(null)
 		setSendResult(null)
@@ -192,8 +213,10 @@ export function ZcashPrivacyTab() {
 			const whole = BigInt(parts[0] || "0") * 100_000_000n
 			const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
 			const frac = BigInt(fracStr)
-			const zatoshis = Number(whole + frac)
-			if (!Number.isFinite(zatoshis) || zatoshis <= 0) throw new Error("Invalid amount")
+			const zatoshisBig = whole + frac
+			// ZEC max supply is 21M = 2,100,000,000,000,000 zatoshis — fits in Number.MAX_SAFE_INTEGER
+			if (zatoshisBig <= 0n || zatoshisBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Invalid amount")
+			const zatoshis = Number(zatoshisBig)
 		// Validate memo length (Orchard memo field is 512 bytes max)
 			if (memo && new TextEncoder().encode(memo).length > 512) {
 				throw new Error(t("memoTooLong"))
@@ -212,7 +235,7 @@ export function ZcashPrivacyTab() {
 			setSendError(e.message || "Send failed")
 		}
 		setSending(false)
-	}, [recipient, amount, memo, refreshBalance])
+	}, [recipient, amount, memo, recipientValidation, refreshBalance])
 
 	// ── Copy address ──────────────────────────────────────────────────
 	const copyAddress = useCallback(() => {
@@ -466,6 +489,9 @@ export function ZcashPrivacyTab() {
 							_hover={{ borderColor: "kk.textMuted" }}
 							_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
 						/>
+						{recipientValidation && !recipientValidation.valid && recipientValidation.error && (
+							<Text fontSize="11px" color="#F87171">{t(recipientValidation.error)}</Text>
+						)}
 						<Flex gap="2">
 							<Input
 								placeholder={t("amountZec")}
@@ -504,7 +530,7 @@ export function ZcashPrivacyTab() {
 							fontWeight="600"
 							_hover={{ bg: "rgba(192,168,96,0.9)" }}
 							onClick={handleSend}
-							disabled={!recipient || !amount || sending}
+							disabled={!recipient || !amount || sending || (recipientValidation != null && !recipientValidation.valid)}
 						>
 							{sending ? (
 								<><Spinner size="xs" mr="2" /> {t("sending")}</>

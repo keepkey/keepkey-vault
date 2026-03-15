@@ -265,6 +265,10 @@ export interface ApiLogEntry {
   imageUrl?: string
   requestBody?: any      // parsed JSON body (POST requests)
   responseBody?: any     // parsed JSON response
+  // ── Activity tracking (populated for sign/broadcast operations) ──
+  txid?: string          // blockchain txid (computed from signed tx or from broadcast response)
+  chain?: string         // chain symbol (BTC, ETH, ATOM, etc.)
+  activityType?: string  // sign | broadcast | swap | message
 }
 
 // Supported fiat currencies
@@ -529,6 +533,30 @@ export interface SwapHistoryStats {
   failed: number
   refunded: number
   pending: number
+}
+
+// ── Recent Activity types ──────────────────────────────────────────────
+
+export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve'
+export type ActivitySource = 'app' | 'api'
+
+export interface RecentActivity {
+  id: string
+  txid?: string              // blockchain txid (may be absent for sign-only before broadcast)
+  chain: string              // chain symbol (BTC, ETH, ATOM, etc.)
+  chainId?: string           // internal chain id (bitcoin, ethereum, etc.) — for explorer links
+  type: ActivityType
+  source: ActivitySource
+  to?: string
+  amount?: string
+  asset?: string             // token symbol if different from chain native
+  appName?: string           // for API-originating activities
+  status: 'signed' | 'broadcast' | 'failed'
+  createdAt: number
+  // ── On-chain confirmation data (populated by scan, updated on rescan) ──
+  confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
+  blockHeight?: number       // block the tx was mined in (0 = unconfirmed)
+  fee?: string               // tx fee (human-readable)
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts

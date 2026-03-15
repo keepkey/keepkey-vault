@@ -212,6 +212,11 @@ export function initDb() {
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    // Activity tracking columns on api_log (sign/broadcast ops)
+    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT']) {
+      try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -275,6 +280,21 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
     tx()
   } catch (e: any) {
     console.warn('[db] setCachedBalances failed:', e.message)
+  }
+}
+
+/** Update a single chain's cached balance (upsert). */
+export function updateCachedBalance(deviceId: string, balance: ChainBalance) {
+  try {
+    if (!db) return
+    const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
+    db.run(
+      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] updateCachedBalance failed:', e.message)
   }
 }
 
@@ -511,8 +531,8 @@ export function insertApiLog(entry: ApiLogEntry) {
   try {
     if (!db) return
     db.run(
-      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body, txid, chain, activity_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entry.method,
         entry.route,
@@ -523,6 +543,9 @@ export function insertApiLog(entry: ApiLogEntry) {
         entry.imageUrl || null,
         entry.requestBody ? JSON.stringify(entry.requestBody) : null,
         entry.responseBody ? JSON.stringify(entry.responseBody) : null,
+        entry.txid || null,
+        entry.chain || null,
+        entry.activityType || null,
       ]
     )
     // Periodic prune (every ~100 inserts, check if over limit)
@@ -573,6 +596,114 @@ export function clearApiLogs() {
   }
 }
 
+
+// ── Recent Activity (unified from api_log + swap_history) ─────────────
+
+import type { RecentActivity, ActivityType } from '../shared/types'
+
+/** Check if a txid already exists in api_log */
+export function apiLogTxidExists(txid: string): boolean {
+  try {
+    if (!db) return false
+    const row = db.query('SELECT 1 FROM api_log WHERE txid = ? LIMIT 1').get(txid)
+    return !!row
+  } catch { return false }
+}
+
+/** Update response_body metadata for an existing api_log entry by txid (used to refresh confirmation counts) */
+export function updateApiLogTxMeta(txid: string, meta: Record<string, any>) {
+  try {
+    if (!db) return
+    db.run('UPDATE api_log SET response_body = ? WHERE txid = ?', [JSON.stringify(meta), txid])
+  } catch (e: any) {
+    console.warn('[db] updateApiLogTxMeta failed:', e.message)
+  }
+}
+
+const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
+
+/** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
+export function getRecentActivityFromLog(limit = 50, chainFilter?: string): RecentActivity[] {
+  try {
+    if (!db) return []
+
+    // Build query with optional chain filter
+    let logSql = `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
+       FROM api_log WHERE activity_type IS NOT NULL`
+    const logParams: any[] = []
+    if (chainFilter) {
+      logSql += ` AND chain = ?`
+      logParams.push(chainFilter)
+    }
+    logSql += ` ORDER BY timestamp DESC LIMIT ?`
+    logParams.push(limit)
+
+    const logRows = db.query(logSql).all(...logParams) as Array<{
+      id: number; txid: string | null; chain: string | null; activity_type: string;
+      app_name: string; timestamp: number; route: string; method: string; response_body: string | null
+    }>
+
+    const logActivities: RecentActivity[] = logRows.map(r => {
+      // Parse tx metadata from response_body (stored by scan)
+      let meta: any = null
+      if (r.response_body) { try { meta = JSON.parse(r.response_body) } catch {} }
+      return {
+        id: String(r.id),
+        txid: r.txid || undefined,
+        chain: r.chain || '?',
+        type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
+        source: (r.method === 'RPC' ? 'app' : 'api') as 'app' | 'api',
+        appName: r.method === 'RPC' ? undefined : r.app_name,
+        status: r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed',
+        createdAt: r.timestamp,
+        confirmations: meta?.confirmations ?? undefined,
+        blockHeight: meta?.blockHeight ?? undefined,
+        amount: meta?.value ?? undefined,
+        fee: meta?.fee ?? undefined,
+      }
+    })
+
+    // Swap history entries (dedupe by txid against logActivities)
+    let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at
+       FROM swap_history`
+    const swapParams: any[] = []
+    if (chainFilter) {
+      // Match swap by from_symbol (chain filter is a symbol like 'BTC')
+      swapSql += ` WHERE from_symbol = ?`
+      swapParams.push(chainFilter)
+    }
+    swapSql += ` ORDER BY created_at DESC LIMIT ?`
+    swapParams.push(limit)
+
+    const swapRows = db.query(swapSql).all(...swapParams) as Array<{
+      id: string; txid: string; from_symbol: string; to_symbol: string;
+      from_chain_id: string; from_amount: string; status: string; created_at: number
+    }>
+
+    const logTxids = new Set(logActivities.filter(a => a.txid).map(a => a.txid))
+    const swapActivities: RecentActivity[] = swapRows
+      .filter(r => !logTxids.has(r.txid))
+      .map(r => ({
+        id: r.id,
+        txid: r.txid,
+        chain: r.from_symbol,
+        chainId: r.from_chain_id,
+        type: 'swap' as const,
+        source: 'app' as const,
+        amount: r.from_amount,
+        asset: `${r.from_symbol}\u2192${r.to_symbol}`,
+        status: r.status === 'completed' ? 'broadcast' as const : r.status === 'failed' ? 'failed' as const : 'broadcast' as const,
+        createdAt: r.created_at,
+      }))
+
+    return [...logActivities, ...swapActivities]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+  } catch (e: any) {
+    console.warn('[db] getRecentActivityFromLog failed:', e.message)
+    return []
+  }
+}
 
 // ── Device Snapshot (watch-only cache) ──────────────────────────────
 
@@ -834,8 +965,9 @@ export function getSwapHistory(filter?: SwapHistoryFilter): SwapHistoryRecord[] 
       params.push(filter.toDate)
     }
     if (filter?.asset) {
-      sql += ` AND (from_symbol LIKE ? OR to_symbol LIKE ? OR from_asset LIKE ? OR to_asset LIKE ?)`
-      const q = `%${filter.asset}%`
+      sql += ` AND (from_symbol LIKE ? ESCAPE '\\' OR to_symbol LIKE ? ESCAPE '\\' OR from_asset LIKE ? ESCAPE '\\' OR to_asset LIKE ? ESCAPE '\\')`
+      const escaped = filter.asset.replace(/[\\%_]/g, c => '\\' + c)
+      const q = `%${escaped}%`
       params.push(q, q, q, q)
     }
 

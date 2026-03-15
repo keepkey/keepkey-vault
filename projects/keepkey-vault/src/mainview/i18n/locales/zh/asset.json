@@ -16,5 +16,6 @@
 	"hideToken": "隐藏代币",
 	"revertToAutoDetect": "恢复自动检测",
 	"unhide": "取消隐藏",
-	"addCustomToken": "添加自定义代币"
+	"addCustomToken": "添加自定义代币",
+	"invalidZcashRecipient": "无效地址 — 必须是 u1...（unified）或 t1.../t3...（transparent）"
 }

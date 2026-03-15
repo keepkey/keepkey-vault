@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
+import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaSyncAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
@@ -37,6 +37,24 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
+
+	// Single-chain refresh
+	const [refreshing, setRefreshing] = useState(false)
+	const [refreshedBalance, setRefreshedBalance] = useState<ChainBalance | null>(null)
+	const handleRefresh = useCallback(async () => {
+		setRefreshing(true)
+		try {
+			const updated = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id })
+			setRefreshedBalance(updated)
+		} catch (e) {
+			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
+		} finally {
+			setRefreshing(false)
+		}
+	}, [chain.id])
+
+	// Use refreshed balance if available, otherwise prop
+	const activeBalance = refreshedBalance || balance
 
 	// Feature flag: swaps
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
@@ -77,7 +95,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const effectivePath = (isBtc && btcSelected) ? btcSelected.fullPath : currentPath
 	const effectiveScriptType = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
 
-	const deriveAddress = useCallback(async (path?: number[]) => {
+	// TON: bounceable toggle (default: non-bounceable / UQ for safe receiving)
+	const isTon = chain.chainFamily === 'ton'
+	const [tonBounceable, setTonBounceable] = useState(false) // default: non-bounceable (UQ)
+
+	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean) => {
 		const usePath = path || effectivePath
 		if (path) setCurrentPath(path)
 		setLoading(true)
@@ -90,6 +112,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			}
 			const st = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
 			if (st) params.scriptType = st
+			// TON: pass bounceable flag for UQ vs EQ address
+			if (isTon) params.bounceable = overrideBounceable ?? tonBounceable
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
 			const addr = typeof result === "string" ? result : result?.address || String(result)
 			setAddress(addr)
@@ -99,7 +123,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			setAddress(null)
 		}
 		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected])
+	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	useEffect(() => {
@@ -153,13 +177,13 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 		}
 	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses])
 
-	// Only auto-derive once on mount, not on every address change
+	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag
 	useEffect(() => {
-		if (!address && !deriveError) deriveAddress()
+		if (isTon || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Token spam filter ──────────────────────────────────────────────
-	const tokens = useMemo(() => balance?.tokens || [], [balance?.tokens])
+	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [showHidden, setShowHidden] = useState(false)
 
@@ -202,7 +226,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const hiddenCount = spamTokens.length + zeroValueTokens.length
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
 	const spamTotalUsd = useMemo(() => spamTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [spamTokens])
-	const cleanBalanceUsd = (balance?.balanceUsd || 0) - spamTotalUsd
+	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
 	const [showSwapDialog, setShowSwapDialog] = useState(false)
@@ -405,14 +429,26 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 					/>
 					<Text fontSize={{ base: "md", md: "lg" }} fontWeight="600" color="kk.textPrimary">{chain.coin}</Text>
 					<Text fontSize={{ base: "xs", md: "sm" }} color="kk.textMuted">{chain.symbol}</Text>
-					{balance && (
-						<Flex ml="auto" align="baseline" gap="2" flexShrink={0}>
+					{activeBalance && (
+						<Flex ml="auto" align="center" gap="2" flexShrink={0}>
 							<Text fontSize={{ base: "xs", md: "sm" }} fontFamily="mono" color="kk.textPrimary">
-								{balance.balance} {chain.symbol}
+								{activeBalance.balance} {chain.symbol}
 							</Text>
 							{cleanBalanceUsd > 0 && (
 								<AnimatedUsd value={cleanBalanceUsd} prefix="($" suffix=")" fontSize="xs" color="white" fontWeight="500" display={{ base: "none", sm: "block" }} />
 							)}
+							<IconButton
+								aria-label="Refresh balance"
+								size="xs"
+								variant="ghost"
+								color="kk.gold"
+								onClick={handleRefresh}
+								disabled={refreshing}
+								_hover={{ bg: "rgba(255,215,0,0.15)" }}
+								css={refreshing ? { animation: "spin 1s linear infinite", "@keyframes spin": { from: { transform: "rotate(0deg)" }, to: { transform: "rotate(360deg)" } } } : undefined}
+							>
+								<FaSyncAlt />
+							</IconButton>
 						</Flex>
 					)}
 				</Flex>
@@ -511,13 +547,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							btcAddressIndex={btcAddressIndex}
 							onBtcChangeIndex={handleBtcChangeIndex}
 							onBtcAddressIndex={setBtcAddressIndex}
+							isTon={isTon}
+							tonBounceable={tonBounceable}
+							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
 						/>
 					)}
 					{view === "send" && (
 						<SendForm
 							chain={chain}
 							address={address}
-							balance={balance}
+							balance={activeBalance}
 							token={selectedToken}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
@@ -530,7 +569,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						open={showSwapDialog}
 						onClose={() => setShowSwapDialog(false)}
 						chain={chain}
-						balance={balance}
+						balance={activeBalance}
 						address={address}
 					/>
 					{view === "privacy" && isZcash && (

@@ -44,5 +44,6 @@
 	"copyAddress": "Adres kopiëren",
 	"copied": "Gekopieerd",
 	"zcashCliRequired": "Bouw zcash-cli om in te schakelen",
-	"memoTooLong": "Memo overschrijdt 512 bytes"
+	"memoTooLong": "Memo overschrijdt 512 bytes",
+	"invalidZcashRecipient": "Ongeldig adres — moet u1... (unified) of t1.../t3... (transparent) zijn"
 }
