@@ -13,6 +13,7 @@ import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
+import { playChaChing } from "../lib/sounds"
 
 const DASHBOARD_ANIMATIONS = `
 	@keyframes pulseGold {
@@ -198,6 +199,25 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 		window.addEventListener('keepkey-swap-completed', handler)
 		return () => window.removeEventListener('keepkey-swap-completed', handler)
 	}, [refreshBalances])
+
+	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
+	useEffect(() => {
+		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
+			setBalances(prev => {
+				const old = prev.get(updated.chainId)
+				const oldUsd = old?.balanceUsd ?? 0
+				const newUsd = updated.balanceUsd ?? 0
+				// Cha-ching when balance increased
+				if (newUsd > oldUsd && oldUsd > 0) {
+					playChaChing()
+				}
+				const next = new Map(prev)
+				next.set(updated.chainId, updated)
+				return next
+			})
+			setCacheUpdatedAt(Date.now())
+		})
+	}, [])
 
 	// Compute spam-filtered USD per chain: subtract spam token values from chain totals
 	const cleanBalanceUsd = useMemo(() => {

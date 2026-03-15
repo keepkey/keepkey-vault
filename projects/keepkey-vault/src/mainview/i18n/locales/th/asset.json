@@ -44,5 +44,6 @@
 	"copyAddress": "คัดลอกที่อยู่",
 	"copied": "คัดลอกแล้ว",
 	"zcashCliRequired": "สร้าง zcash-cli เพื่อเปิดใช้งาน",
-	"memoTooLong": "บันทึกเกิน 512 ไบต์"
+	"memoTooLong": "บันทึกเกิน 512 ไบต์",
+	"invalidZcashRecipient": "ที่อยู่ไม่ถูกต้อง — ต้องเป็น u1... (unified) หรือ t1.../t3... (transparent)"
 }

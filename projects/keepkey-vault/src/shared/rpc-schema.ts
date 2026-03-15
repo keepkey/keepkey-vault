@@ -206,6 +206,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
+      'balance-updated': ChainBalance
     }
   }
   webview: {

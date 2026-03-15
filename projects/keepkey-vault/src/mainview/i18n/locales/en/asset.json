@@ -44,5 +44,6 @@
 	"copyAddress": "Copy address",
 	"copied": "Copied",
 	"zcashCliRequired": "Build zcash-cli to enable",
-	"memoTooLong": "Memo exceeds 512 bytes"
+	"memoTooLong": "Memo exceeds 512 bytes",
+	"invalidZcashRecipient": "Invalid address — must be u1... (unified) or t1.../t3... (transparent)"
 }

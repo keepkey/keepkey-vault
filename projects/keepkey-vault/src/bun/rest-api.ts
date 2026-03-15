@@ -823,6 +823,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await wallet.tonGetAddress({
             addressNList: body.address_n,
             showDisplay: body.show_display ?? false,
+            bounceable: false, // UQ prefix — safe for uninitialized wallets
           })
           const address = typeof result === 'string' ? result : (result as any)?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
@@ -1352,7 +1353,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 } else if (coinType === 607) {
                   // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
                   const tonNList = p.address_n
-                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false })
+                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
                   address = typeof r === 'string' ? r : (r as any)?.address || ''
                 }
 

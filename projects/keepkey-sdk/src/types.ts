@@ -142,6 +142,22 @@ export interface SolanaSignTxParams {
   raw_tx: string  // base64-encoded raw transaction
 }
 
+// ── Tron Types ─────────────────────────────────────────────────────
+export interface TronSignTxParams {
+  addressNList: number[]
+  from: string
+  to: string
+  amount: number  // amount in sun (1 TRX = 1,000,000 sun)
+  memo?: string
+}
+
+// ── TON Types ──────────────────────────────────────────────────────
+export interface TonSignTxParams {
+  address_n?: number[]
+  addressNList?: number[]
+  raw_tx: string  // base64 or hex encoded raw transaction
+}
+
 // ── Public Key Types ────────────────────────────────────────────────
 export interface GetPublicKeyRequest {
   address_n: number[]

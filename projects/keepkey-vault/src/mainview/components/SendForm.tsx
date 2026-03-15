@@ -7,6 +7,7 @@ import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
+import { validateAddress } from "../../shared/address-validation"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -139,15 +140,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		return n * pricePerUnit
 	}, [amount, hasPrice, pricePerUnit, isMax])
 
-	const recipientTooShort = useMemo(() => {
-		if (!recipient) return false
-		// Most addresses are 25+ chars; catch obvious typos
-		return recipient.length > 0 && recipient.length < 10
-	}, [recipient])
+	const addressValidation = useMemo(() => {
+		if (!recipient) return null
+		return validateAddress(recipient, chain)
+	}, [recipient, chain])
 
 	const handleBuild = useCallback(async () => {
 		if (!recipient || (!amount && !isMax)) return
-		if (recipientTooShort) { setError(t("addressTooShort")); return }
+		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 		setLoading(true)
 		setError(null)
@@ -174,7 +174,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, recipientTooShort, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -350,6 +350,9 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								<QrIcon />
 							</Button>
 						</Flex>
+						{addressValidation && !addressValidation.valid && (
+							<Text fontSize="11px" color="kk.error" mt="1">{t(addressValidation.error!)}</Text>
+						)}
 					</Box>
 
 					{/* Amount input with USD conversion */}
@@ -458,7 +461,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						color="black"
 						_hover={{ bg: "kk.goldHover" }}
 						onClick={handleBuild}
-						disabled={loading || !recipient || (!amount && !isMax)}
+						disabled={loading || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
 						w="full"
 					>
 						{loading ? t("buildingTransaction") : t("buildTransaction")}

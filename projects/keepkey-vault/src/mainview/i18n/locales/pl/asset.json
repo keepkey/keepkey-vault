@@ -44,5 +44,6 @@
 	"copyAddress": "Kopiuj adres",
 	"copied": "Skopiowano",
 	"zcashCliRequired": "Zbuduj zcash-cli, aby włączyć",
-	"memoTooLong": "Notatka przekracza 512 bajtów"
+	"memoTooLong": "Notatka przekracza 512 bajtów",
+	"invalidZcashRecipient": "Nieprawidłowy adres — musi być u1... (unified) lub t1.../t3... (transparent)"
 }

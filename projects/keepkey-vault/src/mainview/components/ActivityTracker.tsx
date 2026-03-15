@@ -16,6 +16,20 @@ const TRACKER_CSS = `
     0%, 100% { box-shadow: 0 0 0 0 rgba(35,220,200,0.5); }
     50% { box-shadow: 0 0 0 8px rgba(35,220,200,0); }
   }
+  @keyframes kkBounceUp {
+    0% { transform: scale(1) translateY(0); }
+    20% { transform: scale(1.35) translateY(-6px); }
+    40% { transform: scale(1.15) translateY(-2px); }
+    60% { transform: scale(1.25) translateY(-4px); }
+    80% { transform: scale(1.05) translateY(-1px); }
+    100% { transform: scale(1) translateY(0); }
+  }
+  @keyframes kkCountSlideUp {
+    0% { opacity: 0; transform: translateY(8px) scale(0.8); }
+    40% { opacity: 1; transform: translateY(-3px) scale(1.1); }
+    70% { transform: translateY(1px) scale(1.0); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
 `
 
 export function ActivityTracker() {
@@ -23,7 +37,9 @@ export function ActivityTracker() {
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([])
   const [panelOpen, setPanelOpen] = useState(false)
   const [hasNew, setHasNew] = useState(false)
+  const [bouncing, setBouncing] = useState(false)
   const lastCountRef = useRef(0)
+  const bounceTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
 
   // Fetch recent activities from api_log + swap_history (unified query)
   const fetchActivities = useCallback(() => {
@@ -82,17 +98,20 @@ export function ActivityTracker() {
     return () => window.removeEventListener('keepkey-swap-executed', handler)
   }, [fetchActivities, fetchSwaps])
 
-  // Detect new items for pulse animation
+  // Detect new items — trigger bounce animation
   const activeSwapCount = pendingSwaps.filter(s =>
     s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
   ).length
   const totalCount = activities.length + activeSwapCount
   useEffect(() => {
-    if (totalCount > lastCountRef.current && !panelOpen) {
+    if (totalCount > lastCountRef.current && lastCountRef.current > 0) {
       setHasNew(true)
+      setBouncing(true)
+      if (bounceTimeoutRef.current) clearTimeout(bounceTimeoutRef.current)
+      bounceTimeoutRef.current = setTimeout(() => setBouncing(false), 700)
     }
     lastCountRef.current = totalCount
-  }, [totalCount, panelOpen])
+  }, [totalCount])
 
   const handleOpen = () => {
     setPanelOpen(true)
@@ -111,6 +130,12 @@ export function ActivityTracker() {
   } else {
     label = `${activities.length} tx${activities.length > 1 ? 's' : ''}`
   }
+
+  const bubbleAnimation = bouncing
+    ? 'kkBounceUp 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)'
+    : hasNew
+      ? 'kkActivityPulse 2s ease-in-out infinite'
+      : 'none'
 
   return (
     <>
@@ -133,14 +158,23 @@ export function ActivityTracker() {
           _hover={{ bg: displayCount > 0 ? "rgba(35,220,200,0.25)" : "rgba(255,255,255,0.1)", transform: "scale(1.05)" }}
           transition="all 0.2s"
           onClick={handleOpen}
-          style={hasNew ? { animation: 'kkActivityPulse 2s ease-in-out infinite' } : {}}
+          style={{ animation: bubbleAnimation }}
         >
           {activeSwapCount > 0 ? (
             <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkActivityPulse 1.5s ease-in-out infinite' }} />
           ) : (
             <Text fontSize="xs" opacity={displayCount > 0 ? 1 : 0.5}>&#9889;</Text>
           )}
-          <Text fontSize="xs" fontWeight="600" color={displayCount > 0 ? "#23DCC8" : "whiteAlpha.500"}>
+          <Text
+            fontSize="xs"
+            fontWeight="600"
+            color={displayCount > 0 ? "#23DCC8" : "whiteAlpha.500"}
+            key={displayCount}
+            style={bouncing ? {
+              display: 'inline-block',
+              animation: 'kkCountSlideUp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            } : {}}
+          >
             {label}
           </Text>
         </Box>

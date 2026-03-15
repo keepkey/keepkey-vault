@@ -246,7 +246,7 @@ if (existsSync(keepkeyDir)) {
     if (existsSync(nestedNm)) {
       const result = Bun.spawnSync(['du', '-sk', nestedNm])
       const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
-      rmSync(nestedNm, { recursive: true })
+      try { rmSync(nestedNm, { recursive: true }) } catch { /* already removed */ }
       strippedKK += kb
     }
   }

@@ -44,5 +44,6 @@
 	"copyAddress": "Sao chép địa chỉ",
 	"copied": "Đã sao chép",
 	"zcashCliRequired": "Xây dựng zcash-cli để kích hoạt",
-	"memoTooLong": "Ghi chú vượt quá 512 byte"
+	"memoTooLong": "Ghi chú vượt quá 512 byte",
+	"invalidZcashRecipient": "Địa chỉ không hợp lệ — phải là u1... (unified) hoặc t1.../t3... (transparent)"
 }

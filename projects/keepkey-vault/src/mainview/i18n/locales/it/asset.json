@@ -16,5 +16,6 @@
 	"hideToken": "Nascondi token",
 	"revertToAutoDetect": "Ripristina rilevamento automatico",
 	"unhide": "Mostra",
-	"addCustomToken": "Aggiungi token personalizzato"
+	"addCustomToken": "Aggiungi token personalizzato",
+	"invalidZcashRecipient": "Indirizzo non valido — deve essere u1... (unified) o t1.../t3... (transparent)"
 }

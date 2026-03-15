@@ -16,5 +16,6 @@
 	"hideToken": "Token ausblenden",
 	"revertToAutoDetect": "Auf automatische Erkennung zurücksetzen",
 	"unhide": "Einblenden",
-	"addCustomToken": "Benutzerdefinierten Token hinzufügen"
+	"addCustomToken": "Benutzerdefinierten Token hinzufügen",
+	"invalidZcashRecipient": "Ungültige Adresse — muss u1... (unified) oder t1.../t3... (transparent) sein"
 }

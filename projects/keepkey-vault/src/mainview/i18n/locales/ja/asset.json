@@ -16,5 +16,6 @@
 	"hideToken": "トークンを非表示",
 	"revertToAutoDetect": "自動検出に戻す",
 	"unhide": "再表示",
-	"addCustomToken": "カスタムトークンを追加"
+	"addCustomToken": "カスタムトークンを追加",
+	"invalidZcashRecipient": "無効なアドレス — u1...（unified）またはt1.../t3...（transparent）である必要があります"
 }

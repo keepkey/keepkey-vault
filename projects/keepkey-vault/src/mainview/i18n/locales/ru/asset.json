@@ -16,5 +16,6 @@
 	"hideToken": "Скрыть токен",
 	"revertToAutoDetect": "Вернуть автоопределение",
 	"unhide": "Показать",
-	"addCustomToken": "Добавить пользовательский токен"
+	"addCustomToken": "Добавить пользовательский токен",
+	"invalidZcashRecipient": "Недействительный адрес — должен быть u1... (unified) или t1.../t3... (transparent)"
 }

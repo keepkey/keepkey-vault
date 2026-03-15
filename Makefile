@@ -9,7 +9,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug test test-rest
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -33,6 +33,13 @@ modules-clean:
 
 build-zcash-cli:
 	cd $(PROJECT_DIR)/zcash-cli && cargo build --release
+ifdef ELECTROBUN_DEVELOPER_ID
+	@echo "Signing zcash-cli binary..."
+	codesign --force --verbose --timestamp \
+		--sign "Developer ID Application: $(ELECTROBUN_DEVELOPER_ID) ($(ELECTROBUN_TEAMID))" \
+		--options runtime \
+		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
+endif
 
 build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
@@ -55,7 +62,7 @@ dev-hmr: install
 build: install
 	cd $(PROJECT_DIR) && bun run build
 
-build-stable: install
+build-stable: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:stable
 
 build-canary: install
@@ -102,6 +109,13 @@ dmg:
 	echo "Stapling notarization ticket..."; \
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
+
+# --- Testing ---
+
+test: test-rest
+
+test-rest:
+	cd $(PROJECT_DIR) && bun test __tests__/rest-api.test.ts
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -200,4 +214,6 @@ help:
 	@echo "  make publish        - Show distribution artifacts"
 	@echo "  make release        - Build, sign, and create new GitHub release"
 	@echo "  make upload-dmg     - Upload signed DMG to existing CI draft release"
+	@echo "  make test           - Run all tests"
+	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
