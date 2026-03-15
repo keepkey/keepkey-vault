@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
 
 const SCHEMA_VERSION = '8'
 
@@ -208,6 +208,24 @@ export function initDb() {
       )
     `)
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pioneer_servers (
+        url        TEXT PRIMARY KEY,
+        label      TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )
+    `)
+
+    // Seed default Pioneer server if table is empty
+    const serverCount = db.query('SELECT COUNT(*) as c FROM pioneer_servers').get() as { c: number } | null
+    if (!serverCount || serverCount.c === 0) {
+      db.run(
+        'INSERT INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, 1, ?)',
+        ['https://api.keepkey.info', 'KeepKey Official', Date.now()]
+      )
+    }
+
     // Migrations: add columns to existing tables (safe to re-run)
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
@@ -402,6 +420,46 @@ export function setSetting(key: string, value: string) {
     db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
   } catch (e: any) {
     console.warn('[db] setSetting failed:', e.message)
+  }
+}
+
+// ── Pioneer Servers ──────────────────────────────────────────────────
+
+export function getPioneerServers(): PioneerServer[] {
+  try {
+    if (!db) return []
+    const rows = db.query('SELECT url, label, is_default FROM pioneer_servers ORDER BY is_default DESC, created_at ASC').all() as Array<{
+      url: string; label: string; is_default: number
+    }>
+    return rows.map(r => ({ url: r.url, label: r.label, isDefault: r.is_default === 1 }))
+  } catch (e: any) {
+    console.warn('[db] getPioneerServers failed:', e.message)
+    return []
+  }
+}
+
+export function addPioneerServerDb(url: string, label: string) {
+  try {
+    if (!db) return
+    db.run(
+      'INSERT OR REPLACE INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, 0, ?)',
+      [url, label, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] addPioneerServer failed:', e.message)
+  }
+}
+
+export function removePioneerServerDb(url: string) {
+  try {
+    if (!db) return
+    // Prevent removing the default server
+    const row = db.query('SELECT is_default FROM pioneer_servers WHERE url = ?').get(url) as { is_default: number } | null
+    if (row?.is_default === 1) throw new Error('Cannot remove the default server')
+    db.run('DELETE FROM pioneer_servers WHERE url = ?', [url])
+  } catch (e: any) {
+    console.warn('[db] removePioneerServer failed:', e.message)
+    throw e
   }
 }
 

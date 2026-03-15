@@ -19,7 +19,7 @@ import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chain
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta } from "./db"
+import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -183,9 +183,15 @@ let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
 function getAppSettings() {
+	const servers = getPioneerServers()
+	const activeBase = getPioneerApiBase()
+	// If the active URL matches a server in the list, use it; otherwise fall back to the first server
+	const activePioneerServer = servers.find(s => s.url === activeBase)?.url || servers[0]?.url || activeBase
 	return {
 		restApiEnabled,
-		pioneerApiBase: getPioneerApiBase(),
+		pioneerApiBase: activeBase,
+		pioneerServers: servers,
+		activePioneerServer,
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
 		swapsEnabled,
@@ -648,10 +654,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → single GetPortfolioBalances call`)
 
-				// Build networkId → chainId lookup for token grouping
+				// Build networkId → chainId lookup for token grouping (lowercase keys — Pioneer may return different casing)
 				const networkToChain = new Map<string, string>()
 				for (const chain of allChains) {
-					if (chain.networkId) networkToChain.set(chain.networkId, chain.id)
+					if (chain.networkId) networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
 				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
@@ -659,9 +665,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					if (!pioneer) throw new Error('Pioneer client not available')
 					const resp = await withTimeout(
-						pioneer.GetPortfolioBalances({
-							pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
-						}),
+						pioneer.GetPortfolioBalances(
+							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{ forceRefresh: true }
+						),
 						PIONEER_TIMEOUT_MS,
 						'GetPortfolioBalances'
 					)
@@ -702,6 +709,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					console.log(`[getBalances] After classification: ${pureNatives.length} natives, ${tokenEntries.length} tokens`)
 
+					// Log Solana-specific entries for debugging
+					const solanaEntries = allEntries.filter((d: any) => d.caip?.includes('solana') || d.networkId?.includes('solana'))
+					console.log(`[getBalances] Solana entries from Pioneer: ${solanaEntries.length}`)
+					for (const s of solanaEntries) console.log(`  SOL: caip=${s.caip}, type=${s.type}, symbol=${s.symbol}, balance=${s.balance}, usd=${s.valueUsd}, networkId=${s.networkId}, contract=${s.contract}`)
+
 					// Group tokens by their parent chain (via networkId or CAIP prefix)
 					// Also log the networkToChain map so we can audit matching
 					console.log(`[getBalances] networkToChain map (${networkToChain.size} entries): ${JSON.stringify(Object.fromEntries(networkToChain))}`)
@@ -712,9 +724,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const bal = parseFloat(String(tok.balance ?? '0'))
 						if (bal <= 0) { tokensSkippedZero++; continue }
 
-						// Determine parent chainId from networkId or CAIP-2 prefix
-						const tokNetworkId = tok.networkId || ''
-						const caipPrefix = (tok.caip || '').split('/')[0] // e.g. "eip155:1"
+						// Determine parent chainId from networkId or CAIP-2 prefix (lowercase — Pioneer may return different casing)
+						const tokNetworkId = (tok.networkId || '').toLowerCase()
+						const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase() // e.g. "eip155:1"
 						const parentChainId = networkToChain.get(tokNetworkId) || networkToChain.get(caipPrefix) || null
 						if (!parentChainId) {
 							tokensSkippedNoChain++
@@ -722,16 +734,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
-						// Extract contract address from CAIP: "eip155:1/erc20:0xdac17..." → "0xdac17..."
-						const contractMatch = (tok.caip || '').match(/\/erc20:(0x[a-fA-F0-9]+)/)
-						const contractAddress = contractMatch?.[1] || tok.contract || undefined
+						// Extract contract address from CAIP:
+						//   ERC-20: "eip155:1/erc20:0xdac17..." → "0xdac17..."
+						//   SPL:    "solana:5eykt4.../spl:TokenMint..." → "TokenMint..."
+						//   TRC-20: "tron:27Lqcw/trc20:T..." → "T..."
+						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+						const contractAddress = contractMatch?.[2] || tok.contract || undefined
+
+						const rawValueUsd = tok.valueUsd
+						const rawPriceUsd = tok.priceUsd
+						const parsedBalanceUsd = Number(rawValueUsd ?? 0)
+						const parsedPriceUsd = Number(rawPriceUsd ?? 0)
+
+						// DEBUG: log first 5 tokens per chain to verify USD parsing
+						const existingCount = (tokensByChainId.get(parentChainId) || []).length
+						if (existingCount < 5) {
+							console.log(`[token-usd-debug] ${tok.symbol}: raw valueUsd=${JSON.stringify(rawValueUsd)} (${typeof rawValueUsd}) → parsed=${parsedBalanceUsd} | raw priceUsd=${JSON.stringify(rawPriceUsd)} → parsed=${parsedPriceUsd}`)
+						}
 
 						const token: TokenBalance = {
 							symbol: tok.symbol || '???',
 							name: tok.name || tok.symbol || 'Unknown Token',
 							balance: String(tok.balance ?? '0'),
-							balanceUsd: Number(tok.valueUsd ?? 0),
-							priceUsd: Number(tok.priceUsd ?? 0),
+							balanceUsd: parsedBalanceUsd,
+							priceUsd: parsedPriceUsd,
 							caip: tok.caip || '',
 							contractAddress,
 							networkId: tokNetworkId || caipPrefix,
@@ -748,7 +774,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					console.log(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
 					for (const [chainId, toks] of tokensByChainId) {
-						console.log(`[getBalances]   ${chainId}: ${toks.length} tokens, $${toks.reduce((s, t) => s + t.balanceUsd, 0).toFixed(2)} — ${toks.map(t => t.symbol).join(', ')}`)
+						const topTokens = toks.slice(0, 5).map(t => `${t.symbol}=$${t.balanceUsd.toFixed(2)}(p=$${(t.priceUsd ?? 0).toFixed(4)})`).join(', ')
+						console.log(`[getBalances]   ${chainId}: ${toks.length} tokens, $${toks.reduce((s, t) => s + t.balanceUsd, 0).toFixed(2)} — ${topTokens}`)
 					}
 
 					// Merge user-added custom tokens as placeholders
@@ -940,7 +967,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Single portfolio call
 				let balance = '0', balanceUsd = 0
 				try {
-					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
+					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }, { forceRefresh: true }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
 					const match = (resp?.data?.balances || [])[0]
 					if (match) { balance = String(match.balance ?? '0'); balanceUsd = Number(match.valueUsd ?? 0) }
 				} catch (e: any) {
@@ -1435,6 +1462,64 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				bip85Enabled = params.enabled
 				setSetting('bip85_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] BIP-85 enabled:', params.enabled)
+				return getAppSettings()
+			},
+			addPioneerServer: async (params) => {
+				const url = (params.url || '').trim().replace(/\/+$/, '')
+				const label = (params.label || '').trim()
+				if (!url || !/^https?:\/\//i.test(url)) throw new Error('URL must start with http:// or https://')
+				if (!label) throw new Error('Label is required')
+				// Health-check the server before adding
+				try {
+					const resp = await fetch(`${url}/api/v1/health`, { signal: AbortSignal.timeout(10000) })
+					if (!resp.ok) throw new Error(`Server returned ${resp.status}`)
+				} catch (e: any) {
+					throw new Error(`Server health check failed: ${e.message}`)
+				}
+				addPioneerServerDb(url, label)
+				console.log('[settings] Pioneer server added:', label, url)
+				return getAppSettings()
+			},
+			removePioneerServer: async (params) => {
+				const url = (params.url || '').trim()
+				if (!url) throw new Error('URL is required')
+				removePioneerServerDb(url)
+				// If the removed server was the active one, reset to default
+				const currentBase = getPioneerApiBase()
+				if (currentBase === url) {
+					setSetting('pioneer_api_base', '')
+					resetPioneer()
+					chainCatalog = []
+					catalogLoadedAt = 0
+					console.log('[settings] Active server removed, reset to default')
+				}
+				console.log('[settings] Pioneer server removed:', url)
+				return getAppSettings()
+			},
+			setActivePioneerServer: async (params) => {
+				const url = (params.url || '').trim().replace(/\/+$/, '')
+				if (!url) throw new Error('URL is required')
+				// Verify the server exists in our list
+				const servers = getPioneerServers()
+				if (!servers.find(s => s.url === url)) throw new Error('Server not found in saved list')
+				// Health-check before switching
+				try {
+					const resp = await fetch(`${url}/api/v1/health`, { signal: AbortSignal.timeout(10000) })
+					if (!resp.ok) throw new Error(`Server returned ${resp.status}`)
+				} catch (e: any) {
+					throw new Error(`Server health check failed: ${e.message}`)
+				}
+				// Find the default server — if switching to default, clear the override
+				const defaultServer = servers.find(s => s.isDefault)
+				if (defaultServer && defaultServer.url === url) {
+					setSetting('pioneer_api_base', '')
+				} else {
+					setSetting('pioneer_api_base', url)
+				}
+				resetPioneer()
+				chainCatalog = []
+				catalogLoadedAt = 0
+				console.log('[settings] Active Pioneer server set to:', url)
 				return getAppSettings()
 			},
 

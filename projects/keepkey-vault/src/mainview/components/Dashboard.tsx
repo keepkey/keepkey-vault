@@ -172,6 +172,15 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
 				console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)}`)
+				// DEBUG: dump token data that arrived via RPC
+				for (const b of result) {
+					if (b.tokens && b.tokens.length > 0) {
+						console.log(`[Dashboard:rpc-tokens] ${b.chainId}: ${b.tokens.length} tokens`)
+						for (const t of b.tokens.slice(0, 3)) {
+							console.log(`  ${t.symbol}: balanceUsd=${t.balanceUsd}, priceUsd=${t.priceUsd}, balance=${t.balance}, caip=${t.caip?.substring(0, 40)}`)
+						}
+					}
+				}
 				const map = new Map<string, ChainBalance>()
 				for (const b of result) map.set(b.chainId, b)
 				setBalances(map)
@@ -219,22 +228,14 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 		})
 	}, [])
 
-	// Compute spam-filtered USD per chain: subtract spam token values from chain totals
+	// Token count per chain — spam filter OFF for now
 	const cleanBalanceUsd = useMemo(() => {
-		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v]))
 		const result = new Map<string, { usd: number; cleanTokenCount: number }>()
 		for (const [chainId, bal] of balances) {
-			if (!bal.tokens || bal.tokens.length === 0) {
-				result.set(chainId, { usd: bal.balanceUsd || 0, cleanTokenCount: 0 })
-				continue
-			}
-			const { spam } = categorizeTokens(bal.tokens, overrides)
-			const spamUsd = spam.reduce((s, t) => s + (t.balanceUsd || 0), 0)
-			const cleanTokens = (bal.tokens?.length || 0) - spam.length
-			result.set(chainId, { usd: (bal.balanceUsd || 0) - spamUsd, cleanTokenCount: cleanTokens })
+			result.set(chainId, { usd: bal.balanceUsd || 0, cleanTokenCount: bal.tokens?.length || 0 })
 		}
 		return result
-	}, [balances, visibilityMap])
+	}, [balances])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 

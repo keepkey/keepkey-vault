@@ -274,13 +274,23 @@ export interface ApiLogEntry {
 // Supported fiat currencies
 export type FiatCurrency = 'USD' | 'EUR' | 'GBP' | 'JPY' | 'CHF' | 'CAD' | 'AUD' | 'CNY' | 'KRW' | 'BRL' | 'RUB' | 'INR' | 'MXN' | 'SEK' | 'NOK' | 'DKK' | 'PLN' | 'CZK' | 'HUF' | 'TRY'
 
+// Pioneer API server entry (persisted in SQLite)
+export interface PioneerServer {
+  url: string
+  label: string
+  isDefault: boolean
+}
+
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
-  restApiEnabled: boolean   // controls entire REST API server on/off
-  pioneerApiBase: string    // current Pioneer API base URL
-  fiatCurrency: FiatCurrency  // display currency (default 'USD')
-  numberLocale: string        // number formatting locale (default 'en-US')
-  swapsEnabled: boolean       // feature flag: cross-chain swaps (default OFF)
+  restApiEnabled: boolean        // controls entire REST API server on/off
+  pioneerApiBase: string         // current Pioneer API base URL
+  pioneerServers: PioneerServer[] // all configured Pioneer servers
+  activePioneerServer: string    // URL of the active server
+  fiatCurrency: FiatCurrency     // display currency (default 'USD')
+  numberLocale: string           // number formatting locale (default 'en-US')
+  swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
+  bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────
