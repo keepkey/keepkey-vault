@@ -89,38 +89,85 @@ export async function buildTx(
       // Solana — Pioneer builds the raw tx (with dummy signature header), device signs
       if (!params.fromAddress) throw new Error('fromAddress required for Solana')
 
-      // Convert SOL amount to lamports (9 decimals)
-      const solAmountLamports = (() => {
-        const parts = params.amount.split('.')
-        const whole = parts[0] || '0'
-        const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-        return String(BigInt(whole) * 1000000000n + BigInt(frac))
-      })()
+      // Detect SPL token send from CAIP: "solana:.../token:MintAddress" or "solana:.../spl:MintAddress"
+      const splMintMatch = params.caip?.match(/\/(token|spl):([A-Za-z0-9]+)/)
+      const isSplToken = !!splMintMatch
+      const splMintAddress = splMintMatch?.[2]
 
       let rawTx: string
-      try {
-        // Direct HTTP call to Pioneer — do NOT use pioneer.BuildTransferN() as the
-        // swagger-codegen suffix is non-deterministic (shifts when new chains add
-        // endpoints with the same operationId "BuildTransfer").
-        const base = getPioneerApiBase()
-        const resp = await fetch(`${base}/api/v1/solana/build-transfer`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: params.fromAddress,
-            to: params.to,
-            amount: solAmountLamports,
-            memo: params.memo || undefined,
-          }),
-        })
-        const data = await resp.json() as any
-        if (!resp.ok || data?.success === false) {
-          throw new Error(data?.error || data?.message || `HTTP ${resp.status}`)
+      const base = getPioneerApiBase()
+
+      if (isSplToken && splMintAddress) {
+        // SPL token transfer — Pioneer builds the ATA-aware transfer instruction
+        const tokenDecimals = params.tokenDecimals ?? 6 // default to 6 (USDC)
+        // For MAX send, use frontend-provided tokenBalance (same pattern as EVM)
+        const sendAmount = params.isMax && params.tokenBalance && parseFloat(params.tokenBalance) > 0
+          ? params.tokenBalance
+          : params.amount
+        if (params.isMax && (!sendAmount || parseFloat(sendAmount) <= 0)) {
+          throw new Error('Token balance is zero — cannot send max')
         }
-        rawTx = data?.serialized
-        if (!rawTx) throw new Error('Pioneer did not return serialized tx for Solana')
-      } catch (e: any) {
-        throw new Error(`Solana tx build failed: ${e.message}`)
+        const tokenAmountBase = (() => {
+          const parts = sendAmount.split('.')
+          const whole = parts[0] || '0'
+          const frac = (parts[1] || '').slice(0, tokenDecimals).padEnd(tokenDecimals, '0')
+          return String(BigInt(whole) * BigInt(10 ** tokenDecimals) + BigInt(frac))
+        })()
+
+        try {
+          const resp = await fetch(`${base}/api/v1/solana/build-transfer-token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: params.fromAddress,
+              to: params.to,
+              amount: tokenAmountBase,
+              token: splMintAddress,
+              decimals: tokenDecimals,
+              memo: params.memo || undefined,
+            }),
+          })
+          const data = await resp.json() as any
+          if (!resp.ok || data?.success === false) {
+            throw new Error(data?.error || data?.message || `HTTP ${resp.status}`)
+          }
+          rawTx = data?.serialized
+          if (!rawTx) throw new Error('Pioneer did not return serialized tx for SPL token transfer')
+        } catch (e: any) {
+          throw new Error(`SPL token tx build failed: ${e.message}`)
+        }
+      } else {
+        // Native SOL transfer — convert to lamports (9 decimals)
+        const solAmountLamports = (() => {
+          const parts = params.amount.split('.')
+          const whole = parts[0] || '0'
+          const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
+          return String(BigInt(whole) * 1000000000n + BigInt(frac))
+        })()
+
+        try {
+          // Direct HTTP call to Pioneer — do NOT use pioneer.BuildTransferN() as the
+          // swagger-codegen suffix is non-deterministic (shifts when new chains add
+          // endpoints with the same operationId "BuildTransfer").
+          const resp = await fetch(`${base}/api/v1/solana/build-transfer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: params.fromAddress,
+              to: params.to,
+              amount: solAmountLamports,
+              memo: params.memo || undefined,
+            }),
+          })
+          const data = await resp.json() as any
+          if (!resp.ok || data?.success === false) {
+            throw new Error(data?.error || data?.message || `HTTP ${resp.status}`)
+          }
+          rawTx = data?.serialized
+          if (!rawTx) throw new Error('Pioneer did not return serialized tx for Solana')
+        } catch (e: any) {
+          throw new Error(`Solana tx build failed: ${e.message}`)
+        }
       }
 
       const unsignedTx = {

@@ -76,7 +76,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	}, [tokenCaip])
 
 	// Derived display values — token mode vs native mode
-	const isTokenSend = !!(token && token.caip?.includes('erc20'))
+	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
 
