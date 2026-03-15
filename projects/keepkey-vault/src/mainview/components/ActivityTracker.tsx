@@ -45,14 +45,14 @@ export function ActivityTracker() {
   const fetchActivities = useCallback(() => {
     rpcRequest<RecentActivity[]>('getRecentActivity', { limit: 50 }, 5000)
       .then((result) => { if (result) setActivities(result) })
-      .catch(() => {})
+      .catch((err) => { console.warn('[ActivityTracker] fetch activities failed:', err.message) })
   }, [])
 
   // Fetch pending swaps (for live swap tracking)
   const fetchSwaps = useCallback(() => {
     rpcRequest<PendingSwap[]>('getPendingSwaps', undefined, 5000)
       .then((result) => { if (result) setPendingSwaps(result) })
-      .catch(() => {})
+      .catch((err) => { console.warn('[ActivityTracker] fetch swaps failed:', err.message) })
   }, [])
 
   // Fetch on mount
@@ -88,14 +88,20 @@ export function ActivityTracker() {
 
   // Listen for swap-executed DOM event from SwapDialog
   useEffect(() => {
+    let t1: ReturnType<typeof setTimeout>
+    let t2: ReturnType<typeof setTimeout>
     const handler = () => {
       fetchActivities()
       fetchSwaps()
-      setTimeout(fetchActivities, 1000)
-      setTimeout(fetchSwaps, 1000)
+      t1 = setTimeout(fetchActivities, 1000)
+      t2 = setTimeout(fetchSwaps, 1000)
     }
     window.addEventListener('keepkey-swap-executed', handler)
-    return () => window.removeEventListener('keepkey-swap-executed', handler)
+    return () => {
+      window.removeEventListener('keepkey-swap-executed', handler)
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
   }, [fetchActivities, fetchSwaps])
 
   // Detect new items — trigger bounce animation
@@ -169,7 +175,6 @@ export function ActivityTracker() {
             fontSize="xs"
             fontWeight="600"
             color={displayCount > 0 ? "#23DCC8" : "whiteAlpha.500"}
-            key={displayCount}
             style={bouncing ? {
               display: 'inline-block',
               animation: 'kkCountSlideUp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',

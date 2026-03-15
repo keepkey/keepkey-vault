@@ -1045,9 +1045,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						// Try node.publicKey first (raw bytes), fall back to xpub decode
 						const node = pubKeyProto.getNode?.()
 						const rawKey = node?.getPublicKey_asU8?.()
-						if (rawKey && rawKey.length >= 32) {
+						if (rawKey && (rawKey.length === 32 || rawKey.length === 33)) {
 							// ed25519 node key is 33 bytes: 0x00 prefix + 32-byte key
-							const keyBytes = rawKey.length === 33 && rawKey[0] === 0x00 ? rawKey.subarray(1) : rawKey
+							const keyBytes = rawKey.length === 33 && rawKey[0] === 0x00 ? rawKey.subarray(1) : rawKey.length === 32 ? rawKey : null
+							if (!keyBytes || keyBytes.length !== 32) throw new Error(`Unexpected ed25519 key length: ${rawKey.length}`)
 							publicKeyHex = Buffer.from(keyBytes).toString('hex')
 						} else {
 							// Fallback: decode xpub to extract raw key

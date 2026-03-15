@@ -92,6 +92,12 @@ export function parseTonAddress(addr: string): { workchain: number; hash: Buffer
   // Byte 1: workchain (0x00=basechain, 0xFF=masterchain)
   // Bytes 2-33: 256-bit hash
   // Bytes 34-35: CRC16-XMODEM
+  const expectedCrc = (raw[34] << 8) | raw[35]
+  const actualCrc = tonCrc16(raw.subarray(0, 34))
+  if (expectedCrc !== actualCrc) {
+    throw new Error(`Invalid TON address checksum: expected ${expectedCrc.toString(16)}, got ${actualCrc.toString(16)}`)
+  }
+
   const wc = raw[1] === 0xFF ? -1 : raw[1]
   const hash = raw.subarray(2, 34)
 
@@ -111,6 +117,9 @@ class BitWriter {
   get bitLength(): number { return this.len }
 
   writeBit(v: boolean): this {
+    if (this.len >= this.buf.length * 8) {
+      throw new Error(`BitWriter overflow: capacity ${this.buf.length * 8} bits exceeded`)
+    }
     if (v) this.buf[this.len >> 3] |= (0x80 >> (this.len & 7))
     this.len++
     return this
@@ -257,7 +266,7 @@ function serializeBoc(root: Cell): string {
     totalDataSize += cellBuf.length
   }
 
-  const offsetSize = totalDataSize <= 0xFF ? 1 : totalDataSize <= 0xFFFF ? 2 : 3
+  const offsetSize = totalDataSize <= 0xFF ? 1 : totalDataSize <= 0xFFFF ? 2 : 4
 
   // BOC header: magic + flags_byte + offset_size + cell_count + roots + absent + data_len + root_idx + cells
   const headerBuf = Buffer.alloc(4 + 1 + 1 + refSize * 3 + offsetSize + refSize)
@@ -591,9 +600,17 @@ export function assembleTonSignedBoc(
   return serializeBoc(extMsg)
 }
 
+const TON_API_TIMEOUT_MS = 30_000
+
+function tonFetch(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TON_API_TIMEOUT_MS)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 /** Check if a TON wallet is initialized (has contract code deployed) */
 export async function getTonWalletState(address: string): Promise<{ initialized: boolean; balance: string }> {
-  const resp = await fetch(`https://toncenter.com/api/v2/getAddressInformation?address=${encodeURIComponent(address)}`)
+  const resp = await tonFetch(`https://toncenter.com/api/v2/getAddressInformation?address=${encodeURIComponent(address)}`)
   const data = await resp.json() as any
   if (!data?.ok) throw new Error(`Failed to get TON wallet state: ${data?.error || 'unknown'}`)
   const state = data?.result?.state
@@ -603,7 +620,7 @@ export async function getTonWalletState(address: string): Promise<{ initialized:
 
 /** Fetch the current seqno for a TON wallet address. Returns 0 for uninitialized wallets. */
 export async function getTonSeqno(address: string): Promise<number> {
-  const resp = await fetch('https://toncenter.com/api/v2/runGetMethod', {
+  const resp = await tonFetch('https://toncenter.com/api/v2/runGetMethod', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, method: 'seqno', stack: [] }),
@@ -616,12 +633,16 @@ export async function getTonSeqno(address: string): Promise<number> {
   if (!stack || !stack[0]) return 0
   // stack[0] = ["num", "0x..."]
   const val = stack[0][1] || stack[0]
-  return typeof val === 'string' ? parseInt(val, 16) : Number(val)
+  const seqno = typeof val === 'string' ? parseInt(val, 16) : Number(val)
+  if (!Number.isFinite(seqno) || seqno < 0 || seqno > 0xFFFFFFFF) {
+    throw new Error(`Invalid TON seqno: ${seqno}`)
+  }
+  return seqno
 }
 
 /** Broadcast a signed BOC to the TON network via TON Center */
 export async function broadcastTonBoc(bocBase64: string): Promise<string> {
-  const resp = await fetch('https://toncenter.com/api/v2/sendBoc', {
+  const resp = await tonFetch('https://toncenter.com/api/v2/sendBoc', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ boc: bocBase64 }),

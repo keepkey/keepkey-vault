@@ -5,15 +5,13 @@ import { FaShieldAlt, FaCopy, FaCheck } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { generateQRSvg } from "../lib/qr"
 
-const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
-
-/** Validate Zcash recipient: unified (u1...) or transparent (t1.../t3...) */
+/** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
 function validateZcashRecipient(addr: string): { valid: boolean; error?: string } {
 	const s = addr.trim()
 	if (!s) return { valid: false }
-	// Unified address (Orchard / Sapling / Transparent combo)
 	if (s.startsWith('u1') && s.length >= 70) return { valid: true }
-	// Transparent P2PKH / P2SH
+	if (s.startsWith('zs1') && s.length >= 70) return { valid: true }
+	const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
 	if ((s.startsWith('t1') || s.startsWith('t3')) && s.length === 35 && BASE58.test(s)) return { valid: true }
 	return { valid: false, error: 'invalidZcashRecipient' }
 }
@@ -215,8 +213,10 @@ export function ZcashPrivacyTab() {
 			const whole = BigInt(parts[0] || "0") * 100_000_000n
 			const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
 			const frac = BigInt(fracStr)
-			const zatoshis = Number(whole + frac)
-			if (!Number.isFinite(zatoshis) || zatoshis <= 0) throw new Error("Invalid amount")
+			const zatoshisBig = whole + frac
+			// ZEC max supply is 21M = 2,100,000,000,000,000 zatoshis — fits in Number.MAX_SAFE_INTEGER
+			if (zatoshisBig <= 0n || zatoshisBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Invalid amount")
+			const zatoshis = Number(zatoshisBig)
 		// Validate memo length (Orchard memo field is 512 bytes max)
 			if (memo && new TextEncoder().encode(memo).length > 512) {
 				throw new Error(t("memoTooLong"))

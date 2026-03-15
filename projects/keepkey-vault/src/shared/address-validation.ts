@@ -160,7 +160,11 @@ function validateTonAddress(addr: string): ValidationResult {
 // ── Zcash shielded ──────────────────────────────────────────────────────
 
 function validateZcashShieldedAddress(addr: string): ValidationResult {
-  // Unified addresses start with 'u1', Orchard-only with 'u1'
+  // Unified addresses start with 'u1'
   if (addr.startsWith('u1') && addr.length >= 70) return OK
+  // Sapling addresses start with 'zs1'
+  if (addr.startsWith('zs1') && addr.length >= 70) return OK
+  // Transparent fallback (some wallets send from shielded tab to transparent)
+  if ((addr.startsWith('t1') || addr.startsWith('t3')) && addr.length === 35 && BASE58.test(addr)) return OK
   return fail('invalidZcashShieldedAddress')
 }

@@ -140,7 +140,10 @@ export async function buildTx(
         const parts = params.amount.split('.')
         const whole = parts[0] || '0'
         const frac = (parts[1] || '').slice(0, 6).padEnd(6, '0')
-        return Number(BigInt(whole) * 1000000n + BigInt(frac))
+        // Keep as Number — TronGrid expects integer, and TRX max supply (99B) fits safely in Number
+        const sun = BigInt(whole) * 1000000n + BigInt(frac)
+        if (sun > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('TRX amount too large')
+        return Number(sun)
       })()
 
       let tronGridTx: any
@@ -189,10 +192,16 @@ export async function buildTx(
       })()
 
       // Check wallet state — uninitialized wallets need StateInit in first tx
-      const [seqno, walletState] = await Promise.all([
-        getTonSeqno(params.fromAddress),
-        getTonWalletState(params.fromAddress),
-      ])
+      let walletState: { initialized: boolean; balance: string }
+      let seqno: number
+      try {
+        ;[seqno, walletState] = await Promise.all([
+          getTonSeqno(params.fromAddress),
+          getTonWalletState(params.fromAddress),
+        ])
+      } catch (e: any) {
+        throw new Error(`TON network error — cannot determine wallet state: ${e.message}`)
+      }
 
       const needsDeploy = !walletState.initialized
       if (needsDeploy && !params.publicKeyHex) {

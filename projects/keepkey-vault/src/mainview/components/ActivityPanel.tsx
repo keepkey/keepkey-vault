@@ -4,7 +4,7 @@
  * Forced network select dropdown + refresh icon triggers Pioneer scan.
  * No "All" — user must pick a network. Only shows that network's txids.
  */
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Box, Text, Flex, VStack, HStack, Image } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
@@ -306,16 +306,17 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       .catch(() => {})
   }, [open])
 
+  const chainMap = useMemo(() => new Map(CHAINS.map(c => [c.id, c])), [])
   const chainOptions = useMemo(() => {
     return availableChains
       .map(b => {
-        const def = CHAINS.find(c => c.id === b.chainId)
+        const def = chainMap.get(b.chainId)
         if (!def) return null
         return { id: def.id, symbol: def.symbol, coin: def.coin, caip: def.caip, networkId: def.networkId, color: def.color, balanceUsd: b.balanceUsd }
       })
       .filter((c): c is NonNullable<typeof c> => c !== null)
       .sort((a, b) => b.balanceUsd - a.balanceUsd)
-  }, [availableChains])
+  }, [availableChains, chainMap])
 
   const selectedDef = useMemo(() => CHAINS.find(c => c.id === selectedChain), [selectedChain])
 
@@ -340,8 +341,10 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
     return filteredActivities.filter(a => !(a.type === 'swap' && a.txid && swapTxids.has(a.txid)))
   }, [filteredActivities, pendingSwaps])
 
+  const scanningRef = useRef(false)
   const handleScan = useCallback(async () => {
-    if (!selectedChain || scanning) return
+    if (!selectedChain || scanningRef.current) return
+    scanningRef.current = true
     setScanning(true)
     setScanResult(null)
     try {
@@ -349,11 +352,12 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       setScanResult(result.count > 0 ? `+${result.count} tx${result.count > 1 ? 's' : ''}` : 'Up to date')
       onRefresh()
     } catch (e: any) {
-      setScanResult(e.message?.slice(0, 40) || 'Failed')
+      setScanResult(e.message || 'Failed')
     } finally {
+      scanningRef.current = false
       setScanning(false)
     }
-  }, [selectedChain, scanning, onRefresh])
+  }, [selectedChain, onRefresh])
 
   useEffect(() => { setScanResult(null) }, [selectedChain])
 

@@ -965,8 +965,9 @@ export function getSwapHistory(filter?: SwapHistoryFilter): SwapHistoryRecord[] 
       params.push(filter.toDate)
     }
     if (filter?.asset) {
-      sql += ` AND (from_symbol LIKE ? OR to_symbol LIKE ? OR from_asset LIKE ? OR to_asset LIKE ?)`
-      const q = `%${filter.asset}%`
+      sql += ` AND (from_symbol LIKE ? ESCAPE '\\' OR to_symbol LIKE ? ESCAPE '\\' OR from_asset LIKE ? ESCAPE '\\' OR to_asset LIKE ? ESCAPE '\\')`
+      const escaped = filter.asset.replace(/[\\%_]/g, c => '\\' + c)
+      const q = `%${escaped}%`
       params.push(q, q, q, q)
     }
 
