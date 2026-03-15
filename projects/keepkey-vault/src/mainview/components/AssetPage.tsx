@@ -194,34 +194,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			.catch(() => {})
 	}, [])
 
-	// Categorize tokens: clean (shown), spam (hidden by default), zeroValue (hidden by default)
+	// Spam filter OFF — show all tokens as clean
 	const { cleanTokens, spamTokens, zeroValueTokens, spamResults } = useMemo(() => {
-		const clean: TokenBalance[] = []
-		const spam: TokenBalance[] = []
-		const zero: TokenBalance[] = []
 		const results = new Map<string, SpamResult>()
-
 		for (const t of tokens) {
-			const override = visibilityMap[t.caip?.toLowerCase()] ?? null
-			const result = detectSpamToken(t, override)
-			results.set(t.caip, result)
-
-			if (result.isSpam) {
-				spam.push(t)
-			} else if ((t.balanceUsd ?? 0) === 0) {
-				zero.push(t)
-			} else {
-				clean.push(t)
-			}
+			results.set(t.caip, { isSpam: false, level: null, reason: 'Filter disabled' })
 		}
-
 		return {
-			cleanTokens: clean.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
-			spamTokens: spam.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
-			zeroValueTokens: zero.sort((a, b) => a.symbol.localeCompare(b.symbol)),
+			cleanTokens: [...tokens].sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
+			spamTokens: [] as TokenBalance[],
+			zeroValueTokens: [] as TokenBalance[],
 			spamResults: results,
 		}
-	}, [tokens, visibilityMap])
+	}, [tokens])
 
 	const hiddenCount = spamTokens.length + zeroValueTokens.length
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])

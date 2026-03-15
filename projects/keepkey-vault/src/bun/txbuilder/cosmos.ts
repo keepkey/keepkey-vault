@@ -96,7 +96,7 @@ export async function buildCosmosTx(
   let baseAmount: bigint
 
   if (isMax) {
-    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] })
+    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
     const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
     const feeDisplay = FEES[chain.id] || 0
     const balBase = toBaseUnits(balStr, chain.decimals)
