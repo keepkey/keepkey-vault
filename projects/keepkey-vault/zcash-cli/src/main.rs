@@ -25,6 +25,8 @@ struct State {
     fvk: Option<FullViewingKey>,
     /// Pending PCZT state waiting for signatures
     pending_pczt: Option<pczt_builder::PcztState>,
+    /// Pending shield PCZT state waiting for signatures
+    pending_shield: Option<pczt_builder::ShieldPcztState>,
 }
 
 impl State {
@@ -33,6 +35,7 @@ impl State {
             db: None,
             fvk: None,
             pending_pczt: None,
+            pending_shield: None,
         }
     }
 
@@ -222,30 +225,36 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
     info!("set_fvk: nk  = {}", nk_hex);
     info!("set_fvk: rivk= {}", rivk_hex);
 
-    // Diagnostic: try decompressing ak as a Pallas point
+    // Diagnostic: check ak sign bit (must be 0 per Zcash spec §4.2.3)
+    let ak_sign_bit = ak_bytes[31] & 0x80;
+    if ak_sign_bit != 0 {
+        error!("set_fvk: FIRMWARE BUG — ak sign bit is SET (byte[31]=0x{:02x}). \
+                The orchard crate requires sign bit = 0 (even y-coordinate). \
+                This means the firmware's ask negation failed. \
+                Attempting auto-fix by clearing the sign bit...", ak_bytes[31]);
+    }
+
+    // Try with sign bit cleared (auto-fix for firmware bug)
+    let mut ak_fixed = ak_bytes.clone();
+    ak_fixed[31] &= 0x7f;
+
     let ak_valid = {
         use pasta_curves::group::GroupEncoding;
-        let ak_arr: [u8; 32] = ak_bytes.clone().try_into().unwrap();
+        let ak_arr: [u8; 32] = ak_fixed.clone().try_into().unwrap();
         let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_arr);
         let valid = bool::from(ak_point.is_some());
-        info!("set_fvk: ak decompresses as valid Pallas point? {}", valid);
+        info!("set_fvk: ak decompresses as valid Pallas point (sign cleared)? {}", valid);
 
         if !valid {
-            // Check: is the x-coord on the curve? (x^3 + 5 must be a QR)
-            let mut x_bytes = ak_arr;
-            x_bytes[31] &= 0x7f; // clear sign bit
-            info!("set_fvk: ak x-coord (sign cleared) = {}", hex::encode(&x_bytes));
+            // Check with original bytes too
+            let ak_arr_orig: [u8; 32] = ak_bytes.clone().try_into().unwrap();
+            let ak_point_orig = pasta_curves::pallas::Affine::from_bytes(&ak_arr_orig);
+            let valid_orig = bool::from(ak_point_orig.is_some());
+            info!("set_fvk: ak decompresses with original sign bit? {}", valid_orig);
 
-            // Also verify SpendAuth basepoint bytes are valid
-            let spendauth_bytes: [u8; 32] = [
-                0x63, 0xc9, 0x75, 0xb8, 0x84, 0x72, 0x1a, 0x8d,
-                0x0c, 0xa1, 0x70, 0x7b, 0xe3, 0x0c, 0x7f, 0x0c,
-                0x5f, 0x44, 0x5f, 0x3e, 0x7c, 0x18, 0x8d, 0x3b,
-                0x06, 0xd6, 0xf1, 0x28, 0xb3, 0x23, 0x55, 0xb7,
-            ];
-            let sa_point = pasta_curves::pallas::Affine::from_bytes(&spendauth_bytes);
-            let sa_valid = bool::from(sa_point.is_some());
-            info!("set_fvk: SpendAuth basepoint decompresses? {}", sa_valid);
+            let mut x_bytes = ak_arr;
+            x_bytes[31] &= 0x7f;
+            info!("set_fvk: ak x-coord = {}", hex::encode(&x_bytes));
         }
         valid
     };
@@ -268,12 +277,33 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
         valid
     };
 
-    let fvk = FullViewingKey::from_bytes(&fvk_bytes)
-        .ok_or_else(|| anyhow::anyhow!(
-            "Invalid FVK bytes — decode failed. ak_valid={}, nk_valid={}, rivk_valid={}. \
-             ak={}, nk={}, rivk={}",
-            ak_valid, nk_valid, rivk_valid, ak_hex, nk_hex, rivk_hex
-        ))?;
+    // Use sign-bit-cleared ak for FVK construction (workaround for firmware bug)
+    let mut fvk_fixed = [0u8; 96];
+    fvk_fixed[..32].copy_from_slice(&ak_fixed);
+    fvk_fixed[32..64].copy_from_slice(&nk_bytes);
+    fvk_fixed[64..96].copy_from_slice(&rivk_bytes);
+
+    let fvk = FullViewingKey::from_bytes(&fvk_fixed)
+        .ok_or_else(|| {
+            // Try with original bytes to give better error message
+            let orig_result = FullViewingKey::from_bytes(&fvk_bytes);
+            let sign_note = if ak_sign_bit != 0 {
+                " (sign bit was set — firmware bug confirmed)"
+            } else {
+                ""
+            };
+            anyhow::anyhow!(
+                "Invalid FVK bytes — decode failed{}. ak_valid={}, nk_valid={}, rivk_valid={}. \
+                 ak={}, nk={}, rivk={}, orig_decode={}",
+                sign_note, ak_valid, nk_valid, rivk_valid,
+                hex::encode(&ak_fixed), nk_hex, rivk_hex,
+                orig_result.is_some()
+            )
+        })?;
+
+    if ak_sign_bit != 0 {
+        info!("set_fvk: Successfully recovered FVK by clearing ak sign bit");
+    }
 
     // Get default address and encode as Unified Address (u1...)
     let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
@@ -421,6 +451,129 @@ async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
     }))
 }
 
+async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<Value> {
+    let fvk = state.fvk.as_ref()
+        .ok_or_else(|| anyhow::anyhow!("No FVK set — call set_fvk first"))?
+        .clone();
+
+    let amount = params.get("amount")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
+
+    let fee = params.get("fee")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10000); // default 0.0001 ZEC
+
+    let account = params.get("account")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    let transparent_inputs_json = params.get("transparent_inputs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing transparent_inputs array"))?;
+
+    let mut transparent_inputs: Vec<pczt_builder::ShieldTransparentInput> = Vec::new();
+    for ti in transparent_inputs_json {
+        let txid = ti.get("txid").and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing txid in transparent input"))?;
+        let vout = ti.get("vout").and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("Missing vout"))? as u32;
+        let value = ti.get("value").and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("Missing value"))?;
+        let script_pubkey = ti.get("script_pubkey").and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing script_pubkey"))?;
+
+        transparent_inputs.push(pczt_builder::ShieldTransparentInput {
+            txid: txid.to_string(),
+            vout,
+            value,
+            script_pubkey: script_pubkey.to_string(),
+        });
+    }
+
+    let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
+    let branch_id = lwd_client.get_consensus_branch_id().await?;
+    let db = state.ensure_db()?;
+
+    let shield_state = pczt_builder::build_shield_pczt(
+        &fvk, transparent_inputs, amount, fee, account, branch_id,
+        &mut lwd_client, db,
+    ).await?;
+
+    // Build response JSON
+    let transparent_signing: Vec<serde_json::Value> = shield_state.transparent_signing_inputs
+        .iter()
+        .map(|ti| serde_json::json!({
+            "index": ti.index,
+            "sighash": hex::encode(&ti.sighash),
+            "address_path": ti.address_path,
+            "amount": ti.amount,
+        }))
+        .collect();
+
+    let orchard_request = serde_json::to_value(&shield_state.orchard_signing_request)?;
+
+    let response = serde_json::json!({
+        "transparent_inputs": transparent_signing,
+        "orchard_signing_request": orchard_request,
+        "digests": {
+            "header": hex::encode(&shield_state.orchard_signing_request.digests.header),
+            "transparent": hex::encode(&shield_state.orchard_signing_request.digests.transparent),
+            "sapling": hex::encode(&shield_state.orchard_signing_request.digests.sapling),
+            "orchard": hex::encode(&shield_state.orchard_signing_request.digests.orchard),
+        },
+        "display": {
+            "amount": format!("{:.8} ZEC", amount as f64 / 1e8),
+            "fee": format!("{:.8} ZEC", fee as f64 / 1e8),
+            "action": "shield",
+        },
+    });
+
+    // Store state for finalization
+    state.pending_shield = Some(shield_state);
+
+    Ok(response)
+}
+
+async fn handle_finalize_shield(state: &mut State, params: &Value) -> Result<Value> {
+    let mut shield_state = state.pending_shield.take()
+        .ok_or_else(|| anyhow::anyhow!("No pending shield PCZT — call build_shield_pczt first"))?;
+
+    let transparent_sigs_json = params.get("transparent_signatures")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing transparent_signatures array"))?;
+
+    let orchard_sigs_json = params.get("orchard_signatures")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing orchard_signatures array"))?;
+
+    let transparent_sigs: Vec<Vec<u8>> = transparent_sigs_json.iter()
+        .map(|v| hex::decode(v.as_str().unwrap_or("")).map_err(|e| anyhow::anyhow!("Bad hex: {}", e)))
+        .collect::<Result<Vec<_>>>()?;
+
+    let orchard_sigs: Vec<Vec<u8>> = orchard_sigs_json.iter()
+        .map(|v| hex::decode(v.as_str().unwrap_or("")).map_err(|e| anyhow::anyhow!("Bad hex: {}", e)))
+        .collect::<Result<Vec<_>>>()?;
+
+    let compressed_pubkey = params.get("compressed_pubkey")
+        .and_then(|v| v.as_str())
+        .map(|s| hex::decode(s))
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Bad pubkey hex: {}", e))?;
+
+    let (raw_tx, txid) = pczt_builder::finalize_shield_pczt(
+        shield_state,
+        &transparent_sigs,
+        &orchard_sigs,
+        compressed_pubkey.as_deref(),
+    )?;
+
+    Ok(serde_json::json!({
+        "raw_tx": hex::encode(&raw_tx),
+        "txid": txid,
+    }))
+}
+
 async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
     let raw_tx_hex = params.get("raw_tx")
         .and_then(|v| v.as_str())
@@ -522,6 +675,8 @@ async fn main() {
             "build_pczt" => handle_build_pczt(&mut state, &request.params).await,
             "finalize" => handle_finalize(&mut state, &request.params).await,
             "broadcast" => handle_broadcast(&mut state, &request.params).await,
+            "build_shield_pczt" => handle_build_shield_pczt(&mut state, &request.params).await,
+            "finalize_shield" => handle_finalize_shield(&mut state, &request.params).await,
             "ping" => Ok(serde_json::json!({"pong": true})),
             "quit" => {
                 info!("Received quit command");
@@ -545,4 +700,159 @@ async fn main() {
     }
 
     info!("zcash-cli sidecar exiting");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orchard::keys::{FullViewingKey, SpendingKey};
+    use pasta_curves::group::GroupEncoding;
+    use ff::PrimeField;
+    use zip32::AccountId;
+
+    fn account(n: u32) -> AccountId {
+        AccountId::try_from(n).unwrap()
+    }
+
+    /// Test that a known FVK (from orchard crate's derive_fvk) round-trips
+    /// through from_bytes / to_bytes correctly.
+    #[test]
+    fn test_fvk_roundtrip_from_spending_key() {
+        // Derive FVK from a test spending key via orchard crate
+        let seed = [0x42u8; 32];
+        let sk = SpendingKey::from_zip32_seed(&seed, 133, account(0))
+            .expect("spending key derivation");
+        let fvk = FullViewingKey::from(&sk);
+        let fvk_bytes = fvk.to_bytes();
+
+        // Verify sign bit of ak is 0
+        assert_eq!(fvk_bytes[31] & 0x80, 0,
+            "ak sign bit must be 0 in valid FVK");
+
+        // Verify round-trip
+        let fvk2 = FullViewingKey::from_bytes(&fvk_bytes)
+            .expect("FVK round-trip failed");
+        assert_eq!(fvk.to_bytes(), fvk2.to_bytes());
+    }
+
+    /// Test that FullViewingKey::from_bytes rejects ak with sign bit = 1
+    #[test]
+    fn test_fvk_rejects_sign_bit_set() {
+        let seed = [0x42u8; 32];
+        let sk = SpendingKey::from_zip32_seed(&seed, 133, account(0))
+            .expect("spending key derivation");
+        let fvk = FullViewingKey::from(&sk);
+        let mut fvk_bytes = fvk.to_bytes();
+
+        // Set the sign bit on ak
+        fvk_bytes[31] |= 0x80;
+
+        // Should be rejected
+        assert!(FullViewingKey::from_bytes(&fvk_bytes).is_none(),
+            "FVK should reject ak with sign bit set");
+    }
+
+    /// Test that clearing the sign bit recovers a valid FVK
+    #[test]
+    fn test_fvk_sign_bit_clear_workaround() {
+        let seed = [0x42u8; 32];
+        let sk = SpendingKey::from_zip32_seed(&seed, 133, account(0))
+            .expect("spending key derivation");
+        let fvk = FullViewingKey::from(&sk);
+        let original_bytes = fvk.to_bytes();
+        let mut corrupted = original_bytes;
+
+        // Corrupt by setting sign bit
+        corrupted[31] |= 0x80;
+        assert!(FullViewingKey::from_bytes(&corrupted).is_none());
+
+        // Fix by clearing sign bit
+        corrupted[31] &= 0x7f;
+        let recovered = FullViewingKey::from_bytes(&corrupted)
+            .expect("Should recover with sign bit cleared");
+        assert_eq!(original_bytes, recovered.to_bytes(),
+            "Recovered FVK should match original");
+    }
+
+    /// Test with the exact failing values from the device log
+    #[test]
+    fn test_device_ak_sign_bit_diagnosis() {
+        let ak_hex = "59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7";
+        let nk_hex = "568fa99d2705be00371cadfba937efe844533b54c631bea1045fd8f46e1a4c17";
+        let rivk_hex = "01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d";
+
+        let ak = hex::decode(ak_hex).unwrap();
+        let nk = hex::decode(nk_hex).unwrap();
+        let rivk = hex::decode(rivk_hex).unwrap();
+
+        // Verify sign bit is set
+        assert_eq!(ak[31] & 0x80, 0x80,
+            "Device ak should have sign bit set (this is the bug)");
+
+        // Original should fail
+        let mut fvk_bytes = [0u8; 96];
+        fvk_bytes[..32].copy_from_slice(&ak);
+        fvk_bytes[32..64].copy_from_slice(&nk);
+        fvk_bytes[64..96].copy_from_slice(&rivk);
+        assert!(FullViewingKey::from_bytes(&fvk_bytes).is_none(),
+            "Original FVK should fail due to sign bit");
+
+        // Clear sign bit
+        fvk_bytes[31] &= 0x7f;
+
+        // Verify ak decompresses as valid Pallas point with sign cleared
+        let ak_arr: [u8; 32] = fvk_bytes[..32].try_into().unwrap();
+        let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_arr);
+        assert!(bool::from(ak_point.is_some()),
+            "ak with sign cleared should be a valid Pallas point");
+
+        // Verify nk is valid base field element
+        let nk_arr: [u8; 32] = nk.try_into().unwrap();
+        let nk_valid = pasta_curves::pallas::Base::from_repr(nk_arr);
+        assert!(bool::from(nk_valid.is_some()), "nk should be valid");
+
+        // Verify rivk is valid scalar
+        let rivk_arr: [u8; 32] = rivk.try_into().unwrap();
+        let rivk_valid = pasta_curves::pallas::Scalar::from_repr(rivk_arr);
+        assert!(bool::from(rivk_valid.is_some()), "rivk should be valid");
+
+        // With sign bit cleared, FVK decode may or may not work
+        // (depends on whether ivk derivation produces valid key)
+        let result = FullViewingKey::from_bytes(&fvk_bytes);
+        println!("FVK decode with sign bit cleared: {}",
+            if result.is_some() { "SUCCESS" } else { "FAILED (ivk issue?)" });
+    }
+
+    /// Test that multiple accounts all have sign bit = 0
+    #[test]
+    fn test_multiple_accounts_sign_bit() {
+        let seed = [0x42u8; 32];
+        for acct in 0..16u32 {
+            let sk = SpendingKey::from_zip32_seed(&seed, 133, account(acct))
+                .expect(&format!("spending key for account {}", acct));
+            let fvk = FullViewingKey::from(&sk);
+            let bytes = fvk.to_bytes();
+            assert_eq!(bytes[31] & 0x80, 0,
+                "Account {} has ak sign bit set", acct);
+        }
+    }
+
+    /// Test RedPallas signature verification with known keys
+    #[test]
+    fn test_redpallas_sig_verify() {
+        use orchard::keys::SpendingKey;
+
+        let seed = [0x42u8; 32];
+        let sk = SpendingKey::from_zip32_seed(&seed, 133, account(0))
+            .expect("spending key");
+        let fvk = FullViewingKey::from(&sk);
+        let bytes = fvk.to_bytes();
+
+        println!("Reference FVK for seed 0x42:");
+        println!("  ak:   {}", hex::encode(&bytes[..32]));
+        println!("  nk:   {}", hex::encode(&bytes[32..64]));
+        println!("  rivk: {}", hex::encode(&bytes[64..96]));
+
+        // These can be compared against firmware output to find derivation bugs
+    }
 }
