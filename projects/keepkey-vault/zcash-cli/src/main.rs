@@ -984,7 +984,10 @@ mod tests {
     // 6. Device Log Vector Tests
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Exact device log vector through real handler.
+    /// Exact device log vector through real handler — pinned to known outcome.
+    /// This vector (ak sign bit set) canonicalizes successfully after clearing
+    /// the sign bit. If this test fails, it means a regression in the
+    /// canonicalization path or a change in the orchard crate's FVK decoding.
     #[test]
     fn test_handle_set_fvk_device_vector() {
         let ak = hex::decode(
@@ -1000,33 +1003,25 @@ mod tests {
         assert_eq!(ak[31] & 0x80, 0x80, "device ak must have sign bit set");
 
         let (mut state, _dir) = test_state();
-        let result = call_set_fvk(&mut state, &ak, &nk, &rivk);
+        let response = call_set_fvk(&mut state, &ak, &nk, &rivk)
+            .expect("device vector must canonicalize successfully");
 
-        // This device vector may or may not produce a valid ivk after sign bit fix.
-        // The test verifies the sidecar handles it cleanly either way.
-        match result {
-            Ok(response) => {
-                // If it worked: verify canonical ak in response
-                let resp_ak = hex::decode(response["fvk"]["ak"].as_str().unwrap()).unwrap();
-                assert_eq!(resp_ak[31] & 0x80, 0, "response ak sign bit must be 0");
-                assert_eq!(response["sign_bit_corrected"], true);
+        // Response returns canonical ak (sign bit cleared)
+        let resp_ak = hex::decode(response["fvk"]["ak"].as_str().unwrap()).unwrap();
+        assert_eq!(resp_ak[31] & 0x80, 0, "response ak sign bit must be 0");
+        assert_eq!(response["sign_bit_corrected"], true);
 
-                // State FVK is set with canonical bytes
-                let state_bytes = state.fvk.as_ref().unwrap().to_bytes();
-                assert_eq!(state_bytes[31] & 0x80, 0);
+        // State FVK is set with canonical bytes
+        let state_bytes = state.fvk.as_ref().unwrap().to_bytes();
+        assert_eq!(state_bytes[31] & 0x80, 0);
 
-                // DB stores canonical bytes
-                let stored = state.db.as_ref().unwrap().load_fvk().unwrap().unwrap();
-                assert_eq!(stored[31] & 0x80, 0);
-            }
-            Err(e) => {
-                // If ivk derivation fails: state unchanged, error is descriptive
-                assert!(state.fvk.is_none());
-                let msg = e.to_string();
-                assert!(msg.contains("Invalid FVK") || msg.contains("sign bit"),
-                    "error should be descriptive: {}", msg);
-            }
-        }
+        // DB stores canonical bytes
+        let stored = state.db.as_ref().unwrap().load_fvk().unwrap().unwrap();
+        assert_eq!(stored[31] & 0x80, 0);
+
+        // Address is a valid Unified Address
+        let addr = response["address"].as_str().unwrap();
+        assert!(addr.starts_with("u1"), "address must be a Unified Address");
     }
 
     /// Exact device log vector: component-level validation.
