@@ -38,6 +38,15 @@ impl State {
         }
     }
 
+    #[cfg(test)]
+    fn with_db(db: wallet_db::WalletDb) -> Self {
+        Self {
+            db: Some(db),
+            fvk: None,
+            pending_pczt: None,
+        }
+    }
+
     fn ensure_db(&mut self) -> Result<&wallet_db::WalletDb> {
         if self.db.is_none() {
             self.db = Some(wallet_db::WalletDb::open_default()?);
@@ -56,11 +65,13 @@ impl State {
             if had_sign_bit {
                 error!("Saved FVK has ak sign bit set — clearing (legacy DB entry)");
                 fvk_bytes[31] &= 0x7f;
-                // Re-save canonical bytes so this only happens once
-                let _ = db.save_fvk(&fvk_bytes);
             }
             match FullViewingKey::from_bytes(&fvk_bytes) {
                 Some(fvk) => {
+                    // Only persist canonical bytes AFTER decode succeeds
+                    if had_sign_bit {
+                        let _ = db.save_fvk(&fvk_bytes);
+                    }
                     let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
                     let ua = encode_unified_address(&addr)?;
                     info!("Auto-loaded FVK from database, UA: {}...", &ua[..20]);
@@ -626,327 +637,356 @@ mod tests {
         (db, dir)
     }
 
-    /// Helper: simulate what handle_set_fvk does — canonicalize, persist, return.
-    /// Returns (canonical_bytes, response_json, db, _dir_guard).
-    fn simulate_set_fvk(
-        ak: &[u8], nk: &[u8], rivk: &[u8],
-    ) -> Result<([u8; 96], Value, wallet_db::WalletDb, TempDir)> {
+    /// Helper: create a State backed by a temp DB.
+    fn test_state() -> (State, TempDir) {
         let (db, dir) = test_db();
+        (State::with_db(db), dir)
+    }
 
-        let mut fvk_bytes = [0u8; 96];
-        fvk_bytes[..32].copy_from_slice(ak);
-        fvk_bytes[32..64].copy_from_slice(nk);
-        fvk_bytes[64..96].copy_from_slice(rivk);
+    /// Helper: build JSON params for handle_set_fvk from raw bytes.
+    fn set_fvk_params(ak: &[u8], nk: &[u8], rivk: &[u8]) -> Value {
+        serde_json::json!({
+            "ak": hex::encode(ak),
+            "nk": hex::encode(nk),
+            "rivk": hex::encode(rivk),
+        })
+    }
 
-        // Canonicalize: clear ak sign bit
-        let mut canonical = fvk_bytes;
-        canonical[31] &= 0x7f;
-
-        let _fvk = FullViewingKey::from_bytes(&canonical)
-            .ok_or_else(|| anyhow::anyhow!("FVK decode failed"))?;
-
-        let canonical_ak_hex = hex::encode(&canonical[..32]);
-        let nk_hex = hex::encode(nk);
-        let rivk_hex = hex::encode(rivk);
-
-        // Persist canonical bytes (matches the fix)
-        if let Ok(false) = db.fvk_matches(&canonical) {
-            let _ = db.reset();
-        }
-        db.save_fvk(&canonical)?;
-
-        let response = serde_json::json!({
-            "fvk": { "ak": canonical_ak_hex, "nk": nk_hex, "rivk": rivk_hex },
-            "sign_bit_corrected": fvk_bytes[31] & 0x80 != 0,
-        });
-
-        Ok((canonical, response, db, dir))
+    /// Helper: call handle_set_fvk on a real State (async wrapper).
+    fn call_set_fvk(state: &mut State, ak: &[u8], nk: &[u8], rivk: &[u8]) -> Result<Value> {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(handle_set_fvk(state, &set_fvk_params(ak, nk, rivk)))
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // 1. FVK Primitive Tests (orchard crate behavior verification)
     // ══════════════════════════════════════════════════════════════════════
 
-    /// FVK round-trips through to_bytes/from_bytes.
     #[test]
     fn test_fvk_roundtrip_from_spending_key() {
         let fvk = derive_test_fvk(0x42, 0);
         let fvk_bytes = fvk.to_bytes();
-
         assert_eq!(fvk_bytes[31] & 0x80, 0, "ak sign bit must be 0 in valid FVK");
-
-        let fvk2 = FullViewingKey::from_bytes(&fvk_bytes)
-            .expect("FVK round-trip failed");
+        let fvk2 = FullViewingKey::from_bytes(&fvk_bytes).expect("round-trip failed");
         assert_eq!(fvk.to_bytes(), fvk2.to_bytes());
     }
 
-    /// FVK rejects ak with sign bit = 1.
     #[test]
     fn test_fvk_rejects_sign_bit_set() {
         let fvk = derive_test_fvk(0x42, 0);
         let mut fvk_bytes = fvk.to_bytes();
         fvk_bytes[31] |= 0x80;
-
         assert!(FullViewingKey::from_bytes(&fvk_bytes).is_none(),
             "FVK should reject ak with sign bit set");
     }
 
-    /// Clearing the sign bit recovers the original FVK.
     #[test]
     fn test_fvk_sign_bit_clear_workaround() {
         let fvk = derive_test_fvk(0x42, 0);
         let original_bytes = fvk.to_bytes();
         let mut corrupted = original_bytes;
-
         corrupted[31] |= 0x80;
         assert!(FullViewingKey::from_bytes(&corrupted).is_none());
-
         corrupted[31] &= 0x7f;
         let recovered = FullViewingKey::from_bytes(&corrupted)
             .expect("Should recover with sign bit cleared");
-        assert_eq!(original_bytes, recovered.to_bytes(),
-            "Recovered FVK should match original");
+        assert_eq!(original_bytes, recovered.to_bytes());
     }
 
-    /// Multiple accounts all produce ak with sign bit = 0.
     #[test]
     fn test_multiple_accounts_sign_bit() {
         for acct in 0..16u32 {
             let fvk = derive_test_fvk(0x42, acct);
-            let bytes = fvk.to_bytes();
-            assert_eq!(bytes[31] & 0x80, 0,
+            assert_eq!(fvk.to_bytes()[31] & 0x80, 0,
                 "Account {} has ak sign bit set", acct);
         }
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 2. Canonicalization Tests (handle_set_fvk behavior)
+    // 2. Real handle_set_fvk Tests
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Valid canonical FVK: response, DB, and state all use the same bytes.
+    /// Valid FVK through real handler: state, DB, and response all consistent.
     #[test]
-    fn test_set_fvk_accepts_valid_canonical_fvk() {
+    fn test_handle_set_fvk_valid_canonical() {
+        let (mut state, _dir) = test_state();
         let fvk = derive_test_fvk(0x42, 0);
-        let fvk_bytes = fvk.to_bytes();
-        let ak = &fvk_bytes[..32];
-        let nk = &fvk_bytes[32..64];
-        let rivk = &fvk_bytes[64..96];
+        let b = fvk.to_bytes();
 
-        let (canonical, response, db, _dir) = simulate_set_fvk(ak, nk, rivk)
-            .expect("set_fvk should succeed for valid input");
+        let response = call_set_fvk(&mut state, &b[..32], &b[32..64], &b[64..96])
+            .expect("should succeed");
 
-        // Canonical bytes == input bytes (no correction needed)
-        assert_eq!(&canonical[..32], ak, "canonical ak should match input");
-        assert_eq!(&canonical[32..64], nk);
-        assert_eq!(&canonical[64..96], rivk);
+        // State has FVK
+        let state_fvk = state.fvk.as_ref().expect("state.fvk should be set");
+        assert_eq!(state_fvk.to_bytes(), b, "state FVK must match input");
 
-        // Response returns canonical ak
+        // Response ak matches input (no correction)
         let resp_ak = response["fvk"]["ak"].as_str().unwrap();
-        assert_eq!(resp_ak, hex::encode(ak), "response ak should match input");
-
-        // sign_bit_corrected should be false
+        assert_eq!(resp_ak, hex::encode(&b[..32]));
         assert_eq!(response["sign_bit_corrected"], false);
 
+        // Response address matches state FVK address
+        let state_addr = state_fvk.address_at(0u32, orchard::keys::Scope::External);
+        let state_ua = encode_unified_address(&state_addr).unwrap();
+        assert_eq!(response["address"].as_str().unwrap(), state_ua);
+
         // DB stores canonical bytes
-        let stored = db.load_fvk().unwrap().expect("FVK should be in DB");
-        assert_eq!(stored, canonical, "DB should store canonical bytes");
-        assert!(db.fvk_matches(&canonical).unwrap(), "DB fingerprint should match canonical");
+        let db = state.db.as_ref().unwrap();
+        let stored = db.load_fvk().unwrap().expect("DB should have FVK");
+        assert_eq!(stored, b);
+        assert!(db.fvk_matches(&b).unwrap());
     }
 
-    /// Buggy sign-bit FVK: everything canonicalizes consistently.
+    /// Buggy sign-bit FVK through real handler: everything canonicalizes.
     #[test]
-    fn test_set_fvk_recovers_sign_bit_and_canonicalizes_everything() {
+    fn test_handle_set_fvk_buggy_sign_bit_canonicalizes() {
+        let (mut state, _dir) = test_state();
         let fvk = derive_test_fvk(0x42, 0);
-        let original_bytes = fvk.to_bytes();
+        let original = fvk.to_bytes();
         let mut buggy_ak = [0u8; 32];
-        buggy_ak.copy_from_slice(&original_bytes[..32]);
-        buggy_ak[31] |= 0x80; // simulate firmware bug
+        buggy_ak.copy_from_slice(&original[..32]);
+        buggy_ak[31] |= 0x80;
 
-        let nk = &original_bytes[32..64];
-        let rivk = &original_bytes[64..96];
+        let response = call_set_fvk(&mut state, &buggy_ak, &original[32..64], &original[64..96])
+            .expect("should recover");
 
-        let (canonical, response, db, _dir) = simulate_set_fvk(&buggy_ak, nk, rivk)
-            .expect("set_fvk should recover from sign bit bug");
+        // State FVK matches canonical (sign-cleared)
+        let state_bytes = state.fvk.as_ref().unwrap().to_bytes();
+        assert_eq!(state_bytes[31] & 0x80, 0, "state FVK sign bit must be 0");
+        assert_eq!(&state_bytes[..32], &original[..32]);
 
-        // Canonical ak has sign bit cleared
-        assert_eq!(canonical[31] & 0x80, 0, "canonical ak sign bit must be 0");
-        assert_eq!(&canonical[..32], &original_bytes[..32],
-            "canonical ak should match the correct (sign-cleared) ak");
-
-        // Response returns CANONICAL ak, not the buggy input
+        // Response returns canonical ak, NOT buggy
         let resp_ak = response["fvk"]["ak"].as_str().unwrap();
-        assert_eq!(resp_ak, hex::encode(&original_bytes[..32]),
-            "response must return canonical ak, not buggy firmware ak");
-        assert_ne!(resp_ak, hex::encode(&buggy_ak),
-            "response must NOT return the buggy ak");
-
-        // sign_bit_corrected should be true
+        assert_eq!(resp_ak, hex::encode(&original[..32]));
+        assert_ne!(resp_ak, hex::encode(&buggy_ak));
         assert_eq!(response["sign_bit_corrected"], true);
 
         // DB stores canonical bytes
-        let stored = db.load_fvk().unwrap().expect("FVK should be in DB");
-        assert_eq!(stored[31] & 0x80, 0, "DB must store canonical ak");
-        assert_eq!(stored, canonical, "DB bytes must match canonical");
-
-        // DB fingerprint matches canonical
-        assert!(db.fvk_matches(&canonical).unwrap(),
-            "DB fingerprint must match canonical bytes");
+        let db = state.db.as_ref().unwrap();
+        let stored = db.load_fvk().unwrap().unwrap();
+        assert_eq!(stored[31] & 0x80, 0);
+        assert_eq!(&stored[..32], &original[..32]);
     }
 
-    /// Non-recoverable FVK (garbage bytes) should fail.
+    /// Garbage FVK through real handler: state unchanged, error returned.
     #[test]
-    fn test_set_fvk_rejects_invalid_nonrecoverable_fvk() {
+    fn test_handle_set_fvk_rejects_garbage() {
+        let (mut state, _dir) = test_state();
         let garbage = [0xFFu8; 32];
-        let result = simulate_set_fvk(&garbage, &garbage, &garbage);
-        assert!(result.is_err(), "Garbage bytes should fail FVK decode");
+        let result = call_set_fvk(&mut state, &garbage, &garbage, &garbage);
+        assert!(result.is_err(), "garbage should fail");
+        assert!(state.fvk.is_none(), "state.fvk must remain None on failure");
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 3. Persistence / Reload Tests
+    // 3. Real try_load_fvk Tests
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Canonical bytes saved by set_fvk round-trip through load_fvk.
+    /// Canonical bytes in DB: try_load_fvk succeeds.
     #[test]
-    fn test_saved_canonical_fvk_roundtrips_through_load() {
+    fn test_try_load_fvk_canonical_bytes() {
+        let (mut state, _dir) = test_state();
         let fvk = derive_test_fvk(0x42, 0);
-        let original_bytes = fvk.to_bytes();
-        let mut buggy_ak = [0u8; 32];
-        buggy_ak.copy_from_slice(&original_bytes[..32]);
-        buggy_ak[31] |= 0x80;
+        let b = fvk.to_bytes();
+        state.db.as_ref().unwrap().save_fvk(&b).unwrap();
 
-        let nk = &original_bytes[32..64];
-        let rivk = &original_bytes[64..96];
+        let loaded = state.try_load_fvk().expect("should not error");
+        assert!(loaded, "should load successfully");
 
-        let (canonical, _, db, _dir) = simulate_set_fvk(&buggy_ak, nk, rivk)
-            .expect("set_fvk should succeed");
-
-        // Reload from DB
-        let loaded = db.load_fvk().unwrap().expect("should load");
-        assert_eq!(loaded, canonical, "loaded bytes should be canonical");
-
-        // Decode should succeed (canonical bytes are valid)
-        let fvk_reloaded = FullViewingKey::from_bytes(&loaded)
-            .expect("canonical bytes must decode on reload");
-
-        // Same address
-        let addr1 = fvk.address_at(0u32, orchard::keys::Scope::External);
-        let addr2 = fvk_reloaded.address_at(0u32, orchard::keys::Scope::External);
-        assert_eq!(addr1.to_raw_address_bytes(), addr2.to_raw_address_bytes(),
-            "address after reload must match original");
+        let state_bytes = state.fvk.as_ref().unwrap().to_bytes();
+        assert_eq!(state_bytes, b, "loaded FVK must match stored");
     }
 
-    /// If someone manually saves buggy bytes to DB, try_load_fvk should
-    /// canonicalize them and re-save (defense in depth).
+    /// Legacy buggy bytes in DB: try_load_fvk canonicalizes, re-saves, succeeds.
     #[test]
     fn test_try_load_fvk_fixes_legacy_buggy_bytes() {
+        let (mut state, _dir) = test_state();
         let fvk = derive_test_fvk(0x42, 0);
-        let original_bytes = fvk.to_bytes();
-
-        // Simulate legacy DB with buggy bytes
-        let (db, _dir) = test_db();
-        let mut buggy = original_bytes;
+        let original = fvk.to_bytes();
+        let mut buggy = original;
         buggy[31] |= 0x80;
-        db.save_fvk(&buggy).expect("save buggy bytes");
 
-        // Verify buggy bytes are in DB
-        let stored = db.load_fvk().unwrap().unwrap();
-        assert_eq!(stored[31] & 0x80, 0x80, "DB should have buggy bytes initially");
+        // Save buggy bytes (simulates legacy DB)
+        state.db.as_ref().unwrap().save_fvk(&buggy).unwrap();
+        let stored = state.db.as_ref().unwrap().load_fvk().unwrap().unwrap();
+        assert_eq!(stored[31] & 0x80, 0x80, "precondition: buggy bytes in DB");
 
-        // Simulate try_load_fvk behavior
-        let mut loaded = stored;
-        let had_sign_bit = loaded[31] & 0x80 != 0;
-        assert!(had_sign_bit, "should detect sign bit");
+        // try_load_fvk should canonicalize
+        let loaded = state.try_load_fvk().expect("should not error");
+        assert!(loaded, "should load successfully after canonicalization");
 
-        loaded[31] &= 0x7f; // canonicalize
-        db.save_fvk(&loaded).expect("re-save canonical");
+        // State FVK is canonical
+        let state_bytes = state.fvk.as_ref().unwrap().to_bytes();
+        assert_eq!(state_bytes[31] & 0x80, 0);
+        assert_eq!(state_bytes, original);
 
-        // Verify DB now has canonical bytes
-        let reloaded = db.load_fvk().unwrap().unwrap();
-        assert_eq!(reloaded[31] & 0x80, 0, "DB should now have canonical bytes");
-
-        // And it decodes
-        assert!(FullViewingKey::from_bytes(&reloaded).is_some(),
-            "canonical bytes should decode");
+        // DB was rewritten with canonical bytes
+        let reloaded = state.db.as_ref().unwrap().load_fvk().unwrap().unwrap();
+        assert_eq!(reloaded[31] & 0x80, 0, "DB must now have canonical bytes");
+        assert_eq!(reloaded, original);
     }
 
-    /// Raw buggy bytes without canonicalization fail to decode.
+    /// Corrupt bytes in DB (not recoverable even with sign bit fix): try_load_fvk
+    /// returns false, does NOT rewrite DB with still-corrupt data.
     #[test]
-    fn test_raw_buggy_bytes_fail_to_decode() {
-        let fvk = derive_test_fvk(0x42, 0);
-        let mut buggy = fvk.to_bytes();
-        buggy[31] |= 0x80;
+    fn test_try_load_fvk_corrupt_bytes_no_rewrite() {
+        let (mut state, _dir) = test_state();
+        let corrupt = [0xFFu8; 96];
+        state.db.as_ref().unwrap().save_fvk(&corrupt).unwrap();
 
-        // This is what the old code would have done on reload — direct decode fails
-        assert!(FullViewingKey::from_bytes(&buggy).is_none(),
-            "buggy bytes must not decode without canonicalization");
+        let loaded = state.try_load_fvk().expect("should not error");
+        assert!(!loaded, "should fail to load corrupt FVK");
+        assert!(state.fvk.is_none(), "state.fvk must remain None");
+
+        // DB bytes should still be the original corrupt bytes (no silent rewrite)
+        let stored = state.db.as_ref().unwrap().load_fvk().unwrap().unwrap();
+        // The sign bit was cleared in-memory, but since decode failed, it should
+        // NOT have been saved back. However, the first 31 bytes are all 0xFF,
+        // and only byte[31] changed (0xFF → 0x7F). Check the original wasn't overwritten.
+        // Actually: the corrupt bytes have sign bit set (0xFF & 0x80 = 0x80), so
+        // try_load_fvk clears it in-memory. Since decode fails, save_fvk is NOT called.
+        // DB should still have the original 0xFF bytes.
+        assert_eq!(stored[31], 0xFF, "DB must NOT be rewritten when decode fails");
+    }
+
+    /// Empty DB: try_load_fvk returns false gracefully.
+    #[test]
+    fn test_try_load_fvk_empty_db() {
+        let (mut state, _dir) = test_state();
+        let loaded = state.try_load_fvk().expect("should not error");
+        assert!(!loaded);
+        assert!(state.fvk.is_none());
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 4. Fingerprint / Reset Tests
+    // 4. End-to-End Persistence Tests (set → reload)
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Equivalent buggy-sign-bit input should NOT trigger a DB reset.
+    /// Set FVK with buggy input → new State → try_load_fvk → same address.
     #[test]
-    fn test_set_fvk_no_false_reset_for_equivalent_buggy_input() {
-        let fvk = derive_test_fvk(0x42, 0);
-        let original_bytes = fvk.to_bytes();
-        let nk = &original_bytes[32..64];
-        let rivk = &original_bytes[64..96];
-
-        // First: set valid canonical FVK
+    fn test_e2e_set_fvk_then_reload() {
         let (db, _dir) = test_db();
-        db.save_fvk(&original_bytes).expect("save");
-
-        // Simulate second call with buggy sign bit (same underlying key)
+        let fvk = derive_test_fvk(0x42, 0);
+        let original = fvk.to_bytes();
         let mut buggy_ak = [0u8; 32];
-        buggy_ak.copy_from_slice(&original_bytes[..32]);
+        buggy_ak.copy_from_slice(&original[..32]);
         buggy_ak[31] |= 0x80;
 
-        // Canonicalize
-        let mut canonical = [0u8; 96];
-        canonical[..32].copy_from_slice(&buggy_ak);
-        canonical[31] &= 0x7f; // clear sign bit
-        canonical[32..64].copy_from_slice(nk);
-        canonical[64..96].copy_from_slice(rivk);
+        // Session 1: set_fvk with buggy input
+        let response = {
+            let mut state1 = State::with_db(db);
+            let resp = call_set_fvk(&mut state1, &buggy_ak, &original[32..64], &original[64..96])
+                .expect("should succeed");
+            // DB was written by state1; drop state1 but keep the dir
+            resp
+        };
+        let session1_address = response["address"].as_str().unwrap().to_string();
 
-        // fvk_matches should return true (same canonical key)
-        assert!(db.fvk_matches(&canonical).unwrap(),
-            "same key with different sign bit should match after canonicalization");
+        // Session 2: fresh State, same DB file
+        let db_path = _dir.path().join("test_wallet.db");
+        let db2 = wallet_db::WalletDb::open(&db_path).expect("reopen");
+        let mut state2 = State::with_db(db2);
+        let loaded = state2.try_load_fvk().expect("should load");
+        assert!(loaded, "should auto-load from DB");
+
+        // Same FVK, same address
+        let state2_fvk = state2.fvk.as_ref().unwrap();
+        let addr2 = state2_fvk.address_at(0u32, orchard::keys::Scope::External);
+        let ua2 = encode_unified_address(&addr2).unwrap();
+        assert_eq!(ua2, session1_address, "address must survive restart");
+        assert_eq!(state2_fvk.to_bytes()[31] & 0x80, 0, "sign bit must be 0 after reload");
     }
 
-    /// Different account should trigger a DB reset.
+    // ══════════════════════════════════════════════════════════════════════
+    // 5. Fingerprint / Reset Tests (real handler)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Same key with buggy sign bit does NOT reset DB.
     #[test]
-    fn test_set_fvk_resets_for_different_account() {
-        let fvk0 = derive_test_fvk(0x42, 0);
-        let fvk1 = derive_test_fvk(0x42, 1);
-        let bytes0 = fvk0.to_bytes();
-        let bytes1 = fvk1.to_bytes();
+    fn test_handle_set_fvk_no_false_reset_for_equivalent_buggy() {
+        let (mut state, _dir) = test_state();
+        let fvk = derive_test_fvk(0x42, 0);
+        let original = fvk.to_bytes();
 
-        let (db, _dir) = test_db();
-        db.save_fvk(&bytes0).expect("save account 0");
+        // First call: canonical
+        call_set_fvk(&mut state, &original[..32], &original[32..64], &original[64..96])
+            .expect("first call");
 
-        // Different account key should NOT match
-        assert_eq!(db.fvk_matches(&bytes1).unwrap(), false,
-            "different account FVK should not match");
+        // Insert a note so we can detect a reset
+        let db = state.db.as_ref().unwrap();
+        db.insert_note(&wallet_db::ScannedNote {
+            value: 100000,
+            recipient: vec![0u8; 43],
+            rho: [1u8; 32],
+            rseed: [2u8; 32],
+            cmx: [3u8; 32],
+            nullifier: [4u8; 32],
+            block_height: 1000,
+            tx_index: 0,
+            action_index: 0,
+        }).unwrap();
+
+        // Second call: same key but with buggy sign bit
+        let mut buggy_ak = [0u8; 32];
+        buggy_ak.copy_from_slice(&original[..32]);
+        buggy_ak[31] |= 0x80;
+        call_set_fvk(&mut state, &buggy_ak, &original[32..64], &original[64..96])
+            .expect("second call");
+
+        // Note should still be there (no reset)
+        let (_, unspent) = state.db.as_ref().unwrap().get_note_count().unwrap();
+        assert_eq!(unspent, 1, "note must survive — no false reset");
     }
 
-    /// fvk_matches returns true when no FVK stored yet (first time).
+    /// Different account FVK triggers DB reset.
+    #[test]
+    fn test_handle_set_fvk_resets_for_different_account() {
+        let (mut state, _dir) = test_state();
+        let fvk0 = derive_test_fvk(0x42, 0);
+        let b0 = fvk0.to_bytes();
+
+        // Set account 0
+        call_set_fvk(&mut state, &b0[..32], &b0[32..64], &b0[64..96]).unwrap();
+
+        // Insert a note
+        state.db.as_ref().unwrap().insert_note(&wallet_db::ScannedNote {
+            value: 100000,
+            recipient: vec![0u8; 43],
+            rho: [1u8; 32],
+            rseed: [2u8; 32],
+            cmx: [3u8; 32],
+            nullifier: [4u8; 32],
+            block_height: 1000,
+            tx_index: 0,
+            action_index: 0,
+        }).unwrap();
+
+        // Set account 1 (different key)
+        let fvk1 = derive_test_fvk(0x42, 1);
+        let b1 = fvk1.to_bytes();
+        call_set_fvk(&mut state, &b1[..32], &b1[32..64], &b1[64..96]).unwrap();
+
+        // Note should be gone (reset occurred)
+        let (total, _) = state.db.as_ref().unwrap().get_note_count().unwrap();
+        assert_eq!(total, 0, "DB must be reset when FVK changes");
+    }
+
+    /// fvk_matches returns true for empty DB (first-time setup).
     #[test]
     fn test_fvk_matches_returns_true_for_empty_db() {
         let fvk = derive_test_fvk(0x42, 0);
         let (db, _dir) = test_db();
-
         assert!(db.fvk_matches(&fvk.to_bytes()).unwrap(),
-            "empty DB should match any FVK (first-time setup)");
+            "empty DB should match any FVK");
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 5. Device Log Vector Tests
+    // 6. Device Log Vector Tests
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Exact device log vector: verify sign bit detection and recovery attempt.
+    /// Exact device log vector through real handler.
     #[test]
-    fn test_device_log_vector_sign_bit_detection() {
+    fn test_handle_set_fvk_device_vector() {
         let ak = hex::decode(
             "59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7"
         ).unwrap();
@@ -957,174 +997,142 @@ mod tests {
             "01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d"
         ).unwrap();
 
-        // Sign bit IS set — this is the bug
         assert_eq!(ak[31] & 0x80, 0x80, "device ak must have sign bit set");
 
-        // Original bytes fail
-        let mut fvk_bytes = [0u8; 96];
-        fvk_bytes[..32].copy_from_slice(&ak);
-        fvk_bytes[32..64].copy_from_slice(&nk);
-        fvk_bytes[64..96].copy_from_slice(&rivk);
-        assert!(FullViewingKey::from_bytes(&fvk_bytes).is_none(),
-            "original bytes must fail");
+        let (mut state, _dir) = test_state();
+        let result = call_set_fvk(&mut state, &ak, &nk, &rivk);
 
-        // Clear sign bit
-        let mut canonical = fvk_bytes;
-        canonical[31] &= 0x7f;
+        // This device vector may or may not produce a valid ivk after sign bit fix.
+        // The test verifies the sidecar handles it cleanly either way.
+        match result {
+            Ok(response) => {
+                // If it worked: verify canonical ak in response
+                let resp_ak = hex::decode(response["fvk"]["ak"].as_str().unwrap()).unwrap();
+                assert_eq!(resp_ak[31] & 0x80, 0, "response ak sign bit must be 0");
+                assert_eq!(response["sign_bit_corrected"], true);
 
-        // ak decompresses as valid Pallas point
-        let ak_arr: [u8; 32] = canonical[..32].try_into().unwrap();
-        let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_arr);
-        assert!(bool::from(ak_point.is_some()),
-            "ak with sign cleared must be a valid Pallas point");
+                // State FVK is set with canonical bytes
+                let state_bytes = state.fvk.as_ref().unwrap().to_bytes();
+                assert_eq!(state_bytes[31] & 0x80, 0);
+
+                // DB stores canonical bytes
+                let stored = state.db.as_ref().unwrap().load_fvk().unwrap().unwrap();
+                assert_eq!(stored[31] & 0x80, 0);
+            }
+            Err(e) => {
+                // If ivk derivation fails: state unchanged, error is descriptive
+                assert!(state.fvk.is_none());
+                let msg = e.to_string();
+                assert!(msg.contains("Invalid FVK") || msg.contains("sign bit"),
+                    "error should be descriptive: {}", msg);
+            }
+        }
+    }
+
+    /// Exact device log vector: component-level validation.
+    #[test]
+    fn test_device_log_vector_component_validation() {
+        let ak = hex::decode(
+            "59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7"
+        ).unwrap();
+        let nk = hex::decode(
+            "568fa99d2705be00371cadfba937efe844533b54c631bea1045fd8f46e1a4c17"
+        ).unwrap();
+        let rivk = hex::decode(
+            "01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d"
+        ).unwrap();
+
+        // ak with sign cleared decompresses as valid Pallas point
+        let mut ak_fixed: [u8; 32] = ak.clone().try_into().unwrap();
+        ak_fixed[31] &= 0x7f;
+        let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_fixed);
+        assert!(bool::from(ak_point.is_some()), "ak must be valid Pallas point");
 
         // nk valid as base field element
-        let nk_arr: [u8; 32] = nk.clone().try_into().unwrap();
-        assert!(bool::from(pasta_curves::pallas::Base::from_repr(nk_arr).is_some()),
-            "nk must be valid");
+        let nk_arr: [u8; 32] = nk.try_into().unwrap();
+        assert!(bool::from(pasta_curves::pallas::Base::from_repr(nk_arr).is_some()));
 
         // rivk valid as scalar
-        let rivk_arr: [u8; 32] = rivk.clone().try_into().unwrap();
-        assert!(bool::from(pasta_curves::pallas::Scalar::from_repr(rivk_arr).is_some()),
-            "rivk must be valid");
-
-        // FVK decode with cleared sign bit — may or may not work depending on
-        // whether ivk derivation produces a valid key for this specific vector.
-        // The important thing is that the sidecar either succeeds or fails cleanly.
-        let result = FullViewingKey::from_bytes(&canonical);
-        if let Some(fvk) = result {
-            // If it decodes, verify consistency
-            let roundtrip = fvk.to_bytes();
-            assert_eq!(roundtrip[31] & 0x80, 0,
-                "decoded FVK must have sign bit = 0");
-            assert_eq!(&roundtrip[..32], &canonical[..32],
-                "ak must round-trip correctly");
-        }
-        // Either outcome is acceptable — the test verifies the sidecar's
-        // detection and canonicalization logic, not whether this particular
-        // device key produces a valid ivk.
+        let rivk_arr: [u8; 32] = rivk.try_into().unwrap();
+        assert!(bool::from(pasta_curves::pallas::Scalar::from_repr(rivk_arr).is_some()));
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 6. Response Shape Tests
+    // 7. Response Shape & Address Consistency
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Response ak/nk/rivk match the canonical bytes, not the buggy input.
+    /// Response address matches the address derived from the internal FVK.
     #[test]
-    fn test_set_fvk_response_matches_canonical() {
-        let fvk = derive_test_fvk(0x42, 0);
-        let original_bytes = fvk.to_bytes();
-        let mut buggy_ak = [0u8; 32];
-        buggy_ak.copy_from_slice(&original_bytes[..32]);
-        buggy_ak[31] |= 0x80;
-
-        let (canonical, response, _, _dir) = simulate_set_fvk(
-            &buggy_ak,
-            &original_bytes[32..64],
-            &original_bytes[64..96],
-        ).expect("should succeed");
-
-        // Response ak is the canonical one
-        let resp_ak_bytes = hex::decode(response["fvk"]["ak"].as_str().unwrap()).unwrap();
-        assert_eq!(resp_ak_bytes, &canonical[..32],
-            "response ak must be canonical");
-        assert_eq!(resp_ak_bytes[31] & 0x80, 0,
-            "response ak must not have sign bit set");
-    }
-
-    /// Response for valid input has sign_bit_corrected = false.
-    #[test]
-    fn test_set_fvk_response_no_correction_flag_when_valid() {
+    fn test_handle_set_fvk_response_address_matches_state() {
+        let (mut state, _dir) = test_state();
         let fvk = derive_test_fvk(0x42, 0);
         let b = fvk.to_bytes();
 
-        let (_, response, _, _dir) = simulate_set_fvk(&b[..32], &b[32..64], &b[64..96])
-            .expect("should succeed");
+        let response = call_set_fvk(&mut state, &b[..32], &b[32..64], &b[64..96]).unwrap();
 
-        assert_eq!(response["sign_bit_corrected"], false);
+        let state_fvk = state.fvk.as_ref().unwrap();
+        let addr = state_fvk.address_at(0u32, orchard::keys::Scope::External);
+        let ua = encode_unified_address(&addr).unwrap();
+        assert_eq!(response["address"].as_str().unwrap(), ua);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // 7. Address Consistency Tests
-    // ══════════════════════════════════════════════════════════════════════
-
-    /// Address derived from canonical FVK matches the original.
+    /// Canonical FVK produces same address as original.
     #[test]
     fn test_canonical_fvk_produces_same_address() {
         let fvk = derive_test_fvk(0x42, 0);
-        let original_bytes = fvk.to_bytes();
         let original_addr = fvk.address_at(0u32, orchard::keys::Scope::External);
 
-        // Simulate canonicalization of buggy bytes
-        let mut buggy = original_bytes;
-        buggy[31] |= 0x80;
-        buggy[31] &= 0x7f; // clear = back to original
-
-        let recovered = FullViewingKey::from_bytes(&buggy).expect("should decode");
+        let mut bytes = fvk.to_bytes();
+        bytes[31] |= 0x80;
+        bytes[31] &= 0x7f; // roundtrip through set/clear = same bytes
+        let recovered = FullViewingKey::from_bytes(&bytes).expect("should decode");
         let recovered_addr = recovered.address_at(0u32, orchard::keys::Scope::External);
 
         assert_eq!(
             original_addr.to_raw_address_bytes(),
             recovered_addr.to_raw_address_bytes(),
-            "address from canonical FVK must match original"
         );
     }
 
-    /// Reference FVK output for seed 0x42 — for firmware comparison.
+    /// Reference FVK output for firmware comparison.
     #[test]
     fn test_reference_fvk_output() {
         let fvk = derive_test_fvk(0x42, 0);
         let bytes = fvk.to_bytes();
-
-        // These are deterministic — if firmware matches these, derivation is correct
-        let ak = hex::encode(&bytes[..32]);
-        let nk = hex::encode(&bytes[32..64]);
-        let rivk = hex::encode(&bytes[64..96]);
-
-        // Sign bit must be 0
         assert_eq!(bytes[31] & 0x80, 0);
-
-        // Verify non-zero (not degenerate)
         assert_ne!(&bytes[..32], &[0u8; 32], "ak must not be zero");
         assert_ne!(&bytes[32..64], &[0u8; 32], "nk must not be zero");
         assert_ne!(&bytes[64..96], &[0u8; 32], "rivk must not be zero");
-
-        println!("Reference FVK for seed 0x42, account 0:");
-        println!("  ak:   {}", ak);
-        println!("  nk:   {}", nk);
-        println!("  rivk: {}", rivk);
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // 8. DB Edge Cases
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Overwriting FVK in DB works correctly.
     #[test]
     fn test_db_fvk_overwrite() {
         let fvk0 = derive_test_fvk(0x42, 0);
         let fvk1 = derive_test_fvk(0x42, 1);
         let (db, _dir) = test_db();
 
-        db.save_fvk(&fvk0.to_bytes()).expect("save 0");
+        db.save_fvk(&fvk0.to_bytes()).unwrap();
         assert!(db.fvk_matches(&fvk0.to_bytes()).unwrap());
         assert!(!db.fvk_matches(&fvk1.to_bytes()).unwrap());
 
-        db.save_fvk(&fvk1.to_bytes()).expect("save 1");
+        db.save_fvk(&fvk1.to_bytes()).unwrap();
         assert!(!db.fvk_matches(&fvk0.to_bytes()).unwrap());
         assert!(db.fvk_matches(&fvk1.to_bytes()).unwrap());
     }
 
-    /// DB reset clears FVK.
     #[test]
     fn test_db_reset_clears_fvk() {
         let fvk = derive_test_fvk(0x42, 0);
         let (db, _dir) = test_db();
 
-        db.save_fvk(&fvk.to_bytes()).expect("save");
+        db.save_fvk(&fvk.to_bytes()).unwrap();
         assert!(db.load_fvk().unwrap().is_some());
 
-        db.reset().expect("reset");
+        db.reset().unwrap();
         assert!(db.load_fvk().unwrap().is_none());
     }
 }
