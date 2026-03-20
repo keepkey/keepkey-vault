@@ -119,11 +119,22 @@ try {
     Write-Success "Build complete"
 
     # ── Launch ───────────────────────────────────────────────────────
-    Write-Step "Starting Electrobun dev (console output enabled)"
+    # CRITICAL: Do NOT use `bunx electrobun dev` — it spawns launcher.exe
+    # through an intermediate process that breaks WebView2 window creation
+    # on Windows. Launch launcher.exe directly from the build bin/ directory.
+    $LauncherExe = Join-Path $BuildDir "dev-win-x64\keepkey-vault-dev\bin\launcher.exe"
+    if (-not (Test-Path $LauncherExe)) {
+        throw "launcher.exe not found at: $LauncherExe"
+    }
+    $LauncherDir = Split-Path $LauncherExe -Parent
+
+    Write-Step "Launching app (launcher.exe direct)"
     Write-Host "    Press Ctrl+C to stop" -ForegroundColor Gray
     Write-Host ""
 
-    bunx electrobun dev
+    Push-Location $LauncherDir
+    & $LauncherExe
+    Pop-Location
 } finally {
     Pop-Location
     # Cleanup HMR process
