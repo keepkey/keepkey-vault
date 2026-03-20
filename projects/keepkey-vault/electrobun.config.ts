@@ -6,7 +6,7 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.1.2",
+		version: "1.2.0",
 		urlSchemes: ["keepkey"],
 	},
 	build: {

@@ -234,7 +234,8 @@ console.log(`[prune-bundle] Pruned ${prunedFiles} type/map/source files`)
 
 // 3. Remove known bloat directories
 const STRIP_DIRS = [
-  'lodash', 'rxjs',
+  // NOTE: lodash is required by minim (swagger/apidom transitive dep) — do NOT strip
+  'rxjs',
   '@keepkey/hdwallet-core/src', '@keepkey/hdwallet-keepkey/src',
   '@keepkey/hdwallet-keepkey-nodehid/src', '@keepkey/hdwallet-keepkey-nodewebusb/src',
   '@keepkey/proto-tx-builder/src',
@@ -263,14 +264,22 @@ for (const dir of STRIP_DIRS) {
 console.log(`[prune-bundle] Stripped ${strippedDirs} bloat directories`)
 
 // 4. Remove doc/test files by name
-const PRUNE_NAMES = new Set([
-  'README.md', 'readme.md', 'README', 'CHANGELOG.md', 'CHANGELOG', 'HISTORY.md',
-  'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'license', 'LICENCE', 'LICENCE.md',
+// SAFE_PRUNE: file-like names with extensions — safe to delete at any depth
+const SAFE_PRUNE = new Set([
+  'README.md', 'readme.md', 'CHANGELOG.md', 'HISTORY.md',
+  'LICENSE.md', 'LICENSE.txt', 'LICENCE.md',
   'CONTRIBUTING.md', '.npmignore', '.eslintrc', '.eslintrc.js', '.eslintrc.json',
-  '.prettierrc', '.prettierrc.js', '.editorconfig', '.travis.yml', '.github',
+  '.prettierrc', '.prettierrc.js', '.editorconfig', '.travis.yml',
   'tsconfig.json', 'tsconfig.tsbuildinfo', '.babelrc', 'babel.config.js',
-  'jest.config.js', 'jest.config.ts', 'karma.conf.js', '.nyc_output',
-  'coverage', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'AUTHORS',
+  'jest.config.js', 'jest.config.ts', 'karma.conf.js',
+  'SECURITY.md', 'CODE_OF_CONDUCT.md',
+])
+// ROOT_ONLY_PRUNE: bare directory names that could collide with runtime code
+// (e.g. @swagger-api ships runtime code in a dir named "license/")
+// Only pruned at package root (depth 1 inside each package), never recursively
+const ROOT_ONLY_PRUNE = new Set([
+  'README', 'CHANGELOG', 'LICENSE', 'license', 'LICENCE', 'AUTHORS',
+  '.github', '.nyc_output', 'coverage',
   'test', 'tests', '__tests__', '__mocks__', 'spec', 'benchmark', 'benchmarks',
 ])
 
@@ -279,7 +288,7 @@ function pruneByName(dir: string) {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const fullPath = join(dir, entry.name)
-      if (PRUNE_NAMES.has(entry.name)) {
+      if (SAFE_PRUNE.has(entry.name)) {
         rmSync(fullPath, { recursive: true })
         docPruned++
         continue
@@ -288,7 +297,37 @@ function pruneByName(dir: string) {
     }
   } catch {}
 }
+// Prune ROOT_ONLY names at package root level only
+function pruneRootOnly(nmBase: string) {
+  try {
+    for (const pkg of readdirSync(nmBase, { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue
+      const pkgDir = join(nmBase, pkg.name)
+      // Handle scoped packages (@org/pkg)
+      if (pkg.name.startsWith('@')) {
+        for (const sub of readdirSync(pkgDir, { withFileTypes: true })) {
+          if (!sub.isDirectory()) continue
+          const scopedDir = join(pkgDir, sub.name)
+          for (const entry of readdirSync(scopedDir, { withFileTypes: true })) {
+            if (ROOT_ONLY_PRUNE.has(entry.name)) {
+              rmSync(join(scopedDir, entry.name), { recursive: true })
+              docPruned++
+            }
+          }
+        }
+      } else {
+        for (const entry of readdirSync(pkgDir, { withFileTypes: true })) {
+          if (ROOT_ONLY_PRUNE.has(entry.name)) {
+            rmSync(join(pkgDir, entry.name), { recursive: true })
+            docPruned++
+          }
+        }
+      }
+    }
+  } catch {}
+}
 pruneByName(nmDir)
+pruneRootOnly(nmDir)
 console.log(`[prune-bundle] Pruned ${docPruned} doc/test entries`)
 
 // 5. Remove C/C++ source and native build artifacts
