@@ -53,33 +53,37 @@ function getBinaryPath(): string {
 		return process.env.ZCASH_CLI_BIN
 	}
 
+	// On Windows, Rust produces zcash-cli.exe
+	const isWin = process.platform === "win32"
+	const bin = isWin ? "zcash-cli.exe" : "zcash-cli"
+
 	const candidates: string[] = []
 
 	// 1. cwd-relative (works if cwd is the project root)
 	const cwdRoot = process.cwd()
-	candidates.push(join(cwdRoot, "zcash-cli", "target", "release", "zcash-cli"))
-	candidates.push(join(cwdRoot, "zcash-cli", "target", "debug", "zcash-cli"))
+	candidates.push(join(cwdRoot, "zcash-cli", "target", "release", bin))
+	candidates.push(join(cwdRoot, "zcash-cli", "target", "debug", bin))
 
 	// 2. Walk up from app bundle to source project root.
 	//    Dev:  _build/dev-macos-arm64/keepkey-vault-dev.app/Contents/Resources/app/bun/
 	//    → 7 levels reaches _build/, 8 levels reaches project root
 	for (const depth of [7, 8, 9]) {
 		const fromBundle = resolve(import.meta.dir, ...Array(depth).fill(".."))
-		candidates.push(join(fromBundle, "zcash-cli", "target", "release", "zcash-cli"))
-		candidates.push(join(fromBundle, "zcash-cli", "target", "debug", "zcash-cli"))
+		candidates.push(join(fromBundle, "zcash-cli", "target", "release", bin))
+		candidates.push(join(fromBundle, "zcash-cli", "target", "debug", bin))
 	}
 
 	// 3. Relative to import.meta.dir for non-bundled dev (running bun directly from src/bun/)
 	const srcRelRoot = dirname(dirname(import.meta.dir))
-	candidates.push(join(srcRelRoot, "zcash-cli", "target", "release", "zcash-cli"))
+	candidates.push(join(srcRelRoot, "zcash-cli", "target", "release", bin))
 
 	// 4. Production: Electrobun copies into app/ dir, bun code runs from app/bun/
 	const appDir = resolve(import.meta.dir, "..")
-	candidates.push(join(appDir, "zcash-cli"))
+	candidates.push(join(appDir, bin))
 
 	// 5. Fallback: walk further up in case bundle structure differs
 	const appBundleDir = resolve(import.meta.dir, "..", "..", "..")
-	candidates.push(join(appBundleDir, "zcash-cli"))
+	candidates.push(join(appBundleDir, bin))
 
 	console.log(`[zcash-sidecar] Searching for binary (cwd=${cwdRoot}, import.meta.dir=${import.meta.dir})`)
 	for (const p of candidates) {

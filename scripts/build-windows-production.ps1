@@ -274,6 +274,18 @@ if (-not $SkipBuild) {
     $ErrorActionPreference = 'Stop'
     Pop-Location
 
+    Write-Step "Building zcash-cli sidecar (Rust)"
+    $ZcashCliDir = Join-Path $ProjectDir "zcash-cli"
+    if (Test-Path $ZcashCliDir) {
+        Push-Location $ZcashCliDir
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed for zcash-cli" }
+        Pop-Location
+        Write-Success "zcash-cli.exe built"
+    } else {
+        Write-Host "    [SKIP] zcash-cli/ not found - Zcash shielded features will be unavailable" -ForegroundColor Yellow
+    }
+
     Write-Step "Building Electrobun Windows app"
     Push-Location $ProjectDir
     bun run build
@@ -302,8 +314,9 @@ $filesToSign = @()
 $filesToSign += Get-ChildItem -Path $binDir -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $binDir -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue
 
-# Also sign any .node and .dll files in Resources/
+# Also sign any .exe, .node and .dll files in Resources/ (includes zcash-cli.exe sidecar)
 $resourcesDir = Join-Path $BuildDir "Resources"
+$filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.node" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue
 
