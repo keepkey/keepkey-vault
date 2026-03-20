@@ -237,10 +237,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   }, [onSetupInProgress])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
-  // Device state determines the target step; the button only shows once state is known.
-  const welcomeReady = step === 'welcome' && deviceStatus.state !== 'disconnected'
+  // Only enable "Get Started" when real device features are available.
+  // connected_unpaired has no features yet — routing from that state would
+  // see all needs* flags as false and fall through to onComplete().
+  const hasFeatures = !['disconnected', 'connected_unpaired', 'error'].includes(deviceStatus.state)
+  const welcomeReady = step === 'welcome' && hasFeatures
 
   const handleWelcomeNext = useCallback(() => {
+    // Double-guard: refuse to route without real features
+    if (!hasFeatures) return
     if (needsBootloader) {
       setStep('bootloader')
     } else if (needsFirmware) {
@@ -250,7 +255,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     } else {
       onComplete()
     }
-  }, [needsBootloader, needsFirmware, needsInit, onComplete])
+  }, [hasFeatures, needsBootloader, needsFirmware, needsInit, onComplete])
 
   // ── Bootloader step ────────────────────────────────────────────────────
 

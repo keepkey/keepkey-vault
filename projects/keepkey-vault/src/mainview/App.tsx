@@ -447,12 +447,12 @@ function App() {
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
 
 	const phase: AppPhase =
-		// OOB lock takes top priority — once the wizard opens, keep it mounted
-		// through disconnects and transient states (isClaimed, connected_unpaired).
-		// Without this, unplugging to enter bootloader unmounts the wizard on Windows
-		// because state goes disconnected before setupInProgress can be checked.
-		oobLock ? "setup"
-		: isClaimed ? "claimed"
+		// Claimed/error takes priority over oobLock when the device is persistently
+		// held by another app — the wizard can't do anything without device access.
+		// oobLock only overrides transient disconnects (the Windows unplug/replug gap).
+		isClaimed ? "claimed"
+		: (deviceState.state === 'error' && !oobEnteredRef.current) ? "splash"
+		: oobLock ? "setup"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"

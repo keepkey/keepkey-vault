@@ -26,19 +26,24 @@ export function useDeviceState() {
 
     // Fetch initial state — retry if RPC isn't ready yet (Windows WebView2 timing)
     let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
     const fetchInitial = (attempt: number) => {
       rpcRequest<DeviceStateInfo>('getDeviceState').then((state) => {
         if (!cancelled) setDeviceState(state)
       }).catch((err) => {
         console.warn(`[useDeviceState] fetch attempt ${attempt} failed:`, err?.message)
         if (!cancelled && attempt < 5) {
-          setTimeout(() => fetchInitial(attempt + 1), 500 * attempt)
+          retryTimer = setTimeout(() => fetchInitial(attempt + 1), 500 * attempt)
         }
       })
     }
     fetchInitial(1)
 
-    return () => { cancelled = true; unsubscribe() }
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+      unsubscribe()
+    }
   }, [])
 
   return deviceState
