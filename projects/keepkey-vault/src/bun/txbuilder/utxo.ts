@@ -47,11 +47,12 @@ const DEFAULT_FEES: Record<string, { slow: number; average: number; fast: number
   'bip122:00000000001a91e3dace36e2be3bf030': { slow: 10, average: 10, fast: 10 }, // DOGE
   'bip122:000000000000000000651ef99cb9fcbe': { slow: 1, average: 1, fast: 3 }, // BCH
   'bip122:000007d91d1254d60e2dd1ae58038307': { slow: 1, average: 1, fast: 3 }, // DASH
+  'bip122:00040fe8ec8471911baa1db1266ea15d': { slow: 1, average: 2, fast: 5 }, // ZEC
 }
 
 // SLIP-44 coin type by chain id
 const COIN_TYPE: Record<string, number> = {
-  bitcoin: 0, litecoin: 2, dogecoin: 3, dash: 5, bitcoincash: 145,
+  bitcoin: 0, litecoin: 2, dogecoin: 3, dash: 5, bitcoincash: 145, zcash: 133,
 }
 
 // Purpose by scriptType
@@ -75,6 +76,15 @@ function addressToScriptPubKeyHex(address: string): string | undefined {
       const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
       if (program.length === 20) return `0014${hex}` // p2wpkh
       if (program.length === 32) return `0020${hex}` // p2wsh
+      return undefined
+    }
+    // Zcash t1... (P2PKH) and t3... (P2SH) — 2-byte version prefix
+    if (address.startsWith('t1') || address.startsWith('t3')) {
+      const payload = bs58check.decode(address)
+      if (payload.length < 22) return undefined
+      const hash = Buffer.from(payload.slice(2)).toString('hex')
+      if (address.startsWith('t1')) return `76a914${hash}88ac`
+      if (address.startsWith('t3')) return `a914${hash}87`
       return undefined
     }
     // Base58Check addresses (1..., 3..., L..., D..., X..., etc.)
@@ -102,9 +112,15 @@ function getUtxoScriptPubKeyHex(utxo: any): string | undefined {
 
 // Derive scriptType from xpub prefix (Pioneer SDK pattern)
 function getScriptTypeFromXpub(xpub: string): string | undefined {
+  // BTC
   if (xpub.startsWith('zpub')) return 'p2wpkh'
   if (xpub.startsWith('ypub')) return 'p2sh-p2wpkh'
   if (xpub.startsWith('xpub')) return 'p2pkh'
+  // DOGE (dgub), BCH, DASH (drkp) — all legacy p2pkh
+  if (xpub.startsWith('dgub') || xpub.startsWith('drkp')) return 'p2pkh'
+  // LTC
+  if (xpub.startsWith('Mtub')) return 'p2wpkh'
+  if (xpub.startsWith('Ltub')) return 'p2sh-p2wpkh'
   return undefined // unknown prefix — let caller fall back
 }
 
@@ -151,7 +167,11 @@ export async function buildUtxoTx(
   // 1. Fetch UTXOs — Pioneer API 'network' param expects Chain enum (BTC, LTC, etc.), not CAIP-2 networkId
   console.log(`${TAG} Fetching UTXOs: network=${chain.chain}, xpub=${xpub?.slice(0, 20)}...`)
   const utxosResp = await pioneer.ListUnspent({ network: chain.chain, xpub })
-  const utxos: any[] = utxosResp?.data || []
+  console.log(`${TAG} ListUnspent raw type=${typeof utxosResp}, isArray=${Array.isArray(utxosResp)}, keys=${utxosResp && typeof utxosResp === 'object' && !Array.isArray(utxosResp) ? Object.keys(utxosResp).join(',') : 'N/A'}`)
+  const utxos: any[] = Array.isArray(utxosResp) ? utxosResp
+    : Array.isArray(utxosResp?.data) ? utxosResp.data
+    : Array.isArray(utxosResp?.utxos) ? utxosResp.utxos
+    : []
   if (!utxos.length) throw new Error(`No UTXOs found for ${chain.coin}`)
 
   for (const u of utxos) {
@@ -219,19 +239,34 @@ export async function buildUtxoTx(
 
   let { inputs, outputs, fee } = result
 
-  // DOGE: enforce minimum 1 DOGE fee
+  // DOGE: enforce minimum 1 DOGE fee (network consensus rule)
+  // Pioneer SDK: DOGE_MIN_FEE = 100000000 (1 DOGE), dust = 1000000 (0.01 DOGE)
   if (chain.id === 'dogecoin' && fee < 100000000) {
     const increase = 100000000 - fee
     const changeIdx = outputs.findIndex((o: any) => !o.address)
     if (changeIdx >= 0 && outputs[changeIdx].value >= increase) {
+      // Absorb fee deficit from change output
       outputs[changeIdx].value -= increase
       if (outputs[changeIdx].value < 1000000) {
+        // Change is dust — consolidate into fee
         fee = 100000000 + outputs[changeIdx].value
         outputs.splice(changeIdx, 1)
       } else {
         fee = 100000000
       }
+    } else {
+      // No change output (or change too small) — reduce spend output to cover fee.
+      // For swaps this is fine: THORChain swaps whatever it receives.
+      const spendIdx = outputs.findIndex((o: any) => o.address)
+      if (spendIdx >= 0 && outputs[spendIdx].value > increase + 1000000) {
+        console.log(`${TAG} DOGE: no change output — reducing spend by ${increase} sats to enforce 1 DOGE min fee`)
+        outputs[spendIdx].value -= increase
+        fee = 100000000
+      } else {
+        throw new Error(`Insufficient DOGE to cover minimum 1 DOGE network fee`)
+      }
     }
+    console.log(`${TAG} DOGE: enforced minimum fee = ${fee} sats (${fee / 1e8} DOGE)`)
   }
 
   // 4. Get pubkey info — used for both address→path lookup AND change address index
@@ -381,14 +416,12 @@ export async function buildUtxoTx(
     })
     .filter(Boolean)
 
-  // OP_RETURN memo
-  if (memo && memo.trim()) {
-    preparedOutputs.push({
-      amount: '0',
-      addressType: 'opreturn',
-      opReturnData: memo,
-    })
-  }
+  // OP_RETURN memo — pass raw UTF-8 string as top-level opReturnData ONLY.
+  // hdwallet-keepkey btcSignTx() does its own base64 encoding (line 296):
+  //   Buffer.from(msg.opReturnData).toString("base64")
+  // Do NOT add to preparedOutputs — hdwallet creates the output internally.
+  // Do NOT pre-encode (hex/base64) — causes double-encoding → garbled on-chain.
+  const memoRaw = memo && memo.trim() ? memo.trim() : undefined
 
   // Safety validation — prevent fee burn or empty transactions
   if (!preparedInputs.length) throw new Error('No inputs selected — cannot build transaction')
@@ -413,11 +446,17 @@ export async function buildUtxoTx(
     coin: chain.coin,
     inputs: preparedInputs,
     outputs: preparedOutputs,
-    version: 1,    // keepkey-desktop always passes these explicitly
+    version: chain.coin === 'Zcash' ? 4 : 1,
     locktime: 0,
+    ...(chain.coin === 'Zcash' ? {
+      overwintered: true,
+      versionGroupId: 0x892F2085,
+      branchId: 0x4dec4df0,   // NU6.1 (current Zcash mainnet)
+      expiry: 0,
+    } : {}),
     fee: String(fee / 10 ** chain.decimals),
     memo,
-    // opReturnData at top-level for v1 server contract
-    ...(memo && memo.trim() ? { opReturnData: memo } : {}),
+    // opReturnData at top-level — raw UTF-8 string (hdwallet base64-encodes internally)
+    ...(memoRaw ? { opReturnData: memoRaw } : {}),
   }
 }
