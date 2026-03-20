@@ -285,6 +285,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   // Auto-skip bootloader step when BL is already up to date
   useEffect(() => {
     if (step !== 'bootloader') return
+    // Don't make routing decisions without real device features (Windows disconnect gap)
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (needsBootloader) return // BL actually needs updating
     if (updateState !== 'idle') return
     if (rebootPhase === 'rebooting') return
@@ -296,18 +299,20 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     } else {
       onComplete()
     }
-  }, [step, needsBootloader, needsFirmware, needsInit, updateState, rebootPhase, onComplete])
+  }, [step, needsBootloader, needsFirmware, needsInit, updateState, rebootPhase, onComplete, deviceStatus.state])
 
   // Auto-start bootloader detection polling when entering bootloader step
   useEffect(() => {
     if (step !== 'bootloader') return
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (inBootloader) return // Already detected
     if (waitingForBootloader) return // Already polling
     if (updateState !== 'idle') return
     if (rebootPhase === 'rebooting') return
     if (!needsBootloader) return // BL up to date, skip handled above
     handleEnterBootloaderMode()
-  }, [step, inBootloader, waitingForBootloader, updateState, rebootPhase, needsBootloader])
+  }, [step, inBootloader, waitingForBootloader, updateState, rebootPhase, needsBootloader, deviceStatus.state])
 
   // Enter reboot phase when bootloader update completes
   useEffect(() => {
@@ -379,13 +384,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   // Auto-start polling for bootloader entry (not the update itself)
   useEffect(() => {
     if (step !== 'firmware') return
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (updateState !== 'idle') return
     if (rebootPhase === 'rebooting') return
     if (inBootloader) return // Already in BL — user will click to start
     if (!waitingForBootloaderFw) {
       handleEnterBootloaderForFirmware()
     }
-  }, [step, updateState, rebootPhase, inBootloader, waitingForBootloaderFw]) // H4 fix: added waitingForBootloaderFw
+  }, [step, updateState, rebootPhase, inBootloader, waitingForBootloaderFw, deviceStatus.state]) // H4 fix: added waitingForBootloaderFw
 
   // Enter reboot phase when firmware update completes
   useEffect(() => {
