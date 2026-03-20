@@ -24,14 +24,21 @@ export function useDeviceState() {
       setDeviceState(payload)
     })
 
-    // Fetch initial state
-    rpcRequest<DeviceStateInfo>('getDeviceState').then((state) => {
-      setDeviceState(state)
-    }).catch((err) => {
-      console.warn('Failed to get initial device state:', err)
-    })
+    // Fetch initial state — retry if RPC isn't ready yet (Windows WebView2 timing)
+    let cancelled = false
+    const fetchInitial = (attempt: number) => {
+      rpcRequest<DeviceStateInfo>('getDeviceState').then((state) => {
+        if (!cancelled) setDeviceState(state)
+      }).catch((err) => {
+        console.warn(`[useDeviceState] fetch attempt ${attempt} failed:`, err?.message)
+        if (!cancelled && attempt < 5) {
+          setTimeout(() => fetchInitial(attempt + 1), 500 * attempt)
+        }
+      })
+    }
+    fetchInitial(1)
 
-    return unsubscribe
+    return () => { cancelled = true; unsubscribe() }
   }, [])
 
   return deviceState

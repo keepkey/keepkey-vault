@@ -401,3 +401,30 @@ as `app-real.ico` and then copied over `app.ico`.
 **Files**: `scripts/build-windows-production.ps1`
 
 ---
+
+## 32. "View in Explorer" Button Does Nothing
+
+`window.open(url)` does not work in Electrobun's WebView2 on Windows — the
+WebView2 security policy blocks navigation to external URLs. On macOS,
+Electrobun's WKWebView handles `window.open` correctly.
+
+**Workaround**: Use an RPC call to the Bun backend which calls
+`Bun.spawn(['cmd', '/c', 'start', '', url])` to open the URL in the
+system browser. The frontend should detect Windows and use RPC instead of
+`window.open`.
+
+**Status**: Known issue, not yet fixed. macOS works correctly.
+
+**Files**: `src/mainview/components/AssetPage.tsx`, `src/mainview/components/ActivityPanel.tsx`
+
+---
+
+## 33. Application Menu Not Populated
+
+On Windows, the Electrobun `ApplicationMenu` shows only the default entries
+(Hide, Quit, Window minimize/close). No custom menu items are registered.
+On macOS, the native menu bar is populated by Electrobun automatically.
+
+**Status**: Cosmetic, low priority. The app is fully functional without menus.
+
+**Files**: `src/bun/index.ts`
