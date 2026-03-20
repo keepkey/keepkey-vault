@@ -234,7 +234,8 @@ console.log(`[prune-bundle] Pruned ${prunedFiles} type/map/source files`)
 
 // 3. Remove known bloat directories
 const STRIP_DIRS = [
-  'lodash', 'rxjs',
+  // NOTE: lodash is required by minim (swagger/apidom transitive dep) — do NOT strip
+  'rxjs',
   '@keepkey/hdwallet-core/src', '@keepkey/hdwallet-keepkey/src',
   '@keepkey/hdwallet-keepkey-nodehid/src', '@keepkey/hdwallet-keepkey-nodewebusb/src',
   '@keepkey/proto-tx-builder/src',
