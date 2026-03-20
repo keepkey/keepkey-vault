@@ -18,6 +18,7 @@ import { useDeviceState } from '../hooks/useDeviceState'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
+import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
 
 // ── Design tokens ───────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ const ANIMATIONS_CSS = `
 // ── Step definitions ────────────────────────────────────────────────────────
 
 type WizardStep =
+  | 'intro'
   | 'welcome'
   | 'bootloader'
   | 'firmware'
@@ -55,9 +57,11 @@ type WizardStep =
   | 'init-progress'
   | 'init-label'
   | 'verify-seed'
+  | 'security-tips'
   | 'complete'
 
 const STEP_SEQUENCE: WizardStep[] = [
+  'intro',
   'welcome',
   'bootloader',
   'firmware',
@@ -65,6 +69,7 @@ const STEP_SEQUENCE: WizardStep[] = [
   'init-progress',
   'init-label',
   'verify-seed',
+  'security-tips',
   'complete',
 ]
 
@@ -72,6 +77,7 @@ const STEP_SEQUENCE: WizardStep[] = [
 
 // Map wizard steps → their visible step group
 const stepToVisibleId: Record<WizardStep, string | null> = {
+  'intro': null,
   'welcome': null,
   'bootloader': 'bootloader',
   'firmware': 'firmware',
@@ -79,6 +85,7 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
   'init-progress': 'init-choose',
   'init-label': 'init-choose',
   'verify-seed': 'init-choose',
+  'security-tips': null,
   'complete': null,
 }
 
@@ -103,7 +110,9 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
 export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
-  const [step, setStep] = useState<WizardStep>('welcome')
+  const [step, setStep] = useState<WizardStep>('intro')
+  const [introCard, setIntroCard] = useState(0)
+  const [tipCard, setTipCard] = useState(0)
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
@@ -121,6 +130,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     'init-progress': t('stepDescriptions.initProgress'),
     'init-label': t('stepDescriptions.initLabel'),
     'verify-seed': t('stepDescriptions.verifySeed', { defaultValue: 'Verify your recovery phrase' }),
+    'security-tips': t('stepDescriptions.securityTips', { defaultValue: 'Security tips' }),
     'complete': t('stepDescriptions.complete'),
   }
 
@@ -219,7 +229,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
   const isVisibleStepCompleted = (vsId: string) => {
     const vsIndex = VISIBLE_STEPS.findIndex(s => s.id === vsId)
-    if (step === 'complete' || step === 'verify-seed' || step === 'init-label' || step === 'init-progress') return true
+    if (step === 'complete' || step === 'security-tips' || step === 'verify-seed' || step === 'init-label' || step === 'init-progress') return true
     const curVsIndex = visibleIndex
     return vsIndex < curVsIndex
   }
@@ -631,8 +641,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
         // Label is optional
       }
     }
-    // Offer seed verification for new wallets, skip for recovered
-    setStep(setupType === 'create' ? 'verify-seed' : 'complete')
+    // Offer seed verification for new wallets, skip straight to tips for recovered
+    setStep(setupType === 'create' ? 'verify-seed' : 'security-tips')
   }
 
   // ── Complete: auto-advance after 5s ────────────────────────────────────
@@ -663,7 +673,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const showPrevious = !['welcome', 'complete', 'init-progress'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   const showNext =
-    !['bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'complete'].includes(step) &&
+    !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -794,6 +804,19 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
           w="100%"
         >
           <Box w="100%" maxW="800px">
+            {/* ═══════════════ INTRO (Pre-Tutorial) ═════════════════ */}
+            {step === 'intro' && (
+              <TutorialPage
+                type="pre"
+                cardIndex={introCard}
+                onNext={() => {
+                  if (introCard < 2) setIntroCard(introCard + 1)
+                  else setStep('welcome')
+                }}
+                onSkip={() => setStep('welcome')}
+              />
+            )}
+
             {/* ═══════════════ WELCOME ═══════════════════════════════ */}
             {step === 'welcome' && (
               <VStack gap={4} textAlign="center" w="100%">
@@ -2108,7 +2131,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
                       _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
-                      onClick={() => setStep('complete')}
+                      onClick={() => setStep('security-tips')}
                     >
                       {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
                     </Button>
@@ -2141,7 +2164,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <Button
                       w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
-                      onClick={() => setStep('complete')}
+                      onClick={() => setStep('security-tips')}
                     >
                       {t('verifySeed.continue', { defaultValue: 'Continue' })}
                     </Button>
@@ -2169,13 +2192,26 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
                       _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
-                      onClick={() => setStep('complete')}
+                      onClick={() => setStep('security-tips')}
                     >
                       {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
                     </Button>
                   </>
                 )}
               </VStack>
+            )}
+
+            {/* ═══════════════ SECURITY TIPS (Post-Tutorial) ════════ */}
+            {step === 'security-tips' && (
+              <TutorialPage
+                type="post"
+                cardIndex={tipCard}
+                onNext={() => {
+                  if (tipCard < 2) setTipCard(tipCard + 1)
+                  else setStep('complete')
+                }}
+                onSkip={() => setStep('complete')}
+              />
             )}
 
             {/* ═══════════════ COMPLETE ═════════════════════════════ */}
@@ -2242,9 +2278,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
             <Text fontSize="sm" color="gray.400" fontWeight="500">
               {visibleIndex >= 0
                 ? t('footer.stepOf', { current: visibleIndex + 1, total: VISIBLE_STEPS.length })
-                : step === 'welcome'
+                : step === 'intro' || step === 'welcome'
                   ? ''
-                  : t('footer.settingUpWallet')}
+                  : step === 'security-tips'
+                    ? t('footer.securityTips', { defaultValue: 'Security Tips' })
+                    : t('footer.settingUpWallet')}
             </Text>
             <HStack gap={3}>
               {showPrevious && (
