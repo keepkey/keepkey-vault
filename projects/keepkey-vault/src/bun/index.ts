@@ -2511,8 +2511,9 @@ async function getMainViewUrl(): Promise<string> {
 
 const url = await getMainViewUrl()
 
-// ── Application Menu (required for Cmd+C/V clipboard in WKWebView) ──
-ApplicationMenu.setApplicationMenu([
+// ── Application Menu (required for Cmd+C/V clipboard in WKWebView on macOS) ──
+// On Windows, Electrobun renders a menu bar but macOS roles are no-ops — hide it.
+if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 	{
 		label: "KeepKey Vault",
 		submenu: [
