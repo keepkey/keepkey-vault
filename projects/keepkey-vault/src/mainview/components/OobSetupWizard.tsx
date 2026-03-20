@@ -123,6 +123,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   // L1 fix: removed unused setupLoading state (value was never read)
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
+    'intro': '',
     'welcome': t('stepDescriptions.welcome'),
     'bootloader': t('stepDescriptions.bootloader'),
     'firmware': t('stepDescriptions.firmware'),
@@ -223,7 +224,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   let progressPercent = 0
   if (visibleIndex >= 0) {
     progressPercent = ((visibleIndex + 1) / VISIBLE_STEPS.length) * 100
-  } else if (step !== 'welcome') {
+  } else if (step !== 'welcome' && step !== 'intro') {
     progressPercent = 100
   }
 
@@ -670,7 +671,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   }, [step, onComplete])
 
   // L7 fix: prevent navigating back to already-completed steps
-  const showPrevious = !['welcome', 'complete', 'init-progress'].includes(step)
+  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   const showNext =
     !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
@@ -810,7 +811,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 type="pre"
                 cardIndex={introCard}
                 onNext={() => {
-                  if (introCard < 2) setIntroCard(introCard + 1)
+                  if (introCard < 2) setIntroCard(prev => prev + 1)
                   else setStep('welcome')
                 }}
                 onSkip={() => setStep('welcome')}
@@ -2207,7 +2208,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 type="post"
                 cardIndex={tipCard}
                 onNext={() => {
-                  if (tipCard < 2) setTipCard(tipCard + 1)
+                  if (tipCard < 2) setTipCard(prev => prev + 1)
                   else setStep('complete')
                 }}
                 onSkip={() => setStep('complete')}

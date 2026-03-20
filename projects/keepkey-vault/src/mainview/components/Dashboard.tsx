@@ -453,7 +453,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 								borderRadius="md"
 								cursor="pointer"
 								_hover={{ borderColor: "kk.textMuted", color: "white" }}
-								onClick={() => rpcRequest('openUrl', { url: "https://support.keepkey.com" }).catch(() => {})}
+								onClick={() => rpcRequest('openUrl', { url: "https://support.keepkey.com" }).catch((e: any) => console.warn('[openUrl]', e?.message))}
 							>
 								{t("getSupport")}
 							</Box>

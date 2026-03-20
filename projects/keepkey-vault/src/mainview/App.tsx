@@ -447,12 +447,10 @@ function App() {
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
 
 	const phase: AppPhase =
-		// Claimed/error takes priority over oobLock when the device is persistently
-		// held by another app — the wizard can't do anything without device access.
-		// oobLock only overrides transient disconnects (the Windows unplug/replug gap).
-		isClaimed ? "claimed"
-		: (deviceState.state === 'error' && !oobEnteredRef.current) ? "splash"
-		: oobLock ? "setup"
+		// oobLock takes priority — during OOB, transient claim errors are expected
+		// (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
+		oobLock ? "setup"
+		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"

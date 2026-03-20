@@ -204,7 +204,6 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
   const card = cards[cardIndex]
   if (!card) return null
   const isLast = cardIndex === cards.length - 1
-  const progress = ((cardIndex + 1) / cards.length) * 100
 
   return (
     <VStack gap={4} w="100%" maxW="400px" mx="auto" css={{ animation: 'tutorialFadeIn 0.3s ease-out' }}>
@@ -252,9 +251,12 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
         <Button w="100%" size="md" bg={card.accent} color="black" fontWeight="700"
           _hover={{ opacity: 0.9, transform: 'translateY(-1px)', boxShadow: `0 4px 16px ${card.accent}40` }}
           _active={{ transform: 'scale(0.98)' }} transition="all 0.15s ease"
-          onClick={onNext} rightIcon={<FaChevronRight size={12} />}
+          onClick={onNext}
         >
-          {isLast ? (type === 'pre' ? 'Get Started' : 'Start Using KeepKey') : 'Next'}
+          <HStack gap={2} justify="center">
+            <Text>{isLast ? (type === 'pre' ? 'Get Started' : 'Start Using KeepKey') : 'Next'}</Text>
+            <FaChevronRight size={10} />
+          </HStack>
         </Button>
         <Button w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
           _hover={{ color: 'gray.300', bg: 'rgba(255,255,255,0.04)' }}
