@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "Dépôt THORChain",
 		"methodMayaTransfer": "Transfert Maya",
 		"methodMayaDeposit": "Dépôt Maya",
-		"methodOsmosisSign": "Signer Osmosis"
+		"methodOsmosisSign": "Signer Osmosis",
+		"methodSolanaSignTx": "Signer transaction Solana",
+		"methodSolanaSignMessage": "Signer message Solana",
+		"methodTronSignTx": "Signer transaction Tron",
+		"methodTonSignTx": "Signer transaction TON"
 	},
 	"claimed": {
 		"title": "Appareil en cours d'utilisation",
@@ -61,6 +65,7 @@
 		"step2": "2. Débranchez et rebranchez l'appareil",
 		"step3": "3. Cette application se reconnectera automatiquement",
 		"waiting": "En attente de la disponibilité de l'appareil...",
+		"supportLink": "Toujours des problèmes ? Soumettez un ticket de support",
 		"defaultError": "Appareil utilisé par un autre processus"
 	},
 	"recovery": {

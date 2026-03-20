@@ -2,6 +2,15 @@ PROJECT_DIR := projects/keepkey-vault
 VERSION := $(shell grep '"version"' $(PROJECT_DIR)/package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
 ARCH := $(shell uname -m)
 DMG_NAME := KeepKey-Vault-$(VERSION)-$(ARCH).dmg
+STAMP_DIR := .make
+SUBMODULES_STAMP := $(STAMP_DIR)/submodules.stamp
+PROTO_INSTALL_STAMP := $(STAMP_DIR)/proto-install.stamp
+HDWALLET_INSTALL_STAMP := $(STAMP_DIR)/hdwallet-install.stamp
+HDWALLET_BUILD_STAMP := $(STAMP_DIR)/hdwallet-build.stamp
+VAULT_INSTALL_STAMP := $(STAMP_DIR)/vault-install.stamp
+HDWALLET_BUILD_INPUTS := $(shell find modules/hdwallet/packages -type f \( -name '*.ts' -o -name '*.tsx' -o -name 'package.json' -o -name 'tsconfig.json' \))
+ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
+ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
@@ -9,37 +18,83 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug test test-unit test-rest test-zcash-cli
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
-submodules:
+$(STAMP_DIR):
+	@mkdir -p $(STAMP_DIR)
+
+$(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
 	@git submodule update --init
+	@touch $@
+
+submodules: $(SUBMODULES_STAMP)
 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
-modules-install: submodules
+$(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	cd modules/proto-tx-builder && bun install
-	cd modules/hdwallet && yarn install
+	@touch $@
 
-modules-build: modules-install
-	cd modules/hdwallet && yarn tsc --build --force
+$(HDWALLET_INSTALL_STAMP): modules/hdwallet/package.json modules/hdwallet/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
+	cd modules/hdwallet && yarn install
+	@touch $@
+
+modules-install: $(PROTO_INSTALL_STAMP) $(HDWALLET_INSTALL_STAMP)
+
+$(HDWALLET_BUILD_STAMP): modules/hdwallet/tsconfig.json $(HDWALLET_BUILD_INPUTS) $(HDWALLET_INSTALL_STAMP) | $(STAMP_DIR)
+	cd modules/hdwallet && yarn tsc --build
+	@touch $@
+
+modules-build: $(HDWALLET_BUILD_STAMP)
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
 	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf packages/*/dist node_modules)
+	rm -rf $(STAMP_DIR)
+
+# --- Zcash CLI Sidecar (Rust) ---
+# The stamp tracks source changes — rebuild + retest only when .rs or Cargo.toml change.
+# FAIL FAST: cargo test runs BEFORE the binary is considered ready.
+
+$(ZCASH_CLI_STAMP): $(ZCASH_CLI_SOURCES) | $(STAMP_DIR)
+	@echo "=== Zcash CLI: testing ==="
+	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	@echo "=== Zcash CLI: building (release) ==="
+	cd $(PROJECT_DIR)/zcash-cli && cargo build --release
+ifdef ELECTROBUN_DEVELOPER_ID
+	@echo "Signing zcash-cli binary..."
+	codesign --force --verbose --timestamp \
+		--sign "Developer ID Application: $(ELECTROBUN_DEVELOPER_ID) ($(ELECTROBUN_TEAMID))" \
+		--options runtime \
+		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
+endif
+	@touch $@
+
+build-zcash-cli: $(ZCASH_CLI_STAMP)
+
+test-zcash-cli:
+	cd $(PROJECT_DIR)/zcash-cli && cargo test
+
+build-zcash-cli-debug:
+	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	cd $(PROJECT_DIR)/zcash-cli && cargo build
 
 # --- Vault ---
 
-install: modules-build
+$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_INSTALL_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
 	cd $(PROJECT_DIR) && bun install
+	@touch $@
 
-vault: install dev
+install: $(VAULT_INSTALL_STAMP)
 
-dev: install
+vault: install $(ZCASH_CLI_STAMP) dev
+
+dev: install $(ZCASH_CLI_STAMP)
 	cd $(PROJECT_DIR) && bun run dev
 
-dev-hmr: install
+dev-hmr: install $(ZCASH_CLI_STAMP)
 	-lsof -ti :5177 | xargs kill -9 2>/dev/null || true
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
@@ -47,7 +102,7 @@ dev-hmr: install
 build: install
 	cd $(PROJECT_DIR) && bun run build
 
-build-stable: install
+build-stable: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:stable
 
 build-canary: install
@@ -94,6 +149,18 @@ dmg:
 	echo "Stapling notarization ticket..."; \
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
+
+# --- Testing ---
+
+test: test-zcash-cli test-unit
+
+test-unit:
+	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts
+
+test-integration: test-rest
+
+test-rest:
+	cd $(PROJECT_DIR) && bun test __tests__/rest-api.test.ts
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -184,10 +251,15 @@ help:
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
+	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
+	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
+	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
 	@echo "  make audit          - Generate dependency manifest + SBOM"
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
 	@echo "  make release        - Build, sign, and create new GitHub release"
 	@echo "  make upload-dmg     - Upload signed DMG to existing CI draft release"
+	@echo "  make test           - Run all tests"
+	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"

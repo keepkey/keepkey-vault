@@ -142,7 +142,7 @@ export function ChartLegend({ data, total, activeIndex, onHoverItem }: ChartLege
 			<Box w="8px" h="8px" borderRadius="full" bg={item.color} flexShrink={0} />
 			<Text fontSize="xs" fontWeight="500" color="white">{item.name}</Text>
 			<Text fontSize="xs" fontWeight="bold" color="white">{percent}%</Text>
-			<AnimatedUsd value={item.value} fontSize="xs" color="white" fontWeight="500" />
+			<AnimatedUsd value={item.value} fontSize="xs" fontWeight="500" />
 		</Flex>
 	)
 }

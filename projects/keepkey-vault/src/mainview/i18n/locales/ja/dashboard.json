@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "ウォレットの準備ができました。始め方はこちら：",
 	"welcomeTip1": "下のチェーンをタップして「受取」を押し、入金アドレスを取得します",
 	"welcomeTip2": "アドレスに暗号通貨を送信 — 残高はここに自動的に表示されます",
-	"welcomeTip3": "+ カードでカスタム EVM チェーンを追加して、任意のネットワークを追跡します",
 	"balancesStale": "残高が古い可能性があります",
 	"lastUpdated": "最終更新 {{time}}",
 	"lastUpdatedNever": "未読み込み",

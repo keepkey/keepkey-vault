@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "THORChain-Einzahlung",
 		"methodMayaTransfer": "Maya-Überweisung",
 		"methodMayaDeposit": "Maya-Einzahlung",
-		"methodOsmosisSign": "Osmosis signieren"
+		"methodOsmosisSign": "Osmosis signieren",
+		"methodSolanaSignTx": "Solana-Transaktion signieren",
+		"methodSolanaSignMessage": "Solana-Nachricht signieren",
+		"methodTronSignTx": "Tron-Transaktion signieren",
+		"methodTonSignTx": "TON-Transaktion signieren"
 	},
 	"claimed": {
 		"title": "Gerät wird verwendet",
@@ -61,6 +65,7 @@
 		"step2": "2. Trennen Sie das Gerät und schließen Sie es erneut an",
 		"step3": "3. Diese App verbindet sich automatisch neu",
 		"waiting": "Warte auf Verfügbarkeit des Geräts...",
+		"supportLink": "Immer noch Probleme? Support-Ticket einreichen",
 		"defaultError": "Gerät wird von einem anderen Prozess verwendet"
 	},
 	"recovery": {

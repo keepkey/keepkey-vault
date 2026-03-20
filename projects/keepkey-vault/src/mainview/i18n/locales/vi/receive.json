@@ -1,0 +1,16 @@
+{
+	"receive": "Nhận",
+	"sendToAddress": "Gửi {{symbol}} đến địa chỉ này",
+	"index": "Chỉ mục",
+	"remaining": "Còn lại {{remaining}}",
+	"address": "Địa chỉ",
+	"extendedPublicKey": "Khóa công khai mở rộng (xpub)",
+	"path": "Đường dẫn",
+	"editDerivationPath": "Chỉnh sửa đường dẫn dẫn xuất",
+	"checkDevice": "Kiểm tra thiết bị...",
+	"verifyOnDevice": "Xác minh trên thiết bị",
+	"derivingAddress": "Đang dẫn xuất địa chỉ...",
+	"noAddressDerived": "Chưa có địa chỉ được dẫn xuất",
+	"deriveAddress": "Dẫn xuất địa chỉ",
+	"account": "Tài khoản {{index}}"
+}

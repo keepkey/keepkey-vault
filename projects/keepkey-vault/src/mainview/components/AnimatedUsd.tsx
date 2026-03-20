@@ -6,17 +6,18 @@ interface AnimatedUsdProps extends TextProps {
 	prefix?: string
 	suffix?: string
 	duration?: number
+	decimals?: number
 }
 
-/** Animated USD counter — drops in anywhere a static $X.XX was shown. */
-export function AnimatedUsd({ value, prefix = "$", suffix, duration = 1.2, ...textProps }: AnimatedUsdProps) {
+/** Animated USD counter with CountUp animation. */
+export function AnimatedUsd({ value, prefix = "$", suffix, duration = 1.2, decimals = 2, color = "#23DCC8", ...textProps }: AnimatedUsdProps) {
 	if (!isFinite(value) || value <= 0) {
-		return <Text as="span" {...textProps}>{prefix}0.00{suffix}</Text>
+		return <Text as="span" color={color} {...textProps}>{prefix}0.{'0'.repeat(decimals)}{suffix}</Text>
 	}
 	return (
-		<Text as="span" {...textProps}>
+		<Text as="span" color={color} {...textProps}>
 			{prefix}
-			<CountUp key={value} end={value} decimals={2} duration={duration} separator="," preserveValue={false} />
+			<CountUp key={value} start={0} end={value} decimals={decimals} duration={duration} separator="," preserveValue={false} />
 			{suffix}
 		</Text>
 	)

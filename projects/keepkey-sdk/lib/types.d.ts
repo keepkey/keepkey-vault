@@ -121,6 +121,18 @@ export interface SolanaSignTxParams {
     addressNList?: number[];
     raw_tx: string;
 }
+export interface TronSignTxParams {
+    addressNList: number[];
+    from: string;
+    to: string;
+    amount: number;
+    memo?: string;
+}
+export interface TonSignTxParams {
+    address_n?: number[];
+    addressNList?: number[];
+    raw_tx: string;
+}
 export interface GetPublicKeyRequest {
     address_n: number[];
     ecdsa_curve_name?: string;

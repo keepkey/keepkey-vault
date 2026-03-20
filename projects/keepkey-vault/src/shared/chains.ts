@@ -1,5 +1,6 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
 import type { BtcScriptType, CustomChain } from './types'
+import { versionCompare } from './firmware-versions'
 
 export interface ChainDef {
   id: string
@@ -9,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton'
   color: string
   rpcMethod: string
   signMethod: string
@@ -19,6 +20,8 @@ export interface ChainDef {
   chainId?: string
   explorerAddressUrl?: string  // e.g. "https://etherscan.io/address/{{address}}"
   explorerTxUrl?: string       // e.g. "https://etherscan.io/tx/{{txid}}"
+  hidden?: boolean             // If true, hide from Dashboard grid (used for internal-only chains)
+  minFirmware?: string         // Minimum firmware version required (e.g. '7.11.0')
 }
 
 // ── Bitcoin multi-account constants ─────────────────────────────────────
@@ -48,48 +51,64 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#F7931A',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    explorerTxUrl: 'https://blockchair.com/bitcoin/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/bitcoin/address/{{address}}',
   },
   {
     id: 'ethereum', chain: Chain.Ethereum, coin: 'Ethereum', symbol: 'ETH',
     chainFamily: 'evm', color: '#627EEA',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '1',
+    explorerTxUrl: 'https://etherscan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://etherscan.io/address/{{address}}',
   },
   {
     id: 'polygon', chain: Chain.Polygon, coin: 'Polygon', symbol: 'MATIC',
     chainFamily: 'evm', color: '#8247E5',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '137',
+    explorerTxUrl: 'https://polygonscan.com/tx/{{txid}}',
+    explorerAddressUrl: 'https://polygonscan.com/address/{{address}}',
   },
   {
     id: 'arbitrum', chain: Chain.Arbitrum, coin: 'Arbitrum', symbol: 'ETH',
     chainFamily: 'evm', color: '#28A0F0',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '42161',
+    explorerTxUrl: 'https://arbiscan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://arbiscan.io/address/{{address}}',
   },
   {
     id: 'optimism', chain: Chain.Optimism, coin: 'Optimism', symbol: 'ETH',
     chainFamily: 'evm', color: '#FF0420',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '10',
+    explorerTxUrl: 'https://optimistic.etherscan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://optimistic.etherscan.io/address/{{address}}',
   },
   {
     id: 'avalanche', chain: Chain.Avalanche, coin: 'Avalanche', symbol: 'AVAX',
     chainFamily: 'evm', color: '#E84142',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '43114',
+    explorerTxUrl: 'https://snowtrace.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://snowtrace.io/address/{{address}}',
   },
   {
     id: 'bsc', chain: Chain.BinanceSmartChain, coin: 'BNB Smart Chain', symbol: 'BNB',
     chainFamily: 'evm', color: '#F0B90B',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '56',
+    explorerTxUrl: 'https://bscscan.com/tx/{{txid}}',
+    explorerAddressUrl: 'https://bscscan.com/address/{{address}}',
   },
   {
     id: 'base', chain: Chain.Base, coin: 'Base', symbol: 'ETH',
     chainFamily: 'evm', color: '#0052FF',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '8453',
+    explorerTxUrl: 'https://basescan.org/tx/{{txid}}',
+    explorerAddressUrl: 'https://basescan.org/address/{{address}}',
   },
   {
     id: 'monad', chain: Chain.Monad, coin: 'Monad', symbol: 'MON',
@@ -109,6 +128,8 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'cosmosGetAddress', signMethod: 'cosmosSignTx',
     defaultPath: [0x8000002C, 0x80000076, 0x80000000, 0, 0],
     denom: 'uatom', chainId: 'cosmoshub-4',
+    explorerTxUrl: 'https://www.mintscan.io/cosmos/tx/{{txid}}',
+    explorerAddressUrl: 'https://www.mintscan.io/cosmos/address/{{address}}',
   },
   {
     id: 'thorchain', chain: Chain.THORChain, coin: 'THORChain', symbol: 'RUNE',
@@ -116,6 +137,8 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'thorchainGetAddress', signMethod: 'thorchainSignTx',
     defaultPath: [0x8000002C, 0x800003A3, 0x80000000, 0, 0],
     denom: 'rune', chainId: 'thorchain-1',
+    explorerTxUrl: 'https://runescan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://runescan.io/address/{{address}}',
   },
   {
     id: 'mayachain', chain: Chain.Mayachain, coin: 'Mayachain', symbol: 'CACAO',
@@ -123,6 +146,8 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'mayachainGetAddress', signMethod: 'mayachainSignTx',
     defaultPath: [0x8000002C, 0x800003A3, 0x80000000, 0, 0],
     denom: 'cacao', chainId: 'mayachain-mainnet-v1',
+    explorerTxUrl: 'https://www.mayascan.org/tx/{{txid}}',
+    explorerAddressUrl: 'https://www.mayascan.org/address/{{address}}',
   },
   {
     id: 'osmosis', chain: Chain.Osmosis, coin: 'Osmosis', symbol: 'OSMO',
@@ -130,42 +155,71 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'osmosisGetAddress', signMethod: 'osmosisSignTx',
     defaultPath: [0x8000002C, 0x80000076, 0x80000000, 0, 0],
     denom: 'uosmo', chainId: 'osmosis-1',
+    explorerTxUrl: 'https://www.mintscan.io/osmosis/tx/{{txid}}',
+    explorerAddressUrl: 'https://www.mintscan.io/osmosis/address/{{address}}',
   },
   {
     id: 'litecoin', chain: Chain.Litecoin, coin: 'Litecoin', symbol: 'LTC',
     chainFamily: 'utxo', color: '#BFBBBB',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000002, 0x80000000, 0, 0], scriptType: 'p2wpkh',
+    explorerTxUrl: 'https://blockchair.com/litecoin/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/litecoin/address/{{address}}',
   },
   {
     id: 'dogecoin', chain: Chain.Dogecoin, coin: 'Dogecoin', symbol: 'DOGE',
     chainFamily: 'utxo', color: '#C2A633',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000003, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    explorerTxUrl: 'https://blockchair.com/dogecoin/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/dogecoin/address/{{address}}',
   },
   {
     id: 'bitcoincash', chain: Chain.BitcoinCash, coin: 'BitcoinCash', symbol: 'BCH',
     chainFamily: 'utxo', color: '#0AC18E',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000091, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    explorerTxUrl: 'https://blockchair.com/bitcoin-cash/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/bitcoin-cash/address/{{address}}',
   },
   {
     id: 'dash', chain: Chain.Dash, coin: 'Dash', symbol: 'DASH',
     chainFamily: 'utxo', color: '#008CE7',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000005, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    explorerTxUrl: 'https://blockchair.com/dash/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/dash/address/{{address}}',
+  },
+  {
+    id: 'zcash', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
+    chainFamily: 'utxo', color: '#ECB244',
+    rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
+    defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    minFirmware: '7.14.0',
+  },
+  {
+    id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
+    chainFamily: 'zcash-shielded', color: '#ECB244',
+    rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
+    defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
+    hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
+    minFirmware: '7.14.0',
   },
   {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
     chainFamily: 'utxo', color: '#315BCA',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000014, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    explorerTxUrl: 'https://digiexplorer.info/tx/{{txid}}',
+    explorerAddressUrl: 'https://digiexplorer.info/address/{{address}}',
   },
   {
     id: 'ripple', chain: Chain.Ripple, coin: 'Ripple', symbol: 'XRP',
     chainFamily: 'xrp', color: '#23292F',
     rpcMethod: 'xrpGetAddress', signMethod: 'xrpSignTx',
     defaultPath: [0x8000002C, 0x80000090, 0x80000000, 0, 0],
+    explorerTxUrl: 'https://xrpscan.com/tx/{{txid}}',
+    explorerAddressUrl: 'https://xrpscan.com/account/{{address}}',
   },
   {
     id: 'solana', chain: Chain.Solana, coin: 'Solana', symbol: 'SOL',
@@ -174,20 +228,63 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x800001F5, 0x80000000, 0x80000000],
     explorerAddressUrl: 'https://solscan.io/account/{{address}}',
     explorerTxUrl: 'https://solscan.io/tx/{{txid}}',
+    minFirmware: '7.14.0',
+  },
+  {
+    id: 'tron', chain: 'TRX' as any, coin: 'Tron', symbol: 'TRX',
+    chainFamily: 'tron', color: '#FF0013',
+    rpcMethod: 'tronGetAddress', signMethod: 'tronSignTx',
+    defaultPath: [0x8000002C, 0x800000C3, 0x80000000, 0, 0],
+    explorerAddressUrl: 'https://tronscan.org/#/address/{{address}}',
+    explorerTxUrl: 'https://tronscan.org/#/transaction/{{txid}}',
+    minFirmware: '7.14.0',
+  },
+  {
+    id: 'ton', chain: Chain.TON, coin: 'Ton', symbol: 'TON',
+    chainFamily: 'ton', color: '#0088CC',
+    rpcMethod: 'tonGetAddress', signMethod: 'tonSignTx',
+    defaultPath: [0x8000002C, 0x8000025F, 0x80000000],
+    explorerAddressUrl: 'https://tonscan.org/address/{{address}}',
+    explorerTxUrl: 'https://tonscan.org/tx/{{txid}}',
+    minFirmware: '7.14.0',
   },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
-const CAIP_FALLBACKS: Record<string, string> = {}
-const DECIMAL_FALLBACKS: Record<string, number> = {}
+const CAIP_FALLBACKS: Record<string, string> = {
+  TRX: 'tron:27Lqcw/slip44:195',
+  TON: 'ton:-239/slip44:607',
+}
+const NETWORKID_FALLBACKS: Record<string, string> = {
+  TRX: 'tron:27Lqcw',
+  TON: 'ton:-239',
+}
+const DECIMAL_FALLBACKS: Record<string, number> = {
+  TRX: 6,
+  TON: 9,
+}
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth
 export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   ...c,
-  networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId],
+  networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId] || NETWORKID_FALLBACKS[c.chain] || '',
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
+
+/** Get explorer TX URL for a chain ID + txid. Returns null if no explorer configured. */
+export function getExplorerTxUrl(chainId: string, txid: string): string | null {
+  const chain = CHAINS.find(c => c.id === chainId)
+  if (!chain?.explorerTxUrl) return null
+  return chain.explorerTxUrl.replace('{{txid}}', txid)
+}
+
+/** Check if a chain is supported by the given firmware version. Chains without minFirmware are always supported. */
+export function isChainSupported(chain: ChainDef, firmwareVersion?: string): boolean {
+  if (!chain.minFirmware) return true
+  if (!firmwareVersion) return false
+  return versionCompare(firmwareVersion, chain.minFirmware) >= 0
+}
 
 /** Convert a user-added custom EVM chain into a ChainDef */
 export function customChainToChainDef(c: CustomChain): ChainDef {

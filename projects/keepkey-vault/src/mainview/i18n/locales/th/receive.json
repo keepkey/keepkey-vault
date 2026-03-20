@@ -1,0 +1,16 @@
+{
+	"receive": "รับ",
+	"sendToAddress": "ส่ง {{symbol}} ไปยังที่อยู่นี้",
+	"index": "ดัชนี",
+	"remaining": "เหลือ {{remaining}}",
+	"address": "ที่อยู่",
+	"extendedPublicKey": "คีย์สาธารณะขยาย (xpub)",
+	"path": "เส้นทาง",
+	"editDerivationPath": "แก้ไขเส้นทางการอนุมาน",
+	"checkDevice": "ตรวจสอบอุปกรณ์...",
+	"verifyOnDevice": "ตรวจสอบบนอุปกรณ์",
+	"derivingAddress": "กำลังอนุมานที่อยู่...",
+	"noAddressDerived": "ยังไม่ได้อนุมานที่อยู่",
+	"deriveAddress": "อนุมานที่อยู่",
+	"account": "บัญชี {{index}}"
+}

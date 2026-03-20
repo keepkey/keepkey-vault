@@ -1,0 +1,10 @@
+{
+	"title": "Ứng dụng",
+	"subtitle": "Kết nối KeepKey của bạn với các ứng dụng được hỗ trợ",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "Quản lý ví phần cứng KeepKey của bạn",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "Giao dịch, theo dõi và quản lý tiền mã hóa trên nhiều mạng",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "Kết nối với bất kỳ ứng dụng nào tương thích WalletConnect"
+}

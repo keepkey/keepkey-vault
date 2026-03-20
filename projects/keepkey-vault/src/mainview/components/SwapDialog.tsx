@@ -486,6 +486,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [showConfetti, setShowConfetti] = useState(false)
   const completionFiredRef = useRef(false)
 
+  // ── Frozen amount sent (captured at execution time so balance changes don't affect display) ──
+  const [sentAmount, setSentAmount] = useState<string | null>(null)
+
   // ── Custom destination address ──────────────────────────────────────
   const [useCustomAddress, setUseCustomAddress] = useState(false)
   const [customToAddress, setCustomToAddress] = useState("")
@@ -689,6 +692,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setFromAsset(from)
     setToAsset(to)
     setAmount(resumeSwap.fromAmount)
+    setSentAmount(resumeSwap.fromAmount)
     setTxid(resumeSwap.txid)
     setLiveStatus(resumeSwap.status)
     setLiveConfirmations(resumeSwap.confirmations)
@@ -915,6 +919,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setPhase(isErc20 ? 'approving' : 'signing')
     setError(null)
 
+    // Freeze the sent amount so balance changes don't affect the display
+    setSentAmount(isMax ? (fromBalance || '0') : amount)
+
     // Capture before-balances
     const fromBal = fromBalance || '0'
     setBeforeFromBal(fromBal)
@@ -974,6 +981,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setAfterFromBal(null)
     setAfterToBal(null)
     setShowConfetti(false)
+    setSentAmount(null)
     completionFiredRef.current = false
     hasAutoSelected.current = false
     hasResumedRef.current = null
@@ -1004,7 +1012,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   }, [t])
 
   const busy = phase === 'approving' || phase === 'signing' || phase === 'broadcasting'
-  const displayAmount = isMax ? (fromBalance || '0') : amount
+  const displayAmount = sentAmount ?? (isMax ? (fromBalance || '0') : amount)
   // sendMax on native EVM: quote uses full balance but execution subtracts gas, so output is overstated
   const isNativeEvmMax = isMax && !!fromAsset && fromAsset.chainFamily === 'evm' && !fromAsset.contractAddress
 

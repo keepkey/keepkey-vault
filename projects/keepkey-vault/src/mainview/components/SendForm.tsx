@@ -7,6 +7,7 @@ import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
+import { validateAddress } from "../../shared/address-validation"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -75,7 +76,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	}, [tokenCaip])
 
 	// Derived display values — token mode vs native mode
-	const isTokenSend = !!(token && token.caip?.includes('erc20'))
+	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
 
@@ -139,15 +140,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		return n * pricePerUnit
 	}, [amount, hasPrice, pricePerUnit, isMax])
 
-	const recipientTooShort = useMemo(() => {
-		if (!recipient) return false
-		// Most addresses are 25+ chars; catch obvious typos
-		return recipient.length > 0 && recipient.length < 10
-	}, [recipient])
+	const addressValidation = useMemo(() => {
+		if (!recipient) return null
+		return validateAddress(recipient, chain)
+	}, [recipient, chain])
 
 	const handleBuild = useCallback(async () => {
 		if (!recipient || (!amount && !isMax)) return
-		if (recipientTooShort) { setError(t("addressTooShort")); return }
+		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 		setLoading(true)
 		setError(null)
@@ -174,7 +174,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, recipientTooShort, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -350,6 +350,9 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								<QrIcon />
 							</Button>
 						</Flex>
+						{addressValidation && !addressValidation.valid && (
+							<Text fontSize="11px" color="kk.error" mt="1">{t(addressValidation.error!)}</Text>
+						)}
 					</Box>
 
 					{/* Amount input with USD conversion */}
@@ -358,16 +361,6 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Text fontSize="xs" color="kk.textMuted">
 								{inputMode === 'crypto' ? `${t("amount")} (${displaySymbol})` : `${t("amount")} (USD)`}
 							</Text>
-							{hasPrice && (
-								<Button
-									size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" h="auto" py="0"
-									_hover={{ color: "kk.gold" }}
-									onClick={toggleInputMode}
-									title={t("switchInput")}
-								>
-									<SwapIcon />
-								</Button>
-							)}
 						</Flex>
 						<Flex gap="2" align="center">
 							<Box flex="1">
@@ -393,21 +386,39 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								borderColor="kk.border"
 								_hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
 								onClick={() => { setIsMax(!isMax); setAmount(""); setUsdAmount("") }}
+								px="4" py="2"
 								h="32px"
 							>
 								{t("max")}
 							</Button>
 						</Flex>
 
-						{/* Secondary display: shows the converted value */}
-						{!isMax && hasPrice && (
-							<Flex mt="1" px="1" justify="space-between">
-								{inputMode === 'crypto' && amountUsdPreview !== null ? (
-									<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">${formatUsd(amountUsdPreview)}</Text>
-								) : inputMode === 'usd' && amount ? (
-									<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">{formatBalance(amount)} {displaySymbol}</Text>
-								) : (
-									<Box />
+						{/* Clickable secondary value — tap to flip input mode */}
+						{hasPrice && (
+							<Flex
+								mt="1" px="1" justify="space-between" align="center"
+								cursor={!isMax ? "pointer" : "default"}
+								onClick={!isMax ? toggleInputMode : undefined}
+								role={!isMax ? "button" : undefined}
+								borderRadius="sm"
+								_hover={!isMax ? { bg: "rgba(255,255,255,0.04)" } : undefined}
+								py="0.5"
+							>
+								{!isMax && (
+									<Flex align="center" gap="1">
+										{inputMode === 'crypto' ? (
+											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
+												{amountUsdPreview !== null ? `$${formatUsd(amountUsdPreview)}` : '$0.00'}
+											</Text>
+										) : (
+											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
+												{amount ? `${formatBalance(amount)} ${displaySymbol}` : `0 ${displaySymbol}`}
+											</Text>
+										)}
+										<Box color="kk.textMuted" opacity={0.6} _hover={{ color: "kk.gold", opacity: 1 }} transition="all 0.15s">
+											<SwapIcon />
+										</Box>
+									</Flex>
 								)}
 								{pricePerUnit > 0 && (
 									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = ${formatUsd(pricePerUnit)}</Text>
@@ -458,7 +469,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						color="black"
 						_hover={{ bg: "kk.goldHover" }}
 						onClick={handleBuild}
-						disabled={loading || !recipient || (!amount && !isMax)}
+						disabled={loading || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
+						px="4" py="2"
 						w="full"
 					>
 						{loading ? t("buildingTransaction") : t("buildTransaction")}
@@ -522,6 +534,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							borderColor="kk.border"
 							_hover={{ bg: "rgba(255,255,255,0.06)" }}
 							onClick={() => setPhase('input')}
+							px="4" py="2"
 						>
 							{t("back", { ns: "common" })}
 						</Button>
@@ -533,6 +546,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleSign}
 							disabled={loading}
+							px="4" py="2"
 						>
 							{loading ? t("confirmOnDevice") : t("signOnDevice")}
 						</Button>
@@ -559,6 +573,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							borderColor="kk.border"
 							_hover={{ bg: "rgba(255,255,255,0.06)" }}
 							onClick={() => setPhase('input')}
+							px="4" py="2"
 						>
 							{t("cancel", { ns: "common" })}
 						</Button>
@@ -570,6 +585,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							_hover={{ opacity: 0.9 }}
 							onClick={handleBroadcast}
 							disabled={loading}
+							px="4" py="2"
 						>
 							{loading ? t("broadcasting") : t("broadcastTransaction")}
 						</Button>

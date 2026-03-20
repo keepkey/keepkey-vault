@@ -3,12 +3,13 @@
  *
  * Detection order (first match wins):
  *  1. User override (SQLite-persisted 'visible'/'hidden') — absolute precedence
- *  2. Name/symbol contains URL or phishing keywords → CONFIRMED spam
- *  3. Symbol has suspicious characters or excessive length → CONFIRMED spam
- *  4. Known stablecoin symbol with value < $0.50 → CONFIRMED spam
- *  5. Dust airdrop: huge quantity (>1M) + near-zero unit price (<$0.0001) → CONFIRMED spam
- *  6. Value < $1 → POSSIBLE spam
- *  7. Otherwise → clean
+ *  2. Value floor: tokens worth >= $5 skip heuristic tiers 3-6 (real value = not spam)
+ *  3. Name/symbol contains URL or phishing keywords → CONFIRMED spam
+ *  4. Symbol has suspicious characters or excessive length → CONFIRMED spam
+ *  5. Known stablecoin symbol with value < $0.50 → CONFIRMED spam
+ *  6. Dust airdrop: huge quantity (>1M) + near-zero unit price + low value → CONFIRMED spam
+ *  7. Value < $0.01 → POSSIBLE spam (only "possible" — not auto-hidden)
+ *  8. Otherwise → clean
  */
 
 import type { TokenBalance } from './types'
@@ -49,6 +50,9 @@ export interface SpamResult {
 
 // ── Heuristic helpers ────────────────────────────────────────────────
 
+/** Tokens worth at least this much skip heuristic spam checks (tiers 3-6) */
+const VALUE_FLOOR_USD = 5
+
 /** URL-like patterns in name or symbol — nearly always phishing */
 const URL_PATTERN = /(?:\.[a-z]{2,6}(?:\/|$))|https?:|www\./i
 
@@ -84,6 +88,7 @@ export function detectSpamToken(
 	const name = token.name || ''
 
 	// ── Tier 1: Name/symbol contains URL → CONFIRMED spam ────────────
+	// (Always check regardless of value — phishing tokens can be high-value)
 	if (URL_PATTERN.test(name) || URL_PATTERN.test(token.symbol || '')) {
 		return {
 			isSpam: true,
@@ -99,6 +104,15 @@ export function detectSpamToken(
 			level: 'confirmed',
 			reason: `Name contains phishing keyword`,
 		}
+	}
+
+	// ── Value floor: tokens worth >= $5 are not spam ─────────────────
+	// A token with real USD value is not a dust airdrop or worthless spam.
+	// Pioneer may return priceUsd: "0.00" for LP tokens where per-unit
+	// price rounds to zero, but the total valueUsd is significant.
+	// Skip all remaining heuristic tiers for tokens with real value.
+	if (usd >= VALUE_FLOOR_USD) {
+		return { isSpam: false, level: null, reason: `Value $${usd.toFixed(2)} above floor` }
 	}
 
 	// ── Tier 3: Suspicious symbol characters or length → CONFIRMED ───
@@ -133,23 +147,14 @@ export function detectSpamToken(
 				reason: `Dust airdrop — ${qty.toLocaleString()} units at $${price.toFixed(8)}/unit`,
 			}
 		}
-
-		// Moderate quantity + zero price but somehow has USD value (manipulated)
-		if (qty > 10_000 && price === 0 && usd > 0) {
-			return {
-				isSpam: true,
-				level: 'confirmed',
-				reason: `Suspicious — large quantity with $0 price but non-zero value`,
-			}
-		}
 	}
 
-	// ── Tier 6: Low value → POSSIBLE spam ────────────────────────────
-	if (usd < 1) {
+	// ── Tier 6: Near-zero value → POSSIBLE spam ──────────────────────
+	if (usd < 0.01) {
 		return {
 			isSpam: true,
 			level: 'possible',
-			reason: `Low value ($${usd.toFixed(4)}) — common airdrop spam pattern`,
+			reason: `Near-zero value ($${usd.toFixed(4)})`,
 		}
 	}
 
@@ -163,6 +168,9 @@ export function detectSpamToken(
  * @param tokens      - token array from ChainBalance.tokens
  * @param overrides   - Map<caip, 'visible'|'hidden'> from DB
  * @returns { clean, spam, zeroValue } — mutually exclusive buckets
+ *
+ * Only "confirmed" spam is auto-hidden. "Possible" spam stays visible
+ * so the user can decide (and mark hidden via token_visibility if desired).
  */
 export function categorizeTokens(
 	tokens: TokenBalance[],
@@ -176,7 +184,7 @@ export function categorizeTokens(
 		const override = overrides?.get(t.caip?.toLowerCase()) ?? null
 		const result = detectSpamToken(t, override)
 
-		if (result.isSpam) {
+		if (result.isSpam && result.level === 'confirmed') {
 			spam.push(t)
 		} else if ((t.balanceUsd ?? 0) === 0) {
 			zeroValue.push(t)

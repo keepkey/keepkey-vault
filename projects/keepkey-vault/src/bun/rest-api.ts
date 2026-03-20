@@ -3,7 +3,13 @@ import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
-import { CHAINS } from '../shared/chains'
+import { decodeCalldata } from './calldata-decoder'
+import { CHAINS, isChainSupported } from '../shared/chains'
+import {
+  initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
+} from './txbuilder/zcash-shielded'
+import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -12,6 +18,7 @@ import { parseRequest, validateResponse } from './validate'
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
   onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
+  onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
   onPairDismissed?: () => void
   getVersion: () => string
@@ -38,7 +45,7 @@ function requireWallet(engine: EngineController) {
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
   20: 'DigiByte', 60: 'Ethereum', 118: 'Cosmos', 144: 'Ripple',
-  145: 'BitcoinCash', 501: 'Solana', 931: 'Rune',
+  145: 'BitcoinCash', 195: 'Tron', 501: 'Solana', 607: 'Ton', 931: 'Rune',
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -312,10 +319,17 @@ function addressNListToBIP32(addressNList: number[]): string {
 /** Start time for uptime calculation */
 const startTime = Date.now()
 
+/** Route prefix → chain symbol for activity tracking */
+const ROUTE_TO_CHAIN: Record<string, string> = {
+  eth: 'ETH', utxo: 'BTC', cosmos: 'ATOM', osmosis: 'OSMO',
+  thorchain: 'RUNE', mayachain: 'CACAO', xrp: 'XRP',
+  solana: 'SOL', tron: 'TRX', ton: 'TON',
+}
+
 /** Set of signing endpoints that require user approval */
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
-  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message',
+  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction', '/ton/sign-transaction',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
   '/cosmos/sign-amino-ibc-transfer',
@@ -355,10 +369,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let reqBody: any = undefined
 
       // Per-request response helpers (capture req for CORS origin check)
-      const json = (data: unknown, status = 200) => {
+      const json = (data: unknown, status = 200, activity?: { txid?: string; chain?: string; activityType?: string }) => {
         const resp = new Response(JSON.stringify(data), {
           status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
         })
+        // Auto-detect activity type from route if not explicitly provided
+        let resolvedActivity = activity
+        if (!resolvedActivity && method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) {
+          const chainForRoute = ROUTE_TO_CHAIN[path.split('/')[1]]
+          if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
+        }
         // Log the request with body + response + duration
         if (callbacks?.onApiLog) {
           const { appName, imageUrl } = resolveAppInfo()
@@ -368,6 +388,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status, appName, imageUrl: imageUrl || undefined,
             requestBody: reqBody,
             responseBody: data,
+            ...resolvedActivity,
           })
         }
         return resp
@@ -462,6 +483,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       if (method === 'POST') {
         try { reqBody = await req.clone().json() } catch { /* not JSON or empty */ }
       }
+
+      // Track active signing request so we can dismiss the overlay after the
+      // actual handler completes (success or failure), not when the user clicks approve.
+      let activeSigningId: string | undefined
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -578,6 +603,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           try {
             const preview = await req.clone().json() as any
             signingInfo.chain = path.split('/')[1] // e.g. "eth", "cosmos"
+            signingInfo.rawRequestBody = preview    // full payload for UI transparency
+
+            console.log(`[REST] Signing request ${path}:`, JSON.stringify(preview, null, 2))
 
             if (path === '/eth/sign-typed-data') {
               // EIP-712: address + typedData structure (no from/to/value/data)
@@ -586,19 +614,66 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
               }
+            } else if (path === '/ton/sign-transaction') {
+              // TON: field names differ from EVM (to_address, amount, raw_tx)
+              signingInfo.to = preview.to_address
+              signingInfo.value = preview.amount
+            } else if (path === '/tron/sign-transaction') {
+              // Tron: field names differ from EVM (to_address, amount, raw_tx)
+              signingInfo.to = preview.to_address
+              signingInfo.value = preview.amount
             } else {
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to
               signingInfo.value = preview.value
               signingInfo.chainId = preview.chainId || preview.chain_id
-              signingInfo.data = preview.data ? (preview.data.length > 66 ? preview.data.slice(0, 66) + '...' : preview.data) : undefined
+              signingInfo.data = preview.data   // full data — UI handles display
+
+              // Clear-signing: decode calldata via Pioneer descriptor API + local fallback
+              if (preview.data && preview.data.length >= 10 && preview.to) {
+                try {
+                  const chainIdNum = typeof signingInfo.chainId === 'string'
+                    ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
+                    : signingInfo.chainId
+                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
+                  console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
+                } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
+
+                // Determine if this tx needs blind signing:
+                // Has calldata AND calldata is not fully decoded (source is 'none' or missing)
+                const decoded = signingInfo.calldataDecoded
+                signingInfo.needsBlindSigning = !decoded || decoded.source === 'none'
+                console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning}, source=${decoded?.source}`)
+              }
             }
           } catch { /* body parse failed, non-fatal */ }
+
+          // Check device AdvancedMode policy before presenting to user.
+          // Try cached features first; on failure, retry with a fresh read.
+          try {
+            const wallet = requireWallet(engine)
+            let features: any
+            try {
+              features = await getCachedFeatures(wallet)
+            } catch {
+              // Cache miss or stale — try a fresh getFeatures() from device
+              try { features = await wallet.getFeatures() } catch { /* device busy */ }
+            }
+            if (features) {
+              const policies: any[] = features?.policiesList || features?.policies || []
+              const advPol = policies.find((p: any) => (p.policyName || p.policy_name) === 'AdvancedMode')
+              signingInfo.advancedModeEnabled = advPol?.enabled ?? false
+            }
+          } catch (e: any) {
+            console.warn('[rest-api] Failed to read AdvancedMode policy:', e?.message || e)
+          }
 
           const approved = await callbacks.onSigningRequest(signingInfo)
           if (!approved) {
             return json({ error: 'Signing rejected by user' }, 403)
           }
+          // Approved — track ID so we dismiss the overlay AFTER the handler finishes
+          activeSigningId = id
         }
 
         // ── List paired apps (public — shows connected dApps, keys stripped) ──
@@ -616,7 +691,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'utxo:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.btcGetAddress({
@@ -636,7 +711,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'cosmos:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.cosmosGetAddress({
@@ -672,7 +747,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'eth:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.ethGetAddress({
@@ -690,7 +765,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'tendermint:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.cosmosGetAddress({
@@ -744,7 +819,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'xrp:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.rippleGetAddress({
@@ -768,6 +843,43 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await wallet.solanaGetAddress({
             addressNList: body.address_n,
             showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
+        if (path === '/addresses/tron' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = 'trx:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.tronGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
+        if (path === '/addresses/ton' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = 'ton:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.tonGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+            bounceable: false, // UQ prefix — safe for uninitialized wallets
           })
           const address = typeof result === 'string' ? result : (result as any)?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
@@ -813,8 +925,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
 
-          const result = await wallet.ethSignTx(msg)
-          return json(validateResponse(result, S.EthSignTransactionResponse, path))
+          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
+          try {
+            const result = await wallet.ethSignTx(msg)
+            console.log('[REST] ethSignTx result:', JSON.stringify(result))
+            return json(validateResponse(result, S.EthSignTransactionResponse, path))
+          } catch (err: any) {
+            // Distinguish user cancellation / device rejection from actual failures
+            const errMsg = String(err?.message || err || '').toLowerCase()
+            if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
+              return json({ error: 'User cancelled signing on device' }, 403)
+            }
+            throw err
+          }
         }
 
         if (path === '/eth/sign-typed-data' && method === 'POST') {
@@ -888,8 +1011,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             outputs: body.outputs,
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
+            ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
+            ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
+            ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
+            ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
           })
-          return json(validateResponse(result, S.UtxoSignTransactionResponse, path))
+          // Explicit chain for UTXO — auto-detect defaults to BTC but could be LTC/DOGE/etc
+          const coinSymbol = coin === 'Bitcoin' ? 'BTC' : coin === 'Litecoin' ? 'LTC' : coin === 'Dogecoin' ? 'DOGE' : coin === 'Dash' ? 'DASH' : coin === 'BitcoinCash' ? 'BCH' : coin
+          return json(validateResponse(result, S.UtxoSignTransactionResponse, path), 200, { chain: coinSymbol, activityType: 'sign' })
         }
 
         // ── COSMOS SIGNING (6 endpoints) ──────────────────────────────
@@ -1029,11 +1158,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+
+          // Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
+          // Firmware expects just the message bytes. Extract message portion.
+          let deviceRawTx = body.raw_tx
+          const fullTx = Buffer.from(body.raw_tx, 'base64')
+          let pos = 0, sigCount = 0
+          if (fullTx[0] < 0x80) { sigCount = fullTx[0]; pos = 1 }
+          else if (fullTx.length >= 2 && fullTx[1] < 0x80) {
+            sigCount = (fullTx[0] & 0x7f) | (fullTx[1] << 7); pos = 2
+          } else if (fullTx.length >= 3) {
+            sigCount = (fullTx[0] & 0x7f) | ((fullTx[1] & 0x7f) << 7) | (fullTx[2] << 14); pos = 3
+          }
+          const messageStart = pos + sigCount * 64
+          if (sigCount > 0 && messageStart < fullTx.length) {
+            deviceRawTx = Buffer.from(fullTx.subarray(messageStart)).toString('base64')
+          }
+
           const result = await wallet.solanaSignTx({
             addressNList,
-            rawTx: body.raw_tx,
+            rawTx: deviceRawTx,
           })
-          // Assemble signed tx: replace dummy 64-byte signature in rawTx with real signature
+          // Assemble signed tx: replace dummy 64-byte signature in full tx with real signature
           if (result?.signature && body.raw_tx) {
             const rawBytes = Buffer.from(body.raw_tx, 'base64')
             const sigBytes = result.signature instanceof Uint8Array
@@ -1067,6 +1213,41 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               ? Buffer.from(result.publicKey).toString('base64')
               : result.publicKey,
           })
+        }
+
+        // ── TRON SIGNING (1 endpoint) ──────────────────────────────────
+        if (path === '/tron/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          const result = await wallet.tronSignTx({
+            addressNList,
+            rawTx: body.raw_tx,
+            toAddress: body.to_address,
+            amount: body.amount,
+          })
+          return json({
+            signature: result?.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('hex')
+              : result?.signature,
+          })
+        }
+
+        // ── TON SIGNING (1 endpoint) ──────────────────────────────────
+        if (path === '/ton/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TonSignRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
+          const result = await wallet.tonSignTx({
+            addressNList,
+            rawTx: body.raw_tx,
+            toAddress: body.to_address,
+            amount: body.amount,
+          })
+          if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
+          return json(result)
         }
 
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
@@ -1253,6 +1434,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   // Solana uses ed25519 with 4-element path (m/44'/501'/0'/0') — don't extend to 5
                   const solNList = p.address_n
                   const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                } else if (coinType === 195) {
+                  const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                } else if (coinType === 607) {
+                  // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
+                  const tonNList = p.address_n
+                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
                   address = typeof r === 'string' ? r : (r as any)?.address || ''
                 }
 
@@ -1447,6 +1636,67 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ success: true })
         }
 
+        // ── Zcash Shielded (Orchard) ────────────────────────────────
+
+        const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
+        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.state?.firmwareVersion)
+
+        if (path === '/api/zcash/shielded/status' && method === 'GET') {
+          if (!zcashFwSupported) return json({ ready: false, error: 'Zcash requires firmware >= 7.11.0' })
+          return json({ ready: isSidecarReady() })
+        }
+
+        // All mutating zcash endpoints require firmware support
+        if (path.startsWith('/api/zcash/shielded/') && path !== '/api/zcash/shielded/status' && !zcashFwSupported) {
+          return json({ error: 'Zcash requires firmware >= 7.11.0' }, 503)
+        }
+
+        if (path === '/api/zcash/shielded/init' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashInitRequest)
+          if (body.from_device) {
+            const wallet = requireWallet(engine)
+            const result = await initializeOrchardFromDevice(wallet, body.account ?? 0)
+            return json(result)
+          }
+          // seed_hex path is dev/test only — reject in production builds
+          return json({ error: 'seed_hex init disabled — use from_device: true' }, 403)
+        }
+
+        if (path === '/api/zcash/shielded/scan' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashScanRequest)
+          const result = await scanOrchardNotes(body.start_height)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/balance' && method === 'GET') {
+          auth.requireAuth(req)
+          const result = await getShieldedBalance()
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/build' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashBuildRequest)
+          const result = await buildShieldedTx(body)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/finalize' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashFinalizeRequest)
+          const result = await finalizeShieldedTx(body.signatures)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/broadcast' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashBroadcastRequest)
+          const result = await broadcastShieldedTx(body.raw_tx)
+          return json(result)
+        }
+
         // ── Catch-all ────────────────────────────────────────────────
         // Sequential if/else routing is fine for ~60 localhost-only endpoints.
         // A Map-based router adds complexity with no measurable perf gain here.
@@ -1458,6 +1708,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
         console.error('[REST] Error:', err)
         return json({ error: 'Internal error' }, 500)
+      } finally {
+        // Dismiss signing overlay AFTER the handler completes (success, error, or cancellation)
+        if (activeSigningId && callbacks?.onSigningDismissed) {
+          callbacks.onSigningDismissed(activeSigningId)
+        }
       }
     },
   })

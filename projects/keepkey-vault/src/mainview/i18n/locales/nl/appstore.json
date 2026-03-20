@@ -1,0 +1,10 @@
+{
+	"title": "Apps",
+	"subtitle": "Verbind je KeepKey met ondersteunde applicaties",
+	"keepkeyName": "KeepKey",
+	"keepkeyDescription": "Beheer je KeepKey hardware wallet",
+	"shapeshiftName": "ShapeShift",
+	"shapeshiftDescription": "Handel, volg en beheer crypto op meerdere netwerken",
+	"walletconnectName": "WalletConnect",
+	"walletconnectDescription": "Verbind met elke WalletConnect-compatibele applicatie"
+}

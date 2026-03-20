@@ -1,0 +1,16 @@
+{
+	"receive": "Al",
+	"sendToAddress": "Bu adrese {{symbol}} gönderin",
+	"index": "İndeks",
+	"remaining": "{{remaining}} kaldı",
+	"address": "Adres",
+	"extendedPublicKey": "Genişletilmiş genel anahtar (xpub)",
+	"path": "Yol",
+	"editDerivationPath": "Türetme yolunu düzenle",
+	"checkDevice": "Cihaz kontrol ediliyor...",
+	"verifyOnDevice": "Cihazda doğrula",
+	"derivingAddress": "Adres türetiliyor...",
+	"noAddressDerived": "Henüz adres türetilmedi",
+	"deriveAddress": "Adres türet",
+	"account": "Hesap {{index}}"
+}

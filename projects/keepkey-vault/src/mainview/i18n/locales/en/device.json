@@ -53,9 +53,21 @@
 		"methodMayaDeposit": "Maya Deposit",
 		"methodOsmosisSign": "Osmosis Sign",
 		"methodSolanaSignTx": "Solana Sign Transaction",
+		"methodSolanaSignMessage": "Solana Sign Message",
+		"methodTronSignTx": "Tron Sign Transaction",
+		"methodTonSignTx": "TON Sign Transaction",
 		"domainName": "Domain",
 		"contract": "Contract",
-		"operationType": "Operation"
+		"operationType": "Operation",
+		"verified": "Verified Contract",
+		"signedVerified": "Signed & Verified",
+		"knownPattern": "Known Pattern",
+		"unverifiedContract": "Unverified Contract",
+		"blindSigningRequired": "Blind Signing Required",
+		"blindSigningDescription": "This transaction contains contract data the device cannot fully parse. Enable Advanced Mode to sign.",
+		"enableNow": "Enable",
+		"enableAdvancedModeFirst": "Enable Advanced Mode to approve",
+		"enableAdvancedModeHint": "Enable Advanced Mode above to unlock signing"
 	},
 	"recovery": {
 		"title": "Recover Your Wallet",
@@ -86,7 +98,10 @@
 		"cipherHelp3": "The scramble changes after every character, so always check the device screen before pressing the next key.",
 		"cipherHelp4": "Make sure you are entering the correct BIP39 seed words in the correct order.",
 		"recoveryInterrupted": "The recovery process was interrupted. You can safely try again.",
-		"tryAgain": "Try Again"
+		"tryAgain": "Try Again",
+		"wordNotFoundTitle": "Word Not Recognized",
+		"wordNotFoundMessage": "The characters you entered don't match a valid BIP39 seed word. Double-check the scrambled letters on your KeepKey screen.",
+		"wordNotFoundRestarting": "Restarting from word 1 — please re-enter your words..."
 	},
 	"claimed": {
 		"title": "Device In Use",
@@ -96,6 +111,7 @@
 		"step2": "2. Unplug and replug the device",
 		"step3": "3. This app will reconnect automatically",
 		"waiting": "Waiting for device to become available...",
+		"supportLink": "Still having trouble? Submit a support ticket",
 		"defaultError": "Device claimed by another process"
 	}
 }

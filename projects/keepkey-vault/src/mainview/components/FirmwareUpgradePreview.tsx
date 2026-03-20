@@ -345,6 +345,13 @@ function FeatureCard({ feature, index, visible }: { feature: FirmwareFeature; in
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
               </svg>
             </Box>
+          ) : feature.icon === 'feature' ? (
+            <Box w="36px" h="36px" borderRadius="lg" bg={`${color}15`} display="flex" alignItems="center" justifyContent="center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </Box>
           ) : (
             <Box w="36px" h="36px" borderRadius="lg" bg={`${color}15`} display="flex" alignItems="center" justifyContent="center">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -358,9 +365,30 @@ function FeatureCard({ feature, index, visible }: { feature: FirmwareFeature; in
 
         {/* Text */}
         <VStack gap={0.5} align="start" flex={1}>
-          <Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2">
-            {feature.title}
-          </Text>
+          <HStack gap={2}>
+            <Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2">
+              {feature.title}
+            </Text>
+            {feature.comingSoon && (
+              <Box
+                px={1.5}
+                py={0.5}
+                borderRadius="full"
+                fontSize="2xs"
+                fontWeight="bold"
+                textTransform="uppercase"
+                letterSpacing="0.05em"
+                bg="purple.900"
+                color="purple.300"
+                border="1px solid"
+                borderColor="purple.700"
+                lineHeight="1"
+                whiteSpace="nowrap"
+              >
+                Coming Soon
+              </Box>
+            )}
+          </HStack>
           <Text fontSize="xs" color="whiteAlpha.600" lineHeight="1.4">
             {feature.description}
           </Text>

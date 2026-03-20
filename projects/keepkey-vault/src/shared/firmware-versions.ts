@@ -16,6 +16,8 @@ export interface FirmwareFeature {
   color?: string
   /** Icon key: 'chain' shows chain logos, 'security' shows a shield, 'performance' shows a bolt */
   icon?: 'chain' | 'security' | 'performance' | 'feature'
+  /** Feature is announced but not yet available */
+  comingSoon?: boolean
 }
 
 export interface FirmwareVersionInfo {
@@ -34,9 +36,9 @@ export interface FirmwareVersionInfo {
  */
 export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
-    version: '7.11.0',
-    date: '2025-03',
-    headline: 'Solana has arrived on KeepKey',
+    version: '7.14.0',
+    date: '2026-03',
+    headline: 'New chains, BIP-85, and transaction insight',
     features: [
       {
         title: 'Solana Support',
@@ -45,16 +47,42 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         color: '#14F195',
         icon: 'chain',
       },
+      {
+        title: 'Tron (TRX) Support',
+        description: 'Full Tron network support — send, receive, and sign TRX transactions.',
+        chains: ['tron'],
+        color: '#FF0013',
+        icon: 'chain',
+      },
+      {
+        title: 'TON Support',
+        description: 'Send and receive TON with hardware-secured key derivation.',
+        chains: ['ton'],
+        color: '#0088CC',
+        icon: 'chain',
+      },
+      {
+        title: 'Zcash Support',
+        description: 'Transparent Zcash transactions with on-device signing.',
+        chains: ['zcash'],
+        color: '#ECB244',
+        icon: 'chain',
+      },
+      {
+        title: 'BIP-85 Deterministic Entropy',
+        description: 'Derive child mnemonics from your master seed — create isolated wallets without extra backups.',
+        color: '#48BB78',
+        icon: 'security',
+      },
+      {
+        title: 'Transaction Insight',
+        description: 'Human-readable transaction details shown on-device before signing — know exactly what you\'re approving.',
+        color: '#805AD5',
+        icon: 'feature',
+        comingSoon: true,
+      },
     ],
   },
-  // Future versions go here:
-  // {
-  //   version: '7.12.0',
-  //   headline: 'Zcash Privacy',
-  //   features: [
-  //     { title: 'Zcash Shielded', description: '...', chains: ['zcash'], color: '#F4B728', icon: 'chain' },
-  //   ],
-  // },
 ]
 
 /**
@@ -135,6 +163,12 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   'fc13cb3a405fdee342ebd0d945403b334f0c43ba19771fdabd0e81caf85a63f7': 'v7.9.1',
   '24cca93ef5e7907dc6d8405b8ab9800d4e072dd9259138cf7679107985b88137': 'v7.9.3',
   '518ad41643ee8a0aa6a6422f8534ac94f56cd65bc637aea4db7f3fdbb53255c3': 'v7.10.0',
+  // v7.14.0 unsigned builds (custom firmware)
+  '75dc509a90f70a1f0025a9c5451532f407c4f78df5ef7d1d7b9b2ef9b9740e19': 'v7.14.0-solana',
+  '02def01217709269ff39c2c4745179e45c9c6892b19299de6cdd2f2becfddc87': 'v7.14.0-bip85',
+  '8ed86d578019f127998215268b75165b92c52948647a8b31949e4f311d695d3d': 'v7.14.0-zcash',
+  '84c94eb69193d8bdf6be48992b852f25c3b30f0ea133019491849825137aca2f': 'v7.14.0-zcash-askneg',
+  'cab8446a1d17dd847938476be282e6e45041cece750afcdb089f63fa4ba5a248': 'v7.14.0-zcash-widereduction',
 }
 
 /**
@@ -146,7 +180,7 @@ export function resolveOndeviceFirmwareVersion(hash: string | undefined): string
 }
 
 /** Compare semver strings: returns -1 (a<b), 0 (a==b), 1 (a>b) */
-function versionCompare(a: string, b: string): number {
+export function versionCompare(a: string, b: string): number {
   const pa = a.split('.').map(Number)
   const pb = b.split('.').map(Number)
   for (let i = 0; i < 3; i++) {
