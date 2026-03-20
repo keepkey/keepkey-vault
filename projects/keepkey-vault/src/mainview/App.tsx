@@ -36,6 +36,10 @@ function App() {
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
+	// Ref-based OOB lock: once the device enters an OOB state, keep the wizard
+	// mounted through disconnects. The state-based setupInProgress can lose races
+	// with React render batching on fast USB detach/reattach cycles (Windows).
+	const oobEnteredRef = useRef(false)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
@@ -432,10 +436,22 @@ function App() {
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
 
+	// Track OOB entry — once the wizard is shown, lock it through disconnects
+	if (!wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+		oobEnteredRef.current = true
+	}
+	if (wizardComplete) {
+		oobEnteredRef.current = false
+	}
+
+	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
+
 	const phase: AppPhase =
-		// Setup lock takes top priority — during OOB, transient states like
-		// isClaimed (LIBUSB_ERROR_ACCESS race) must not unmount the wizard.
-		!wizardComplete && setupInProgress ? "setup"
+		// OOB lock takes top priority — once the wizard opens, keep it mounted
+		// through disconnects and transient states (isClaimed, connected_unpaired).
+		// Without this, unplugging to enter bootloader unmounts the wizard on Windows
+		// because state goes disconnected before setupInProgress can be checked.
+		oobLock ? "setup"
 		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"

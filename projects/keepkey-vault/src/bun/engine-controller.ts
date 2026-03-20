@@ -614,7 +614,11 @@ export class EngineController extends EventEmitter {
     const fwVersion = features ? this.extractVersion(features) : undefined
     const blVersion = features?.bootloaderVersion || undefined
     const bootloaderMode = features?.bootloaderMode ?? false
-    const initialized = features?.initialized ?? false
+    // When features are unavailable (device detached/reconnecting), default to
+    // true so needsInit stays false. Without this, the OOB wizard sees needsInit=true
+    // during the featureless gap between detach and re-pair, skipping straight to
+    // "Create New Wallet" instead of waiting for bootloader/firmware steps.
+    const initialized = features ? (features.initialized ?? false) : true
     // In bootloader mode, fwVersion is actually the BL version (from extractVersion).
     // Firmware always needs flashing when device is in bootloader mode.
     const needsFw = bootloaderMode
