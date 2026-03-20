@@ -153,11 +153,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 	const handleOpenExplorer = useCallback(async (txidValue: string) => {
 		const url = getExplorerTxUrl(chain, txidValue)
 		if (!url) return
-		try {
-			await rpcRequest('openUrl', { url }, 5000)
-		} catch {
-			window.open(url, "_blank")
-		}
+		rpcRequest('openUrl', { url }).catch(() => {})
 	}, [chain])
 
 	const handleCopyTxid = useCallback(async (txidValue: string) => {
@@ -283,7 +279,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 									mt="2"
 									onClick={() => {
 										const url = getValidatorExplorerUrl(chain.id)
-										if (url) window.open(url, "_blank")
+										if (url) rpcRequest('openUrl', { url }).catch(() => {})
 									}}
 								>
 									{t('browseAllValidators')}
@@ -571,11 +567,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 	const handleOpenExplorer = useCallback(async (txidValue: string) => {
 		const url = getExplorerTxUrl(chain, txidValue)
 		if (!url) return
-		try {
-			await rpcRequest('openUrl', { url }, 5000)
-		} catch {
-			window.open(url, "_blank")
-		}
+		rpcRequest('openUrl', { url }).catch(() => {})
 	}, [chain])
 
 	const handleCopyTxid = useCallback(async (txidValue: string) => {

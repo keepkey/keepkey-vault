@@ -2333,8 +2333,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					const parsed = new URL(params.url)
 					if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error()
-					const cmd = process.platform === 'win32' ? 'start' : process.platform === 'linux' ? 'xdg-open' : 'open'
-					Bun.spawn([cmd, parsed.href])
+					if (process.platform === 'win32') {
+						// 'start' is a cmd.exe built-in, not an executable — must invoke via cmd /c
+						// Empty title "" required because start treats URLs with & as title strings
+						Bun.spawn(['cmd', '/c', 'start', '', parsed.href])
+					} else {
+						const cmd = process.platform === 'linux' ? 'xdg-open' : 'open'
+						Bun.spawn([cmd, parsed.href])
+					}
 				} catch {
 					throw new Error('Invalid URL')
 				}
