@@ -18,6 +18,7 @@ import { buildCosmosStakingTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
+import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
@@ -2343,8 +2344,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			checkForUpdate: async () => {
 				const result = await Updater.checkForUpdate()
 				const info = Updater.updateInfo()
+				// Suppress false "update available" when running a pre-release newer than the latest stable.
+				// Electrobun compares hashes — different hash = "update available" even if remote is older.
+				let updateAvailable = !!info?.updateAvailable
+				if (updateAvailable && info?.version) {
+					const localVer = await Updater.localInfo.version()
+					if (localVer && versionCompare(info.version, localVer) < 0) {
+						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
+						updateAvailable = false
+					}
+				}
 				return {
-					updateAvailable: !!info?.updateAvailable,
+					updateAvailable,
 					updateReady: !!info?.updateReady,
 					version: info?.version ?? '',
 					hash: info?.hash ?? '',
@@ -2444,12 +2455,21 @@ evmAddresses.on('change', (set: EvmAddressSet) => {
 // Updater status changes → push to WebView (debounced to prevent spam)
 let lastUpdateStatus = ''
 let lastUpdateStatusTime = 0
-Updater.onStatusChange((entry: any) => {
+Updater.onStatusChange(async (entry: any) => {
 	try {
 		const status = entry.status || ''
 		const now = Date.now()
 		// Debounce: skip duplicate error statuses within 5 seconds
 		if ((status === 'error' || status === 'download-error') && status === lastUpdateStatus && now - lastUpdateStatusTime < 5000) return
+		// Suppress "update-available" when running a pre-release newer than latest stable
+		if (status === 'update-available' || status === 'update-available-full' || status === 'update-available-delta') {
+			const info = Updater.updateInfo()
+			const localVer = await Updater.localInfo.version()
+			if (info?.version && localVer && versionCompare(info.version, localVer) < 0) {
+				console.log(`[Updater] Suppressing status ${status}: remote ${info.version} < local ${localVer}`)
+				return
+			}
+		}
 		lastUpdateStatus = status
 		lastUpdateStatusTime = now
 		rpc.send['update-status']({
