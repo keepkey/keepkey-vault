@@ -7,10 +7,10 @@
 import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join } from 'node:path'
-import { mkdirSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData } from '../shared/types'
+import { mkdirSync, unlinkSync, existsSync } from 'node:fs'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
 
-const SCHEMA_VERSION = '7'
+const SCHEMA_VERSION = '8'
 
 let db: Database | null = null
 
@@ -160,10 +160,81 @@ export function initDb() {
     `)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC)`)
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS swap_history (
+        id                  TEXT PRIMARY KEY,
+        txid                TEXT NOT NULL,
+        from_asset          TEXT NOT NULL,
+        to_asset            TEXT NOT NULL,
+        from_symbol         TEXT NOT NULL,
+        to_symbol           TEXT NOT NULL,
+        from_chain_id       TEXT NOT NULL,
+        to_chain_id         TEXT NOT NULL,
+        from_amount         TEXT NOT NULL,
+        quoted_output       TEXT NOT NULL,
+        minimum_output      TEXT NOT NULL DEFAULT '0',
+        received_output     TEXT,
+        slippage_bps        INTEGER NOT NULL DEFAULT 300,
+        fee_bps             INTEGER NOT NULL DEFAULT 0,
+        fee_outbound        TEXT NOT NULL DEFAULT '0',
+        integration         TEXT NOT NULL DEFAULT 'thorchain',
+        memo                TEXT NOT NULL DEFAULT '',
+        inbound_address     TEXT NOT NULL DEFAULT '',
+        router              TEXT,
+        status              TEXT NOT NULL DEFAULT 'pending',
+        outbound_txid       TEXT,
+        error               TEXT,
+        created_at          INTEGER NOT NULL,
+        updated_at          INTEGER NOT NULL,
+        completed_at        INTEGER,
+        estimated_time_secs INTEGER NOT NULL DEFAULT 0,
+        actual_time_secs    INTEGER,
+        approval_txid       TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_created ON swap_history(created_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_status ON swap_history(status)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_txid ON swap_history(txid)`)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bip85_seeds (
+        wallet_fingerprint TEXT NOT NULL,
+        word_count         INTEGER NOT NULL,
+        derivation_index   INTEGER NOT NULL,
+        derivation_path    TEXT NOT NULL,
+        label              TEXT NOT NULL DEFAULT '',
+        created_at         INTEGER NOT NULL,
+        PRIMARY KEY (wallet_fingerprint, word_count, derivation_index)
+      )
+    `)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pioneer_servers (
+        url        TEXT PRIMARY KEY,
+        label      TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )
+    `)
+
+    // Seed default Pioneer server if table is empty
+    const serverCount = db.query('SELECT COUNT(*) as c FROM pioneer_servers').get() as { c: number } | null
+    if (!serverCount || serverCount.c === 0) {
+      db.run(
+        'INSERT INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, 1, ?)',
+        ['https://api.keepkey.info', 'KeepKey Official', Date.now()]
+      )
+    }
+
     // Migrations: add columns to existing tables (safe to re-run)
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    // Activity tracking columns on api_log (sign/broadcast ops)
+    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT']) {
+      try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -177,6 +248,36 @@ export function closeDb() {
     db?.close()
   } catch { /* ignore */ }
   db = null
+}
+
+/** Delete the entire database file and re-initialize a fresh one.
+ *  This is a full factory reset of all local app data including Zcash sidecar. */
+export function factoryResetDb() {
+  const dir = Utils.paths.userData
+  const dbPath = join(dir, 'vault.db')
+  // Close the current connection
+  closeDb()
+  // Remove vault DB file + WAL/SHM journals
+  for (const suffix of ['', '-wal', '-shm']) {
+    const f = dbPath + suffix
+    try { if (existsSync(f)) unlinkSync(f) } catch { /* ignore */ }
+  }
+  console.log('[db] Factory reset — vault database deleted')
+
+  // Remove Zcash sidecar wallet DB (~/.keepkey/zcash_wallet.db)
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  if (home) {
+    const zcashDbPath = join(home, '.keepkey', 'zcash_wallet.db')
+    for (const suffix of ['', '-wal', '-shm']) {
+      const f = zcashDbPath + suffix
+      try { if (existsSync(f)) unlinkSync(f) } catch { /* ignore */ }
+    }
+    console.log('[db] Factory reset — zcash sidecar database deleted')
+  }
+
+  // Re-create a fresh vault database
+  initDb()
+  console.log('[db] Factory reset — fresh database initialized')
 }
 
 // ── Balance Cache ──────────────────────────────────────────────────────
@@ -227,6 +328,21 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
     tx()
   } catch (e: any) {
     console.warn('[db] setCachedBalances failed:', e.message)
+  }
+}
+
+/** Update a single chain's cached balance (upsert). */
+export function updateCachedBalance(deviceId: string, balance: ChainBalance) {
+  try {
+    if (!db) return
+    const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
+    db.run(
+      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] updateCachedBalance failed:', e.message)
   }
 }
 
@@ -334,6 +450,46 @@ export function setSetting(key: string, value: string) {
     db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
   } catch (e: any) {
     console.warn('[db] setSetting failed:', e.message)
+  }
+}
+
+// ── Pioneer Servers ──────────────────────────────────────────────────
+
+export function getPioneerServers(): PioneerServer[] {
+  try {
+    if (!db) return []
+    const rows = db.query('SELECT url, label, is_default FROM pioneer_servers ORDER BY is_default DESC, created_at ASC').all() as Array<{
+      url: string; label: string; is_default: number
+    }>
+    return rows.map(r => ({ url: r.url, label: r.label, isDefault: r.is_default === 1 }))
+  } catch (e: any) {
+    console.warn('[db] getPioneerServers failed:', e.message)
+    return []
+  }
+}
+
+export function addPioneerServerDb(url: string, label: string) {
+  try {
+    if (!db) return
+    db.run(
+      'INSERT OR REPLACE INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, 0, ?)',
+      [url, label, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] addPioneerServer failed:', e.message)
+  }
+}
+
+export function removePioneerServerDb(url: string) {
+  try {
+    if (!db) return
+    // Prevent removing the default server
+    const row = db.query('SELECT is_default FROM pioneer_servers WHERE url = ?').get(url) as { is_default: number } | null
+    if (row?.is_default === 1) throw new Error('Cannot remove the default server')
+    db.run('DELETE FROM pioneer_servers WHERE url = ?', [url])
+  } catch (e: any) {
+    console.warn('[db] removePioneerServer failed:', e.message)
+    throw e
   }
 }
 
@@ -463,8 +619,8 @@ export function insertApiLog(entry: ApiLogEntry) {
   try {
     if (!db) return
     db.run(
-      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body, txid, chain, activity_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entry.method,
         entry.route,
@@ -475,6 +631,9 @@ export function insertApiLog(entry: ApiLogEntry) {
         entry.imageUrl || null,
         entry.requestBody ? JSON.stringify(entry.requestBody) : null,
         entry.responseBody ? JSON.stringify(entry.responseBody) : null,
+        entry.txid || null,
+        entry.chain || null,
+        entry.activityType || null,
       ]
     )
     // Periodic prune (every ~100 inserts, check if over limit)
@@ -525,6 +684,115 @@ export function clearApiLogs() {
   }
 }
 
+
+// ── Recent Activity (unified from api_log + swap_history) ─────────────
+
+import type { RecentActivity, ActivityType, ActivitySource } from '../shared/types'
+
+/** Check if a txid already exists in api_log */
+export function apiLogTxidExists(txid: string): boolean {
+  try {
+    if (!db) return false
+    const row = db.query('SELECT 1 FROM api_log WHERE txid = ? LIMIT 1').get(txid)
+    return !!row
+  } catch { return false }
+}
+
+/** Update response_body metadata for an existing api_log entry by txid (used to refresh confirmation counts) */
+export function updateApiLogTxMeta(txid: string, meta: Record<string, any>) {
+  try {
+    if (!db) return
+    db.run('UPDATE api_log SET response_body = ? WHERE txid = ?', [JSON.stringify(meta), txid])
+  } catch (e: any) {
+    console.warn('[db] updateApiLogTxMeta failed:', e.message)
+  }
+}
+
+const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
+
+/** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
+export function getRecentActivityFromLog(limit = 50, chainFilter?: string): RecentActivity[] {
+  try {
+    if (!db) return []
+
+    // Build query with optional chain filter
+    let logSql = `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
+       FROM api_log WHERE activity_type IS NOT NULL`
+    const logParams: any[] = []
+    if (chainFilter) {
+      logSql += ` AND chain = ?`
+      logParams.push(chainFilter)
+    }
+    logSql += ` ORDER BY timestamp DESC LIMIT ?`
+    logParams.push(limit)
+
+    const logRows = db.query(logSql).all(...logParams) as Array<{
+      id: number; txid: string | null; chain: string | null; activity_type: string;
+      app_name: string; timestamp: number; route: string; method: string; response_body: string | null
+    }>
+
+    const logActivities: RecentActivity[] = logRows.map(r => {
+      // Parse tx metadata from response_body (stored by scan)
+      let meta: any = null
+      if (r.response_body) { try { meta = JSON.parse(r.response_body) } catch {} }
+      const isScan = r.method === 'SCAN'
+      return {
+        id: String(r.id),
+        txid: r.txid || undefined,
+        chain: r.chain || '?',
+        type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
+        source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
+        appName: r.method === 'RPC' ? undefined : (isScan ? undefined : r.app_name),
+        status: isScan ? 'broadcast' : (r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed'),
+        createdAt: r.timestamp,
+        confirmations: meta?.confirmations ?? undefined,
+        blockHeight: meta?.blockHeight ?? undefined,
+        amount: meta?.value ?? undefined,
+        fee: meta?.fee ?? undefined,
+      }
+    })
+
+    // Swap history entries (dedupe by txid against logActivities)
+    let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at
+       FROM swap_history`
+    const swapParams: any[] = []
+    if (chainFilter) {
+      // Match swap by either source or destination chain (e.g. ETH->BTC visible under both ETH and BTC)
+      swapSql += ` WHERE from_symbol = ? OR to_symbol = ?`
+      swapParams.push(chainFilter, chainFilter)
+    }
+    swapSql += ` ORDER BY created_at DESC LIMIT ?`
+    swapParams.push(limit)
+
+    const swapRows = db.query(swapSql).all(...swapParams) as Array<{
+      id: string; txid: string; from_symbol: string; to_symbol: string;
+      from_chain_id: string; from_amount: string; status: string; created_at: number
+    }>
+
+    const logTxids = new Set(logActivities.filter(a => a.txid).map(a => a.txid))
+    const swapActivities: RecentActivity[] = swapRows
+      .filter(r => !logTxids.has(r.txid))
+      .map(r => ({
+        id: r.id,
+        txid: r.txid,
+        chain: r.from_symbol,
+        chainId: r.from_chain_id,
+        type: 'swap' as const,
+        source: 'app' as const,
+        amount: r.from_amount,
+        asset: `${r.from_symbol}\u2192${r.to_symbol}`,
+        status: r.status === 'completed' ? 'completed' as const : r.status === 'failed' ? 'failed' as const : r.status === 'refunded' ? 'refunded' as const : 'broadcast' as const,
+        createdAt: r.created_at,
+      }))
+
+    return [...logActivities, ...swapActivities]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+  } catch (e: any) {
+    console.warn('[db] getRecentActivityFromLog failed:', e.message)
+    return []
+  }
+}
 
 // ── Device Snapshot (watch-only cache) ──────────────────────────────
 
@@ -578,6 +846,17 @@ export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; pat
   } catch (e: any) {
     console.warn('[db] getCachedPubkeys failed:', e.message)
     return []
+  }
+}
+
+/** Clear all cached pubkeys for a device (e.g. when passphrase changes the seed). */
+export function clearCachedPubkeys(deviceId: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
+    console.log(`[db] Cleared cached pubkeys for device ${deviceId}`)
+  } catch (e: any) {
+    console.warn('[db] clearCachedPubkeys failed:', e.message)
   }
 }
 
@@ -678,6 +957,261 @@ export function reportExists(id: string): boolean {
     return !!row
   } catch {
     return false
+  }
+}
+
+// ── Swap History ──────────────────────────────────────────────────────
+
+/** Insert a new swap history record (called when swap is first tracked) */
+export function insertSwapHistory(record: SwapHistoryRecord) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO swap_history
+        (id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
+         from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
+         fee_outbound, integration, memo, inbound_address, router, status, outbound_txid,
+         error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id, record.txid, record.fromAsset, record.toAsset,
+        record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
+        record.fromAmount, record.quotedOutput, record.minimumOutput,
+        record.receivedOutput || null,
+        record.slippageBps, record.feeBps, record.feeOutbound,
+        record.integration, record.memo, record.inboundAddress,
+        record.router || null, record.status, record.outboundTxid || null,
+        record.error || null, record.createdAt, record.updatedAt,
+        record.completedAt || null, record.estimatedTimeSeconds,
+        record.actualTimeSeconds || null, record.approvalTxid || null,
+      ]
+    )
+  } catch (e: any) {
+    console.warn('[db] insertSwapHistory failed:', e.message)
+  }
+}
+
+/** Update swap status and related fields (called on every status change) */
+export function updateSwapHistoryStatus(
+  txid: string,
+  status: SwapTrackingStatus,
+  extra?: {
+    outboundTxid?: string
+    error?: string
+    receivedOutput?: string
+    completedAt?: number
+    actualTimeSeconds?: number
+  }
+) {
+  try {
+    if (!db) return
+    const now = Date.now()
+    const isFinal = status === 'completed' || status === 'failed' || status === 'refunded'
+
+    // Build SET clauses and params together to prevent misalignment
+    const setClauses: Array<{ col: string; value: any }> = [
+      { col: 'status', value: status },
+      { col: 'updated_at', value: now },
+    ]
+
+    if (extra?.outboundTxid) setClauses.push({ col: 'outbound_txid', value: extra.outboundTxid })
+    if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
+    if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
+    if (isFinal) {
+      setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
+      if (extra?.actualTimeSeconds !== undefined) {
+        setClauses.push({ col: 'actual_time_secs', value: extra.actualTimeSeconds })
+      }
+    }
+
+    const sql = `UPDATE swap_history SET ${setClauses.map(c => `${c.col} = ?`).join(', ')} WHERE txid = ?`
+    const params = [...setClauses.map(c => c.value), txid]
+
+    db.run(sql, params)
+  } catch (e: any) {
+    console.warn('[db] updateSwapHistoryStatus failed:', e.message)
+  }
+}
+
+/** Query swap history with optional filters */
+export function getSwapHistory(filter?: SwapHistoryFilter): SwapHistoryRecord[] {
+  try {
+    if (!db) return []
+
+    let sql = `SELECT * FROM swap_history WHERE 1=1`
+    const params: any[] = []
+
+    if (filter?.status && filter.status !== 'all') {
+      sql += ` AND status = ?`
+      params.push(filter.status)
+    }
+    if (filter?.fromDate) {
+      sql += ` AND created_at >= ?`
+      params.push(filter.fromDate)
+    }
+    if (filter?.toDate) {
+      sql += ` AND created_at <= ?`
+      params.push(filter.toDate)
+    }
+    if (filter?.asset) {
+      sql += ` AND (from_symbol LIKE ? ESCAPE '\\' OR to_symbol LIKE ? ESCAPE '\\' OR from_asset LIKE ? ESCAPE '\\' OR to_asset LIKE ? ESCAPE '\\')`
+      const escaped = filter.asset.replace(/[\\%_]/g, c => '\\' + c)
+      const q = `%${escaped}%`
+      params.push(q, q, q, q)
+    }
+
+    sql += ` ORDER BY created_at DESC`
+
+    const limit = filter?.limit || 100
+    const offset = filter?.offset || 0
+    sql += ` LIMIT ? OFFSET ?`
+    params.push(limit, offset)
+
+    const rows = db.query(sql).all(...params) as any[]
+    return rows.map(mapSwapRow)
+  } catch (e: any) {
+    console.warn('[db] getSwapHistory failed:', e.message)
+    return []
+  }
+}
+
+/** Get a single swap history record by txid */
+export function getSwapHistoryByTxid(txid: string): SwapHistoryRecord | null {
+  try {
+    if (!db) return null
+    const row = db.query('SELECT * FROM swap_history WHERE txid = ?').get(txid) as any
+    return row ? mapSwapRow(row) : null
+  } catch (e: any) {
+    console.warn('[db] getSwapHistoryByTxid failed:', e.message)
+    return null
+  }
+}
+
+/** Get aggregate stats for swap history */
+export function getSwapHistoryStats(): SwapHistoryStats {
+  try {
+    if (!db) return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+    const row = db.query(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'refunded' THEN 1 ELSE 0 END) as refunded,
+        SUM(CASE WHEN status NOT IN ('completed', 'failed', 'refunded') THEN 1 ELSE 0 END) as pending
+      FROM swap_history
+    `).get() as any
+    return {
+      totalSwaps: row?.total || 0,
+      completed: row?.completed || 0,
+      failed: row?.failed || 0,
+      refunded: row?.refunded || 0,
+      pending: row?.pending || 0,
+    }
+  } catch (e: any) {
+    console.warn('[db] getSwapHistoryStats failed:', e.message)
+    return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+  }
+}
+
+function mapSwapRow(r: any): SwapHistoryRecord {
+  return {
+    id: r.id,
+    txid: r.txid,
+    fromAsset: r.from_asset,
+    toAsset: r.to_asset,
+    fromSymbol: r.from_symbol,
+    toSymbol: r.to_symbol,
+    fromChainId: r.from_chain_id,
+    toChainId: r.to_chain_id,
+    fromAmount: r.from_amount,
+    quotedOutput: r.quoted_output,
+    minimumOutput: r.minimum_output,
+    receivedOutput: r.received_output || undefined,
+    slippageBps: r.slippage_bps,
+    feeBps: r.fee_bps,
+    feeOutbound: r.fee_outbound,
+    integration: r.integration,
+    memo: r.memo,
+    inboundAddress: r.inbound_address,
+    router: r.router || undefined,
+    status: r.status as SwapTrackingStatus,
+    outboundTxid: r.outbound_txid || undefined,
+    error: r.error || undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    completedAt: r.completed_at || undefined,
+    estimatedTimeSeconds: r.estimated_time_secs,
+    actualTimeSeconds: r.actual_time_secs || undefined,
+    approvalTxid: r.approval_txid || undefined,
+  }
+}
+
+// ── BIP-85 Seed Metadata ────────────────────────────────────────────
+
+export function getBip85Seeds(fingerprint?: string): Bip85SeedMeta[] {
+  try {
+    if (!db) { console.warn('[db] getBip85Seeds — db is null'); return [] }
+    const sql = fingerprint
+      ? 'SELECT wallet_fingerprint, word_count, derivation_index, derivation_path, label, created_at FROM bip85_seeds WHERE wallet_fingerprint = ? ORDER BY created_at DESC'
+      : 'SELECT wallet_fingerprint, word_count, derivation_index, derivation_path, label, created_at FROM bip85_seeds ORDER BY created_at DESC'
+    const rows = (fingerprint ? db.query(sql).all(fingerprint) : db.query(sql).all()) as Array<{
+      wallet_fingerprint: string; word_count: number; derivation_index: number;
+      derivation_path: string; label: string; created_at: number
+    }>
+    console.log('[db] getBip85Seeds — found:', rows.length, 'rows', fingerprint ? `(fp: ${fingerprint.slice(0, 8)}...)` : '(all)')
+    return rows.map(r => ({
+      walletFingerprint: r.wallet_fingerprint,
+      wordCount: r.word_count as 12 | 18 | 24,
+      index: r.derivation_index,
+      derivationPath: r.derivation_path,
+      label: r.label,
+      createdAt: r.created_at,
+    }))
+  } catch (e: any) {
+    console.error('[db] getBip85Seeds FAILED:', e.message)
+    return []
+  }
+}
+
+export function saveBip85Seed(meta: Bip85SeedMeta): boolean {
+  try {
+    if (!db) { console.error('[db] saveBip85Seed — db is null, cannot save'); return false }
+    console.log('[db] saveBip85Seed — fp:', meta.walletFingerprint, 'wc:', meta.wordCount, 'idx:', meta.index, 'label:', meta.label)
+    db.run(
+      `INSERT OR REPLACE INTO bip85_seeds (wallet_fingerprint, word_count, derivation_index, derivation_path, label, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [meta.walletFingerprint, meta.wordCount, meta.index, meta.derivationPath, meta.label, meta.createdAt]
+    )
+    // Verify the write
+    const check = db.query(
+      'SELECT COUNT(*) as count FROM bip85_seeds WHERE wallet_fingerprint = ? AND word_count = ? AND derivation_index = ?'
+    ).get(meta.walletFingerprint, meta.wordCount, meta.index) as { count: number } | null
+    const verified = (check?.count ?? 0) > 0
+    console.log('[db] saveBip85Seed — verified:', verified, 'total in table:', (db.query('SELECT COUNT(*) as c FROM bip85_seeds').get() as any)?.c)
+    return verified
+  } catch (e: any) {
+    console.error('[db] saveBip85Seed FAILED:', e.message, e.stack)
+    return false
+  }
+}
+
+
+export function deleteBip85Seed(wordCount: number, index: number, fingerprint?: string) {
+  try {
+    if (!db) return
+    if (fingerprint) {
+      db.run(
+        'DELETE FROM bip85_seeds WHERE wallet_fingerprint = ? AND word_count = ? AND derivation_index = ?',
+        [fingerprint, wordCount, index]
+      )
+    } else {
+      db.run(
+        'DELETE FROM bip85_seeds WHERE word_count = ? AND derivation_index = ?',
+        [wordCount, index]
+      )
+    }
+  } catch (e: any) {
+    console.warn('[db] deleteBip85Seed failed:', e.message)
   }
 }
 

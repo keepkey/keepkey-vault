@@ -23,6 +23,8 @@ interface PairedClient {
 }
 
 const MAX_KEYS = 20
+/** API key TTL: 30 days in milliseconds */
+const KEY_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 export class AuthStore {
   private keys = new Map<string, PairedClient>()
@@ -108,6 +110,15 @@ export class AuthStore {
   validate(apiKey: string): PairedClient | null {
     const entry = this.keys.get(apiKey)
     if (!entry) return null
+    // Check TTL — expire keys older than 30 days.
+    // Legacy pairings without addedOn are treated as expired (fail-closed)
+    // to prevent permanently grandfathered trust.
+    const addedOn = entry.info.addedOn
+    if (!addedOn || Date.now() - addedOn > KEY_TTL_MS) {
+      this.keys.delete(apiKey)
+      removePairing(apiKey)
+      return null
+    }
     return entry
   }
 

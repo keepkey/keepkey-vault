@@ -594,6 +594,8 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								/>
 								<Button
 									size="sm"
+									px="4"
+									py="2"
 									variant="outline"
 									color={tested ? "green.400" : "kk.textSecondary"}
 									borderColor={tested ? "green.400" : "kk.border"}
@@ -645,13 +647,14 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 						)}
 
 						<Flex justify="flex-end" gap="2" pt="1">
-							<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleBack}>
+							<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleBack}>
 								{t('back', { ns: 'common' })}
 							</Button>
 							<Button
 								size="sm"
 								bg="kk.gold"
 								color="black"
+								px="4" py="2"
 								_hover={{ bg: "kk.goldHover" }}
 								onClick={handleAdd}
 								disabled={!isValidConfigure || saving}
@@ -728,6 +731,8 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								/>
 								<Button
 									size="sm"
+									px="4"
+									py="2"
 									variant="outline"
 									color={tested ? "green.400" : "kk.textSecondary"}
 									borderColor={tested ? "green.400" : "kk.border"}
@@ -778,13 +783,14 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 						)}
 
 						<Flex justify="flex-end" gap="2" pt="1">
-							<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleBack}>
+							<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleBack}>
 								{t('back', { ns: 'common' })}
 							</Button>
 							<Button
 								size="sm"
 								bg="kk.gold"
 								color="black"
+								px="4" py="2"
 								_hover={{ bg: "kk.goldHover" }}
 								onClick={handleAdd}
 								disabled={!isValidManual || saving}

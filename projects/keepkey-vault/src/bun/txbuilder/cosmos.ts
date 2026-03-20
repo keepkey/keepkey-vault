@@ -25,12 +25,24 @@ const FEES: Record<string, number> = {
   osmosis: 0.035,
 }
 
-// Chain-specific msg types
-const MSG_TYPES: Record<string, string> = {
+// Chain-specific msg types (MsgSend)
+const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
   mayachain: 'mayachain/MsgSend',
   cosmos: 'cosmos-sdk/MsgSend',
   osmosis: 'cosmos-sdk/MsgSend',
+}
+
+// Chain-specific msg types (MsgDeposit — used for swaps/LP on THORChain/Maya)
+const MSG_DEPOSIT_TYPES: Record<string, string> = {
+  thorchain: 'thorchain/MsgDeposit',
+  mayachain: 'mayachain/MsgDeposit',
+}
+
+// MsgDeposit asset identifiers (CHAIN.SYMBOL format)
+const DEPOSIT_ASSETS: Record<string, string> = {
+  thorchain: 'THOR.RUNE',
+  mayachain: 'MAYA.CACAO',
 }
 
 // Fee templates
@@ -45,7 +57,9 @@ export interface BuildCosmosParams {
   to: string
   amount: string    // human-readable (e.g. "1.5")
   memo?: string
+  feeLevel?: number // 1=slow, 5=fast (default 5)
   isMax?: boolean
+  isSwapDeposit?: boolean // use MsgDeposit instead of MsgSend (for THORChain/Maya swaps)
   fromAddress: string
 }
 
@@ -54,7 +68,7 @@ export async function buildCosmosTx(
   chain: ChainDef,
   params: BuildCosmosParams,
 ) {
-  const { to, memo = '', isMax = false, fromAddress } = params
+  const { to, memo = '', feeLevel = 5, isMax = false, isSwapDeposit = false, fromAddress } = params
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
@@ -82,7 +96,7 @@ export async function buildCosmosTx(
   let baseAmount: bigint
 
   if (isMax) {
-    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] })
+    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
     const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
     const feeDisplay = FEES[chain.id] || 0
     const balBase = toBaseUnits(balStr, chain.decimals)
@@ -95,13 +109,48 @@ export async function buildCosmosTx(
 
   if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
 
-  // 3. Build unsigned tx
-  const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
-  const msgType = MSG_TYPES[chain.id] || 'cosmos-sdk/MsgSend'
+  // 3. Build unsigned tx — apply feeLevel multiplier to gas
+  const baseFee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
+  const gasMultiplier = feeLevel <= 2 ? 1 : feeLevel <= 4 ? 1.5 : 2
+  const adjustedGas = String(Math.ceil(Number(baseFee.gas) * gasMultiplier))
+  const adjustedFeeAmount = baseFee.amount.map(a => ({
+    ...a,
+    amount: String(Math.ceil(Number(a.amount) * gasMultiplier)),
+  }))
+  const fee = { gas: adjustedGas, amount: adjustedFeeAmount }
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+
+  // Determine message type: MsgDeposit for THORChain/Maya swaps (explicit flag), MsgSend otherwise
+  // NOTE: Do NOT infer from !!memo — normal sends with memos (e.g. exchange deposits) must use MsgSend
+  const isDeposit = isSwapDeposit && (chain.id === 'thorchain' || chain.id === 'mayachain')
+  let msg: { type: string; value: Record<string, unknown> }
+
+  if (isDeposit) {
+    const depositType = MSG_DEPOSIT_TYPES[chain.id]!
+    const depositAsset = DEPOSIT_ASSETS[chain.id]!
+    console.log(`${TAG} Building MsgDeposit: asset=${depositAsset}, amount=${baseAmount}, memo=${memo}`)
+    msg = {
+      type: depositType,
+      value: {
+        coins: [{ asset: depositAsset, amount: String(baseAmount) }],
+        memo,
+        signer: fromAddress,
+      },
+    }
+  } else {
+    const sendType = MSG_SEND_TYPES[chain.id] || 'cosmos-sdk/MsgSend'
+    msg = {
+      type: sendType,
+      value: {
+        amount: [{ denom, amount: String(baseAmount) }],
+        from_address: fromAddress,
+        to_address: to,
+      },
+    }
+  }
 
   return {
     signerAddress: fromAddress,
@@ -109,16 +158,80 @@ export async function buildCosmosTx(
     tx: {
       fee,
       memo: memo || '',
-      msg: [
-        {
-          type: msgType,
-          value: {
-            amount: [{ denom, amount: String(baseAmount) }],
-            from_address: fromAddress,
-            to_address: to,
-          },
-        },
-      ],
+      msg: [msg],
+      signatures: [],
+    },
+    chain_id,
+    account_number,
+    sequence,
+    fee: feeInDisplay,
+  }
+}
+
+// ── Staking / delegation tx builder ─────────────────────────────────────
+
+export interface BuildCosmosStakingParams {
+  validatorAddress: string
+  amount: string    // human-readable (e.g. "1.5")
+  memo?: string
+  fromAddress: string
+  type: 'delegate' | 'undelegate'
+}
+
+export async function buildCosmosStakingTx(
+  pioneer: any,
+  chain: ChainDef,
+  params: BuildCosmosStakingParams,
+) {
+  const { validatorAddress, memo = '', fromAddress, type } = params
+
+  if (!validatorAddress) throw new Error('Validator address is required')
+  const amountNum = parseFloat(params.amount)
+  if (!amountNum || amountNum <= 0) throw new Error('Amount must be greater than zero')
+
+  const denom = chain.denom || chain.symbol.toLowerCase()
+
+  console.log(`${TAG} Fetching account info for ${chain.coin} (staking)...`)
+  const accountResp = await pioneer.GetAccountInfo({ network: chain.id, address: fromAddress })
+  const accountInfo = accountResp?.data
+
+  let account_number: string
+  let sequence: string
+
+  if (accountInfo?.account) {
+    account_number = String(accountInfo.account.account_number || '0')
+    sequence = String(accountInfo.account.sequence || '0')
+  } else if (accountInfo?.result?.value) {
+    account_number = String(accountInfo.result.value.account_number || '0')
+    sequence = String(accountInfo.result.value.sequence || '0')
+  } else {
+    throw new Error(`Unexpected account info format for ${chain.id}: ${JSON.stringify(accountInfo)}`)
+  }
+
+  console.log(`${TAG} account_number=${account_number}, sequence=${sequence}`)
+
+  const baseAmount = toBaseUnits(params.amount, chain.decimals)
+  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
+
+  const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
+  const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+  if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
+  const chain_id = chain.chainId
+
+  const msgType = type === 'undelegate' ? 'cosmos-sdk/MsgUndelegate' : 'cosmos-sdk/MsgDelegate'
+  const msgValue = {
+    amount: { denom, amount: String(baseAmount) },
+    delegator_address: fromAddress,
+    validator_address: validatorAddress,
+  }
+
+  return {
+    signerAddress: fromAddress,
+    addressNList: chain.defaultPath,
+    tx: {
+      fee,
+      memo: memo || '',
+      msg: [{ type: msgType, value: msgValue }],
       signatures: [],
     },
     chain_id,

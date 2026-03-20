@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "지갑이 준비되었습니다. 시작하는 방법은 다음과 같습니다:",
 	"welcomeTip1": "아래 체인을 탭한 다음 수신을 눌러 입금 주소를 받으세요",
 	"welcomeTip2": "주소로 암호화폐를 보내세요 — 잔액이 여기에 자동으로 표시됩니다",
-	"welcomeTip3": "+ 카드로 커스텀 EVM 체인을 추가하여 모든 네트워크를 추적하세요",
 	"balancesStale": "잔액이 오래되었을 수 있습니다",
 	"lastUpdated": "마지막 업데이트 {{time}}",
 	"lastUpdatedNever": "로드된 적 없음",

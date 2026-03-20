@@ -112,10 +112,11 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 			left={0}
 			w="100vw"
 			h="100vh"
-			bg="blackAlpha.800"
+			bg="rgba(0,0,0,0.3)"
 			align="center"
 			justify="center"
 			zIndex={2000}
+			backdropFilter="blur(2px)"
 			style={{ animation: "pinOverlayFadeIn 0.25s ease-out" }}
 		>
 			<style>{PIN_ANIMATIONS}</style>

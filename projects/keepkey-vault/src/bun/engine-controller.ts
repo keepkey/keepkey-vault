@@ -4,7 +4,7 @@ import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
 import { saveDeviceSnapshot } from './db'
-import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType } from '../shared/types'
+import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -109,6 +109,7 @@ export class EngineController extends EventEmitter {
     this.wallet = null
     this.activeTransport = null
     this.cachedFeatures = null
+    this.cachedFingerprint = null
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -149,6 +150,13 @@ export class EngineController extends EventEmitter {
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
       console.log('[Engine] PASSPHRASE_REQUEST → emitting to UI')
+      // Device has moved past PIN and now waits for passphrase — update derived
+      // state immediately so the UI reflects what the device actually needs.
+      // Without this, state stays 'needs_pin' and App.tsx's cleanup effect
+      // dismisses the passphrase overlay before the user can interact with it.
+      if (this.lastState !== 'needs_passphrase') {
+        this.updateState('needs_passphrase')
+      }
       this.emit('passphrase-request')
     })
 
@@ -217,6 +225,14 @@ export class EngineController extends EventEmitter {
         const fwVer = this.extractVersion(this.cachedFeatures)
         saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
       } catch { /* never block on cache failure */ }
+
+      // Pre-cache wallet fingerprint so BIP-85 and other ops don't need
+      // a separate btcGetAddress call (which can trigger BUTTON_REQUEST).
+      if (!this.cachedFingerprint) {
+        this.getWalletFingerprint()
+          .then(fp => console.log('[Engine] Fingerprint pre-cached:', fp.slice(0, 12) + '...'))
+          .catch(err => console.warn('[Engine] Fingerprint pre-cache failed (will retry on demand):', err?.message))
+      }
     }
 
     // Auto-trigger PIN matrix on device OLED when state becomes needs_pin.
@@ -232,6 +248,20 @@ export class EngineController extends EventEmitter {
       setTimeout(() => {
         this.promptPin().catch(err => {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
+          // If device is still locked (wrong PIN, transport error, etc.), retry so
+          // the PIN overlay re-appears.  Without this, promptPinActive stays false,
+          // lastState is already 'needs_pin', and updateState won't re-fire —
+          // leaving the user with no PIN overlay while the device still needs PIN.
+          if (this.lastState === 'needs_pin' && !this.promptPinActive) {
+            setTimeout(() => {
+              if (this.lastState === 'needs_pin' && !this.promptPinActive) {
+                console.log('[Engine] Retrying prompt-pin (device still locked)')
+                this.promptPin().catch(err2 => {
+                  console.warn('[Engine] Retry prompt-pin failed:', err2?.message)
+                })
+              }
+            }, 3000)
+          }
         })
       }, delay)
     }
@@ -240,10 +270,16 @@ export class EngineController extends EventEmitter {
     // already cached (or disabled).  We must call promptPin() → getPublicKeys()
     // so the device sends PASSPHRASE_REQUEST; without it, the UI overlay shows
     // but sendPassphrase() has no pending device request to respond to.
-    if (state === 'needs_passphrase' && !this.promptPinActive) {
-      this.promptPin().catch(err => {
-        console.warn('[Engine] Auto prompt-passphrase failed:', err?.message)
-      })
+    // Use setTimeout (like needs_pin) so the check runs after any in-flight
+    // promptPin() completes and clears promptPinActive in its finally block.
+    if (state === 'needs_passphrase') {
+      setTimeout(() => {
+        if (!this.promptPinActive) {
+          this.promptPin().catch(err => {
+            console.warn('[Engine] Auto prompt-passphrase failed:', err?.message)
+          })
+        }
+      }, 0)
     }
   }
 
@@ -628,7 +664,7 @@ export class EngineController extends EventEmitter {
       deviceId: features?.deviceId || undefined,
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
-      bootloaderVersion: blVersion,
+      bootloaderVersion: effectiveBlVersion || blVersion,
       latestFirmware: this.latestFirmware,
       latestBootloader: this.latestBootloader,
       bootloaderMode,
@@ -636,6 +672,7 @@ export class EngineController extends EventEmitter {
       needsFirmwareUpdate: needsFw,
       needsInit: !initialized,
       initialized,
+      passphraseProtection: features?.passphraseProtection ?? false,
       // In bootloader mode the device can't report `initialized` — use firmware
       // hash presence instead. If firmware bytes exist on flash, the device has
       // been set up before and entered bootloader for an update (not OOB).
@@ -771,27 +808,50 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async recoverDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }) {
-    if (!this.wallet) throw new Error('No device connected')
-    this.setupInProgress = true
-    this.pinRequestCount = 0
+  async recoverDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }, _retryCount = 0) {
+    const MAX_WORD_RETRIES = 5
+
+    if (_retryCount === 0) {
+      if (!this.wallet) throw new Error('No device connected')
+      this.setupInProgress = true
+      this.pinRequestCount = 0
+    }
+
     try {
-      await this.wallet.recover({
+      await this.wallet!.recover({
         entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
         autoLockDelayMs: 600000, // 10 min — recovery requires extended user interaction
       })
-      this.cachedFeatures = await this.wallet.getFeatures()
+      this.cachedFeatures = await this.wallet!.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+      this.setupInProgress = false
+      this.pinRequestCount = 0
     } catch (err: any) {
       const rawMessage = extractErrorMessage(err)
       console.error('[Engine] Recovery failed:', rawMessage)
 
+      // Word not found — firmware aborts session, but we auto-restart so user can retry
+      if (rawMessage.includes('Word not found') && _retryCount < MAX_WORD_RETRIES) {
+        console.log(`[Engine] Word rejected, auto-retrying recovery (attempt ${_retryCount + 1}/${MAX_WORD_RETRIES})`)
+        this.emit('recovery-error', {
+          message: 'Word not found in BIP39 wordlist. Restarting from word 1...',
+          errorType: 'word-not-found',
+          autoRetrying: true,
+        })
+        await new Promise(r => setTimeout(r, 2000))
+        return this.recoverDevice(opts, _retryCount + 1)
+      }
+
+      // Terminal error — clean up
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+
       // Classify the failure for user-friendly messaging
       let message = rawMessage
-      let errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' = 'unknown'
+      let errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown' = 'unknown'
       if (rawMessage.includes('Action cancelled') && this.pinRequestCount >= 2) {
         message = 'PINs did not match. Both entries must be identical.'
         errorType = 'pin-mismatch'
@@ -801,36 +861,38 @@ export class EngineController extends EventEmitter {
         errorType = 'invalid-mnemonic'
       } else if (rawMessage.includes('Words were not entered correctly') || rawMessage.includes('substition cipher') || rawMessage.includes('substitution cipher')) {
         errorType = 'bad-words'
+      } else if (rawMessage.includes('Word not found')) {
+        errorType = 'word-not-found'
       }
 
       this.emit('recovery-error', { message, errorType })
 
       // Refresh device state after failure — device may now be in needs_init or needs_pin
       try {
-        this.cachedFeatures = await this.wallet.getFeatures()
+        this.cachedFeatures = await this.wallet!.getFeatures()
         this.updateState(this.deriveState(this.cachedFeatures))
       } catch {
         // Device may be unresponsive after failure, state will sync on next USB event
       }
 
       throw err
-    } finally {
-      this.setupInProgress = false
-      this.pinRequestCount = 0
     }
   }
 
-  async verifySeed(opts: { wordCount: 12 | 18 | 24 }) {
-    if (!this.wallet) throw new Error('No device connected')
-    if (!this.wallet.transport) throw new Error('No transport available')
+  async verifySeed(opts: { wordCount: 12 | 18 | 24 }, _retryCount = 0): Promise<{ success: boolean; message: string }> {
+    const MAX_WORD_RETRIES = 5
+
+    if (_retryCount === 0) {
+      if (!this.wallet) throw new Error('No device connected')
+      if (!this.wallet.transport) throw new Error('No transport available')
+      this.setupInProgress = true
+      this.pinRequestCount = 0
+    }
 
     // hdwallet's recover() doesn't support dryRun, so we construct
     // the raw RecoveryDevice protobuf with dryRun=true and send via transport.
     // dryRun means the device verifies the seed WITHOUT modifying any state.
     const Messages = await import('@keepkey/device-protocol/lib/messages_pb')
-
-    this.setupInProgress = true
-    this.pinRequestCount = 0
 
     try {
       const msg = new Messages.RecoveryDevice()
@@ -850,25 +912,42 @@ export class EngineController extends EventEmitter {
         { msgTimeout: 10 * 60 * 1000 }
       )
 
+      this.setupInProgress = false
+      this.pinRequestCount = 0
       return { success: true, message: 'Seed verified successfully' }
     } catch (err: any) {
       const rawMessage = extractErrorMessage(err)
       console.error('[Engine] Seed verification failed:', rawMessage)
 
-      let errorType: 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' = 'unknown'
+      // Word not found — firmware aborts session, but we auto-restart so user can retry
+      if (rawMessage.includes('Word not found') && _retryCount < MAX_WORD_RETRIES) {
+        console.log(`[Engine] Word rejected, auto-retrying verification (attempt ${_retryCount + 1}/${MAX_WORD_RETRIES})`)
+        this.emit('recovery-error', {
+          message: 'Word not found in BIP39 wordlist. Restarting from word 1...',
+          errorType: 'word-not-found',
+          autoRetrying: true,
+        })
+        await new Promise(r => setTimeout(r, 2000))
+        return this.verifySeed(opts, _retryCount + 1)
+      }
+
+      // Terminal error — clean up
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+
+      let errorType: 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown' = 'unknown'
       if (rawMessage.includes('Action cancelled')) {
         errorType = 'cancelled'
       } else if (rawMessage.includes('Invalid mnemonic') || rawMessage.includes('does not match')) {
         errorType = 'invalid-mnemonic'
       } else if (rawMessage.includes('Words were not entered correctly') || rawMessage.includes('substition cipher') || rawMessage.includes('substitution cipher')) {
         errorType = 'bad-words'
+      } else if (rawMessage.includes('Word not found')) {
+        errorType = 'word-not-found'
       }
 
       this.emit('recovery-error', { message: rawMessage, errorType })
       throw err
-    } finally {
-      this.setupInProgress = false
-      this.pinRequestCount = 0
     }
   }
 
@@ -888,7 +967,11 @@ export class EngineController extends EventEmitter {
     if (!this.wallet) throw new Error('No device connected')
     const settings: any = {}
     if (opts.label !== undefined) settings.label = opts.label
-    if (opts.usePassphrase !== undefined) settings.usePassphrase = opts.usePassphrase
+    if (opts.usePassphrase !== undefined) {
+      settings.usePassphrase = opts.usePassphrase
+      // Toggling passphrase changes the effective seed — clear fingerprint
+      this.cachedFingerprint = null
+    }
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
     this.cachedFeatures = await this.wallet.getFeatures()
@@ -969,6 +1052,8 @@ export class EngineController extends EventEmitter {
 
   async sendPassphrase(passphrase: string) {
     if (!this.wallet) throw new Error('No device connected')
+    // Passphrase changes the effective seed — clear fingerprint so it's re-derived
+    this.cachedFingerprint = null
     await this.wallet.sendPassphrase(passphrase)
     // Don't call getFeatures if promptPin's getPublicKeys is still pending —
     // it owns the transport and will refresh features when it completes.
@@ -1076,7 +1161,8 @@ export class EngineController extends EventEmitter {
 
     // Device state — distinguish bootloader mode from firmware mode
     const isBootloaderMode = this.cachedFeatures?.bootloaderMode === true
-    const deviceBootloaderVersion = this.cachedFeatures?.bootloaderVersion || null
+    // Use resolved BL version (hash→version from manifest) when raw features lack it
+    const deviceBootloaderVersion = this.getDeviceState().bootloaderVersion || this.cachedFeatures?.bootloaderVersion || null
 
     // In bootloader mode, extractVersion() returns the BL version (not FW).
     // The pre-existing firmware version is not available in bootloader mode.
@@ -1097,9 +1183,12 @@ export class EngineController extends EventEmitter {
       isDowngrade = this.versionLessThan(detectedVersion, currentFirmwareVersion)
     }
 
-    // Signed→unsigned transition will wipe the device.
-    // In bootloader mode we can't know the previous firmware state, so be safe.
-    const willWipeDevice = !isSigned && !isBootloaderMode && (currentFirmwareVerified === true)
+    // Crossing the signed/unsigned boundary in EITHER direction wipes the device.
+    // In bootloader mode we can't know the previous firmware state, so we can't determine this.
+    const willWipeDevice = !isBootloaderMode && (
+      (!isSigned && currentFirmwareVerified === true) ||   // signed → unsigned
+      (isSigned && currentFirmwareVerified === false)      // unsigned → signed
+    )
 
     return {
       isSigned,
@@ -1114,6 +1203,49 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+    }
+  }
+
+  // ── Wallet Fingerprint (0th BTC address — identifies seed+passphrase) ───
+
+  private cachedFingerprint: string | null = null
+
+  async getWalletFingerprint(): Promise<string> {
+    if (this.cachedFingerprint) return this.cachedFingerprint
+    if (!this.wallet) throw new Error('No device connected')
+    const result = await (this.wallet as any).btcGetAddress({
+      addressNList: [0x80000000 + 44, 0x80000000 + 0, 0x80000000 + 0, 0, 0],
+      coin: 'Bitcoin',
+      scriptType: 'p2pkh',
+      showDisplay: false,
+    })
+    // btcGetAddress returns string in some adapters, {address} in others
+    const address = typeof result === 'string' ? result : result?.address
+    if (!address) throw new Error('Failed to derive fingerprint address')
+    this.cachedFingerprint = address
+    return address
+  }
+
+  // ── BIP-85 Derived Seeds ────────────────────────────────────────────────
+
+  async getBip85Mnemonic(opts: Bip85DeriveParams): Promise<Bip85DisplayResult> {
+    if (!this.wallet) throw new Error('No device connected')
+    if (![12, 18, 24].includes(opts.wordCount))
+      throw new Error('wordCount must be 12, 18, or 24')
+    if (!Number.isInteger(opts.index) || opts.index < 0 || opts.index > 2147483647)
+      throw new Error('Index must be 0–2147483647')
+
+    await (this.wallet as any).bip85GetMnemonic({
+      wordCount: opts.wordCount,
+      index: opts.index,
+    })
+
+    // Seed is displayed on device screen only — never returned over USB
+    return {
+      displayed: true,
+      wordCount: opts.wordCount,
+      index: opts.index,
+      derivationPath: `m/83696968'/39'/0'/${opts.wordCount}'/${opts.index}'`,
     }
   }
 

@@ -1,0 +1,16 @@
+{
+	"receive": "Ontvangen",
+	"sendToAddress": "Stuur {{symbol}} naar dit adres",
+	"index": "Index",
+	"remaining": "Resterend {{remaining}}",
+	"address": "Adres",
+	"extendedPublicKey": "Uitgebreide publieke sleutel (xpub)",
+	"path": "Pad",
+	"editDerivationPath": "Afleidingspad bewerken",
+	"checkDevice": "Apparaat controleren...",
+	"verifyOnDevice": "Verifiëren op apparaat",
+	"derivingAddress": "Adres afleiden...",
+	"noAddressDerived": "Nog geen adres afgeleid",
+	"deriveAddress": "Adres afleiden",
+	"account": "Account {{index}}"
+}

@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "Депозит THORChain",
 		"methodMayaTransfer": "Перевод Maya",
 		"methodMayaDeposit": "Депозит Maya",
-		"methodOsmosisSign": "Подписать Osmosis"
+		"methodOsmosisSign": "Подписать Osmosis",
+		"methodSolanaSignTx": "Подписать транзакцию Solana",
+		"methodSolanaSignMessage": "Подписать сообщение Solana",
+		"methodTronSignTx": "Подписать транзакцию Tron",
+		"methodTonSignTx": "Подписать транзакцию TON"
 	},
 	"claimed": {
 		"title": "Устройство занято",
@@ -61,6 +65,7 @@
 		"step2": "2. Отключите и снова подключите устройство",
 		"step3": "3. Это приложение подключится автоматически",
 		"waiting": "Ожидание доступности устройства...",
+		"supportLink": "Всё ещё есть проблемы? Отправьте запрос в поддержку",
 		"defaultError": "Устройство занято другим процессом"
 	},
 	"recovery": {

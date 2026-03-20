@@ -133,6 +133,8 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 				<Flex justify="flex-end" gap="2">
 					<Button
 						size="sm"
+						px="4"
+						py="2"
 						variant="ghost"
 						color="kk.textSecondary"
 						onClick={onClose}
@@ -142,6 +144,8 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 					{!result && (
 						<Button
 							size="sm"
+							px="4"
+							py="2"
 							bg="kk.gold"
 							color="black"
 							_hover={{ bg: "kk.goldHover" }}

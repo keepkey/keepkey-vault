@@ -175,7 +175,7 @@ export class EvmAddressManager extends EventEmitter {
       // Check if any EVM chain has a balance for this address
       const pubkeys = evmChains.map(c => ({ caip: c.caip, pubkey: address }))
       try {
-        const resp = await pioneer.GetPortfolioBalances({ pubkeys })
+        const resp = await pioneer.GetPortfolioBalances({ pubkeys }, { forceRefresh: true })
         const balances = resp?.data?.balances || resp?.data || []
         const hasBalance = (Array.isArray(balances) ? balances : []).some(
           (b: any) => parseFloat(String(b?.balance ?? '0')) > 0 || Number(b?.valueUsd ?? 0) > 0,

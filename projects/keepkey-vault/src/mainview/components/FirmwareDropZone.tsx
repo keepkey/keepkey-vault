@@ -3,6 +3,7 @@ import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { FirmwareAnalysis, FirmwareProgress } from "../../shared/types"
+import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 
 /**
  * FirmwareDropZone — Global drag-and-drop firmware flasher.
@@ -346,6 +347,16 @@ export function FirmwareDropZone() {
 							</Flex>
 						</Box>
 
+						{/* ── Release notes for this firmware version ── */}
+						{analysis.detectedVersion && (
+							<Box mx="6" mb="3">
+								<FirmwareUpgradePreview
+									currentVersion={analysis.currentFirmwareVersion}
+									targetVersion={analysis.detectedVersion}
+								/>
+							</Box>
+						)}
+
 						{/* ── DOUBLE WARNING: Signed → Unsigned (WILL WIPE) ── */}
 						{analysis.willWipeDevice && (
 							<Box
@@ -366,9 +377,12 @@ export function FirmwareDropZone() {
 									</Text>
 								</Flex>
 								<Text fontSize="sm" color="#FC8181" lineHeight="1.6" mb="3">
-									You are flashing <Text as="span" fontWeight="700">unsigned firmware</Text> onto a device
-									running <Text as="span" fontWeight="700">signed (official) firmware</Text>.
-									This transition requires a full device wipe — <Text as="span" fontWeight="700">all keys and
+									You are crossing the <Text as="span" fontWeight="700">signed/unsigned firmware boundary</Text>.
+									{analysis.isSigned
+										? <> Flashing <Text as="span" fontWeight="700">signed (official) firmware</Text> onto a device running <Text as="span" fontWeight="700">unsigned (developer) firmware</Text>.</>
+										: <> Flashing <Text as="span" fontWeight="700">unsigned firmware</Text> onto a device running <Text as="span" fontWeight="700">signed (official) firmware</Text>.</>
+									}
+									{' '}This transition requires a full device wipe — <Text as="span" fontWeight="700">all keys and
 									settings will be permanently erased</Text>.
 								</Text>
 								<Text fontSize="sm" color="#FC8181" lineHeight="1.6" mb="3">
@@ -473,6 +487,7 @@ export function FirmwareDropZone() {
 								size="sm"
 								variant="ghost"
 								color="kk.textSecondary"
+								px="4" py="2"
 								_hover={{ color: "kk.textPrimary" }}
 								onClick={handleDismiss}
 							>
@@ -483,6 +498,7 @@ export function FirmwareDropZone() {
 								bg={analysis.willWipeDevice ? "#E53E3E" : analysis.isSigned ? "kk.gold" : "#ED8936"}
 								color={analysis.willWipeDevice ? "white" : "black"}
 								fontWeight="700"
+								px="4" py="2"
 								_hover={{
 									bg: analysis.willWipeDevice ? "#C53030" : analysis.isSigned ? "kk.goldHover" : "#DD6B20",
 								}}
@@ -533,7 +549,7 @@ export function FirmwareDropZone() {
 
 				{/* ── Complete ──────────────────────────────── */}
 				{phase === "complete" && (
-					<Box p="8" textAlign="center">
+					<Box p="8" textAlign="center" border="1px solid" borderColor="#48BB78" borderRadius="xl">
 						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#48BB78" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
 							<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
 							<polyline points="22 4 12 14.01 9 11.01" />
@@ -550,6 +566,7 @@ export function FirmwareDropZone() {
 							bg="kk.gold"
 							color="black"
 							fontWeight="600"
+							px="4" py="2"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleDismiss}
 						>
@@ -577,6 +594,7 @@ export function FirmwareDropZone() {
 							bg="kk.gold"
 							color="black"
 							fontWeight="600"
+							px="4" py="2"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleDismiss}
 						>

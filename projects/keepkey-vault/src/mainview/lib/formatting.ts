@@ -2,13 +2,15 @@
 export function formatBalance(val: string): string {
 	const num = parseFloat(val)
 	if (isNaN(num) || num === 0) return '0'
-	if (num < 0.000001) return num.toExponential(2)
-	if (num < 1) return num.toFixed(6)
-	if (num < 1000) return num.toFixed(4)
-	return num.toLocaleString(undefined, { maximumFractionDigits: 2 })
+	const abs = Math.abs(num)
+	const sign = num < 0 ? '-' : ''
+	if (abs < 0.000001) return num.toExponential(2)
+	if (abs < 1) return sign + abs.toFixed(6)
+	if (abs < 1000) return sign + abs.toFixed(4)
+	return sign + abs.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-/** Format a USD value for display (e.g. "1,234.56"). */
+/** Format a USD value for display (e.g. "1,234.56"). Legacy — prefer useFiat().fmt() */
 export function formatUsd(value: number | string | null | undefined): string {
 	if (value === null || value === undefined) return '0.00'
 	const num = typeof value === 'string' ? parseFloat(value) : value

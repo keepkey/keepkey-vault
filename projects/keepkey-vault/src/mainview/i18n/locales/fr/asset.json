@@ -16,5 +16,6 @@
 	"hideToken": "Masquer le jeton",
 	"revertToAutoDetect": "Revenir à la détection automatique",
 	"unhide": "Afficher",
-	"addCustomToken": "Ajouter un jeton personnalisé"
+	"addCustomToken": "Ajouter un jeton personnalisé",
+	"invalidZcashRecipient": "Adresse invalide — doit être u1... (unified) ou t1.../t3... (transparent)"
 }

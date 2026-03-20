@@ -11,6 +11,7 @@ const DEFAULT_STATE: DeviceStateInfo = {
   needsFirmwareUpdate: false,
   needsInit: false, // L8 fix: default false prevents brief wizard flash before features arrive
   initialized: false,
+  passphraseProtection: false,
   isOob: false,
 }
 

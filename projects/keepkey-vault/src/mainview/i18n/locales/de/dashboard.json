@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "Ihre Wallet ist bereit. So starten Sie:",
 	"welcomeTip1": "Tippen Sie auf eine Blockchain unten und dann auf Empfangen, um Ihre Einzahlungsadresse zu erhalten",
 	"welcomeTip2": "Senden Sie Krypto an Ihre Adresse — Ihr Guthaben erscheint hier automatisch",
-	"welcomeTip3": "Fügen Sie benutzerdefinierte EVM-Chains mit der +-Karte hinzu, um jedes Netzwerk zu verfolgen",
 	"balancesStale": "Guthaben können veraltet sein",
 	"lastUpdated": "Zuletzt aktualisiert {{time}}",
 	"lastUpdatedNever": "Nie geladen",

@@ -84,6 +84,8 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 				<Flex gap="2" mt="4" justify="flex-end">
 					<Button
 						size="sm"
+						px="4"
+						py="2"
 						variant="ghost"
 						color="kk.textSecondary"
 						_hover={{ color: "kk.textPrimary" }}
@@ -93,6 +95,8 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 					</Button>
 					<Button
 						size="sm"
+						px="4"
+						py="2"
 						bg="kk.gold"
 						color="black"
 						_hover={{ bg: "kk.goldHover" }}

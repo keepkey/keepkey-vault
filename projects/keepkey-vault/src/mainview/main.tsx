@@ -6,6 +6,7 @@ import "./index.css"
 import "./i18n"
 import splashBg from "./assets/splash-bg.png"
 import App from "./App"
+import { FiatProvider } from "./lib/fiat-context"
 
 // Global error handler — prevent stray promise rejections from crashing the WebView
 window.addEventListener('unhandledrejection', (e) => {
@@ -19,7 +20,9 @@ document.body.style.background = `#000000 url(${splashBg}) center / cover no-rep
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<ChakraProvider value={system}>
-			<App />
+			<FiatProvider>
+				<App />
+			</FiatProvider>
 		</ChakraProvider>
 	</StrictMode>,
 )

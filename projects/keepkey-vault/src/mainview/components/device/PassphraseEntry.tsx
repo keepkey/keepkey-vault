@@ -37,6 +37,14 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 		// when the device state transitions away from needs_passphrase.
 	}, [passphrase, onSubmit, submitting])
 
+	const handleCancel = useCallback(() => {
+		// Don't allow cancel while device is waiting for physical confirmation —
+		// dismissing the overlay would hide the only indication that the device
+		// expects a button press, and there's no path to re-show it.
+		if (submitting) return
+		onCancel()
+	}, [onCancel, submitting])
+
 	// Keyboard: Enter on input submits; Escape anywhere dismisses
 	const handleInputKeyDown = useCallback((e: React.KeyboardEvent) => {
 		if (e.key === "Enter") {
@@ -47,11 +55,11 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && !submitting) onCancel()
+			if (e.key === "Escape") handleCancel()
 		}
 		window.addEventListener("keydown", onKeyDown)
 		return () => window.removeEventListener("keydown", onKeyDown)
-	}, [onCancel, submitting])
+	}, [handleCancel])
 
 	return (
 		<Flex
@@ -60,21 +68,44 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 			left={0}
 			w="100vw"
 			h="100vh"
-			bg="blackAlpha.800"
+			bg="rgba(0,0,0,0.3)"
 			align="center"
 			justify="center"
 			zIndex={2000}
+			backdropFilter="blur(2px)"
 		>
 			<Box
 				bg="kk.cardBg"
 				borderRadius="xl"
 				border="1px solid"
-				borderColor="kk.border"
+				borderColor="kk.gold"
 				p="8"
 				maxW="420px"
 				w="90%"
-				boxShadow="0 8px 32px rgba(0,0,0,0.6)"
+				boxShadow="0 4px 24px rgba(192, 168, 96, 0.3), 0 8px 32px rgba(0,0,0,0.6)"
+				position="relative"
 			>
+				{/* Close button — hidden during device-confirm to prevent dismissing */}
+				{!submitting && (
+					<Box
+						as="button"
+						type="button"
+						aria-label={t("cancel", { ns: "common" })}
+						position="absolute"
+						top="3"
+						right="3"
+						onClick={handleCancel}
+						color="kk.textMuted"
+						_hover={{ color: "kk.textPrimary" }}
+						cursor="pointer"
+						p="1"
+						lineHeight="1"
+						fontSize="lg"
+					>
+						&#x2715;
+					</Box>
+				)}
+
 				{submitting ? (
 					/* ── Confirm on device state ── */
 					<Flex direction="column" align="center" gap="5" py="4">
@@ -161,7 +192,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						{/* Action buttons */}
 						<Flex gap="3" justifyContent="center">
 							<Button
-								onClick={onCancel}
+								onClick={handleCancel}
 								size="md"
 								variant="outline"
 								borderColor="kk.border"

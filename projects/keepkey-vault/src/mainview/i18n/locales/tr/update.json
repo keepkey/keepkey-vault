@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "Yeni sürüm mevcut",
+	"downloadingWithProgress": "Güncelleme indiriliyor... %{{progress}}",
+	"downloading": "Güncelleme indiriliyor...",
+	"readyToInstall": "Güncelleme indirildi ve hazır",
+	"applying": "Güncelleme yükleniyor, yeniden başlatılıyor...",
+	"errorWithMessage": "Güncelleme hatası: {{error}}",
+	"download": "İndir",
+	"later": "Daha sonra",
+	"restartToUpdate": "Güncellemek için yeniden başlat"
+}

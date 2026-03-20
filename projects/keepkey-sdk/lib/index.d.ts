@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, TronSignTxParams, TonSignTxParams, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset } from './types';
 export { SdkError } from './client';
 export * from './types';
 export declare class KeepKeySdk {
@@ -124,6 +124,12 @@ export declare class KeepKeySdk {
         solanaGetAddress: (params: AddressRequest) => Promise<{
             address: string;
         }>;
+        tronGetAddress: (params: AddressRequest) => Promise<{
+            address: string;
+        }>;
+        tonGetAddress: (params: AddressRequest) => Promise<{
+            address: string;
+        }>;
     };
     eth: {
         ethSignTransaction: (params: EthSignTxParams) => Promise<SignedTx>;
@@ -179,6 +185,12 @@ export declare class KeepKeySdk {
     };
     solana: {
         solanaSignTransaction: (params: SolanaSignTxParams) => Promise<SignedTx>;
+    };
+    tron: {
+        tronSignTransaction: (params: TronSignTxParams) => Promise<SignedTx>;
+    };
+    ton: {
+        tonSignTransaction: (params: TonSignTxParams) => Promise<SignedTx>;
     };
     xpub: {
         getPublicKey: (params: GetPublicKeyRequest) => Promise<{

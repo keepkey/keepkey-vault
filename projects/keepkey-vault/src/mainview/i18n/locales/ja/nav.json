@@ -12,5 +12,6 @@
 	"loadingPortfolio": "ポートフォリオを読み込み中",
 	"errorWithMessage": "エラー: {{error}}",
 	"tryUnplugging": "KeepKeyを抜いて再接続してみてください。",
-	"watchOnlyConnectPrompt": "閲覧専用 — フルアクセスにはデバイスを接続してください"
+	"watchOnlyConnectPrompt": "閲覧専用 — フルアクセスにはデバイスを接続してください",
+	"passphraseMode": "パスフレーズ"
 }

@@ -1,0 +1,18 @@
+{
+	"apps": "Ứng dụng",
+	"keepkey": "KeepKey",
+	"swap": "Đổi",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "Chỉ xem",
+	"deviceSettings": "Cài đặt thiết bị",
+	"searchingForKeepKey": "Đang tìm KeepKey",
+	"keepkeyDetected": "Đã phát hiện KeepKey",
+	"keepkeyDetectedConnecting": "Đã phát hiện KeepKey — đang kết nối",
+	"unlockYourKeepKey": "Mở khóa KeepKey của bạn",
+	"passphraseRequired": "Cần cụm mật khẩu",
+	"loadingPortfolio": "Đang tải danh mục đầu tư",
+	"errorWithMessage": "Lỗi: {{error}}",
+	"tryUnplugging": "Thử rút và cắm lại KeepKey.",
+	"watchOnlyConnectPrompt": "Chỉ xem — Kết nối thiết bị để có quyền truy cập đầy đủ",
+	"passphraseMode": "Cụm mật khẩu"
+}

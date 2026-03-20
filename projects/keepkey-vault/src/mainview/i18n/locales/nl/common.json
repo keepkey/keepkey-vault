@@ -1,0 +1,23 @@
+{
+	"cancel": "Annuleren",
+	"save": "Opslaan",
+	"back": "Terug",
+	"next": "Volgende",
+	"done": "Gereed",
+	"close": "Sluiten",
+	"confirm": "Bevestigen",
+	"copy": "Kopiëren",
+	"copied": "Gekopieerd",
+	"loading": "Laden...",
+	"retry": "Opnieuw proberen",
+	"dismiss": "Sluiten",
+	"enabled": "Ingeschakeld",
+	"disabled": "Uitgeschakeld",
+	"notSet": "Niet ingesteld",
+	"change": "Wijzigen",
+	"remove": "Verwijderen",
+	"add": "Toevoegen",
+	"verify": "Verifiëren",
+	"skip": "Overslaan",
+	"previous": "Vorige"
+}
