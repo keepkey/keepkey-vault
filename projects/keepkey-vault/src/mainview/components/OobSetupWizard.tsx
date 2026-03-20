@@ -54,6 +54,7 @@ type WizardStep =
   | 'init-choose'
   | 'init-progress'
   | 'init-label'
+  | 'verify-seed'
   | 'complete'
 
 const STEP_SEQUENCE: WizardStep[] = [
@@ -63,6 +64,7 @@ const STEP_SEQUENCE: WizardStep[] = [
   'init-choose',
   'init-progress',
   'init-label',
+  'verify-seed',
   'complete',
 ]
 
@@ -76,6 +78,7 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
   'init-choose': 'init-choose',
   'init-progress': 'init-choose',
   'init-label': 'init-choose',
+  'verify-seed': 'init-choose',
   'complete': null,
 }
 
@@ -105,6 +108,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
   const [setupError, setSetupError] = useState<string | null>(null)
+  // Seed verification state
+  const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'verifying' | 'success' | 'failed'>('idle')
+  const [verifyError, setVerifyError] = useState<string | null>(null)
   // L1 fix: removed unused setupLoading state (value was never read)
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
@@ -114,6 +120,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     'init-choose': t('stepDescriptions.initChoose'),
     'init-progress': t('stepDescriptions.initProgress'),
     'init-label': t('stepDescriptions.initLabel'),
+    'verify-seed': t('stepDescriptions.verifySeed', { defaultValue: 'Verify your recovery phrase' }),
     'complete': t('stepDescriptions.complete'),
   }
 
@@ -212,7 +219,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
   const isVisibleStepCompleted = (vsId: string) => {
     const vsIndex = VISIBLE_STEPS.findIndex(s => s.id === vsId)
-    if (step === 'complete' || step === 'init-label' || step === 'init-progress') return true
+    if (step === 'complete' || step === 'verify-seed' || step === 'init-label' || step === 'init-progress') return true
     const curVsIndex = visibleIndex
     return vsIndex < curVsIndex
   }
@@ -624,7 +631,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
         // Label is optional
       }
     }
-    setStep('complete')
+    // Offer seed verification for new wallets, skip for recovered
+    setStep(setupType === 'create' ? 'verify-seed' : 'complete')
   }
 
   // ── Complete: auto-advance after 5s ────────────────────────────────────
@@ -655,7 +663,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const showPrevious = !['welcome', 'complete', 'init-progress'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   const showNext =
-    !['bootloader', 'init-choose', 'init-progress', 'init-label', 'complete'].includes(step) &&
+    !['bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -2058,6 +2066,115 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     {t('initLabel.skipForNow')}
                   </Button>
                 </VStack>
+              </VStack>
+            )}
+
+            {/* ═══════════════ VERIFY SEED ═══════════════════════════ */}
+            {step === 'verify-seed' && (
+              <VStack gap={4} textAlign="center" w="100%" maxW="400px" mx="auto">
+                {verifyingPhase === 'idle' && (
+                  <>
+                    <FaKey color="#C0A860" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="white">
+                        {t('verifySeed.title', { defaultValue: 'Verify Your Recovery Phrase' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400" maxW="320px">
+                        {t('verifySeed.description', { defaultValue: 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.' })}
+                      </Text>
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                      _active={{ transform: 'scale(0.98)' }}
+                      transition="all 0.15s ease"
+                      onClick={async () => {
+                        setVerifyingPhase('verifying')
+                        setVerifyError(null)
+                        onWordCountChange?.(wordCount)
+                        try {
+                          const result = await rpcRequest('verifySeed', { wordCount }, 0) as { success: boolean; message: string }
+                          setVerifyingPhase(result.success ? 'success' : 'failed')
+                          if (!result.success) setVerifyError(result.message)
+                        } catch (e: any) {
+                          setVerifyingPhase('failed')
+                          setVerifyError(e?.message || 'Verification failed')
+                        }
+                      }}
+                    >
+                      {t('verifySeed.verifyNow', { defaultValue: 'Verify Now' })}
+                    </Button>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={() => setStep('complete')}
+                    >
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                    </Button>
+                  </>
+                )}
+                {verifyingPhase === 'verifying' && (
+                  <>
+                    <Spinner size="lg" color="#C0A860" borderWidth="3px" />
+                    <VStack gap={1}>
+                      <Text fontSize="md" fontWeight="bold" color="white">
+                        {t('verifySeed.verifying', { defaultValue: 'Verifying...' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {t('verifySeed.followDevice', { defaultValue: 'Follow the prompts on your KeepKey to enter the requested words.' })}
+                      </Text>
+                    </VStack>
+                  </>
+                )}
+                {verifyingPhase === 'success' && (
+                  <>
+                    <FaCheckCircle color="#48BB78" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="green.400">
+                        {t('verifySeed.verified', { defaultValue: 'Recovery Phrase Verified!' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {t('verifySeed.verifiedDetail', { defaultValue: 'Your backup is correct. Keep it safe — never share it with anyone.' })}
+                      </Text>
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      onClick={() => setStep('complete')}
+                    >
+                      {t('verifySeed.continue', { defaultValue: 'Continue' })}
+                    </Button>
+                  </>
+                )}
+                {verifyingPhase === 'failed' && (
+                  <>
+                    <FaExclamationTriangle color="#FC8181" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="red.400">
+                        {t('verifySeed.failed', { defaultValue: 'Verification Failed' })}
+                      </Text>
+                      <Text fontSize="xs" color="red.300" maxW="320px">
+                        {verifyError || t('verifySeed.failedDetail', { defaultValue: 'The words you entered did not match. Please try again or check your written backup.' })}
+                      </Text>
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      onClick={() => setVerifyingPhase('idle')}
+                    >
+                      {t('verifySeed.tryAgain', { defaultValue: 'Try Again' })}
+                    </Button>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={() => setStep('complete')}
+                    >
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                    </Button>
+                  </>
+                )}
               </VStack>
             )}
 
