@@ -40,6 +40,7 @@ function App() {
 	// mounted through disconnects. The state-based setupInProgress can lose races
 	// with React render batching on fast USB detach/reattach cycles (Windows).
 	const oobEnteredRef = useRef(false)
+	const oobClaimStuckSince = useRef<number | null>(null)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
@@ -442,6 +443,15 @@ function App() {
 	}
 	if (wizardComplete) {
 		oobEnteredRef.current = false
+	}
+
+	// Release OOB lock if device is persistently claimed/errored for >30s
+	// (another app holding the device, not a transient reboot)
+	if (oobEnteredRef.current && isClaimed) {
+		if (!oobClaimStuckSince.current) oobClaimStuckSince.current = Date.now()
+		else if (Date.now() - oobClaimStuckSince.current > 30000) oobEnteredRef.current = false
+	} else {
+		oobClaimStuckSince.current = null
 	}
 
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
