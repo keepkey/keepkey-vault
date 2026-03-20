@@ -227,11 +227,64 @@ binary. Useful when `_build/` is locked or you only changed TS/TSX files.
 - **Bash-to-PowerShell output loss**: Running PS1 from Claude's bash loses
   stdout and can timeout, killing long builds silently
 
+### Timeline — Round 3 (launcher.exe also unreliable)
+15. Rebased branch on latest develop, rebuilt all 3 steps — all passed
+16. Ran `launcher.exe` directly from `bin/` — NO WINDOW (MainWindowHandle=0)
+17. Same command that worked 30 minutes ago now fails
+18. Installed production build via `KeepKeyVault.exe` — still works
+19. Tried `Start-Process` with `-WorkingDirectory` — still no window
+20. Tried copying installed `KeepKeyVault.exe` wrapper into dev build — window opens!
+21. Multiple retries of `launcher.exe` direct — eventually works on ~5th attempt
+
+**Root cause**: `launcher.exe` window creation is NON-DETERMINISTIC on Windows.
+WebView2 `CreateCoreWebView2EnvironmentWithOptions` sometimes fails silently
+depending on process environment, timing, and whether stale WebView2 profiles
+exist. The Zig wrapper (`KeepKeyVault.exe`) is more reliable because:
+- It uses `CREATE_NO_WINDOW` flag and Windows subsystem (no console)
+- It sets CWD explicitly via `CreateProcessW`
+- It doesn't inherit bash/PowerShell console environment
+
+### The Reliable Dev Launch Method
+
+**Build** (3 separate commands, each must succeed):
+```bash
+cd projects/keepkey-vault
+bunx vite build
+bun scripts/collect-externals.ts
+bunx electrobun build
+```
+
+**Launch** (use the Zig wrapper from the installed production build):
+```bash
+cp /c/Users/bithi/AppData/Local/Programs/KeepKeyVault/KeepKeyVault.exe \
+   projects/keepkey-vault/_build/dev-win-x64/keepkey-vault-dev/KeepKeyVault.exe
+./projects/keepkey-vault/_build/dev-win-x64/keepkey-vault-dev/KeepKeyVault.exe
+```
+
+Or if `launcher.exe` direct isn't working, just hot-patch the installed build
+(see "Alternative: Hot-patch the Installed Build" above).
+
+### Root Causes (all rounds)
+- **`electrobun dev` breaks WebView2**: Intermediate process prevents HWND creation
+- **`launcher.exe` direct is non-deterministic**: WebView2 init depends on process
+  environment, console inheritance, stale profiles, and timing. Sometimes works,
+  sometimes doesn't. The Zig wrapper is the only reliable launch method.
+- **Port mismatch**: `hmr` script uses 5177, old dev script killed 5173
+- **No process cleanup**: Stale processes held file locks on `_build/`
+- **WebView2 profile pollution**: Stale profiles under `%LOCALAPPDATA%` cause
+  init failures. Clean with: `rm -rf %LOCALAPPDATA%/com.keepkey.vault/dev/webview2-*`
+- **Bash-to-PowerShell output loss**: Running PS1 from Claude's bash loses
+  stdout and can timeout, killing long builds silently
+- **Chained commands swallow errors**: `cmd1 && cmd2 && cmd3` in bash — if
+  the chain is backgrounded, failures are silent. Run each step separately.
+
 ### Lessons
-1. **NEVER use `bunx electrobun dev` on Windows** — always `launcher.exe` direct
-2. Always kill KeepKey processes by path match, not just name
-3. WebView2 user-data MUST be outside the build tree
-4. Document the hot-patch workflow as a fallback
-5. Run build steps individually from bash, not wrapped in PowerShell
-6. The production build works because the Zig wrapper is a thin `CreateProcessW`
-   call — no Node/Bun intermediary in the process tree
+1. **NEVER use `bunx electrobun dev` on Windows**
+2. **`launcher.exe` direct is unreliable** — use the Zig wrapper or hot-patch
+3. **The installed production build is the most reliable test target** — hot-patch it
+4. Always kill KeepKey processes before rebuilding
+5. Run build steps one at a time, check each exit code
+6. Never chain build + launch in a single bash command
+7. WebView2 on Windows is fragile — stale profiles, console inheritance, and
+   process tree depth all affect whether a window appears
+8. When in doubt: hot-patch the installed build, it always works
