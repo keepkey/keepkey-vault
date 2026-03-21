@@ -118,6 +118,121 @@ async function windowsLaunchInstaller(rpc: any) {
 	}, 1500)
 }
 
+// ── macOS auto-update (bypasses Electrobun's baseUrl: "latest" limitation) ──
+// Electrobun's Updater.downloadUpdate() fetches from releases/latest/download
+// which only resolves to non-pre-release releases. Download the tar.zst
+// directly from the specific release tag, extract, replace .app, relaunch.
+
+async function macosDownloadAndInstall(rpc: any) {
+	const version = pendingUpdateVersion || Updater.updateInfo()?.version
+	if (!version || version === pkg.version) {
+		throw new Error(`No update version available (current: ${pkg.version})`)
+	}
+
+	// We only ship arm64 macOS builds (Intel Macs run via Rosetta)
+	const assetName = 'stable-macos-arm64-keepkey-vault.app.tar.zst'
+	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${assetName}`
+
+	console.log(`[macOS Update] Downloading: ${url}`)
+	rpc.send['update-status']({ status: 'downloading-update', message: `Downloading v${version}...`, progress: 0 })
+
+	try {
+		const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
+		if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`)
+
+		const totalBytes = Number(resp.headers.get('content-length') || 0)
+		const reader = resp.body?.getReader()
+		if (!reader) throw new Error('No response body')
+
+		const chunks: Uint8Array[] = []
+		let downloaded = 0
+
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			chunks.push(value)
+			downloaded += value.length
+			if (totalBytes > 0) {
+				const progress = (downloaded / totalBytes) * 100
+				rpc.send['update-status']({ status: 'download-progress', message: `Downloading... ${Math.round(progress)}%`, progress })
+			}
+		}
+
+		const tmpDir = os.tmpdir()
+		const archivePath = path.join(tmpDir, assetName)
+		await Bun.write(archivePath, new Blob(chunks))
+		console.log(`[macOS Update] Archive saved: ${archivePath} (${downloaded} bytes)`)
+
+		rpc.send['update-status']({ status: 'applying-update', message: 'Extracting update...' })
+
+		// Decompress zstd → tar using the zig-zstd binary bundled in the .app
+		// (stock macOS doesn't have zstd; the app ships zig-zstd at Contents/MacOS/)
+		const tarPath = archivePath.replace('.tar.zst', '.tar')
+		const appBundleForZstd = path.resolve(process.argv[1] || '', '../../../../..')
+		const zigZstd = path.join(appBundleForZstd, 'Contents', 'MacOS', 'zig-zstd')
+		let zstdResult = Bun.spawnSync([zigZstd, '-d', '-f', archivePath, '-o', tarPath])
+		if (zstdResult.exitCode !== 0) {
+			// Fallback: try system zstd (Homebrew users)
+			zstdResult = Bun.spawnSync(['zstd', '-d', '-f', archivePath, '-o', tarPath])
+			if (zstdResult.exitCode !== 0) throw new Error(`zstd decompress failed: ${zstdResult.stderr.toString()}`)
+		}
+
+		// Find the current .app bundle path
+		// Electrobun apps run from: /path/to/App.app/Contents/Resources/app/bun/index.js
+		const appBundlePath = path.resolve(process.argv[1] || '', '../../../../..')
+		const appName = path.basename(appBundlePath)
+
+		if (!appBundlePath.endsWith('.app')) {
+			throw new Error(`Cannot determine .app bundle path: ${appBundlePath}`)
+		}
+
+		console.log(`[macOS Update] Replacing: ${appBundlePath}`)
+
+		// Extract new app to temp staging dir
+		const stageDir = path.join(tmpDir, `keepkey-update-${version}`)
+		Bun.spawnSync(['rm', '-rf', stageDir])
+		Bun.spawnSync(['mkdir', '-p', stageDir])
+
+		const extractResult = Bun.spawnSync(['tar', 'xf', tarPath, '-C', stageDir])
+		if (extractResult.exitCode !== 0) throw new Error(`tar extract failed: ${extractResult.stderr.toString()}`)
+
+		// Find the .app in the extracted contents
+		const lsResult = Bun.spawnSync(['find', stageDir, '-maxdepth', '2', '-name', '*.app', '-type', 'd'])
+		const extractedApp = lsResult.stdout.toString().trim().split('\n')[0]
+		if (!extractedApp || !extractedApp.endsWith('.app')) {
+			throw new Error(`No .app found in extracted archive`)
+		}
+
+		// Move old app to backup, move new app into place
+		const backupPath = path.join(tmpDir, `${appName}.backup-${Date.now()}`)
+		const backupResult = Bun.spawnSync(['mv', appBundlePath, backupPath])
+		if (backupResult.exitCode !== 0) {
+			throw new Error(`Failed to move current app to backup: ${backupResult.stderr.toString()}`)
+		}
+		const moveResult = Bun.spawnSync(['mv', extractedApp, appBundlePath])
+		if (moveResult.exitCode !== 0) {
+			// Restore backup on failure
+			Bun.spawnSync(['mv', backupPath, appBundlePath])
+			throw new Error(`Failed to move new app into place: ${moveResult.stderr.toString()}`)
+		}
+
+		console.log(`[macOS Update] Replaced successfully. Relaunching...`)
+		rpc.send['update-status']({ status: 'relaunching', message: 'Restarting app...' })
+
+		// Relaunch the new app and exit
+		Bun.spawn(['open', '-n', appBundlePath], { stdio: ['ignore', 'ignore', 'ignore'] })
+
+		setTimeout(() => {
+			console.log('[macOS Update] Exiting for relaunch...')
+			process.exit(0)
+		}, 1500)
+	} catch (e: any) {
+		console.error('[macOS Update] Failed:', e)
+		rpc.send['update-status']({ status: 'error', message: e.message, details: { errorMessage: e.message } })
+		throw e
+	}
+}
+
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
 const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
 let chainCatalog: PioneerChainInfo[] = []
@@ -2441,71 +2556,75 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			checkForUpdate: async () => {
 				const localVer = await Updater.localInfo.version()
 
-				// Pre-release channel: check GitHub API for latest release including pre-releases
-				if (preReleaseUpdates) {
-					try {
-						const resp = await fetch('https://api.github.com/repos/keepkey/keepkey-vault/releases?per_page=5', {
-							signal: AbortSignal.timeout(10000),
-							headers: { 'Accept': 'application/vnd.github.v3+json' },
-						})
-						if (resp.ok) {
-							const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean; assets: Array<{ name: string; browser_download_url: string }> }>
-							// Find the first non-draft release (includes pre-releases)
-							const latest = releases.find(r => !r.draft)
-							if (latest) {
-								const remoteVer = latest.tag_name.replace(/^v/, '')
-								if (localVer && versionCompare(remoteVer, localVer) > 0) {
-									console.log(`[Updater] Pre-release available: ${remoteVer} > ${localVer}`)
-									pendingUpdateVersion = remoteVer
-									return {
-										updateAvailable: true,
-										updateReady: false,
-										version: remoteVer,
-										hash: '',
-										preRelease: latest.prerelease,
-									}
-								}
-								console.log(`[Updater] Pre-release check: ${remoteVer} <= ${localVer}, up to date`)
+				// Always use GitHub API to check for updates.
+				// Electrobun's native check is unreliable:
+				// - Windows: no update.json published → 404
+				// - macOS: update.json version is stale (generated before release)
+				try {
+					const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`, {
+						signal: AbortSignal.timeout(15000),
+						headers: { 'Accept': 'application/vnd.github.v3+json' },
+					})
+					if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
+
+					const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+					const candidate = preReleaseUpdates
+						? releases.find(r => !r.draft)
+						: releases.find(r => !r.draft && !r.prerelease)
+
+					if (candidate) {
+						const remoteVer = candidate.tag_name.replace(/^v/, '')
+						if (localVer && versionCompare(remoteVer, localVer) > 0) {
+							console.log(`[Updater] Update available: ${remoteVer} > ${localVer}`)
+							pendingUpdateVersion = remoteVer
+							return {
+								updateAvailable: true,
+								updateReady: false,
+								version: remoteVer,
+								hash: '',
+								preRelease: candidate.prerelease,
 							}
 						}
-					} catch (e: any) {
-						console.warn('[Updater] Pre-release check failed:', e.message)
+						console.log(`[Updater] Up to date: ${remoteVer} <= ${localVer}`)
 					}
-				}
 
-				// Standard channel: use Electrobun's built-in updater
-				const result = await Updater.checkForUpdate()
-				const info = Updater.updateInfo()
-				// Suppress false "update available" when running a pre-release newer than the latest stable.
-				let updateAvailable = !!info?.updateAvailable
-				if (updateAvailable && info?.version) {
-					pendingUpdateVersion = info.version
-					if (localVer && versionCompare(info.version, localVer) < 0) {
-						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
-						updateAvailable = false
+					return {
+						updateAvailable: false,
+						updateReady: false,
+						version: '',
+						hash: '',
 					}
-				}
-				return {
-					updateAvailable,
-					updateReady: !!info?.updateReady,
-					version: info?.version ?? '',
-					hash: info?.hash ?? '',
-					error: result?.error || undefined,
+				} catch (e: any) {
+					console.warn('[Updater] GitHub API check failed:', e.message)
+					return {
+						updateAvailable: false,
+						updateReady: false,
+						version: '',
+						hash: '',
+						error: `Update check failed: ${e.message}`,
+					}
 				}
 			},
 			downloadUpdate: async () => {
 				if (process.platform === 'win32') {
-					// Windows: bypass Electrobun's broken zig-zstd updater.
-					// Download the setup exe from GitHub, save to temp, launch it, quit.
 					await windowsDownloadAndInstall(rpc)
+					return
+				}
+				if (process.platform === 'darwin') {
+					// macOS: download tar.zst from specific release tag, replace .app, relaunch
+					await macosDownloadAndInstall(rpc)
 					return
 				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
 				if (process.platform === 'win32') {
-					// Windows: if we already downloaded the exe, launch it and quit
 					await windowsLaunchInstaller(rpc)
+					return
+				}
+				if (process.platform === 'darwin') {
+					// macOS: download+apply is a single operation — retry if we get here
+					await macosDownloadAndInstall(rpc)
 					return
 				}
 				await Updater.applyUpdate()
@@ -2769,10 +2888,48 @@ await engine.start()
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
 // Background update check (skip in dev, delay to let webview initialize)
+// Always uses GitHub API instead of Electrobun's native checker because:
+// - Windows: no update.json is published, so Electrobun check always 404s
+// - macOS: update.json version is stale (generated before release is published)
 Updater.localInfo.channel().then(ch => {
 	if (ch !== 'dev') {
-		setTimeout(() => {
-			Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+		setTimeout(async () => {
+			try {
+				const localVer = await Updater.localInfo.version()
+				if (!localVer) return
+
+				const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`, {
+					signal: AbortSignal.timeout(15000),
+					headers: { 'Accept': 'application/vnd.github.v3+json' },
+				})
+				if (!resp.ok) {
+					console.warn(`[Vault] Background update check: GitHub API ${resp.status}`)
+					return
+				}
+
+				const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+				// Pre-release channel: first non-draft release (includes pre-releases)
+				// Standard channel: first non-draft, non-prerelease release
+				const candidate = preReleaseUpdates
+					? releases.find(r => !r.draft)
+					: releases.find(r => !r.draft && !r.prerelease)
+
+				if (!candidate) {
+					console.log('[Vault] Background update check: no suitable release found')
+					return
+				}
+
+				const remoteVer = candidate.tag_name.replace(/^v/, '')
+				if (versionCompare(remoteVer, localVer) > 0) {
+					console.log(`[Vault] Update available: ${remoteVer} > ${localVer}`)
+					pendingUpdateVersion = remoteVer
+					rpc.send['update-status']({ status: 'update-available', message: `Version ${remoteVer} available` })
+				} else {
+					console.log(`[Vault] Up to date: ${remoteVer} <= ${localVer}`)
+				}
+			} catch (e: any) {
+				console.warn('[Vault] Background update check failed:', e.message)
+			}
 		}, 5000)
 	}
 })
