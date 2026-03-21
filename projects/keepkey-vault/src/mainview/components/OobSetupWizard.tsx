@@ -18,6 +18,7 @@ import { useDeviceState } from '../hooks/useDeviceState'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
+import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
 
 // ── Design tokens ───────────────────────────────────────────────────────────
@@ -48,21 +49,27 @@ const ANIMATIONS_CSS = `
 // ── Step definitions ────────────────────────────────────────────────────────
 
 type WizardStep =
+  | 'intro'
   | 'welcome'
   | 'bootloader'
   | 'firmware'
   | 'init-choose'
   | 'init-progress'
   | 'init-label'
+  | 'verify-seed'
+  | 'security-tips'
   | 'complete'
 
 const STEP_SEQUENCE: WizardStep[] = [
+  'intro',
   'welcome',
   'bootloader',
   'firmware',
   'init-choose',
   'init-progress',
   'init-label',
+  'verify-seed',
+  'security-tips',
   'complete',
 ]
 
@@ -70,12 +77,15 @@ const STEP_SEQUENCE: WizardStep[] = [
 
 // Map wizard steps → their visible step group
 const stepToVisibleId: Record<WizardStep, string | null> = {
+  'intro': null,
   'welcome': null,
   'bootloader': 'bootloader',
   'firmware': 'firmware',
   'init-choose': 'init-choose',
   'init-progress': 'init-choose',
   'init-label': 'init-choose',
+  'verify-seed': 'init-choose',
+  'security-tips': null,
   'complete': null,
 }
 
@@ -100,20 +110,28 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
 export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
-  const [step, setStep] = useState<WizardStep>('welcome')
+  const [step, setStep] = useState<WizardStep>('intro')
+  const [introCard, setIntroCard] = useState(0)
+  const [tipCard, setTipCard] = useState(0)
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
   const [setupError, setSetupError] = useState<string | null>(null)
+  // Seed verification state
+  const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'verifying' | 'success' | 'failed'>('idle')
+  const [verifyError, setVerifyError] = useState<string | null>(null)
   // L1 fix: removed unused setupLoading state (value was never read)
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
+    'intro': '',
     'welcome': t('stepDescriptions.welcome'),
     'bootloader': t('stepDescriptions.bootloader'),
     'firmware': t('stepDescriptions.firmware'),
     'init-choose': t('stepDescriptions.initChoose'),
     'init-progress': t('stepDescriptions.initProgress'),
     'init-label': t('stepDescriptions.initLabel'),
+    'verify-seed': t('stepDescriptions.verifySeed', { defaultValue: 'Verify your recovery phrase' }),
+    'security-tips': t('stepDescriptions.securityTips', { defaultValue: 'Security tips' }),
     'complete': t('stepDescriptions.complete'),
   }
 
@@ -206,13 +224,13 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   let progressPercent = 0
   if (visibleIndex >= 0) {
     progressPercent = ((visibleIndex + 1) / VISIBLE_STEPS.length) * 100
-  } else if (step !== 'welcome') {
+  } else if (step !== 'welcome' && step !== 'intro') {
     progressPercent = 100
   }
 
   const isVisibleStepCompleted = (vsId: string) => {
     const vsIndex = VISIBLE_STEPS.findIndex(s => s.id === vsId)
-    if (step === 'complete' || step === 'init-label' || step === 'init-progress') return true
+    if (step === 'complete' || step === 'security-tips' || step === 'verify-seed' || step === 'init-label' || step === 'init-progress') return true
     const curVsIndex = visibleIndex
     return vsIndex < curVsIndex
   }
@@ -237,10 +255,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   }, [onSetupInProgress])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
-  // Device state determines the target step; the button only shows once state is known.
-  const welcomeReady = step === 'welcome' && deviceStatus.state !== 'disconnected'
+  // Only enable "Get Started" when real device features are available.
+  // connected_unpaired has no features yet — routing from that state would
+  // see all needs* flags as false and fall through to onComplete().
+  const hasFeatures = !['disconnected', 'connected_unpaired', 'error'].includes(deviceStatus.state)
+  const welcomeReady = step === 'welcome' && hasFeatures
 
   const handleWelcomeNext = useCallback(() => {
+    // Double-guard: refuse to route without real features
+    if (!hasFeatures) return
     if (needsBootloader) {
       setStep('bootloader')
     } else if (needsFirmware) {
@@ -250,7 +273,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     } else {
       onComplete()
     }
-  }, [needsBootloader, needsFirmware, needsInit, onComplete])
+  }, [hasFeatures, needsBootloader, needsFirmware, needsInit, onComplete])
 
   // ── Bootloader step ────────────────────────────────────────────────────
 
@@ -285,6 +308,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   // Auto-skip bootloader step when BL is already up to date
   useEffect(() => {
     if (step !== 'bootloader') return
+    // Don't make routing decisions without real device features (Windows disconnect gap)
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (needsBootloader) return // BL actually needs updating
     if (updateState !== 'idle') return
     if (rebootPhase === 'rebooting') return
@@ -296,18 +322,20 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     } else {
       onComplete()
     }
-  }, [step, needsBootloader, needsFirmware, needsInit, updateState, rebootPhase, onComplete])
+  }, [step, needsBootloader, needsFirmware, needsInit, updateState, rebootPhase, onComplete, deviceStatus.state])
 
   // Auto-start bootloader detection polling when entering bootloader step
   useEffect(() => {
     if (step !== 'bootloader') return
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (inBootloader) return // Already detected
     if (waitingForBootloader) return // Already polling
     if (updateState !== 'idle') return
     if (rebootPhase === 'rebooting') return
     if (!needsBootloader) return // BL up to date, skip handled above
     handleEnterBootloaderMode()
-  }, [step, inBootloader, waitingForBootloader, updateState, rebootPhase, needsBootloader])
+  }, [step, inBootloader, waitingForBootloader, updateState, rebootPhase, needsBootloader, deviceStatus.state])
 
   // Enter reboot phase when bootloader update completes
   useEffect(() => {
@@ -379,13 +407,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   // Auto-start polling for bootloader entry (not the update itself)
   useEffect(() => {
     if (step !== 'firmware') return
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (updateState !== 'idle') return
     if (rebootPhase === 'rebooting') return
     if (inBootloader) return // Already in BL — user will click to start
     if (!waitingForBootloaderFw) {
       handleEnterBootloaderForFirmware()
     }
-  }, [step, updateState, rebootPhase, inBootloader, waitingForBootloaderFw]) // H4 fix: added waitingForBootloaderFw
+  }, [step, updateState, rebootPhase, inBootloader, waitingForBootloaderFw, deviceStatus.state]) // H4 fix: added waitingForBootloaderFw
 
   // Enter reboot phase when firmware update completes
   useEffect(() => {
@@ -612,7 +642,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
         // Label is optional
       }
     }
-    setStep('complete')
+    // Offer seed verification for new wallets, skip straight to tips for recovered
+    setStep(setupType === 'create' ? 'verify-seed' : 'security-tips')
   }
 
   // ── Complete: auto-advance after 5s ────────────────────────────────────
@@ -640,10 +671,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   }, [step, onComplete])
 
   // L7 fix: prevent navigating back to already-completed steps
-  const showPrevious = !['welcome', 'complete', 'init-progress'].includes(step)
+  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   const showNext =
-    !['bootloader', 'init-choose', 'init-progress', 'init-label', 'complete'].includes(step) &&
+    !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -774,6 +805,19 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
           w="100%"
         >
           <Box w="100%" maxW="800px">
+            {/* ═══════════════ INTRO (Pre-Tutorial) ═════════════════ */}
+            {step === 'intro' && (
+              <TutorialPage
+                type="pre"
+                cardIndex={introCard}
+                onNext={() => {
+                  if (introCard < 2) setIntroCard(prev => prev + 1)
+                  else setStep('welcome')
+                }}
+                onSkip={() => setStep('welcome')}
+              />
+            )}
+
             {/* ═══════════════ WELCOME ═══════════════════════════════ */}
             {step === 'welcome' && (
               <VStack gap={4} textAlign="center" w="100%">
@@ -1634,22 +1678,21 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </VStack>
                 )}
 
+                {/* Firmware reboot: device says "Please disconnect and reconnect" — user must unplug */}
                 {rebootPhase === 'rebooting' && (
                   <VStack gap={2} w="100%">
-                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
+                    <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
                       <VStack gap={2} align="start">
                         <HStack gap={2}>
-                          <Spinner size="sm" color="blue.300" />
-                          <Text fontSize="sm" color="blue.300" fontWeight="bold">
-                            {rebootElapsedMs < 20000
-                              ? t('firmware.deviceRebooting', { defaultValue: 'Device rebooting...' })
-                              : t('firmware.rebootTakingLong', { defaultValue: 'Reconnection is taking longer than usual...' })}
+                          <FaExclamationTriangle color="#ECC94B" size={16} />
+                          <Text fontSize="sm" color="yellow.200" fontWeight="bold">
+                            {t('firmware.pleaseDisconnect', { defaultValue: 'Please disconnect and reconnect your KeepKey' })}
                           </Text>
                         </HStack>
-                        <Text fontSize="xs" color="blue.200">
+                        <Text fontSize="xs" color="yellow.300">
                           {rebootElapsedMs < 20000
-                            ? t('firmware.rebootingMessage', { defaultValue: 'Waiting for device to reconnect after update.' })
-                            : t('firmware.rebootTakingLongSub', { defaultValue: 'The device may need a moment to restart.' })}
+                            ? t('firmware.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
+                            : t('firmware.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
                         </Text>
                       </VStack>
                     </Box>
@@ -1960,6 +2003,24 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </Text>
                 </VStack>
 
+                {setupType === 'create' && (
+                  <Box w="100%" p={4} bg="red.900" borderRadius="lg" borderWidth="2px" borderColor="red.400"
+                    css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(245,101,101,0.4)' }}>
+                    <VStack gap={2}>
+                      <HStack gap={2} justify="center">
+                        <FaExclamationTriangle color="#FC8181" size={20} />
+                        <Text fontSize="md" color="red.200" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
+                          {t('initProgress.writeDownWarning', { defaultValue: 'Write down every word!' })}
+                        </Text>
+                        <FaExclamationTriangle color="#FC8181" size={20} />
+                      </HStack>
+                      <Text fontSize="xs" color="red.300" textAlign="center" fontWeight="600">
+                        {t('initProgress.writeDownDetail', { defaultValue: 'Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup — you will NOT see these words again.' })}
+                      </Text>
+                    </VStack>
+                  </Box>
+                )}
+
                 <Box w="100%" p={3} bg="green.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
                   <HStack gap={2} justify="center">
                     <FaExclamationTriangle color="#48BB78" size={14} />
@@ -1968,6 +2029,30 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     </Text>
                   </HStack>
                 </Box>
+
+                {setupError && (
+                  <Box w="100%" p={3} bg="red.900" borderRadius="lg" borderWidth="1px" borderColor="red.500">
+                    <Text fontSize="xs" color="red.300" textAlign="center">{setupError}</Text>
+                  </Box>
+                )}
+
+                {/* Escape hatch: if device disconnects or communication fails */}
+                {(deviceStatus.state === 'disconnected' || deviceStatus.state === 'error') && (
+                  <VStack gap={2} w="100%">
+                    <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="1px" borderColor="yellow.500">
+                      <Text fontSize="xs" color="yellow.200" textAlign="center">
+                        {t('initProgress.deviceLost', { defaultValue: 'Device disconnected. Plug it back in to continue, or go back to try again.' })}
+                      </Text>
+                    </Box>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.400"
+                      _hover={{ color: 'white', bg: 'rgba(255,255,255,0.06)' }}
+                      onClick={() => { setSetupError(null); setStep('init-choose') }}
+                    >
+                      {t('initProgress.goBack', { defaultValue: 'Go Back' })}
+                    </Button>
+                  </VStack>
+                )}
               </VStack>
             )}
 
@@ -2030,6 +2115,128 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </Button>
                 </VStack>
               </VStack>
+            )}
+
+            {/* ═══════════════ VERIFY SEED ═══════════════════════════ */}
+            {step === 'verify-seed' && (
+              <VStack gap={4} textAlign="center" w="100%" maxW="400px" mx="auto">
+                {verifyingPhase === 'idle' && (
+                  <>
+                    <FaKey color="#C0A860" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="white">
+                        {t('verifySeed.title', { defaultValue: 'Verify Your Recovery Phrase' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400" maxW="320px">
+                        {t('verifySeed.description', { defaultValue: 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.' })}
+                      </Text>
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                      _active={{ transform: 'scale(0.98)' }}
+                      transition="all 0.15s ease"
+                      onClick={async () => {
+                        setVerifyingPhase('verifying')
+                        setVerifyError(null)
+                        onWordCountChange?.(wordCount)
+                        try {
+                          const result = await rpcRequest('verifySeed', { wordCount }, 0) as { success: boolean; message: string }
+                          setVerifyingPhase(result.success ? 'success' : 'failed')
+                          if (!result.success) setVerifyError(result.message)
+                        } catch (e: any) {
+                          setVerifyingPhase('failed')
+                          setVerifyError(e?.message || 'Verification failed')
+                        }
+                      }}
+                    >
+                      {t('verifySeed.verifyNow', { defaultValue: 'Verify Now' })}
+                    </Button>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={() => setStep('security-tips')}
+                    >
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                    </Button>
+                  </>
+                )}
+                {verifyingPhase === 'verifying' && (
+                  <>
+                    <Spinner size="lg" color="#C0A860" borderWidth="3px" />
+                    <VStack gap={1}>
+                      <Text fontSize="md" fontWeight="bold" color="white">
+                        {t('verifySeed.verifying', { defaultValue: 'Verifying...' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {t('verifySeed.followDevice', { defaultValue: 'Follow the prompts on your KeepKey to enter the requested words.' })}
+                      </Text>
+                    </VStack>
+                  </>
+                )}
+                {verifyingPhase === 'success' && (
+                  <>
+                    <FaCheckCircle color="#48BB78" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="green.400">
+                        {t('verifySeed.verified', { defaultValue: 'Recovery Phrase Verified!' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {t('verifySeed.verifiedDetail', { defaultValue: 'Your backup is correct. Keep it safe — never share it with anyone.' })}
+                      </Text>
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      onClick={() => setStep('security-tips')}
+                    >
+                      {t('verifySeed.continue', { defaultValue: 'Continue' })}
+                    </Button>
+                  </>
+                )}
+                {verifyingPhase === 'failed' && (
+                  <>
+                    <FaExclamationTriangle color="#FC8181" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="red.400">
+                        {t('verifySeed.failed', { defaultValue: 'Verification Failed' })}
+                      </Text>
+                      <Text fontSize="xs" color="red.300" maxW="320px">
+                        {verifyError || t('verifySeed.failedDetail', { defaultValue: 'The words you entered did not match. Please try again or check your written backup.' })}
+                      </Text>
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      onClick={() => setVerifyingPhase('idle')}
+                    >
+                      {t('verifySeed.tryAgain', { defaultValue: 'Try Again' })}
+                    </Button>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={() => setStep('security-tips')}
+                    >
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                    </Button>
+                  </>
+                )}
+              </VStack>
+            )}
+
+            {/* ═══════════════ SECURITY TIPS (Post-Tutorial) ════════ */}
+            {step === 'security-tips' && (
+              <TutorialPage
+                type="post"
+                cardIndex={tipCard}
+                onNext={() => {
+                  if (tipCard < 2) setTipCard(prev => prev + 1)
+                  else setStep('complete')
+                }}
+                onSkip={() => setStep('complete')}
+              />
             )}
 
             {/* ═══════════════ COMPLETE ═════════════════════════════ */}
@@ -2096,9 +2303,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
             <Text fontSize="sm" color="gray.400" fontWeight="500">
               {visibleIndex >= 0
                 ? t('footer.stepOf', { current: visibleIndex + 1, total: VISIBLE_STEPS.length })
-                : step === 'welcome'
+                : step === 'intro' || step === 'welcome'
                   ? ''
-                  : t('footer.settingUpWallet')}
+                  : step === 'security-tips'
+                    ? t('footer.securityTips', { defaultValue: 'Security Tips' })
+                    : t('footer.settingUpWallet')}
             </Text>
             <HStack gap={3}>
               {showPrevious && (

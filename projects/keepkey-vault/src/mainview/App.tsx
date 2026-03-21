@@ -36,6 +36,11 @@ function App() {
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
+	// Ref-based OOB lock: once the device enters an OOB state, keep the wizard
+	// mounted through disconnects. The state-based setupInProgress can lose races
+	// with React render batching on fast USB detach/reattach cycles (Windows).
+	const oobEnteredRef = useRef(false)
+	const oobClaimStuckSince = useRef<number | null>(null)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
@@ -432,10 +437,29 @@ function App() {
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
 
+	// Track OOB entry — once the wizard is shown, lock it through disconnects
+	if (!wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+		oobEnteredRef.current = true
+	}
+	if (wizardComplete) {
+		oobEnteredRef.current = false
+	}
+
+	// Release OOB lock if device is persistently claimed/errored for >30s
+	// (another app holding the device, not a transient reboot)
+	if (oobEnteredRef.current && isClaimed) {
+		if (!oobClaimStuckSince.current) oobClaimStuckSince.current = Date.now()
+		else if (Date.now() - oobClaimStuckSince.current > 30000) oobEnteredRef.current = false
+	} else {
+		oobClaimStuckSince.current = null
+	}
+
+	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
+
 	const phase: AppPhase =
-		// Setup lock takes top priority — during OOB, transient states like
-		// isClaimed (LIBUSB_ERROR_ACCESS race) must not unmount the wizard.
-		!wizardComplete && setupInProgress ? "setup"
+		// oobLock takes priority — during OOB, transient claim errors are expected
+		// (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
+		oobLock ? "setup"
 		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"

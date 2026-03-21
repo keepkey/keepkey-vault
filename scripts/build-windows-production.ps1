@@ -448,6 +448,16 @@ if (-not (Test-Path $WrapperExe)) {
     Write-Success "Wrapper EXE already exists"
 }
 
+# Copy DPI-awareness manifest next to wrapper EXE
+# Windows auto-loads <exename>.exe.manifest for per-monitor DPI scaling.
+# Without this, WebView2 renders at 96 DPI and the OS bitmap-scales it — blurry text/UI.
+$ManifestSrc = Join-Path $ScriptDir "KeepKeyVault.exe.manifest"
+$ManifestDst = Join-Path $BuildDir "KeepKeyVault.exe.manifest"
+if (Test-Path $ManifestSrc) {
+    Copy-Item $ManifestSrc $ManifestDst -Force
+    Write-Success "DPI manifest copied"
+}
+
 # Embed KeepKey icon into all EXEs
 # Electrobun's rcedit call fails (ENOENT — hardcoded CI path), so we do it ourselves.
 $RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
