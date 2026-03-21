@@ -246,7 +246,7 @@ function getSwaggerUiHtml(): string {
     .kk-tab{padding:12px 20px;cursor:pointer;font-size:14px;font-weight:500;color:#8a8a9a;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;user-select:none}
     .kk-tab:hover{color:#e0e0e0}
     .kk-tab.active{color:#C0A860;border-bottom-color:#C0A860}
-    .kk-tab.locked{opacity:.4;cursor:not-allowed}
+    .kk-tab.locked{opacity:.4;cursor:default;pointer-events:none}
 
     .kk-panel{display:none}
     .kk-panel.active{display:block}
@@ -567,6 +567,7 @@ function getSwaggerUiHtml(): string {
     }]
   }
 }</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('cosmos/sign-amino',{signerAddress:'cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj',signDoc:{chain_id:'cosmoshub-4',account_number:'16359',sequence:'17',fee:{amount:[{amount:'100',denom:'uatom'}],gas:'100000'},memo:'',msgs:[{type:'cosmos-sdk/MsgSend',value:{amount:[{amount:'1000',denom:'uatom'}],from_address:'cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj',to_address:'cosmos1qjwdyn56ecagk8rjf7crrzwcyz6775cj89njn3'}}]}})">Try it</button>
 
         <h2>THORChain &mdash; Transfer</h2>
 <pre><code><span class="cmt">// POST /thorchain/sign-amino-transfer</span>
@@ -588,6 +589,7 @@ function getSwaggerUiHtml(): string {
     }]
   }
 }</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('thorchain/sign-amino-transfer',{signerAddress:'thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az',signDoc:{chain_id:'thorchain-mainnet-v1',account_number:'17',sequence:'2',fee:{amount:[{amount:'3000',denom:'rune'}],gas:'200000'},memo:'',msgs:[{type:'thorchain/MsgSend',value:{amount:[{amount:'100',denom:'rune'}],from_address:'thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az',to_address:'thor1wy58774wagy4hkljz9mchhqtgk949zdwwe80d5'}}]}})">Try it</button>
 
         <h2>Device &mdash; Get Features</h2>
 <pre><code><span class="cmt">// POST /system/info/get-features</span>
@@ -615,13 +617,23 @@ function getSwaggerUiHtml(): string {
 
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    var KEY='kk_dev_apikey'
-    var sL=false, swaggerUI=null
+    var STORAGE_KEY='kk_dev_apikey'
+    var swaggerLoaded=false
 
-    function getKey(){return localStorage.getItem(KEY)||''}
-    function setKey(k){
-      if(k)localStorage.setItem(KEY,k);else localStorage.removeItem(KEY)
+    function getKey(){return localStorage.getItem(STORAGE_KEY)||''}
+    function setKey(key){
+      if(key)localStorage.setItem(STORAGE_KEY,key);else localStorage.removeItem(STORAGE_KEY)
+      swaggerLoaded=false
+      document.getElementById('swagger-ui').innerHTML=''
       refreshUI()
+    }
+
+    /* ── Timeout helper (AbortSignal.timeout fallback) ── */
+    function timeoutSignal(ms){
+      if(typeof AbortSignal.timeout==='function')return AbortSignal.timeout(ms)
+      var c=new AbortController()
+      setTimeout(function(){c.abort()},ms)
+      return c.signal
     }
 
     /* ── Tab switching ───────────────────────── */
@@ -635,39 +647,40 @@ function getSwaggerUiHtml(): string {
     }
     document.querySelectorAll('.kk-tab').forEach(function(t){
       t.addEventListener('click',function(){
-        var tab=t.dataset.tab
-        switchTab(tab)
+        if(t.classList.contains('locked'))return
+        switchTab(t.dataset.tab)
       })
     })
 
-    /* ── Load Swagger with bearer ────────────── */
+    /* ── Load Swagger with live key lookup ────── */
     function loadSwagger(){
-      var k=getKey()
-      if(!k){
+      var key=getKey()
+      if(!key){
         document.getElementById('explorer-gate').style.display='block'
         document.getElementById('swagger-ui').style.display='none'
         return
       }
       document.getElementById('explorer-gate').style.display='none'
       document.getElementById('swagger-ui').style.display='block'
-      if(sL)return
-      sL=true
-      swaggerUI=SwaggerUIBundle({
+      if(swaggerLoaded)return
+      swaggerLoaded=true
+      SwaggerUIBundle({
         url:'/spec/swagger.json',
         dom_id:'#swagger-ui',
         deepLinking:true,
         presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
         layout:'BaseLayout',
         requestInterceptor:function(req){
-          if(k)req.headers['Authorization']='Bearer '+k
+          var live=getKey()
+          if(live)req.headers['Authorization']='Bearer '+live
           return req
         }
       })
     }
 
-    /* ── Status ──────────────────────────────── */
-    function ck(){
-      fetch('/api/health',{signal:AbortSignal.timeout(3000)})
+    /* ── Health status polling ────────────────── */
+    function checkHealth(){
+      fetch('/api/health',{signal:timeoutSignal(3000)})
         .then(function(r){return r.json()})
         .then(function(d){
           document.getElementById('sd').style.background=d.connected?'#22c55e':'#eab308'
@@ -680,105 +693,112 @@ function getSwaggerUiHtml(): string {
           document.getElementById('st').textContent='offline'
         })
     }
-    ck();setInterval(ck,10000)
+    checkHealth();setInterval(checkHealth,10000)
 
     /* ── UI refresh based on key state ───────── */
     function refreshUI(){
-      var k=getKey()
+      var key=getKey()
       var kb=document.getElementById('kb')
       var banner=document.getElementById('paired-banner')
       var form=document.getElementById('pair-form')
       var title=document.getElementById('pair-title')
       var desc=document.getElementById('pair-desc')
-      var eg=document.getElementById('examples-gate')
-      var ec=document.getElementById('examples-content')
-      if(k){
+      var exGate=document.getElementById('examples-gate')
+      var exContent=document.getElementById('examples-content')
+      var lockedTabs=document.querySelectorAll('[data-tab="examples"],[data-tab="explorer"]')
+      if(key){
         kb.style.display='inline';kb.textContent='paired'
         banner.style.display='flex'
-        document.getElementById('paired-key').textContent=k.slice(0,8)+'...'
+        document.getElementById('paired-key').textContent=key.slice(0,8)+'...'
         form.style.display='none'
         title.textContent='Connected'
         desc.textContent='Your app is paired. Use the Examples and API Explorer tabs.'
-        if(eg){eg.style.display='none';ec.style.display='block'}
+        if(exGate){exGate.style.display='none';exContent.style.display='block'}
+        lockedTabs.forEach(function(t){t.classList.remove('locked')})
       }else{
         kb.style.display='none'
         banner.style.display='none'
         form.style.display='block'
         title.textContent='Pair a New App'
         desc.textContent='Register your application with the vault. Approve the pairing on your KeepKey device.'
-        if(eg){eg.style.display='block';ec.style.display='none'}
+        if(exGate){exGate.style.display='block';exContent.style.display='none'}
+        lockedTabs.forEach(function(t){t.classList.add('locked')})
       }
     }
 
     /* ── Pair ─────────────────────────────────── */
     function doPair(){
-      var n=document.getElementById('pn').value.trim()
-      if(!n)return
-      var b=document.getElementById('pb'),r=document.getElementById('pr')
-      b.disabled=true;b.textContent='Approve on device\u2026'
-      r.className='pair-result';r.textContent=''
+      var name=document.getElementById('pn').value.trim()
+      if(!name)return
+      var btn=document.getElementById('pb'),res=document.getElementById('pr')
+      btn.disabled=true;btn.textContent='Approve on device\u2026'
+      res.className='pair-result';res.textContent=''
       fetch('/auth/pair',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name:n,imageUrl:document.getElementById('pi').value.trim()||undefined})
+        body:JSON.stringify({name:name,imageUrl:document.getElementById('pi').value.trim()||undefined})
       })
-      .then(function(x){return x.json()})
+      .then(function(r){return r.json()})
       .then(function(d){
         if(d.apiKey){
-          r.className='pair-result ok';r.textContent='Paired! Key: '+d.apiKey
+          res.className='pair-result ok';res.textContent='Paired! Key: '+d.apiKey
           setKey(d.apiKey)
         }else{
-          r.className='pair-result err';r.textContent=d.error||'Pairing rejected'
+          res.className='pair-result err';res.textContent=d.error||'Pairing rejected'
         }
       })
-      .catch(function(e){r.className='pair-result err';r.textContent='Error: '+e.message})
-      .finally(function(){b.disabled=false;b.textContent='Pair App'})
+      .catch(function(e){res.className='pair-result err';res.textContent='Error: '+e.message})
+      .finally(function(){btn.disabled=false;btn.textContent='Pair App'})
     }
 
     function doVerify(){
-      var k=document.getElementById('ek').value.trim()
-      if(!k)return
-      var r=document.getElementById('vr')
-      fetch('/auth/pair',{headers:{'Authorization':'Bearer '+k}})
-        .then(function(x){return x.json()})
+      var key=document.getElementById('ek').value.trim()
+      if(!key)return
+      var res=document.getElementById('vr')
+      fetch('/auth/pair',{headers:{'Authorization':'Bearer '+key}})
+        .then(function(r){return r.json()})
         .then(function(d){
-          r.style.marginTop='12px'
+          res.style.marginTop='12px'
           if(d.paired){
-            r.className='pair-result ok'
-            r.textContent='Valid \u2014 paired as "'+(d.name||'unknown')+'"'
-            setKey(k)
+            res.className='pair-result ok'
+            res.textContent='Valid \u2014 paired as "'+(d.name||'unknown')+'"'
+            setKey(key)
           }else{
-            r.className='pair-result err'
-            r.textContent='Invalid or expired key'
+            res.className='pair-result err'
+            res.textContent='Invalid or expired key'
           }
         })
         .catch(function(e){
-          r.className='pair-result err';r.textContent='Error: '+e.message
-          r.style.marginTop='12px'
+          res.className='pair-result err';res.textContent='Error: '+e.message
+          res.style.marginTop='12px'
         })
     }
 
     function doUnpair(){
       setKey('')
-      sL=false;swaggerUI=null
-      document.getElementById('swagger-ui').innerHTML=''
+      switchTab('pair')
     }
 
     /* ── Try examples ────────────────────────── */
     function tryExample(endpoint,body){
-      var k=getKey()
-      if(!k){switchTab('pair');return}
+      var key=getKey()
+      if(!key){switchTab('pair');return}
       var rd=document.getElementById('try-result')
       var rb=document.getElementById('try-result-body')
       rd.style.display='block'
       rb.textContent='Sending... (approve on device if prompted)'
       fetch('/'+endpoint,{
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+k},
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
         body:JSON.stringify(body),
-        signal:AbortSignal.timeout(120000)
+        signal:timeoutSignal(120000)
       })
-      .then(function(r){return r.json()})
+      .then(function(r){
+        if(!r.ok)return r.text().then(function(t){
+          try{return JSON.parse(t)}catch(e){throw new Error(r.status+': '+t.slice(0,200))}
+        })
+        return r.json()
+      })
       .then(function(d){rb.textContent=JSON.stringify(d,null,2)})
       .catch(function(e){rb.textContent='Error: '+e.message})
       rd.scrollIntoView({behavior:'smooth'})
@@ -968,6 +988,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // Track active signing request so we can dismiss the overlay after the
       // actual handler completes (success or failure), not when the user clicks approve.
       let activeSigningId: string | undefined
+      let activeSigningInfo: SigningRequestInfo | undefined
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -1153,8 +1174,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!approved) {
             return json({ error: 'Signing rejected by user' }, 403)
           }
-          // Approved — track ID so we dismiss the overlay AFTER the handler finishes
+          // Approved — track ID + decoded info so handlers can pass metadata to device
           activeSigningId = id
+          activeSigningInfo = signingInfo
         }
 
         // ── List paired apps (public — shows connected dApps, keys stripped) ──
@@ -1404,6 +1426,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             msg.maxPriorityFeePerGas = body.maxPriorityFeePerGas || body.max_priority_fee_per_gas || '0x0'
           } else {
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
+          }
+
+          // ── EVM Clear-Signing: pass signed metadata blob to hdwallet ──
+          // If the calldata decoder obtained a signedInsightBlob from Pioneer,
+          // attach it so hdwallet sends EthereumTxMetadata to the device before signing.
+          const decoded = activeSigningInfo?.calldataDecoded
+          if (decoded?.signedInsightBlob) {
+            msg.txMetadata = {
+              signedPayload: decoded.signedInsightBlob,
+              keyId: decoded.insightKeyId,
+            }
+            console.log(`[REST] Attaching EVM clear-sign metadata: keyId=${decoded.insightKeyId} blobLen=${typeof decoded.signedInsightBlob === 'string' ? decoded.signedInsightBlob.length : decoded.signedInsightBlob?.length}`)
+          } else {
+            console.log('[REST] No signed metadata blob — device will show raw hex (blind signing on OLED)')
           }
 
           console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
@@ -2194,6 +2230,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (activeSigningId && callbacks?.onSigningDismissed) {
           callbacks.onSigningDismissed(activeSigningId)
         }
+        activeSigningId = undefined
+        activeSigningInfo = undefined
       }
     },
   })
