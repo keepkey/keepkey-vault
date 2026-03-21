@@ -129,9 +129,8 @@ async function macosDownloadAndInstall(rpc: any) {
 		throw new Error(`No update version available (current: ${pkg.version})`)
 	}
 
-	// Arch-aware asset name: arm64 vs x64
-	const arch = process.arch === 'x64' ? 'x64' : 'arm64'
-	const assetName = `stable-macos-${arch}-keepkey-vault.app.tar.zst`
+	// We only ship arm64 macOS builds (Intel Macs run via Rosetta)
+	const assetName = 'stable-macos-arm64-keepkey-vault.app.tar.zst'
 	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${assetName}`
 
 	console.log(`[macOS Update] Downloading: ${url}`)
