@@ -2887,10 +2887,44 @@ await engine.start()
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
 // Background update check (skip in dev, delay to let webview initialize)
+// Uses the same pre-release-aware logic as the RPC checkForUpdate handler
+// so the UpdateBanner actually shows for pre-release updates.
 Updater.localInfo.channel().then(ch => {
 	if (ch !== 'dev') {
-		setTimeout(() => {
-			Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+		setTimeout(async () => {
+			try {
+				const localVer = await Updater.localInfo.version()
+
+				// Pre-release path: check GitHub API directly
+				if (preReleaseUpdates) {
+					try {
+						const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=5`, {
+							signal: AbortSignal.timeout(10000),
+							headers: { 'Accept': 'application/vnd.github.v3+json' },
+						})
+						if (resp.ok) {
+							const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+							const latest = releases.find(r => !r.draft)
+							if (latest) {
+								const remoteVer = latest.tag_name.replace(/^v/, '')
+								if (localVer && versionCompare(remoteVer, localVer) > 0) {
+									console.log(`[Vault] Background: pre-release ${remoteVer} available (current: ${localVer})`)
+									pendingUpdateVersion = remoteVer
+									rpc.send['update-status']({ status: 'update-available', message: `Version ${remoteVer} available` })
+									return
+								}
+							}
+						}
+					} catch (e: any) {
+						console.warn('[Vault] Background pre-release check failed:', e.message)
+					}
+				}
+
+				// Standard path: Electrobun's built-in checker
+				await Updater.checkForUpdate()
+			} catch (e: any) {
+				console.warn('[Vault] Update check failed:', e.message)
+			}
 		}, 5000)
 	}
 })
