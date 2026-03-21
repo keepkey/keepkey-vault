@@ -35,6 +35,84 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 
+// ── Windows auto-update (bypasses Electrobun's broken zig-zstd) ──────
+const GITHUB_REPO = 'keepkey/keepkey-vault'
+let windowsInstallerPath: string | null = null
+
+async function windowsDownloadAndInstall(rpc: any) {
+	// 1. Get the latest version from Electrobun or cached update info
+	const info = Updater.updateInfo()
+	const version = info?.version || pkg.version
+	const exeName = `KeepKey-Vault-${version}-win-x64-setup.exe`
+	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${exeName}`
+
+	console.log(`[Windows Update] Downloading installer: ${url}`)
+	rpc.send['update-status']({ status: 'downloading-update', message: `Downloading ${exeName}...`, progress: 0 })
+
+	try {
+		const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
+		if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`)
+
+		const totalBytes = Number(resp.headers.get('content-length') || 0)
+		const reader = resp.body?.getReader()
+		if (!reader) throw new Error('No response body')
+
+		const chunks: Uint8Array[] = []
+		let downloaded = 0
+
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			chunks.push(value)
+			downloaded += value.length
+			if (totalBytes > 0) {
+				const progress = (downloaded / totalBytes) * 100
+				rpc.send['update-status']({ status: 'download-progress', message: `Downloading... ${Math.round(progress)}%`, progress })
+			}
+		}
+
+		// Save to temp directory
+		const tmpDir = os.tmpdir()
+		const installerPath = path.join(tmpDir, exeName)
+		const blob = new Blob(chunks)
+		await Bun.write(installerPath, blob)
+
+		windowsInstallerPath = installerPath
+		console.log(`[Windows Update] Installer saved: ${installerPath} (${downloaded} bytes)`)
+
+		rpc.send['update-status']({ status: 'update-ready', message: 'Update ready to install' })
+	} catch (e: any) {
+		console.error('[Windows Update] Download failed:', e)
+		rpc.send['update-status']({ status: 'error', message: e.message, details: { errorMessage: e.message } })
+		throw e
+	}
+}
+
+async function windowsLaunchInstaller(rpc: any) {
+	if (!windowsInstallerPath) {
+		// No downloaded installer — try download first
+		await windowsDownloadAndInstall(rpc)
+	}
+	if (!windowsInstallerPath) throw new Error('No installer available')
+
+	console.log(`[Windows Update] Launching installer: ${windowsInstallerPath}`)
+	rpc.send['update-status']({ status: 'applying-update', message: 'Launching installer...' })
+
+	// Launch the installer and exit the app
+	// The /S flag runs NSIS installer silently (if supported)
+	// cmd /c start runs it detached so it survives our exit
+	const installerWin = windowsInstallerPath.replace(/\//g, '\\')
+	Bun.spawn(['cmd', '/c', 'start', '', installerWin], {
+		stdio: ['ignore', 'ignore', 'ignore'],
+	})
+
+	// Give the installer a moment to start, then quit
+	setTimeout(() => {
+		console.log('[Windows Update] Exiting app for installer...')
+		process.exit(0)
+	}, 1500)
+}
+
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
 const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
 let chainCatalog: PioneerChainInfo[] = []
@@ -2409,9 +2487,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			downloadUpdate: async () => {
+				if (process.platform === 'win32') {
+					// Windows: bypass Electrobun's broken zig-zstd updater.
+					// Download the setup exe from GitHub, save to temp, launch it, quit.
+					await windowsDownloadAndInstall(rpc)
+					return
+				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
+				if (process.platform === 'win32') {
+					// Windows: if we already downloaded the exe, launch it and quit
+					await windowsLaunchInstaller(rpc)
+					return
+				}
 				await Updater.applyUpdate()
 			},
 			getUpdateInfo: async () => {
