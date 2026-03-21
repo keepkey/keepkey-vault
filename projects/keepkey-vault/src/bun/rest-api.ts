@@ -233,7 +233,6 @@ function getSwaggerUiHtml(): string {
     *{box-sizing:border-box}
     body{margin:0;background:#0d1117;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
 
-    /* ── Header ────────────────────────────────── */
     .kk-header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border-bottom:2px solid #C0A860;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
     .kk-header-left{display:flex;align-items:center;gap:12px}
     .kk-header h1{margin:0;color:#C0A860;font-size:20px;font-weight:700}
@@ -241,25 +240,25 @@ function getSwaggerUiHtml(): string {
     .kk-status{display:flex;align-items:center;gap:8px}
     .kk-status .dot{width:8px;height:8px;border-radius:50%;background:#555}
     .kk-status span{color:#8a8a9a;font-size:12px}
+    .kk-status .key-badge{background:rgba(34,197,94,.15);color:#22c55e;padding:2px 8px;border-radius:4px;font-size:11px;font-family:'SF Mono',Menlo,monospace}
 
-    /* ── Tabs ──────────────────────────────────── */
-    .kk-tabs{display:flex;gap:0;background:#161b22;border-bottom:1px solid #30363d;padding:0 24px}
+    .kk-tabs{display:flex;gap:0;background:#161b22;border-bottom:1px solid #30363d;padding:0 24px;flex-wrap:wrap}
     .kk-tab{padding:12px 20px;cursor:pointer;font-size:14px;font-weight:500;color:#8a8a9a;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;user-select:none}
     .kk-tab:hover{color:#e0e0e0}
     .kk-tab.active{color:#C0A860;border-bottom-color:#C0A860}
+    .kk-tab.locked{opacity:.4;cursor:not-allowed}
 
-    /* ── Panels ────────────────────────────────── */
     .kk-panel{display:none}
     .kk-panel.active{display:block}
 
-    /* ── Guide ─────────────────────────────────── */
+    /* ── Guide ──────────────────────────────── */
     .guide{max-width:820px;margin:0 auto;padding:32px 24px;line-height:1.7}
     .guide h2{color:#C0A860;font-size:22px;margin:32px 0 12px;font-weight:600;border-bottom:1px solid #30363d;padding-bottom:8px}
     .guide h2:first-child{margin-top:0}
     .guide h3{color:#e0e0e0;font-size:16px;margin:24px 0 8px}
     .guide p{color:#b0b0c0;margin:8px 0}
     .guide code{background:#161b22;padding:2px 6px;border-radius:4px;font-family:'SF Mono',Menlo,monospace;font-size:13px;color:#C0A860}
-    .guide pre{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0}
+    .guide pre{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0;position:relative}
     .guide pre code{background:none;padding:0;color:#e0e0e0;display:block;white-space:pre}
     .kw{color:#ff7b72}.str{color:#a5d6ff}.cmt{color:#8b949e}.fn{color:#d2a8ff}.num{color:#79c0ff}
     .steps{display:grid;grid-template-columns:40px 1fr;gap:12px;margin:16px 0}
@@ -270,12 +269,14 @@ function getSwaggerUiHtml(): string {
     .chip .cl{color:#e0e0e0;font-weight:500}.chip .cs{color:#8a8a9a;font-size:11px}
     .note{background:rgba(192,168,96,.08);border-left:3px solid #C0A860;padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
     .note strong{color:#C0A860}
+    .note.warn{border-left-color:#eab308;background:rgba(234,179,8,.08)}
+    .note.warn strong{color:#eab308}
     .guide table{width:100%;border-collapse:collapse;margin:12px 0}
     .guide th{text-align:left;color:#8a8a9a;font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding:8px 12px;border-bottom:1px solid #30363d}
     .guide td{padding:8px 12px;border-bottom:1px solid #1c2128;color:#b0b0c0;font-size:13px}
     .guide td code{font-size:12px}
 
-    /* ── Pair panel ─────────────────────────────── */
+    /* ── Pair panel ─────────────────────────── */
     .pair-wrap{max-width:500px;margin:40px auto;padding:0 24px}
     .pair-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px}
     .pair-card h2{color:#C0A860;margin:0 0 4px;font-size:18px}
@@ -294,8 +295,22 @@ function getSwaggerUiHtml(): string {
     .pair-row input{margin-bottom:0;flex:1}
     .vfy-btn{padding:10px 16px;background:transparent;border:1px solid #30363d;border-radius:6px;color:#C0A860;font-size:13px;cursor:pointer;white-space:nowrap}
     .vfy-btn:hover{border-color:#C0A860}
+    .paired-banner{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
+    .paired-banner .left{display:flex;align-items:center;gap:10px}
+    .paired-banner .dot{width:8px;height:8px;border-radius:50%;background:#22c55e}
+    .paired-banner .info{font-size:13px;color:#22c55e}
+    .paired-banner .info .key{font-family:'SF Mono',Menlo,monospace;font-size:11px;color:#8a8a9a;margin-top:2px}
+    .unpair-btn{background:transparent;border:1px solid rgba(248,81,73,.3);color:#f85149;padding:6px 12px;border-radius:4px;font-size:12px;cursor:pointer}
+    .unpair-btn:hover{background:rgba(248,81,73,.1)}
 
-    /* ── Swagger overrides ─────────────────────── */
+    /* ── Locked gate ────────────────────────── */
+    .lock-gate{max-width:500px;margin:60px auto;text-align:center;padding:0 24px}
+    .lock-gate h2{color:#C0A860;font-size:20px;margin-bottom:8px}
+    .lock-gate p{color:#8a8a9a;font-size:14px;margin-bottom:20px}
+    .lock-gate .go-pair{display:inline-block;padding:10px 24px;background:#C0A860;color:#0d1117;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;text-decoration:none;border:none}
+    .lock-gate .go-pair:hover{background:#d4bc6a}
+
+    /* ── Swagger overrides ──────────────────── */
     .swagger-ui{background:#0d1117}
     .swagger-ui .topbar{display:none}
     .swagger-ui .scheme-container{background:#0d1117;box-shadow:none}
@@ -336,7 +351,6 @@ function getSwaggerUiHtml(): string {
 </head>
 <body>
 
-  <!-- ═══ Header ═══ -->
   <div class="kk-header">
     <div class="kk-header-left">
       <svg width="32" height="32" viewBox="0 0 100 100" fill="none">
@@ -351,80 +365,75 @@ function getSwaggerUiHtml(): string {
     <div class="kk-status">
       <div class="dot" id="sd"></div>
       <span id="st">checking&hellip;</span>
+      <span class="key-badge" id="kb" style="display:none"></span>
     </div>
   </div>
 
-  <!-- ═══ Tabs ═══ -->
-  <div class="kk-tabs">
-    <div class="kk-tab active" data-tab="guide">Getting Started</div>
+  <div class="kk-tabs" id="tabs">
     <div class="kk-tab" data-tab="pair">Pair App</div>
+    <div class="kk-tab" data-tab="guide">Getting Started</div>
+    <div class="kk-tab" data-tab="examples">Examples</div>
     <div class="kk-tab" data-tab="explorer">API Explorer</div>
   </div>
 
-  <!-- ═══ Getting Started ═══ -->
-  <div class="kk-panel active" id="panel-guide">
-    <div class="guide">
-
-      <h2>Quick Start</h2>
-      <p>The KeepKey Vault exposes a local REST API on <code>localhost:1646</code>.
-         Any app &mdash; web, mobile, CLI, or bot &mdash; can pair with the vault and
-         interact with the hardware wallet.</p>
-
-      <div class="steps">
-        <div class="sn">1</div>
-        <div class="sc">
-          <strong>Enable the API bridge</strong>
-          <p>Open Vault &rarr; Settings &rarr; toggle <em>API Bridge</em> on.</p>
+  <!-- ═══ Pair App (default) ═══ -->
+  <div class="kk-panel" id="panel-pair">
+    <div class="pair-wrap">
+      <div class="pair-card">
+        <div id="paired-banner" style="display:none" class="paired-banner">
+          <div class="left"><div class="dot"></div><div class="info">Paired<div class="key" id="paired-key"></div></div></div>
+          <button class="unpair-btn" onclick="doUnpair()">Disconnect</button>
         </div>
-        <div class="sn">2</div>
-        <div class="sc">
-          <strong>Pair your app</strong>
-          <p>Send <code>POST /auth/pair</code> with your app name.
-             Approve on the KeepKey device. You receive a bearer token.</p>
-        </div>
-        <div class="sn">3</div>
-        <div class="sc">
-          <strong>Make API calls</strong>
-          <p>Include the bearer token in the <code>Authorization</code> header
-             for all subsequent requests.</p>
+        <h2 id="pair-title">Pair a New App</h2>
+        <p class="desc" id="pair-desc">Register your application with the vault. Approve the pairing on your KeepKey device.</p>
+
+        <div id="pair-form">
+          <label for="pn">App Name</label>
+          <input id="pn" placeholder="My Trading Bot" />
+          <label for="pi">Icon URL <span style="color:#8a8a9a">(optional)</span></label>
+          <input id="pi" placeholder="https://example.com/icon.png" />
+          <button class="pair-btn" id="pb" onclick="doPair()">Pair App</button>
+          <div id="pr"></div>
+
+          <div class="pair-sep">
+            <label for="ek">Already have a key?</label>
+            <div class="pair-row">
+              <input id="ek" placeholder="Paste API key&hellip;" />
+              <button class="vfy-btn" onclick="doVerify()">Use Key</button>
+            </div>
+            <div id="vr"></div>
+          </div>
         </div>
       </div>
+    </div>
+  </div>
 
-      <h2>Pairing</h2>
-      <h3>Request an API key</h3>
-<pre><code><span class="cmt">// POST http://localhost:1646/auth/pair</span>
-{
-  <span class="str">"name"</span>: <span class="str">"My Trading Bot"</span>,
-  <span class="str">"imageUrl"</span>: <span class="str">"https://example.com/icon.png"</span>
-}
+  <!-- ═══ Getting Started ═══ -->
+  <div class="kk-panel" id="panel-guide">
+    <div class="guide">
+      <h2>Quick Start</h2>
+      <p>The KeepKey Vault exposes a local REST API on <code>localhost:1646</code>.
+         Any app &mdash; web, mobile, CLI, or bot &mdash; can pair and interact
+         with the hardware wallet.</p>
+      <div class="steps">
+        <div class="sn">1</div><div class="sc"><strong>Enable the API bridge</strong><p>Vault &rarr; Settings &rarr; toggle <em>API Bridge</em> on.</p></div>
+        <div class="sn">2</div><div class="sc"><strong>Pair your app</strong><p><code>POST /auth/pair</code> with your app name. Approve on device. Get a bearer token.</p></div>
+        <div class="sn">3</div><div class="sc"><strong>Make API calls</strong><p>Include the token in the <code>Authorization: Bearer ...</code> header.</p></div>
+      </div>
 
-<span class="cmt">// Response (after device approval)</span>
-{ <span class="str">"apiKey"</span>: <span class="str">"a1b2c3d4-e5f6-..."</span> }</code></pre>
-
-      <h3>Use the SDK</h3>
+      <h2>SDK Quick Start</h2>
 <pre><code><span class="kw">import</span> { KeepKeySdk } <span class="kw">from</span> <span class="str">'@keepkey/keepkey-sdk'</span>
 
+<span class="cmt">// Auto-pairs if no key saved</span>
 <span class="kw">const</span> sdk = <span class="kw">await</span> KeepKeySdk.<span class="fn">create</span>({
   <span class="str">serviceName</span>: <span class="str">'My App'</span>,
   <span class="str">serviceImageUrl</span>: <span class="str">'https://example.com/icon.png'</span>,
 })
 
-<span class="cmt">// Get ETH address (approve on device)</span>
+<span class="cmt">// Get ETH address</span>
 <span class="kw">const</span> { address } = <span class="kw">await</span> sdk.address.<span class="fn">ethGetAddress</span>({
   <span class="str">address_n</span>: [<span class="num">0x8000002C</span>, <span class="num">0x8000003C</span>, <span class="num">0x80000000</span>, <span class="num">0</span>, <span class="num">0</span>],
   <span class="str">show_display</span>: <span class="kw">true</span>,
-})
-
-<span class="cmt">// Sign an EIP-1559 transaction</span>
-<span class="kw">const</span> signed = <span class="kw">await</span> sdk.eth.<span class="fn">ethSignTransaction</span>({
-  <span class="str">addressNList</span>: [<span class="num">0x8000002C</span>, <span class="num">0x8000003C</span>, <span class="num">0x80000000</span>, <span class="num">0</span>, <span class="num">0</span>],
-  <span class="str">to</span>:    <span class="str">'0xRecipient...'</span>,
-  <span class="str">value</span>: <span class="str">'0xDE0B6B3A7640000'</span>,  <span class="cmt">// 1 ETH</span>
-  <span class="str">chainId</span>: <span class="num">1</span>,
-  <span class="str">nonce</span>:    <span class="str">'0x0'</span>,
-  <span class="str">gasLimit</span>: <span class="str">'0x5208'</span>,
-  <span class="str">maxFeePerGas</span>:         <span class="str">'0x2540BE400'</span>,
-  <span class="str">maxPriorityFeePerGas</span>: <span class="str">'0x3B9ACA00'</span>,
 })</code></pre>
 
       <h2>Supported Chains</h2>
@@ -443,71 +452,152 @@ function getSwaggerUiHtml(): string {
         <div class="chip"><div class="cl">EVM Chains</div><div class="cs">Polygon, Arb, OP, &hellip;</div></div>
       </div>
 
-      <h2>Key Endpoints</h2>
-      <table>
-        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Health check &amp; version info</td></tr>
-          <tr><td><code>POST</code></td><td><code>/auth/pair</code></td><td>Pair a new app (device approval)</td></tr>
-          <tr><td><code>GET</code></td><td><code>/api/device/features</code></td><td>Device info, firmware version</td></tr>
-          <tr><td><code>POST</code></td><td><code>/addresses/eth</code></td><td>Derive an ETH address</td></tr>
-          <tr><td><code>POST</code></td><td><code>/eth/sign-transaction</code></td><td>Sign an EVM transaction</td></tr>
-          <tr><td><code>POST</code></td><td><code>/eth/sign-typed-data</code></td><td>Sign EIP-712 typed data</td></tr>
-          <tr><td><code>POST</code></td><td><code>/utxo/sign-transaction</code></td><td>Sign a Bitcoin / UTXO tx</td></tr>
-          <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino/*</code></td><td>Sign Cosmos amino txs</td></tr>
-          <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign a Solana transaction</td></tr>
-        </tbody>
-      </table>
-
       <h2>Authentication</h2>
-      <p>All endpoints except <code>/api/health</code>, <code>/info/ping</code>,
-         <code>/docs</code>, and <code>/spec/swagger.json</code> require a bearer
-         token obtained via the <strong>Pair App</strong> tab:</p>
+      <p>All endpoints except health, ping, docs, and spec require a bearer token:</p>
 <pre><code><span class="kw">curl</span> http://localhost:1646/api/device/features \\
   -H <span class="str">"Authorization: Bearer YOUR_API_KEY"</span></code></pre>
       <div class="note">
         <strong>Device approval required</strong> &mdash; signing operations
-        always block until the user confirms or rejects on the KeepKey.
+        block until the user confirms or rejects on the KeepKey.
       </div>
 
       <h2>Clear Signing</h2>
-      <p>EVM transactions with contract calldata are decoded and displayed
-         on the device in human-readable form:</p>
+      <p>EVM contract calls are decoded on-device in human-readable form:</p>
       <table>
-        <thead><tr><th>Type</th><th>What the device shows</th></tr></thead>
+        <thead><tr><th>Type</th><th>Device display</th></tr></thead>
         <tbody>
-          <tr><td>ERC-20 transfer</td><td>Token symbol, amount, recipient</td></tr>
+          <tr><td>ERC-20 transfer</td><td>Token, amount, recipient</td></tr>
           <tr><td>ERC-20 approve</td><td>Token, spender, allowance</td></tr>
-          <tr><td>DEX swaps</td><td>Input/output tokens, amounts, slippage</td></tr>
-          <tr><td>EIP-712 typed data</td><td>Domain name, message fields</td></tr>
-          <tr><td>Unknown calldata</td><td>Raw hex with 4-byte selector</td></tr>
+          <tr><td>DEX swaps</td><td>Input/output tokens, amounts</td></tr>
+          <tr><td>EIP-712 typed data</td><td>Domain, message fields</td></tr>
+          <tr><td>Unknown calldata</td><td>Raw hex + 4-byte selector</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Key Endpoints</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th><th>Timeout</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Health &amp; version</td><td>5s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/auth/pair</code></td><td>Pair app (device approval)</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/system/info/get-features</code></td><td>Device info, firmware</td><td>30s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/addresses/eth</code></td><td>Derive ETH address</td><td>30s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/eth/sign-transaction</code></td><td>Sign EVM transaction</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/eth/sign-typed-data</code></td><td>Sign EIP-712</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/utxo/sign-transaction</code></td><td>Sign Bitcoin/UTXO tx</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino</code></td><td>Sign Cosmos amino</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign Solana tx</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- ═══ Pair App ═══ -->
-  <div class="kk-panel" id="panel-pair">
-    <div class="pair-wrap">
-      <div class="pair-card">
-        <h2>Pair a New App</h2>
-        <p class="desc">Register your application with the vault.
-           You will need to approve the pairing on the KeepKey device.</p>
+  <!-- ═══ Examples ═══ -->
+  <div class="kk-panel" id="panel-examples">
+    <div class="guide">
+      <div id="examples-gate" class="lock-gate" style="display:none">
+        <h2>Pair First</h2>
+        <p>You need an API key to try the examples. Pair your app to get started.</p>
+        <button class="go-pair" onclick="switchTab('pair')">Go to Pair App</button>
+      </div>
+      <div id="examples-content">
+        <h2>ETH &mdash; Simple Transfer</h2>
+<pre><code><span class="cmt">// POST /eth/sign-transaction</span>
+{
+  <span class="str">"addressNList"</span>: [<span class="num">2147483692</span>, <span class="num">2147483708</span>, <span class="num">2147483648</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">"nonce"</span>: <span class="str">"0x01"</span>,
+  <span class="str">"gasLimit"</span>: <span class="str">"0x5208"</span>,
+  <span class="str">"maxFeePerGas"</span>: <span class="str">"0x1dcd65000"</span>,
+  <span class="str">"maxPriorityFeePerGas"</span>: <span class="str">"0x540ae480"</span>,
+  <span class="str">"value"</span>: <span class="str">"0x2c68af0bb14000"</span>,
+  <span class="str">"to"</span>: <span class="str">"0x12eC06288EDD7Ae2CC41A843fE089237fC7354F0"</span>,
+  <span class="str">"chainId"</span>: <span class="num">1</span>,
+  <span class="str">"data"</span>: <span class="str">""</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('eth/sign-transaction',{addressNList:[2147483692,2147483708,2147483648,0,0],nonce:'0x01',gasLimit:'0x5208',maxFeePerGas:'0x1dcd65000',maxPriorityFeePerGas:'0x540ae480',value:'0x2c68af0bb14000',to:'0x12eC06288EDD7Ae2CC41A843fE089237fC7354F0',chainId:1,data:''})">Try it</button>
 
-        <label for="pn">App Name</label>
-        <input id="pn" placeholder="My Trading Bot" />
-        <label for="pi">Icon URL <span style="color:#8a8a9a">(optional)</span></label>
-        <input id="pi" placeholder="https://example.com/icon.png" />
-        <button class="pair-btn" id="pb" onclick="doPair()">Pair App</button>
-        <div id="pr"></div>
+        <h2>ETH &mdash; ERC-20 Transfer</h2>
+<pre><code><span class="cmt">// POST /eth/sign-transaction</span>
+{
+  <span class="str">"addressNList"</span>: [<span class="num">2147483692</span>, <span class="num">2147483708</span>, <span class="num">2147483648</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">"nonce"</span>: <span class="str">"0x01"</span>,
+  <span class="str">"gasLimit"</span>: <span class="str">"0x14"</span>,
+  <span class="str">"gasPrice"</span>: <span class="str">"0x14"</span>,
+  <span class="str">"value"</span>: <span class="str">"0x00"</span>,
+  <span class="str">"to"</span>: <span class="str">"0x41e5560054824ea6b0732e656e3ad64e20e94e45"</span>,  <span class="cmt">// token contract</span>
+  <span class="str">"chainId"</span>: <span class="num">1</span>,
+  <span class="str">"data"</span>: <span class="str">"0xa9059cbb0000000000000000000000001d8ce9022f6284c3a5c317f8f34620107d727445000000000000000000000000000000000000000000000000000000000bebc200"</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('eth/sign-transaction',{addressNList:[2147483692,2147483708,2147483648,0,0],nonce:'0x01',gasLimit:'0x14',gasPrice:'0x14',value:'0x00',to:'0x41e5560054824ea6b0732e656e3ad64e20e94e45',chainId:1,data:'0xa9059cbb0000000000000000000000001d8ce9022f6284c3a5c317f8f34620107d727445000000000000000000000000000000000000000000000000000000000bebc200'})">Try it</button>
 
-        <div class="pair-sep">
-          <label for="ek">Already have a key?</label>
-          <div class="pair-row">
-            <input id="ek" placeholder="Paste API key&hellip;" />
-            <button class="vfy-btn" onclick="doVerify()">Verify</button>
-          </div>
-          <div id="vr"></div>
+        <h2>ETH &mdash; Sign Message</h2>
+<pre><code><span class="cmt">// POST /eth/sign</span>
+{
+  <span class="str">"address"</span>: <span class="str">"0x3f2329C9ADFbcCd9A84f52c906E936A42dA18CB8"</span>,
+  <span class="str">"message"</span>: <span class="str">"0x48656c6c6f20576f726c64"</span>  <span class="cmt">// "Hello World"</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('eth/sign',{address:'0x3f2329C9ADFbcCd9A84f52c906E936A42dA18CB8',message:'0x48656c6c6f20576f726c64'})">Try it</button>
+
+        <h2>ETH &mdash; Get Address</h2>
+<pre><code><span class="cmt">// POST /addresses/eth</span>
+{
+  <span class="str">"address_n"</span>: [<span class="num">2147483692</span>, <span class="num">2147483708</span>, <span class="num">2147483648</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">"show_display"</span>: <span class="kw">true</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('addresses/eth',{address_n:[2147483692,2147483708,2147483648,0,0],show_display:true})">Try it</button>
+
+        <h2>Cosmos &mdash; Transfer</h2>
+<pre><code><span class="cmt">// POST /cosmos/sign-amino</span>
+{
+  <span class="str">"signerAddress"</span>: <span class="str">"cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj"</span>,
+  <span class="str">"signDoc"</span>: {
+    <span class="str">"chain_id"</span>: <span class="str">"cosmoshub-4"</span>,
+    <span class="str">"account_number"</span>: <span class="str">"16359"</span>,
+    <span class="str">"sequence"</span>: <span class="str">"17"</span>,
+    <span class="str">"fee"</span>: { <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"100"</span>, <span class="str">"denom"</span>: <span class="str">"uatom"</span> }], <span class="str">"gas"</span>: <span class="str">"100000"</span> },
+    <span class="str">"memo"</span>: <span class="str">""</span>,
+    <span class="str">"msgs"</span>: [{
+      <span class="str">"type"</span>: <span class="str">"cosmos-sdk/MsgSend"</span>,
+      <span class="str">"value"</span>: {
+        <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"1000"</span>, <span class="str">"denom"</span>: <span class="str">"uatom"</span> }],
+        <span class="str">"from_address"</span>: <span class="str">"cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj"</span>,
+        <span class="str">"to_address"</span>: <span class="str">"cosmos1qjwdyn56ecagk8rjf7crrzwcyz6775cj89njn3"</span>
+      }
+    }]
+  }
+}</code></pre>
+
+        <h2>THORChain &mdash; Transfer</h2>
+<pre><code><span class="cmt">// POST /thorchain/sign-amino-transfer</span>
+{
+  <span class="str">"signerAddress"</span>: <span class="str">"thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az"</span>,
+  <span class="str">"signDoc"</span>: {
+    <span class="str">"chain_id"</span>: <span class="str">"thorchain-mainnet-v1"</span>,
+    <span class="str">"account_number"</span>: <span class="str">"17"</span>,
+    <span class="str">"sequence"</span>: <span class="str">"2"</span>,
+    <span class="str">"fee"</span>: { <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"3000"</span>, <span class="str">"denom"</span>: <span class="str">"rune"</span> }], <span class="str">"gas"</span>: <span class="str">"200000"</span> },
+    <span class="str">"memo"</span>: <span class="str">""</span>,
+    <span class="str">"msgs"</span>: [{
+      <span class="str">"type"</span>: <span class="str">"thorchain/MsgSend"</span>,
+      <span class="str">"value"</span>: {
+        <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"100"</span>, <span class="str">"denom"</span>: <span class="str">"rune"</span> }],
+        <span class="str">"from_address"</span>: <span class="str">"thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az"</span>,
+        <span class="str">"to_address"</span>: <span class="str">"thor1wy58774wagy4hkljz9mchhqtgk949zdwwe80d5"</span>
+      }
+    }]
+  }
+}</code></pre>
+
+        <h2>Device &mdash; Get Features</h2>
+<pre><code><span class="cmt">// POST /system/info/get-features</span>
+<span class="cmt">// (no body required)</span></code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('system/info/get-features',{})">Try it</button>
+
+        <!-- Result display -->
+        <div id="try-result" style="display:none">
+          <h3 style="color:#C0A860">Response</h3>
+          <pre><code id="try-result-body"></code></pre>
         </div>
       </div>
     </div>
@@ -515,31 +605,65 @@ function getSwaggerUiHtml(): string {
 
   <!-- ═══ API Explorer ═══ -->
   <div class="kk-panel" id="panel-explorer">
+    <div id="explorer-gate" class="lock-gate" style="display:none">
+      <h2>Pair First</h2>
+      <p>Pair your app to unlock the interactive API explorer with your bearer token pre-filled.</p>
+      <button class="go-pair" onclick="switchTab('pair')">Go to Pair App</button>
+    </div>
     <div id="swagger-ui"></div>
   </div>
 
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    /* ── Tabs ────────────────────────────────── */
-    var sL=false
+    var KEY='kk_dev_apikey'
+    var sL=false, swaggerUI=null
+
+    function getKey(){return localStorage.getItem(KEY)||''}
+    function setKey(k){
+      if(k)localStorage.setItem(KEY,k);else localStorage.removeItem(KEY)
+      refreshUI()
+    }
+
+    /* ── Tab switching ───────────────────────── */
+    function switchTab(name){
+      document.querySelectorAll('.kk-tab').forEach(function(x){x.classList.remove('active')})
+      document.querySelectorAll('.kk-panel').forEach(function(x){x.classList.remove('active')})
+      var tab=document.querySelector('[data-tab="'+name+'"]')
+      if(tab)tab.classList.add('active')
+      document.getElementById('panel-'+name).classList.add('active')
+      if(name==='explorer')loadSwagger()
+    }
     document.querySelectorAll('.kk-tab').forEach(function(t){
       t.addEventListener('click',function(){
-        document.querySelectorAll('.kk-tab').forEach(function(x){x.classList.remove('active')})
-        document.querySelectorAll('.kk-panel').forEach(function(x){x.classList.remove('active')})
-        t.classList.add('active')
-        document.getElementById('panel-'+t.dataset.tab).classList.add('active')
-        if(t.dataset.tab==='explorer'&&!sL){
-          sL=true
-          SwaggerUIBundle({
-            url:'/spec/swagger.json',
-            dom_id:'#swagger-ui',
-            deepLinking:true,
-            presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
-            layout:'BaseLayout',
-          })
-        }
+        var tab=t.dataset.tab
+        switchTab(tab)
       })
     })
+
+    /* ── Load Swagger with bearer ────────────── */
+    function loadSwagger(){
+      var k=getKey()
+      if(!k){
+        document.getElementById('explorer-gate').style.display='block'
+        document.getElementById('swagger-ui').style.display='none'
+        return
+      }
+      document.getElementById('explorer-gate').style.display='none'
+      document.getElementById('swagger-ui').style.display='block'
+      if(sL)return
+      sL=true
+      swaggerUI=SwaggerUIBundle({
+        url:'/spec/swagger.json',
+        dom_id:'#swagger-ui',
+        deepLinking:true,
+        presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
+        layout:'BaseLayout',
+        requestInterceptor:function(req){
+          if(k)req.headers['Authorization']='Bearer '+k
+          return req
+        }
+      })
+    }
 
     /* ── Status ──────────────────────────────── */
     function ck(){
@@ -558,7 +682,35 @@ function getSwaggerUiHtml(): string {
     }
     ck();setInterval(ck,10000)
 
-    /* ── Pair ────────────────────────────────── */
+    /* ── UI refresh based on key state ───────── */
+    function refreshUI(){
+      var k=getKey()
+      var kb=document.getElementById('kb')
+      var banner=document.getElementById('paired-banner')
+      var form=document.getElementById('pair-form')
+      var title=document.getElementById('pair-title')
+      var desc=document.getElementById('pair-desc')
+      var eg=document.getElementById('examples-gate')
+      var ec=document.getElementById('examples-content')
+      if(k){
+        kb.style.display='inline';kb.textContent='paired'
+        banner.style.display='flex'
+        document.getElementById('paired-key').textContent=k.slice(0,8)+'...'
+        form.style.display='none'
+        title.textContent='Connected'
+        desc.textContent='Your app is paired. Use the Examples and API Explorer tabs.'
+        if(eg){eg.style.display='none';ec.style.display='block'}
+      }else{
+        kb.style.display='none'
+        banner.style.display='none'
+        form.style.display='block'
+        title.textContent='Pair a New App'
+        desc.textContent='Register your application with the vault. Approve the pairing on your KeepKey device.'
+        if(eg){eg.style.display='block';ec.style.display='none'}
+      }
+    }
+
+    /* ── Pair ─────────────────────────────────── */
     function doPair(){
       var n=document.getElementById('pn').value.trim()
       if(!n)return
@@ -572,8 +724,12 @@ function getSwaggerUiHtml(): string {
       })
       .then(function(x){return x.json()})
       .then(function(d){
-        if(d.apiKey){r.className='pair-result ok';r.textContent='API Key: '+d.apiKey}
-        else{r.className='pair-result err';r.textContent=d.error||'Pairing rejected'}
+        if(d.apiKey){
+          r.className='pair-result ok';r.textContent='Paired! Key: '+d.apiKey
+          setKey(d.apiKey)
+        }else{
+          r.className='pair-result err';r.textContent=d.error||'Pairing rejected'
+        }
       })
       .catch(function(e){r.className='pair-result err';r.textContent='Error: '+e.message})
       .finally(function(){b.disabled=false;b.textContent='Pair App'})
@@ -586,16 +742,51 @@ function getSwaggerUiHtml(): string {
       fetch('/auth/pair',{headers:{'Authorization':'Bearer '+k}})
         .then(function(x){return x.json()})
         .then(function(d){
-          r.className='pair-result '+(d.paired?'ok':'err')
-          r.textContent=d.paired?'Valid \u2014 paired as "'+(d.name||'unknown')+'"':'Invalid or expired key'
           r.style.marginTop='12px'
+          if(d.paired){
+            r.className='pair-result ok'
+            r.textContent='Valid \u2014 paired as "'+(d.name||'unknown')+'"'
+            setKey(k)
+          }else{
+            r.className='pair-result err'
+            r.textContent='Invalid or expired key'
+          }
         })
         .catch(function(e){
-          r.className='pair-result err'
-          r.textContent='Error: '+e.message
+          r.className='pair-result err';r.textContent='Error: '+e.message
           r.style.marginTop='12px'
         })
     }
+
+    function doUnpair(){
+      setKey('')
+      sL=false;swaggerUI=null
+      document.getElementById('swagger-ui').innerHTML=''
+    }
+
+    /* ── Try examples ────────────────────────── */
+    function tryExample(endpoint,body){
+      var k=getKey()
+      if(!k){switchTab('pair');return}
+      var rd=document.getElementById('try-result')
+      var rb=document.getElementById('try-result-body')
+      rd.style.display='block'
+      rb.textContent='Sending... (approve on device if prompted)'
+      fetch('/'+endpoint,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+k},
+        body:JSON.stringify(body),
+        signal:AbortSignal.timeout(120000)
+      })
+      .then(function(r){return r.json()})
+      .then(function(d){rb.textContent=JSON.stringify(d,null,2)})
+      .catch(function(e){rb.textContent='Error: '+e.message})
+      rd.scrollIntoView({behavior:'smooth'})
+    }
+
+    /* ── Init ─────────────────────────────────── */
+    refreshUI()
+    if(getKey()){switchTab('guide')}else{switchTab('pair')}
   </script>
 </body>
 </html>`
