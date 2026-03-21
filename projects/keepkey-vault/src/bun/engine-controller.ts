@@ -253,6 +253,11 @@ export class EngineController extends EventEmitter {
           // lastState is already 'needs_pin', and updateState won't re-fire —
           // leaving the user with no PIN overlay while the device still needs PIN.
           if (this.lastState === 'needs_pin' && !this.promptPinActive) {
+            // Notify UI that the PIN attempt failed (wrong PIN entered)
+            if (this.pinRequestCount > 0) {
+              console.log('[Engine] PIN attempt failed — notifying UI')
+              this.emit('pin-error', {})
+            }
             setTimeout(() => {
               if (this.lastState === 'needs_pin' && !this.promptPinActive) {
                 console.log('[Engine] Retrying prompt-pin (device still locked)')
