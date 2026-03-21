@@ -1151,17 +1151,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           } catch { /* body parse failed, non-fatal */ }
 
           // Check device AdvancedMode policy before presenting to user.
-          // Try cached features first; on failure, retry with a fresh read.
+          // ONLY use cached features — never call getFeatures() here because
+          // if the device is PIN-locked it triggers a PIN_REQUEST that races
+          // with the signing approval overlay.
           try {
-            const wallet = requireWallet(engine)
-            let features: any
-            try {
-              features = await getCachedFeatures(wallet)
-            } catch {
-              // Cache miss or stale — try a fresh getFeatures() from device
-              try { features = await wallet.getFeatures() } catch { /* device busy */ }
-            }
-            if (features) {
+            const now = Date.now()
+            if (featuresCache && (now - featuresCache.timestamp) < FEATURES_TTL_MS) {
+              const features = featuresCache.data
               const policies: any[] = features?.policiesList || features?.policies || []
               const advPol = policies.find((p: any) => (p.policyName || p.policy_name) === 'AdvancedMode')
               signingInfo.advancedModeEnabled = advPol?.enabled ?? false
