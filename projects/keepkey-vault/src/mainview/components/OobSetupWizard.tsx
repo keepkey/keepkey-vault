@@ -1096,35 +1096,42 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </>
                 )}
 
-                {/* Bootloader reboot: auto-reboot — user just waits */}
+                {/* Bootloader reboot: device shows "Please disconnect and reconnect" — user must unplug */}
                 {rebootPhase === 'rebooting' && (
                   <VStack gap={2} w="100%">
-                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
-                      <VStack gap={2} align="center">
-                        <Spinner size="md" color="blue.300" />
-                        <Text fontSize="sm" color="blue.200" fontWeight="bold">
-                          {t('bootloader.rebooting', { defaultValue: 'Device is rebooting...' })}
-                        </Text>
-                        <Text fontSize="xs" color="blue.300">
-                          {t('bootloader.rebootingDetail', { defaultValue: 'Your KeepKey will restart automatically. This usually takes a few seconds.' })}
+                    <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
+                      <VStack gap={2} align="start">
+                        <HStack gap={2}>
+                          <FaExclamationTriangle color="#ECC94B" size={16} />
+                          <Text fontSize="sm" color="yellow.200" fontWeight="bold">
+                            {t('firmware.pleaseDisconnect', { defaultValue: 'Please disconnect and reconnect your KeepKey' })}
+                          </Text>
+                        </HStack>
+                        <Text fontSize="xs" color="yellow.300">
+                          {rebootElapsedMs < 20000
+                            ? t('bootloader.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
+                            : t('bootloader.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
                         </Text>
                       </VStack>
                     </Box>
 
                     {rebootElapsedMs >= 30000 && (
-                      <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
+                      <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.600">
                         <VStack gap={1.5} align="start">
                           <HStack gap={2}>
-                            <FaExclamationTriangle color="#ECC94B" size={14} />
-                            <Text fontSize="sm" fontWeight="bold" color="yellow.300">
-                              {t('bootloader.rebootStalled', { defaultValue: 'Taking longer than expected?' })}
+                            <FaExclamationTriangle color="#63B3ED" size={14} />
+                            <Text fontSize="sm" fontWeight="bold" color="blue.300">
+                              {t('firmware.manualReconnectTitle', { defaultValue: 'Device not reconnecting?' })}
                             </Text>
                           </HStack>
                           <VStack align="start" gap={0.5} pl={5}>
-                            <Text fontSize="xs" color="yellow.200">{t('firmware.manualReconnectStep1', { defaultValue: '1. Unplug your KeepKey' })}</Text>
-                            <Text fontSize="xs" color="yellow.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
-                            <Text fontSize="xs" color="yellow.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
+                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep1', { defaultValue: '1. Unplug your KeepKey' })}</Text>
+                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
+                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
                           </VStack>
+                          <Text fontSize="2xs" color="blue.300" pl={5}>
+                            {t('firmware.manualReconnectNote', { defaultValue: 'Setup will continue automatically when the device is detected.' })}
+                          </Text>
                         </VStack>
                       </Box>
                     )}
