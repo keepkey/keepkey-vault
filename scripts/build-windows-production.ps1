@@ -147,6 +147,13 @@ function Sign-File {
         return $true
     }
 
+    # Skip bun shims in .bin/ directories — they are shell scripts with .exe extension,
+    # not real PE binaries. signtool returns 0x800700C1 (ERROR_BAD_EXE_FORMAT).
+    if ($FilePath -like '*\.bin\*' -or $FilePath -like '*/.bin/*') {
+        Write-Host "    [SKIP] Bun shim (not PE): $fileName" -ForegroundColor Gray
+        return $true
+    }
+
     # Check if already signed
     try {
         $sig = Get-AuthenticodeSignature $FilePath
@@ -171,13 +178,18 @@ function Sign-File {
 
     $signArgs += $FilePath
 
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $result = & $SIGNTOOL @signArgs 2>&1
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
 
-    if ($LASTEXITCODE -eq 0) {
+    if ($exitCode -eq 0) {
         Write-Success "Signed: $fileName"
         return $true
     } else {
-        if ($result -match "not recognized") {
+        $resultStr = $result -join ' '
+        if ($resultStr -match "not recognized" -or $resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") {
             Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
             return $true
         }
@@ -290,6 +302,18 @@ if (-not $SkipBuild) {
     Push-Location $ProjectDir
     bun run build
     Pop-Location
+
+    # Patch channel to stable — Electrobun's --env=stable produces a macOS-style
+    # bundle on Windows that our installer can't use. Build as dev, patch to stable.
+    $VersionJson = Join-Path $BuildDir "Resources\version.json"
+    if (Test-Path $VersionJson) {
+        $vj = Get-Content $VersionJson -Raw | ConvertFrom-Json
+        $vj.channel = "stable"
+        $vj.name = "keepkey-vault"
+        $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
+        $vj | ConvertTo-Json -Compress | Set-Content $VersionJson -Encoding UTF8
+        Write-Success "Patched version.json: channel=stable"
+    }
 
     Write-Success "Build completed"
 } else {
@@ -529,6 +553,7 @@ $isccArgs = @(
     "/DMyAppVersion=$Version",
     "/DMySourceDir=$BuildDir",
     "/DMyOutputDir=$ArtifactsDir",
+    "/DMyScriptDir=$ScriptDir",
     $IssFile
 )
 
