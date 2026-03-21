@@ -113,14 +113,14 @@ extern "user32" fn GetSystemMetrics(INT) callconv(.winapi) INT;
 extern "user32" fn BeginPaint(HWND, *PAINTSTRUCT) callconv(.winapi) HDC;
 extern "user32" fn EndPaint(HWND, *const PAINTSTRUCT) callconv(.winapi) BOOL;
 extern "user32" fn FillRect(HDC, *const RECT, HBRUSH) callconv(.winapi) INT;
-extern "user32" fn DrawTextW(HDC, [*:0]const u16, INT, *RECT, UINT) callconv(.winapi) INT;
+extern "user32" fn DrawTextW(HDC, [*]const u16, INT, *RECT, UINT) callconv(.winapi) INT;
 extern "user32" fn SetTimer(HWND, usize, UINT, ?*anyopaque) callconv(.winapi) usize;
 extern "user32" fn KillTimer(HWND, usize) callconv(.winapi) BOOL;
-extern "user32" fn FindWindowW(?[*:0]const u16, ?[*:0]const u16) callconv(.winapi) HWND;
-extern "user32" fn LoadImageW(HINSTANCE, [*:0]const u16, UINT, INT, INT, UINT) callconv(.winapi) ?*anyopaque;
 extern "user32" fn PostQuitMessage(INT) callconv(.winapi) void;
 extern "user32" fn InvalidateRect(HWND, ?*const RECT, BOOL) callconv(.winapi) BOOL;
 extern "user32" fn IsWindowVisible(HWND) callconv(.winapi) BOOL;
+extern "user32" fn EnumWindows(*const fn (HWND, LPARAM) callconv(.winapi) BOOL, LPARAM) callconv(.winapi) BOOL;
+extern "user32" fn GetWindowTextW(HWND, [*]u16, INT) callconv(.winapi) INT;
 
 // gdi32
 extern "gdi32" fn CreateSolidBrush(COLORREF) callconv(.winapi) HBRUSH;
@@ -138,6 +138,7 @@ const WS_EX_TOOLWINDOW: DWORD = 0x00000080;
 const WM_PAINT: UINT = 0x000F;
 const WM_TIMER: UINT = 0x0113;
 const WM_DESTROY: UINT = 0x0002;
+const WM_QUIT: UINT = 0x0012;
 const SM_CXSCREEN: INT = 0;
 const SM_CYSCREEN: INT = 1;
 const DT_CENTER: UINT = 0x01;
@@ -147,9 +148,6 @@ const CREATE_NO_WINDOW: DWORD = 0x08000000;
 const TRANSPARENT: INT = 1;
 const FW_NORMAL: INT = 400;
 const FW_SEMIBOLD: INT = 600;
-const IMAGE_ICON: UINT = 1;
-const LR_LOADFROMFILE: UINT = 0x0010;
-const LR_DEFAULTSIZE: UINT = 0x0040;
 const PM_REMOVE: UINT = 0x0001;
 const SW_SHOW: INT = 5;
 
@@ -165,6 +163,78 @@ const TIMER_MS: UINT = 100; // Fast timer for smooth progress bar animation
 // Global state
 var g_frame: u32 = 0;
 var g_found_count: u32 = 0; // consecutive detections of main window
+var g_main_visible: bool = false; // set by EnumWindows callback
+var g_version_buf: [32]u16 = [_]u16{0} ** 32;
+var g_version_len: usize = 0; // 0 = no version loaded
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+fn containsU16(haystack: []const u16, needle: []const u16) bool {
+    if (needle.len == 0 or needle.len > haystack.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.mem.eql(u16, haystack[i..][0..needle.len], needle)) return true;
+    }
+    return false;
+}
+
+fn enumCallback(hwnd: HWND, _: LPARAM) callconv(.winapi) BOOL {
+    var title_buf: [256]u16 = undefined;
+    const len = GetWindowTextW(hwnd, &title_buf, 256);
+    if (len < 7) return 1; // "KeepKey" is 7 chars minimum
+    const title = title_buf[0..@as(usize, @intCast(len))];
+
+    // Match any window containing "KeepKey" (covers "KeepKey Vault", "KeepKey Vault vX.Y.Z", etc.)
+    const kk = [_]u16{ 'K', 'e', 'e', 'p', 'K', 'e', 'y' };
+    // Also match dev title "keepkey-vault"
+    const dev = [_]u16{ 'k', 'e', 'e', 'p', 'k', 'e', 'y', '-', 'v', 'a', 'u', 'l', 't' };
+
+    if (containsU16(title, &kk) or containsU16(title, &dev)) {
+        if (IsWindowVisible(hwnd) != 0) {
+            g_main_visible = true;
+            return 0; // stop enumeration
+        }
+    }
+    return 1; // continue
+}
+
+fn loadVersion(exe_dir: []const u8, alloc: std.mem.Allocator) void {
+    const path = std.fs.path.join(alloc, &.{ exe_dir, "Resources", "version.json" }) catch return;
+    defer alloc.free(path);
+
+    const file = std.fs.cwd().openFile(path, .{}) catch return;
+    defer file.close();
+
+    var file_buf: [2048]u8 = undefined;
+    const n = file.read(&file_buf) catch return;
+    const content = file_buf[0..n];
+
+    // Extract version from "version":"X.Y.Z" (handles optional spaces around colon)
+    const key = "\"version\"";
+    const idx = std.mem.indexOf(u8, content, key) orelse return;
+    var pos = idx + key.len;
+    while (pos < content.len and (content[pos] == ':' or content[pos] == ' ')) : (pos += 1) {}
+    if (pos >= content.len or content[pos] != '"') return;
+    pos += 1;
+    const start = pos;
+    while (pos < content.len and content[pos] != '"') : (pos += 1) {}
+    if (pos >= content.len) return;
+    const ver = content[start..pos];
+
+    if (ver.len == 0 or ver.len > 30) return;
+
+    // Write "vX.Y.Z" into g_version_buf as UTF-16LE
+    g_version_buf[0] = 'v';
+    var out: usize = 1;
+    for (ver) |c| {
+        g_version_buf[out] = @intCast(c);
+        out += 1;
+    }
+    g_version_buf[out] = 0; // null terminate
+    g_version_len = out;
+}
+
+// ── Splash window procedure ─────────────────────────────────────────
 
 fn splashWndProc(hwnd: HWND, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(.winapi) LRESULT {
     switch (msg) {
@@ -233,49 +303,40 @@ fn splashWndProc(hwnd: HWND, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(.winapi
                     _ = DeleteObject(@ptrCast(f));
                 }
 
-                // Version at bottom
-                const ver_font = CreateFontW(11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI"));
-                if (ver_font) |f| {
-                    _ = SelectObject(dc, @ptrCast(f));
-                    _ = SetTextColor(dc, 0x00444444);
-                    var ver_rc = RECT{ .left = 0, .top = SPLASH_H - 25, .right = SPLASH_W, .bottom = SPLASH_H - 5 };
-                    _ = DrawTextW(dc, std.unicode.utf8ToUtf16LeStringLiteral("v1.2.1"), -1, &ver_rc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-                    _ = DeleteObject(@ptrCast(f));
+                // Version at bottom (read from Resources/version.json at startup)
+                if (g_version_len > 0) {
+                    const ver_font = CreateFontW(11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI"));
+                    if (ver_font) |f| {
+                        _ = SelectObject(dc, @ptrCast(f));
+                        _ = SetTextColor(dc, 0x00444444);
+                        var ver_rc = RECT{ .left = 0, .top = SPLASH_H - 25, .right = SPLASH_W, .bottom = SPLASH_H - 5 };
+                        _ = DrawTextW(dc, &g_version_buf, @intCast(g_version_len), &ver_rc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+                        _ = DeleteObject(@ptrCast(f));
+                    }
                 }
             }
             _ = EndPaint(hwnd, &ps);
             return 0;
         },
         WM_TIMER => {
-            // Animate dots
             g_frame += 1;
             _ = InvalidateRect(hwnd, null, 0);
 
-            // Check if main app window appeared — try versioned and unversioned titles.
-            // After detecting the HWND, wait extra time for WebView2 to actually render
-            // content (the HWND exists before the page is painted).
-            const titles = [_][*:0]const u16{
-                std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault"),
-                std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault v1.2.1"),
-                std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault v1.2.0"),
-                std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault v1.1.2"),
-                std.unicode.utf8ToUtf16LeStringLiteral("keepkey-vault-dev"),
-            };
-            for (titles) |title| {
-                const main_wnd = FindWindowW(null, title);
-                if (main_wnd != null) {
-                    // Window exists but WebView2 content may not be painted yet.
-                    // Wait for the window to be visible AND foreground-ready.
-                    if (IsWindowVisible(main_wnd) != 0) {
-                        g_found_count += 1;
-                        // Require 15 consecutive detections (1.5 seconds at 100ms poll)
-                        if (g_found_count >= 15) {
-                            _ = KillTimer(hwnd, TIMER_ID);
-                            _ = DestroyWindow(hwnd);
-                            return 0;
-                        }
-                    }
+            // Check if any window with "KeepKey" in the title is visible.
+            // Uses EnumWindows for version-independent detection — no hardcoded titles.
+            g_main_visible = false;
+            _ = EnumWindows(enumCallback, 0);
+
+            if (g_main_visible) {
+                g_found_count += 1;
+                // Require 15 consecutive detections (1.5s at 100ms timer)
+                if (g_found_count >= 15) {
+                    _ = KillTimer(hwnd, TIMER_ID);
+                    _ = DestroyWindow(hwnd);
+                    return 0;
                 }
+            } else {
+                g_found_count = 0; // Reset on miss — must be truly consecutive
             }
             return 0;
         },
@@ -296,6 +357,9 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const a = arena.allocator();
+
+    // Load version from Resources/version.json for splash display
+    loadVersion(exe_dir, a);
 
     // ── Show splash window immediately ──────────────────────────────
     const hInst = GetModuleHandleW(null);
@@ -353,13 +417,13 @@ pub fn main() !void {
     // ── Run message loop until splash is closed ─────────────────────
     // Splash auto-closes when it detects the main "KeepKey Vault" window.
     // Safety: also close after 30 seconds regardless.
-    var msg = MSG{};
+    var msg_loop = MSG{};
     const start = @as(u32, @truncate(@as(u64, @bitCast(std.time.milliTimestamp()))));
     while (true) {
-        while (PeekMessageW(&msg, null, 0, 0, PM_REMOVE) != 0) {
-            if (msg.message == 0x0012) return; // WM_QUIT
-            _ = TranslateMessage(&msg);
-            _ = DispatchMessageW(&msg);
+        while (PeekMessageW(&msg_loop, null, 0, 0, PM_REMOVE) != 0) {
+            if (msg_loop.message == WM_QUIT) return;
+            _ = TranslateMessage(&msg_loop);
+            _ = DispatchMessageW(&msg_loop);
         }
         Sleep(16); // ~60fps
         const now = @as(u32, @truncate(@as(u64, @bitCast(std.time.milliTimestamp()))));
