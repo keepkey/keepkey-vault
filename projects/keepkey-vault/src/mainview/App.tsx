@@ -557,7 +557,10 @@ function App() {
 					deviceState={deviceState}
 					appVersion={appVersion}
 					onCheckForUpdate={update.checkForUpdate}
+					onDownloadUpdate={update.downloadUpdate}
+					onApplyUpdate={update.applyUpdate}
 					updatePhase={update.phase}
+					updateVersion={update.info?.version}
 				/>
 			</>
 		)
@@ -654,7 +657,10 @@ function App() {
 				}}
 				deviceState={deviceState}
 				onCheckForUpdate={update.checkForUpdate}
+				onDownloadUpdate={update.downloadUpdate}
+				onApplyUpdate={update.applyUpdate}
 				updatePhase={update.phase}
+				updateVersion={update.info?.version}
 				appVersion={appVersion}
 				onOpenAuditLog={() => setAuditLogOpen(true)}
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
