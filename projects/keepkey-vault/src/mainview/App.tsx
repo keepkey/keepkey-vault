@@ -467,8 +467,9 @@ function App() {
 		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
 		: "splash"
 
-	// ── Overlays (render above everything, only one at a time) ──────
-	// Priority: signing > pairing > passphrase > recovery > PIN
+	// ── Overlays (render above everything) ──────────────────────────
+	// PIN is highest priority (z-index 2010) — must show above signing
+	// approval so users can unlock a PIN-locked device during API signing.
 	const signingOverlay = signingRequest ? (
 		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} />
 	) : null

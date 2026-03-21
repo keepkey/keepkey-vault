@@ -62,6 +62,11 @@ export const EthSignTransactionRequest = z.object({
   from: z.string().optional(),
   addressNList: z.array(z.number().int()).optional(),
   address_n_list: z.array(z.number().int()).optional(),
+  // EVM clear-signing metadata (firmware 7.14+)
+  txMetadata: z.object({
+    signedPayload: z.string(),
+    keyId: z.number().int().optional(),
+  }).optional(),
 }).strip().refine(
   d => d.from || d.addressNList || d.address_n_list,
   { message: 'Missing from address or addressNList' },

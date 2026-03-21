@@ -3,6 +3,7 @@ import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import type { PinRequestType } from "../../../shared/types"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
+import { Z } from "../../lib/z-index"
 
 interface PinEntryProps {
 	type?: PinRequestType
@@ -115,7 +116,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 			bg="rgba(0,0,0,0.3)"
 			align="center"
 			justify="center"
-			zIndex={2000}
+			zIndex={Z.overlay + 10}
 			backdropFilter="blur(2px)"
 			style={{ animation: "pinOverlayFadeIn 0.25s ease-out" }}
 		>
