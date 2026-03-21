@@ -155,7 +155,7 @@ dmg:
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/wizard-messaging.test.ts
 
 test-integration: test-rest
 
