@@ -428,3 +428,30 @@ On macOS, the native menu bar is populated by Electrobun automatically.
 **Status**: Cosmetic, low priority. The app is fully functional without menus.
 
 **Files**: `src/bun/index.ts`
+
+---
+
+## 34. Stale Vite Assets Cause 30s+ Startup (CRITICAL)
+
+Vite produces uniquely-hashed files per build (e.g., `index-Bf_MDLkO.js`).
+Without cleanup, old files accumulate across installs and hot-patches. WebView2
+scans all files in `Resources/app/views/mainview/assets/` at startup — 55 stale
+files (20MB) caused startup to go from **1.4 seconds to 30+ seconds**.
+
+**Observed**: 2026-03-20 session. Backend ready in 1.4s, but WebView2 took 30s+
+to render because it was loading/scanning 37 stale JS bundles alongside the
+18 current ones.
+
+**Fix (installer)**: `[InstallDelete]` in `installer.iss` removes the assets
+directory before copying new files. Must appear BEFORE the `[Files]` section.
+
+**Fix (dev)**: Always `rm -rf assets/*` before copying new build output when
+hot-patching the installed app.
+
+**Guard**: `__tests__/stale-assets-guard.test.ts` verifies:
+- installer.iss has `[InstallDelete]` for assets
+- dist/ has bounded number of JS files (max 30)
+- Exactly one `index-*.js`, one `index-*.css`, one `asset-data-*.js`
+- Total assets under 10MB
+
+**Files**: `scripts/installer.iss`, `__tests__/stale-assets-guard.test.ts`
