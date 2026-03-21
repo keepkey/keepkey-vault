@@ -38,11 +38,14 @@ const PIONEER_TIMEOUT_MS = 60_000
 // ── Windows auto-update (bypasses Electrobun's broken zig-zstd) ──────
 const GITHUB_REPO = 'keepkey/keepkey-vault'
 let windowsInstallerPath: string | null = null
+// Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
+let pendingUpdateVersion: string | null = null
 
 async function windowsDownloadAndInstall(rpc: any) {
-	// 1. Get the update version — must be newer than current, not a fallback to self
+	// 1. Get the update version — try pendingUpdateVersion first (pre-release path),
+	// then fall back to Electrobun's Updater.updateInfo() (stable path).
 	const info = Updater.updateInfo()
-	const version = info?.version
+	const version = pendingUpdateVersion || info?.version
 	if (!version || version === pkg.version) {
 		throw new Error(`No update version available (current: ${pkg.version})`)
 	}
@@ -2453,6 +2456,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								const remoteVer = latest.tag_name.replace(/^v/, '')
 								if (localVer && versionCompare(remoteVer, localVer) > 0) {
 									console.log(`[Updater] Pre-release available: ${remoteVer} > ${localVer}`)
+									pendingUpdateVersion = remoteVer
 									return {
 										updateAvailable: true,
 										updateReady: false,
@@ -2475,6 +2479,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Suppress false "update available" when running a pre-release newer than the latest stable.
 				let updateAvailable = !!info?.updateAvailable
 				if (updateAvailable && info?.version) {
+					pendingUpdateVersion = info.version
 					if (localVer && versionCompare(info.version, localVer) < 0) {
 						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
 						updateAvailable = false
