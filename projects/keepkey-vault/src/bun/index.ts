@@ -205,7 +205,10 @@ async function macosDownloadAndInstall(rpc: any) {
 
 		// Move old app to backup, move new app into place
 		const backupPath = path.join(tmpDir, `${appName}.backup-${Date.now()}`)
-		Bun.spawnSync(['mv', appBundlePath, backupPath])
+		const backupResult = Bun.spawnSync(['mv', appBundlePath, backupPath])
+		if (backupResult.exitCode !== 0) {
+			throw new Error(`Failed to move current app to backup: ${backupResult.stderr.toString()}`)
+		}
 		const moveResult = Bun.spawnSync(['mv', extractedApp, appBundlePath])
 		if (moveResult.exitCode !== 0) {
 			// Restore backup on failure
