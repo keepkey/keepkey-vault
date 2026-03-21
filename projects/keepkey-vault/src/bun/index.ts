@@ -2509,7 +2509,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					return
 				}
 				if (process.platform === 'darwin') {
-					// macOS: download tar.zst from specific release tag, replace .app, relaunch
+					// macOS: open releases page for manual DMG download
 					macosOpenReleasePage(rpc)
 					return
 				}
@@ -2521,7 +2521,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					return
 				}
 				if (process.platform === 'darwin') {
-					// macOS: download+apply is a single operation — retry if we get here
+					// macOS: open releases page for manual DMG download
 					macosOpenReleasePage(rpc)
 					return
 				}
