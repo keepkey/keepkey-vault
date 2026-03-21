@@ -1424,18 +1424,27 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
 
-          // ── EVM Clear-Signing: pass signed metadata blob to hdwallet ──
-          // If the calldata decoder obtained a signedInsightBlob from Pioneer,
-          // attach it so hdwallet sends EthereumTxMetadata to the device before signing.
-          const decoded = activeSigningInfo?.calldataDecoded
-          if (decoded?.signedInsightBlob) {
+          // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
+          // Priority: 1) caller provides txMetadata in request body (test fixtures)
+          //           2) Pioneer signedInsightBlob from calldata decoder
+          //           3) none — device falls back to raw hex
+          if (body.txMetadata && body.txMetadata.signedPayload) {
             msg.txMetadata = {
-              signedPayload: decoded.signedInsightBlob,
-              keyId: decoded.insightKeyId,
+              signedPayload: body.txMetadata.signedPayload,
+              keyId: body.txMetadata.keyId ?? 0,
             }
-            console.log(`[REST] Attaching EVM clear-sign metadata: keyId=${decoded.insightKeyId} blobLen=${typeof decoded.signedInsightBlob === 'string' ? decoded.signedInsightBlob.length : decoded.signedInsightBlob?.length}`)
+            console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
           } else {
-            console.log('[REST] No signed metadata blob — device will show raw hex (blind signing on OLED)')
+            const decoded = activeSigningInfo?.calldataDecoded
+            if (decoded?.signedInsightBlob) {
+              msg.txMetadata = {
+                signedPayload: decoded.signedInsightBlob,
+                keyId: decoded.insightKeyId,
+              }
+              console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId})`)
+            } else {
+              console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
+            }
           }
 
           console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
