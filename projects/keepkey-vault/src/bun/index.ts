@@ -129,7 +129,9 @@ async function macosDownloadAndInstall(rpc: any) {
 		throw new Error(`No update version available (current: ${pkg.version})`)
 	}
 
-	const assetName = 'stable-macos-arm64-keepkey-vault.app.tar.zst'
+	// Arch-aware asset name: arm64 vs x64
+	const arch = process.arch === 'x64' ? 'x64' : 'arm64'
+	const assetName = `stable-macos-${arch}-keepkey-vault.app.tar.zst`
 	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${assetName}`
 
 	console.log(`[macOS Update] Downloading: ${url}`)
@@ -164,10 +166,17 @@ async function macosDownloadAndInstall(rpc: any) {
 
 		rpc.send['update-status']({ status: 'applying-update', message: 'Extracting update...' })
 
-		// Decompress zstd → tar
+		// Decompress zstd → tar using the zig-zstd binary bundled in the .app
+		// (stock macOS doesn't have zstd; the app ships zig-zstd at Contents/MacOS/)
 		const tarPath = archivePath.replace('.tar.zst', '.tar')
-		const zstdResult = Bun.spawnSync(['zstd', '-d', '-f', archivePath, '-o', tarPath])
-		if (zstdResult.exitCode !== 0) throw new Error(`zstd decompress failed: ${zstdResult.stderr.toString()}`)
+		const appBundleForZstd = path.resolve(process.argv[1] || '', '../../../../..')
+		const zigZstd = path.join(appBundleForZstd, 'Contents', 'MacOS', 'zig-zstd')
+		let zstdResult = Bun.spawnSync([zigZstd, '-d', '-f', archivePath, '-o', tarPath])
+		if (zstdResult.exitCode !== 0) {
+			// Fallback: try system zstd (Homebrew users)
+			zstdResult = Bun.spawnSync(['zstd', '-d', '-f', archivePath, '-o', tarPath])
+			if (zstdResult.exitCode !== 0) throw new Error(`zstd decompress failed: ${zstdResult.stderr.toString()}`)
+		}
 
 		// Find the current .app bundle path
 		// Electrobun apps run from: /path/to/App.app/Contents/Resources/app/bun/index.js
