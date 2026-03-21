@@ -1,0 +1,48 @@
+[2026-03-21T07:52:27.985Z] LOG: [Vault] Dev file logger started → C:\Users\bithi\AppData\Local\com.keepkey.vault\dev-backend.log
+[2026-03-21T07:52:27.986Z] ERR: Failed to read version.json {}
+[2026-03-21T07:52:27.987Z] WARN: [db] Failed to init SQLite cache: JSON Parse error: Unrecognized token '﻿'
+[2026-03-21T07:52:27.988Z] LOG: [Vault] REST API disabled by user setting
+[2026-03-21T07:52:27.988Z] LOG: [swap-tracker] Swap feature flag is OFF — tracker not initialized
+[2026-03-21T07:52:28.062Z] LOG: DEBUG: BrowserView constructor - no HTML provided for webview 1
+[2026-03-21T07:52:28.062Z] LOG: setting webviewId:  1
+[2026-03-21T07:52:28.080Z] LOG: [Vault] Window icon set via Win32 API: C:\Users\bithi\AppData\Local\Programs\KeepKeyVault\Resources\app-real.ico
+[2026-03-21T07:52:28.419Z] LOG: [Engine] Firmware manifest: fw=7.10.0 bl=2.1.4
+[2026-03-21T07:52:28.420Z] LOG: [Engine] Scanning for WebUSB device...
+[2026-03-21T07:52:28.428Z] LOG: [Engine] WebUSB getDevice() returned nothing: Failed to execute 'requestDevice' on 'USB': No device selected.
+[2026-03-21T07:52:28.428Z] LOG: [Engine] Scanning for HID device...
+[2026-03-21T07:52:28.506Z] LOG: [Engine] HID getDevice() returned nothing: device not found
+[2026-03-21T07:52:28.506Z] LOG: [Engine] initializeWallet done — usbDetected=false, error=null
+[2026-03-21T07:52:28.506Z] LOG: [zcash] Sidecar skipped (feature flag OFF)
+[2026-03-21T07:52:28.506Z] LOG: KeepKey Vault started!
+[2026-03-21T07:53:12.830Z] LOG: [Engine] KeepKey USB attached
+[2026-03-21T07:53:12.830Z] LOG: [Engine] State → connected_unpaired
+[2026-03-21T07:53:14.341Z] LOG: [Engine] Scanning for WebUSB device...
+[2026-03-21T07:53:14.352Z] LOG: [Engine] WebUSB device found, attempting pairRawDevice...
+[2026-03-21T07:53:14.831Z] LOG: [Engine] Paired via WebUSB
+[2026-03-21T07:53:14.831Z] LOG: [Engine] Initializing device...
+[2026-03-21T07:53:15.303Z] LOG: [Engine] Features: {"deviceId":"(empty)","initialized":"(undefined)","firmwareVersion":"2.1.4","bootloaderMode":true,"label":"(none)","firmwareHash":"6bb7cfd28262fcd61c450fdc3f6932650bdf16a134ab6c1bc6f90b0d1578e620","firmwareVerified":false,"bootloaderHash":"fe98454e7ebd4aef4a6db5bd4c60f52cf3f58b974283a7c1e1fcc5fea02cf3eb","bootloaderVerified":true}
+[2026-03-21T07:53:15.304Z] LOG: [Engine] State → bootloader
+[2026-03-21T07:53:15.304Z] LOG: [Engine] Bootloader mode: using extractVersion 2.1.4 as BL version
+[2026-03-21T07:53:15.331Z] LOG: [Engine] Bootloader mode: using extractVersion 2.1.4 as BL version
+[2026-03-21T07:53:21.986Z] LOG: [Engine] Bootloader mode: using extractVersion 2.1.4 as BL version
+[2026-03-21T07:53:22.243Z] LOG: [Engine] Firmware binary integrity verified (KPKY header stripped)
+[2026-03-21T07:53:22.246Z] LOG: [Engine] BUTTON_REQUEST — confirm on device
+[2026-03-21T07:53:47.552Z] LOG: [Engine] Starting reboot poll (5s interval, max 5 min)
+[2026-03-21T07:53:50.839Z] LOG: [Engine] KeepKey USB detached
+[2026-03-21T07:53:50.839Z] LOG: [Engine] Detach during reboot phase — ignoring (reboot poll active)
+[2026-03-21T07:53:52.573Z] LOG: [Engine] Scanning for WebUSB device...
+[2026-03-21T07:53:52.581Z] LOG: [Engine] WebUSB getDevice() returned nothing: Failed to execute 'requestDevice' on 'USB': No device selected.
+[2026-03-21T07:53:52.583Z] LOG: [Engine] Scanning for HID device...
+[2026-03-21T07:53:52.599Z] LOG: [Engine] HID getDevice() returned nothing: device not found
+[2026-03-21T07:53:52.599Z] LOG: [Engine] initializeWallet done — usbDetected=false, error=null
+[2026-03-21T07:53:52.599Z] LOG: [Engine] syncState: no device during reboot phase — suppressing disconnected
+[2026-03-21T07:53:57.430Z] LOG: [Engine] KeepKey USB attached
+[2026-03-21T07:53:57.431Z] LOG: [Engine] State → connected_unpaired
+[2026-03-21T07:53:57.581Z] LOG: [Engine] Scanning for WebUSB device...
+[2026-03-21T07:53:57.601Z] LOG: [Engine] WebUSB device found, attempting pairRawDevice...
+[2026-03-21T07:53:58.306Z] LOG: [Engine] Paired via WebUSB
+[2026-03-21T07:53:58.306Z] LOG: [Engine] Initializing device...
+[2026-03-21T07:53:59.048Z] LOG: [Engine] Features: {"deviceId":"A500F2F0EA1353645EB517C4","initialized":false,"firmwareVersion":"7.10.0","label":"(none)","firmwareHash":"518ad41643ee8a0aa6a6422f8534ac94f56cd65bc637aea4db7f3fdbb53255c3","firmwareVerified":true,"bootloaderHash":"fe98454e7ebd4aef4a6db5bd4c60f52cf3f58b974283a7c1e1fcc5fea02cf3eb","bootloaderVerified":true}
+[2026-03-21T07:53:59.048Z] LOG: [Engine] Device reconnected after reboot, clearing reboot phase
+[2026-03-21T07:53:59.048Z] LOG: [Engine] State → needs_init
+[2026-03-21T07:53:59.049Z] LOG: [Engine] Resolved BL hash fe98454e… → v2.1.4
