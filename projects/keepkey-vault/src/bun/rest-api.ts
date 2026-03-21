@@ -227,85 +227,375 @@ function getSwaggerUiHtml(): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KeepKey Vault API</title>
+  <title>KeepKey Vault &mdash; Developer Center</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>
-    body { margin: 0; background: #1a1a2e; }
-    .kk-header {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      border-bottom: 2px solid #C0A860;
-      padding: 12px 24px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .kk-header svg { flex-shrink: 0; }
-    .kk-header h1 {
-      margin: 0; color: #C0A860; font-family: system-ui, sans-serif;
-      font-size: 18px; font-weight: 600;
-    }
-    .kk-header span { color: #8a8a9a; font-size: 13px; font-family: system-ui, sans-serif; }
-    /* Dark theme overrides */
-    .swagger-ui { background: #1a1a2e; }
-    .swagger-ui .topbar { display: none; }
-    .swagger-ui .info .title { color: #e0e0e0; }
-    .swagger-ui .info p, .swagger-ui .info li { color: #b0b0c0; }
-    .swagger-ui .opblock-tag { color: #e0e0e0 !important; border-bottom-color: #333 !important; }
-    .swagger-ui .opblock { border-color: #333; background: rgba(255,255,255,0.03); }
-    .swagger-ui .opblock .opblock-summary { border-color: #333; }
-    .swagger-ui .opblock .opblock-summary-description { color: #b0b0c0; }
-    .swagger-ui .opblock .opblock-summary-method { font-weight: 700; }
-    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #2563EB; }
-    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #C0A860; color: #000; }
-    .swagger-ui .opblock.opblock-get { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.3); }
-    .swagger-ui .opblock.opblock-post { background: rgba(192,168,96,0.06); border-color: rgba(192,168,96,0.3); }
-    .swagger-ui .btn { border-radius: 4px; }
-    .swagger-ui .btn.execute { background: #C0A860; color: #000; border: none; }
-    .swagger-ui .btn.execute:hover { background: #d4bc6a; }
-    .swagger-ui .model-box, .swagger-ui .models { background: rgba(255,255,255,0.03); }
-    .swagger-ui .model { color: #b0b0c0; }
-    .swagger-ui table thead tr th { color: #b0b0c0; border-bottom-color: #333; }
-    .swagger-ui table tbody tr td { color: #e0e0e0; border-bottom-color: #222; }
-    .swagger-ui .parameter__name { color: #e0e0e0; }
-    .swagger-ui .parameter__type { color: #C0A860; }
-    .swagger-ui input[type=text], .swagger-ui textarea, .swagger-ui select {
-      background: #0d1117; color: #e0e0e0; border-color: #333;
-    }
-    .swagger-ui .scheme-container { background: #1a1a2e; box-shadow: none; }
-    .swagger-ui .loading-container .loading::after { color: #C0A860; }
-    .swagger-ui section.models { border-color: #333; }
-    .swagger-ui section.models h4 { color: #e0e0e0; }
-    .swagger-ui .response-col_status { color: #e0e0e0; }
-    .swagger-ui .response-col_description { color: #b0b0c0; }
-    .swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5 { color: #e0e0e0; }
-    .swagger-ui .opblock-description-wrapper p { color: #b0b0c0; }
-    .swagger-ui .opblock-section-header { background: rgba(255,255,255,0.02); }
-    .swagger-ui .opblock-section-header h4 { color: #e0e0e0; }
-    .swagger-ui .highlight-code { background: #0d1117; }
-    .swagger-ui .microlight { background: #0d1117 !important; color: #e0e0e0 !important; }
+    *{box-sizing:border-box}
+    body{margin:0;background:#0d1117;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
+
+    /* ── Header ────────────────────────────────── */
+    .kk-header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border-bottom:2px solid #C0A860;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+    .kk-header-left{display:flex;align-items:center;gap:12px}
+    .kk-header h1{margin:0;color:#C0A860;font-size:20px;font-weight:700}
+    .kk-header .sub{color:#8a8a9a;font-size:13px}
+    .kk-status{display:flex;align-items:center;gap:8px}
+    .kk-status .dot{width:8px;height:8px;border-radius:50%;background:#555}
+    .kk-status span{color:#8a8a9a;font-size:12px}
+
+    /* ── Tabs ──────────────────────────────────── */
+    .kk-tabs{display:flex;gap:0;background:#161b22;border-bottom:1px solid #30363d;padding:0 24px}
+    .kk-tab{padding:12px 20px;cursor:pointer;font-size:14px;font-weight:500;color:#8a8a9a;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;user-select:none}
+    .kk-tab:hover{color:#e0e0e0}
+    .kk-tab.active{color:#C0A860;border-bottom-color:#C0A860}
+
+    /* ── Panels ────────────────────────────────── */
+    .kk-panel{display:none}
+    .kk-panel.active{display:block}
+
+    /* ── Guide ─────────────────────────────────── */
+    .guide{max-width:820px;margin:0 auto;padding:32px 24px;line-height:1.7}
+    .guide h2{color:#C0A860;font-size:22px;margin:32px 0 12px;font-weight:600;border-bottom:1px solid #30363d;padding-bottom:8px}
+    .guide h2:first-child{margin-top:0}
+    .guide h3{color:#e0e0e0;font-size:16px;margin:24px 0 8px}
+    .guide p{color:#b0b0c0;margin:8px 0}
+    .guide code{background:#161b22;padding:2px 6px;border-radius:4px;font-family:'SF Mono',Menlo,monospace;font-size:13px;color:#C0A860}
+    .guide pre{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0}
+    .guide pre code{background:none;padding:0;color:#e0e0e0;display:block;white-space:pre}
+    .kw{color:#ff7b72}.str{color:#a5d6ff}.cmt{color:#8b949e}.fn{color:#d2a8ff}.num{color:#79c0ff}
+    .steps{display:grid;grid-template-columns:40px 1fr;gap:12px;margin:16px 0}
+    .sn{width:32px;height:32px;border-radius:50%;background:rgba(192,168,96,.15);color:#C0A860;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+    .sc{padding-top:4px}
+    .chains{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:12px 0}
+    .chip{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;font-size:13px;text-align:center}
+    .chip .cl{color:#e0e0e0;font-weight:500}.chip .cs{color:#8a8a9a;font-size:11px}
+    .note{background:rgba(192,168,96,.08);border-left:3px solid #C0A860;padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
+    .note strong{color:#C0A860}
+    .guide table{width:100%;border-collapse:collapse;margin:12px 0}
+    .guide th{text-align:left;color:#8a8a9a;font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding:8px 12px;border-bottom:1px solid #30363d}
+    .guide td{padding:8px 12px;border-bottom:1px solid #1c2128;color:#b0b0c0;font-size:13px}
+    .guide td code{font-size:12px}
+
+    /* ── Pair panel ─────────────────────────────── */
+    .pair-wrap{max-width:500px;margin:40px auto;padding:0 24px}
+    .pair-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px}
+    .pair-card h2{color:#C0A860;margin:0 0 4px;font-size:18px}
+    .pair-card .desc{color:#8a8a9a;font-size:13px;margin-bottom:20px}
+    .pair-card label{display:block;color:#b0b0c0;font-size:13px;margin-bottom:6px;font-weight:500}
+    .pair-card input{width:100%;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e0e0e0;font-size:14px;margin-bottom:16px;outline:none}
+    .pair-card input:focus{border-color:#C0A860}
+    .pair-btn{width:100%;padding:12px;background:#C0A860;color:#0d1117;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+    .pair-btn:hover{background:#d4bc6a}
+    .pair-btn:disabled{opacity:.5;cursor:not-allowed}
+    .pair-result{margin-top:16px;padding:12px;border-radius:6px;font-size:13px;font-family:'SF Mono',Menlo,monospace;word-break:break-all}
+    .pair-result.ok{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:#22c55e}
+    .pair-result.err{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);color:#f85149}
+    .pair-sep{margin-top:20px;padding-top:20px;border-top:1px solid #30363d}
+    .pair-row{display:flex;gap:8px}
+    .pair-row input{margin-bottom:0;flex:1}
+    .vfy-btn{padding:10px 16px;background:transparent;border:1px solid #30363d;border-radius:6px;color:#C0A860;font-size:13px;cursor:pointer;white-space:nowrap}
+    .vfy-btn:hover{border-color:#C0A860}
+
+    /* ── Swagger overrides ─────────────────────── */
+    .swagger-ui{background:#0d1117}
+    .swagger-ui .topbar{display:none}
+    .swagger-ui .scheme-container{background:#0d1117;box-shadow:none}
+    .swagger-ui .btn.authorize,.swagger-ui .authorization__btn{display:none !important}
+    .swagger-ui .info .title{color:#e0e0e0}
+    .swagger-ui .info p,.swagger-ui .info li{color:#b0b0c0}
+    .swagger-ui .opblock-tag{color:#e0e0e0 !important;border-bottom-color:#30363d !important}
+    .swagger-ui .opblock{border-color:#30363d;background:rgba(255,255,255,.02)}
+    .swagger-ui .opblock .opblock-summary{border-color:#30363d}
+    .swagger-ui .opblock .opblock-summary-description{color:#b0b0c0}
+    .swagger-ui .opblock .opblock-summary-method{font-weight:700}
+    .swagger-ui .opblock.opblock-get .opblock-summary-method{background:#2563EB}
+    .swagger-ui .opblock.opblock-post .opblock-summary-method{background:#C0A860;color:#000}
+    .swagger-ui .opblock.opblock-get{background:rgba(37,99,235,.06);border-color:rgba(37,99,235,.25)}
+    .swagger-ui .opblock.opblock-post{background:rgba(192,168,96,.06);border-color:rgba(192,168,96,.25)}
+    .swagger-ui .btn{border-radius:4px}
+    .swagger-ui .btn.execute{background:#C0A860;color:#000;border:none}
+    .swagger-ui .btn.execute:hover{background:#d4bc6a}
+    .swagger-ui .model-box,.swagger-ui .models{background:rgba(255,255,255,.02)}
+    .swagger-ui .model{color:#b0b0c0}
+    .swagger-ui table thead tr th{color:#b0b0c0;border-bottom-color:#30363d}
+    .swagger-ui table tbody tr td{color:#e0e0e0;border-bottom-color:#1c2128}
+    .swagger-ui .parameter__name{color:#e0e0e0}
+    .swagger-ui .parameter__type{color:#C0A860}
+    .swagger-ui input[type=text],.swagger-ui textarea,.swagger-ui select{background:#0d1117;color:#e0e0e0;border-color:#30363d}
+    .swagger-ui .loading-container .loading::after{color:#C0A860}
+    .swagger-ui section.models{border-color:#30363d}
+    .swagger-ui section.models h4{color:#e0e0e0}
+    .swagger-ui .response-col_status{color:#e0e0e0}
+    .swagger-ui .response-col_description{color:#b0b0c0}
+    .swagger-ui .responses-inner h4,.swagger-ui .responses-inner h5{color:#e0e0e0}
+    .swagger-ui .opblock-description-wrapper p{color:#b0b0c0}
+    .swagger-ui .opblock-section-header{background:rgba(255,255,255,.02)}
+    .swagger-ui .opblock-section-header h4{color:#e0e0e0}
+    .swagger-ui .highlight-code{background:#161b22}
+    .swagger-ui .microlight{background:#161b22 !important;color:#e0e0e0 !important}
   </style>
 </head>
 <body>
+
+  <!-- ═══ Header ═══ -->
   <div class="kk-header">
-    <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
-      <rect width="100" height="100" rx="16" fill="#C0A860"/>
-      <path d="M30 70V30h10v15l15-15h14L52 47l18 23H56L43 53l-3 3v14H30z" fill="#1a1a2e"/>
-    </svg>
-    <div>
-      <h1>KeepKey Vault API</h1>
-      <span>Interactive documentation &mdash; localhost:1646</span>
+    <div class="kk-header-left">
+      <svg width="32" height="32" viewBox="0 0 100 100" fill="none">
+        <rect width="100" height="100" rx="16" fill="#C0A860"/>
+        <path d="M30 70V30h10v15l15-15h14L52 47l18 23H56L43 53l-3 3v14H30z" fill="#1a1a2e"/>
+      </svg>
+      <div>
+        <h1>KeepKey Vault &mdash; Developer Center</h1>
+        <span class="sub">Build on the KeepKey hardware wallet</span>
+      </div>
+    </div>
+    <div class="kk-status">
+      <div class="dot" id="sd"></div>
+      <span id="st">checking&hellip;</span>
     </div>
   </div>
-  <div id="swagger-ui"></div>
+
+  <!-- ═══ Tabs ═══ -->
+  <div class="kk-tabs">
+    <div class="kk-tab active" data-tab="guide">Getting Started</div>
+    <div class="kk-tab" data-tab="pair">Pair App</div>
+    <div class="kk-tab" data-tab="explorer">API Explorer</div>
+  </div>
+
+  <!-- ═══ Getting Started ═══ -->
+  <div class="kk-panel active" id="panel-guide">
+    <div class="guide">
+
+      <h2>Quick Start</h2>
+      <p>The KeepKey Vault exposes a local REST API on <code>localhost:1646</code>.
+         Any app &mdash; web, mobile, CLI, or bot &mdash; can pair with the vault and
+         interact with the hardware wallet.</p>
+
+      <div class="steps">
+        <div class="sn">1</div>
+        <div class="sc">
+          <strong>Enable the API bridge</strong>
+          <p>Open Vault &rarr; Settings &rarr; toggle <em>API Bridge</em> on.</p>
+        </div>
+        <div class="sn">2</div>
+        <div class="sc">
+          <strong>Pair your app</strong>
+          <p>Send <code>POST /auth/pair</code> with your app name.
+             Approve on the KeepKey device. You receive a bearer token.</p>
+        </div>
+        <div class="sn">3</div>
+        <div class="sc">
+          <strong>Make API calls</strong>
+          <p>Include the bearer token in the <code>Authorization</code> header
+             for all subsequent requests.</p>
+        </div>
+      </div>
+
+      <h2>Pairing</h2>
+      <h3>Request an API key</h3>
+<pre><code><span class="cmt">// POST http://localhost:1646/auth/pair</span>
+{
+  <span class="str">"name"</span>: <span class="str">"My Trading Bot"</span>,
+  <span class="str">"imageUrl"</span>: <span class="str">"https://example.com/icon.png"</span>
+}
+
+<span class="cmt">// Response (after device approval)</span>
+{ <span class="str">"apiKey"</span>: <span class="str">"a1b2c3d4-e5f6-..."</span> }</code></pre>
+
+      <h3>Use the SDK</h3>
+<pre><code><span class="kw">import</span> { KeepKeySdk } <span class="kw">from</span> <span class="str">'@keepkey/keepkey-sdk'</span>
+
+<span class="kw">const</span> sdk = <span class="kw">await</span> KeepKeySdk.<span class="fn">create</span>({
+  <span class="str">serviceName</span>: <span class="str">'My App'</span>,
+  <span class="str">serviceImageUrl</span>: <span class="str">'https://example.com/icon.png'</span>,
+})
+
+<span class="cmt">// Get ETH address (approve on device)</span>
+<span class="kw">const</span> { address } = <span class="kw">await</span> sdk.address.<span class="fn">ethGetAddress</span>({
+  <span class="str">address_n</span>: [<span class="num">0x8000002C</span>, <span class="num">0x8000003C</span>, <span class="num">0x80000000</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">show_display</span>: <span class="kw">true</span>,
+})
+
+<span class="cmt">// Sign an EIP-1559 transaction</span>
+<span class="kw">const</span> signed = <span class="kw">await</span> sdk.eth.<span class="fn">ethSignTransaction</span>({
+  <span class="str">addressNList</span>: [<span class="num">0x8000002C</span>, <span class="num">0x8000003C</span>, <span class="num">0x80000000</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">to</span>:    <span class="str">'0xRecipient...'</span>,
+  <span class="str">value</span>: <span class="str">'0xDE0B6B3A7640000'</span>,  <span class="cmt">// 1 ETH</span>
+  <span class="str">chainId</span>: <span class="num">1</span>,
+  <span class="str">nonce</span>:    <span class="str">'0x0'</span>,
+  <span class="str">gasLimit</span>: <span class="str">'0x5208'</span>,
+  <span class="str">maxFeePerGas</span>:         <span class="str">'0x2540BE400'</span>,
+  <span class="str">maxPriorityFeePerGas</span>: <span class="str">'0x3B9ACA00'</span>,
+})</code></pre>
+
+      <h2>Supported Chains</h2>
+      <div class="chains">
+        <div class="chip"><div class="cl">Bitcoin</div><div class="cs">P2PKH / P2SH / SegWit</div></div>
+        <div class="chip"><div class="cl">Ethereum</div><div class="cs">EIP-1559 / EIP-712</div></div>
+        <div class="chip"><div class="cl">Cosmos</div><div class="cs">Amino + Protobuf</div></div>
+        <div class="chip"><div class="cl">THORChain</div><div class="cs">Swap / Deposit</div></div>
+        <div class="chip"><div class="cl">Mayachain</div><div class="cs">Swap / Deposit</div></div>
+        <div class="chip"><div class="cl">Osmosis</div><div class="cs">LP / IBC / Swap</div></div>
+        <div class="chip"><div class="cl">Solana</div><div class="cs">SPL tokens</div></div>
+        <div class="chip"><div class="cl">XRP</div><div class="cs">Payments</div></div>
+        <div class="chip"><div class="cl">TRON</div><div class="cs">TRC-20</div></div>
+        <div class="chip"><div class="cl">TON</div><div class="cs">Jettons</div></div>
+        <div class="chip"><div class="cl">Zcash</div><div class="cs">Shielded (Orchard)</div></div>
+        <div class="chip"><div class="cl">EVM Chains</div><div class="cs">Polygon, Arb, OP, &hellip;</div></div>
+      </div>
+
+      <h2>Key Endpoints</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Health check &amp; version info</td></tr>
+          <tr><td><code>POST</code></td><td><code>/auth/pair</code></td><td>Pair a new app (device approval)</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/device/features</code></td><td>Device info, firmware version</td></tr>
+          <tr><td><code>POST</code></td><td><code>/addresses/eth</code></td><td>Derive an ETH address</td></tr>
+          <tr><td><code>POST</code></td><td><code>/eth/sign-transaction</code></td><td>Sign an EVM transaction</td></tr>
+          <tr><td><code>POST</code></td><td><code>/eth/sign-typed-data</code></td><td>Sign EIP-712 typed data</td></tr>
+          <tr><td><code>POST</code></td><td><code>/utxo/sign-transaction</code></td><td>Sign a Bitcoin / UTXO tx</td></tr>
+          <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino/*</code></td><td>Sign Cosmos amino txs</td></tr>
+          <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign a Solana transaction</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Authentication</h2>
+      <p>All endpoints except <code>/api/health</code>, <code>/info/ping</code>,
+         <code>/docs</code>, and <code>/spec/swagger.json</code> require a bearer
+         token obtained via the <strong>Pair App</strong> tab:</p>
+<pre><code><span class="kw">curl</span> http://localhost:1646/api/device/features \\
+  -H <span class="str">"Authorization: Bearer YOUR_API_KEY"</span></code></pre>
+      <div class="note">
+        <strong>Device approval required</strong> &mdash; signing operations
+        always block until the user confirms or rejects on the KeepKey.
+      </div>
+
+      <h2>Clear Signing</h2>
+      <p>EVM transactions with contract calldata are decoded and displayed
+         on the device in human-readable form:</p>
+      <table>
+        <thead><tr><th>Type</th><th>What the device shows</th></tr></thead>
+        <tbody>
+          <tr><td>ERC-20 transfer</td><td>Token symbol, amount, recipient</td></tr>
+          <tr><td>ERC-20 approve</td><td>Token, spender, allowance</td></tr>
+          <tr><td>DEX swaps</td><td>Input/output tokens, amounts, slippage</td></tr>
+          <tr><td>EIP-712 typed data</td><td>Domain name, message fields</td></tr>
+          <tr><td>Unknown calldata</td><td>Raw hex with 4-byte selector</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══ Pair App ═══ -->
+  <div class="kk-panel" id="panel-pair">
+    <div class="pair-wrap">
+      <div class="pair-card">
+        <h2>Pair a New App</h2>
+        <p class="desc">Register your application with the vault.
+           You will need to approve the pairing on the KeepKey device.</p>
+
+        <label for="pn">App Name</label>
+        <input id="pn" placeholder="My Trading Bot" />
+        <label for="pi">Icon URL <span style="color:#8a8a9a">(optional)</span></label>
+        <input id="pi" placeholder="https://example.com/icon.png" />
+        <button class="pair-btn" id="pb" onclick="doPair()">Pair App</button>
+        <div id="pr"></div>
+
+        <div class="pair-sep">
+          <label for="ek">Already have a key?</label>
+          <div class="pair-row">
+            <input id="ek" placeholder="Paste API key&hellip;" />
+            <button class="vfy-btn" onclick="doVerify()">Verify</button>
+          </div>
+          <div id="vr"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ API Explorer ═══ -->
+  <div class="kk-panel" id="panel-explorer">
+    <div id="swagger-ui"></div>
+  </div>
+
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    SwaggerUIBundle({
-      url: '/spec/swagger.json',
-      dom_id: '#swagger-ui',
-      deepLinking: true,
-      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
-      layout: 'BaseLayout',
+    /* ── Tabs ────────────────────────────────── */
+    var sL=false
+    document.querySelectorAll('.kk-tab').forEach(function(t){
+      t.addEventListener('click',function(){
+        document.querySelectorAll('.kk-tab').forEach(function(x){x.classList.remove('active')})
+        document.querySelectorAll('.kk-panel').forEach(function(x){x.classList.remove('active')})
+        t.classList.add('active')
+        document.getElementById('panel-'+t.dataset.tab).classList.add('active')
+        if(t.dataset.tab==='explorer'&&!sL){
+          sL=true
+          SwaggerUIBundle({
+            url:'/spec/swagger.json',
+            dom_id:'#swagger-ui',
+            deepLinking:true,
+            presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
+            layout:'BaseLayout',
+          })
+        }
+      })
     })
+
+    /* ── Status ──────────────────────────────── */
+    function ck(){
+      fetch('/api/health',{signal:AbortSignal.timeout(3000)})
+        .then(function(r){return r.json()})
+        .then(function(d){
+          document.getElementById('sd').style.background=d.connected?'#22c55e':'#eab308'
+          document.getElementById('st').textContent=d.connected
+            ?'device connected \u2014 v'+(d.version||'')
+            :'no device'
+        })
+        .catch(function(){
+          document.getElementById('sd').style.background='#f85149'
+          document.getElementById('st').textContent='offline'
+        })
+    }
+    ck();setInterval(ck,10000)
+
+    /* ── Pair ────────────────────────────────── */
+    function doPair(){
+      var n=document.getElementById('pn').value.trim()
+      if(!n)return
+      var b=document.getElementById('pb'),r=document.getElementById('pr')
+      b.disabled=true;b.textContent='Approve on device\u2026'
+      r.className='pair-result';r.textContent=''
+      fetch('/auth/pair',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:n,imageUrl:document.getElementById('pi').value.trim()||undefined})
+      })
+      .then(function(x){return x.json()})
+      .then(function(d){
+        if(d.apiKey){r.className='pair-result ok';r.textContent='API Key: '+d.apiKey}
+        else{r.className='pair-result err';r.textContent=d.error||'Pairing rejected'}
+      })
+      .catch(function(e){r.className='pair-result err';r.textContent='Error: '+e.message})
+      .finally(function(){b.disabled=false;b.textContent='Pair App'})
+    }
+
+    function doVerify(){
+      var k=document.getElementById('ek').value.trim()
+      if(!k)return
+      var r=document.getElementById('vr')
+      fetch('/auth/pair',{headers:{'Authorization':'Bearer '+k}})
+        .then(function(x){return x.json()})
+        .then(function(d){
+          r.className='pair-result '+(d.paired?'ok':'err')
+          r.textContent=d.paired?'Valid \u2014 paired as "'+(d.name||'unknown')+'"':'Invalid or expired key'
+          r.style.marginTop='12px'
+        })
+        .catch(function(e){
+          r.className='pair-result err'
+          r.textContent='Error: '+e.message
+          r.style.marginTop='12px'
+        })
+    }
   </script>
 </body>
 </html>`
