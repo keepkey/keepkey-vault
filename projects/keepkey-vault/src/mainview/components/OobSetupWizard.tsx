@@ -1096,22 +1096,21 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </>
                 )}
 
+                {/* Bootloader reboot: device says "Please disconnect and reconnect" — user must unplug */}
                 {rebootPhase === 'rebooting' && (
                   <VStack gap={2} w="100%">
-                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
+                    <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
                       <VStack gap={2} align="start">
                         <HStack gap={2}>
-                          <Spinner size="sm" color="blue.300" />
-                          <Text fontSize="sm" color="blue.300" fontWeight="bold">
-                            {rebootElapsedMs < 20000
-                              ? t('firmware.deviceRebooting', { defaultValue: 'Device rebooting...' })
-                              : t('firmware.rebootTakingLong', { defaultValue: 'Reconnection is taking longer than usual...' })}
+                          <FaExclamationTriangle color="#ECC94B" size={16} />
+                          <Text fontSize="sm" color="yellow.200" fontWeight="bold">
+                            {t('firmware.pleaseDisconnect', { defaultValue: 'Please disconnect and reconnect your KeepKey' })}
                           </Text>
                         </HStack>
-                        <Text fontSize="xs" color="blue.200">
+                        <Text fontSize="xs" color="yellow.300">
                           {rebootElapsedMs < 20000
-                            ? t('firmware.rebootingMessage', { defaultValue: 'Waiting for device to reconnect after update.' })
-                            : t('firmware.rebootTakingLongSub', { defaultValue: 'The device may need a moment to restart.' })}
+                            ? t('firmware.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
+                            : t('firmware.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
                         </Text>
                       </VStack>
                     </Box>
