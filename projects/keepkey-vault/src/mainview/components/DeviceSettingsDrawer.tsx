@@ -154,11 +154,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
+	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
 	const [newServerUrl, setNewServerUrl] = useState("")
@@ -294,6 +295,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setZcashPrivacyEnabled:", e) }
 		setTogglingZcashPrivacy(false)
+	}, [])
+
+	const togglePreRelease = useCallback(async (enabled: boolean) => {
+		setTogglingPreRelease(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setPreReleaseUpdates", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setPreReleaseUpdates:", e) }
+		setTogglingPreRelease(false)
 	}, [])
 
 	const openSwagger = useCallback(async () => {
@@ -982,6 +992,40 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Text>
 								)}
 							</Box>
+
+							{/* Pre-release updates toggle */}
+							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
+								<Flex align="center" gap="3">
+									<Box w="8" h="8" borderRadius="lg" bg="rgba(139,92,246,0.15)" display="flex" alignItems="center" justifyContent="center">
+										<Text fontSize="sm">🧪</Text>
+									</Box>
+									<VStack gap="0" align="start">
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("preReleaseUpdates", { defaultValue: "Pre-release Updates" })}</Text>
+										<Text fontSize="2xs" color="kk.textMuted">{t("preReleaseUpdatesDesc", { defaultValue: "Get early access to new features before stable release" })}</Text>
+									</VStack>
+								</Flex>
+								<Box
+									as="button"
+									w="44px" h="24px"
+									borderRadius="full"
+									bg={appSettings.preReleaseUpdates ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}
+									position="relative"
+									transition="all 0.2s"
+									cursor={togglingPreRelease ? "not-allowed" : "pointer"}
+									opacity={togglingPreRelease ? 0.5 : 1}
+									onClick={() => !togglingPreRelease && togglePreRelease(!appSettings.preReleaseUpdates)}
+								>
+									<Box
+										w="18px" h="18px"
+										borderRadius="full"
+										bg={appSettings.preReleaseUpdates ? "#8B5CF6" : "rgba(255,255,255,0.3)"}
+										position="absolute"
+										top="3px"
+										left={appSettings.preReleaseUpdates ? "23px" : "3px"}
+										transition="all 0.2s"
+									/>
+								</Box>
+							</Flex>
 
 						</VStack>
 					</Section>

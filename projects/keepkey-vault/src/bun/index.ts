@@ -183,6 +183,7 @@ let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF — u
 let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
 let bip85Enabled = getSetting('bip85_enabled') === '1' // default OFF
 let zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1' // default OFF, locked
+let preReleaseUpdates = getSetting('pre_release_updates') === '1' // default OFF
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
@@ -201,6 +202,7 @@ function getAppSettings() {
 		swapsEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
+		preReleaseUpdates,
 	}
 }
 
@@ -1767,6 +1769,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return getAppSettings()
 			},
+			setPreReleaseUpdates: async (params) => {
+				preReleaseUpdates = params.enabled
+				setSetting('pre_release_updates', params.enabled ? '1' : '0')
+				console.log('[settings] Pre-release updates:', params.enabled)
+				return getAppSettings()
+			},
 			// ── Factory Reset ─────────────────────────────────────────
 			factoryReset: async () => {
 				console.log('[factory-reset] Starting full app reset...')
@@ -2348,13 +2356,45 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── App Updates ──────────────────────────────────────────
 			checkForUpdate: async () => {
+				const localVer = await Updater.localInfo.version()
+
+				// Pre-release channel: check GitHub API for latest release including pre-releases
+				if (preReleaseUpdates) {
+					try {
+						const resp = await fetch('https://api.github.com/repos/keepkey/keepkey-vault/releases?per_page=5', {
+							signal: AbortSignal.timeout(10000),
+							headers: { 'Accept': 'application/vnd.github.v3+json' },
+						})
+						if (resp.ok) {
+							const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean; assets: Array<{ name: string; browser_download_url: string }> }>
+							// Find the first non-draft release (includes pre-releases)
+							const latest = releases.find(r => !r.draft)
+							if (latest) {
+								const remoteVer = latest.tag_name.replace(/^v/, '')
+								if (localVer && versionCompare(remoteVer, localVer) > 0) {
+									console.log(`[Updater] Pre-release available: ${remoteVer} > ${localVer}`)
+									return {
+										updateAvailable: true,
+										updateReady: false,
+										version: remoteVer,
+										hash: '',
+										preRelease: latest.prerelease,
+									}
+								}
+								console.log(`[Updater] Pre-release check: ${remoteVer} <= ${localVer}, up to date`)
+							}
+						}
+					} catch (e: any) {
+						console.warn('[Updater] Pre-release check failed:', e.message)
+					}
+				}
+
+				// Standard channel: use Electrobun's built-in updater
 				const result = await Updater.checkForUpdate()
 				const info = Updater.updateInfo()
 				// Suppress false "update available" when running a pre-release newer than the latest stable.
-				// Electrobun compares hashes — different hash = "update available" even if remote is older.
 				let updateAvailable = !!info?.updateAvailable
 				if (updateAvailable && info?.version) {
-					const localVer = await Updater.localInfo.version()
 					if (localVer && versionCompare(info.version, localVer) < 0) {
 						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
 						updateAvailable = false
