@@ -40,9 +40,12 @@ const GITHUB_REPO = 'keepkey/keepkey-vault'
 let windowsInstallerPath: string | null = null
 
 async function windowsDownloadAndInstall(rpc: any) {
-	// 1. Get the latest version from Electrobun or cached update info
+	// 1. Get the update version — must be newer than current, not a fallback to self
 	const info = Updater.updateInfo()
-	const version = info?.version || pkg.version
+	const version = info?.version
+	if (!version || version === pkg.version) {
+		throw new Error(`No update version available (current: ${pkg.version})`)
+	}
 	const exeName = `KeepKey-Vault-${version}-win-x64-setup.exe`
 	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${exeName}`
 
@@ -99,8 +102,7 @@ async function windowsLaunchInstaller(rpc: any) {
 	rpc.send['update-status']({ status: 'applying-update', message: 'Launching installer...' })
 
 	// Launch the installer and exit the app
-	// The /S flag runs NSIS installer silently (if supported)
-	// cmd /c start runs it detached so it survives our exit
+	// cmd /c start runs it detached so it survives our process exit
 	const installerWin = windowsInstallerPath.replace(/\//g, '\\')
 	Bun.spawn(['cmd', '/c', 'start', '', installerWin], {
 		stdio: ['ignore', 'ignore', 'ignore'],
