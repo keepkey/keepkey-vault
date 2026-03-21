@@ -118,119 +118,17 @@ async function windowsLaunchInstaller(rpc: any) {
 	}, 1500)
 }
 
-// ── macOS auto-update (bypasses Electrobun's baseUrl: "latest" limitation) ──
-// Electrobun's Updater.downloadUpdate() fetches from releases/latest/download
-// which only resolves to non-pre-release releases. Download the tar.zst
-// directly from the specific release tag, extract, replace .app, relaunch.
+// ── macOS update — open GitHub releases page ──
+// In-app tar.zst extraction requires zstd which stock macOS doesn't have.
+// zig-zstd is bundled but uses different CLI flags. Just open the releases page.
 
-async function macosDownloadAndInstall(rpc: any) {
+function macosOpenReleasePage(rpc: any) {
 	const version = pendingUpdateVersion || Updater.updateInfo()?.version
-	if (!version || version === pkg.version) {
-		throw new Error(`No update version available (current: ${pkg.version})`)
-	}
-
-	// We only ship arm64 macOS builds (Intel Macs run via Rosetta)
-	const assetName = 'stable-macos-arm64-keepkey-vault.app.tar.zst'
-	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${assetName}`
-
-	console.log(`[macOS Update] Downloading: ${url}`)
-	rpc.send['update-status']({ status: 'downloading-update', message: `Downloading v${version}...`, progress: 0 })
-
-	try {
-		const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
-		if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`)
-
-		const totalBytes = Number(resp.headers.get('content-length') || 0)
-		const reader = resp.body?.getReader()
-		if (!reader) throw new Error('No response body')
-
-		const chunks: Uint8Array[] = []
-		let downloaded = 0
-
-		while (true) {
-			const { done, value } = await reader.read()
-			if (done) break
-			chunks.push(value)
-			downloaded += value.length
-			if (totalBytes > 0) {
-				const progress = (downloaded / totalBytes) * 100
-				rpc.send['update-status']({ status: 'download-progress', message: `Downloading... ${Math.round(progress)}%`, progress })
-			}
-		}
-
-		const tmpDir = os.tmpdir()
-		const archivePath = path.join(tmpDir, assetName)
-		await Bun.write(archivePath, new Blob(chunks))
-		console.log(`[macOS Update] Archive saved: ${archivePath} (${downloaded} bytes)`)
-
-		rpc.send['update-status']({ status: 'applying-update', message: 'Extracting update...' })
-
-		// Decompress zstd → tar using the zig-zstd binary bundled in the .app
-		// (stock macOS doesn't have zstd; the app ships zig-zstd at Contents/MacOS/)
-		const tarPath = archivePath.replace('.tar.zst', '.tar')
-		const appBundleForZstd = path.resolve(process.argv[1] || '', '../../../../..')
-		const zigZstd = path.join(appBundleForZstd, 'Contents', 'MacOS', 'zig-zstd')
-		let zstdResult = Bun.spawnSync([zigZstd, '-d', '-f', archivePath, '-o', tarPath])
-		if (zstdResult.exitCode !== 0) {
-			// Fallback: try system zstd (Homebrew users)
-			zstdResult = Bun.spawnSync(['zstd', '-d', '-f', archivePath, '-o', tarPath])
-			if (zstdResult.exitCode !== 0) throw new Error(`zstd decompress failed: ${zstdResult.stderr.toString()}`)
-		}
-
-		// Find the current .app bundle path
-		// Electrobun apps run from: /path/to/App.app/Contents/Resources/app/bun/index.js
-		const appBundlePath = path.resolve(process.argv[1] || '', '../../../../..')
-		const appName = path.basename(appBundlePath)
-
-		if (!appBundlePath.endsWith('.app')) {
-			throw new Error(`Cannot determine .app bundle path: ${appBundlePath}`)
-		}
-
-		console.log(`[macOS Update] Replacing: ${appBundlePath}`)
-
-		// Extract new app to temp staging dir
-		const stageDir = path.join(tmpDir, `keepkey-update-${version}`)
-		Bun.spawnSync(['rm', '-rf', stageDir])
-		Bun.spawnSync(['mkdir', '-p', stageDir])
-
-		const extractResult = Bun.spawnSync(['tar', 'xf', tarPath, '-C', stageDir])
-		if (extractResult.exitCode !== 0) throw new Error(`tar extract failed: ${extractResult.stderr.toString()}`)
-
-		// Find the .app in the extracted contents
-		const lsResult = Bun.spawnSync(['find', stageDir, '-maxdepth', '2', '-name', '*.app', '-type', 'd'])
-		const extractedApp = lsResult.stdout.toString().trim().split('\n')[0]
-		if (!extractedApp || !extractedApp.endsWith('.app')) {
-			throw new Error(`No .app found in extracted archive`)
-		}
-
-		// Move old app to backup, move new app into place
-		const backupPath = path.join(tmpDir, `${appName}.backup-${Date.now()}`)
-		const backupResult = Bun.spawnSync(['mv', appBundlePath, backupPath])
-		if (backupResult.exitCode !== 0) {
-			throw new Error(`Failed to move current app to backup: ${backupResult.stderr.toString()}`)
-		}
-		const moveResult = Bun.spawnSync(['mv', extractedApp, appBundlePath])
-		if (moveResult.exitCode !== 0) {
-			// Restore backup on failure
-			Bun.spawnSync(['mv', backupPath, appBundlePath])
-			throw new Error(`Failed to move new app into place: ${moveResult.stderr.toString()}`)
-		}
-
-		console.log(`[macOS Update] Replaced successfully. Relaunching...`)
-		rpc.send['update-status']({ status: 'relaunching', message: 'Restarting app...' })
-
-		// Relaunch the new app and exit
-		Bun.spawn(['open', '-n', appBundlePath], { stdio: ['ignore', 'ignore', 'ignore'] })
-
-		setTimeout(() => {
-			console.log('[macOS Update] Exiting for relaunch...')
-			process.exit(0)
-		}, 1500)
-	} catch (e: any) {
-		console.error('[macOS Update] Failed:', e)
-		rpc.send['update-status']({ status: 'error', message: e.message, details: { errorMessage: e.message } })
-		throw e
-	}
+	const url = version
+		? `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`
+		: `https://github.com/${GITHUB_REPO}/releases`
+	console.log(`[macOS Update] Opening releases page: ${url}`)
+	Bun.spawn(['open', url], { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
@@ -2612,7 +2510,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				if (process.platform === 'darwin') {
 					// macOS: download tar.zst from specific release tag, replace .app, relaunch
-					await macosDownloadAndInstall(rpc)
+					macosOpenReleasePage(rpc)
 					return
 				}
 				await Updater.downloadUpdate()
@@ -2624,7 +2522,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				if (process.platform === 'darwin') {
 					// macOS: download+apply is a single operation — retry if we get here
-					await macosDownloadAndInstall(rpc)
+					macosOpenReleasePage(rpc)
 					return
 				}
 				await Updater.applyUpdate()
