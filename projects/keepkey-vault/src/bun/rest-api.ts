@@ -880,15 +880,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const chainForRoute = ROUTE_TO_CHAIN[path.split('/')[1]]
           if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
         }
-        // Log the request with body + response + duration
+        // Log the request with body + response + duration.
+        // Sanitize: strip sensitive fields from signing payloads to prevent
+        // leaking signatures, transaction data, or typed-data content to audit log.
         if (callbacks?.onApiLog) {
           const { appName, imageUrl } = resolveAppInfo()
+          const SENSITIVE_KEYS = ['signature', 'serialized', 'serializedTx', 'signedTx', 'signed', 'typedData', 'message', 'rawTx', 'hex']
+          const sanitize = (obj: any): any => {
+            if (!obj || typeof obj !== 'object') return obj
+            if (Array.isArray(obj)) return obj.map(sanitize)
+            const out: any = {}
+            for (const [k, v] of Object.entries(obj)) {
+              out[k] = SENSITIVE_KEYS.includes(k) ? '[REDACTED]' : v
+            }
+            return out
+          }
+          const isSigning = SIGNING_ROUTES.has(path)
           callbacks.onApiLog({
             method, route: path, timestamp: requestStart,
             durationMs: Date.now() - requestStart,
             status, appName, imageUrl: imageUrl || undefined,
-            requestBody: reqBody,
-            responseBody: data,
+            requestBody: isSigning ? sanitize(reqBody) : reqBody,
+            responseBody: isSigning ? sanitize(data) : data,
             ...resolvedActivity,
           })
         }
@@ -1399,10 +1412,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             addressNList = await findEthAddressNList(wallet, auth, body.from)
           }
 
-          // chainId: default to 1 if 0 or missing
+          // chainId: default to 1 if 0 or missing, validate range
           let chainId = body.chainId ?? body.chain_id ?? 1
           if (typeof chainId === 'string') {
             chainId = chainId.startsWith('0x') ? parseInt(chainId, 16) : parseInt(chainId, 10)
+          }
+          if (!Number.isFinite(chainId) || chainId < 0 || chainId > 4294967295) {
+            throw new HttpError(400, `Invalid chainId: ${body.chainId ?? body.chain_id}`)
           }
           if (!chainId || chainId === 0) chainId = 1
 

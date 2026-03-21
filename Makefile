@@ -99,7 +99,7 @@ dev-hmr: install $(ZCASH_CLI_STAMP)
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
 
-build: install
+build: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build
 
 build-stable: install build-zcash-cli

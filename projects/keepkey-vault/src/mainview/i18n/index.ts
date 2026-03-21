@@ -20,7 +20,8 @@ import staking from "./locales/en/staking.json"
 
 const STORAGE_KEY = "keepkey-vault-lang"
 
-const savedLang = localStorage.getItem(STORAGE_KEY) || "en"
+let savedLang = "en"
+try { savedLang = localStorage.getItem(STORAGE_KEY) || "en" } catch { /* private browsing / blocked */ }
 
 i18n
 	.use(initReactI18next)
@@ -76,7 +77,7 @@ i18n
 
 // Persist language changes
 i18n.on("languageChanged", (lng) => {
-	localStorage.setItem(STORAGE_KEY, lng)
+	try { localStorage.setItem(STORAGE_KEY, lng) } catch { /* private browsing / blocked */ }
 })
 
 export default i18n
