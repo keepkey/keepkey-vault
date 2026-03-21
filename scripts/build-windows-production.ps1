@@ -311,7 +311,9 @@ if (-not $SkipBuild) {
         $vj.channel = "stable"
         $vj.name = "keepkey-vault"
         $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
-        $vj | ConvertTo-Json -Compress | Set-Content $VersionJson -Encoding UTF8
+        # Use .NET WriteAllText to avoid BOM — PowerShell 5's -Encoding UTF8 writes a BOM
+        # which breaks JSON parsing in bun's require()
+        [System.IO.File]::WriteAllText($VersionJson, ($vj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
         Write-Success "Patched version.json: channel=stable"
     }
 

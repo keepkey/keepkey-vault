@@ -177,7 +177,9 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           {phase === "available" && (
             <>
               <Button size="xs" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={onDownload}>
-                {t("download")}
+                {navigator.platform?.startsWith("Win")
+                  ? t("downloadFromGithub", { defaultValue: "Download from GitHub" })
+                  : t("download")}
               </Button>
               <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
                 {t("later")}
@@ -186,8 +188,10 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           )}
           {phase === "ready" && (
             <>
-              <Button size="xs" bg="#22C55E" color="white" _hover={{ bg: "#16A34A" }} onClick={onApply}>
-                {t("restartToUpdate")}
+              <Button size="xs" bg="#22C55E" color="white" _hover={{ bg: "#16A34A" }} onClick={navigator.platform?.startsWith("Win") ? onDownload : onApply}>
+                {navigator.platform?.startsWith("Win")
+                  ? t("downloadFromGithub", { defaultValue: "Download from GitHub" })
+                  : t("restartToUpdate")}
               </Button>
               <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
                 {t("later")}
