@@ -994,15 +994,37 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										{updateMessage}
 									</Text>
 								)}
-								{/* Update action — opens GitHub releases page */}
-								{(updatePhase === "available" || updatePhase === "ready" || updatePhase === "error") && onDownloadUpdate && (
+								{/* Download button (available state) */}
+								{updatePhase === "available" && onDownloadUpdate && (
 									<Box
 										as="button" mt="2" px="3" py="1.5" borderRadius="full"
 										bg="kk.gold" color="black" fontSize="xs" fontWeight="600"
 										cursor="pointer" _hover={{ opacity: 0.9 }}
 										onClick={onDownloadUpdate}
 									>
-										{t("downloadFromGithub", { defaultValue: "Download from GitHub" })}
+										{t("downloadUpdate", { defaultValue: "Download Update" })}
+									</Box>
+								)}
+								{/* Install button (ready state — Linux native updater) */}
+								{updatePhase === "ready" && onApplyUpdate && (
+									<Box
+										as="button" mt="2" px="3" py="1.5" borderRadius="full"
+										bg="#22C55E" color="white" fontSize="xs" fontWeight="600"
+										cursor="pointer" _hover={{ bg: "#16A34A" }}
+										onClick={onApplyUpdate}
+									>
+										{t("restartToUpdate", { defaultValue: "Restart & Install" })}
+									</Box>
+								)}
+								{/* Error fallback */}
+								{updatePhase === "error" && onDownloadUpdate && (
+									<Box
+										as="button" mt="2" px="3" py="1.5" borderRadius="full"
+										bg="rgba(255,255,255,0.06)" color="kk.gold" fontSize="xs" fontWeight="500"
+										cursor="pointer" _hover={{ bg: "rgba(255,255,255,0.1)" }}
+										onClick={onDownloadUpdate}
+									>
+										{t("downloadManually", { defaultValue: "Download from GitHub" })}
 									</Box>
 								)}
 							</Box>
