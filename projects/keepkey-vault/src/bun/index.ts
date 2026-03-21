@@ -2569,6 +2569,9 @@ onScanProgress((progress) => {
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
 })
+engine.on('pin-error', (err) => {
+	try { rpc.send['pin-error'](err) } catch { /* webview not ready yet */ }
+})
 engine.on('character-request', (req) => {
 	try { rpc.send['character-request'](req) } catch { /* webview not ready yet */ }
 })

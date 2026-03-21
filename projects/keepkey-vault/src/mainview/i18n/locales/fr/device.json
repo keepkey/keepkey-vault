@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Effacer votre KeepKey supprimera toutes les clés et paramètres. Vous perdrez l'accès à vos fonds si vous n'avez pas votre phrase de récupération.",
 		"wipeAcknowledge": "J'ai sauvegardé ma phrase de récupération et je comprends ce que je fais",
 		"wipeDevice": "Effacer l'appareil",
-		"wiping": "Effacement..."
+		"wiping": "Effacement...",
+		"incorrectPin": "PIN incorrect",
+		"tryAgainDescription": "Vérifiez l'écran de votre KeepKey et réessayez"
 	},
 	"passphrase": {
 		"title": "Entrer la phrase secrète",

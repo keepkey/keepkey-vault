@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Wiping your KeepKey will erase all keys and settings. You will lose access to your funds if you don't have your recovery phrase.",
 		"wipeAcknowledge": "I have backed up my recovery phrase and understand what I am doing",
 		"wipeDevice": "Wipe Device",
-		"wiping": "Wiping..."
+		"wiping": "Wiping...",
+		"incorrectPin": "Incorrect PIN",
+		"tryAgainDescription": "Check your KeepKey screen and try again"
 	},
 	"passphrase": {
 		"title": "Enter Passphrase",

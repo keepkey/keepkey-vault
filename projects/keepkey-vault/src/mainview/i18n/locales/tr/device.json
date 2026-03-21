@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "KeepKey'i sıfırlamak tüm anahtarları ve ayarları silecektir. Kurtarma ifadeniz yoksa fonlarınıza erişimi kaybedersiniz.",
 		"wipeAcknowledge": "Kurtarma ifademin yedeğini aldım ve ne yaptığımı anlıyorum",
 		"wipeDevice": "Cihazı sıfırla",
-		"wiping": "Sıfırlanıyor..."
+		"wiping": "Sıfırlanıyor...",
+		"incorrectPin": "Yanlış PIN",
+		"tryAgainDescription": "KeepKey ekranınızı kontrol edin ve tekrar deneyin"
 	},
 	"passphrase": {
 		"title": "Parola girin",

@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Xóa KeepKey sẽ xóa tất cả khóa và cài đặt. Bạn sẽ mất quyền truy cập vào tài sản nếu không có cụm từ khôi phục.",
 		"wipeAcknowledge": "Tôi đã sao lưu cụm từ khôi phục và hiểu rõ những gì mình đang làm",
 		"wipeDevice": "Xóa thiết bị",
-		"wiping": "Đang xóa..."
+		"wiping": "Đang xóa...",
+		"incorrectPin": "PIN không chính xác",
+		"tryAgainDescription": "Kiểm tra màn hình KeepKey và thử lại"
 	},
 	"passphrase": {
 		"title": "Nhập cụm mật khẩu",
