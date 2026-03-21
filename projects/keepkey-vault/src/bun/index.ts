@@ -118,6 +118,110 @@ async function windowsLaunchInstaller(rpc: any) {
 	}, 1500)
 }
 
+// ── macOS auto-update (bypasses Electrobun's baseUrl: "latest" limitation) ──
+// Electrobun's Updater.downloadUpdate() fetches from releases/latest/download
+// which only resolves to non-pre-release releases. Download the tar.zst
+// directly from the specific release tag, extract, replace .app, relaunch.
+
+async function macosDownloadAndInstall(rpc: any) {
+	const version = pendingUpdateVersion || Updater.updateInfo()?.version
+	if (!version || version === pkg.version) {
+		throw new Error(`No update version available (current: ${pkg.version})`)
+	}
+
+	const assetName = 'stable-macos-arm64-keepkey-vault.app.tar.zst'
+	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${assetName}`
+
+	console.log(`[macOS Update] Downloading: ${url}`)
+	rpc.send['update-status']({ status: 'downloading-update', message: `Downloading v${version}...`, progress: 0 })
+
+	try {
+		const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
+		if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`)
+
+		const totalBytes = Number(resp.headers.get('content-length') || 0)
+		const reader = resp.body?.getReader()
+		if (!reader) throw new Error('No response body')
+
+		const chunks: Uint8Array[] = []
+		let downloaded = 0
+
+		while (true) {
+			const { done, value } = await reader.read()
+			if (done) break
+			chunks.push(value)
+			downloaded += value.length
+			if (totalBytes > 0) {
+				const progress = (downloaded / totalBytes) * 100
+				rpc.send['update-status']({ status: 'download-progress', message: `Downloading... ${Math.round(progress)}%`, progress })
+			}
+		}
+
+		const tmpDir = os.tmpdir()
+		const archivePath = path.join(tmpDir, assetName)
+		await Bun.write(archivePath, new Blob(chunks))
+		console.log(`[macOS Update] Archive saved: ${archivePath} (${downloaded} bytes)`)
+
+		rpc.send['update-status']({ status: 'applying-update', message: 'Extracting update...' })
+
+		// Decompress zstd → tar
+		const tarPath = archivePath.replace('.tar.zst', '.tar')
+		const zstdResult = Bun.spawnSync(['zstd', '-d', '-f', archivePath, '-o', tarPath])
+		if (zstdResult.exitCode !== 0) throw new Error(`zstd decompress failed: ${zstdResult.stderr.toString()}`)
+
+		// Find the current .app bundle path
+		// Electrobun apps run from: /path/to/App.app/Contents/Resources/app/bun/index.js
+		const appBundlePath = path.resolve(process.argv[1] || '', '../../../../..')
+		const appName = path.basename(appBundlePath)
+
+		if (!appBundlePath.endsWith('.app')) {
+			throw new Error(`Cannot determine .app bundle path: ${appBundlePath}`)
+		}
+
+		console.log(`[macOS Update] Replacing: ${appBundlePath}`)
+
+		// Extract new app to temp staging dir
+		const stageDir = path.join(tmpDir, `keepkey-update-${version}`)
+		Bun.spawnSync(['rm', '-rf', stageDir])
+		Bun.spawnSync(['mkdir', '-p', stageDir])
+
+		const extractResult = Bun.spawnSync(['tar', 'xf', tarPath, '-C', stageDir])
+		if (extractResult.exitCode !== 0) throw new Error(`tar extract failed: ${extractResult.stderr.toString()}`)
+
+		// Find the .app in the extracted contents
+		const lsResult = Bun.spawnSync(['find', stageDir, '-maxdepth', '2', '-name', '*.app', '-type', 'd'])
+		const extractedApp = lsResult.stdout.toString().trim().split('\n')[0]
+		if (!extractedApp || !extractedApp.endsWith('.app')) {
+			throw new Error(`No .app found in extracted archive`)
+		}
+
+		// Move old app to backup, move new app into place
+		const backupPath = path.join(tmpDir, `${appName}.backup-${Date.now()}`)
+		Bun.spawnSync(['mv', appBundlePath, backupPath])
+		const moveResult = Bun.spawnSync(['mv', extractedApp, appBundlePath])
+		if (moveResult.exitCode !== 0) {
+			// Restore backup on failure
+			Bun.spawnSync(['mv', backupPath, appBundlePath])
+			throw new Error(`Failed to move new app into place: ${moveResult.stderr.toString()}`)
+		}
+
+		console.log(`[macOS Update] Replaced successfully. Relaunching...`)
+		rpc.send['update-status']({ status: 'relaunching', message: 'Restarting app...' })
+
+		// Relaunch the new app and exit
+		Bun.spawn(['open', '-n', appBundlePath], { stdio: ['ignore', 'ignore', 'ignore'] })
+
+		setTimeout(() => {
+			console.log('[macOS Update] Exiting for relaunch...')
+			process.exit(0)
+		}, 1500)
+	} catch (e: any) {
+		console.error('[macOS Update] Failed:', e)
+		rpc.send['update-status']({ status: 'error', message: e.message, details: { errorMessage: e.message } })
+		throw e
+	}
+}
+
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
 const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
 let chainCatalog: PioneerChainInfo[] = []
@@ -2492,17 +2596,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			downloadUpdate: async () => {
 				if (process.platform === 'win32') {
-					// Windows: bypass Electrobun's broken zig-zstd updater.
-					// Download the setup exe from GitHub, save to temp, launch it, quit.
 					await windowsDownloadAndInstall(rpc)
+					return
+				}
+				if (process.platform === 'darwin') {
+					// macOS: download tar.zst from specific release tag, replace .app, relaunch
+					await macosDownloadAndInstall(rpc)
 					return
 				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
 				if (process.platform === 'win32') {
-					// Windows: if we already downloaded the exe, launch it and quit
 					await windowsLaunchInstaller(rpc)
+					return
+				}
+				if (process.platform === 'darwin') {
+					// macOS: download+apply is a single operation — retry if we get here
+					await macosDownloadAndInstall(rpc)
 					return
 				}
 				await Updater.applyUpdate()
