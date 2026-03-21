@@ -35,202 +35,23 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 
-// ── Windows auto-update (bypasses Electrobun's broken zig-zstd) ──────
+// ── Desktop update — open GitHub releases page ──
+// In-app auto-update is unreliable on both platforms:
+// - macOS: zig-zstd has different CLI flags than zstd, stock macOS has no zstd
+// - Windows: in-app exe download + spawn had process lock issues
+// Both platforms now open the GitHub releases page for manual download.
 const GITHUB_REPO = 'keepkey/keepkey-vault'
-let windowsInstallerPath: string | null = null
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 
-async function windowsDownloadAndInstall(rpc: any) {
-	// 1. Get the update version — try pendingUpdateVersion first (pre-release path),
-	// then fall back to Electrobun's Updater.updateInfo() (stable path).
-	const info = Updater.updateInfo()
-	const version = pendingUpdateVersion || info?.version
-	if (!version || version === pkg.version) {
-		throw new Error(`No update version available (current: ${pkg.version})`)
-	}
-	const exeName = `KeepKey-Vault-${version}-win-x64-setup.exe`
-	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${exeName}`
-
-	console.log(`[Windows Update] Downloading installer: ${url}`)
-	rpc.send['update-status']({ status: 'downloading-update', message: `Downloading ${exeName}...`, progress: 0 })
-
-	try {
-		const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
-		if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`)
-
-		const totalBytes = Number(resp.headers.get('content-length') || 0)
-		const reader = resp.body?.getReader()
-		if (!reader) throw new Error('No response body')
-
-		const chunks: Uint8Array[] = []
-		let downloaded = 0
-
-		while (true) {
-			const { done, value } = await reader.read()
-			if (done) break
-			chunks.push(value)
-			downloaded += value.length
-			if (totalBytes > 0) {
-				const progress = (downloaded / totalBytes) * 100
-				rpc.send['update-status']({ status: 'download-progress', message: `Downloading... ${Math.round(progress)}%`, progress })
-			}
-		}
-
-		// Save to temp directory
-		const tmpDir = os.tmpdir()
-		const installerPath = path.join(tmpDir, exeName)
-		const blob = new Blob(chunks)
-		await Bun.write(installerPath, blob)
-
-		windowsInstallerPath = installerPath
-		console.log(`[Windows Update] Installer saved: ${installerPath} (${downloaded} bytes)`)
-
-		rpc.send['update-status']({ status: 'update-ready', message: 'Update ready to install' })
-	} catch (e: any) {
-		console.error('[Windows Update] Download failed:', e)
-		rpc.send['update-status']({ status: 'error', message: e.message, details: { errorMessage: e.message } })
-		throw e
-	}
-}
-
-async function windowsLaunchInstaller(rpc: any) {
-	if (!windowsInstallerPath) {
-		// No downloaded installer — try download first
-		await windowsDownloadAndInstall(rpc)
-	}
-	if (!windowsInstallerPath) throw new Error('No installer available')
-
-	console.log(`[Windows Update] Launching installer: ${windowsInstallerPath}`)
-	rpc.send['update-status']({ status: 'applying-update', message: 'Launching installer...' })
-
-	// Launch the installer and exit the app
-	// cmd /c start runs it detached so it survives our process exit
-	const installerWin = windowsInstallerPath.replace(/\//g, '\\')
-	Bun.spawn(['cmd', '/c', 'start', '', installerWin], {
-		stdio: ['ignore', 'ignore', 'ignore'],
-	})
-
-	// Give the installer a moment to start, then quit
-	setTimeout(() => {
-		console.log('[Windows Update] Exiting app for installer...')
-		process.exit(0)
-	}, 1500)
-}
-
-// ── macOS auto-update (bypasses Electrobun's baseUrl: "latest" limitation) ──
-// Electrobun's Updater.downloadUpdate() fetches from releases/latest/download
-// which only resolves to non-pre-release releases. Download the tar.zst
-// directly from the specific release tag, extract, replace .app, relaunch.
-
-async function macosDownloadAndInstall(rpc: any) {
+function openReleasePage() {
 	const version = pendingUpdateVersion || Updater.updateInfo()?.version
-	if (!version || version === pkg.version) {
-		throw new Error(`No update version available (current: ${pkg.version})`)
-	}
-
-	// We only ship arm64 macOS builds (Intel Macs run via Rosetta)
-	const assetName = 'stable-macos-arm64-keepkey-vault.app.tar.zst'
-	const url = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${assetName}`
-
-	console.log(`[macOS Update] Downloading: ${url}`)
-	rpc.send['update-status']({ status: 'downloading-update', message: `Downloading v${version}...`, progress: 0 })
-
-	try {
-		const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
-		if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`)
-
-		const totalBytes = Number(resp.headers.get('content-length') || 0)
-		const reader = resp.body?.getReader()
-		if (!reader) throw new Error('No response body')
-
-		const chunks: Uint8Array[] = []
-		let downloaded = 0
-
-		while (true) {
-			const { done, value } = await reader.read()
-			if (done) break
-			chunks.push(value)
-			downloaded += value.length
-			if (totalBytes > 0) {
-				const progress = (downloaded / totalBytes) * 100
-				rpc.send['update-status']({ status: 'download-progress', message: `Downloading... ${Math.round(progress)}%`, progress })
-			}
-		}
-
-		const tmpDir = os.tmpdir()
-		const archivePath = path.join(tmpDir, assetName)
-		await Bun.write(archivePath, new Blob(chunks))
-		console.log(`[macOS Update] Archive saved: ${archivePath} (${downloaded} bytes)`)
-
-		rpc.send['update-status']({ status: 'applying-update', message: 'Extracting update...' })
-
-		// Decompress zstd → tar using the zig-zstd binary bundled in the .app
-		// (stock macOS doesn't have zstd; the app ships zig-zstd at Contents/MacOS/)
-		const tarPath = archivePath.replace('.tar.zst', '.tar')
-		const appBundleForZstd = path.resolve(process.argv[1] || '', '../../../../..')
-		const zigZstd = path.join(appBundleForZstd, 'Contents', 'MacOS', 'zig-zstd')
-		let zstdResult = Bun.spawnSync([zigZstd, '-d', '-f', archivePath, '-o', tarPath])
-		if (zstdResult.exitCode !== 0) {
-			// Fallback: try system zstd (Homebrew users)
-			zstdResult = Bun.spawnSync(['zstd', '-d', '-f', archivePath, '-o', tarPath])
-			if (zstdResult.exitCode !== 0) throw new Error(`zstd decompress failed: ${zstdResult.stderr.toString()}`)
-		}
-
-		// Find the current .app bundle path
-		// Electrobun apps run from: /path/to/App.app/Contents/Resources/app/bun/index.js
-		const appBundlePath = path.resolve(process.argv[1] || '', '../../../../..')
-		const appName = path.basename(appBundlePath)
-
-		if (!appBundlePath.endsWith('.app')) {
-			throw new Error(`Cannot determine .app bundle path: ${appBundlePath}`)
-		}
-
-		console.log(`[macOS Update] Replacing: ${appBundlePath}`)
-
-		// Extract new app to temp staging dir
-		const stageDir = path.join(tmpDir, `keepkey-update-${version}`)
-		Bun.spawnSync(['rm', '-rf', stageDir])
-		Bun.spawnSync(['mkdir', '-p', stageDir])
-
-		const extractResult = Bun.spawnSync(['tar', 'xf', tarPath, '-C', stageDir])
-		if (extractResult.exitCode !== 0) throw new Error(`tar extract failed: ${extractResult.stderr.toString()}`)
-
-		// Find the .app in the extracted contents
-		const lsResult = Bun.spawnSync(['find', stageDir, '-maxdepth', '2', '-name', '*.app', '-type', 'd'])
-		const extractedApp = lsResult.stdout.toString().trim().split('\n')[0]
-		if (!extractedApp || !extractedApp.endsWith('.app')) {
-			throw new Error(`No .app found in extracted archive`)
-		}
-
-		// Move old app to backup, move new app into place
-		const backupPath = path.join(tmpDir, `${appName}.backup-${Date.now()}`)
-		const backupResult = Bun.spawnSync(['mv', appBundlePath, backupPath])
-		if (backupResult.exitCode !== 0) {
-			throw new Error(`Failed to move current app to backup: ${backupResult.stderr.toString()}`)
-		}
-		const moveResult = Bun.spawnSync(['mv', extractedApp, appBundlePath])
-		if (moveResult.exitCode !== 0) {
-			// Restore backup on failure
-			Bun.spawnSync(['mv', backupPath, appBundlePath])
-			throw new Error(`Failed to move new app into place: ${moveResult.stderr.toString()}`)
-		}
-
-		console.log(`[macOS Update] Replaced successfully. Relaunching...`)
-		rpc.send['update-status']({ status: 'relaunching', message: 'Restarting app...' })
-
-		// Relaunch the new app and exit
-		Bun.spawn(['open', '-n', appBundlePath], { stdio: ['ignore', 'ignore', 'ignore'] })
-
-		setTimeout(() => {
-			console.log('[macOS Update] Exiting for relaunch...')
-			process.exit(0)
-		}, 1500)
-	} catch (e: any) {
-		console.error('[macOS Update] Failed:', e)
-		rpc.send['update-status']({ status: 'error', message: e.message, details: { errorMessage: e.message } })
-		throw e
-	}
+	const url = version
+		? `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`
+		: `https://github.com/${GITHUB_REPO}/releases`
+	console.log(`[Update] Opening releases page: ${url}`)
+	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['open', url]
+	Bun.spawn(cmd, { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
@@ -2606,25 +2427,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			downloadUpdate: async () => {
-				if (process.platform === 'win32') {
-					await windowsDownloadAndInstall(rpc)
-					return
-				}
-				if (process.platform === 'darwin') {
-					// macOS: download tar.zst from specific release tag, replace .app, relaunch
-					await macosDownloadAndInstall(rpc)
+				if (process.platform === 'win32' || process.platform === 'darwin') {
+					openReleasePage()
 					return
 				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
-				if (process.platform === 'win32') {
-					await windowsLaunchInstaller(rpc)
-					return
-				}
-				if (process.platform === 'darwin') {
-					// macOS: download+apply is a single operation — retry if we get here
-					await macosDownloadAndInstall(rpc)
+				if (process.platform === 'win32' || process.platform === 'darwin') {
+					openReleasePage()
 					return
 				}
 				await Updater.applyUpdate()
