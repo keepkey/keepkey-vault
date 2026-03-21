@@ -2441,56 +2441,53 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			checkForUpdate: async () => {
 				const localVer = await Updater.localInfo.version()
 
-				// Pre-release channel: check GitHub API for latest release including pre-releases
-				if (preReleaseUpdates) {
-					try {
-						const resp = await fetch('https://api.github.com/repos/keepkey/keepkey-vault/releases?per_page=5', {
-							signal: AbortSignal.timeout(10000),
-							headers: { 'Accept': 'application/vnd.github.v3+json' },
-						})
-						if (resp.ok) {
-							const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean; assets: Array<{ name: string; browser_download_url: string }> }>
-							// Find the first non-draft release (includes pre-releases)
-							const latest = releases.find(r => !r.draft)
-							if (latest) {
-								const remoteVer = latest.tag_name.replace(/^v/, '')
-								if (localVer && versionCompare(remoteVer, localVer) > 0) {
-									console.log(`[Updater] Pre-release available: ${remoteVer} > ${localVer}`)
-									pendingUpdateVersion = remoteVer
-									return {
-										updateAvailable: true,
-										updateReady: false,
-										version: remoteVer,
-										hash: '',
-										preRelease: latest.prerelease,
-									}
-								}
-								console.log(`[Updater] Pre-release check: ${remoteVer} <= ${localVer}, up to date`)
+				// Always use GitHub API to check for updates.
+				// Electrobun's native check is unreliable:
+				// - Windows: no update.json published → 404
+				// - macOS: update.json version is stale (generated before release)
+				try {
+					const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`, {
+						signal: AbortSignal.timeout(15000),
+						headers: { 'Accept': 'application/vnd.github.v3+json' },
+					})
+					if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
+
+					const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+					const candidate = preReleaseUpdates
+						? releases.find(r => !r.draft)
+						: releases.find(r => !r.draft && !r.prerelease)
+
+					if (candidate) {
+						const remoteVer = candidate.tag_name.replace(/^v/, '')
+						if (localVer && versionCompare(remoteVer, localVer) > 0) {
+							console.log(`[Updater] Update available: ${remoteVer} > ${localVer}`)
+							pendingUpdateVersion = remoteVer
+							return {
+								updateAvailable: true,
+								updateReady: false,
+								version: remoteVer,
+								hash: '',
+								preRelease: candidate.prerelease,
 							}
 						}
-					} catch (e: any) {
-						console.warn('[Updater] Pre-release check failed:', e.message)
+						console.log(`[Updater] Up to date: ${remoteVer} <= ${localVer}`)
 					}
-				}
 
-				// Standard channel: use Electrobun's built-in updater
-				const result = await Updater.checkForUpdate()
-				const info = Updater.updateInfo()
-				// Suppress false "update available" when running a pre-release newer than the latest stable.
-				let updateAvailable = !!info?.updateAvailable
-				if (updateAvailable && info?.version) {
-					pendingUpdateVersion = info.version
-					if (localVer && versionCompare(info.version, localVer) < 0) {
-						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
-						updateAvailable = false
+					return {
+						updateAvailable: false,
+						updateReady: false,
+						version: '',
+						hash: '',
 					}
-				}
-				return {
-					updateAvailable,
-					updateReady: !!info?.updateReady,
-					version: info?.version ?? '',
-					hash: info?.hash ?? '',
-					error: result?.error || undefined,
+				} catch (e: any) {
+					console.warn('[Updater] GitHub API check failed:', e.message)
+					return {
+						updateAvailable: false,
+						updateReady: false,
+						version: '',
+						hash: '',
+						error: `Update check failed: ${e.message}`,
+					}
 				}
 			},
 			downloadUpdate: async () => {
@@ -2769,10 +2766,48 @@ await engine.start()
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
 // Background update check (skip in dev, delay to let webview initialize)
+// Always uses GitHub API instead of Electrobun's native checker because:
+// - Windows: no update.json is published, so Electrobun check always 404s
+// - macOS: update.json version is stale (generated before release is published)
 Updater.localInfo.channel().then(ch => {
 	if (ch !== 'dev') {
-		setTimeout(() => {
-			Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+		setTimeout(async () => {
+			try {
+				const localVer = await Updater.localInfo.version()
+				if (!localVer) return
+
+				const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`, {
+					signal: AbortSignal.timeout(15000),
+					headers: { 'Accept': 'application/vnd.github.v3+json' },
+				})
+				if (!resp.ok) {
+					console.warn(`[Vault] Background update check: GitHub API ${resp.status}`)
+					return
+				}
+
+				const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+				// Pre-release channel: first non-draft release (includes pre-releases)
+				// Standard channel: first non-draft, non-prerelease release
+				const candidate = preReleaseUpdates
+					? releases.find(r => !r.draft)
+					: releases.find(r => !r.draft && !r.prerelease)
+
+				if (!candidate) {
+					console.log('[Vault] Background update check: no suitable release found')
+					return
+				}
+
+				const remoteVer = candidate.tag_name.replace(/^v/, '')
+				if (versionCompare(remoteVer, localVer) > 0) {
+					console.log(`[Vault] Update available: ${remoteVer} > ${localVer}`)
+					pendingUpdateVersion = remoteVer
+					rpc.send['update-status']({ status: 'update-available', message: `Version ${remoteVer} available` })
+				} else {
+					console.log(`[Vault] Up to date: ${remoteVer} <= ${localVer}`)
+				}
+			} catch (e: any) {
+				console.warn('[Vault] Background update check failed:', e.message)
+			}
 		}, 5000)
 	}
 })
