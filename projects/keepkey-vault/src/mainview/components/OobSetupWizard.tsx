@@ -2029,6 +2029,30 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     </Text>
                   </HStack>
                 </Box>
+
+                {setupError && (
+                  <Box w="100%" p={3} bg="red.900" borderRadius="lg" borderWidth="1px" borderColor="red.500">
+                    <Text fontSize="xs" color="red.300" textAlign="center">{setupError}</Text>
+                  </Box>
+                )}
+
+                {/* Escape hatch: if device disconnects or communication fails */}
+                {(deviceStatus.state === 'disconnected' || deviceStatus.state === 'error') && (
+                  <VStack gap={2} w="100%">
+                    <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="1px" borderColor="yellow.500">
+                      <Text fontSize="xs" color="yellow.200" textAlign="center">
+                        {t('initProgress.deviceLost', { defaultValue: 'Device disconnected. Plug it back in to continue, or go back to try again.' })}
+                      </Text>
+                    </Box>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.400"
+                      _hover={{ color: 'white', bg: 'rgba(255,255,255,0.06)' }}
+                      onClick={() => { setSetupError(null); setStep('init-choose') }}
+                    >
+                      {t('initProgress.goBack', { defaultValue: 'Go Back' })}
+                    </Button>
+                  </VStack>
+                )}
               </VStack>
             )}
 
