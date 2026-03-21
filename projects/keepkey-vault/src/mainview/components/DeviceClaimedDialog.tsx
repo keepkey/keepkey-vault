@@ -12,56 +12,57 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
       transform="translate(-50%, -50%)"
       mt="60px"
       bg="rgba(0, 0, 0, 0.95)"
-      border="1px solid"
-      borderColor="#B8860B"
-      borderRadius="lg"
-      px={6}
-      py={5}
-      maxW="420px"
+      border="2px solid"
+      borderColor="#D4A017"
+      borderRadius="xl"
+      px={8}
+      py={7}
+      maxW="460px"
       w="90%"
-      boxShadow="0 0 30px rgba(184, 134, 11, 0.2)"
+      boxShadow="0 0 40px rgba(212, 160, 23, 0.3)"
     >
-      <VStack gap={3} align="stretch">
+      <VStack gap={4} align="stretch">
         <Flex align="center" gap={2}>
-          <Text fontSize="lg" fontWeight="bold" color="#D4A017">
+          <Text fontSize="xl" fontWeight="bold" color="#F5D060">
             {t("claimed.title")}
           </Text>
         </Flex>
 
-        <Text fontSize="sm" color="gray.300" lineHeight="tall">
+        <Text fontSize="md" color="gray.100" lineHeight="tall" fontWeight="medium">
           {t("claimed.description")}
         </Text>
 
-        <Box bg="rgba(184, 134, 11, 0.08)" border="1px solid" borderColor="rgba(184, 134, 11, 0.25)" borderRadius="md" px={3} py={2}>
-          <Text fontSize="xs" color="gray.500" fontFamily="mono" wordBreak="break-word">
+        <Box bg="rgba(212, 160, 23, 0.1)" border="1px solid" borderColor="rgba(212, 160, 23, 0.35)" borderRadius="md" px={4} py={3}>
+          <Text fontSize="sm" color="yellow.200" fontFamily="mono" wordBreak="break-word">
             {error}
           </Text>
         </Box>
 
-        <Flex justify="center" py={2}>
-          <Box w="80px" h="80px" dangerouslySetInnerHTML={{ __html: connectSvgRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
+        <Flex justify="center" py={3}>
+          <Box w="90px" h="90px" dangerouslySetInnerHTML={{ __html: connectSvgRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
         </Flex>
 
-        <Text fontSize="sm" color="#D4A017" fontWeight="semibold">
+        <Text fontSize="md" color="#F5D060" fontWeight="bold">
           {t("claimed.toConnect")}
         </Text>
-        <VStack gap={1} align="stretch" pl={2}>
-          <Text fontSize="sm" color="gray.400">{t("claimed.step1")}</Text>
-          <Text fontSize="sm" color="gray.400">{t("claimed.step2")}</Text>
-          <Text fontSize="sm" color="gray.400">{t("claimed.step3")}</Text>
+        <VStack gap={2} align="stretch" pl={2}>
+          <Text fontSize="md" color="gray.200" fontWeight="medium">{t("claimed.step1")}</Text>
+          <Text fontSize="md" color="gray.200" fontWeight="medium">{t("claimed.step2")}</Text>
+          <Text fontSize="md" color="gray.200" fontWeight="medium">{t("claimed.step3")}</Text>
         </VStack>
 
-        <Text fontSize="xs" color="gray.600" textAlign="center" mt={1}>
+        <Text fontSize="sm" color="yellow.300" textAlign="center" mt={2} fontWeight="semibold">
           {t("claimed.waiting")}
         </Text>
 
         <Link
           href="https://support.keepkey.com"
           target="_blank"
-          fontSize="xs"
-          color="blue.400"
+          fontSize="sm"
+          color="blue.300"
           textAlign="center"
-          _hover={{ color: "blue.300", textDecoration: "underline" }}
+          fontWeight="medium"
+          _hover={{ color: "blue.200", textDecoration: "underline" }}
         >
           {t("claimed.supportLink")}
         </Link>
