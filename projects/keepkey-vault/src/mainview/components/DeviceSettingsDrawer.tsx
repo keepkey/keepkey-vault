@@ -994,50 +994,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										{updateMessage}
 									</Text>
 								)}
-								{/* Download / Install buttons — full update flow from settings */}
-								{updatePhase === "available" && onDownloadUpdate && (
-									<Flex gap="2" mt="2">
-										<Box
-											as="button" px="3" py="1.5" borderRadius="full"
-											bg="kk.gold" color="black" fontSize="xs" fontWeight="600"
-											cursor="pointer" _hover={{ opacity: 0.9 }}
-											onClick={onDownloadUpdate}
-										>
-											{t("downloadUpdate", { defaultValue: "Download Update" })}
-										</Box>
-										{updateVersion && (
-											<Box
-												as="button" px="3" py="1.5" borderRadius="full"
-												bg="rgba(255,255,255,0.06)" color="kk.textSecondary" fontSize="xs" fontWeight="500"
-												cursor="pointer" _hover={{ color: "kk.textPrimary" }}
-												onClick={() => rpcRequest("openUrl", { url: `https://github.com/keepkey/keepkey-vault/releases/tag/v${updateVersion}` }).catch(() => {})}
-											>
-												{t("viewRelease", { defaultValue: "View Release" })}
-											</Box>
-										)}
-									</Flex>
-								)}
-								{updatePhase === "downloading" && (
-									<Text fontSize="xs" color="kk.gold" mt="1">{t("downloadingUpdate", { defaultValue: "Downloading..." })}</Text>
-								)}
-								{updatePhase === "ready" && onApplyUpdate && (
+								{/* Update action — opens GitHub releases page */}
+								{(updatePhase === "available" || updatePhase === "ready" || updatePhase === "error") && onDownloadUpdate && (
 									<Box
 										as="button" mt="2" px="3" py="1.5" borderRadius="full"
-										bg="#22C55E" color="white" fontSize="xs" fontWeight="600"
-										cursor="pointer" _hover={{ bg: "#16A34A" }}
-										onClick={onApplyUpdate}
+										bg="kk.gold" color="black" fontSize="xs" fontWeight="600"
+										cursor="pointer" _hover={{ opacity: 0.9 }}
+										onClick={onDownloadUpdate}
 									>
-										{t("restartToUpdate", { defaultValue: "Restart & Install" })}
-									</Box>
-								)}
-								{updatePhase === "error" && updateVersion && (
-									<Box
-										as="button" mt="2" px="3" py="1.5" borderRadius="full"
-										bg="rgba(255,255,255,0.06)" color="kk.gold" fontSize="xs" fontWeight="500"
-										cursor="pointer" _hover={{ bg: "rgba(255,255,255,0.1)" }}
-										onClick={() => rpcRequest("openUrl", { url: `https://github.com/keepkey/keepkey-vault/releases/tag/v${updateVersion}` }).catch(() => {})}
-									>
-										{t("downloadManually", { defaultValue: "Download from GitHub" })}
+										{t("downloadFromGithub", { defaultValue: "Download from GitHub" })}
 									</Box>
 								)}
 							</Box>

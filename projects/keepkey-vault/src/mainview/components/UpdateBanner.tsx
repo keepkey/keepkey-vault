@@ -174,20 +174,10 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
 
         {/* Actions */}
         <Flex gap="2" flexShrink={0}>
-          {phase === "available" && (
+          {(phase === "available" || phase === "ready") && (
             <>
               <Button size="xs" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={onDownload}>
-                {t("download")}
-              </Button>
-              <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
-                {t("later")}
-              </Button>
-            </>
-          )}
-          {phase === "ready" && (
-            <>
-              <Button size="xs" bg="#22C55E" color="white" _hover={{ bg: "#16A34A" }} onClick={onApply}>
-                {t("restartToUpdate")}
+                {t("downloadFromGithub", { defaultValue: "Download from GitHub" })}
               </Button>
               <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
                 {t("later")}
