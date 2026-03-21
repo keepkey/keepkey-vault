@@ -2,7 +2,11 @@
  * Wizard Messaging Tests
  *
  * Tests the OobSetupWizard rendering decisions for:
- *   1. Reboot messaging: bootloader (auto-reboot, wait) vs firmware (manual disconnect/reconnect)
+ *   1. Reboot messaging: bootloader vs firmware have DIFFERENT device behavior
+ *      - Bootloader flash: OLD bootloader doesn't auto-reboot → device says
+ *        "Please disconnect and reconnect" → yellow box, user must unplug
+ *      - Firmware flash: NEW bootloader calls board_reset() → device says
+ *        "Your device will now restart" → blue spinner, auto-reboots
  *   2. Seed phrase warning: must appear for 'create', must NOT appear for 'recover'
  *   3. Reboot elapsed-time escalation: different messages at 0s, 20s, 30s thresholds
  *
@@ -16,62 +20,61 @@ import { describe, test, expect } from 'bun:test'
 // ── Mirror of wizard rendering decisions ─────────────────────────────
 
 type WizardStep = 'intro' | 'welcome' | 'bootloader' | 'firmware' | 'init-choose' | 'init-progress' | 'init-label' | 'verify-seed' | 'security-tips' | 'complete'
-type RebootPhase = 'idle' | 'rebooting'
+type RebootPhase = 'idle' | 'bootloader-rebooting' | 'firmware-rebooting'
 type SetupType = 'create' | 'recover' | null
 
 /**
  * Determines which reboot message category to show.
  * Mirrors the conditional rendering in OobSetupWizard.tsx:
- *   - step='bootloader' + rebootPhase='rebooting' → auto-reboot (wait)
- *   - step='firmware'    + rebootPhase='rebooting' → manual disconnect/reconnect
+ *   - step='bootloader' → 'bootloader-rebooting' → manual-disconnect (yellow box)
+ *   - step='firmware'    → 'firmware-rebooting'   → auto-reboot (blue spinner)
  *   - otherwise → none
  */
 function getRebootMessageType(
   step: WizardStep,
   rebootPhase: RebootPhase,
-): 'auto-reboot' | 'manual-disconnect' | 'none' {
-  if (rebootPhase !== 'rebooting') return 'none'
-  if (step === 'bootloader') return 'auto-reboot'
-  if (step === 'firmware') return 'manual-disconnect'
+): 'manual-disconnect' | 'auto-reboot' | 'none' {
+  if (rebootPhase === 'idle') return 'none'
+  if (rebootPhase === 'bootloader-rebooting' && step === 'bootloader') return 'manual-disconnect'
+  if (rebootPhase === 'firmware-rebooting' && step === 'firmware') return 'auto-reboot'
   return 'none'
 }
 
 /**
  * Determines the specific sub-message based on elapsed time.
- * Mirrors the time-based escalation in both reboot blocks.
  *
- * Bootloader (auto-reboot):
- *   - always: "Device is rebooting..."
- *   - >=30s: + "Taking longer than expected?" fallback
- *
- * Firmware (manual disconnect):
- *   - <20s: "Your device says 'Firmware Update Complete.' Unplug..."
- *   - >=20s: "Still waiting — make sure you unplug and re-plug..."
+ * Bootloader (manual disconnect — OLD bootloader, no auto-reboot):
+ *   - <20s: "Please disconnect and reconnect" — immediate action needed
+ *   - >=20s: "Still waiting — make sure you unplug and re-plug"
  *   - >=30s: + manual reconnect steps
+ *
+ * Firmware (auto-reboot — NEW bootloader, board_reset()):
+ *   - <30s: "Your device is restarting..." — blue spinner, no action needed
+ *   - >=30s: + fallback unplug steps (in case auto-reboot didn't fire)
  */
 function getRebootSubMessage(
-  type: 'auto-reboot' | 'manual-disconnect' | 'none',
+  type: 'manual-disconnect' | 'auto-reboot' | 'none',
   rebootElapsedMs: number,
 ): { primary: string; showFallbackSteps: boolean } {
   if (type === 'none') return { primary: 'none', showFallbackSteps: false }
 
-  if (type === 'auto-reboot') {
+  if (type === 'manual-disconnect') {
     return {
-      primary: 'rebooting-wait',
+      primary: rebootElapsedMs < 20000 ? 'disconnect-reconnect' : 'still-waiting',
       showFallbackSteps: rebootElapsedMs >= 30000,
     }
   }
 
-  // manual-disconnect (firmware step)
+  // auto-reboot (firmware step): blue spinner, fallback steps only at 30s+
   return {
-    primary: rebootElapsedMs < 20000 ? 'disconnect-reconnect' : 'still-waiting',
+    primary: 'restarting',
     showFallbackSteps: rebootElapsedMs >= 30000,
   }
 }
 
 /**
  * Determines whether the seed phrase warning banner should be shown.
- * Mirrors OobSetupWizard.tsx line ~2005: only when step='init-progress' AND setupType='create'.
+ * Mirrors OobSetupWizard.tsx: only when step='init-progress' AND setupType='create'.
  */
 function shouldShowSeedWarning(step: WizardStep, setupType: SetupType): boolean {
   return step === 'init-progress' && setupType === 'create'
@@ -79,14 +82,14 @@ function shouldShowSeedWarning(step: WizardStep, setupType: SetupType): boolean 
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
-describe('Reboot messaging: bootloader vs firmware (QA #1)', () => {
+describe('Reboot messaging: bootloader (manual) vs firmware (auto-reboot)', () => {
   describe('message type selection', () => {
-    test('bootloader step + rebooting → auto-reboot (wait)', () => {
-      expect(getRebootMessageType('bootloader', 'rebooting')).toBe('auto-reboot')
+    test('bootloader step + bootloader-rebooting → manual-disconnect', () => {
+      expect(getRebootMessageType('bootloader', 'bootloader-rebooting')).toBe('manual-disconnect')
     })
 
-    test('firmware step + rebooting → manual-disconnect', () => {
-      expect(getRebootMessageType('firmware', 'rebooting')).toBe('manual-disconnect')
+    test('firmware step + firmware-rebooting → auto-reboot', () => {
+      expect(getRebootMessageType('firmware', 'firmware-rebooting')).toBe('auto-reboot')
     })
 
     test('bootloader step + idle → none', () => {
@@ -97,47 +100,40 @@ describe('Reboot messaging: bootloader vs firmware (QA #1)', () => {
       expect(getRebootMessageType('firmware', 'idle')).toBe('none')
     })
 
-    test('other steps + rebooting → none', () => {
+    test('mismatched phase/step → none', () => {
+      expect(getRebootMessageType('bootloader', 'firmware-rebooting')).toBe('none')
+      expect(getRebootMessageType('firmware', 'bootloader-rebooting')).toBe('none')
+    })
+
+    test('other steps → none regardless of phase', () => {
       for (const step of ['init-choose', 'init-progress', 'complete', 'welcome'] as WizardStep[]) {
-        expect(getRebootMessageType(step, 'rebooting')).toBe('none')
+        expect(getRebootMessageType(step, 'bootloader-rebooting')).toBe('none')
+        expect(getRebootMessageType(step, 'firmware-rebooting')).toBe('none')
       }
     })
   })
 
-  describe('bootloader auto-reboot sub-messages', () => {
-    test('shows "rebooting-wait" at 0s (no manual action needed)', () => {
-      const msg = getRebootSubMessage('auto-reboot', 0)
-      expect(msg.primary).toBe('rebooting-wait')
-      expect(msg.showFallbackSteps).toBe(false)
+  describe('CRITICAL: bootloader and firmware produce DIFFERENT outputs', () => {
+    test('bootloader = disconnect-reconnect, firmware = restarting', () => {
+      const bl = getRebootSubMessage('manual-disconnect', 0)
+      const fw = getRebootSubMessage('auto-reboot', 0)
+      expect(bl.primary).toBe('disconnect-reconnect')
+      expect(fw.primary).toBe('restarting')
+      expect(bl.primary).not.toBe(fw.primary)
     })
 
-    test('still "rebooting-wait" at 15s', () => {
-      const msg = getRebootSubMessage('auto-reboot', 15000)
-      expect(msg.primary).toBe('rebooting-wait')
-      expect(msg.showFallbackSteps).toBe(false)
-    })
-
-    test('shows fallback steps at 30s', () => {
-      const msg = getRebootSubMessage('auto-reboot', 30000)
-      expect(msg.primary).toBe('rebooting-wait')
-      expect(msg.showFallbackSteps).toBe(true)
-    })
-
-    test('shows fallback steps at 60s', () => {
-      const msg = getRebootSubMessage('auto-reboot', 60000)
-      expect(msg.showFallbackSteps).toBe(true)
+    test('at 25s: bootloader = still-waiting, firmware = restarting', () => {
+      const bl = getRebootSubMessage('manual-disconnect', 25000)
+      const fw = getRebootSubMessage('auto-reboot', 25000)
+      expect(bl.primary).toBe('still-waiting')
+      expect(fw.primary).toBe('restarting')
+      expect(bl.primary).not.toBe(fw.primary)
     })
   })
 
-  describe('firmware manual-disconnect sub-messages', () => {
+  describe('bootloader sub-messages (user must unplug)', () => {
     test('shows "disconnect-reconnect" at 0s', () => {
       const msg = getRebootSubMessage('manual-disconnect', 0)
-      expect(msg.primary).toBe('disconnect-reconnect')
-      expect(msg.showFallbackSteps).toBe(false)
-    })
-
-    test('shows "disconnect-reconnect" at 19s', () => {
-      const msg = getRebootSubMessage('manual-disconnect', 19999)
       expect(msg.primary).toBe('disconnect-reconnect')
       expect(msg.showFallbackSteps).toBe(false)
     })
@@ -155,24 +151,28 @@ describe('Reboot messaging: bootloader vs firmware (QA #1)', () => {
     })
   })
 
-  describe('CRITICAL: bootloader and firmware messages must differ', () => {
-    test('at 0s elapsed, bootloader shows wait vs firmware shows disconnect', () => {
-      const bl = getRebootSubMessage('auto-reboot', 0)
-      const fw = getRebootSubMessage('manual-disconnect', 0)
-      expect(bl.primary).not.toBe(fw.primary)
-      expect(bl.primary).toBe('rebooting-wait')
-      expect(fw.primary).toBe('disconnect-reconnect')
+  describe('firmware sub-messages (auto-reboot, spinner)', () => {
+    test('shows "restarting" at 0s (no user action needed)', () => {
+      const msg = getRebootSubMessage('auto-reboot', 0)
+      expect(msg.primary).toBe('restarting')
+      expect(msg.showFallbackSteps).toBe(false)
     })
 
-    test('at 25s elapsed, bootloader still shows wait vs firmware shows still-waiting', () => {
-      const bl = getRebootSubMessage('auto-reboot', 25000)
-      const fw = getRebootSubMessage('manual-disconnect', 25000)
-      expect(bl.primary).not.toBe(fw.primary)
+    test('still "restarting" at 25s (device may be slow)', () => {
+      const msg = getRebootSubMessage('auto-reboot', 25000)
+      expect(msg.primary).toBe('restarting')
+      expect(msg.showFallbackSteps).toBe(false)
+    })
+
+    test('shows fallback steps at 30s (auto-reboot may have failed)', () => {
+      const msg = getRebootSubMessage('auto-reboot', 30000)
+      expect(msg.primary).toBe('restarting')
+      expect(msg.showFallbackSteps).toBe(true)
     })
   })
 })
 
-describe('Seed phrase warning (QA #2)', () => {
+describe('Seed phrase warning', () => {
   test('shows warning during init-progress + create', () => {
     expect(shouldShowSeedWarning('init-progress', 'create')).toBe(true)
   })
@@ -193,18 +193,20 @@ describe('Seed phrase warning (QA #2)', () => {
 })
 
 describe('Full OOB reboot sequence', () => {
-  test('bootloader flash → auto-reboot → firmware flash → manual disconnect', () => {
-    // Phase 1: Bootloader just flashed, device auto-reboots
-    const blReboot = getRebootMessageType('bootloader', 'rebooting')
-    expect(blReboot).toBe('auto-reboot')
-    const blMsg = getRebootSubMessage(blReboot, 5000)
-    expect(blMsg.primary).toBe('rebooting-wait') // user waits, no action
+  test('bootloader flash → manual disconnect, then firmware flash → auto-reboot', () => {
+    // Phase 1: Bootloader just flashed — OLD bootloader doesn't auto-reboot
+    // Device screen: "FIRMWARE UPDATE COMPLETE — Please disconnect and reconnect"
+    const blType = getRebootMessageType('bootloader', 'bootloader-rebooting')
+    expect(blType).toBe('manual-disconnect')
+    const blMsg = getRebootSubMessage(blType, 5000)
+    expect(blMsg.primary).toBe('disconnect-reconnect') // user must unplug
 
-    // Phase 2: Device reconnects, moves to firmware step, firmware flashes
-    // Phase 3: Firmware flashed, device needs manual disconnect/reconnect
-    const fwReboot = getRebootMessageType('firmware', 'rebooting')
-    expect(fwReboot).toBe('manual-disconnect')
-    const fwMsg = getRebootSubMessage(fwReboot, 5000)
-    expect(fwMsg.primary).toBe('disconnect-reconnect') // user must unplug
+    // Phase 2: Device reconnects after manual replug, moves to firmware step
+    // Firmware flashes via NEW bootloader which calls board_reset()
+    // Device screen: "Firmware Update Complete — Your device will now restart"
+    const fwType = getRebootMessageType('firmware', 'firmware-rebooting')
+    expect(fwType).toBe('auto-reboot')
+    const fwMsg = getRebootSubMessage(fwType, 5000)
+    expect(fwMsg.primary).toBe('restarting') // device auto-reboots, user waits
   })
 })
