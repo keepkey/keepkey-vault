@@ -24,22 +24,44 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "script_type": {
-                    "$ref": "#/components/schemas/BTCInputScriptType"
+                    "$ref": "#/components/schemas/BTCInputScriptType",
+                    "example": "p2wpkh"
                   },
                   "coin": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "Bitcoin"
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483648,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "coin",
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483648,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Bitcoin",
+                  "show_display": false,
+                  "script_type": "p2wpkh"
+                }
               }
             }
           },
@@ -92,15 +114,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483766,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483766,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Atom",
+                  "show_display": false
+                }
               }
             }
           },
@@ -155,15 +196,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483766,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483766,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Osmo",
+                  "show_display": false
+                }
               }
             }
           },
@@ -218,15 +278,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483708,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483708,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Ethereum",
+                  "show_display": false
+                }
               }
             }
           },
@@ -281,15 +360,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483766,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483766,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Atom",
+                  "show_display": false
+                }
               }
             }
           },
@@ -344,15 +442,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483579,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483579,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Rune",
+                  "show_display": false
+                }
               }
             }
           },
@@ -407,15 +524,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484579,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484579,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Cacao",
+                  "show_display": false
+                }
               }
             }
           },
@@ -470,15 +606,32 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484149,
+                      2147483648,
+                      2147483648
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484149,
+                    2147483648,
+                    2147483648
+                  ],
+                  "coin": "Solana",
+                  "show_display": false
+                }
               }
             }
           },
@@ -533,15 +686,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484143,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484143,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Tron",
+                  "show_display": false
+                }
               }
             }
           },
@@ -596,15 +768,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484255,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484255,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "TON",
+                  "show_display": false
+                }
               }
             }
           },
@@ -659,15 +850,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483792,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483792,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "XRP",
+                  "show_display": false
+                }
               }
             }
           },
@@ -1332,7 +1542,24 @@
                   "value",
                   "data",
                   "to"
-                ]
+                ],
+                "example": {
+                  "addressNList": [
+                    2147483692,
+                    2147483708,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "nonce": "0x01",
+                  "gasLimit": "0x5208",
+                  "maxFeePerGas": "0x1dcd65000",
+                  "maxPriorityFeePerGas": "0x540ae480",
+                  "value": "0x2c68af0bb14000",
+                  "to": "0x12eC06288EDD7Ae2CC41A843fE089237fC7354F0",
+                  "chainId": 1,
+                  "data": ""
+                }
               }
             }
           },
@@ -1458,7 +1685,11 @@
                 "required": [
                   "address",
                   "message"
-                ]
+                ],
+                "example": {
+                  "address": "0x3f2329C9ADFbcCd9A84f52c906E936A42dA18CB8",
+                  "message": "0x48656c6c6f20576f726c64"
+                }
               }
             }
           },
@@ -2404,19 +2635,24 @@
                 "type": "object",
                 "properties": {
                   "message": {
-                    "type": "string"
+                    "type": "string",
+                    "example": ""
                   },
                   "wipe_code_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "passphrase_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "pin_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "button_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   }
                 }
               }
@@ -3351,7 +3587,8 @@
                   "outputs": {},
                   "inputs": {},
                   "coin": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "Bitcoin"
                   }
                 },
                 "required": [
@@ -4485,7 +4722,8 @@
                           "type": "string"
                         },
                         "coin": {
-                          "type": "string"
+                          "type": "string",
+                          "example": "Bitcoin"
                         },
                         "networks": {
                           "type": "array",
@@ -4605,7 +4843,8 @@
           {}
         ],
         "maximum": 4294967295,
-        "minimum": 0
+        "minimum": 0,
+        "example": 2147483692
       },
       "types.AddressNList": {
         "description": "a BIP-32 path, expressed as a list of node indexes",
@@ -4614,7 +4853,14 @@
           "$ref": "#/components/schemas/types.numeric.U32"
         },
         "maxItems": 5,
-        "minItems": 3
+        "minItems": 3,
+        "example": [
+          2147483692,
+          2147483708,
+          2147483648,
+          0,
+          0
+        ]
       },
       "BTCInputScriptType": {
         "type": "string",
