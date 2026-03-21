@@ -14,6 +14,8 @@ import type {
   XrpSignTxParams,
   BnbSignTxParams,
   SolanaSignTxParams,
+  TronSignTxParams,
+  TonSignTxParams,
   GetPublicKeyRequest,
   BatchPubkeysPath,
   ApplySettingsParams,
@@ -235,6 +237,12 @@ export class KeepKeySdk {
 
     solanaGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
       this.client.post('/addresses/solana', params),
+
+    tronGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
+      this.client.post('/addresses/tron', params),
+
+    tonGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
+      this.client.post('/addresses/ton', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -394,6 +402,22 @@ export class KeepKeySdk {
   solana = {
     solanaSignTransaction: (params: SolanaSignTxParams): Promise<SignedTx> =>
       this.client.post('/solana/sign-transaction', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // tron — Tron signing
+  // ═══════════════════════════════════════════════════════════════════
+  tron = {
+    tronSignTransaction: (params: TronSignTxParams): Promise<SignedTx> =>
+      this.client.post('/tron/sign-transaction', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ton — TON signing
+  // ═══════════════════════════════════════════════════════════════════
+  ton = {
+    tonSignTransaction: (params: TonSignTxParams): Promise<SignedTx> =>
+      this.client.post('/ton/sign-transaction', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════

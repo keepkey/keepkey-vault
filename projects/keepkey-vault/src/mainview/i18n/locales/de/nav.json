@@ -12,5 +12,6 @@
 	"loadingPortfolio": "Portfolio wird geladen",
 	"errorWithMessage": "Fehler: {{error}}",
 	"tryUnplugging": "Versuchen Sie, Ihren KeepKey aus- und wieder einzustecken.",
-	"watchOnlyConnectPrompt": "Nur Ansicht — Gerät verbinden für vollen Zugriff"
+	"watchOnlyConnectPrompt": "Nur Ansicht — Gerät verbinden für vollen Zugriff",
+	"passphraseMode": "Passphrase"
 }

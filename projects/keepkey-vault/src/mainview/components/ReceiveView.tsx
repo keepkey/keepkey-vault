@@ -25,6 +25,10 @@ interface ReceiveViewProps {
 	btcAddressIndex?: number
 	onBtcChangeIndex?: (v: 0 | 1) => void
 	onBtcAddressIndex?: (v: number) => void
+	// TON bounceable toggle
+	isTon?: boolean
+	tonBounceable?: boolean
+	onTonBounceableChange?: (bounceable: boolean) => void
 }
 
 function CopyableField({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
@@ -84,6 +88,7 @@ function CopyableField({ label, value, mono = true }: { label: string; value: st
 export function ReceiveView({
 	chain, address, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, onBtcChangeIndex, onBtcAddressIndex,
+	isTon, tonBounceable = false, onTonBounceableChange,
 }: ReceiveViewProps) {
 	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
@@ -100,10 +105,11 @@ export function ReceiveView({
 			}
 			const st = scriptType || chain.scriptType
 			if (st) params.scriptType = st
+			if (isTon) params.bounceable = tonBounceable
 			await rpcRequest(chain.rpcMethod, params, 60000)
 		} catch (e: any) { console.error("showOnDevice:", e) }
 		setShowing(false)
-	}, [chain, currentPath, scriptType])
+	}, [chain, currentPath, scriptType, isTon, tonBounceable])
 
 	const handlePathApply = useCallback((newPath: number[]) => {
 		setPathDialogOpen(false)
@@ -127,14 +133,14 @@ export function ReceiveView({
 				{error ? (
 					<>
 						<Text fontSize="sm" color="kk.error">{error}</Text>
-						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
+						<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
 							{t("retry", { ns: "common" })}
 						</Button>
 					</>
 				) : (
 					<>
 						<Text fontSize="sm" color="kk.textMuted">{t("noAddressDerived")}</Text>
-						<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
+						<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
 							{t("deriveAddress")}
 						</Button>
 					</>
@@ -273,6 +279,49 @@ export function ReceiveView({
 								</Flex>
 							)}
 						</Flex>
+					)}
+
+					{/* TON: bounceable / non-bounceable toggle */}
+					{isTon && onTonBounceableChange && (
+						<Box>
+							<Flex align="center" gap="2" mb="1">
+								<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">
+									Address Type
+								</Text>
+							</Flex>
+							<Flex gap="1" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg">
+								<Button
+									size="xs" variant="ghost" fontSize="11px" px="3" py="1" borderRadius="md"
+									color={!tonBounceable ? "kk.gold" : "kk.textSecondary"}
+									bg={!tonBounceable ? "rgba(255,215,0,0.1)" : "transparent"}
+									fontWeight={!tonBounceable ? "600" : "400"}
+									_hover={{ bg: "rgba(255,255,255,0.06)" }}
+									onClick={() => onTonBounceableChange(false)}
+								>
+									UQ (Safe)
+								</Button>
+								<Button
+									size="xs" variant="ghost" fontSize="11px" px="3" py="1" borderRadius="md"
+									color={tonBounceable ? "kk.gold" : "kk.textSecondary"}
+									bg={tonBounceable ? "rgba(255,215,0,0.1)" : "transparent"}
+									fontWeight={tonBounceable ? "600" : "400"}
+									_hover={{ bg: "rgba(255,255,255,0.06)" }}
+									onClick={() => onTonBounceableChange(true)}
+								>
+									EQ (Bounceable)
+								</Button>
+							</Flex>
+							{!tonBounceable && (
+								<Text fontSize="10px" color="kk.textMuted" mt="1">
+									Non-bounceable — funds won't bounce back if wallet is uninitialized
+								</Text>
+							)}
+							{tonBounceable && (
+								<Text fontSize="10px" color="kk.warning" mt="1">
+									Bounceable — funds will bounce back if wallet contract is not deployed
+								</Text>
+							)}
+						</Box>
 					)}
 
 					{/* Address — copyable */}

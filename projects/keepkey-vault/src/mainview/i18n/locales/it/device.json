@@ -51,7 +51,11 @@
 		"methodThorchainDeposit": "Deposito THORChain",
 		"methodMayaTransfer": "Trasferimento Maya",
 		"methodMayaDeposit": "Deposito Maya",
-		"methodOsmosisSign": "Firma Osmosis"
+		"methodOsmosisSign": "Firma Osmosis",
+		"methodSolanaSignTx": "Firma transazione Solana",
+		"methodSolanaSignMessage": "Firma messaggio Solana",
+		"methodTronSignTx": "Firma transazione Tron",
+		"methodTonSignTx": "Firma transazione TON"
 	},
 	"claimed": {
 		"title": "Dispositivo in uso",
@@ -61,6 +65,7 @@
 		"step2": "2. Scollega e ricollega il dispositivo",
 		"step3": "3. Questa app si riconnetterà automaticamente",
 		"waiting": "In attesa che il dispositivo diventi disponibile...",
+		"supportLink": "Ancora problemi? Invia un ticket di supporto",
 		"defaultError": "Dispositivo utilizzato da un altro processo"
 	},
 	"recovery": {

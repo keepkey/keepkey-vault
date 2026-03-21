@@ -3,7 +3,13 @@ import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
-import { CHAINS } from '../shared/chains'
+import { decodeCalldata } from './calldata-decoder'
+import { CHAINS, isChainSupported } from '../shared/chains'
+import {
+  initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
+} from './txbuilder/zcash-shielded'
+import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -12,6 +18,7 @@ import { parseRequest, validateResponse } from './validate'
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
   onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
+  onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
   onPairDismissed?: () => void
   getVersion: () => string
@@ -38,7 +45,7 @@ function requireWallet(engine: EngineController) {
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
   20: 'DigiByte', 60: 'Ethereum', 118: 'Cosmos', 144: 'Ripple',
-  145: 'BitcoinCash', 501: 'Solana', 931: 'Rune',
+  145: 'BitcoinCash', 195: 'Tron', 501: 'Solana', 607: 'Ton', 931: 'Rune',
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -220,85 +227,586 @@ function getSwaggerUiHtml(): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KeepKey Vault API</title>
+  <title>KeepKey Vault &mdash; Developer Center</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>
-    body { margin: 0; background: #1a1a2e; }
-    .kk-header {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      border-bottom: 2px solid #C0A860;
-      padding: 12px 24px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .kk-header svg { flex-shrink: 0; }
-    .kk-header h1 {
-      margin: 0; color: #C0A860; font-family: system-ui, sans-serif;
-      font-size: 18px; font-weight: 600;
-    }
-    .kk-header span { color: #8a8a9a; font-size: 13px; font-family: system-ui, sans-serif; }
-    /* Dark theme overrides */
-    .swagger-ui { background: #1a1a2e; }
-    .swagger-ui .topbar { display: none; }
-    .swagger-ui .info .title { color: #e0e0e0; }
-    .swagger-ui .info p, .swagger-ui .info li { color: #b0b0c0; }
-    .swagger-ui .opblock-tag { color: #e0e0e0 !important; border-bottom-color: #333 !important; }
-    .swagger-ui .opblock { border-color: #333; background: rgba(255,255,255,0.03); }
-    .swagger-ui .opblock .opblock-summary { border-color: #333; }
-    .swagger-ui .opblock .opblock-summary-description { color: #b0b0c0; }
-    .swagger-ui .opblock .opblock-summary-method { font-weight: 700; }
-    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #2563EB; }
-    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #C0A860; color: #000; }
-    .swagger-ui .opblock.opblock-get { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.3); }
-    .swagger-ui .opblock.opblock-post { background: rgba(192,168,96,0.06); border-color: rgba(192,168,96,0.3); }
-    .swagger-ui .btn { border-radius: 4px; }
-    .swagger-ui .btn.execute { background: #C0A860; color: #000; border: none; }
-    .swagger-ui .btn.execute:hover { background: #d4bc6a; }
-    .swagger-ui .model-box, .swagger-ui .models { background: rgba(255,255,255,0.03); }
-    .swagger-ui .model { color: #b0b0c0; }
-    .swagger-ui table thead tr th { color: #b0b0c0; border-bottom-color: #333; }
-    .swagger-ui table tbody tr td { color: #e0e0e0; border-bottom-color: #222; }
-    .swagger-ui .parameter__name { color: #e0e0e0; }
-    .swagger-ui .parameter__type { color: #C0A860; }
-    .swagger-ui input[type=text], .swagger-ui textarea, .swagger-ui select {
-      background: #0d1117; color: #e0e0e0; border-color: #333;
-    }
-    .swagger-ui .scheme-container { background: #1a1a2e; box-shadow: none; }
-    .swagger-ui .loading-container .loading::after { color: #C0A860; }
-    .swagger-ui section.models { border-color: #333; }
-    .swagger-ui section.models h4 { color: #e0e0e0; }
-    .swagger-ui .response-col_status { color: #e0e0e0; }
-    .swagger-ui .response-col_description { color: #b0b0c0; }
-    .swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5 { color: #e0e0e0; }
-    .swagger-ui .opblock-description-wrapper p { color: #b0b0c0; }
-    .swagger-ui .opblock-section-header { background: rgba(255,255,255,0.02); }
-    .swagger-ui .opblock-section-header h4 { color: #e0e0e0; }
-    .swagger-ui .highlight-code { background: #0d1117; }
-    .swagger-ui .microlight { background: #0d1117 !important; color: #e0e0e0 !important; }
+    *{box-sizing:border-box}
+    body{margin:0;background:#0d1117;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
+
+    .kk-header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border-bottom:2px solid #C0A860;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+    .kk-header-left{display:flex;align-items:center;gap:12px}
+    .kk-header h1{margin:0;color:#C0A860;font-size:20px;font-weight:700}
+    .kk-header .sub{color:#8a8a9a;font-size:13px}
+    .kk-status{display:flex;align-items:center;gap:8px}
+    .kk-status .dot{width:8px;height:8px;border-radius:50%;background:#555}
+    .kk-status span{color:#8a8a9a;font-size:12px}
+    .kk-status .key-badge{background:rgba(34,197,94,.15);color:#22c55e;padding:2px 8px;border-radius:4px;font-size:11px;font-family:'SF Mono',Menlo,monospace}
+
+    .kk-tabs{display:flex;gap:0;background:#161b22;border-bottom:1px solid #30363d;padding:0 24px;flex-wrap:wrap}
+    .kk-tab{padding:12px 20px;cursor:pointer;font-size:14px;font-weight:500;color:#8a8a9a;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;user-select:none}
+    .kk-tab:hover{color:#e0e0e0}
+    .kk-tab.active{color:#C0A860;border-bottom-color:#C0A860}
+    .kk-tab.locked{opacity:.4;cursor:default;pointer-events:none}
+
+    .kk-panel{display:none}
+    .kk-panel.active{display:block}
+
+    /* ── Guide ──────────────────────────────── */
+    .guide{max-width:820px;margin:0 auto;padding:32px 24px;line-height:1.7}
+    .guide h2{color:#C0A860;font-size:22px;margin:32px 0 12px;font-weight:600;border-bottom:1px solid #30363d;padding-bottom:8px}
+    .guide h2:first-child{margin-top:0}
+    .guide h3{color:#e0e0e0;font-size:16px;margin:24px 0 8px}
+    .guide p{color:#b0b0c0;margin:8px 0}
+    .guide code{background:#161b22;padding:2px 6px;border-radius:4px;font-family:'SF Mono',Menlo,monospace;font-size:13px;color:#C0A860}
+    .guide pre{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0;position:relative}
+    .guide pre code{background:none;padding:0;color:#e0e0e0;display:block;white-space:pre}
+    .kw{color:#ff7b72}.str{color:#a5d6ff}.cmt{color:#8b949e}.fn{color:#d2a8ff}.num{color:#79c0ff}
+    .steps{display:grid;grid-template-columns:40px 1fr;gap:12px;margin:16px 0}
+    .sn{width:32px;height:32px;border-radius:50%;background:rgba(192,168,96,.15);color:#C0A860;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+    .sc{padding-top:4px}
+    .chains{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:12px 0}
+    .chip{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;font-size:13px;text-align:center}
+    .chip .cl{color:#e0e0e0;font-weight:500}.chip .cs{color:#8a8a9a;font-size:11px}
+    .note{background:rgba(192,168,96,.08);border-left:3px solid #C0A860;padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
+    .note strong{color:#C0A860}
+    .note.warn{border-left-color:#eab308;background:rgba(234,179,8,.08)}
+    .note.warn strong{color:#eab308}
+    .guide table{width:100%;border-collapse:collapse;margin:12px 0}
+    .guide th{text-align:left;color:#8a8a9a;font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding:8px 12px;border-bottom:1px solid #30363d}
+    .guide td{padding:8px 12px;border-bottom:1px solid #1c2128;color:#b0b0c0;font-size:13px}
+    .guide td code{font-size:12px}
+
+    /* ── Pair panel ─────────────────────────── */
+    .pair-wrap{max-width:500px;margin:40px auto;padding:0 24px}
+    .pair-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px}
+    .pair-card h2{color:#C0A860;margin:0 0 4px;font-size:18px}
+    .pair-card .desc{color:#8a8a9a;font-size:13px;margin-bottom:20px}
+    .pair-card label{display:block;color:#b0b0c0;font-size:13px;margin-bottom:6px;font-weight:500}
+    .pair-card input{width:100%;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e0e0e0;font-size:14px;margin-bottom:16px;outline:none}
+    .pair-card input:focus{border-color:#C0A860}
+    .pair-btn{width:100%;padding:12px;background:#C0A860;color:#0d1117;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+    .pair-btn:hover{background:#d4bc6a}
+    .pair-btn:disabled{opacity:.5;cursor:not-allowed}
+    .pair-result{margin-top:16px;padding:12px;border-radius:6px;font-size:13px;font-family:'SF Mono',Menlo,monospace;word-break:break-all}
+    .pair-result.ok{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:#22c55e}
+    .pair-result.err{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);color:#f85149}
+    .pair-sep{margin-top:20px;padding-top:20px;border-top:1px solid #30363d}
+    .pair-row{display:flex;gap:8px}
+    .pair-row input{margin-bottom:0;flex:1}
+    .vfy-btn{padding:10px 16px;background:transparent;border:1px solid #30363d;border-radius:6px;color:#C0A860;font-size:13px;cursor:pointer;white-space:nowrap}
+    .vfy-btn:hover{border-color:#C0A860}
+    .paired-banner{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
+    .paired-banner .left{display:flex;align-items:center;gap:10px}
+    .paired-banner .dot{width:8px;height:8px;border-radius:50%;background:#22c55e}
+    .paired-banner .info{font-size:13px;color:#22c55e}
+    .paired-banner .info .key{font-family:'SF Mono',Menlo,monospace;font-size:11px;color:#8a8a9a;margin-top:2px}
+    .unpair-btn{background:transparent;border:1px solid rgba(248,81,73,.3);color:#f85149;padding:6px 12px;border-radius:4px;font-size:12px;cursor:pointer}
+    .unpair-btn:hover{background:rgba(248,81,73,.1)}
+
+    /* ── Locked gate ────────────────────────── */
+    .lock-gate{max-width:500px;margin:60px auto;text-align:center;padding:0 24px}
+    .lock-gate h2{color:#C0A860;font-size:20px;margin-bottom:8px}
+    .lock-gate p{color:#8a8a9a;font-size:14px;margin-bottom:20px}
+    .lock-gate .go-pair{display:inline-block;padding:10px 24px;background:#C0A860;color:#0d1117;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;text-decoration:none;border:none}
+    .lock-gate .go-pair:hover{background:#d4bc6a}
+
+    /* ── Swagger overrides ──────────────────── */
+    .swagger-ui{background:#0d1117}
+    .swagger-ui .topbar{display:none}
+    .swagger-ui .scheme-container{background:#0d1117;box-shadow:none}
+    .swagger-ui .btn.authorize,.swagger-ui .authorization__btn{display:none !important}
+    .swagger-ui .info .title{color:#e0e0e0}
+    .swagger-ui .info p,.swagger-ui .info li{color:#b0b0c0}
+    .swagger-ui .opblock-tag{color:#e0e0e0 !important;border-bottom-color:#30363d !important}
+    .swagger-ui .opblock{border-color:#30363d;background:rgba(255,255,255,.02)}
+    .swagger-ui .opblock .opblock-summary{border-color:#30363d}
+    .swagger-ui .opblock .opblock-summary-description{color:#b0b0c0}
+    .swagger-ui .opblock .opblock-summary-method{font-weight:700}
+    .swagger-ui .opblock.opblock-get .opblock-summary-method{background:#2563EB}
+    .swagger-ui .opblock.opblock-post .opblock-summary-method{background:#C0A860;color:#000}
+    .swagger-ui .opblock.opblock-get{background:rgba(37,99,235,.06);border-color:rgba(37,99,235,.25)}
+    .swagger-ui .opblock.opblock-post{background:rgba(192,168,96,.06);border-color:rgba(192,168,96,.25)}
+    .swagger-ui .btn{border-radius:4px}
+    .swagger-ui .btn.execute{background:#C0A860;color:#000;border:none}
+    .swagger-ui .btn.execute:hover{background:#d4bc6a}
+    .swagger-ui .model-box,.swagger-ui .models{background:rgba(255,255,255,.02)}
+    .swagger-ui .model{color:#b0b0c0}
+    .swagger-ui table thead tr th{color:#b0b0c0;border-bottom-color:#30363d}
+    .swagger-ui table tbody tr td{color:#e0e0e0;border-bottom-color:#1c2128}
+    .swagger-ui .parameter__name{color:#e0e0e0}
+    .swagger-ui .parameter__type{color:#C0A860}
+    .swagger-ui input[type=text],.swagger-ui textarea,.swagger-ui select{background:#0d1117;color:#e0e0e0;border-color:#30363d}
+    .swagger-ui .loading-container .loading::after{color:#C0A860}
+    .swagger-ui section.models{border-color:#30363d}
+    .swagger-ui section.models h4{color:#e0e0e0}
+    .swagger-ui .response-col_status{color:#e0e0e0}
+    .swagger-ui .response-col_description{color:#b0b0c0}
+    .swagger-ui .responses-inner h4,.swagger-ui .responses-inner h5{color:#e0e0e0}
+    .swagger-ui .opblock-description-wrapper p{color:#b0b0c0}
+    .swagger-ui .opblock-section-header{background:rgba(255,255,255,.02)}
+    .swagger-ui .opblock-section-header h4{color:#e0e0e0}
+    .swagger-ui .highlight-code{background:#161b22}
+    .swagger-ui .microlight{background:#161b22 !important;color:#e0e0e0 !important}
   </style>
 </head>
 <body>
+
   <div class="kk-header">
-    <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
-      <rect width="100" height="100" rx="16" fill="#C0A860"/>
-      <path d="M30 70V30h10v15l15-15h14L52 47l18 23H56L43 53l-3 3v14H30z" fill="#1a1a2e"/>
-    </svg>
-    <div>
-      <h1>KeepKey Vault API</h1>
-      <span>Interactive documentation &mdash; localhost:1646</span>
+    <div class="kk-header-left">
+      <svg width="32" height="32" viewBox="0 0 100 100" fill="none">
+        <rect width="100" height="100" rx="16" fill="#C0A860"/>
+        <path d="M30 70V30h10v15l15-15h14L52 47l18 23H56L43 53l-3 3v14H30z" fill="#1a1a2e"/>
+      </svg>
+      <div>
+        <h1>KeepKey Vault &mdash; Developer Center</h1>
+        <span class="sub">Build on the KeepKey hardware wallet</span>
+      </div>
+    </div>
+    <div class="kk-status">
+      <div class="dot" id="sd"></div>
+      <span id="st">checking&hellip;</span>
+      <span class="key-badge" id="kb" style="display:none"></span>
     </div>
   </div>
-  <div id="swagger-ui"></div>
+
+  <div class="kk-tabs" id="tabs">
+    <div class="kk-tab" data-tab="pair">Pair App</div>
+    <div class="kk-tab" data-tab="guide">Getting Started</div>
+    <div class="kk-tab" data-tab="examples">Examples</div>
+    <div class="kk-tab" data-tab="explorer">API Explorer</div>
+  </div>
+
+  <!-- ═══ Pair App (default) ═══ -->
+  <div class="kk-panel" id="panel-pair">
+    <div class="pair-wrap">
+      <div class="pair-card">
+        <div id="paired-banner" style="display:none" class="paired-banner">
+          <div class="left"><div class="dot"></div><div class="info">Paired<div class="key" id="paired-key"></div></div></div>
+          <button class="unpair-btn" onclick="doUnpair()">Disconnect</button>
+        </div>
+        <h2 id="pair-title">Pair a New App</h2>
+        <p class="desc" id="pair-desc">Register your application with the vault. Approve the pairing on your KeepKey device.</p>
+
+        <div id="pair-form">
+          <label for="pn">App Name</label>
+          <input id="pn" placeholder="My Trading Bot" />
+          <label for="pi">Icon URL <span style="color:#8a8a9a">(optional)</span></label>
+          <input id="pi" placeholder="https://example.com/icon.png" />
+          <button class="pair-btn" id="pb" onclick="doPair()">Pair App</button>
+          <div id="pr"></div>
+
+          <div class="pair-sep">
+            <label for="ek">Already have a key?</label>
+            <div class="pair-row">
+              <input id="ek" placeholder="Paste API key&hellip;" />
+              <button class="vfy-btn" onclick="doVerify()">Use Key</button>
+            </div>
+            <div id="vr"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Getting Started ═══ -->
+  <div class="kk-panel" id="panel-guide">
+    <div class="guide">
+      <h2>Quick Start</h2>
+      <p>The KeepKey Vault exposes a local REST API on <code>localhost:1646</code>.
+         Any app &mdash; web, mobile, CLI, or bot &mdash; can pair and interact
+         with the hardware wallet.</p>
+      <div class="steps">
+        <div class="sn">1</div><div class="sc"><strong>Enable the API bridge</strong><p>Vault &rarr; Settings &rarr; toggle <em>API Bridge</em> on.</p></div>
+        <div class="sn">2</div><div class="sc"><strong>Pair your app</strong><p><code>POST /auth/pair</code> with your app name. Approve on device. Get a bearer token.</p></div>
+        <div class="sn">3</div><div class="sc"><strong>Make API calls</strong><p>Include the token in the <code>Authorization: Bearer ...</code> header.</p></div>
+      </div>
+
+      <h2>SDK Quick Start</h2>
+<pre><code><span class="kw">import</span> { KeepKeySdk } <span class="kw">from</span> <span class="str">'@keepkey/keepkey-sdk'</span>
+
+<span class="cmt">// Auto-pairs if no key saved</span>
+<span class="kw">const</span> sdk = <span class="kw">await</span> KeepKeySdk.<span class="fn">create</span>({
+  <span class="str">serviceName</span>: <span class="str">'My App'</span>,
+  <span class="str">serviceImageUrl</span>: <span class="str">'https://example.com/icon.png'</span>,
+})
+
+<span class="cmt">// Get ETH address</span>
+<span class="kw">const</span> { address } = <span class="kw">await</span> sdk.address.<span class="fn">ethGetAddress</span>({
+  <span class="str">address_n</span>: [<span class="num">0x8000002C</span>, <span class="num">0x8000003C</span>, <span class="num">0x80000000</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">show_display</span>: <span class="kw">true</span>,
+})</code></pre>
+
+      <h2>Supported Chains</h2>
+      <div class="chains">
+        <div class="chip"><div class="cl">Bitcoin</div><div class="cs">P2PKH / P2SH / SegWit</div></div>
+        <div class="chip"><div class="cl">Ethereum</div><div class="cs">EIP-1559 / EIP-712</div></div>
+        <div class="chip"><div class="cl">Cosmos</div><div class="cs">Amino + Protobuf</div></div>
+        <div class="chip"><div class="cl">THORChain</div><div class="cs">Swap / Deposit</div></div>
+        <div class="chip"><div class="cl">Mayachain</div><div class="cs">Swap / Deposit</div></div>
+        <div class="chip"><div class="cl">Osmosis</div><div class="cs">LP / IBC / Swap</div></div>
+        <div class="chip"><div class="cl">Solana</div><div class="cs">SPL tokens</div></div>
+        <div class="chip"><div class="cl">XRP</div><div class="cs">Payments</div></div>
+        <div class="chip"><div class="cl">TRON</div><div class="cs">TRC-20</div></div>
+        <div class="chip"><div class="cl">TON</div><div class="cs">Jettons</div></div>
+        <div class="chip"><div class="cl">Zcash</div><div class="cs">Shielded (Orchard)</div></div>
+        <div class="chip"><div class="cl">EVM Chains</div><div class="cs">Polygon, Arb, OP, &hellip;</div></div>
+      </div>
+
+      <h2>Authentication</h2>
+      <p>All endpoints except health, ping, docs, and spec require a bearer token:</p>
+<pre><code><span class="kw">curl</span> http://localhost:1646/api/device/features \\
+  -H <span class="str">"Authorization: Bearer YOUR_API_KEY"</span></code></pre>
+      <div class="note">
+        <strong>Device approval required</strong> &mdash; signing operations
+        block until the user confirms or rejects on the KeepKey.
+      </div>
+
+      <h2>Clear Signing</h2>
+      <p>EVM contract calls are decoded on-device in human-readable form:</p>
+      <table>
+        <thead><tr><th>Type</th><th>Device display</th></tr></thead>
+        <tbody>
+          <tr><td>ERC-20 transfer</td><td>Token, amount, recipient</td></tr>
+          <tr><td>ERC-20 approve</td><td>Token, spender, allowance</td></tr>
+          <tr><td>DEX swaps</td><td>Input/output tokens, amounts</td></tr>
+          <tr><td>EIP-712 typed data</td><td>Domain, message fields</td></tr>
+          <tr><td>Unknown calldata</td><td>Raw hex + 4-byte selector</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Key Endpoints</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th><th>Timeout</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Health &amp; version</td><td>5s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/auth/pair</code></td><td>Pair app (device approval)</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/system/info/get-features</code></td><td>Device info, firmware</td><td>30s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/addresses/eth</code></td><td>Derive ETH address</td><td>30s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/eth/sign-transaction</code></td><td>Sign EVM transaction</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/eth/sign-typed-data</code></td><td>Sign EIP-712</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/utxo/sign-transaction</code></td><td>Sign Bitcoin/UTXO tx</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino</code></td><td>Sign Cosmos amino</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign Solana tx</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══ Examples ═══ -->
+  <div class="kk-panel" id="panel-examples">
+    <div class="guide">
+      <div id="examples-gate" class="lock-gate" style="display:none">
+        <h2>Pair First</h2>
+        <p>You need an API key to try the examples. Pair your app to get started.</p>
+        <button class="go-pair" onclick="switchTab('pair')">Go to Pair App</button>
+      </div>
+      <div id="examples-content">
+        <h2>ETH &mdash; Simple Transfer</h2>
+<pre><code><span class="cmt">// POST /eth/sign-transaction</span>
+{
+  <span class="str">"addressNList"</span>: [<span class="num">2147483692</span>, <span class="num">2147483708</span>, <span class="num">2147483648</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">"nonce"</span>: <span class="str">"0x01"</span>,
+  <span class="str">"gasLimit"</span>: <span class="str">"0x5208"</span>,
+  <span class="str">"maxFeePerGas"</span>: <span class="str">"0x1dcd65000"</span>,
+  <span class="str">"maxPriorityFeePerGas"</span>: <span class="str">"0x540ae480"</span>,
+  <span class="str">"value"</span>: <span class="str">"0x2c68af0bb14000"</span>,
+  <span class="str">"to"</span>: <span class="str">"0x12eC06288EDD7Ae2CC41A843fE089237fC7354F0"</span>,
+  <span class="str">"chainId"</span>: <span class="num">1</span>,
+  <span class="str">"data"</span>: <span class="str">""</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('eth/sign-transaction',{addressNList:[2147483692,2147483708,2147483648,0,0],nonce:'0x01',gasLimit:'0x5208',maxFeePerGas:'0x1dcd65000',maxPriorityFeePerGas:'0x540ae480',value:'0x2c68af0bb14000',to:'0x12eC06288EDD7Ae2CC41A843fE089237fC7354F0',chainId:1,data:''})">Try it</button>
+
+        <h2>ETH &mdash; ERC-20 Transfer</h2>
+<pre><code><span class="cmt">// POST /eth/sign-transaction</span>
+{
+  <span class="str">"addressNList"</span>: [<span class="num">2147483692</span>, <span class="num">2147483708</span>, <span class="num">2147483648</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">"nonce"</span>: <span class="str">"0x01"</span>,
+  <span class="str">"gasLimit"</span>: <span class="str">"0x14"</span>,
+  <span class="str">"gasPrice"</span>: <span class="str">"0x14"</span>,
+  <span class="str">"value"</span>: <span class="str">"0x00"</span>,
+  <span class="str">"to"</span>: <span class="str">"0x41e5560054824ea6b0732e656e3ad64e20e94e45"</span>,  <span class="cmt">// token contract</span>
+  <span class="str">"chainId"</span>: <span class="num">1</span>,
+  <span class="str">"data"</span>: <span class="str">"0xa9059cbb0000000000000000000000001d8ce9022f6284c3a5c317f8f34620107d727445000000000000000000000000000000000000000000000000000000000bebc200"</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('eth/sign-transaction',{addressNList:[2147483692,2147483708,2147483648,0,0],nonce:'0x01',gasLimit:'0x14',gasPrice:'0x14',value:'0x00',to:'0x41e5560054824ea6b0732e656e3ad64e20e94e45',chainId:1,data:'0xa9059cbb0000000000000000000000001d8ce9022f6284c3a5c317f8f34620107d727445000000000000000000000000000000000000000000000000000000000bebc200'})">Try it</button>
+
+        <h2>ETH &mdash; Sign Message</h2>
+<pre><code><span class="cmt">// POST /eth/sign</span>
+{
+  <span class="str">"address"</span>: <span class="str">"0x3f2329C9ADFbcCd9A84f52c906E936A42dA18CB8"</span>,
+  <span class="str">"message"</span>: <span class="str">"0x48656c6c6f20576f726c64"</span>  <span class="cmt">// "Hello World"</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('eth/sign',{address:'0x3f2329C9ADFbcCd9A84f52c906E936A42dA18CB8',message:'0x48656c6c6f20576f726c64'})">Try it</button>
+
+        <h2>ETH &mdash; Get Address</h2>
+<pre><code><span class="cmt">// POST /addresses/eth</span>
+{
+  <span class="str">"address_n"</span>: [<span class="num">2147483692</span>, <span class="num">2147483708</span>, <span class="num">2147483648</span>, <span class="num">0</span>, <span class="num">0</span>],
+  <span class="str">"show_display"</span>: <span class="kw">true</span>
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('addresses/eth',{address_n:[2147483692,2147483708,2147483648,0,0],show_display:true})">Try it</button>
+
+        <h2>Cosmos &mdash; Transfer</h2>
+<pre><code><span class="cmt">// POST /cosmos/sign-amino</span>
+{
+  <span class="str">"signerAddress"</span>: <span class="str">"cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj"</span>,
+  <span class="str">"signDoc"</span>: {
+    <span class="str">"chain_id"</span>: <span class="str">"cosmoshub-4"</span>,
+    <span class="str">"account_number"</span>: <span class="str">"16359"</span>,
+    <span class="str">"sequence"</span>: <span class="str">"17"</span>,
+    <span class="str">"fee"</span>: { <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"100"</span>, <span class="str">"denom"</span>: <span class="str">"uatom"</span> }], <span class="str">"gas"</span>: <span class="str">"100000"</span> },
+    <span class="str">"memo"</span>: <span class="str">""</span>,
+    <span class="str">"msgs"</span>: [{
+      <span class="str">"type"</span>: <span class="str">"cosmos-sdk/MsgSend"</span>,
+      <span class="str">"value"</span>: {
+        <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"1000"</span>, <span class="str">"denom"</span>: <span class="str">"uatom"</span> }],
+        <span class="str">"from_address"</span>: <span class="str">"cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj"</span>,
+        <span class="str">"to_address"</span>: <span class="str">"cosmos1qjwdyn56ecagk8rjf7crrzwcyz6775cj89njn3"</span>
+      }
+    }]
+  }
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('cosmos/sign-amino',{signerAddress:'cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj',signDoc:{chain_id:'cosmoshub-4',account_number:'16359',sequence:'17',fee:{amount:[{amount:'100',denom:'uatom'}],gas:'100000'},memo:'',msgs:[{type:'cosmos-sdk/MsgSend',value:{amount:[{amount:'1000',denom:'uatom'}],from_address:'cosmos15cenya0tr7nm3tz2wn3h3zwkht2rxrq7q7h3dj',to_address:'cosmos1qjwdyn56ecagk8rjf7crrzwcyz6775cj89njn3'}}]}})">Try it</button>
+
+        <h2>THORChain &mdash; Transfer</h2>
+<pre><code><span class="cmt">// POST /thorchain/sign-amino-transfer</span>
+{
+  <span class="str">"signerAddress"</span>: <span class="str">"thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az"</span>,
+  <span class="str">"signDoc"</span>: {
+    <span class="str">"chain_id"</span>: <span class="str">"thorchain-mainnet-v1"</span>,
+    <span class="str">"account_number"</span>: <span class="str">"17"</span>,
+    <span class="str">"sequence"</span>: <span class="str">"2"</span>,
+    <span class="str">"fee"</span>: { <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"3000"</span>, <span class="str">"denom"</span>: <span class="str">"rune"</span> }], <span class="str">"gas"</span>: <span class="str">"200000"</span> },
+    <span class="str">"memo"</span>: <span class="str">""</span>,
+    <span class="str">"msgs"</span>: [{
+      <span class="str">"type"</span>: <span class="str">"thorchain/MsgSend"</span>,
+      <span class="str">"value"</span>: {
+        <span class="str">"amount"</span>: [{ <span class="str">"amount"</span>: <span class="str">"100"</span>, <span class="str">"denom"</span>: <span class="str">"rune"</span> }],
+        <span class="str">"from_address"</span>: <span class="str">"thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az"</span>,
+        <span class="str">"to_address"</span>: <span class="str">"thor1wy58774wagy4hkljz9mchhqtgk949zdwwe80d5"</span>
+      }
+    }]
+  }
+}</code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('thorchain/sign-amino-transfer',{signerAddress:'thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az',signDoc:{chain_id:'thorchain-mainnet-v1',account_number:'17',sequence:'2',fee:{amount:[{amount:'3000',denom:'rune'}],gas:'200000'},memo:'',msgs:[{type:'thorchain/MsgSend',value:{amount:[{amount:'100',denom:'rune'}],from_address:'thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az',to_address:'thor1wy58774wagy4hkljz9mchhqtgk949zdwwe80d5'}}]}})">Try it</button>
+
+        <h2>Device &mdash; Get Features</h2>
+<pre><code><span class="cmt">// POST /system/info/get-features</span>
+<span class="cmt">// (no body required)</span></code></pre>
+        <button class="pair-btn" style="max-width:200px;margin:8px 0 24px" onclick="tryExample('system/info/get-features',{})">Try it</button>
+
+        <!-- Result display -->
+        <div id="try-result" style="display:none">
+          <h3 style="color:#C0A860">Response</h3>
+          <pre><code id="try-result-body"></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ API Explorer ═══ -->
+  <div class="kk-panel" id="panel-explorer">
+    <div id="explorer-gate" class="lock-gate" style="display:none">
+      <h2>Pair First</h2>
+      <p>Pair your app to unlock the interactive API explorer with your bearer token pre-filled.</p>
+      <button class="go-pair" onclick="switchTab('pair')">Go to Pair App</button>
+    </div>
+    <div id="swagger-ui"></div>
+  </div>
+
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    SwaggerUIBundle({
-      url: '/spec/swagger.json',
-      dom_id: '#swagger-ui',
-      deepLinking: true,
-      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
-      layout: 'BaseLayout',
+    var STORAGE_KEY='kk_dev_apikey'
+    var swaggerLoaded=false
+
+    function getKey(){return localStorage.getItem(STORAGE_KEY)||''}
+    function setKey(key){
+      if(key)localStorage.setItem(STORAGE_KEY,key);else localStorage.removeItem(STORAGE_KEY)
+      swaggerLoaded=false
+      document.getElementById('swagger-ui').innerHTML=''
+      refreshUI()
+    }
+
+    /* ── Timeout helper (AbortSignal.timeout fallback) ── */
+    function timeoutSignal(ms){
+      if(typeof AbortSignal.timeout==='function')return AbortSignal.timeout(ms)
+      var c=new AbortController()
+      setTimeout(function(){c.abort()},ms)
+      return c.signal
+    }
+
+    /* ── Tab switching ───────────────────────── */
+    function switchTab(name){
+      document.querySelectorAll('.kk-tab').forEach(function(x){x.classList.remove('active')})
+      document.querySelectorAll('.kk-panel').forEach(function(x){x.classList.remove('active')})
+      var tab=document.querySelector('[data-tab="'+name+'"]')
+      if(tab)tab.classList.add('active')
+      document.getElementById('panel-'+name).classList.add('active')
+      if(name==='explorer')loadSwagger()
+    }
+    document.querySelectorAll('.kk-tab').forEach(function(t){
+      t.addEventListener('click',function(){
+        if(t.classList.contains('locked'))return
+        switchTab(t.dataset.tab)
+      })
     })
+
+    /* ── Load Swagger with live key lookup ────── */
+    function loadSwagger(){
+      var key=getKey()
+      if(!key){
+        document.getElementById('explorer-gate').style.display='block'
+        document.getElementById('swagger-ui').style.display='none'
+        return
+      }
+      document.getElementById('explorer-gate').style.display='none'
+      document.getElementById('swagger-ui').style.display='block'
+      if(swaggerLoaded)return
+      swaggerLoaded=true
+      SwaggerUIBundle({
+        url:'/spec/swagger.json',
+        dom_id:'#swagger-ui',
+        deepLinking:true,
+        presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
+        layout:'BaseLayout',
+        requestInterceptor:function(req){
+          var live=getKey()
+          if(live)req.headers['Authorization']='Bearer '+live
+          return req
+        }
+      })
+    }
+
+    /* ── Health status polling ────────────────── */
+    function checkHealth(){
+      fetch('/api/health',{signal:timeoutSignal(3000)})
+        .then(function(r){return r.json()})
+        .then(function(d){
+          document.getElementById('sd').style.background=d.connected?'#22c55e':'#eab308'
+          document.getElementById('st').textContent=d.connected
+            ?'device connected \u2014 v'+(d.version||'')
+            :'no device'
+        })
+        .catch(function(){
+          document.getElementById('sd').style.background='#f85149'
+          document.getElementById('st').textContent='offline'
+        })
+    }
+    checkHealth();setInterval(checkHealth,10000)
+
+    /* ── UI refresh based on key state ───────── */
+    function refreshUI(){
+      var key=getKey()
+      var kb=document.getElementById('kb')
+      var banner=document.getElementById('paired-banner')
+      var form=document.getElementById('pair-form')
+      var title=document.getElementById('pair-title')
+      var desc=document.getElementById('pair-desc')
+      var exGate=document.getElementById('examples-gate')
+      var exContent=document.getElementById('examples-content')
+      var lockedTabs=document.querySelectorAll('[data-tab="examples"],[data-tab="explorer"]')
+      if(key){
+        kb.style.display='inline';kb.textContent='paired'
+        banner.style.display='flex'
+        document.getElementById('paired-key').textContent=key.slice(0,8)+'...'
+        form.style.display='none'
+        title.textContent='Connected'
+        desc.textContent='Your app is paired. Use the Examples and API Explorer tabs.'
+        if(exGate){exGate.style.display='none';exContent.style.display='block'}
+        lockedTabs.forEach(function(t){t.classList.remove('locked')})
+      }else{
+        kb.style.display='none'
+        banner.style.display='none'
+        form.style.display='block'
+        title.textContent='Pair a New App'
+        desc.textContent='Register your application with the vault. Approve the pairing on your KeepKey device.'
+        if(exGate){exGate.style.display='block';exContent.style.display='none'}
+        lockedTabs.forEach(function(t){t.classList.add('locked')})
+      }
+    }
+
+    /* ── Pair ─────────────────────────────────── */
+    function doPair(){
+      var name=document.getElementById('pn').value.trim()
+      if(!name)return
+      var btn=document.getElementById('pb'),res=document.getElementById('pr')
+      btn.disabled=true;btn.textContent='Approve on device\u2026'
+      res.className='pair-result';res.textContent=''
+      fetch('/auth/pair',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:name,imageUrl:document.getElementById('pi').value.trim()||undefined})
+      })
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(d.apiKey){
+          res.className='pair-result ok';res.textContent='Paired! Key: '+d.apiKey
+          setKey(d.apiKey)
+        }else{
+          res.className='pair-result err';res.textContent=d.error||'Pairing rejected'
+        }
+      })
+      .catch(function(e){res.className='pair-result err';res.textContent='Error: '+e.message})
+      .finally(function(){btn.disabled=false;btn.textContent='Pair App'})
+    }
+
+    function doVerify(){
+      var key=document.getElementById('ek').value.trim()
+      if(!key)return
+      var res=document.getElementById('vr')
+      fetch('/auth/pair',{headers:{'Authorization':'Bearer '+key}})
+        .then(function(r){return r.json()})
+        .then(function(d){
+          res.style.marginTop='12px'
+          if(d.paired){
+            res.className='pair-result ok'
+            res.textContent='Valid \u2014 paired as "'+(d.name||'unknown')+'"'
+            setKey(key)
+          }else{
+            res.className='pair-result err'
+            res.textContent='Invalid or expired key'
+          }
+        })
+        .catch(function(e){
+          res.className='pair-result err';res.textContent='Error: '+e.message
+          res.style.marginTop='12px'
+        })
+    }
+
+    function doUnpair(){
+      setKey('')
+      switchTab('pair')
+    }
+
+    /* ── Try examples ────────────────────────── */
+    function tryExample(endpoint,body){
+      var key=getKey()
+      if(!key){switchTab('pair');return}
+      var rd=document.getElementById('try-result')
+      var rb=document.getElementById('try-result-body')
+      rd.style.display='block'
+      rb.textContent='Sending... (approve on device if prompted)'
+      fetch('/'+endpoint,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+        body:JSON.stringify(body),
+        signal:timeoutSignal(120000)
+      })
+      .then(function(r){
+        if(!r.ok)return r.text().then(function(t){
+          try{return JSON.parse(t)}catch(e){throw new Error(r.status+': '+t.slice(0,200))}
+        })
+        return r.json()
+      })
+      .then(function(d){rb.textContent=JSON.stringify(d,null,2)})
+      .catch(function(e){rb.textContent='Error: '+e.message})
+      rd.scrollIntoView({behavior:'smooth'})
+    }
+
+    /* ── Init ─────────────────────────────────── */
+    refreshUI()
+    if(getKey()){switchTab('guide')}else{switchTab('pair')}
   </script>
 </body>
 </html>`
@@ -312,10 +820,17 @@ function addressNListToBIP32(addressNList: number[]): string {
 /** Start time for uptime calculation */
 const startTime = Date.now()
 
+/** Route prefix → chain symbol for activity tracking */
+const ROUTE_TO_CHAIN: Record<string, string> = {
+  eth: 'ETH', utxo: 'BTC', cosmos: 'ATOM', osmosis: 'OSMO',
+  thorchain: 'RUNE', mayachain: 'CACAO', xrp: 'XRP',
+  solana: 'SOL', tron: 'TRX', ton: 'TON',
+}
+
 /** Set of signing endpoints that require user approval */
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
-  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message',
+  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction', '/ton/sign-transaction',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
   '/cosmos/sign-amino-ibc-transfer',
@@ -355,10 +870,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let reqBody: any = undefined
 
       // Per-request response helpers (capture req for CORS origin check)
-      const json = (data: unknown, status = 200) => {
+      const json = (data: unknown, status = 200, activity?: { txid?: string; chain?: string; activityType?: string }) => {
         const resp = new Response(JSON.stringify(data), {
           status, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
         })
+        // Auto-detect activity type from route if not explicitly provided
+        let resolvedActivity = activity
+        if (!resolvedActivity && method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) {
+          const chainForRoute = ROUTE_TO_CHAIN[path.split('/')[1]]
+          if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
+        }
         // Log the request with body + response + duration
         if (callbacks?.onApiLog) {
           const { appName, imageUrl } = resolveAppInfo()
@@ -368,6 +889,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status, appName, imageUrl: imageUrl || undefined,
             requestBody: reqBody,
             responseBody: data,
+            ...resolvedActivity,
           })
         }
         return resp
@@ -462,6 +984,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       if (method === 'POST') {
         try { reqBody = await req.clone().json() } catch { /* not JSON or empty */ }
       }
+
+      // Track active signing request so we can dismiss the overlay after the
+      // actual handler completes (success or failure), not when the user clicks approve.
+      let activeSigningId: string | undefined
+      let activeSigningInfo: SigningRequestInfo | undefined
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -578,6 +1105,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           try {
             const preview = await req.clone().json() as any
             signingInfo.chain = path.split('/')[1] // e.g. "eth", "cosmos"
+            signingInfo.rawRequestBody = preview    // full payload for UI transparency
+
+            console.log(`[REST] Signing request ${path}:`, JSON.stringify(preview, null, 2))
 
             if (path === '/eth/sign-typed-data') {
               // EIP-712: address + typedData structure (no from/to/value/data)
@@ -586,19 +1116,63 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
               }
+            } else if (path === '/ton/sign-transaction') {
+              // TON: field names differ from EVM (to_address, amount, raw_tx)
+              signingInfo.to = preview.to_address
+              signingInfo.value = preview.amount
+            } else if (path === '/tron/sign-transaction') {
+              // Tron: field names differ from EVM (to_address, amount, raw_tx)
+              signingInfo.to = preview.to_address
+              signingInfo.value = preview.amount
             } else {
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to
               signingInfo.value = preview.value
               signingInfo.chainId = preview.chainId || preview.chain_id
-              signingInfo.data = preview.data ? (preview.data.length > 66 ? preview.data.slice(0, 66) + '...' : preview.data) : undefined
+              signingInfo.data = preview.data   // full data — UI handles display
+
+              // Clear-signing: decode calldata via Pioneer descriptor API + local fallback
+              if (preview.data && preview.data.length >= 10 && preview.to) {
+                try {
+                  const chainIdNum = typeof signingInfo.chainId === 'string'
+                    ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
+                    : signingInfo.chainId
+                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
+                  console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
+                } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
+
+                // Determine if this tx needs blind signing:
+                // Has calldata AND calldata is not fully decoded (source is 'none' or missing)
+                const decoded = signingInfo.calldataDecoded
+                signingInfo.needsBlindSigning = !decoded || decoded.source === 'none'
+                console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning}, source=${decoded?.source}`)
+              }
             }
           } catch { /* body parse failed, non-fatal */ }
+
+          // Check device AdvancedMode policy before presenting to user.
+          // ONLY use cached features — never call getFeatures() here because
+          // if the device is PIN-locked it triggers a PIN_REQUEST that races
+          // with the signing approval overlay.
+          try {
+            const now = Date.now()
+            if (featuresCache && (now - featuresCache.timestamp) < FEATURES_TTL_MS) {
+              const features = featuresCache.data
+              const policies: any[] = features?.policiesList || features?.policies || []
+              const advPol = policies.find((p: any) => (p.policyName || p.policy_name) === 'AdvancedMode')
+              signingInfo.advancedModeEnabled = advPol?.enabled ?? false
+            }
+          } catch (e: any) {
+            console.warn('[rest-api] Failed to read AdvancedMode policy:', e?.message || e)
+          }
 
           const approved = await callbacks.onSigningRequest(signingInfo)
           if (!approved) {
             return json({ error: 'Signing rejected by user' }, 403)
           }
+          // Approved — track ID + decoded info so handlers can pass metadata to device
+          activeSigningId = id
+          activeSigningInfo = signingInfo
         }
 
         // ── List paired apps (public — shows connected dApps, keys stripped) ──
@@ -616,7 +1190,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'utxo:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.btcGetAddress({
@@ -636,7 +1210,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'cosmos:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.cosmosGetAddress({
@@ -672,7 +1246,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'eth:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.ethGetAddress({
@@ -690,7 +1264,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'tendermint:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.cosmosGetAddress({
@@ -744,7 +1318,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = 'xrp:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const result = await wallet.rippleGetAddress({
@@ -768,6 +1342,43 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await wallet.solanaGetAddress({
             addressNList: body.address_n,
             showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
+        if (path === '/addresses/tron' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = 'trx:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.tronGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+          })
+          const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
+        if (path === '/addresses/ton' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = 'ton:' + JSON.stringify(body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const result = await wallet.tonGetAddress({
+            addressNList: body.address_n,
+            showDisplay: body.show_display ?? false,
+            bounceable: false, // UQ prefix — safe for uninitialized wallets
           })
           const address = typeof result === 'string' ? result : (result as any)?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
@@ -813,8 +1424,42 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
 
-          const result = await wallet.ethSignTx(msg)
-          return json(validateResponse(result, S.EthSignTransactionResponse, path))
+          // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
+          // Priority: 1) caller provides txMetadata in request body (test fixtures)
+          //           2) Pioneer signedInsightBlob from calldata decoder
+          //           3) none — device falls back to raw hex
+          if (body.txMetadata && body.txMetadata.signedPayload) {
+            msg.txMetadata = {
+              signedPayload: body.txMetadata.signedPayload,
+              keyId: body.txMetadata.keyId ?? 0,
+            }
+            console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
+          } else {
+            const decoded = activeSigningInfo?.calldataDecoded
+            if (decoded?.signedInsightBlob) {
+              msg.txMetadata = {
+                signedPayload: decoded.signedInsightBlob,
+                keyId: decoded.insightKeyId,
+              }
+              console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId})`)
+            } else {
+              console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
+            }
+          }
+
+          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
+          try {
+            const result = await wallet.ethSignTx(msg)
+            console.log('[REST] ethSignTx result:', JSON.stringify(result))
+            return json(validateResponse(result, S.EthSignTransactionResponse, path))
+          } catch (err: any) {
+            // Distinguish user cancellation / device rejection from actual failures
+            const errMsg = String(err?.message || err || '').toLowerCase()
+            if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
+              return json({ error: 'User cancelled signing on device' }, 403)
+            }
+            throw err
+          }
         }
 
         if (path === '/eth/sign-typed-data' && method === 'POST') {
@@ -888,8 +1533,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             outputs: body.outputs,
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
+            ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
+            ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
+            ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
+            ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
           })
-          return json(validateResponse(result, S.UtxoSignTransactionResponse, path))
+          // Explicit chain for UTXO — auto-detect defaults to BTC but could be LTC/DOGE/etc
+          const coinSymbol = coin === 'Bitcoin' ? 'BTC' : coin === 'Litecoin' ? 'LTC' : coin === 'Dogecoin' ? 'DOGE' : coin === 'Dash' ? 'DASH' : coin === 'BitcoinCash' ? 'BCH' : coin
+          return json(validateResponse(result, S.UtxoSignTransactionResponse, path), 200, { chain: coinSymbol, activityType: 'sign' })
         }
 
         // ── COSMOS SIGNING (6 endpoints) ──────────────────────────────
@@ -1029,11 +1680,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+
+          // Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
+          // Firmware expects just the message bytes. Extract message portion.
+          let deviceRawTx = body.raw_tx
+          const fullTx = Buffer.from(body.raw_tx, 'base64')
+          let pos = 0, sigCount = 0
+          if (fullTx[0] < 0x80) { sigCount = fullTx[0]; pos = 1 }
+          else if (fullTx.length >= 2 && fullTx[1] < 0x80) {
+            sigCount = (fullTx[0] & 0x7f) | (fullTx[1] << 7); pos = 2
+          } else if (fullTx.length >= 3) {
+            sigCount = (fullTx[0] & 0x7f) | ((fullTx[1] & 0x7f) << 7) | (fullTx[2] << 14); pos = 3
+          }
+          const messageStart = pos + sigCount * 64
+          if (sigCount > 0 && messageStart < fullTx.length) {
+            deviceRawTx = Buffer.from(fullTx.subarray(messageStart)).toString('base64')
+          }
+
           const result = await wallet.solanaSignTx({
             addressNList,
-            rawTx: body.raw_tx,
+            rawTx: deviceRawTx,
           })
-          // Assemble signed tx: replace dummy 64-byte signature in rawTx with real signature
+          // Assemble signed tx: replace dummy 64-byte signature in full tx with real signature
           if (result?.signature && body.raw_tx) {
             const rawBytes = Buffer.from(body.raw_tx, 'base64')
             const sigBytes = result.signature instanceof Uint8Array
@@ -1067,6 +1735,41 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               ? Buffer.from(result.publicKey).toString('base64')
               : result.publicKey,
           })
+        }
+
+        // ── TRON SIGNING (1 endpoint) ──────────────────────────────────
+        if (path === '/tron/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          const result = await wallet.tronSignTx({
+            addressNList,
+            rawTx: body.raw_tx,
+            toAddress: body.to_address,
+            amount: body.amount,
+          })
+          return json({
+            signature: result?.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('hex')
+              : result?.signature,
+          })
+        }
+
+        // ── TON SIGNING (1 endpoint) ──────────────────────────────────
+        if (path === '/ton/sign-transaction' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TonSignRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
+          const result = await wallet.tonSignTx({
+            addressNList,
+            rawTx: body.raw_tx,
+            toAddress: body.to_address,
+            amount: body.amount,
+          })
+          if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
+          return json(result)
         }
 
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
@@ -1253,6 +1956,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   // Solana uses ed25519 with 4-element path (m/44'/501'/0'/0') — don't extend to 5
                   const solNList = p.address_n
                   const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                } else if (coinType === 195) {
+                  const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
+                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                } else if (coinType === 607) {
+                  // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
+                  const tonNList = p.address_n
+                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
                   address = typeof r === 'string' ? r : (r as any)?.address || ''
                 }
 
@@ -1447,6 +2158,67 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ success: true })
         }
 
+        // ── Zcash Shielded (Orchard) ────────────────────────────────
+
+        const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
+        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.state?.firmwareVersion)
+
+        if (path === '/api/zcash/shielded/status' && method === 'GET') {
+          if (!zcashFwSupported) return json({ ready: false, error: 'Zcash requires firmware >= 7.11.0' })
+          return json({ ready: isSidecarReady() })
+        }
+
+        // All mutating zcash endpoints require firmware support
+        if (path.startsWith('/api/zcash/shielded/') && path !== '/api/zcash/shielded/status' && !zcashFwSupported) {
+          return json({ error: 'Zcash requires firmware >= 7.11.0' }, 503)
+        }
+
+        if (path === '/api/zcash/shielded/init' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashInitRequest)
+          if (body.from_device) {
+            const wallet = requireWallet(engine)
+            const result = await initializeOrchardFromDevice(wallet, body.account ?? 0)
+            return json(result)
+          }
+          // seed_hex path is dev/test only — reject in production builds
+          return json({ error: 'seed_hex init disabled — use from_device: true' }, 403)
+        }
+
+        if (path === '/api/zcash/shielded/scan' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashScanRequest)
+          const result = await scanOrchardNotes(body.start_height)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/balance' && method === 'GET') {
+          auth.requireAuth(req)
+          const result = await getShieldedBalance()
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/build' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashBuildRequest)
+          const result = await buildShieldedTx(body)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/finalize' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashFinalizeRequest)
+          const result = await finalizeShieldedTx(body.signatures)
+          return json(result)
+        }
+
+        if (path === '/api/zcash/shielded/broadcast' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashBroadcastRequest)
+          const result = await broadcastShieldedTx(body.raw_tx)
+          return json(result)
+        }
+
         // ── Catch-all ────────────────────────────────────────────────
         // Sequential if/else routing is fine for ~60 localhost-only endpoints.
         // A Map-based router adds complexity with no measurable perf gain here.
@@ -1458,6 +2230,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
         console.error('[REST] Error:', err)
         return json({ error: 'Internal error' }, 500)
+      } finally {
+        // Dismiss signing overlay AFTER the handler completes (success, error, or cancellation)
+        if (activeSigningId && callbacks?.onSigningDismissed) {
+          callbacks.onSigningDismissed(activeSigningId)
+        }
+        activeSigningId = undefined
+        activeSigningInfo = undefined
       }
     },
   })

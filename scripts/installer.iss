@@ -29,6 +29,8 @@ SetupIconFile={#MySourceDir}\Resources\app-real.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+WizardImageFile={#MyScriptDir}\installer-wizard.bmp
+WizardSmallImageFile={#MyScriptDir}\installer-small.bmp
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\Resources\app-real.ico
@@ -42,8 +44,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; Clean stale hashed assets from prior versions — Vite generates unique filenames
+; per build, and old files accumulate causing slow WebView2 startup.
+Type: filesandordirs; Name: "{app}\Resources\app\views\mainview\assets"
+
 [Files]
 Source: "{#MySourceDir}\KeepKeyVault.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySourceDir}\KeepKeyVault.exe.manifest"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\Resources\*"; DestDir: "{app}\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; WebView2 bootstrapper — extracted to temp, deleted after install

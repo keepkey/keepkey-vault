@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "Tu billetera está lista. Aquí te explicamos cómo empezar:",
 	"welcomeTip1": "Toca cualquier cadena abajo y luego presiona Recibir para obtener tu dirección de depósito",
 	"welcomeTip2": "Envía cripto a tu dirección — tu saldo aparecerá aquí automáticamente",
-	"welcomeTip3": "Agrega cadenas EVM personalizadas con la tarjeta + para rastrear cualquier red",
 	"balancesStale": "Los saldos pueden estar desactualizados",
 	"lastUpdated": "Última actualización {{time}}",
 	"lastUpdatedNever": "Nunca cargado",

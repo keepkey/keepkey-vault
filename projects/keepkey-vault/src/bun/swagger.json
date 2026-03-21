@@ -24,22 +24,44 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "script_type": {
-                    "$ref": "#/components/schemas/BTCInputScriptType"
+                    "$ref": "#/components/schemas/BTCInputScriptType",
+                    "example": "p2wpkh"
                   },
                   "coin": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "Bitcoin"
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483648,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "coin",
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483648,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Bitcoin",
+                  "show_display": false,
+                  "script_type": "p2wpkh"
+                }
               }
             }
           },
@@ -92,15 +114,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483766,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483766,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Atom",
+                  "show_display": false
+                }
               }
             }
           },
@@ -155,15 +196,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483766,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483766,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Osmo",
+                  "show_display": false
+                }
               }
             }
           },
@@ -218,15 +278,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483708,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483708,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Ethereum",
+                  "show_display": false
+                }
               }
             }
           },
@@ -281,15 +360,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483766,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483766,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Atom",
+                  "show_display": false
+                }
               }
             }
           },
@@ -344,15 +442,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483579,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483579,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Rune",
+                  "show_display": false
+                }
               }
             }
           },
@@ -407,15 +524,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484579,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484579,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Cacao",
+                  "show_display": false
+                }
               }
             }
           },
@@ -457,6 +593,250 @@
         ]
       }
     },
+    "/addresses/solana": {
+      "post": {
+        "operationId": "SolanaGetAddress",
+        "summary": "Get Solana Address",
+        "description": "Get a Solana address, loading it into the current session and optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean",
+                    "example": false
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484149,
+                      2147483648,
+                      2147483648
+                    ]
+                  }
+                },
+                "required": [
+                  "address_n"
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484149,
+                    2147483648,
+                    2147483648
+                  ],
+                  "coin": "Solana",
+                  "show_display": false
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/tron": {
+      "post": {
+        "operationId": "TronGetAddress",
+        "summary": "Get Tron Address",
+        "description": "Get a Tron (TRX) address, loading it into the current session and optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean",
+                    "example": false
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484143,
+                      2147483648,
+                      0,
+                      0
+                    ]
+                  }
+                },
+                "required": [
+                  "address_n"
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484143,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "Tron",
+                  "show_display": false
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
+    "/addresses/ton": {
+      "post": {
+        "operationId": "TonGetAddress",
+        "summary": "Get TON Address",
+        "description": "Get a TON address, loading it into the current session and optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": {
+                    "type": "boolean",
+                    "example": false
+                  },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147484255,
+                      2147483648,
+                      0,
+                      0
+                    ]
+                  }
+                },
+                "required": [
+                  "address_n"
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147484255,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "TON",
+                  "show_display": false
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Address"
+        ]
+      }
+    },
     "/addresses/xrp": {
       "post": {
         "operationId": "XrpGetAddress",
@@ -470,15 +850,34 @@
                 "type": "object",
                 "properties": {
                   "show_display": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "address_n": {
-                    "$ref": "#/components/schemas/types.AddressNList"
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [
+                      2147483692,
+                      2147483792,
+                      2147483648,
+                      0,
+                      0
+                    ]
                   }
                 },
                 "required": [
                   "address_n"
-                ]
+                ],
+                "example": {
+                  "address_n": [
+                    2147483692,
+                    2147483792,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "coin": "XRP",
+                  "show_display": false
+                }
               }
             }
           },
@@ -1143,7 +1542,24 @@
                   "value",
                   "data",
                   "to"
-                ]
+                ],
+                "example": {
+                  "addressNList": [
+                    2147483692,
+                    2147483708,
+                    2147483648,
+                    0,
+                    0
+                  ],
+                  "nonce": "0x01",
+                  "gasLimit": "0x5208",
+                  "maxFeePerGas": "0x1dcd65000",
+                  "maxPriorityFeePerGas": "0x540ae480",
+                  "value": "0x2c68af0bb14000",
+                  "to": "0x12eC06288EDD7Ae2CC41A843fE089237fC7354F0",
+                  "chainId": 1,
+                  "data": ""
+                }
               }
             }
           },
@@ -1269,7 +1685,11 @@
                 "required": [
                   "address",
                   "message"
-                ]
+                ],
+                "example": {
+                  "address": "0x3f2329C9ADFbcCd9A84f52c906E936A42dA18CB8",
+                  "message": "0x48656c6c6f20576f726c64"
+                }
               }
             }
           },
@@ -2215,19 +2635,24 @@
                 "type": "object",
                 "properties": {
                   "message": {
-                    "type": "string"
+                    "type": "string",
+                    "example": ""
                   },
                   "wipe_code_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "passphrase_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "pin_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   },
                   "button_protection": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                   }
                 }
               }
@@ -3162,7 +3587,8 @@
                   "outputs": {},
                   "inputs": {},
                   "coin": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "Bitcoin"
                   }
                 },
                 "required": [
@@ -3286,6 +3712,279 @@
         ],
         "tags": [
           "XRP"
+        ]
+      }
+    },
+    "/solana/sign-transaction": {
+      "post": {
+        "operationId": "solana_signTransaction",
+        "summary": "Sign a Solana transaction",
+        "description": "Sign a raw Solana transaction on the KeepKey device. The raw_tx is a base64-encoded serialized Solana transaction.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "addressNList": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "raw_tx": {
+                    "type": "string",
+                    "description": "Base64-encoded raw Solana transaction"
+                  }
+                },
+                "required": [
+                  "raw_tx"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": {
+                      "type": "string"
+                    },
+                    "serializedTx": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Solana"
+        ]
+      }
+    },
+    "/solana/sign-message": {
+      "post": {
+        "operationId": "solana_signMessage",
+        "summary": "Sign a Solana message",
+        "description": "Sign an arbitrary message with a Solana key on the KeepKey device.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "addressNList": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Message to sign (utf-8 or base64)"
+                  },
+                  "show_display": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": {
+                      "type": "string"
+                    },
+                    "publicKey": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Solana"
+        ]
+      }
+    },
+    "/tron/sign-transaction": {
+      "post": {
+        "operationId": "tron_signTransaction",
+        "summary": "Sign a Tron transaction",
+        "description": "Sign a raw Tron transaction on the KeepKey device. The raw_tx is a hex-encoded serialized Tron protobuf transaction.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "addressNList": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "raw_tx": {
+                    "type": "string",
+                    "description": "Hex-encoded raw Tron transaction"
+                  }
+                },
+                "required": [
+                  "raw_tx"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Tron"
+        ]
+      }
+    },
+    "/ton/sign-transaction": {
+      "post": {
+        "operationId": "ton_signTransaction",
+        "summary": "Sign a TON transaction",
+        "description": "Sign a raw TON transaction on the KeepKey device. The raw_tx is a base64-encoded BOC cell.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "addressNList": {
+                    "$ref": "#/components/schemas/types.AddressNList"
+                  },
+                  "raw_tx": {
+                    "type": "string",
+                    "description": "Base64-encoded raw TON transaction (BOC)"
+                  },
+                  "to_address": {
+                    "type": "string",
+                    "description": "Destination address (enables clear-signing on device)"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "description": "Transfer amount in nanoTON (enables clear-signing on device)"
+                  }
+                },
+                "required": [
+                  "raw_tx"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signature": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Error processing request"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "TON"
         ]
       }
     },
@@ -3685,7 +4384,10 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "message": { "type": "string", "example": "pong" }
+                    "message": {
+                      "type": "string",
+                      "example": "pong"
+                    }
                   }
                 }
               }
@@ -3693,59 +4395,9 @@
           }
         },
         "security": [],
-        "tags": ["Detection"]
-      }
-    },
-    "/system/info/ping": {
-      "post": {
-        "operationId": "SystemInfoPing",
-        "summary": "System ping check",
-        "description": "POST variant of ping check, compatible with keepkey-desktop SDK detection.",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Ok",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": { "type": "string", "example": "pong" }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [],
-        "tags": ["Detection"]
-      }
-    },
-    "/admin/info": {
-      "get": {
-        "operationId": "AdminInfo",
-        "summary": "Admin health info",
-        "description": "Returns version, connection status, and uptime. Alias of /api/health.",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Ok",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "version": { "type": "string" },
-                    "connected": { "type": "boolean" },
-                    "uptime": { "type": "integer" }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [],
-        "tags": ["Detection"]
+        "tags": [
+          "Detection"
+        ]
       }
     },
     "/docs": {
@@ -3760,94 +4412,292 @@
           }
         },
         "security": [],
-        "tags": ["Spec"]
+        "tags": [
+          "Spec"
+        ]
       }
     },
     "/api/v1/health": {
       "get": {
         "operationId": "V1Health",
         "summary": "V1 Health check (alias for /api/health)",
-        "responses": { "200": { "description": "Health status", "content": { "application/json": { "schema": { "type": "object" } } } } },
-        "tags": ["Health"]
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Health"
+        ]
       }
     },
     "/api/v1/health/fast": {
       "get": {
         "operationId": "V1HealthFast",
         "summary": "Fast health check (minimal response)",
-        "responses": { "200": { "description": "Minimal health", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "uptime": { "type": "integer" } } } } } } },
-        "tags": ["Health"]
+        "responses": {
+          "200": {
+            "description": "Minimal health",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "uptime": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Health"
+        ]
       }
     },
     "/api/v2/devices": {
       "get": {
         "operationId": "V2ListDevices",
         "summary": "List all connected devices",
-        "security": [{ "apiKey": [] }],
-        "responses": { "200": { "description": "Device list", "content": { "application/json": { "schema": { "type": "object" } } } } },
-        "tags": ["Devices"]
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Devices"
+        ]
       }
     },
     "/api/v2/devices/active": {
       "get": {
         "operationId": "V2GetActiveDevice",
         "summary": "Get the active device",
-        "security": [{ "apiKey": [] }],
-        "responses": { "200": { "description": "Active device", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "No active device" } },
-        "tags": ["Devices"]
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active device"
+          }
+        },
+        "tags": [
+          "Devices"
+        ]
       }
     },
     "/api/v2/devices/select": {
       "post": {
         "operationId": "V2SelectDevice",
         "summary": "Select active device (single-device mode)",
-        "security": [{ "apiKey": [] }],
-        "responses": { "200": { "description": "Device selected", "content": { "application/json": { "schema": { "type": "object" } } } } },
-        "tags": ["Devices"]
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device selected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Devices"
+        ]
       }
     },
     "/api/v2/devices/paired": {
       "get": {
         "operationId": "V2GetPairedDevices",
         "summary": "Get all paired device history",
-        "security": [{ "apiKey": [] }],
-        "responses": { "200": { "description": "Paired devices", "content": { "application/json": { "schema": { "type": "object" } } } } },
-        "tags": ["Devices"]
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paired devices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Devices"
+        ]
       }
     },
     "/api/v2/devices/{id}": {
       "get": {
         "operationId": "V2GetDevice",
         "summary": "Get a specific device by ID",
-        "security": [{ "apiKey": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Device info", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
-        "tags": ["Devices"]
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Device not found"
+          }
+        },
+        "tags": [
+          "Devices"
+        ]
       }
     },
     "/api/cache/status": {
       "get": {
         "operationId": "GetCacheStatus",
         "summary": "Get cache status (pubkeys and addresses)",
-        "responses": { "200": { "description": "Cache status", "content": { "application/json": { "schema": { "type": "object", "properties": { "available": { "type": "boolean" }, "cached_pubkeys": { "type": "integer" }, "cached_addresses": { "type": "integer" } } } } } } },
-        "tags": ["Cache"]
+        "responses": {
+          "200": {
+            "description": "Cache status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "cached_pubkeys": {
+                      "type": "integer"
+                    },
+                    "cached_addresses": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Cache"
+        ]
       }
     },
     "/api/portfolio": {
       "get": {
         "operationId": "GetPortfolio",
         "summary": "Get combined portfolio for all devices",
-        "responses": { "200": { "description": "Portfolio data", "content": { "application/json": { "schema": { "type": "object" } } } } },
-        "tags": ["Portfolio"]
+        "responses": {
+          "200": {
+            "description": "Portfolio data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Portfolio"
+        ]
       }
     },
     "/api/portfolio/{deviceId}": {
       "get": {
         "operationId": "GetDevicePortfolio",
         "summary": "Get portfolio for a specific device",
-        "parameters": [{ "name": "deviceId", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Device portfolio", "content": { "application/json": { "schema": { "type": "object" } } } }, "404": { "description": "Device not found" } },
-        "tags": ["Portfolio"]
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device portfolio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Device not found"
+          }
+        },
+        "tags": [
+          "Portfolio"
+        ]
       }
     },
     "/api/pubkeys/batch": {
@@ -3855,96 +4705,123 @@
         "operationId": "BatchGetPubkeys",
         "summary": "Get multiple public keys in a single batch call",
         "requestBody": {
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "paths": { "type": "array", "items": { "type": "object", "properties": { "address_n": { "$ref": "#/components/schemas/types.AddressNList" }, "script_type": { "type": "string" }, "coin": { "type": "string" }, "networks": { "type": "array", "items": { "type": "string" } }, "type": { "type": "string" } }, "required": ["address_n"] } }, "context": { "type": "string" } }, "required": ["paths"] } } },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "address_n": {
+                          "$ref": "#/components/schemas/types.AddressNList"
+                        },
+                        "script_type": {
+                          "type": "string"
+                        },
+                        "coin": {
+                          "type": "string",
+                          "example": "Bitcoin"
+                        },
+                        "networks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "address_n"
+                      ]
+                    }
+                  },
+                  "context": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "paths"
+                ]
+              }
+            }
+          },
           "required": true
         },
-        "responses": { "200": { "description": "Batch pubkey results", "content": { "application/json": { "schema": { "type": "object", "properties": { "pubkeys": { "type": "array", "items": { "type": "object" } }, "cached_count": { "type": "integer" }, "total_requested": { "type": "integer" }, "device_id": { "type": "string" } } } } } }, "503": { "description": "No device connected" } },
-        "tags": ["Pubkeys"]
-      }
-    },
-    "/system/apply-settings": {
-      "post": {
-        "operationId": "ApplySettings",
-        "summary": "Change device configuration (label, passphrase, autolock)",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "label": { "type": "string" }, "use_passphrase": { "type": "boolean" }, "autolock_delay_ms": { "type": "integer" } } } } } },
-        "responses": { "200": { "description": "Settings applied" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/change-pin": {
-      "post": {
-        "operationId": "ChangePin",
-        "summary": "Change or remove device PIN",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "remove": { "type": "boolean" } } } } } },
-        "responses": { "200": { "description": "PIN operation started" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/apply-policies": {
-      "post": {
-        "operationId": "ApplyPolicies",
-        "summary": "Enable or disable device policies",
-        "responses": { "200": { "description": "Policies applied" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/wipe-device": {
-      "post": {
-        "operationId": "WipeDevice",
-        "summary": "Wipe and reset device to factory defaults",
-        "responses": { "200": { "description": "Device wiped" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/clear-session": {
-      "post": {
-        "operationId": "ClearSession",
-        "summary": "Lock device (forget PIN and passphrase)",
-        "responses": { "200": { "description": "Session cleared" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/initialize/reset-device": {
-      "post": {
-        "operationId": "ResetDevice",
-        "summary": "Set up device and generate new seed",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "word_count": { "type": "integer" }, "pin_protection": { "type": "boolean" }, "passphrase_protection": { "type": "boolean" }, "label": { "type": "string" } } } } } },
-        "responses": { "200": { "description": "Device reset started" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/initialize/recover-device": {
-      "post": {
-        "operationId": "RecoverDevice",
-        "summary": "Recover device from seed phrase",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "word_count": { "type": "integer" }, "pin_protection": { "type": "boolean" }, "passphrase_protection": { "type": "boolean" }, "label": { "type": "string" } } } } } },
-        "responses": { "200": { "description": "Recovery started" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
-      }
-    },
-    "/system/initialize/load-device": {
-      "post": {
-        "operationId": "LoadDevice",
-        "summary": "Load externally-derived keys into device (NOT RECOMMENDED)",
-        "responses": { "200": { "description": "Device loaded" } },
-        "security": [{ "apiKey": [] }],
-        "tags": ["System"]
+        "responses": {
+          "200": {
+            "description": "Batch pubkey results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pubkeys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "cached_count": {
+                      "type": "integer"
+                    },
+                    "total_requested": {
+                      "type": "integer"
+                    },
+                    "device_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No device connected"
+          }
+        },
+        "tags": [
+          "Pubkeys"
+        ]
       }
     },
     "/system/recovery/pin": {
       "post": {
         "operationId": "SendRecoveryPin",
         "summary": "Send PIN during device setup or unlock flow",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "pin": { "type": "string" } }, "required": ["pin"] } } }, "required": true },
-        "responses": { "200": { "description": "PIN accepted" }, "400": { "description": "Missing pin" } },
-        "tags": ["System"]
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pin"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "PIN accepted"
+          },
+          "400": {
+            "description": "Missing pin"
+          }
+        },
+        "tags": [
+          "System"
+        ]
       }
     }
   },
@@ -3966,7 +4843,8 @@
           {}
         ],
         "maximum": 4294967295,
-        "minimum": 0
+        "minimum": 0,
+        "example": 2147483692
       },
       "types.AddressNList": {
         "description": "a BIP-32 path, expressed as a list of node indexes",
@@ -3975,7 +4853,14 @@
           "$ref": "#/components/schemas/types.numeric.U32"
         },
         "maxItems": 5,
-        "minItems": 3
+        "minItems": 3,
+        "example": [
+          2147483692,
+          2147483708,
+          2147483648,
+          0,
+          0
+        ]
       },
       "BTCInputScriptType": {
         "type": "string",

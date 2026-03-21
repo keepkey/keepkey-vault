@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -24,6 +24,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       loadDevice: { params: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }; response: void }
       verifySeed: { params: { wordCount: 12 | 18 | 24 }; response: { success: boolean; message: string } }
       applySettings: { params: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }; response: void }
+      applyPolicy: { params: { policyName: string; enabled: boolean }; response: void }
       changePin: { params: void; response: void }
       removePin: { params: void; response: void }
       sendPin: { params: { pin: string }; response: void }
@@ -48,6 +49,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       osmosisGetAddress: { params: any; response: any } // TODO: type
       xrpGetAddress: { params: any; response: any } // TODO: type
       solanaGetAddress: { params: any; response: any }
+      tronGetAddress: { params: any; response: any }
+      tonGetAddress: { params: any; response: any }
 
       // ── Transaction signing ───────────────────────────────────────
       btcSignTx: { params: any; response: any }
@@ -61,12 +64,20 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       osmosisSignTx: { params: any; response: any } // TODO: type
       xrpSignTx: { params: any; response: any } // TODO: type
       solanaSignTx: { params: any; response: any }
+      tronSignTx: { params: any; response: any }
+      tonSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: void; response: ChainBalance[] }
       getBalance: { params: { chainId: string }; response: ChainBalance }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
       broadcastTx: { params: { chainId: string; signedTx: any }; response: BroadcastResult }
+
+      // ── Staking / delegation ─────────────────────────────────────────
+      getStakingPositions: { params: { chainId: string; address: string }; response: StakingPosition[] }
+      buildDelegateTx: { params: BuildStakingTxParams; response: BuildTxResult }
+      buildUndelegateTx: { params: BuildStakingTxParams; response: BuildTxResult }
+
       getMarketData: { params: { caips: string[] }; response: any }
       getFees: { params: { chainId: string }; response: any }
 
@@ -98,6 +109,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       removeTokenVisibility: { params: { caip: string }; response: void }
       getTokenVisibilityMap: { params: void; response: Record<string, TokenVisibilityStatus> }
 
+      // ── Zcash Shielded (Orchard) ──────────────────────────────────────
+      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null } }
+      zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
+      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
+      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number } }
+      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
+      zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
+      zcashBackfillMemos: { params: void; response: { backfilled: number } }
+
       // ── Camera / QR scanning ──────────────────────────────────────────
       startQrScan: { params: void; response: void }
       stopQrScan: { params: void; response: void }
@@ -118,6 +139,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getAppSettings: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
+      setFiatCurrency: { params: { currency: string }; response: AppSettings }
+      setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setSwapsEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
+      setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
+      addPioneerServer: { params: { url: string; label: string }; response: AppSettings }
+      removePioneerServer: { params: { url: string }; response: AppSettings }
+      setActivePioneerServer: { params: { url: string }; response: AppSettings }
 
       // ── Reports ──────────────────────────────────────────────────────
       generateReport: { params: void; response: ReportMeta }
@@ -126,6 +156,25 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       deleteReport: { params: { id: string }; response: void }
       saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
 
+      // ── Swap ──────────────────────────────────────────────────────────
+      getSwappableChainIds: { params: void; response: string[] }
+      getSwapAssets: { params: void; response: SwapAsset[] }
+      getSwapQuote: { params: SwapQuoteParams; response: SwapQuote }
+      executeSwap: { params: ExecuteSwapParams; response: SwapResult }
+      getPendingSwaps: { params: void; response: PendingSwap[] }
+      dismissSwap: { params: { txid: string }; response: void }
+
+      // ── Swap History (SQLite-persisted) ─────────────────────────────
+      getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
+      getSwapHistoryStats: { params: void; response: SwapHistoryStats }
+      exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
+
+      // ── Recent Activity ──────────────────────────────────────────────────
+      getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
+      scanChainHistory: { params: { chainId: string }; response: { count: number } }
+      dismissActivity: { params: { id: string }; response: void }
+      clearRecentActivity: { params: void; response: void }
+
       // ── Balance cache (instant portfolio) ─────────────────────────────
       getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
 
@@ -133,6 +182,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
       getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }
       getWatchOnlyPubkeys: { params: void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+
+      // ── Factory Reset ──────────────────────────────────────────────────
+      factoryReset: { params: void; response: void }
 
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
@@ -157,7 +209,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'pin-request': PinRequest
       'character-request': CharacterRequest
       'passphrase-request': Record<string, never>
-      'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'cancelled' | 'unknown' }
+      'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown'; autoRetrying?: boolean }
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
       'camera-frame': string
@@ -171,6 +223,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
+      'swap-update': SwapStatusUpdate
+      'swap-complete': PendingSwap
+      'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
+      'balance-updated': ChainBalance
+      'shield-progress': { step: string; detail?: string }
     }
   }
   webview: {

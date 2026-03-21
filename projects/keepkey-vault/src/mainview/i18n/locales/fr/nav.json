@@ -12,5 +12,6 @@
 	"loadingPortfolio": "Chargement du portefeuille",
 	"errorWithMessage": "Erreur : {{error}}",
 	"tryUnplugging": "Essayez de débrancher et rebrancher votre KeepKey.",
-	"watchOnlyConnectPrompt": "Lecture seule — Connectez l'appareil pour un accès complet"
+	"watchOnlyConnectPrompt": "Lecture seule — Connectez l'appareil pour un accès complet",
+	"passphraseMode": "Phrase secrète"
 }

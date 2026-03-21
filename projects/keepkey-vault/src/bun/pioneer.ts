@@ -7,7 +7,7 @@
 import Pioneer from '@pioneer-platform/pioneer-client'
 import { getSetting } from './db'
 
-const DEFAULT_API_BASE = 'https://api.keepkey.info'
+export const DEFAULT_API_BASE = 'https://api.keepkey.info'
 const QUERY_KEY = process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
 const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 

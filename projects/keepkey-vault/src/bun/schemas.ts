@@ -4,8 +4,8 @@ import { z } from 'zod'
 // Shared primitives
 // ═══════════════════════════════════════════════════════════════════════
 
-/** BIP32 address path — array of 3-5 hardened/unhardened integers */
-export const AddressNList = z.array(z.number().int()).min(3).max(5)
+/** BIP32 address path — array of 3-6 hardened/unhardened integers (TON uses 6) */
+export const AddressNList = z.array(z.number().int()).min(3).max(6)
 
 /** 0x-prefixed Ethereum address (40 hex chars) */
 export const EthAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/)
@@ -62,6 +62,11 @@ export const EthSignTransactionRequest = z.object({
   from: z.string().optional(),
   addressNList: z.array(z.number().int()).optional(),
   address_n_list: z.array(z.number().int()).optional(),
+  // EVM clear-signing metadata (firmware 7.14+)
+  txMetadata: z.object({
+    signedPayload: z.string(),
+    keyId: z.number().int().optional(),
+  }).optional(),
 }).strip().refine(
   d => d.from || d.addressNList || d.address_n_list,
   { message: 'Missing from address or addressNList' },
@@ -135,6 +140,24 @@ export const SolanaSignRequest = z.object({
   raw_tx: z.string().min(1),
 }).strip()
 
+/** POST /tron/sign-transaction — sign a raw Tron transaction */
+export const TronSignRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  raw_tx: z.string().min(1),
+  to_address: z.string().optional(),  // enables clear-sign on device
+  amount: z.string().optional(),      // amount in SUN — enables clear-sign on device
+}).strip()
+
+/** POST /ton/sign-transaction — sign a raw TON transaction */
+export const TonSignRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  raw_tx: z.string().min(1),
+  to_address: z.string().optional(),  // enables clear-sign on device
+  amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
+}).strip()
+
 /** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
 export const SolanaSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
@@ -190,6 +213,38 @@ export const LoadDeviceRequest = z.object({}).passthrough()
 /** POST /system/recovery/pin */
 export const SendPinRequest = z.object({
   pin: z.string().min(1),
+}).passthrough()
+
+// ── Zcash Shielded (Orchard) ─────────────────────────────────────────
+
+/** POST /api/zcash/shielded/init */
+export const ZcashInitRequest = z.object({
+  seed_hex: z.string().optional(),
+  from_device: z.boolean().optional(),
+  account: z.number().int().min(0).optional(),
+}).passthrough()
+
+/** POST /api/zcash/shielded/scan */
+export const ZcashScanRequest = z.object({
+  start_height: z.number().int().min(0).optional(),
+}).passthrough()
+
+/** POST /api/zcash/shielded/build */
+export const ZcashBuildRequest = z.object({
+  recipient: z.string().min(1),
+  amount: z.number().positive().max(2_100_000_000_000_000),
+  account: z.number().int().min(0).optional(),
+  memo: z.string().optional(),
+}).passthrough()
+
+/** POST /api/zcash/shielded/finalize */
+export const ZcashFinalizeRequest = z.object({
+  signatures: z.array(z.string().regex(/^[0-9a-fA-F]{128}$/)).min(1),
+}).passthrough()
+
+/** POST /api/zcash/shielded/broadcast */
+export const ZcashBroadcastRequest = z.object({
+  raw_tx: z.string().min(1),
 }).passthrough()
 
 /** POST /api/pubkeys/batch */

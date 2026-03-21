@@ -12,5 +12,6 @@
 	"loadingPortfolio": "포트폴리오 로딩 중",
 	"errorWithMessage": "오류: {{error}}",
 	"tryUnplugging": "KeepKey를 분리했다가 다시 연결해 보세요.",
-	"watchOnlyConnectPrompt": "읽기 전용 — 전체 액세스를 위해 기기를 연결하세요"
+	"watchOnlyConnectPrompt": "읽기 전용 — 전체 액세스를 위해 기기를 연결하세요",
+	"passphraseMode": "암호문"
 }

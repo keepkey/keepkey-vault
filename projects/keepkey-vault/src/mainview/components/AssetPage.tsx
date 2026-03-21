@@ -1,32 +1,52 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
+import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
+import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
-import { BTC_SCRIPT_TYPES, btcAccountPath } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, TokenVisibilityStatus } from "../../shared/types"
+import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance, formatUsd } from "../lib/formatting"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
+
+// Lazy-load optional feature components — defers module evaluation to avoid
+// bundler TDZ issues when these heavy modules are statically imported.
+const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })).catch(err => { console.error("[SwapDialog lazy] TDZ or load error:", err, err?.stack); throw err }))
+const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
+const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
+
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
-import { detectSpamToken, type SpamResult } from "../../shared/spamFilter"
+import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
-type AssetView = "receive" | "send"
+type AssetView = "receive" | "send" | "privacy"
+
+class SwapErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+	state = { error: null as Error | null }
+	static getDerivedStateFromError(error: Error) { return { error } }
+	componentDidCatch(error: Error, info: React.ErrorInfo) {
+		console.error("[SwapErrorBoundary]", error.message, error.stack, info.componentStack)
+	}
+	render() {
+		if (this.state.error) return <Box p="4" color="red.300" fontSize="sm"><Text fontWeight="bold">Swap load error:</Text><Text fontFamily="mono" whiteSpace="pre-wrap">{this.state.error.message}{"\n"}{this.state.error.stack}</Text></Box>
+		return this.props.children
+	}
+}
 
 interface AssetPageProps {
 	chain: ChainDef
 	balance?: ChainBalance
 	onBack: () => void
+	firmwareVersion?: string
 }
 
-export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
@@ -34,6 +54,54 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
+
+	// Single-chain refresh
+	const [refreshing, setRefreshing] = useState(false)
+	const [refreshedBalance, setRefreshedBalance] = useState<ChainBalance | null>(null)
+	const handleRefresh = useCallback(async () => {
+		setRefreshing(true)
+		try {
+			const updated = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id })
+			setRefreshedBalance(updated)
+		} catch (e) {
+			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
+		} finally {
+			setRefreshing(false)
+		}
+	}, [chain.id])
+
+	// Use refreshed balance if available, otherwise prop
+	const activeBalance = refreshedBalance || balance
+
+	// Feature flags: swaps, zcash privacy
+	const [swapsEnabled, setSwapsEnabled] = useState(false)
+	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
+	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
+	const refreshFeatureFlags = useCallback(() => {
+		rpcRequest<AppSettings>("getAppSettings")
+			.then(s => {
+				setSwapsEnabled(s.swapsEnabled)
+				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
+				if (s.swapsEnabled) {
+					rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
+						.then(ids => setSwappableChainIds(new Set(ids)))
+						.catch(() => {})
+				} else {
+					setSwappableChainIds(new Set())
+				}
+			})
+			.catch(() => {})
+	}, [])
+	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
+	useEffect(() => {
+		window.addEventListener('keepkey-settings-changed', refreshFeatureFlags)
+		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
+	}, [refreshFeatureFlags])
+
+	// Reset view if user is on privacy tab but flag got turned off
+	useEffect(() => {
+		if (view === "privacy" && !zcashPrivacyEnabled) setView("receive")
+	}, [view, zcashPrivacyEnabled])
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
@@ -66,7 +134,11 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const effectivePath = (isBtc && btcSelected) ? btcSelected.fullPath : currentPath
 	const effectiveScriptType = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
 
-	const deriveAddress = useCallback(async (path?: number[]) => {
+	// TON: bounceable toggle (default: non-bounceable / UQ for safe receiving)
+	const isTon = chain.chainFamily === 'ton'
+	const [tonBounceable, setTonBounceable] = useState(false)
+
+	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean) => {
 		const usePath = path || effectivePath
 		if (path) setCurrentPath(path)
 		setLoading(true)
@@ -79,6 +151,7 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			}
 			const st = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
 			if (st) params.scriptType = st
+			if (isTon) params.bounceable = overrideBounceable ?? tonBounceable
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
 			const addr = typeof result === "string" ? result : result?.address || String(result)
 			setAddress(addr)
@@ -88,14 +161,14 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			setAddress(null)
 		}
 		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected])
+	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	useEffect(() => {
 		if (isBtc && btcSelected) {
 			deriveAddress(btcSelected.fullPath)
 		}
-	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex]) // scriptType, account, change, or index change
+	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Fetch next unused address indices from Pioneer API when xpub selection changes
 	const prevScriptRef = useMemo(() => btcAccounts.selectedXpub?.scriptType, [btcAccounts.selectedXpub?.scriptType])
@@ -105,7 +178,6 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		setBtcChangeIndex(0)
 		setBtcAddressIndex(0)
 		setPioneerIndices(null)
-		// Look up next unused indices from Pioneer API
 		const xpub = btcAccounts.accounts
 			.find(a => a.accountIndex === (btcAccounts.selectedXpub?.accountIndex ?? 0))
 			?.xpubs.find(x => x.scriptType === (btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh'))
@@ -114,12 +186,11 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
 				.then((indices) => {
 					setPioneerIndices(indices)
-					// Default to receive tab → set receive index
 					setBtcAddressIndex(indices.receiveIndex)
 				})
 				.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
 		}
-	}, [prevScriptRef, prevAcctRef])
+	}, [prevScriptRef, prevAcctRef]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// When toggling Receive/Change, set index to the cached Pioneer value
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
@@ -137,18 +208,17 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		if (selected) {
 			setAddress(selected.address)
-			// Update path to reflect the selected index
 			setCurrentPath([0x8000002C, 0x8000003C, 0x80000000, 0, selected.addressIndex])
 		}
 	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses])
 
-	// Only auto-derive once on mount, not on every address change
+	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag
 	useEffect(() => {
-		if (!address && !deriveError) deriveAddress()
+		if (isTon || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Token spam filter ──────────────────────────────────────────────
-	const tokens = useMemo(() => balance?.tokens || [], [balance?.tokens])
+	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [showHidden, setShowHidden] = useState(false)
 
@@ -159,31 +229,19 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 			.catch(() => {})
 	}, [])
 
-	// Categorize tokens: clean (shown), spam (hidden by default), zeroValue (hidden by default)
 	const { cleanTokens, spamTokens, zeroValueTokens, spamResults } = useMemo(() => {
-		const clean: TokenBalance[] = []
-		const spam: TokenBalance[] = []
-		const zero: TokenBalance[] = []
+		const overrides = new Map(
+			Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
+		)
 		const results = new Map<string, SpamResult>()
-
 		for (const t of tokens) {
-			const override = visibilityMap[t.caip?.toLowerCase()] ?? null
-			const result = detectSpamToken(t, override)
-			results.set(t.caip, result)
-
-			if (result.isSpam) {
-				spam.push(t)
-			} else if ((t.balanceUsd ?? 0) === 0) {
-				zero.push(t)
-			} else {
-				clean.push(t)
-			}
+			results.set(t.caip, detectSpamToken(t, overrides.get(t.caip?.toLowerCase()) ?? null))
 		}
-
+		const { clean, spam, zeroValue } = categorizeTokens(tokens, overrides)
 		return {
 			cleanTokens: clean.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
-			spamTokens: spam.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0)),
-			zeroValueTokens: zero.sort((a, b) => a.symbol.localeCompare(b.symbol)),
+			spamTokens: spam,
+			zeroValueTokens: zeroValue,
 			spamResults: results,
 		}
 	}, [tokens, visibilityMap])
@@ -191,9 +249,11 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 	const hiddenCount = spamTokens.length + zeroValueTokens.length
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
 	const spamTotalUsd = useMemo(() => spamTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [spamTokens])
-	const cleanBalanceUsd = (balance?.balanceUsd || 0) - spamTotalUsd
+	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
+	const [showSwapDialog, setShowSwapDialog] = useState(false)
+	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
 	const isEvmChain = chain.chainFamily === 'evm'
 
 	// Toggle token visibility via RPC
@@ -219,9 +279,15 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 		}
 	}, [])
 
-	const PILLS: { id: AssetView; label: string; icon: typeof FaArrowDown }[] = [
+	const isZcash = chain.id === 'zcash'
+	const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
+	const zcashShieldedSupported = isZcash && zcashShieldedDef && isChainSupported(zcashShieldedDef, firmwareVersion)
+
+	const PILLS: { id: AssetView | 'swap'; label: string; icon: typeof FaArrowDown }[] = [
 		{ id: "receive", label: t("receive"), icon: FaArrowDown },
 		{ id: "send", label: t("send"), icon: FaArrowUp },
+		...(swapsEnabled && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), icon: FaExchangeAlt }] : []),
+		...(zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
 	]
 
 	// Shared token row renderer
@@ -301,7 +367,6 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								</Text>
 							)}
 						</Box>
-						{/* Per-token actions */}
 						{spamResult?.isSpam && !isUserSafe && (
 							<IconButton
 								aria-label={t("markAsSafe")}
@@ -387,14 +452,40 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 					/>
 					<Text fontSize={{ base: "md", md: "lg" }} fontWeight="600" color="kk.textPrimary">{chain.coin}</Text>
 					<Text fontSize={{ base: "xs", md: "sm" }} color="kk.textMuted">{chain.symbol}</Text>
-					{balance && (
-						<Flex ml="auto" align="baseline" gap="2" flexShrink={0}>
+					{activeBalance && (
+						<Flex ml="auto" align="center" gap="2" flexShrink={0}>
 							<Text fontSize={{ base: "xs", md: "sm" }} fontFamily="mono" color="kk.textPrimary">
-								{balance.balance} {chain.symbol}
+								{activeBalance.balance} {chain.symbol}
 							</Text>
 							{cleanBalanceUsd > 0 && (
-								<AnimatedUsd value={cleanBalanceUsd} prefix="($" suffix=")" fontSize="xs" color="white" fontWeight="500" display={{ base: "none", sm: "block" }} />
+								<AnimatedUsd value={cleanBalanceUsd} prefix="($" suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
 							)}
+							<Box
+								as="button"
+								px="2.5"
+								py="1"
+								fontSize="11px"
+								fontWeight="600"
+								color={refreshing ? "kk.textMuted" : "kk.gold"}
+								bg="transparent"
+								borderRadius="full"
+								cursor={refreshing ? "default" : "pointer"}
+								transition="all 0.2s"
+								_hover={refreshing ? {} : { color: "white", bg: "rgba(192,168,96,0.12)" }}
+								onClick={refreshing ? undefined : handleRefresh}
+							>
+								<Flex align="center" gap="1.5">
+									{refreshing ? (
+										<Spinner size="xs" color="kk.gold" />
+									) : (
+										<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+											<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+										</svg>
+									)}
+									{refreshing ? t("refreshing") : t("refresh")}
+								</Flex>
+							</Box>
 						</Flex>
 					)}
 				</Flex>
@@ -421,7 +512,10 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 								px={{ base: "5", md: "6" }}
 								py="2"
 								borderRadius="md"
-								onClick={() => { setView(p.id); if (p.id === 'receive') setSelectedToken(null) }}
+								onClick={() => {
+									if (p.id === 'swap') { setShowSwapDialog(true); return }
+									setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
+								}}
 								display="flex"
 								alignItems="center"
 								gap="1.5"
@@ -455,7 +549,6 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 						adding={evmLoading}
 					/>
 				)}
-				{/* Show "+" to add first additional EVM address when only index 0 exists */}
 				{isEvm && evmAddresses.addresses.length === 1 && (
 					<Flex mb="3" align="center" gap="2">
 						<Button
@@ -473,9 +566,24 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 					</Flex>
 				)}
 
-				{/* Content — fixed minH prevents bounce when switching views */}
+				{/* Content */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }} minH="280px">
-					{view === "receive" && (
+					{view === "send" ? (
+						<SendForm
+							chain={chain}
+							address={address}
+							balance={activeBalance}
+							token={selectedToken}
+							onClearToken={() => setSelectedToken(null)}
+							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
+							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
+							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
+						/>
+					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
+						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
+							<ZcashPrivacyTab />
+						</Suspense>
+					) : (
 						<ReceiveView
 							chain={chain}
 							address={address}
@@ -490,26 +598,30 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							btcAddressIndex={btcAddressIndex}
 							onBtcChangeIndex={handleBtcChangeIndex}
 							onBtcAddressIndex={setBtcAddressIndex}
-						/>
-					)}
-					{view === "send" && (
-						<SendForm
-							chain={chain}
-							address={address}
-							balance={balance}
-							token={selectedToken}
-							onClearToken={() => setSelectedToken(null)}
-							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
-							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
-							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
+							isTon={isTon}
+							tonBounceable={tonBounceable}
+							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
 						/>
 					)}
 				</Box>
 
+				{/* Staking section — Cosmos-family chains */}
+				{chain.chainFamily === 'cosmos' && (chain.id === 'cosmos' || chain.id === 'osmosis') && (
+					<Box mt="4" bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }}>
+						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
+							<StakingPanel
+								chain={chain}
+								address={address}
+								availableBalance={activeBalance?.balance || '0'}
+								watchOnly={!address}
+							/>
+						</Suspense>
+					</Box>
+				)}
+
 				{/* Tokens Section — with spam filter */}
 				{(tokens.length > 0 || isEvmChain) && (
 					<Box mt="4">
-						{/* Section header */}
 						<Flex align="center" justify="space-between" mb="2" px="1">
 							<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em">
 								{t("tokens")}
@@ -538,12 +650,10 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 							</HStack>
 						</Flex>
 
-						{/* Clean tokens (always visible) */}
 						<VStack gap="1.5">
-							{cleanTokens.map((tok) => renderTokenRow(tok))}
+							{cleanTokens.map((tok) => renderTokenRow(tok, { showSpamBadge: true }))}
 						</VStack>
 
-						{/* Hidden tokens toggle */}
 						{hiddenCount > 0 && (
 							<Box mt="3">
 								<Button
@@ -563,7 +673,6 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 
 								{showHidden && (
 									<VStack gap="1.5" mt="2">
-										{/* Zero-value tokens */}
 										{zeroValueTokens.length > 0 && (
 											<>
 												<Text fontSize="10px" color="kk.textMuted" w="100%" px="1" mt="1">
@@ -572,7 +681,6 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 												{zeroValueTokens.map((tok) => renderTokenRow(tok))}
 											</>
 										)}
-										{/* Spam tokens */}
 										{spamTokens.length > 0 && (
 											<>
 												<Text fontSize="10px" color="orange.400" w="100%" px="1" mt="1">
@@ -594,6 +702,20 @@ export function AssetPage({ chain, balance, onBack }: AssetPageProps) {
 					/>
 				)}
 			</Box>
+			{/* SwapDialog rendered outside overflow container so position:fixed works */}
+			{swapsEnabled && showSwapDialog && (
+				<SwapErrorBoundary>
+					<Suspense fallback={null}>
+						<SwapDialog
+							open={showSwapDialog}
+							onClose={() => setShowSwapDialog(false)}
+							chain={chain}
+							balance={activeBalance}
+							address={address}
+						/>
+					</Suspense>
+				</SwapErrorBoundary>
+			)}
 		</Flex>
 	)
 }

@@ -1,0 +1,18 @@
+{
+	"apps": "แอปพลิเคชัน",
+	"keepkey": "KeepKey",
+	"swap": "แลกเปลี่ยน",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "ดูอย่างเดียว",
+	"deviceSettings": "การตั้งค่าอุปกรณ์",
+	"searchingForKeepKey": "กำลังค้นหา KeepKey",
+	"keepkeyDetected": "ตรวจพบ KeepKey",
+	"keepkeyDetectedConnecting": "ตรวจพบ KeepKey — กำลังเชื่อมต่อ",
+	"unlockYourKeepKey": "ปลดล็อก KeepKey ของคุณ",
+	"passphraseRequired": "ต้องใช้รหัสผ่าน",
+	"loadingPortfolio": "กำลังโหลดพอร์ตโฟลิโอ",
+	"errorWithMessage": "ข้อผิดพลาด: {{error}}",
+	"tryUnplugging": "ลองถอดและเสียบ KeepKey ใหม่",
+	"watchOnlyConnectPrompt": "ดูอย่างเดียว — เชื่อมต่ออุปกรณ์เพื่อเข้าถึงเต็มรูปแบบ",
+	"passphraseMode": "รหัสผ่าน"
+}

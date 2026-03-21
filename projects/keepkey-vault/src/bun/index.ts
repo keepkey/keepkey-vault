@@ -1,4 +1,5 @@
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+import pkg from "../../package.json"
 
 // ── Global error handlers (MUST be first — prevents silent crashes) ──
 process.on('uncaughtException', (err) => {
@@ -9,31 +10,32 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
-import { startRestApi, type RestApiCallbacks } from "./rest-api"
+import { startRestApi, clearFeaturesCache, type RestApiCallbacks } from "./rest-api"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
-import { CHAINS, customChainToChainDef } from "../shared/chains"
+import { buildCosmosStakingTx } from "./txbuilder/cosmos"
+import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
+import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
+import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
-import { initDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
-function getDiscoveryUrl(): string {
-	return `${getPioneerApiBase()}/api/v1/discovery/search`
-}
 const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
 let chainCatalog: PioneerChainInfo[] = []
 let catalogLoadedAt = 0
@@ -74,22 +76,22 @@ async function loadChainCatalog(): Promise<void> {
 	if (catalogLoading) return catalogLoading
 	catalogLoading = (async () => {
 		try {
+			const pioneer = await getPioneer()
 			const results: PioneerChainInfo[] = []
 
-			// Fetch all queries in parallel for speed
-			const baseUrl = getDiscoveryUrl()
+			// Fetch all queries in parallel via Pioneer client
 			const fetches = CATALOG_QUERIES.map(async (q) => {
 				try {
-					const resp = await fetch(`${baseUrl}?q=${q}&limit=2000`, { signal: AbortSignal.timeout(15_000) })
-					if (!resp.ok) return []
-					return (await resp.json()) as any[]
+					const resp = await pioneer.SearchAssets({ q, limit: 2000 })
+					return resp?.data || resp || []
 				} catch { return [] }
 			})
 			const batches = await Promise.all(fetches)
 
 			const byChainId = new Map<number, PioneerChainInfo>()
 			for (const raw of batches) {
-				for (const entry of raw) {
+				const entries = Array.isArray(raw) ? raw : []
+				for (const entry of entries) {
 					const parsed = parseRawEntry(entry)
 					if (!parsed) continue
 					const existing = byChainId.get(parsed.chainId)
@@ -175,14 +177,33 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 	return chain.chainId ? EVM_RPC_URLS[chain.chainId] : undefined
 }
 
-// ── REST API Server (opt-in, persisted in DB, default OFF) ─────────────
+// ── REST API Server (on by default, can be disabled in Settings) ───────
 const auth = new AuthStore()
-let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF
+let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF — user must opt in via Settings
+let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
+let bip85Enabled = getSetting('bip85_enabled') === '1' // default OFF
+let zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1' // default OFF, locked
+let preReleaseUpdates = getSetting('pre_release_updates') === '1' // default OFF
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
 function getAppSettings() {
-	return { restApiEnabled, pioneerApiBase: getPioneerApiBase() }
+	const servers = getPioneerServers()
+	const activeBase = getPioneerApiBase()
+	// If the active URL matches a server in the list, use it; otherwise fall back to the first server
+	const activePioneerServer = servers.find(s => s.url === activeBase)?.url || servers[0]?.url || activeBase
+	return {
+		restApiEnabled,
+		pioneerApiBase: activeBase,
+		pioneerServers: servers,
+		activePioneerServer,
+		fiatCurrency: getSetting('fiat_currency') || 'USD',
+		numberLocale: getSetting('number_locale') || 'en-US',
+		swapsEnabled,
+		bip85Enabled,
+		zcashPrivacyEnabled,
+		preReleaseUpdates,
+	}
 }
 
 // Callbacks bridge REST → RPC UI
@@ -204,6 +225,9 @@ const restCallbacks: RestApiCallbacks = {
 			// Restore normal window level after user responds (or timeout)
 			try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 		}
+	},
+	onSigningDismissed: (id: string) => {
+		try { rpc.send['signing-dismissed']({ id }) } catch { /* webview not ready */ }
 	},
 	onPairRequest: (info) => {
 		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
@@ -233,9 +257,13 @@ function applyRestApiState() {
 	}
 }
 
-// Start REST if previously enabled
+// Start REST API (on by default)
 applyRestApiState()
-if (!restApiEnabled) console.log('[Vault] REST API disabled (enable in Settings → Application)')
+if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
+
+// ── Swap quote cache (last 10 quotes for tracker data) ───────────────
+import type { SwapQuote } from '../shared/types'
+const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -272,10 +300,75 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			sendCharacterDelete: async () => { await engine.sendCharacterDelete() },
 			sendCharacterDone: async () => { await engine.sendCharacterDone() },
 
+			// ── BIP-85 Derived Seeds ──────────────────────────────────
+			// Seed is displayed on device screen only — never sent over USB.
+			getBip85Mnemonic: async (params) => {
+				const result = await engine.getBip85Mnemonic(params)
+
+				// Save metadata when label is provided
+				if (params.label !== undefined) {
+					try {
+						const fp = await engine.getWalletFingerprint()
+						const meta: Bip85SeedMeta = {
+							walletFingerprint: fp,
+							wordCount: params.wordCount as 12 | 18 | 24,
+							index: params.index,
+							derivationPath: result.derivationPath,
+							label: params.label || '',
+							createdAt: Date.now(),
+						}
+						const saved = saveBip85Seed(meta)
+						console.log('[bip85] seed meta saved:', saved, 'wc:', params.wordCount, 'idx:', params.index, 'fp:', fp.slice(0, 8))
+						return { ...result, saved }
+					} catch (e: any) {
+						console.warn('[bip85] metadata save failed:', e?.message)
+						return { ...result, saved: false }
+					}
+				}
+				return result
+			},
+			getWalletFingerprint: async () => {
+				const fingerprint = await engine.getWalletFingerprint()
+				return { fingerprint }
+			},
+			// DB read — uses fingerprint to isolate per-wallet when device is available
+			listBip85Seeds: async () => {
+				let fp: string | undefined
+				try { fp = await engine.getWalletFingerprint() } catch { /* device not connected */ }
+				const seeds = getBip85Seeds(fp)
+				console.log('[bip85] listBip85Seeds — found:', seeds.length, fp ? `fp: ${fp.slice(0, 8)}` : '(no device, showing all)')
+				return seeds
+			},
+			// DB write — requires device for fingerprint (cannot save without wallet identity)
+			saveBip85SeedMeta: async (params) => {
+				const fp = await engine.getWalletFingerprint()
+				const meta: Bip85SeedMeta = {
+					walletFingerprint: fp,
+					wordCount: params.wordCount as 12 | 18 | 24,
+					index: params.index,
+					derivationPath: `m/83696968'/39'/0'/${params.wordCount}'/${params.index}'`,
+					label: params.label || '',
+					createdAt: Date.now(),
+				}
+				const saved = saveBip85Seed(meta)
+				if (!saved) throw new Error('Failed to persist seed metadata to database')
+				return meta
+			},
+			// DB delete — requires device fingerprint to prevent cross-wallet deletion
+			deleteBip85SeedMeta: async (params) => {
+				const fp = await engine.getWalletFingerprint()
+				deleteBip85Seed(params.wordCount, params.index, fp)
+			},
+
 			// ── Wallet operations (hdwallet pass-through) ─────────────
 			getFeatures: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.getFeatures()
+			},
+			applyPolicy: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				await engine.wallet.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
+				clearFeaturesCache()
 			},
 			ping: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -353,6 +446,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
+			tronGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tronGetAddress(params)
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr)
+				return result
+			},
+			tonGetAddress: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				// Default to non-bounceable (UQ) — bounceable (EQ) bounces funds if wallet is uninitialized
+				const bounceable = params.bounceable ?? false
+				const result = await engine.wallet.tonGetAddress({ ...params, bounceable })
+				const addr = typeof result === 'string' ? result : result?.address
+				if (addr) cacheAddress('ton', JSON.stringify(params.addressNList || []), addr)
+				return result
+			},
 
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
@@ -397,18 +506,64 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			solanaSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.solanaSignTx(params)
+
+				console.debug(`[solanaSignTx] RPC call received`)
+
+				// Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
+				// Firmware expects just the message bytes for parsing and signing.
+				// Extract message portion before sending to device.
+				let deviceParams = params
+				if (params.rawTx) {
+					const fullTx = Buffer.from(
+						typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
+						'base64',
+					)
+					// Read compact-u16 signature count
+					let pos = 0
+					let sigCount = 0
+					if (fullTx[0] < 0x80) {
+						sigCount = fullTx[0]; pos = 1
+					} else if (fullTx.length >= 2 && fullTx[1] < 0x80) {
+						sigCount = (fullTx[0] & 0x7f) | (fullTx[1] << 7); pos = 2
+					} else if (fullTx.length >= 3) {
+						sigCount = (fullTx[0] & 0x7f) | ((fullTx[1] & 0x7f) << 7) | (fullTx[2] << 14); pos = 3
+					}
+					// Solana transactions have at most ~20 signers; reject clearly malformed data
+					if (sigCount > 127) {
+						throw new Error(`[solanaSignTx] Unreasonable signature count (${sigCount}) — malformed transaction`)
+					}
+					const messageStart = pos + sigCount * 64
+					console.debug(`[solanaSignTx] fullTx=${fullTx.length}B sigCount=${sigCount} messageStart=${messageStart}`)
+					if (sigCount > 0 && messageStart < fullTx.length) {
+						const messageBytes = fullTx.subarray(messageStart)
+						deviceParams = { ...params, rawTx: Buffer.from(messageBytes).toString('base64') }
+						console.debug(`[solanaSignTx] Extracted message: ${messageBytes.length}B (stripped ${sigCount} dummy sigs)`)
+					}
+				}
+
+				console.debug(`[solanaSignTx] Calling hdwallet.solanaSignTx`)
+				const result = await engine.wallet.solanaSignTx(deviceParams)
+
+				console.debug(`[solanaSignTx] hdwallet result: hasSig=${!!result?.signature} sigLen=${result?.signature?.length || 0}`)
+
 				// Assemble signed tx: replace the 64-byte dummy signature in rawTx with real signature
 				if (result?.signature && params.rawTx) {
-					const rawBytes = Buffer.from(params.rawTx, 'base64')
+					const rawBytes = Buffer.from(
+						typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
+						'base64',
+					)
 					const sigBytes = result.signature instanceof Uint8Array
 						? result.signature
 						: Buffer.from(result.signature, 'base64')
-					// rawTx format: [1 byte sig_count] [64 bytes dummy sig] [message...]
+					// Full tx format: [1 byte sig_count] [64 bytes dummy sig] [message...]
 					// Replace bytes 1-64 with real signature
 					if (rawBytes.length > 65 && sigBytes.length === 64) {
 						sigBytes.forEach((b: number, i: number) => { rawBytes[1 + i] = b })
-						return { signature: result.signature, serializedTx: rawBytes.toString('base64') }
+						const assembled = rawBytes.toString('base64')
+						console.debug(`[solanaSignTx] Assembled signed tx: ${rawBytes.length}B`)
+						return { signature: result.signature, serializedTx: assembled }
+					} else {
+						console.debug(`[solanaSignTx] Cannot assemble: rawBytes=${rawBytes.length}B sigBytes=${sigBytes.length}B`)
 					}
 				}
 				return result
@@ -424,6 +579,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					publicKey: result.publicKey instanceof Uint8Array
 						? Buffer.from(result.publicKey).toString('base64')
 						: result.publicKey,
+				}
+			},
+			tronSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tronSignTx(params)
+				if (!result) throw new Error('tronSignTx returned no result')
+				return {
+					signature: result.signature instanceof Uint8Array
+						? Buffer.from(result.signature).toString('hex')
+						: result.signature,
+					// Pass rawTx + tronGridTx through for broadcast
+					rawTx: typeof params.rawTx === 'string' ? params.rawTx
+						: params.rawTx instanceof Uint8Array ? Buffer.from(params.rawTx).toString('hex')
+						: undefined,
+					tronGridTx: (params as any).tronGridTx,
+				}
+			},
+			tonSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await engine.wallet.tonSignTx(params)
+				if (!result) throw new Error('tonSignTx returned no result')
+				return {
+					signature: result.signature instanceof Uint8Array
+						? Buffer.from(result.signature).toString('hex')
+						: result.signature,
+					// Pass tonBuildResult through for BOC assembly in broadcastTx
+					tonBuildResult: (params as any).tonBuildResult,
 				}
 			},
 
@@ -450,8 +632,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				// Non-BTC UTXO chains still use the old single-xpub path
-				const allChains = getAllChains()
+				// Filter chains by firmware version — don't derive addresses for unsupported chains
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const allChains = getAllChains().filter(c => isChainSupported(c, fwVersion))
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
@@ -503,10 +686,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 						if (chain.scriptType) addrParams.scriptType = chain.scriptType
+						// TON: always non-bounceable (UQ) — bounceable (EQ) bounces if wallet uninitialized
+						if (chain.chainFamily === 'ton') addrParams.bounceable = false
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 						const result = await wallet[method](addrParams)
 						const address = typeof result === 'string' ? result : result?.address || ''
-						if (address) pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
+						if (address) {
+							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
+							if (chain.id === 'tron') console.log(`[getBalances] TRON address derived: ${address}, caip: ${chain.caip}, networkId: ${chain.networkId}`)
+						} else {
+							if (chain.id === 'tron') console.warn(`[getBalances] TRON address derivation returned empty! result:`, JSON.stringify(result))
+						}
 					} catch (e: any) {
 						console.warn(`[getBalances] ${chain.coin} address failed:`, e.message)
 					}
@@ -537,73 +727,65 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → single GetPortfolioBalances call`)
 
-				// Build networkId → chainId lookup for token grouping
+				// Build networkId → chainId lookup for token grouping (lowercase keys — Pioneer may return different casing)
 				const networkToChain = new Map<string, string>()
 				for (const chain of allChains) {
-					if (chain.networkId) networkToChain.set(chain.networkId, chain.id)
+					if (chain.networkId) networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
-				// 3. Single API call — use GetPortfolio (charts endpoint) which returns
-				//    both native balances AND tokens (ERC-20, etc.)
+				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw new Error('Pioneer client not available')
 					const resp = await withTimeout(
-						pioneer.GetPortfolio({
-							pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey }))
-						}),
+						pioneer.GetPortfolioBalances(
+							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{ forceRefresh: true }
+						),
 						PIONEER_TIMEOUT_MS,
-						'GetPortfolio'
+						'GetPortfolioBalances'
 					)
-					// Unwrap Swagger double-wrap: { data: { data: { balances, tokens } } }
-					const portfolio = resp?.data?.data || resp?.data || {}
-					const nativeEntries: any[] = portfolio.balances || (Array.isArray(portfolio) ? portfolio : [])
-					const portfolioTokens: any[] = portfolio.tokens || []
+					// Unwrap: { data: { balances: [...] } } or { data: [...] }
+					const rawData = resp?.data?.data || resp?.data || {}
+					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 
-					console.log(`[getBalances] GetPortfolio response: ${nativeEntries.length} balances, ${portfolioTokens.length} tokens`)
+					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
+					// Log TRON-specific entries for debugging
+					const tronEntries = allEntries.filter((d: any) => d.caip?.includes('tron') || d.networkId?.includes('tron'))
+					if (tronEntries.length > 0) {
+						console.log(`[getBalances] TRON entries from Pioneer: ${tronEntries.length}`)
+						for (const t of tronEntries) console.log(`  TRON: caip=${t.caip}, pubkey=${t.pubkey}, address=${t.address}, balance=${t.balance}, usd=${t.valueUsd}, type=${t.type}`)
+					} else {
+						console.warn(`[getBalances] TRON: NO entries returned from Pioneer`)
+					}
 					// Log BTC-specific entries for debugging
-					const btcNatives = nativeEntries.filter((d: any) => d.caip?.includes('bip122') || d.pubkey?.startsWith('xpub') || d.pubkey?.startsWith('ypub') || d.pubkey?.startsWith('zpub'))
-					console.log(`[getBalances] BTC native entries from Pioneer: ${btcNatives.length}`)
+					const btcNatives = allEntries.filter((d: any) => d.caip?.includes('bip122') || d.pubkey?.startsWith('xpub') || d.pubkey?.startsWith('ypub') || d.pubkey?.startsWith('zpub'))
+					console.log(`[getBalances] BTC entries from Pioneer: ${btcNatives.length}`)
 					for (const b of btcNatives) {
 						console.log(`  BTC: caip=${b.caip}, pubkey=${String(b.pubkey).substring(0, 24)}..., balance=${b.balance}, valueUsd=${b.valueUsd}, address=${b.address}`)
 					}
 
-					// Convert portfolio.tokens (different shape) into the same format as native entries
-					// so our existing token grouping logic works on them
-					const tokenEntries: any[] = []
-					for (const t of portfolioTokens) {
-						if (!t.assetCaip) continue
-						// Skip native assets that leaked into tokens array
-						if (t.assetCaip.includes('/slip44:')) continue
-						tokenEntries.push({
-							caip: t.assetCaip,
-							networkId: t.networkId,
-							symbol: t.token?.symbol || 'UNK',
-							name: t.token?.name || t.token?.coingeckoId || 'Unknown',
-							balance: t.token?.balance?.toString() || '0',
-							valueUsd: t.token?.balanceUSD || 0,
-							priceUsd: t.token?.price || 0,
-							decimals: t.token?.decimals ?? t.token?.decimal ?? 18,
-							type: 'token',
-							contract: t.assetCaip.match(/\/erc20:(0x[a-fA-F0-9]+)/)?.[1] || undefined,
-						})
-					}
-
-					// Also scan nativeEntries for any tokens mixed in (belt + suspenders)
+					// Classify entries into natives vs tokens
 					const pureNatives: any[] = []
-					for (const d of nativeEntries) {
-						const caip = d.caip || ''
+					const tokenEntries: any[] = []
+					for (const entry of allEntries) {
+						const caip = entry.caip || ''
 						const caipPath = caip.split('/')[1] || ''
-						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:')
-						const isTokenByType = d.type === 'token' && d.isNative !== true
+						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
+						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
 						if (isTokenByCaip || isTokenByType) {
-							tokenEntries.push(d)
+							tokenEntries.push(entry)
 						} else {
-							pureNatives.push(d)
+							pureNatives.push(entry)
 						}
 					}
 
 					console.log(`[getBalances] After classification: ${pureNatives.length} natives, ${tokenEntries.length} tokens`)
+
+					// Log Solana-specific entries for debugging
+					const solanaEntries = allEntries.filter((d: any) => d.caip?.includes('solana') || d.networkId?.includes('solana'))
+					console.log(`[getBalances] Solana entries from Pioneer: ${solanaEntries.length}`)
+					for (const s of solanaEntries) console.log(`  SOL: caip=${s.caip}, type=${s.type}, symbol=${s.symbol}, balance=${s.balance}, usd=${s.valueUsd}, networkId=${s.networkId}, contract=${s.contract}`)
 
 					// Group tokens by their parent chain (via networkId or CAIP prefix)
 					// Also log the networkToChain map so we can audit matching
@@ -615,9 +797,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const bal = parseFloat(String(tok.balance ?? '0'))
 						if (bal <= 0) { tokensSkippedZero++; continue }
 
-						// Determine parent chainId from networkId or CAIP-2 prefix
-						const tokNetworkId = tok.networkId || ''
-						const caipPrefix = (tok.caip || '').split('/')[0] // e.g. "eip155:1"
+						// Determine parent chainId from networkId or CAIP-2 prefix (lowercase — Pioneer may return different casing)
+						const tokNetworkId = (tok.networkId || '').toLowerCase()
+						const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase() // e.g. "eip155:1"
 						const parentChainId = networkToChain.get(tokNetworkId) || networkToChain.get(caipPrefix) || null
 						if (!parentChainId) {
 							tokensSkippedNoChain++
@@ -625,19 +807,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
-						// Extract contract address from CAIP: "eip155:1/erc20:0xdac17..." → "0xdac17..."
-						const contractMatch = (tok.caip || '').match(/\/erc20:(0x[a-fA-F0-9]+)/)
-						const contractAddress = contractMatch?.[1] || tok.contract || undefined
+						// Extract contract address from CAIP:
+						//   ERC-20: "eip155:1/erc20:0xdac17..." → "0xdac17..."
+						//   SPL:    "solana:5eykt4.../spl:TokenMint..." → "TokenMint..."
+						//   TRC-20: "tron:27Lqcw/trc20:T..." → "T..."
+						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+						const contractAddress = contractMatch?.[2] || tok.contract || undefined
+
+						const rawValueUsd = tok.valueUsd
+						const rawPriceUsd = tok.priceUsd
+						const parsedBalanceUsd = Number(rawValueUsd ?? 0)
+						const parsedPriceUsd = Number(rawPriceUsd ?? 0)
 
 						const token: TokenBalance = {
 							symbol: tok.symbol || '???',
 							name: tok.name || tok.symbol || 'Unknown Token',
 							balance: String(tok.balance ?? '0'),
-							balanceUsd: Number(tok.valueUsd ?? 0),
-							priceUsd: Number(tok.priceUsd ?? 0),
+							balanceUsd: parsedBalanceUsd,
+							priceUsd: parsedPriceUsd,
 							caip: tok.caip || '',
 							contractAddress,
 							networkId: tokNetworkId || caipPrefix,
+							icon: tok.icon || undefined,
 							decimals: tok.decimals ?? tok.precision,
 							type: tok.type || 'token',
 							dataSource: tok.dataSource,
@@ -649,10 +840,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						tokensGrouped++
 					}
 
-					console.log(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
-					for (const [chainId, toks] of tokensByChainId) {
-						console.log(`[getBalances]   ${chainId}: ${toks.length} tokens, $${toks.reduce((s, t) => s + t.balanceUsd, 0).toFixed(2)} — ${toks.map(t => t.symbol).join(', ')}`)
-					}
+					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
 
 					// Merge user-added custom tokens as placeholders
 					try {
@@ -671,10 +859,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					} catch { /* custom tokens lookup failed, non-fatal */ }
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
-					console.log(`[getBalances] pureNatives count: ${pureNatives.length}`)
+					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
 					for (const n of pureNatives) {
 						if (n.caip?.includes('bip122') || n.pubkey?.startsWith('xpub') || n.pubkey?.startsWith('ypub') || n.pubkey?.startsWith('zpub')) {
-							console.log(`[getBalances] BTC native entry: caip=${n.caip}, pubkey=${n.pubkey?.substring(0, 20)}..., balance=${n.balance}, usd=${n.valueUsd}`)
+							console.debug(`[getBalances] BTC native entry: caip=${n.caip}, pubkey=${n.pubkey?.substring(0, 20)}..., balance=${n.balance}, usd=${n.valueUsd}`)
 						}
 					}
 					let btcTotalBalance = 0
@@ -689,7 +877,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
-							console.log(`[getBalances] BTC match for ${entry.pubkey?.substring(0, 20)}...: ${match ? `balance=${match.balance}, usd=${match.valueUsd}` : 'NO MATCH'}`)
+							console.debug(`[getBalances] BTC match for ${entry.pubkey?.substring(0, 20)}...: ${match ? `balance=${match.balance}, usd=${match.valueUsd}` : 'NO MATCH'}`)
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
 							btcTotalBalance += bal
@@ -724,8 +912,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
+						// Match by CAIP, then by networkId prefix (handles slip44 vs native CAIP variants),
+						// then pubkey, then address field (Pioneer may use either)
+						const entryNetwork = entry.caip.split('/')[0] // e.g. "tron:0x2b6653dc"
 						const match = pureNatives.find((d: any) => d.caip === entry.caip)
+							|| pureNatives.find((d: any) => d.caip && d.caip.split('/')[0] === entryNetwork)
 							|| pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+							|| pureNatives.find((d: any) => d.address === entry.pubkey)
 						const chainTokens = tokensByChainId.get(entry.chainId)
 						// Sum token USD values into the chain total
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
@@ -753,33 +946,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						})
 					}
 
-					// BTC fallback: GetPortfolio (charts/portfolio) returns empty for BTC xpubs.
-					// Use GetPortfolioBalances (/portfolio) which correctly returns BTC data.
-					if (btcTotalBalance === 0 && btcPubkeyEntries.length > 0 && pioneer) {
-						console.log('[getBalances] BTC zero from GetPortfolio (charts) — trying GetPortfolioBalances fallback')
-						try {
-							const btcResp = await withTimeout(
-								pioneer.GetPortfolioBalances({
-									pubkeys: btcPubkeyEntries.map(e => ({ caip: e.caip, pubkey: e.pubkey }))
-								}),
-								PIONEER_TIMEOUT_MS,
-								'GetPortfolioBalances-BTC'
-							)
-							const btcBalances = btcResp?.data?.balances || btcResp?.data || []
-							for (const b of (Array.isArray(btcBalances) ? btcBalances : [])) {
-								const bal = parseFloat(String(b.balance ?? '0'))
-								const usd = Number(b.valueUsd ?? 0)
-								btcTotalBalance += bal
-								btcTotalUsd += usd
-								if (!btcAddress && b.address) btcAddress = b.address
-								if (b.pubkey) btcAccounts.updateXpubBalance(b.pubkey, String(b.balance ?? '0'), usd)
-							}
-							console.log(`[getBalances] BTC fallback result: ${btcTotalBalance.toFixed(8)} BTC, $${btcTotalUsd.toFixed(2)}`)
-						} catch (e: any) {
-							console.warn('[getBalances] BTC GetPortfolioBalances fallback failed:', e.message)
-						}
-					}
-
 					// Push one aggregated BTC entry
 					if (btcPubkeyEntries.length > 0) {
 						const selectedXpub = btcAccounts.getSelectedXpub()
@@ -790,6 +956,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							address: btcAddress || selectedXpub?.xpub || btcPubkeyEntries[0]?.pubkey || '',
 						})
 					}
+
 
 					// Push updated BTC accounts to frontend
 					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
@@ -854,25 +1021,106 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} else {
 					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin }
 					if (chain.scriptType) addrParams.scriptType = chain.scriptType
+					if (chain.chainFamily === 'ton') addrParams.bounceable = false
 					const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 					const result = await wallet[method](addrParams)
 					pubkey = typeof result === 'string' ? result : result?.address || ''
 					if (!pubkey) throw new Error(`Could not derive address for ${chain.coin}`)
 				}
 
-				// Single portfolio call
-				let balance = '0', balanceUsd = 0
+				// Single portfolio call — classify natives vs tokens (same logic as getBalances)
+				let balance = '0', balanceUsd = 0, address = pubkey
+				let tokens: TokenBalance[] | undefined
 				try {
-					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
-					const match = (resp?.data?.balances || [])[0]
-					if (match) { balance = String(match.balance ?? '0'); balanceUsd = Number(match.valueUsd ?? 0) }
+					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }, { forceRefresh: true }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
+					const rawData = resp?.data?.data || resp?.data || {}
+					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+
+					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer`)
+
+					// Classify entries into natives vs tokens
+					let nativeMatch: any = null
+					const tokenEntries: any[] = []
+					for (const entry of allEntries) {
+						const caip = entry.caip || ''
+						const caipPath = caip.split('/')[1] || ''
+						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
+						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
+						if (isTokenByCaip || isTokenByType) {
+							tokenEntries.push(entry)
+						} else if (!nativeMatch) {
+							nativeMatch = entry
+						}
+					}
+
+					if (nativeMatch) {
+						balance = String(nativeMatch.balance ?? '0')
+						balanceUsd = Number(nativeMatch.valueUsd ?? 0)
+						if (nativeMatch.address) address = nativeMatch.address
+					}
+
+					// Process tokens
+					if (tokenEntries.length > 0) {
+						const parsedTokens: TokenBalance[] = []
+						for (const tok of tokenEntries) {
+							const bal = parseFloat(String(tok.balance ?? '0'))
+							if (bal <= 0) continue
+							const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+							const contractAddress = contractMatch?.[2] || tok.contract || undefined
+							parsedTokens.push({
+								symbol: tok.symbol || '???',
+								name: tok.name || tok.symbol || 'Unknown Token',
+								balance: String(tok.balance ?? '0'),
+								balanceUsd: Number(tok.valueUsd ?? 0),
+								priceUsd: Number(tok.priceUsd ?? 0),
+								caip: tok.caip || '',
+								contractAddress,
+								networkId: (tok.networkId || '').toLowerCase(),
+								icon: tok.icon || undefined,
+								decimals: tok.decimals ?? tok.precision,
+								type: tok.type || 'token',
+								dataSource: tok.dataSource,
+							})
+						}
+
+						// Merge user-added custom tokens as placeholders
+						try {
+							const customTokens = getCustomTokens().filter(ct => ct.chainId === chain.id)
+							for (const ct of customTokens) {
+								if (parsedTokens.some(t => t.contractAddress?.toLowerCase() === ct.contractAddress.toLowerCase())) continue
+								parsedTokens.push({
+									symbol: ct.symbol, name: ct.name, balance: '0', balanceUsd: 0, priceUsd: 0,
+									caip: `${ct.networkId}/erc20:${ct.contractAddress}`,
+									contractAddress: ct.contractAddress, networkId: ct.networkId, decimals: ct.decimals, type: 'token',
+								})
+							}
+						} catch { /* custom tokens lookup failed, non-fatal */ }
+
+						if (parsedTokens.length > 0) {
+							tokens = parsedTokens
+							// Include token USD in chain total
+							const tokenUsdTotal = parsedTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							balanceUsd += tokenUsdTotal
+						}
+						console.log(`[getBalance] ${chain.coin}: ${parsedTokens.length} tokens, $${balanceUsd.toFixed(2)} total`)
+					}
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
 				}
-				return { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address: pubkey }
+				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address, tokens }
+
+				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				try {
+					const deviceId = engine.getDeviceState().deviceId || 'unknown'
+					updateCachedBalance(deviceId, result)
+				} catch { /* never block on cache failure */ }
+				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
+
+				return result
 			},
 
 			buildTx: async (params) => {
+				console.debug(`[buildTx] isMax=${params.isMax} chainId=${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
@@ -902,9 +1150,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						coin: chain.coin,
 					}
 					if (chain.scriptType) addrParams.scriptType = chain.scriptType
+					if (chain.chainFamily === 'ton') addrParams.bounceable = false
 					const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+					console.debug(`[buildTx] Deriving ${chain.coin} address`)
 					const addrResult = await wallet[walletMethod](addrParams)
 					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+					console.debug(`[buildTx] Derived ${chain.coin} address OK`)
 				} else if (chain.id === 'bitcoin') {
 					// BTC multi-account: use override or selected xpub + scriptType
 					const selectedBtcXpub = btcAccounts.getSelectedXpub()
@@ -937,12 +1188,66 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
 				const evmIdx = chain.chainFamily === 'evm' ? (params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0) : undefined
+
+				// TON: derive Ed25519 public key for wallet deployment (StateInit)
+				let publicKeyHex: string | undefined
+				if (chain.chainFamily === 'ton') {
+					try {
+						// Bypass hdwallet's getPublicKeys() — it forces a BTC scriptType which
+						// firmware rejects for ed25519. Call transport.call() directly instead.
+						const Messages = await import('@keepkey/device-protocol/lib/messages_pb')
+						const gpk = new Messages.GetPublicKey()
+						gpk.setAddressNList(chain.defaultPath)
+						gpk.setEcdsaCurveName('ed25519')
+						gpk.setShowDisplay(false)
+						const resp = await wallet.transport.call(
+							Messages.MessageType.MESSAGETYPE_GETPUBLICKEY,
+							gpk,
+							{ msgTimeout: 10000 }
+						)
+						const pubKeyProto = resp.proto as any
+						// Try node.publicKey first (raw bytes), fall back to xpub decode
+						const node = pubKeyProto.getNode?.()
+						const rawKey = node?.getPublicKey_asU8?.()
+						if (rawKey && (rawKey.length === 32 || rawKey.length === 33)) {
+							// ed25519 node key is 33 bytes: 0x00 prefix + 32-byte key
+							const keyBytes = rawKey.length === 33 && rawKey[0] === 0x00 ? rawKey.subarray(1) : rawKey.length === 32 ? rawKey : null
+							if (!keyBytes || keyBytes.length !== 32) throw new Error(`Unexpected ed25519 key length: ${rawKey.length}`)
+							publicKeyHex = Buffer.from(keyBytes).toString('hex')
+						} else {
+							// Fallback: decode xpub to extract raw key
+							const xpubStr = pubKeyProto.getXpub?.()
+							if (xpubStr) {
+								const bs58check = require('bs58check')
+								const decoded: Buffer = bs58check.decode(xpubStr)
+								if (decoded.length >= 78 && decoded[45] === 0x00) {
+									publicKeyHex = Buffer.from(decoded.subarray(46, 78)).toString('hex')
+								}
+							}
+						}
+						if (publicKeyHex) {
+							console.debug(`[buildTx] TON ed25519 pubkey derived`)
+							// Compute the correct v4r2 wallet address from the public key.
+							// The firmware may derive a wrong address (sha256(pubkey) instead of
+							// sha256(stateInit)), so always use our vault-computed address.
+							const { tonV4R2Address } = await import('./txbuilder/ton')
+							fromAddress = tonV4R2Address(publicKeyHex)
+							console.debug(`[buildTx] TON v4r2 address derived`)
+						} else {
+							console.warn(`[buildTx] TON: GetPublicKey returned no usable key`)
+						}
+					} catch (e: any) {
+						console.warn(`[buildTx] TON public key derivation failed:`, e.message)
+					}
+				}
+
 				const result = await buildTx(pioneer, chain, {
 					...params,
 					fromAddress,
 					xpub,
 					rpcUrl,
 					evmAddressIndex: evmIdx,
+					publicKeyHex,
 				})
 
 				return { unsignedTx: result.unsignedTx, fee: result.fee }
@@ -953,17 +1258,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 
+				let result: { txid: string }
+
 				// Custom chains: broadcast via direct RPC
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
 				if (rpcUrl) {
 					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
 					if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
 					const txid = await broadcastEvmTx(rpcUrl, serialized)
-					return { txid }
+					result = { txid }
+				} else {
+					const pioneer = await getPioneer()
+					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
 
-				const pioneer = await getPioneer()
-				return await broadcastTx(pioneer, chain, params.signedTx)
+				// Track broadcast in api_log + notify frontend
+				const logEntry: ApiLogEntry = { method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
+				insertApiLog(logEntry)
+				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
+
+				return result
 			},
 
 			getMarketData: async (params) => {
@@ -986,6 +1300,98 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} else {
 					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
 				}
+			},
+
+			// ── Staking / delegation ──────────────────────────────────
+			getStakingPositions: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'cosmos') throw new Error(`Staking not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const resp = await withTimeout(
+					pioneer.GetStakingPositions({ network: chain.id, address: params.address }),
+					PIONEER_TIMEOUT_MS,
+					'GetStakingPositions'
+				)
+
+				const raw = resp?.data?.data || resp?.data || []
+				const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.balances) ? raw.balances : [])
+				const symbol = chain.symbol
+
+				const positions: StakingPosition[] = list.map((pos: any) => ({
+					type: pos.type || 'delegation',
+					balance: String(pos.balance ?? '0'),
+					valueUsd: Number(pos.valueUsd ?? pos.value ?? 0),
+					ticker: pos.ticker || pos.symbol || symbol,
+					validator: pos.validator || pos.validatorName || 'Unknown Validator',
+					validatorAddress: pos.validatorAddress || pos.validator || '',
+					status: pos.status || 'active',
+				}))
+
+				return positions
+			},
+
+			buildDelegateTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'cosmos') throw new Error(`Delegation not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const wallet = engine.wallet as any
+				const addrParams: any = {
+					addressNList: chain.defaultPath,
+					showDisplay: false,
+					coin: chain.coin,
+				}
+				if (chain.scriptType) addrParams.scriptType = chain.scriptType
+				const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+				const addrResult = await wallet[walletMethod](addrParams)
+				const fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				if (!fromAddress) throw new Error(`Could not derive address for ${chain.coin}`)
+
+				const result = await buildCosmosStakingTx(pioneer, chain, {
+					validatorAddress: params.validatorAddress,
+					amount: params.amount,
+					memo: params.memo,
+					fromAddress,
+					type: 'delegate',
+				})
+
+				const { fee, ...unsignedTx } = result
+				return { unsignedTx, fee }
+			},
+
+			buildUndelegateTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'cosmos') throw new Error(`Undelegation not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const wallet = engine.wallet as any
+				const addrParams: any = {
+					addressNList: chain.defaultPath,
+					showDisplay: false,
+					coin: chain.coin,
+				}
+				if (chain.scriptType) addrParams.scriptType = chain.scriptType
+				const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+				const addrResult = await wallet[walletMethod](addrParams)
+				const fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				if (!fromAddress) throw new Error(`Could not derive address for ${chain.coin}`)
+
+				const result = await buildCosmosStakingTx(pioneer, chain, {
+					validatorAddress: params.validatorAddress,
+					amount: params.amount,
+					memo: params.memo,
+					fromAddress,
+					type: 'undelegate',
+				})
+
+				const { fee, ...unsignedTx } = result
+				return { unsignedTx, fee }
 			},
 
 			// ── Bitcoin multi-account ─────────────────────────────────
@@ -1104,6 +1510,31 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (BLOCKED_HOSTS.test(host) || BLOCKED_SUFFIXES.some(s => host.endsWith(s))) {
 					throw new Error('RPC URL must not point to private/internal networks')
 				}
+				// DNS rebinding protection: resolve hostname and reject if it points to a private IP.
+				// Check both IPv4 and IPv6; reject on DNS failure (fail-closed).
+				const isPrivateIP = (ip: string) =>
+					/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0)/.test(ip) ||
+					/^(::1|fe80:|fc00:|fd00:|::ffff:(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.))/.test(ip) ||
+					ip === '::' || ip === '0:0:0:0:0:0:0:1'
+				for (const family of [4, 6] as const) {
+					try {
+						const resolved = await Bun.dns.lookup(host, { family: family === 4 ? 'IPv4' : 'IPv6' } as any)
+						if (resolved && resolved.length > 0) {
+							for (const entry of resolved) {
+								const ip = typeof entry === 'string' ? entry : entry.address
+								if (ip && isPrivateIP(ip)) {
+									throw new Error('RPC URL must not point to private/internal networks (DNS resolved to private IP)')
+								}
+							}
+						}
+					} catch (dnsErr: any) {
+						if (dnsErr.message?.includes('private/internal')) throw dnsErr
+						// IPv6 lookup may legitimately fail if no AAAA record; only block if IPv4 also fails
+						if (family === 4) {
+							throw new Error('RPC URL hostname could not be resolved — cannot verify it is not a private address')
+						}
+					}
+				}
 			} catch (e: any) {
 				if (e.message?.includes('private/internal')) throw e
 				throw new Error('Valid http/https RPC URL required')
@@ -1138,6 +1569,91 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getTokenVisibilityMap: async () => {
 				const map = getAllTokenVisibility()
 				return Object.fromEntries(map)
+			},
+
+			// ── Zcash Shielded (Orchard) ────────────────────────────
+			zcashShieldedStatus: async () => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				// Sidecar readiness doesn't depend on firmware — it runs independently.
+				// Firmware check only matters for device operations (FVK export, signing).
+				const sidecarReady = isSidecarReady()
+				const fvkLoaded = hasFvkLoaded()
+				const cached = getCachedFvk()
+				const result = {
+					ready: sidecarReady,
+					fvk_loaded: fvkLoaded,
+					address: cached?.address ?? null,
+					fvk: cached?.fvk ?? null,
+				}
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				return result
+			},
+			zcashShieldedInit: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				// If FVK is already loaded from DB, return it immediately
+				const cached = getCachedFvk()
+				if (cached) return cached
+				// Otherwise get from device
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
+				setCachedFvk(result.address, result.fvk)
+				return result
+			},
+			zcashShieldedScan: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				return await scanOrchardNotes(params?.startHeight, params?.fullRescan)
+			},
+			zcashShieldedBalance: async () => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				return await getShieldedBalance()
+			},
+			zcashShieldedSend: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				// FVK already loaded means device supports Orchard — skip version check
+				// (version string may not be populated yet at call time)
+				return await sendShielded(engine.wallet as any, {
+					recipient: params.recipient,
+					amount: params.amount,
+					memo: params.memo,
+				})
+			},
+			zcashShieldZec: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
+				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
+				// firmware; the Orchard part needs >= 7.14.0 (checked by zcashShieldedInit).
+				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
+				if (!zcashDef) {
+					throw new Error('Zcash shielded chain definition not found')
+				}
+				const { shieldZec } = await import("./txbuilder/zcash-shield")
+				const pioneer = await getPioneer()
+				try { rpc.send['shield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const result = await shieldZec(engine.wallet as any, pioneer, {
+					amount: params.amount,
+					account: params.account,
+				})
+				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				return result
+			},
+
+			zcashGetTransactions: async () => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				const { getZcashTransactions } = await import("./zcash-sidecar")
+				return await getZcashTransactions()
+			},
+			zcashBackfillMemos: async () => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				const { backfillMemos } = await import("./zcash-sidecar")
+				return await backfillMemos()
+			},
+
+			zcashDiagnoseAnchor: async (params: any) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				const { diagnoseAnchor } = await import("./zcash-sidecar")
+				return await diagnoseAnchor(params?.shardIndex)
 			},
 
 			// ── Camera / QR scanning ─────────────────────────────────
@@ -1196,6 +1712,141 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				chainCatalog = []
 				catalogLoadedAt = 0
 				console.log('[settings] Pioneer API base set to:', url || '(default)')
+				return getAppSettings()
+			},
+			setFiatCurrency: async (params) => {
+				setSetting('fiat_currency', params.currency || 'USD')
+				console.log('[settings] Fiat currency set to:', params.currency)
+				return getAppSettings()
+			},
+			setNumberLocale: async (params) => {
+				setSetting('number_locale', params.locale || 'en-US')
+				console.log('[settings] Number locale set to:', params.locale)
+				return getAppSettings()
+			},
+			setSwapsEnabled: async (params) => {
+				swapsEnabled = params.enabled
+				setSetting('swaps_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Swaps enabled:', params.enabled)
+				// Initialize tracker on-demand when user enables swaps mid-session
+				if (params.enabled) {
+					import('./swap-tracker').then(async ({ initSwapTracker }) => {
+						await initSwapTracker((msg: string, data: any) => {
+							try {
+								if (msg === 'swap-update') rpc.send['swap-update'](data)
+								else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+								else console.error(`[swap-tracker] Unknown message: ${msg}`)
+							} catch (e: any) {
+								console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+							}
+						})
+					}).catch((e) => {
+						console.error('[swap-tracker] Failed to initialize swap tracker:', e.message || e)
+					})
+				}
+				return getAppSettings()
+			},
+			setBip85Enabled: async (params) => {
+				bip85Enabled = params.enabled
+				setSetting('bip85_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] BIP-85 enabled:', params.enabled)
+				return getAppSettings()
+			},
+			setZcashPrivacyEnabled: async (params) => {
+				zcashPrivacyEnabled = params.enabled
+				setSetting('zcash_privacy_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Zcash privacy enabled:', params.enabled)
+				if (params.enabled) {
+					if (!isSidecarReady()) {
+						console.log('[zcash] Starting sidecar on feature enable...')
+						try { await startSidecar() } catch (e: any) {
+							console.error('[zcash] Sidecar failed to start:', e.message)
+						}
+					}
+				} else {
+					console.log('[zcash] Stopping sidecar on feature disable...')
+					stopSidecar()
+				}
+				return getAppSettings()
+			},
+			setPreReleaseUpdates: async (params) => {
+				preReleaseUpdates = params.enabled
+				setSetting('pre_release_updates', params.enabled ? '1' : '0')
+				console.log('[settings] Pre-release updates:', params.enabled)
+				return getAppSettings()
+			},
+			// ── Factory Reset ─────────────────────────────────────────
+			factoryReset: async () => {
+				console.log('[factory-reset] Starting full app reset...')
+				// Stop zcash sidecar if running
+				if (isSidecarReady()) {
+					stopSidecar()
+				}
+				// Nuke all databases (vault + zcash sidecar)
+				factoryResetDb()
+				console.log('[factory-reset] Complete — quitting app')
+				// Give the RPC response a moment to flush, then quit
+				setTimeout(() => cleanupAndQuit(), 500)
+			},
+
+			addPioneerServer: async (params) => {
+				const url = (params.url || '').trim().replace(/\/+$/, '')
+				const label = (params.label || '').trim()
+				if (!url || !/^https?:\/\//i.test(url)) throw new Error('URL must start with http:// or https://')
+				if (!label) throw new Error('Label is required')
+				// Health-check the server before adding
+				const healthUrl = `${url}/api/v1/health`
+				try {
+					const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(10000) })
+					if (!resp.ok) throw new Error(`${healthUrl} returned HTTP ${resp.status}`)
+				} catch (e: any) {
+					throw new Error(`Health check failed for ${healthUrl}: ${e.message}`)
+				}
+				addPioneerServerDb(url, label)
+				console.log('[settings] Pioneer server added:', label, url)
+				return getAppSettings()
+			},
+			removePioneerServer: async (params) => {
+				const url = (params.url || '').trim()
+				if (!url) throw new Error('URL is required')
+				removePioneerServerDb(url)
+				// If the removed server was the active one, reset to default
+				const currentBase = getPioneerApiBase()
+				if (currentBase === url) {
+					setSetting('pioneer_api_base', '')
+					resetPioneer()
+					chainCatalog = []
+					catalogLoadedAt = 0
+					console.log('[settings] Active server removed, reset to default')
+				}
+				console.log('[settings] Pioneer server removed:', url)
+				return getAppSettings()
+			},
+			setActivePioneerServer: async (params) => {
+				const url = (params.url || '').trim().replace(/\/+$/, '')
+				if (!url) throw new Error('URL is required')
+				// Verify the server exists in our list
+				const servers = getPioneerServers()
+				if (!servers.find(s => s.url === url)) throw new Error(`Server "${url}" not found in saved list (have: ${servers.map(s => s.url).join(', ')})`)
+				// Health-check before switching
+				const healthUrl = `${url}/api/v1/health`
+				try {
+					const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(10000) })
+					if (!resp.ok) throw new Error(`${healthUrl} returned HTTP ${resp.status}`)
+				} catch (e: any) {
+					throw new Error(`Health check failed for ${healthUrl}: ${e.message}`)
+				}
+				// Find the default server — if switching to default, clear the override
+				const defaultServer = servers.find(s => s.isDefault)
+				if (defaultServer && defaultServer.url === url) {
+					setSetting('pioneer_api_base', '')
+				} else {
+					setSetting('pioneer_api_base', url)
+				}
+				resetPioneer()
+				chainCatalog = []
+				catalogLoadedAt = 0
+				console.log('[settings] Active Pioneer server set to:', url)
 				return getAppSettings()
 			},
 
@@ -1367,6 +2018,296 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { filePath }
 			},
 
+			// ── Swap (quote cache for tracker) ──────────────────────
+			getSwappableChainIds: async () => {
+				if (!swapsEnabled) return []
+				const { getSwapAssets } = await import('./swap')
+				const assets = await getSwapAssets()
+				// Deduplicate: return unique chain IDs that have at least one native (non-token) asset
+				const chainIds = new Set(assets.filter(a => !a.contractAddress).map(a => a.chainId))
+				return [...chainIds]
+			},
+			getSwapAssets: async () => {
+				if (!swapsEnabled) return []
+				const { getSwapAssets } = await import('./swap')
+				return await getSwapAssets()
+			},
+			getSwapQuote: async (params) => {
+				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
+				const { getSwapQuote, THOR_TO_CHAIN, parseThorAsset } = await import('./swap')
+
+				// Resolve xpub addresses to real receive addresses for UTXO chains.
+				// ChainBalance.address can be an xpub when Pioneer doesn't return
+				// an address field — THORChain rejects xpubs as destination addresses.
+				// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
+				const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
+
+				if (engine.wallet) {
+					const resolveAddr = async (thorAsset: string, addr: string): Promise<string> => {
+						if (!isXpub(addr)) return addr
+						const parsed = parseThorAsset(thorAsset)
+						const chainId = THOR_TO_CHAIN[parsed.chain]
+						if (!chainId) return addr
+						const chainDef = getAllChains().find(c => c.id === chainId)
+						if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
+						try {
+							// Use selected BTC account path/scriptType when available
+							const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
+								? btcAccounts.getSelectedXpub() : undefined
+							const addressNList = selected?.path || chainDef.defaultPath
+							const scriptType = selected?.scriptType || chainDef.scriptType
+							const result = await engine.wallet.btcGetAddress({
+								addressNList,
+								coin: chainDef.coin,
+								scriptType,
+								showDisplay: false,
+							})
+							const resolved = typeof result === 'string' ? result : result?.address
+							if (resolved) {
+								console.log(`[swap] Resolved xpub → ${resolved} for ${thorAsset}`)
+								return resolved
+							}
+						} catch (e: any) {
+							console.warn(`[swap] Failed to resolve xpub for ${thorAsset}: ${e.message}`)
+						}
+						return addr
+					}
+					params = {
+						...params,
+						fromAddress: await resolveAddr(params.fromAsset, params.fromAddress),
+						toAddress: await resolveAddr(params.toAsset, params.toAddress),
+					}
+				}
+
+				// Fail fast if addresses are still xpubs after resolution attempt
+				if (isXpub(params.fromAddress)) {
+					throw new Error(`Could not resolve source address for ${params.fromAsset} — device may be locked or disconnected`)
+				}
+				if (isXpub(params.toAddress)) {
+					throw new Error(`Could not resolve destination address for ${params.toAsset} — device may be locked or disconnected`)
+				}
+
+				const quote = await getSwapQuote(params)
+				// Cache quote so executeSwap can pass real data to the tracker
+				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
+				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
+				swapQuoteCache.set(cacheKey, quote)
+				// Keep cache small (last 10 quotes)
+				if (swapQuoteCache.size > 10) {
+					const oldest = swapQuoteCache.keys().next().value
+					if (oldest) swapQuoteCache.delete(oldest)
+				}
+				return quote
+			},
+			executeSwap: async (params) => {
+				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const { executeSwap } = await import('./swap')
+				const { trackSwap } = await import('./swap-tracker')
+				const result = await executeSwap(params, {
+					wallet: engine.wallet,
+					getAllChains,
+					getRpcUrl,
+					getBtcXpub: () => {
+						if (btcAccounts.isInitialized) {
+							const selected = btcAccounts.getSelectedXpub()
+							if (selected) return selected.xpub
+						}
+						return undefined
+					},
+				})
+				// Look up cached quote for real tracker data
+				// Match by asset pair + amount + inboundAddress to avoid collisions between
+				// quotes that share the same pair/amount but differ in slippage/addresses
+				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
+				for (const [key, val] of swapQuoteCache) {
+					// Key format: fromAsset-toAsset-amount-slippageBps-fromAddress-toAddress
+					// Match on the asset-pair+amount prefix AND inboundAddress from the quote
+					const keyPrefix = `${params.fromAsset}-${params.toAsset}-${params.amount}-`
+					if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
+						cachedQuote = val
+						break
+					}
+				}
+				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
+				// Register swap for tracking (non-blocking)
+				try {
+					trackSwap(result, params, {
+						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
+						minimumOutput: cachedQuote?.minimumOutput || '0',
+						inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
+						router: cachedQuote?.router || params.router,
+						memo: cachedQuote?.memo || params.memo,
+						expiry: cachedQuote?.expiry || params.expiry,
+						fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
+						estimatedTime: cachedQuote?.estimatedTime || 600,
+						slippageBps: cachedQuote?.slippageBps || 300,
+						fromAsset: params.fromAsset,
+						toAsset: params.toAsset,
+						integration: cachedQuote?.integration || 'thorchain',
+					})
+				} catch (e: any) {
+					console.warn('[index] Failed to register swap for tracking:', e.message)
+				}
+				// Track swap in api_log
+				const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+				insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				return result
+			},
+			getPendingSwaps: async () => {
+				if (!swapsEnabled) return []
+				const { getPendingSwaps } = await import('./swap-tracker')
+				return getPendingSwaps()
+			},
+			dismissSwap: async (params) => {
+				const { dismissSwap } = await import('./swap-tracker')
+				dismissSwap(params.txid)
+			},
+
+			// ── Swap History (SQLite-persisted) ─────────────────────
+			getSwapByTxid: async (params) => {
+				const record = getSwapHistoryByTxid(params.txid)
+				if (!record) return null
+				const { inferConfirmationsFromStatus } = await import('./swap-tracker')
+				return {
+					txid: record.txid,
+					fromAsset: record.fromAsset,
+					toAsset: record.toAsset,
+					fromSymbol: record.fromSymbol,
+					toSymbol: record.toSymbol,
+					fromChainId: record.fromChainId,
+					toChainId: record.toChainId,
+					fromAmount: record.fromAmount,
+					expectedOutput: record.quotedOutput,
+					memo: record.memo,
+					inboundAddress: record.inboundAddress,
+					router: record.router,
+					integration: record.integration,
+					status: record.status,
+					confirmations: inferConfirmationsFromStatus(record.status),
+					outboundTxid: record.outboundTxid,
+					createdAt: record.createdAt,
+					updatedAt: record.updatedAt,
+					estimatedTime: record.estimatedTimeSeconds,
+				}
+			},
+			getSwapHistory: async (params) => {
+				return getSwapHistory(params || undefined)
+			},
+			getSwapHistoryStats: async () => {
+				return getSwapHistoryStats()
+			},
+			exportSwapReport: async (params) => {
+				const records = getSwapHistory({
+					fromDate: params.fromDate,
+					toDate: params.toDate,
+					limit: 10000,
+				})
+				if (records.length === 0) throw new Error('No swap records to export')
+
+				const dir = path.join(os.homedir(), 'Downloads')
+
+				if (params.format === 'csv') {
+					const { generateSwapCsv } = await import('./swap-report')
+					const csv = generateSwapCsv(records)
+					const fileName = `keepkey-swaps-${new Date().toISOString().slice(0, 10)}.csv`
+					const filePath = path.join(dir, fileName)
+					await Bun.write(filePath, csv)
+					return { filePath }
+				} else {
+					const { generateSwapPdf } = await import('./swap-report')
+					const pdfBuffer = await generateSwapPdf(records)
+					const fileName = `keepkey-swaps-${new Date().toISOString().slice(0, 10)}.pdf`
+					const filePath = path.join(dir, fileName)
+					await Bun.write(filePath, pdfBuffer)
+					return { filePath }
+				}
+			},
+
+			// ── Recent Activity (from api_log + swap_history) ────────
+			getRecentActivity: async (params) => {
+				return getRecentActivityFromLog(params?.limit || 50, params?.chainId)
+			},
+			scanChainHistory: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// Get the address/xpub for this chain from cached balances
+				// UTXO chains store xpub, account-based chains store address
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) throw new Error('No device connected')
+				const cachedBalances = getCachedBalances(deviceId)
+				const chainBalance = cachedBalances?.balances?.find(b => b.chainId === params.chainId)
+				const pubkey = chainBalance?.address
+				if (!pubkey) throw new Error(`No cached address for ${chain.symbol} — load balances first`)
+
+				const pioneer = await getPioneer()
+				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
+
+				const resp = await withTimeout(
+					pioneer.GetTxHistory({ queries: [{ pubkey, caip: chain.caip }] }),
+					PIONEER_TIMEOUT_MS,
+					`GetTxHistory(${chain.symbol})`
+				)
+				const data = resp?.data || resp
+				const histories = data?.histories || data?.data?.histories || []
+				const txs: any[] = histories[0]?.transactions || []
+
+				if (txs.length === 0) {
+					console.log(`[activity] No transactions found for ${chain.symbol}`)
+					return { count: 0 }
+				}
+
+					// Insert new txs, update confirmations on existing ones
+				let inserted = 0
+				let updated = 0
+				for (const tx of txs) {
+					const txid = tx.txid || tx.hash || tx.txHash
+					if (!txid) continue
+
+					const direction = tx.direction || (tx.value < 0 ? 'sent' : 'received')
+					const activityType = direction === 'sent' ? 'send' : 'receive'
+					const ts = tx.timestamp ? tx.timestamp * 1000 : tx.blockTime ? tx.blockTime * 1000 : Date.now()
+					const confirmations = typeof tx.confirmations === 'number' ? tx.confirmations : 0
+					const blockHeight = tx.blockHeight || tx.block_height || tx.height || 0
+					const value = tx.value != null ? String(tx.value) : undefined
+					const fee = tx.fee != null ? String(tx.fee) : undefined
+
+					// Tx metadata stored in response_body
+					const meta = { confirmations, blockHeight, value, fee, direction }
+
+					if (apiLogTxidExists(txid)) {
+						// Update confirmation count on existing entry
+						updateApiLogTxMeta(txid, meta)
+						updated++
+					} else {
+						// New tx — insert
+						insertApiLog({
+							method: 'SCAN',
+							route: `history/${params.chainId}`,
+							timestamp: ts,
+							durationMs: 0,
+							status: 200,
+							appName: 'vault',
+							txid,
+							chain: chain.symbol,
+							activityType,
+							responseBody: meta,
+						})
+						inserted++
+					}
+				}
+
+				console.log(`[activity] Scanned ${chain.symbol}: ${txs.length} txs, ${inserted} new, ${updated} updated`)
+				return { count: inserted }
+			},
+			dismissActivity: async (_params) => {
+				// No-op: api_log entries are audit records, not dismissible
+			},
+			clearRecentActivity: async () => {
+				// No-op: api_log entries are audit records
+			},
+
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
@@ -1400,8 +2341,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					const parsed = new URL(params.url)
 					if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error()
-					const cmd = process.platform === 'win32' ? 'start' : process.platform === 'linux' ? 'xdg-open' : 'open'
-					Bun.spawn([cmd, parsed.href])
+					if (process.platform === 'win32') {
+						// 'start' is a cmd.exe built-in, not an executable — must invoke via cmd /c
+						// Empty title "" required because start treats URLs with & as title strings
+						Bun.spawn(['cmd', '/c', 'start', '', parsed.href])
+					} else {
+						const cmd = process.platform === 'linux' ? 'xdg-open' : 'open'
+						Bun.spawn([cmd, parsed.href])
+					}
 				} catch {
 					throw new Error('Invalid URL')
 				}
@@ -1409,10 +2356,52 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── App Updates ──────────────────────────────────────────
 			checkForUpdate: async () => {
+				const localVer = await Updater.localInfo.version()
+
+				// Pre-release channel: check GitHub API for latest release including pre-releases
+				if (preReleaseUpdates) {
+					try {
+						const resp = await fetch('https://api.github.com/repos/keepkey/keepkey-vault/releases?per_page=5', {
+							signal: AbortSignal.timeout(10000),
+							headers: { 'Accept': 'application/vnd.github.v3+json' },
+						})
+						if (resp.ok) {
+							const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean; assets: Array<{ name: string; browser_download_url: string }> }>
+							// Find the first non-draft release (includes pre-releases)
+							const latest = releases.find(r => !r.draft)
+							if (latest) {
+								const remoteVer = latest.tag_name.replace(/^v/, '')
+								if (localVer && versionCompare(remoteVer, localVer) > 0) {
+									console.log(`[Updater] Pre-release available: ${remoteVer} > ${localVer}`)
+									return {
+										updateAvailable: true,
+										updateReady: false,
+										version: remoteVer,
+										hash: '',
+										preRelease: latest.prerelease,
+									}
+								}
+								console.log(`[Updater] Pre-release check: ${remoteVer} <= ${localVer}, up to date`)
+							}
+						}
+					} catch (e: any) {
+						console.warn('[Updater] Pre-release check failed:', e.message)
+					}
+				}
+
+				// Standard channel: use Electrobun's built-in updater
 				const result = await Updater.checkForUpdate()
 				const info = Updater.updateInfo()
+				// Suppress false "update available" when running a pre-release newer than the latest stable.
+				let updateAvailable = !!info?.updateAvailable
+				if (updateAvailable && info?.version) {
+					if (localVer && versionCompare(info.version, localVer) < 0) {
+						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
+						updateAvailable = false
+					}
+				}
 				return {
-					updateAvailable: !!info?.updateAvailable,
+					updateAvailable,
 					updateReady: !!info?.updateReady,
 					version: info?.version ?? '',
 					hash: info?.hash ?? '',
@@ -1444,13 +2433,47 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	},
 })
 
+// Initialize swap tracker with typed RPC message sender (only if swaps feature is ON)
+if (swapsEnabled) {
+	import('./swap-tracker').then(async ({ initSwapTracker }) => {
+		await initSwapTracker((msg: string, data: any) => {
+			try {
+				if (msg === 'swap-update') rpc.send['swap-update'](data)
+				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+				else console.error(`[swap-tracker] Unknown message: ${msg}`)
+			} catch (e: any) {
+				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+			}
+		})
+	}).catch((e) => {
+		console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
+	})
+} else {
+	console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
+}
+
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
+	// When entering passphrase mode, the seed is about to change — clear all
+	// cached addresses so they get re-derived from the new passphrase seed.
+	if (state.state === 'needs_passphrase') {
+		btcAccounts.reset()
+		evmAddresses.reset()
+		const deviceId = state.deviceId
+		if (deviceId) {
+			clearCachedPubkeys(deviceId)
+			clearBalances(deviceId)
+		}
+		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
+	}
 })
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
+})
+onScanProgress((progress) => {
+	try { rpc.send['scan-progress'](progress) } catch { /* webview not ready yet */ }
 })
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
@@ -1478,12 +2501,21 @@ evmAddresses.on('change', (set: EvmAddressSet) => {
 // Updater status changes → push to WebView (debounced to prevent spam)
 let lastUpdateStatus = ''
 let lastUpdateStatusTime = 0
-Updater.onStatusChange((entry: any) => {
+Updater.onStatusChange(async (entry: any) => {
 	try {
 		const status = entry.status || ''
 		const now = Date.now()
 		// Debounce: skip duplicate error statuses within 5 seconds
 		if ((status === 'error' || status === 'download-error') && status === lastUpdateStatus && now - lastUpdateStatusTime < 5000) return
+		// Suppress "update-available" when running a pre-release newer than latest stable
+		if (status === 'update-available' || status === 'update-available-full' || status === 'update-available-delta') {
+			const info = Updater.updateInfo()
+			const localVer = await Updater.localInfo.version()
+			if (info?.version && localVer && versionCompare(info.version, localVer) < 0) {
+				console.log(`[Updater] Suppressing status ${status}: remote ${info.version} < local ${localVer}`)
+				return
+			}
+		}
 		lastUpdateStatus = status
 		lastUpdateStatusTime = now
 		rpc.send['update-status']({
@@ -1519,8 +2551,9 @@ async function getMainViewUrl(): Promise<string> {
 
 const url = await getMainViewUrl()
 
-// ── Application Menu (required for Cmd+C/V clipboard in WKWebView) ──
-ApplicationMenu.setApplicationMenu([
+// ── Application Menu (required for Cmd+C/V clipboard in WKWebView on macOS) ──
+// On Windows, Electrobun renders a menu bar but macOS roles are no-ops — hide it.
+if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 	{
 		label: "KeepKey Vault",
 		submenu: [
@@ -1555,7 +2588,7 @@ ApplicationMenu.setApplicationMenu([
 
 let _mainWindow: BrowserWindow | null = null
 const mainWindow = new BrowserWindow({
-	title: "KeepKey Vault",
+	title: `KeepKey Vault v${pkg.version}`,
 	url,
 	rpc,
 	// titleBarStyle left as default — "hidden" breaks WKWebView keyboard input
@@ -1631,6 +2664,8 @@ if (process.platform === 'win32') {
 // Start engine (USB event listeners + initial device sync)
 await engine.start()
 
+// Zcash sidecar is started eagerly at the end of boot (see bottom of file)
+
 // Cache app version for REST health endpoint
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
@@ -1668,6 +2703,7 @@ function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
 	stopCamera()
+	stopSidecar()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()
@@ -1680,6 +2716,20 @@ mainWindow.on("close", cleanupAndQuit)
 if (typeof process !== 'undefined') {
 	process.on('SIGTERM', cleanupAndQuit)
 	process.on('SIGINT', cleanupAndQuit)
+}
+
+// ── Start Zcash sidecar only if feature flag is ON ──────────────────
+if (zcashPrivacyEnabled) {
+	console.log('[zcash] Starting sidecar (feature flag ON)...')
+	try {
+		await startSidecar()
+		console.log('[zcash] Sidecar started successfully, ready:', isSidecarReady())
+	} catch (e: any) {
+		console.error('[zcash] SIDECAR FAILED TO START:', e.message)
+		console.error('[zcash] Zcash shielded features will be unavailable')
+	}
+} else {
+	console.log('[zcash] Sidecar skipped (feature flag OFF)')
 }
 
 console.log("KeepKey Vault started!")

@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "Your wallet is ready. Here's how to get started:",
 	"welcomeTip1": "Tap any chain below, then hit Receive to get your deposit address",
 	"welcomeTip2": "Send crypto to your address — your balance will appear here automatically",
-	"welcomeTip3": "Add custom EVM chains with the + card to track any network",
 	"balancesStale": "Balances may be outdated",
 	"lastUpdated": "Last updated {{time}}",
 	"lastUpdatedNever": "Never loaded",
@@ -29,5 +28,7 @@
 	"timeJustNow": "just now",
 	"timeMinutesAgo": "{{count}}m ago",
 	"timeHoursAgo": "{{count}}h ago",
-	"timeDaysAgo": "{{count}}d ago"
+	"timeDaysAgo": "{{count}}d ago",
+	"staleCtaTitle": "Press to refresh balances",
+	"staleCtaSubtitle": "Last checked {{time}}"
 }

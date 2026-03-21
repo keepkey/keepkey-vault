@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
-import { Box, Flex, Text, Spinner, Image, SimpleGrid } from "@chakra-ui/react"
+import { Component, useState, useEffect, useCallback, useMemo, type ReactNode, type ErrorInfo } from "react"
+import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
-import { CHAINS, customChainToChainDef, type ChainDef } from "../../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
@@ -9,14 +9,67 @@ import { AssetPage } from "./AssetPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
+import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
-import type { ChainBalance, CustomChain, TokenVisibilityStatus } from "../../shared/types"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
+import { playChaChing } from "../lib/sounds"
+
+/** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
+class AssetPageErrorBoundary extends Component<
+	{ children: ReactNode; onBack: () => void; chainName: string },
+	{ hasError: boolean; error: Error | null }
+> {
+	state: { hasError: boolean; error: Error | null } = { hasError: false, error: null }
+	static getDerivedStateFromError(error: Error) { return { hasError: true, error } }
+	componentDidCatch(error: Error, info: ErrorInfo) {
+		console.error('[AssetPageErrorBoundary]', error, info)
+	}
+	render() {
+		if (this.state.hasError) {
+			return (
+				<Flex direction="column" align="center" justify="center" gap="4" py="12" px="6" minH="300px">
+					<Text fontSize="lg" fontWeight="600" color="red.400">
+						Failed to load {this.props.chainName}
+					</Text>
+					<Text fontSize="sm" color="kk.textMuted" textAlign="center" maxW="440px">
+						{this.state.error?.message || 'An unexpected error occurred while loading this asset page.'}
+					</Text>
+					<Flex gap="3">
+						<Button
+							size="sm"
+							variant="ghost"
+							color="kk.gold"
+							onClick={() => this.setState({ hasError: false, error: null })}
+						>
+							Try Again
+						</Button>
+						<Button
+							size="sm"
+							variant="ghost"
+							color="kk.textSecondary"
+							_hover={{ color: "white" }}
+							onClick={this.props.onBack}
+						>
+							&larr; Back to Dashboard
+						</Button>
+					</Flex>
+				</Flex>
+			)
+		}
+		return this.props.children
+	}
+}
 
 const DASHBOARD_ANIMATIONS = `
 	@keyframes pulseGold {
 		0%, 100% { box-shadow: 0 0 12px rgba(192,168,96,0.4); }
 		50% { box-shadow: 0 0 24px rgba(192,168,96,0.7); }
+	}
+	@keyframes glowCta {
+		0% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
+		50% { box-shadow: 0 0 16px rgba(192,168,96,0.5), 0 0 40px rgba(192,168,96,0.2); }
+		100% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
 	}
 `
 
@@ -29,6 +82,11 @@ interface DashboardProps {
 	onLoaded?: () => void
 	watchOnly?: boolean
 	onOpenSettings?: () => void
+	firmwareVersion?: string
+	/** When true (e.g. after OOB setup), skip stale cache and auto-refresh live balances */
+	forceRefresh?: boolean
+	/** Called after forceRefresh has been consumed (one-shot) — parent should clear the flag */
+	onForceRefreshConsumed?: () => void
 }
 
 /** Format a timestamp as a relative "time ago" string (i18n-aware) */
@@ -43,7 +101,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -53,6 +111,8 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
+	const [showBip85, setShowBip85] = useState(false)
+	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [tokenWarning, setTokenWarning] = useState(false)
@@ -65,6 +125,20 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 			.then(setVisibilityMap)
 			.catch(() => {})
 	}, [])
+
+	// Load BIP-85 feature flag (re-check when settings change)
+	const refreshBip85Flag = useCallback(() => {
+		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
+			.then(s => setBip85Enabled(s.bip85Enabled))
+			.catch(() => {})
+	}, [])
+
+	useEffect(() => { refreshBip85Flag() }, [refreshBip85Flag])
+
+	useEffect(() => {
+		window.addEventListener('keepkey-settings-changed', refreshBip85Flag)
+		return () => window.removeEventListener('keepkey-settings-changed', refreshBip85Flag)
+	}, [refreshBip85Flag])
 
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
@@ -93,6 +167,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 	}, [])
 
 	// On mount: load cached balances ONLY (no live fetch — saves API credits)
+	// When forceRefresh (e.g. new seed after OOB setup), skip stale cache entirely.
 	useEffect(() => {
 		let cancelled = false
 
@@ -114,16 +189,21 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 				return
 			}
 
-			try {
-				const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 3000)
-				if (!cancelled && cached && cached.balances.length > 0) {
-					const map = new Map<string, ChainBalance>()
-					for (const b of cached.balances) map.set(b.chainId, b)
-					setBalances(map)
-					setCacheUpdatedAt(cached.updatedAt)
-					console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
-				}
-			} catch { /* cache unavailable */ }
+			// New seed: cache belongs to the old seed — skip it
+			if (!forceRefresh) {
+				try {
+					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 3000)
+					if (!cancelled && cached && cached.balances.length > 0) {
+						const map = new Map<string, ChainBalance>()
+						for (const b of cached.balances) map.set(b.chainId, b)
+						setBalances(map)
+						setCacheUpdatedAt(cached.updatedAt)
+						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
+					}
+				} catch { /* cache unavailable */ }
+			} else {
+				console.log('[Dashboard] forceRefresh: skipping stale cache (new seed detected)')
+			}
 
 			if (!cancelled) {
 				setInitialLoaded(true)
@@ -133,7 +213,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 		loadCached()
 		return () => { cancelled = true }
-	}, [watchOnly])
+	}, [watchOnly, forceRefresh])
 
 	// Manual refresh: fetch live data from Pioneer API
 	const refreshBalances = useCallback(async () => {
@@ -148,6 +228,15 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
 				console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)}`)
+				// DEBUG: dump token data that arrived via RPC
+				for (const b of result) {
+					if (b.tokens && b.tokens.length > 0) {
+						console.log(`[Dashboard:rpc-tokens] ${b.chainId}: ${b.tokens.length} tokens`)
+						for (const t of b.tokens.slice(0, 3)) {
+							console.log(`  ${t.symbol}: balanceUsd=${t.balanceUsd}, priceUsd=${t.priceUsd}, balance=${t.balance}, caip=${t.caip?.substring(0, 40)}`)
+						}
+					}
+				}
 				const map = new Map<string, ChainBalance>()
 				for (const b of result) map.set(b.chainId, b)
 				setBalances(map)
@@ -166,19 +255,62 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 		setLoadingBalances(false)
 	}, [loadingBalances, watchOnly])
 
-	// Compute spam-filtered USD per chain: subtract spam token values from chain totals
+	// Auto-refresh after new seed (OOB setup) — one-shot, then clear the flag
+	useEffect(() => {
+		if (forceRefresh && initialLoaded && !hasEverRefreshed && !loadingBalances) {
+			console.log('[Dashboard] New seed detected — auto-refreshing balances (one-shot)')
+			refreshBalances()
+			onForceRefreshConsumed?.()
+		}
+	}, [forceRefresh, initialLoaded, hasEverRefreshed, loadingBalances, refreshBalances, onForceRefreshConsumed])
+
+	// Auto-refresh balances when a swap completes (both chains affected)
+	useEffect(() => {
+		const handler = () => {
+			console.log('[Dashboard] Swap completed — refreshing balances')
+			refreshBalances()
+		}
+		window.addEventListener('keepkey-swap-completed', handler)
+		return () => window.removeEventListener('keepkey-swap-completed', handler)
+	}, [refreshBalances])
+
+	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
+	useEffect(() => {
+		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
+			setBalances(prev => {
+				const old = prev.get(updated.chainId)
+				const oldUsd = old?.balanceUsd ?? 0
+				const newUsd = updated.balanceUsd ?? 0
+				// Cha-ching when balance increased
+				if (newUsd > oldUsd && oldUsd > 0) {
+					playChaChing()
+				}
+				const next = new Map(prev)
+				next.set(updated.chainId, updated)
+				return next
+			})
+			setCacheUpdatedAt(Date.now())
+		})
+	}, [])
+
 	const cleanBalanceUsd = useMemo(() => {
-		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v]))
+		const overrides = new Map(
+			Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
+		)
 		const result = new Map<string, { usd: number; cleanTokenCount: number }>()
 		for (const [chainId, bal] of balances) {
-			if (!bal.tokens || bal.tokens.length === 0) {
+			if (bal.tokens && bal.tokens.length > 0) {
+				const { clean } = categorizeTokens(bal.tokens, overrides)
+				const spamUsd = (bal.tokens.length - clean.length) > 0
+					? bal.tokens.reduce((s, t) => s + (t.balanceUsd || 0), 0) - clean.reduce((s, t) => s + (t.balanceUsd || 0), 0)
+					: 0
+				result.set(chainId, {
+					usd: (bal.balanceUsd || 0) - spamUsd,
+					cleanTokenCount: clean.length,
+				})
+			} else {
 				result.set(chainId, { usd: bal.balanceUsd || 0, cleanTokenCount: 0 })
-				continue
 			}
-			const { spam } = categorizeTokens(bal.tokens, overrides)
-			const spamUsd = spam.reduce((s, t) => s + (t.balanceUsd || 0), 0)
-			const cleanTokens = (bal.tokens?.length || 0) - spam.length
-			result.set(chainId, { usd: (bal.balanceUsd || 0) - spamUsd, cleanTokenCount: cleanTokens })
 		}
 		return result
 	}, [balances, visibilityMap])
@@ -202,7 +334,9 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 	const hasAnyBalance = chartData.length > 0
 
-	const sortedChains = useMemo(() => [...allChains].sort((a, b) => {
+	const visibleChains = useMemo(() => allChains.filter(c => !c.hidden && isChainSupported(c, firmwareVersion)), [allChains, firmwareVersion])
+
+	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
 		const bUsd = cleanBalanceUsd.get(b.id)?.usd || 0
 		const aHas = aUsd > 0 || parseFloat(balances.get(a.id)?.balance || '0') > 0
@@ -211,14 +345,23 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 		if (!aHas && bHas) return 1
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
-	}), [allChains, balances, cleanBalanceUsd])
+	}), [visibleChains, balances, cleanBalanceUsd])
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
 
+	// Show big CTA when last check is older than 24 hours
+	const cacheOlderThanDay = !loadingBalances && !watchOnly && initialLoaded && (
+		!cacheUpdatedAt || (Date.now() - cacheUpdatedAt > 86_400_000)
+	)
+
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
-		return <AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} />
+		return (
+			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
+				<AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} firmwareVersion={firmwareVersion} />
+			</AssetPageErrorBoundary>
+		)
 	}
 
 	return (
@@ -310,7 +453,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 								borderRadius="md"
 								cursor="pointer"
 								_hover={{ borderColor: "kk.textMuted", color: "white" }}
-								onClick={() => window.open("https://support.keepkey.com", "_blank")}
+								onClick={() => rpcRequest('openUrl', { url: "https://support.keepkey.com" }).catch((e: any) => console.warn('[openUrl]', e?.message))}
 							>
 								{t("getSupport")}
 							</Box>
@@ -440,12 +583,6 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 									{t("welcomeTip2")}
 								</Text>
 							</Flex>
-							<Flex align="flex-start" gap="2.5" textAlign="left">
-								<Text fontSize="sm" mt="0.5">3.</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip3")}
-								</Text>
-							</Flex>
 						</Flex>
 					</Flex>
 				</Box>
@@ -526,7 +663,61 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 				</Flex>
 			)}
 
-			<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
+			{/* Big glowing CTA when balances haven't been checked in over a day */}
+			{cacheOlderThanDay && (
+				<Box
+					as="button"
+					w="100%"
+					mb="4"
+					px="5"
+					py="4"
+					bg="rgba(192,168,96,0.08)"
+					border="1px solid"
+					borderColor="rgba(192,168,96,0.35)"
+					borderRadius="xl"
+					cursor="pointer"
+					transition="all 0.3s ease-out"
+					css={{ animation: "glowCta 3s ease-in-out infinite" }}
+					_hover={{
+						bg: "rgba(192,168,96,0.15)",
+						borderColor: "kk.gold",
+						transform: "scale(1.02)",
+						boxShadow: "0 0 24px rgba(192,168,96,0.5), 0 0 48px rgba(192,168,96,0.2)",
+					}}
+					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
+					onClick={refreshBalances}
+				>
+					<Flex align="center" justify="center" gap="3">
+						<Box
+							w="40px"
+							h="40px"
+							borderRadius="full"
+							bg="rgba(192,168,96,0.15)"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+							flexShrink={0}
+						>
+							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+							</svg>
+						</Box>
+						<Flex direction="column" align="flex-start">
+							<Text fontSize="md" fontWeight="700" color="kk.gold" lineHeight="1.3">
+								{t("staleCtaTitle")}
+							</Text>
+							<Text fontSize="xs" color="kk.textMuted" lineHeight="1.3">
+								{cacheUpdatedAt
+									? t("staleCtaSubtitle", { time: formatTimeAgo(cacheUpdatedAt, t) })
+									: t("lastUpdatedNever")}
+							</Text>
+						</Flex>
+					</Flex>
+				</Box>
+			)}
+
+		<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
 				{sortedChains.map((chain) => {
 					const bal = balances.get(chain.id)
 					const clean = cleanBalanceUsd.get(chain.id)
@@ -597,7 +788,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 											{formatBalance(bal.balance)} {chain.symbol}
 										</Text>
 										{usdNum > 0 && (
-											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : "white"} fontWeight="500" lineHeight="1.3" />
+											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : undefined} fontWeight="500" lineHeight="1.3" />
 										)}
 										{tokenCount > 0 && (
 											<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
@@ -663,6 +854,46 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings }: DashboardProp
 
 			{showReports && (
 				<ReportDialog onClose={() => setShowReports(false)} />
+			)}
+
+			{showBip85 && (
+				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
+			)}
+
+			{/* BIP-85 lock icon — bottom right (only when feature enabled) */}
+			{bip85Enabled && !watchOnly && (
+				<Box
+					as="button"
+					position="fixed"
+					bottom="24px"
+					right="24px"
+					w="52px"
+					h="52px"
+					borderRadius="full"
+					bg="rgba(192,168,96,0.15)"
+					border="1px solid"
+					borderColor="rgba(192,168,96,0.3)"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					cursor="pointer"
+					transition="all 0.2s"
+					_hover={{
+						bg: "rgba(192,168,96,0.25)",
+						borderColor: "kk.gold",
+						transform: "scale(1.08)",
+						boxShadow: "0 0 20px rgba(192,168,96,0.3)",
+					}}
+					_active={{ transform: "scale(0.95)" }}
+					onClick={() => setShowBip85(true)}
+					zIndex={10}
+					title="BIP-85 Seed Vault"
+				>
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+					</svg>
+				</Box>
 			)}
 		</Box>
 	)

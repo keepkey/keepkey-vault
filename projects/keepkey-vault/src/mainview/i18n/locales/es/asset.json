@@ -16,5 +16,6 @@
 	"hideToken": "Ocultar token",
 	"revertToAutoDetect": "Revertir a detección automática",
 	"unhide": "Mostrar",
-	"addCustomToken": "Agregar token personalizado"
+	"addCustomToken": "Agregar token personalizado",
+	"invalidZcashRecipient": "Dirección inválida — debe ser u1... (unified) o t1.../t3... (transparent)"
 }

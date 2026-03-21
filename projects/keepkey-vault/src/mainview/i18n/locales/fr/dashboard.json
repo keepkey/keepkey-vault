@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "Votre portefeuille est prêt. Voici comment démarrer :",
 	"welcomeTip1": "Appuyez sur une chaîne ci-dessous, puis sur Recevoir pour obtenir votre adresse de dépôt",
 	"welcomeTip2": "Envoyez des cryptos à votre adresse — votre solde apparaîtra ici automatiquement",
-	"welcomeTip3": "Ajoutez des chaînes EVM personnalisées avec la carte + pour suivre n'importe quel réseau",
 	"balancesStale": "Les soldes peuvent être obsolètes",
 	"lastUpdated": "Dernière mise à jour {{time}}",
 	"lastUpdatedNever": "Jamais chargé",

@@ -73,7 +73,7 @@ export interface FirmwareAnalysis {
   currentFirmwareVerified: boolean | undefined
   isDowngrade: boolean
   isSameVersion: boolean
-  willWipeDevice: boolean  // true when going from signed → unsigned (not in BL mode)
+  willWipeDevice: boolean  // true when crossing signed/unsigned boundary in either direction (not in BL mode)
 }
 
 // Pioneer integration types
@@ -108,6 +108,7 @@ export interface BuildTxParams {
   memo?: string
   feeLevel?: number   // 1=slow, 5=avg, 10=fast
   isMax?: boolean
+  isSwapDeposit?: boolean // THORChain/Maya: use MsgDeposit instead of MsgSend (for swaps/LP)
   caip?: string        // Token CAIP-19 — triggers token transfer mode when contains 'erc20'
   tokenBalance?: string  // human-readable token balance (from frontend) — avoids re-fetch on max send
   tokenDecimals?: number // token decimals (from frontend) — avoids re-fetch
@@ -115,6 +116,38 @@ export interface BuildTxParams {
   scriptTypeOverride?: string  // BTC multi-account: use this scriptType instead of default
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
   evmAddressIndex?: number     // EVM multi-address: derivation index (default 0)
+}
+
+// ── Staking / delegation types ───────────────────────────────────────────
+export interface BuildStakingTxParams {
+  chainId: string
+  validatorAddress: string
+  amount: string
+  memo?: string
+}
+
+export interface StakingPosition {
+  type: 'delegation' | 'reward' | 'unbonding'
+  balance: string
+  valueUsd?: number
+  ticker?: string
+  validator?: string
+  validatorAddress?: string
+  status?: string
+}
+
+// ── Zcash shielded transaction history ──────────────────────────────────
+
+export interface ZcashTransaction {
+  id: number
+  value: number            // zatoshis
+  block_height: number
+  tx_index: number
+  is_spent: boolean
+  memo: string | null      // decoded UTF-8 text, null if no memo or non-text
+  nullifier: string        // hex
+  txid: string | null      // hex (for block explorer link)
+  action_index: number
 }
 
 // ── Bitcoin multi-account types ─────────────────────────────────────────
@@ -240,6 +273,29 @@ export interface EIP712DecodedInfo {
   isKnownType: boolean
 }
 
+// ── Calldata clear-signing types ─────────────────────────────────────────
+
+export interface CalldataDecodedField {
+  name: string
+  type: string                    // Solidity type (address, uint256, bytes, etc.)
+  value: string                   // Human-readable formatted value
+  format: 'address' | 'amount' | 'hex' | 'raw'
+}
+
+export interface CalldataDecodedInfo {
+  dappName: string                // "Aave", "Uniswap", "ERC-20", "Unknown"
+  contractName: string            // "AaveV3Pool", "UniversalRouter", etc.
+  method: string                  // "supply", "swap", "approve"
+  selector: string                // "0x617ba037"
+  functionType?: string           // "swap" | "deposit" | "withdraw" | etc.
+  fields: CalldataDecodedField[]  // Decoded arguments
+  source: 'pioneer' | 'local' | 'none'  // Where the descriptor came from
+  /** Pre-signed insight blob (base64) from Pioneer — for firmware clear-signing */
+  signedInsightBlob?: string
+  /** Signing key slot used for the insight blob */
+  insightKeyId?: number
+}
+
 export interface SigningRequestInfo {
   id: string
   method: string
@@ -251,6 +307,13 @@ export interface SigningRequestInfo {
   data?: string
   chainId?: number
   typedDataDecoded?: EIP712DecodedInfo
+  calldataDecoded?: CalldataDecodedInfo   // Clear-signing: decoded contract calldata
+  /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
+  needsBlindSigning?: boolean
+  /** true when device AdvancedMode policy is currently enabled */
+  advancedModeEnabled?: boolean
+  /** Full raw request body from the REST API caller — shown in UI for debugging/transparency */
+  rawRequestBody?: Record<string, unknown>
 }
 
 export interface ApiLogEntry {
@@ -264,12 +327,67 @@ export interface ApiLogEntry {
   imageUrl?: string
   requestBody?: any      // parsed JSON body (POST requests)
   responseBody?: any     // parsed JSON response
+  // ── Activity tracking (populated for sign/broadcast operations) ──
+  txid?: string          // blockchain txid (computed from signed tx or from broadcast response)
+  chain?: string         // chain symbol (BTC, ETH, ATOM, etc.)
+  activityType?: string  // sign | broadcast | swap | message
+}
+
+// Supported fiat currencies
+export type FiatCurrency = 'USD' | 'EUR' | 'GBP' | 'JPY' | 'CHF' | 'CAD' | 'AUD' | 'CNY' | 'KRW' | 'BRL' | 'RUB' | 'INR' | 'MXN' | 'SEK' | 'NOK' | 'DKK' | 'PLN' | 'CZK' | 'HUF' | 'TRY'
+
+// Pioneer API server entry (persisted in SQLite)
+export interface PioneerServer {
+  url: string
+  label: string
+  isDefault: boolean
 }
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
-  restApiEnabled: boolean   // controls entire REST API server on/off
-  pioneerApiBase: string    // current Pioneer API base URL
+  restApiEnabled: boolean        // controls entire REST API server on/off
+  pioneerApiBase: string         // current Pioneer API base URL
+  pioneerServers: PioneerServer[] // all configured Pioneer servers
+  activePioneerServer: string    // URL of the active server
+  fiatCurrency: FiatCurrency     // display currency (default 'USD')
+  numberLocale: string           // number formatting locale (default 'en-US')
+  swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
+  bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
+  zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
+  preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+}
+
+// ── BIP-85 types ────────────────────────────────────────────────────────
+
+export interface Bip85DeriveParams {
+  wordCount: 12 | 18 | 24
+  index: number
+  label?: string
+}
+
+/** Firmware displays seed on device screen only — no mnemonic returned over USB */
+export interface Bip85DisplayResult {
+  displayed: boolean
+  wordCount: 12 | 18 | 24
+  index: number
+  derivationPath: string
+}
+
+/** @deprecated Use Bip85DisplayResult — mnemonic is no longer sent over USB */
+export interface Bip85DeriveResult {
+  mnemonic: string
+  wordCount: 12 | 18 | 24
+  index: number
+  derivationPath: string
+}
+
+export interface Bip85SeedMeta {
+  walletFingerprint: string
+  wordCount: 12 | 18 | 24
+  index: number
+  derivationPath: string
+  label: string
+  createdAt: number
 }
 
 // ── RPC param/response types for top-use endpoints ──────────────────────
@@ -361,6 +479,194 @@ export type ReportSection =
   | { title: string; type: 'summary'; data: string[] }
   | { title: string; type: 'list'; data: string[] }
   | { title: string; type: 'text'; data: string }
+
+// ── Swap types ─────────────────────────────────────────────────────────
+
+/** An asset available for swapping (via THORChain, ChainFlip, Pioneer aggregation, etc.) */
+export interface SwapAsset {
+  asset: string            // THORChain asset name (e.g. "BTC.BTC", "ETH.USDT-0xDAC...")
+  chainId: string          // our chain id (e.g. "bitcoin", "ethereum")
+  symbol: string           // display symbol ("BTC", "USDT")
+  name: string             // display name ("Bitcoin", "Tether USD")
+  chainFamily: string      // chain family (utxo, evm, cosmos, xrp, solana, tron, ton, etc.)
+  decimals: number
+  caip?: string            // CAIP-19 if known
+  icon?: string            // icon URL
+  contractAddress?: string // for ERC-20 tokens
+}
+
+/** Quote response from Pioneer (aggregated across DEXes) */
+export interface SwapQuote {
+  expectedOutput: string     // human-readable amount out
+  minimumOutput: string      // after slippage
+  inboundAddress: string     // vault address to send to
+  router?: string            // EVM router contract (for depositWithExpiry)
+  memo: string               // THORChain routing memo (empty for memoless integrations)
+  expiry?: number            // unix timestamp — deadline for depositWithExpiry
+  fees: {
+    affiliate: string        // affiliate fee (human-readable)
+    outbound: string         // outbound gas fee
+    totalBps: number         // total fee in basis points
+  }
+  estimatedTime: number      // seconds
+  warning?: string           // streaming swap note, dust threshold, etc.
+  slippageBps: number        // actual slippage in bps
+  fromAsset: string          // THORChain asset identifier
+  toAsset: string            // THORChain asset identifier
+  integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", etc.
+}
+
+/** Parameters for getSwapQuote RPC */
+export interface SwapQuoteParams {
+  fromAsset: string   // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
+  toAsset: string     // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
+  amount: string      // human-readable amount
+  fromAddress: string // sender address
+  toAddress: string   // destination address
+  slippageBps?: number // slippage tolerance (default 300 = 3%)
+}
+
+/** Parameters for executeSwap RPC */
+export interface ExecuteSwapParams {
+  fromChainId: string       // our chain id
+  toChainId: string         // our chain id
+  fromAsset: string         // THORChain asset id
+  toAsset: string           // THORChain asset id
+  amount: string            // human-readable amount
+  memo: string              // THORChain routing memo
+  inboundAddress: string    // vault address
+  router?: string           // EVM router (for token approvals)
+  expiry?: number           // unix timestamp for depositWithExpiry
+  expectedOutput: string    // for display
+  isMax?: boolean
+  feeLevel?: number
+  fromAddressOverride?: string  // pre-resolved sender address (skips defaultPath derivation)
+  toAddressOverride?: string    // pre-resolved destination address (skips defaultPath derivation)
+}
+
+/** Result of executeSwap RPC */
+export interface SwapResult {
+  txid: string
+  fromAsset: string
+  toAsset: string
+  fromAmount: string
+  expectedOutput: string
+  approvalTxid?: string
+}
+
+// ── Swap tracking types ───────────────────────────────────────────────
+
+export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
+
+export interface PendingSwap {
+  txid: string
+  fromAsset: string       // THORChain asset id (e.g. "BASE.ETH")
+  toAsset: string         // THORChain asset id (e.g. "ETH.ETH")
+  fromSymbol: string
+  toSymbol: string
+  fromChainId: string     // our chain id
+  toChainId: string
+  fromAmount: string      // human-readable
+  expectedOutput: string  // human-readable
+  memo: string
+  inboundAddress: string
+  router?: string
+  integration: string     // "thorchain", "shapeshift", etc.
+  status: SwapTrackingStatus
+  confirmations: number
+  outboundConfirmations?: number
+  outboundRequiredConfirmations?: number
+  outboundTxid?: string
+  createdAt: number       // unix ms
+  updatedAt: number       // unix ms
+  estimatedTime: number   // seconds
+  error?: string
+}
+
+export interface SwapStatusUpdate {
+  txid: string
+  status: SwapTrackingStatus
+  confirmations?: number
+  outboundConfirmations?: number
+  outboundRequiredConfirmations?: number
+  outboundTxid?: string
+  error?: string
+}
+
+/** Persisted swap history record (SQLite) — tracks the full lifecycle */
+export interface SwapHistoryRecord {
+  id: string                     // unique row id (UUID)
+  txid: string                   // inbound transaction hash
+  fromAsset: string              // THORChain asset id
+  toAsset: string
+  fromSymbol: string
+  toSymbol: string
+  fromChainId: string
+  toChainId: string
+  fromAmount: string             // human-readable amount sent
+  quotedOutput: string           // expected output at quote time
+  minimumOutput: string          // minimum after slippage at quote time
+  receivedOutput?: string        // actual received (filled on completion)
+  slippageBps: number            // slippage tolerance used
+  feeBps: number                 // total fee in basis points
+  feeOutbound: string            // outbound gas fee quoted
+  integration: string            // "thorchain", "shapeshift", "chainflip"
+  memo: string
+  inboundAddress: string         // vault address
+  router?: string
+  status: SwapTrackingStatus
+  outboundTxid?: string
+  error?: string
+  createdAt: number              // unix ms — when swap was initiated
+  updatedAt: number              // unix ms — last status update
+  completedAt?: number           // unix ms — when terminal status reached
+  estimatedTimeSeconds: number   // estimated time at quote time
+  actualTimeSeconds?: number     // actual duration (completedAt - createdAt)
+  approvalTxid?: string          // ERC-20 approval tx (if applicable)
+}
+
+/** Filter params for getSwapHistory RPC */
+export interface SwapHistoryFilter {
+  status?: SwapTrackingStatus | 'all'
+  fromDate?: number       // unix ms
+  toDate?: number         // unix ms
+  asset?: string          // filter by fromAsset or toAsset containing this
+  limit?: number
+  offset?: number
+}
+
+/** Stats summary for swap history */
+export interface SwapHistoryStats {
+  totalSwaps: number
+  completed: number
+  failed: number
+  refunded: number
+  pending: number
+}
+
+// ── Recent Activity types ──────────────────────────────────────────────
+
+export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve'
+export type ActivitySource = 'app' | 'api' | 'scan'
+
+export interface RecentActivity {
+  id: string
+  txid?: string              // blockchain txid (may be absent for sign-only before broadcast)
+  chain: string              // chain symbol (BTC, ETH, ATOM, etc.)
+  chainId?: string           // internal chain id (bitcoin, ethereum, etc.) — for explorer links
+  type: ActivityType
+  source: ActivitySource
+  to?: string
+  amount?: string
+  asset?: string             // token symbol if different from chain native
+  appName?: string           // for API-originating activities
+  status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
+  createdAt: number
+  // ── On-chain confirmation data (populated by scan, updated on rescan) ──
+  confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
+  blockHeight?: number       // block the tx was mined in (0 = unconfirmed)
+  fee?: string               // tx fee (human-readable)
+}
 
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.

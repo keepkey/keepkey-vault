@@ -1,0 +1,18 @@
+{
+	"apps": "Apps",
+	"keepkey": "KeepKey",
+	"swap": "Ruilen",
+	"shapeshift": "ShapeShift",
+	"watchOnly": "Alleen bekijken",
+	"deviceSettings": "Apparaatinstellingen",
+	"searchingForKeepKey": "Zoeken naar KeepKey",
+	"keepkeyDetected": "KeepKey gedetecteerd",
+	"keepkeyDetectedConnecting": "KeepKey gedetecteerd — verbinden",
+	"unlockYourKeepKey": "Ontgrendel je KeepKey",
+	"passphraseRequired": "Wachtwoordzin vereist",
+	"loadingPortfolio": "Portfolio laden",
+	"errorWithMessage": "Fout: {{error}}",
+	"tryUnplugging": "Probeer je KeepKey los te koppelen en opnieuw aan te sluiten.",
+	"watchOnlyConnectPrompt": "Alleen bekijken — Sluit apparaat aan voor volledige toegang",
+	"passphraseMode": "Wachtwoordzin"
+}

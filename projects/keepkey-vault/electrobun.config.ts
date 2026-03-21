@@ -1,10 +1,12 @@
 import type { ElectrobunConfig } from "electrobun";
 
+const isWindows = process.platform === "win32";
+
 export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.1.2",
+		version: "1.2.1",
 		urlSchemes: ["keepkey"],
 	},
 	build: {
@@ -23,6 +25,7 @@ export default {
 				"node-hid",
 				"usb",
 				"ethers",
+				"@pioneer-platform/pioneer-client",
 			],
 		},
 		// Vite builds to dist/, we copy from there
@@ -31,6 +34,8 @@ export default {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
 			"_build/_ext_modules": "node_modules",
+			// Zcash privacy engine sidecar (Rust binary — .exe on Windows)
+			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},
 		mac: {
 			bundleCEF: false,

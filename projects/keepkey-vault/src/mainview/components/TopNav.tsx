@@ -8,6 +8,14 @@ import kkIcon from "../assets/icon.png"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
 
+/** Lock icon for passphrase mode */
+const PassphraseLockIcon = () => (
+	<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+		<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+		<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+	</svg>
+)
+
 interface TopNavProps {
 	label?: string
 	connected: boolean
@@ -20,6 +28,7 @@ interface TopNavProps {
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
+	passphraseActive?: boolean
 }
 
 /** Construction/hard-hat icon for dev firmware */
@@ -39,9 +48,9 @@ const ShieldCheckIcon = ({ color }: { color: string }) => (
 	</svg>
 )
 
-/** Grid icon (11px) for Apps tab */
+/** Grid icon for Apps tab */
 const GridIcon = () => (
-	<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+	<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 		<rect x="3" y="3" width="7" height="7" />
 		<rect x="14" y="3" width="7" height="7" />
 		<rect x="14" y="14" width="7" height="7" />
@@ -86,7 +95,7 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly, passphraseActive }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -99,12 +108,12 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 		{
 			id: "vault",
 			label: t("keepkey"),
-			icon: <Image src={kkIcon} alt="KeepKey" w="11px" h="11px" borderRadius="2px" />,
+			icon: <Image src={kkIcon} alt="KeepKey" w="15px" h="15px" borderRadius="2px" />,
 		},
 		{
 			id: "shapeshift",
 			label: t("shapeshift"),
-			icon: <Image src="https://pioneers.dev/coins/fox.png" alt="ShapeShift" w="11px" h="11px" borderRadius="2px" />,
+			icon: <Image src="https://pioneers.dev/coins/fox.png" alt="ShapeShift" w="15px" h="15px" borderRadius="2px" />,
 		},
 	]
 	return (
@@ -185,6 +194,14 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 						)}
 					</Flex>
 				) : null}
+				{passphraseActive && (
+					<Flex align="center" gap="0.5" bg="rgba(251,146,60,0.12)" px="1.5" py="0.5" borderRadius="sm">
+						<PassphraseLockIcon />
+						<Text fontSize="9px" color="#FB923C" fontWeight="500" letterSpacing="0.02em">
+							{t("passphraseMode")}
+						</Text>
+					</Flex>
+				)}
 			</Flex>
 
 			{/* Center: navigation tabs (icon above label) */}
@@ -213,7 +230,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 							minW="48px"
 						>
 							{tab.icon}
-							<Text fontSize="9px" lineHeight="1">{tab.label}</Text>
+							<Text fontSize="10px" lineHeight="1">{tab.label}</Text>
 						</Box>
 					)
 				})}
@@ -229,7 +246,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 					color={settingsOpen ? "kk.gold" : "kk.textSecondary"}
 					_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
 				>
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<circle cx="12" cy="12" r="3" />
 						<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
 					</svg>

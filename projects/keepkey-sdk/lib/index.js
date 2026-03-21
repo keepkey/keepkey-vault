@@ -67,6 +67,8 @@ class KeepKeySdk {
             // v1 SDK compat alias
             binanceGetAddress: (params) => this.client.post('/addresses/bnb', params),
             solanaGetAddress: (params) => this.client.post('/addresses/solana', params),
+            tronGetAddress: (params) => this.client.post('/addresses/tron', params),
+            tonGetAddress: (params) => this.client.post('/addresses/ton', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // eth — Ethereum signing
@@ -152,6 +154,18 @@ class KeepKeySdk {
         // ═══════════════════════════════════════════════════════════════════
         this.solana = {
             solanaSignTransaction: (params) => this.client.post('/solana/sign-transaction', params),
+        };
+        // ═══════════════════════════════════════════════════════════════════
+        // tron — Tron signing
+        // ═══════════════════════════════════════════════════════════════════
+        this.tron = {
+            tronSignTransaction: (params) => this.client.post('/tron/sign-transaction', params),
+        };
+        // ═══════════════════════════════════════════════════════════════════
+        // ton — TON signing
+        // ═══════════════════════════════════════════════════════════════════
+        this.ton = {
+            tonSignTransaction: (params) => this.client.post('/ton/sign-transaction', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // xpub — public key operations (batch + single)

@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "Il tuo portafoglio è pronto. Ecco come iniziare:",
 	"welcomeTip1": "Tocca una catena qui sotto, poi premi Ricevi per ottenere il tuo indirizzo di deposito",
 	"welcomeTip2": "Invia crypto al tuo indirizzo — il tuo saldo apparirà qui automaticamente",
-	"welcomeTip3": "Aggiungi catene EVM personalizzate con la scheda + per monitorare qualsiasi rete",
 	"balancesStale": "I saldi potrebbero essere obsoleti",
 	"lastUpdated": "Ultimo aggiornamento {{time}}",
 	"lastUpdatedNever": "Mai caricato",

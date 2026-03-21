@@ -16,5 +16,6 @@
 	"hideToken": "Ocultar token",
 	"revertToAutoDetect": "Reverter para detecção automática",
 	"unhide": "Reexibir",
-	"addCustomToken": "Adicionar token personalizado"
+	"addCustomToken": "Adicionar token personalizado",
+	"invalidZcashRecipient": "Endereço inválido — deve ser u1... (unified) ou t1.../t3... (transparent)"
 }

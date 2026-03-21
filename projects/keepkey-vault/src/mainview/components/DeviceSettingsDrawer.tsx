@@ -2,15 +2,24 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
+import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
+
+interface DevicePolicy {
+	policyName?: string
+	policy_name?: string
+	enabled: boolean
+}
 
 interface DeviceFeatures {
 	label?: string
 	pinProtection?: boolean
 	passphraseProtection?: boolean
 	u2fCounter?: number
+	policiesList?: DevicePolicy[]
+	policies?: DevicePolicy[]
 }
 
 interface DeviceSettingsDrawerProps {
@@ -50,7 +59,7 @@ function Section({ title, color, defaultOpen = true, children }: {
 				borderBottom={open ? "1px solid" : "none"}
 				borderColor="kk.border"
 			>
-				<Text fontSize="md" fontWeight="600" color={color || "kk.gold"}>{title}</Text>
+				<Text fontSize="lg" fontWeight="600" color={color || "kk.gold"}>{title}</Text>
 				<svg
 					width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 					strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -109,7 +118,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 					<circle cx="12" cy="12" r="10" fill="#22C55E" />
 					<path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 				</svg>
-				<Text fontSize="9px" color="#22C55E" fontWeight="600">{t("official")}</Text>
+				<Text fontSize="11px" color="#22C55E" fontWeight="600">{t("official")}</Text>
 			</Flex>
 		)
 	}
@@ -119,7 +128,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 				<path d="M12 2L1 21h22L12 2z" fill="#FB923C" />
 				<path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
 			</svg>
-			<Text fontSize="9px" color="#FB923C" fontWeight="600">{t("unknown")}</Text>
+			<Text fontSize="11px" color="#FB923C" fontWeight="600">{t("unknown")}</Text>
 		</Flex>
 	)
 }
@@ -144,13 +153,22 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removingPin, setRemovingPin] = useState(false)
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '' })
+	const [togglingPolicy, setTogglingPolicy] = useState("")
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
+	const [togglingSwaps, setTogglingSwaps] = useState(false)
+	const [togglingBip85, setTogglingBip85] = useState(false)
+	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
+	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
-	const [pioneerUrl, setPioneerUrl] = useState("")
-	const [savingPioneerUrl, setSavingPioneerUrl] = useState(false)
-	const [pioneerUrlMsg, setPioneerUrlMsg] = useState<{ text: string; ok: boolean } | null>(null)
+	const [newServerUrl, setNewServerUrl] = useState("")
+	const [newServerLabel, setNewServerLabel] = useState("")
+	const [addingServer, setAddingServer] = useState(false)
+	const [serverMsg, setServerMsg] = useState<{ text: string; ok: boolean } | null>(null)
+	const [switchingServer, setSwitchingServer] = useState("")
+	const [resetConfirm, setResetConfirm] = useState(false)
+	const [resetting, setResetting] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -163,12 +181,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				.catch(() => setFeaturesError(true))
 		}
 		rpcRequest<AppSettings>("getAppSettings")
-			.then(s => { setAppSettings(s); setPioneerUrl(s.pioneerApiBase || "") })
+			.then(s => setAppSettings(s))
 			.catch(() => {})
 	}, [open, deviceState.state])
 
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
-	useEffect(() => { if (!open) { setWipeConfirm(false); setRemovePinConfirm(false) } }, [open])
+	useEffect(() => { if (!open) { setWipeConfirm(false); setRemovePinConfirm(false); setResetConfirm(false) } }, [open])
 
 	// Escape key closes drawer
 	useEffect(() => {
@@ -230,6 +248,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		onClose()
 	}, [onClose])
 
+	const factoryReset = useCallback(async () => {
+		setResetting(true)
+		try {
+			await rpcRequest("factoryReset", undefined, 30000)
+			// App will quit after reset — nothing more to do
+		} catch (e: any) {
+			console.error("factoryReset:", e)
+			setResetting(false)
+			setResetConfirm(false)
+		}
+	}, [])
+
 	const toggleRestApi = useCallback(async (enabled: boolean) => {
 		setTogglingRestApi(true)
 		try {
@@ -239,6 +269,42 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { console.error("setRestApiEnabled:", e) }
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
+
+	const toggleSwaps = useCallback(async (enabled: boolean) => {
+		setTogglingSwaps(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setSwapsEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setSwapsEnabled:", e) }
+		setTogglingSwaps(false)
+	}, [])
+
+	const toggleBip85 = useCallback(async (enabled: boolean) => {
+		setTogglingBip85(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setBip85Enabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setBip85Enabled:", e) }
+		setTogglingBip85(false)
+	}, [])
+
+	const toggleZcashPrivacy = useCallback(async (enabled: boolean) => {
+		setTogglingZcashPrivacy(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setZcashPrivacyEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setZcashPrivacyEnabled:", e) }
+		setTogglingZcashPrivacy(false)
+	}, [])
+
+	const togglePreRelease = useCallback(async (enabled: boolean) => {
+		setTogglingPreRelease(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setPreReleaseUpdates", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setPreReleaseUpdates:", e) }
+		setTogglingPreRelease(false)
+	}, [])
 
 	const openSwagger = useCallback(async () => {
 		try {
@@ -298,27 +364,82 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingPassphrase(true)
 		try {
 			await rpcRequest("applySettings", { usePassphrase: enable }, 60000)
-			// Refresh features to reflect the new state
-			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
-			setFeatures(updated)
-		} catch (e: any) { console.error("togglePassphrase:", e) }
+			// When enabling, state transitions to 'needs_passphrase' and the dashboard
+			// (including this drawer) unmounts — skip getFeatures to avoid racing with
+			// promptPin()'s getPublicKeys() on the transport lock (causes hang).
+			// When disabling, state stays 'ready' so refresh features for the toggle.
+			if (!enable) {
+				const updated = await rpcRequest<DeviceFeatures>("getFeatures")
+				setFeatures(updated)
+			}
+		} catch (e: any) {
+			console.error("togglePassphrase:", e)
+			// Refresh features from device on failure — if PIN timed out or the
+			// operation was cancelled, the device is still the authority on whether
+			// passphrase protection is enabled.
+			rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
+		}
 		setTogglingPassphrase(false)
 	}, [])
 
-	const savePioneerUrl = useCallback(async (url: string) => {
-		setSavingPioneerUrl(true)
-		setPioneerUrlMsg(null)
+	// Get whether a named policy is enabled from device features
+	const isPolicyEnabled = useCallback((name: string): boolean => {
+		if (!features) return false
+		const policies = features.policiesList || features.policies || []
+		const p = policies.find((x: DevicePolicy) => (x.policyName || x.policy_name) === name)
+		return p?.enabled ?? false
+	}, [features])
+
+	const handleTogglePolicy = useCallback(async (policyName: string, enable: boolean) => {
+		setTogglingPolicy(policyName)
 		try {
-			const result = await rpcRequest<AppSettings>("setPioneerApiBase", { url }, 10000)
+			await rpcRequest("applyPolicy", { policyName, enabled: enable }, 60000)
+			// Refresh features to reflect the new state
+			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
+			setFeatures(updated)
+		} catch (e: any) { console.error("applyPolicy:", e) }
+		setTogglingPolicy("")
+	}, [])
+
+	const addServer = useCallback(async () => {
+		setAddingServer(true)
+		setServerMsg({ text: "Checking server health...", ok: true })
+		try {
+			const result = await rpcRequest<AppSettings>("addPioneerServer", { url: newServerUrl, label: newServerLabel }, 15000)
 			setAppSettings(result)
-			setPioneerUrl(result.pioneerApiBase || "")
-			setPioneerUrlMsg({ text: url ? "Saved" : "Reset to default", ok: true })
-			setTimeout(() => setPioneerUrlMsg(null), 3000)
+			setNewServerUrl("")
+			setNewServerLabel("")
+			setServerMsg({ text: "Server added", ok: true })
+			setTimeout(() => setServerMsg(null), 3000)
 		} catch (e: any) {
-			setPioneerUrlMsg({ text: e.message || "Failed", ok: false })
-			setTimeout(() => setPioneerUrlMsg(null), 4000)
+			setServerMsg({ text: e.message || "Failed", ok: false })
+			setTimeout(() => setServerMsg(null), 5000)
 		}
-		setSavingPioneerUrl(false)
+		setAddingServer(false)
+	}, [newServerUrl, newServerLabel])
+
+	const removeServer = useCallback(async (url: string) => {
+		try {
+			const result = await rpcRequest<AppSettings>("removePioneerServer", { url }, 10000)
+			setAppSettings(result)
+		} catch (e: any) {
+			setServerMsg({ text: e.message || "Failed to remove", ok: false })
+			setTimeout(() => setServerMsg(null), 3000)
+		}
+	}, [])
+
+	const switchServer = useCallback(async (url: string) => {
+		setSwitchingServer(url)
+		setServerMsg({ text: "Verifying server...", ok: true })
+		try {
+			const result = await rpcRequest<AppSettings>("setActivePioneerServer", { url }, 15000)
+			setAppSettings(result)
+			setServerMsg(null)
+		} catch (e: any) {
+			setServerMsg({ text: e.message || "Failed to switch", ok: false })
+			setTimeout(() => setServerMsg(null), 5000)
+		}
+		setSwitchingServer("")
 	}, [])
 
 	const securityValue = (val: boolean | undefined): string => {
@@ -347,7 +468,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				top="0"
 				right="0"
 				h="100vh"
-				w="400px"
+				w="440px"
 				maxW="90vw"
 				bg="kk.bg"
 				borderLeft="1px solid"
@@ -393,9 +514,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				{/* Content */}
 				<VStack gap="3" align="stretch" p="4">
 
-					{/* ── Language ────────────────────────────────────── */}
-					<Section title={t("language")}>
+					{/* ── Language & Currency ─────────────────────────── */}
+					<Section title={t("language")} defaultOpen={false}>
 						<LanguageSelector />
+						<Box mt="2">
+							<CurrencySelector />
+						</Box>
 					</Section>
 
 					{/* ── Device Identity ─────────────────────────────── */}
@@ -405,17 +529,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							<InfoRow label={t("deviceId")} value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
 							{/* Firmware with verification badge */}
 							<Flex justify="space-between" align="center">
-								<Text fontSize="xs" color="kk.textSecondary">{t("firmware")}</Text>
+								<Text fontSize="sm" color="kk.textSecondary">{t("firmware")}</Text>
 								<Flex align="center" gap="2">
-									<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{deviceState.firmwareVersion || "—"}</Text>
+									<Text fontSize="sm" color="kk.textPrimary" fontFamily="mono">{deviceState.firmwareVersion || "—"}</Text>
 									<VerificationBadge verified={deviceState.firmwareVerified} t={t} />
 								</Flex>
 							</Flex>
 							{/* Bootloader with verification badge */}
 							<Flex justify="space-between" align="center">
-								<Text fontSize="xs" color="kk.textSecondary">{t("bootloader")}</Text>
+								<Text fontSize="sm" color="kk.textSecondary">{t("bootloader")}</Text>
 								<Flex align="center" gap="2">
-									<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{deviceState.bootloaderVersion || "—"}</Text>
+									<Text fontSize="sm" color="kk.textPrimary" fontFamily="mono">{deviceState.bootloaderVersion || "—"}</Text>
 									<VerificationBadge verified={deviceState.bootloaderVerified} t={t} />
 								</Flex>
 							</Flex>
@@ -426,13 +550,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								<Box mt="1" pt="2" borderTop="1px solid" borderColor="kk.border">
 									{deviceState.firmwareHash && (
 										<Box mb="1">
-											<Text fontSize="9px" color="kk.textSecondary">{t("fwHash")}</Text>
+											<Text fontSize="10px" color="kk.textSecondary">{t("fwHash")}</Text>
 											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.firmwareHash}</Text>
 										</Box>
 									)}
 									{deviceState.bootloaderHash && (
 										<Box>
-											<Text fontSize="9px" color="kk.textSecondary">{t("blHash")}</Text>
+											<Text fontSize="10px" color="kk.textSecondary">{t("blHash")}</Text>
 											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.bootloaderHash}</Text>
 										</Box>
 									)}
@@ -441,7 +565,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 
 						<Box mt="4">
-							<Text fontSize="xs" color="kk.textSecondary" mb="2">{t("changeLabel")}</Text>
+							<Text fontSize="sm" color="kk.textPrimary" fontWeight="600" mb="2">{t("changeLabel")}</Text>
 							<Flex gap="2">
 								<Input
 									value={label}
@@ -454,25 +578,25 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									size="sm"
 									flex="1"
 								/>
-								<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={saveLabel} disabled={saving || !label.trim()}>
+								<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} onClick={saveLabel} disabled={saving || !label.trim()}>
 									{saving ? "..." : t("save", { ns: "common" })}
 								</Button>
 							</Flex>
-							{labelSaved && <Text fontSize="xs" color="kk.success" mt="1">{t("labelSaved")}</Text>}
+							{labelSaved && <Text fontSize="sm" color="kk.success" mt="1">{t("labelSaved")}</Text>}
 						</Box>
 
 						<Flex gap="3" align="center" mt="3">
-							<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={pingDevice} disabled={pinging}>
+							<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={pingDevice} disabled={pinging}>
 								{pinging ? "..." : t("pingDevice")}
 							</Button>
-							{pingResult && <Text fontSize="xs" color="kk.success">{pingResult}</Text>}
+							{pingResult && <Text fontSize="sm" color="kk.success">{pingResult}</Text>}
 						</Flex>
 					</Section>
 
 					{/* ── Security ────────────────────────────────────── */}
 					<Section title={t("security")}>
 						{featuresError && (
-							<Text fontSize="xs" color="kk.error" mb="2">{t("couldNotLoadFeatures")}</Text>
+							<Text fontSize="sm" color="kk.error" mb="2">{t("couldNotLoadFeatures")}</Text>
 						)}
 
 						{/* ── PIN row ────────────────────────────── */}
@@ -491,8 +615,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</svg>
 								</Flex>
 								<Box>
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("pinProtection")}</Text>
-									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("pinProtection")}</Text>
+									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
 										{features?.pinProtection ? t("enabled", { ns: "common" }) : t("notSet", { ns: "common" })}
 									</Text>
 								</Box>
@@ -605,8 +729,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</svg>
 								</Flex>
 								<Box>
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("bip39Passphrase")}</Text>
-									<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip39Passphrase")}</Text>
+									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
 										{togglingPassphrase
 											? t("confirmOnDevice")
 											: features?.passphraseProtection
@@ -634,8 +758,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										</svg>
 									</Flex>
 									<Box>
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("verifySeed")}</Text>
-										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("verifySeed")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
 											{verifyResult
 												? verifyResult.success ? t("seedVerified") : verifyResult.message
 												: t("confirmRecoveryPhrase")
@@ -686,6 +810,66 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Box>
 					</Section>
 
+					{/* ── Signing Policy ─────────────────────────────── */}
+					<Section title={t("signingPolicy")} defaultOpen={false}>
+						<VStack gap="4" align="stretch">
+							{/* Advanced Mode (blind signing) */}
+							<Flex
+								align="center"
+								justify="space-between"
+								py="3"
+								borderBottom="1px solid"
+								borderColor="rgba(255,255,255,0.06)"
+							>
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M12 9v4M12 17h.01" />
+											<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("advancedMode")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("advancedModeDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={isPolicyEnabled("AdvancedMode")}
+									onChange={(v) => handleTogglePolicy("AdvancedMode", v)}
+									disabled={togglingPolicy === "AdvancedMode" || !features}
+								/>
+							</Flex>
+
+							{/* Experimental features */}
+							<Flex
+								align="center"
+								justify="space-between"
+								py="3"
+							>
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(130,100,250,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8264FA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("experimentalFeatures")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("experimentalFeaturesDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={isPolicyEnabled("Experimental")}
+									onChange={(v) => handleTogglePolicy("Experimental", v)}
+									disabled={togglingPolicy === "Experimental" || !features}
+								/>
+							</Flex>
+						</VStack>
+					</Section>
+
 					{/* ── Application Settings ────────────────────────── */}
 					<Section title={t("application")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
@@ -700,8 +884,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										</svg>
 									</Flex>
 									<Box>
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("apiBridge")}</Text>
-										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("apiBridge")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
 											{t("apiBridgeDescription")}
 										</Text>
 									</Box>
@@ -729,7 +913,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										</Text>
 									</Flex>
 									{appSettings.restApiEnabled && (
-										<Text fontSize="xs" color="kk.textMuted" fontFamily="mono">
+										<Text fontSize="sm" color="kk.textSecondary" fontFamily="mono">
 											:1646
 										</Text>
 									)}
@@ -778,8 +962,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
 								<Flex justify="space-between" align="center">
 									<Box>
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("appVersion")}</Text>
-										<Text fontSize="xs" color="kk.textSecondary" mt="0.5" fontFamily="mono">
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("appVersion")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5" fontFamily="mono">
 											{appVersion ? `v${appVersion.version}` : "—"}
 											{appVersion?.channel && appVersion.channel !== "stable" ? ` (${appVersion.channel})` : ""}
 										</Text>
@@ -803,58 +987,247 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 								</Flex>
 								{updateMessage && (
-									<Text fontSize="xs" color={updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1">
+									<Text fontSize="sm" color={updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1">
 										{updateMessage}
 									</Text>
 								)}
 							</Box>
 
+							{/* Pre-release updates toggle */}
+							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
+								<Flex align="center" gap="3">
+									<Box w="8" h="8" borderRadius="lg" bg="rgba(139,92,246,0.15)" display="flex" alignItems="center" justifyContent="center">
+										<Text fontSize="sm">🧪</Text>
+									</Box>
+									<VStack gap="0" align="start">
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("preReleaseUpdates", { defaultValue: "Pre-release Updates" })}</Text>
+										<Text fontSize="2xs" color="kk.textMuted">{t("preReleaseUpdatesDesc", { defaultValue: "Get early access to new features before stable release" })}</Text>
+									</VStack>
+								</Flex>
+								<Box
+									as="button"
+									w="44px" h="24px"
+									borderRadius="full"
+									bg={appSettings.preReleaseUpdates ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}
+									position="relative"
+									transition="all 0.2s"
+									cursor={togglingPreRelease ? "not-allowed" : "pointer"}
+									opacity={togglingPreRelease ? 0.5 : 1}
+									onClick={() => !togglingPreRelease && togglePreRelease(!appSettings.preReleaseUpdates)}
+								>
+									<Box
+										w="18px" h="18px"
+										borderRadius="full"
+										bg={appSettings.preReleaseUpdates ? "#8B5CF6" : "rgba(255,255,255,0.3)"}
+										position="absolute"
+										top="3px"
+										left={appSettings.preReleaseUpdates ? "23px" : "3px"}
+										transition="all 0.2s"
+									/>
+								</Box>
+							</Flex>
+
 						</VStack>
 					</Section>
 
-					{/* ── Developer ───────────────────────────────────── */}
-					<Section title="Developer" defaultOpen={false}>
-						<VStack gap="3" align="stretch">
+					{/* ── Feature Flags ──────────────────────────────── */}
+					<Section title={t("featureFlags")} defaultOpen={false}>
+						<VStack gap="4" align="stretch">
+							{/* Swaps toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M16 3l5 5-5 5" />
+											<path d="M21 8H9" />
+											<path d="M8 21l-5-5 5-5" />
+											<path d="M3 16h12" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("swapsFeature")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("swapsFeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.swapsEnabled}
+									onChange={toggleSwaps}
+									disabled={togglingSwaps}
+								/>
+							</Flex>
+
+							{/* BIP-85 Derived Seeds toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("bip85FeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.bip85Enabled}
+									onChange={toggleBip85}
+									disabled={togglingBip85}
+								/>
+							</Flex>
+
+							{/* Zcash Shielded Privacy toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("zcashPrivacyFeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.zcashPrivacyEnabled}
+									onChange={toggleZcashPrivacy}
+									disabled={togglingZcashPrivacy}
+								/>
+							</Flex>
+						</VStack>
+					</Section>
+
+					{/* ── API Services ────────────────────────────────── */}
+					<Section title="API Services" defaultOpen={false}>
+						<VStack gap="4" align="stretch">
 							<Box>
-								<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Pioneer API Server</Text>
-								<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-									Override the Pioneer API base URL. Leave empty for the default production server.
+								<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Pioneer API Servers</Text>
+								<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+									Manage which Pioneer API server the vault connects to.
 								</Text>
 							</Box>
-							<Flex gap="2">
-								<Input
-									value={pioneerUrl}
-									onChange={(e) => setPioneerUrl(e.target.value)}
-									placeholder="https://api.keepkey.info"
-									bg="kk.bg"
-									border="1px solid"
-									borderColor="kk.border"
-									color="kk.textPrimary"
-									size="sm"
-									flex="1"
-									fontFamily="mono"
-									fontSize="xs"
-								/>
-								<Button size="sm" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={() => savePioneerUrl(pioneerUrl)} disabled={savingPioneerUrl}>
-									{savingPioneerUrl ? "..." : "Save"}
-								</Button>
-							</Flex>
-							{pioneerUrl && (
-								<Box
-									as="button"
-									fontSize="xs"
-									color="kk.textSecondary"
-									cursor="pointer"
-									_hover={{ color: "kk.gold" }}
-									textAlign="left"
-									onClick={() => { setPioneerUrl(""); savePioneerUrl("") }}
-								>
-									Reset to default
-								</Box>
-							)}
-							{pioneerUrlMsg && (
-								<Text fontSize="xs" color={pioneerUrlMsg.ok ? "kk.success" : "kk.error"}>
-									{pioneerUrlMsg.text}
+
+							{/* Server list */}
+							<VStack gap="2" align="stretch">
+								{(appSettings.pioneerServers || []).map(server => {
+									const isActive = server.url === appSettings.activePioneerServer
+									return (
+										<Flex
+											key={server.url}
+											align="center"
+											gap="2"
+											px="3"
+											py="2"
+											bg={isActive ? "rgba(198,170,107,0.08)" : "kk.bg"}
+											border="1px solid"
+											borderColor={isActive ? "kk.gold" : "kk.border"}
+											borderRadius="lg"
+											cursor={isActive ? "default" : "pointer"}
+											_hover={isActive ? {} : { borderColor: "kk.gold", bg: "rgba(198,170,107,0.04)" }}
+											onClick={() => !isActive && switchServer(server.url)}
+										>
+											{/* Radio indicator */}
+											<Box
+												w="14px" h="14px" borderRadius="full"
+												border="2px solid"
+												borderColor={isActive ? "kk.gold" : "kk.border"}
+												display="flex" alignItems="center" justifyContent="center"
+												flexShrink={0}
+											>
+												{isActive && <Box w="7px" h="7px" borderRadius="full" bg="kk.gold" />}
+											</Box>
+
+											<Box flex="1" minW="0">
+												<Flex align="center" gap="2">
+													<Text fontSize="sm" fontWeight="500" color="kk.textPrimary" truncate>{server.label}</Text>
+													{server.isDefault && (
+														<Text fontSize="11px" color="kk.gold" fontWeight="600" px="1.5" py="0.5" bg="rgba(198,170,107,0.12)" borderRadius="md">DEFAULT</Text>
+													)}
+												</Flex>
+												<Text fontSize="12px" color="kk.textSecondary" fontFamily="mono" truncate>{server.url}</Text>
+											</Box>
+
+											{switchingServer === server.url && (
+												<Text fontSize="sm" color="kk.textSecondary">...</Text>
+											)}
+
+											{/* Remove button (not for default) */}
+											{!server.isDefault && (
+												<Box
+													as="button"
+													onClick={(e: React.MouseEvent) => { e.stopPropagation(); removeServer(server.url) }}
+													color="kk.textSecondary"
+													_hover={{ color: "kk.error" }}
+													p="1"
+													flexShrink={0}
+												>
+													<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+														<line x1="18" y1="6" x2="6" y2="18" />
+														<line x1="6" y1="6" x2="18" y2="18" />
+													</svg>
+												</Box>
+											)}
+										</Flex>
+									)
+								})}
+							</VStack>
+
+							{/* Add new server */}
+							<Box borderTop="1px solid" borderColor="kk.border" pt="3">
+								<Text fontSize="sm" color="kk.textSecondary" mb="2">Add Server</Text>
+								<VStack gap="2" align="stretch">
+									<Input
+										value={newServerLabel}
+										onChange={(e) => setNewServerLabel(e.target.value)}
+										placeholder="My Server"
+										bg="kk.bg"
+										border="1px solid"
+										borderColor="kk.border"
+										color="kk.textPrimary"
+										size="sm"
+										fontSize="xs"
+									/>
+									<Flex gap="2">
+										<Input
+											value={newServerUrl}
+											onChange={(e) => setNewServerUrl(e.target.value)}
+											placeholder="https://my-server.example.com"
+											bg="kk.bg"
+											border="1px solid"
+											borderColor="kk.border"
+											color="kk.textPrimary"
+											size="sm"
+											flex="1"
+											fontFamily="mono"
+											fontSize="xs"
+										/>
+										<Button
+											size="sm"
+											px="4"
+											py="2"
+											bg="kk.gold"
+											color="black"
+											_hover={{ bg: "kk.goldHover" }}
+											onClick={addServer}
+											disabled={addingServer || !newServerUrl.trim() || !newServerLabel.trim()}
+										>
+											{addingServer ? "..." : "Add"}
+										</Button>
+									</Flex>
+								</VStack>
+							</Box>
+
+							{serverMsg && (
+								<Text fontSize="sm" color={serverMsg.ok ? "kk.success" : "kk.error"}>
+									{serverMsg.text}
 								</Text>
 							)}
 						</VStack>
@@ -862,23 +1235,48 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Danger Zone ─────────────────────────────────── */}
 					<Section title={t("dangerZone")} color="kk.error" defaultOpen={false}>
-						<Text fontSize="xs" color="kk.textSecondary" mb="3">
+						<Text fontSize="sm" color="kk.textSecondary" mb="3">
 							{t("wipeWarning")}
 						</Text>
 						{!wipeConfirm ? (
-							<Button size="sm" variant="outline" borderColor="kk.error" color="kk.error" _hover={{ bg: "rgba(255,23,68,0.1)" }} onClick={() => setWipeConfirm(true)}>
+							<Button size="sm" variant="outline" borderColor="kk.error" color="kk.error" px="4" py="2" _hover={{ bg: "rgba(255,23,68,0.1)" }} onClick={() => setWipeConfirm(true)}>
 								{t("wipeDevice")}
 							</Button>
 						) : (
 							<Flex gap="3">
-								<Button size="sm" bg="kk.error" color="white" _hover={{ opacity: 0.8 }} onClick={wipeDevice} disabled={wiping}>
+								<Button size="sm" bg="kk.error" color="white" px="4" py="2" _hover={{ opacity: 0.8 }} onClick={wipeDevice} disabled={wiping}>
 									{wiping ? t("wiping") : t("confirmWipe")}
 								</Button>
-								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setWipeConfirm(false)}>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={() => setWipeConfirm(false)}>
 									{t("cancel", { ns: "common" })}
 								</Button>
 							</Flex>
 						)}
+
+						<Box borderTop="1px solid" borderColor="whiteAlpha.100" mt="4" pt="4">
+							<Text fontSize="sm" color="kk.textSecondary" mb="3">
+								{t("factoryResetWarning")}
+							</Text>
+							{!resetConfirm ? (
+								<Button size="sm" variant="outline" borderColor="kk.error" color="kk.error" px="4" py="2" _hover={{ bg: "rgba(255,23,68,0.1)" }} onClick={() => setResetConfirm(true)}>
+									{t("factoryResetApp")}
+								</Button>
+							) : (
+								<VStack gap="3" align="stretch">
+									<Text fontSize="xs" color="kk.textSecondary" bg="whiteAlpha.50" borderRadius="md" px="3" py="2">
+										{t("factoryResetQuitting")}
+									</Text>
+									<Flex gap="3">
+										<Button size="sm" bg="kk.error" color="white" px="4" py="2" _hover={{ opacity: 0.8 }} onClick={factoryReset} disabled={resetting}>
+											{resetting ? t("resetting") : t("confirmFactoryReset")}
+										</Button>
+										<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={() => setResetConfirm(false)} disabled={resetting}>
+											{t("cancel", { ns: "common" })}
+										</Button>
+									</Flex>
+								</VStack>
+							)}
+						</Box>
 					</Section>
 
 				</VStack>
@@ -890,8 +1288,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 function InfoRow({ label, value }: { label: string; value: string }) {
 	return (
 		<Flex justify="space-between" align="center">
-			<Text fontSize="xs" color="kk.textSecondary">{label}</Text>
-			<Text fontSize="xs" color="kk.textPrimary" fontFamily="mono">{value}</Text>
+			<Text fontSize="sm" color="kk.textSecondary">{label}</Text>
+			<Text fontSize="sm" color="kk.textPrimary" fontFamily="mono">{value}</Text>
 		</Flex>
 	)
 }

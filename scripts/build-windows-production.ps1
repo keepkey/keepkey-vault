@@ -147,6 +147,13 @@ function Sign-File {
         return $true
     }
 
+    # Skip bun shims in .bin/ directories — they are shell scripts with .exe extension,
+    # not real PE binaries. signtool returns 0x800700C1 (ERROR_BAD_EXE_FORMAT).
+    if ($FilePath -like '*\.bin\*' -or $FilePath -like '*/.bin/*') {
+        Write-Host "    [SKIP] Bun shim (not PE): $fileName" -ForegroundColor Gray
+        return $true
+    }
+
     # Check if already signed
     try {
         $sig = Get-AuthenticodeSignature $FilePath
@@ -171,13 +178,18 @@ function Sign-File {
 
     $signArgs += $FilePath
 
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $result = & $SIGNTOOL @signArgs 2>&1
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
 
-    if ($LASTEXITCODE -eq 0) {
+    if ($exitCode -eq 0) {
         Write-Success "Signed: $fileName"
         return $true
     } else {
-        if ($result -match "not recognized") {
+        $resultStr = $result -join ' '
+        if ($resultStr -match "not recognized" -or $resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") {
             Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
             return $true
         }
@@ -274,10 +286,34 @@ if (-not $SkipBuild) {
     $ErrorActionPreference = 'Stop'
     Pop-Location
 
+    Write-Step "Building zcash-cli sidecar (Rust)"
+    $ZcashCliDir = Join-Path $ProjectDir "zcash-cli"
+    if (Test-Path $ZcashCliDir) {
+        Push-Location $ZcashCliDir
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed for zcash-cli" }
+        Pop-Location
+        Write-Success "zcash-cli.exe built"
+    } else {
+        Write-Host "    [SKIP] zcash-cli/ not found - Zcash shielded features will be unavailable" -ForegroundColor Yellow
+    }
+
     Write-Step "Building Electrobun Windows app"
     Push-Location $ProjectDir
     bun run build
     Pop-Location
+
+    # Patch channel to stable — Electrobun's --env=stable produces a macOS-style
+    # bundle on Windows that our installer can't use. Build as dev, patch to stable.
+    $VersionJson = Join-Path $BuildDir "Resources\version.json"
+    if (Test-Path $VersionJson) {
+        $vj = Get-Content $VersionJson -Raw | ConvertFrom-Json
+        $vj.channel = "stable"
+        $vj.name = "keepkey-vault"
+        $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
+        $vj | ConvertTo-Json -Compress | Set-Content $VersionJson -Encoding UTF8
+        Write-Success "Patched version.json: channel=stable"
+    }
 
     Write-Success "Build completed"
 } else {
@@ -302,8 +338,9 @@ $filesToSign = @()
 $filesToSign += Get-ChildItem -Path $binDir -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $binDir -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue
 
-# Also sign any .node and .dll files in Resources/
+# Also sign any .exe, .node and .dll files in Resources/ (includes zcash-cli.exe sidecar)
 $resourcesDir = Join-Path $BuildDir "Resources"
+$filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.node" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue
 
@@ -435,6 +472,16 @@ if (-not (Test-Path $WrapperExe)) {
     Write-Success "Wrapper EXE already exists"
 }
 
+# Copy DPI-awareness manifest next to wrapper EXE
+# Windows auto-loads <exename>.exe.manifest for per-monitor DPI scaling.
+# Without this, WebView2 renders at 96 DPI and the OS bitmap-scales it — blurry text/UI.
+$ManifestSrc = Join-Path $ScriptDir "KeepKeyVault.exe.manifest"
+$ManifestDst = Join-Path $BuildDir "KeepKeyVault.exe.manifest"
+if (Test-Path $ManifestSrc) {
+    Copy-Item $ManifestSrc $ManifestDst -Force
+    Write-Success "DPI manifest copied"
+}
+
 # Embed KeepKey icon into all EXEs
 # Electrobun's rcedit call fails (ENOENT — hardcoded CI path), so we do it ourselves.
 $RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
@@ -506,6 +553,7 @@ $isccArgs = @(
     "/DMyAppVersion=$Version",
     "/DMySourceDir=$BuildDir",
     "/DMyOutputDir=$ArtifactsDir",
+    "/DMyScriptDir=$ScriptDir",
     $IssFile
 )
 

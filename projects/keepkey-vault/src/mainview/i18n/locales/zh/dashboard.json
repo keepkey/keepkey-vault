@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "您的钱包已准备就绪。以下是入门指南：",
 	"welcomeTip1": "点击下方任意链，然后按「接收」获取您的存款地址",
 	"welcomeTip2": "将加密货币发送到您的地址 — 余额将自动显示在此处",
-	"welcomeTip3": "使用 + 卡片添加自定义 EVM 链以跟踪任何网络",
 	"balancesStale": "余额可能已过时",
 	"lastUpdated": "上次更新 {{time}}",
 	"lastUpdatedNever": "从未加载",

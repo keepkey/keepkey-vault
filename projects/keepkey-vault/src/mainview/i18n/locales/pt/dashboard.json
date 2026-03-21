@@ -12,7 +12,6 @@
 	"welcomeSubtitle": "Sua carteira está pronta. Veja como começar:",
 	"welcomeTip1": "Toque em qualquer rede abaixo e depois em Receber para obter seu endereço de depósito",
 	"welcomeTip2": "Envie cripto para seu endereço — seu saldo aparecerá aqui automaticamente",
-	"welcomeTip3": "Adicione redes EVM personalizadas com o cartão + para rastrear qualquer rede",
 	"balancesStale": "Os saldos podem estar desatualizados",
 	"lastUpdated": "Última atualização {{time}}",
 	"lastUpdatedNever": "Nunca carregado",

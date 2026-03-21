@@ -134,7 +134,49 @@ export function RecoveryWordEntry({
     const isPinMismatch = errorType === 'pin-mismatch'
     const isInvalidMnemonic = errorType === 'invalid-mnemonic'
     const isBadWords = errorType === 'bad-words'
+    const isWordNotFound = errorType === 'word-not-found'
     const isCipherError = isInvalidMnemonic || isBadWords
+
+    // Word-not-found: auto-retrying — show a brief warning that will auto-clear
+    if (isWordNotFound) {
+      return (
+        <Flex
+          position="fixed"
+          top={0}
+          left={0}
+          w="100vw"
+          h="100vh"
+          bg="blackAlpha.800"
+          align="center"
+          justify="center"
+          zIndex={2000}
+        >
+          <Box
+            bg="kk.cardBg"
+            borderRadius="xl"
+            border="1px solid"
+            borderColor="kk.warning"
+            p="8"
+            maxW="460px"
+            w="90%"
+            boxShadow="0 8px 32px rgba(0,0,0,0.6)"
+          >
+            <VStack gap={4} textAlign="center">
+              <FaExclamationTriangle color="#FFB300" size={48} />
+              <Text fontSize="xl" fontWeight="bold" color="kk.warning">
+                {t('recovery.wordNotFoundTitle')}
+              </Text>
+              <Text color="kk.textSecondary" fontSize="sm">
+                {t('recovery.wordNotFoundMessage')}
+              </Text>
+              <Text color="kk.textMuted" fontSize="xs">
+                {t('recovery.wordNotFoundRestarting')}
+              </Text>
+            </VStack>
+          </Box>
+        </Flex>
+      )
+    }
 
     const title = isPinMismatch ? t('recovery.pinMismatchTitle')
       : isCipherError ? t('recovery.incorrectWordsTitle')

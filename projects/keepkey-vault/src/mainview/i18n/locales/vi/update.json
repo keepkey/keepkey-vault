@@ -1,0 +1,11 @@
+{
+	"newVersionAvailable": "Có phiên bản mới",
+	"downloadingWithProgress": "Đang tải bản cập nhật... {{progress}}%",
+	"downloading": "Đang tải bản cập nhật...",
+	"readyToInstall": "Bản cập nhật đã tải xuống và sẵn sàng",
+	"applying": "Đang cài đặt bản cập nhật, khởi động lại...",
+	"errorWithMessage": "Lỗi cập nhật: {{error}}",
+	"download": "Tải xuống",
+	"later": "Để sau",
+	"restartToUpdate": "Khởi động lại để cập nhật"
+}

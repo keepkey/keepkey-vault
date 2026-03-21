@@ -1,0 +1,873 @@
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useTranslation } from "react-i18next"
+import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
+import { FaShieldAlt, FaCopy, FaCheck, FaEnvelope, FaChevronDown, FaChevronUp } from "react-icons/fa"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { generateQRSvg } from "../lib/qr"
+
+/** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
+function validateZcashRecipient(addr: string): { valid: boolean; error?: string } {
+	const s = addr.trim()
+	if (!s) return { valid: false }
+	if (s.startsWith('u1') && s.length >= 70) return { valid: true }
+	if (s.startsWith('zs1') && s.length >= 70) return { valid: true }
+	const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
+	if ((s.startsWith('t1') || s.startsWith('t3')) && s.length === 35 && BASE58.test(s)) return { valid: true }
+	return { valid: false, error: 'invalidZcashRecipient' }
+}
+
+type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
+type ScanState = "idle" | "scanning" | "done"
+
+interface ScanProgress {
+	percent: number
+	scannedHeight: number
+	tipHeight: number
+	blocksPerSec: number
+	etaSeconds: number
+}
+
+function formatEta(seconds: number): string {
+	if (seconds <= 0) return "calculating..."
+	if (seconds < 60) return `${seconds}s`
+	if (seconds < 3600) {
+		const m = Math.floor(seconds / 60)
+		const s = seconds % 60
+		return s > 0 ? `${m}m ${s}s` : `${m}m`
+	}
+	const h = Math.floor(seconds / 3600)
+	const m = Math.floor((seconds % 3600) / 60)
+	return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+export function ZcashPrivacyTab() {
+	const { t } = useTranslation("asset")
+
+	// ── State ──────────────────────────────────────────────────────────
+	const [status, setStatus] = useState<SidecarStatus>("checking")
+	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
+	const [balance, setBalance] = useState<{ confirmed: number; pending: number } | null>(null)
+	const [syncedTo, setSyncedTo] = useState<number | null>(null)
+	const [scanState, setScanState] = useState<ScanState>("idle")
+	const [scanResult, setScanResult] = useState<string | null>(null)
+	const [copied, setCopied] = useState(false)
+
+	// Send form state
+	const [recipient, setRecipient] = useState("")
+	const [amount, setAmount] = useState("")
+	const [memo, setMemo] = useState("")
+	const [sending, setSending] = useState(false)
+	const [sendResult, setSendResult] = useState<string | null>(null)
+	const [sendError, setSendError] = useState<string | null>(null)
+
+	// Shield form state
+	const [shieldAmount, setShieldAmount] = useState("")
+	const [shielding, setShielding] = useState(false)
+	const [shieldResult, setShieldResult] = useState<string | null>(null)
+	const [shieldError, setShieldError] = useState<string | null>(null)
+	const [shieldStep, setShieldStep] = useState<string | null>(null)
+	const [transparentBalance, setTransparentBalance] = useState<number | null>(null)
+
+	// Transaction history state
+	const [transactions, setTransactions] = useState<Array<{
+		id: number; value: number; block_height: number; tx_index: number
+		is_spent: boolean; memo: string | null; nullifier: string
+		txid: string | null; action_index: number
+	}>>([])
+	const [loadingTxs, setLoadingTxs] = useState(false)
+	const [backfilling, setBackfilling] = useState(false)
+	const [backfillResult, setBackfillResult] = useState<string | null>(null)
+	const [expandedMemo, setExpandedMemo] = useState<number | null>(null)
+
+	// Address validation
+	const recipientValidation = useMemo(() => {
+		if (!recipient) return null
+		return validateZcashRecipient(recipient)
+	}, [recipient])
+
+	// ── Shield progress listener ──────────────────────────────────────
+	useEffect(() => {
+		return onRpcMessage("shield-progress", (payload: { step: string; detail?: string }) => {
+			setShieldStep(payload.step)
+			if (payload.step === "complete" && payload.detail) {
+				setShieldResult(payload.detail)
+				setShielding(false)
+				setShieldStep(null)
+			}
+		})
+	}, [])
+
+	// ── Fetch balance ─────────────────────────────────────────────────
+	const refreshBalance = useCallback(async () => {
+		try {
+			const bal = await rpcRequest<{ confirmed: number; pending: number }>(
+				"zcashShieldedBalance", undefined, 10000
+			)
+			setBalance(bal)
+		} catch {
+			// Balance not available yet (needs scan first)
+		}
+	}, [])
+
+	// ── Load transaction history (must be defined before useEffect that refs it) ──
+	const loadTransactions = useCallback(async () => {
+		setLoadingTxs(true)
+		try {
+			const result = await rpcRequest<{ transactions: typeof transactions }>(
+				"zcashGetTransactions", undefined, 30000
+			)
+			setTransactions(result.transactions || [])
+		} catch {
+			// Not available yet
+		}
+		setLoadingTxs(false)
+	}, [])
+
+	// ── Auto-initialize: check status, auto-init from device if needed ──
+	useEffect(() => {
+		let cancelled = false
+		;(async () => {
+			try {
+				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null }>(
+					"zcashShieldedStatus", undefined, 5000
+				)
+				if (cancelled) return
+				if (!r.ready) { setStatus("not_running"); return }
+
+				if (r.fvk_loaded && r.address) {
+					// FVK auto-loaded from DB — no device interaction needed
+					setOrchardAddress(r.address)
+					setStatus("ready")
+					refreshBalance()
+					loadTransactions()
+					return
+				}
+
+				// Sidecar ready but no FVK — auto-init from device
+				setStatus("initializing")
+				const result = await rpcRequest<{ fvk: any; address: string }>(
+					"zcashShieldedInit", { account: 0 }, 60000
+				)
+				if (cancelled) return
+				setOrchardAddress(result.address)
+				setStatus("ready")
+				refreshBalance()
+				loadTransactions()
+			} catch (e: any) {
+				if (cancelled) return
+				console.error("[ZcashPrivacyTab] Auto-init failed:", e)
+				setStatus("not_running")
+			}
+		})()
+		return () => { cancelled = true }
+	}, [refreshBalance, loadTransactions])
+
+	// ── Manual re-init (fallback button, rarely needed) ───────────────
+	const handleInit = useCallback(async () => {
+		setStatus("initializing")
+		try {
+			const result = await rpcRequest<{ fvk: any; address: string }>(
+				"zcashShieldedInit", { account: 0 }, 60000
+			)
+			setOrchardAddress(result.address)
+			setStatus("ready")
+			refreshBalance()
+		} catch (e: any) {
+			console.error("[ZcashPrivacyTab] Init failed:", e)
+			setStatus("not_running")
+		}
+	}, [refreshBalance])
+
+	// ── Scan progress (pushed from bun via RPC message) ──────────────
+	const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
+	const smoothPercent = useRef(0)
+	const [displayPercent, setDisplayPercent] = useState(0)
+
+	useEffect(() => {
+		return onRpcMessage("scan-progress", (payload: ScanProgress) => {
+			setScanProgress(payload)
+		})
+	}, [])
+
+	// Smooth the progress bar animation
+	useEffect(() => {
+		if (!scanProgress) return
+		const target = scanProgress.percent
+		if (target <= smoothPercent.current) {
+			// Reset on new scan
+			smoothPercent.current = 0
+		}
+		const id = setInterval(() => {
+			const diff = target - smoothPercent.current
+			if (diff < 0.05) {
+				smoothPercent.current = target
+				setDisplayPercent(target)
+				clearInterval(id)
+			} else {
+				smoothPercent.current += diff * 0.3
+				setDisplayPercent(smoothPercent.current)
+			}
+		}, 50)
+		return () => clearInterval(id)
+	}, [scanProgress])
+
+	// Clear progress when scan finishes
+	useEffect(() => {
+		if (scanState !== "scanning") {
+			setScanProgress(null)
+			smoothPercent.current = 0
+			setDisplayPercent(0)
+		}
+	}, [scanState])
+
+	// ── Scan for payments ─────────────────────────────────────────────
+	const [scanFromHeight, setScanFromHeight] = useState("")
+
+	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean) => {
+		setScanState("scanning")
+		setScanResult(null)
+		try {
+			const params: { startHeight?: number; fullRescan?: boolean } = {}
+			if (startHeight != null) params.startHeight = startHeight
+			if (fullRescan) params.fullRescan = true
+			const timeout = startHeight != null ? 300000 : 1800000 // 5 min partial, 30 min full
+			const result = await rpcRequest<{ balance: number; notes_found: number; new_notes?: number; synced_to: number; blocks_scanned: number }>(
+				"zcashShieldedScan", params, timeout
+			)
+			setSyncedTo(result.synced_to)
+			const newInRange = result.new_notes ?? 0
+			const msg = newInRange > 0
+				? t("notesFound", { count: result.notes_found }) + ` (${newInRange} new)`
+				: result.notes_found > 0
+					? t("notesFound", { count: result.notes_found }) + ` (${result.blocks_scanned} blocks scanned)`
+					: `No new notes in ${result.blocks_scanned} blocks (${result.notes_found} total in wallet)`
+			setScanResult(msg)
+			setScanState("done")
+			refreshBalance()
+			loadTransactions()
+		} catch (e: any) {
+			setScanResult(e.message || "Scan failed")
+			setScanState("idle")
+		}
+	}, [t, refreshBalance, loadTransactions])
+
+	// ── Backfill memos ───────────────────────────────────────────────
+	const handleBackfillMemos = useCallback(async () => {
+		setBackfilling(true)
+		setBackfillResult(null)
+		try {
+			const result = await rpcRequest<{ backfilled: number }>(
+				"zcashBackfillMemos", undefined, 300000
+			)
+			setBackfillResult(t("memosBackfilled", { count: result.backfilled }))
+			// Reload transactions to show newly decoded memos
+			await loadTransactions()
+		} catch (e: any) {
+			setBackfillResult(e.message || "Failed to fetch memos")
+		}
+		setBackfilling(false)
+	}, [t, loadTransactions])
+
+	// ── Send shielded ─────────────────────────────────────────────────
+	const handleSend = useCallback(async () => {
+		if (!recipient || !amount) return
+		if (recipientValidation && !recipientValidation.valid) {
+			setSendError(recipientValidation.error ? t(recipientValidation.error) : t("invalidZcashRecipient"))
+			return
+		}
+		setSending(true)
+		setSendError(null)
+		setSendResult(null)
+		try {
+			// String-based decimal conversion to avoid floating-point precision loss
+			const parts = amount.split(".")
+			const whole = BigInt(parts[0] || "0") * 100_000_000n
+			const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
+			const frac = BigInt(fracStr)
+			const zatoshisBig = whole + frac
+			// ZEC max supply is 21M = 2,100,000,000,000,000 zatoshis — fits in Number.MAX_SAFE_INTEGER
+			if (zatoshisBig <= 0n || zatoshisBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Invalid amount")
+			const zatoshis = Number(zatoshisBig)
+		// Validate memo length (Orchard memo field is 512 bytes max)
+			if (memo && new TextEncoder().encode(memo).length > 512) {
+				throw new Error(t("memoTooLong"))
+			}
+			const result = await rpcRequest<{ txid: string }>(
+				"zcashShieldedSend",
+				{ recipient, amount: zatoshis, memo: memo || undefined },
+				120000
+			)
+			setSendResult(result.txid)
+			setRecipient("")
+			setAmount("")
+			setMemo("")
+			refreshBalance()
+		} catch (e: any) {
+			setSendError(e.message || "Send failed")
+		}
+		setSending(false)
+	}, [recipient, amount, memo, recipientValidation, refreshBalance])
+
+	// ── Shield to Orchard ─────────────────────────────────────────────
+	const handleShield = useCallback(async () => {
+		if (!shieldAmount) return
+		setShielding(true)
+		setShieldError(null)
+		setShieldResult(null)
+		setShieldStep("building")
+		try {
+			const parts = shieldAmount.split(".")
+			const whole = BigInt(parts[0] || "0") * 100_000_000n
+			const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
+			const frac = BigInt(fracStr)
+			const zatoshisBig = whole + frac
+			if (zatoshisBig <= 0n || zatoshisBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Invalid amount")
+			const zatoshis = Number(zatoshisBig)
+
+			const result = await rpcRequest<{ txid: string }>(
+				"zcashShieldZec",
+				{ amount: zatoshis },
+				600000 // 10 min — Halo2 proof + device signing
+			)
+			setShieldResult(result.txid)
+			setShieldAmount("")
+			refreshBalance()
+		} catch (e: any) {
+			setShieldError(e.message || "Shield failed")
+		}
+		setShielding(false)
+		setShieldStep(null)
+	}, [shieldAmount, refreshBalance])
+
+	// ── Copy address ──────────────────────────────────────────────────
+	const copyAddress = useCallback(() => {
+		if (!orchardAddress) return
+		navigator.clipboard.writeText(orchardAddress)
+		setCopied(true)
+		setTimeout(() => setCopied(false), 2000)
+	}, [orchardAddress])
+
+	// ── Status indicator color ────────────────────────────────────────
+	const statusColor = status === "ready" ? "#4ADE80"
+		: status === "initializing" || status === "checking" ? "#FBBF24"
+		: "#F87171"
+
+	const statusText = status === "ready" ? t("sidecarReady")
+		: status === "initializing" || status === "checking" ? t("initializing")
+		: t("sidecarNotReady")
+
+	// Format balance from zatoshis to ZEC
+	const formatZec = (zatoshis: number) => (zatoshis / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+
+	return (
+		<Flex direction="column" gap="4">
+			{/* Section A: Status bar */}
+			<Flex align="center" justify="space-between" py="2" px="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
+				<Flex align="center" gap="2">
+					<Box w="8px" h="8px" borderRadius="full" bg={statusColor} flexShrink={0} />
+					<Text fontSize="xs" color="kk.textSecondary">{statusText}</Text>
+				</Flex>
+				{status === "ready" && !orchardAddress && (
+					<Button
+						size="xs"
+						color="kk.gold"
+						variant="outline"
+						borderColor="kk.gold"
+						_hover={{ bg: "rgba(192,168,96,0.15)" }}
+						onClick={handleInit}
+					>
+						<Box as={FaShieldAlt} fontSize="10px" mr="1.5" />
+						{t("initializePrivacy")}
+					</Button>
+				)}
+				{status === "not_running" && (
+					<Text fontSize="10px" color="kk.textMuted">{t("zcashCliRequired")}</Text>
+				)}
+				{status === "initializing" && <Spinner size="xs" color="kk.gold" />}
+			</Flex>
+
+			{/* Section B: Shielded balance */}
+			{orchardAddress && (
+				<Box px="3" py="3" bg="rgba(236,178,68,0.04)" border="1px solid" borderColor="rgba(236,178,68,0.15)" borderRadius="lg">
+					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
+						{t("shieldedBalance")}
+					</Text>
+					{balance ? (
+						<Flex direction="column" gap="1">
+							<Flex align="baseline" gap="2">
+								<Text fontSize="lg" fontWeight="700" fontFamily="mono" color="white">
+									{formatZec(balance.confirmed)}
+								</Text>
+								<Text fontSize="sm" color="kk.textMuted">ZEC</Text>
+							</Flex>
+							{balance.pending > 0 && (
+								<Text fontSize="xs" color="kk.textMuted">
+									{t("pendingBalance")}: {formatZec(balance.pending)} ZEC
+								</Text>
+							)}
+							{syncedTo && (
+								<Text fontSize="10px" color="kk.textMuted" mt="0.5">
+									{t("lastSynced", { height: syncedTo.toLocaleString() })}
+								</Text>
+							)}
+						</Flex>
+					) : (
+						<Text fontSize="xs" color="kk.textMuted">{t("initRequired")}</Text>
+					)}
+				</Box>
+			)}
+
+			{/* Section F: Shield transparent → Orchard */}
+			{orchardAddress && (
+				<Box px="3" py="3" bg="rgba(236,178,68,0.06)" border="1px solid" borderColor="rgba(236,178,68,0.2)" borderRadius="lg">
+					<Flex align="center" gap="2" mb="2">
+						<Box as={FaShieldAlt} fontSize="11px" color="kk.gold" />
+						<Text fontSize="10px" color="kk.gold" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">
+							{t("shieldToOrchard")}
+						</Text>
+					</Flex>
+					<Text fontSize="11px" color="kk.textMuted" mb="3" lineHeight="1.4">
+						{t("shieldDescription")}
+					</Text>
+
+					{shielding ? (
+						<Flex direction="column" align="center" gap="2" py="3">
+							<Spinner size="sm" color="kk.gold" />
+							<Text fontSize="12px" color="kk.textSecondary" fontWeight="500">
+								{shieldStep === "building" ? t("shieldBuilding") :
+								 shieldStep === "signing" ? t("shieldSigning") :
+								 shieldStep === "broadcasting" ? t("shieldBroadcasting") :
+								 t("shieldProcessing")}
+							</Text>
+						</Flex>
+					) : (
+						<Flex direction="column" gap="2">
+							<Flex gap="2" align="center">
+								<Input
+									placeholder={t("amountZec")}
+									value={shieldAmount}
+									onChange={(e) => setShieldAmount(e.target.value)}
+									size="sm"
+									type="number"
+									step="0.00000001"
+									bg="rgba(255,255,255,0.03)"
+									borderColor="kk.border"
+									color="white"
+									fontFamily="mono"
+									fontSize="12px"
+									_hover={{ borderColor: "kk.textMuted" }}
+									_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
+									flex="1"
+								/>
+								{transparentBalance != null && transparentBalance > 0 && (
+									<Button
+										size="xs"
+										variant="ghost"
+										color="kk.gold"
+										onClick={() => setShieldAmount(((transparentBalance - 10000) / 1e8).toFixed(8))}
+										_hover={{ bg: "rgba(192,168,96,0.1)" }}
+									>
+										Max
+									</Button>
+								)}
+							</Flex>
+							<Button
+								size="sm"
+								bg="kk.gold"
+								color="black"
+								fontWeight="600"
+								px="4"
+								py="2"
+								_hover={{ bg: "rgba(192,168,96,0.9)" }}
+								onClick={handleShield}
+								disabled={!shieldAmount || shielding}
+							>
+								<Box as={FaShieldAlt} fontSize="11px" mr="1.5" />
+								{t("shieldToOrchard")}
+							</Button>
+						</Flex>
+					)}
+
+					{shieldResult && (
+						<Box mt="2" bg="rgba(72,187,120,0.1)" border="1px solid" borderColor="rgba(72,187,120,0.3)" borderRadius="md" px="3" py="2">
+							<Text fontSize="xs" color="#4ADE80" fontWeight="600" mb="0.5">{t("shielded")}</Text>
+							<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">
+								{shieldResult}
+							</Text>
+						</Box>
+					)}
+					{shieldError && (
+						<Text fontSize="xs" color="#F87171" mt="2">{shieldError}</Text>
+					)}
+				</Box>
+			)}
+
+			{/* Section C: Orchard address (receive) */}
+			{orchardAddress && (
+				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
+					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
+						{t("orchardAddress")}
+					</Text>
+					<Flex gap="3" align="flex-start" direction={{ base: "column", sm: "row" }}>
+						<Box
+							bg="white"
+							borderRadius="md"
+							dangerouslySetInnerHTML={{ __html: generateQRSvg(orchardAddress, 3, 2) }}
+							w="120px"
+							h="120px"
+							overflow="hidden"
+							flexShrink={0}
+						/>
+						<Flex direction="column" gap="2" flex="1" minW="0">
+							<Text
+								fontSize="11px"
+								fontFamily="mono"
+								color="kk.textSecondary"
+								wordBreak="break-all"
+								lineHeight="1.4"
+							>
+								{orchardAddress}
+							</Text>
+							<Button
+								size="xs"
+								variant="outline"
+								borderColor="kk.border"
+								color={copied ? "#4ADE80" : "kk.textSecondary"}
+								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+								onClick={copyAddress}
+								w="fit-content"
+							>
+								<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
+								{copied ? t("copied") : t("copyAddress")}
+							</Button>
+						</Flex>
+					</Flex>
+				</Box>
+			)}
+
+			{/* Section D: Scan controls */}
+			{orchardAddress && (
+				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
+					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
+						{t("scanPayments")}
+					</Text>
+
+					{/* Progress bar — visible during scan */}
+					{scanState === "scanning" && (
+						<Box mb="3">
+							{/* Bar track */}
+							<Box
+								w="100%"
+								h="6px"
+								bg="rgba(255,255,255,0.06)"
+								borderRadius="full"
+								overflow="hidden"
+								mb="2"
+							>
+								{/* Filled portion */}
+								<Box
+									h="100%"
+									bg="kk.gold"
+									borderRadius="full"
+									w={`${Math.max(displayPercent, 0.5)}%`}
+									transition="width 0.15s ease-out"
+								/>
+							</Box>
+
+							{/* Stats row */}
+							<Flex justify="space-between" align="center">
+								<Text fontSize="11px" fontWeight="600" fontFamily="mono" color="kk.gold">
+									{displayPercent.toFixed(1)}%
+								</Text>
+								{scanProgress ? (
+									<Flex gap="3" align="center">
+										<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
+											{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()}
+										</Text>
+										{scanProgress.blocksPerSec > 0 && (
+											<Text fontSize="10px" color="kk.textMuted">
+												{scanProgress.blocksPerSec.toLocaleString()} blk/s
+											</Text>
+										)}
+										<Text fontSize="10px" color="kk.textSecondary" fontWeight="500">
+											ETA {formatEta(scanProgress.etaSeconds)}
+										</Text>
+									</Flex>
+								) : (
+									<Flex align="center" gap="1.5">
+										<Spinner size="xs" color="kk.gold" />
+										<Text fontSize="10px" color="kk.textMuted">Connecting...</Text>
+									</Flex>
+								)}
+							</Flex>
+						</Box>
+					)}
+
+					{/* Scan buttons — hidden during scan */}
+					{scanState !== "scanning" && (
+						<Flex direction="column" gap="2">
+							<Flex gap="2" align="center">
+								<Input
+									placeholder={t("scanFromHeightPlaceholder")}
+									value={scanFromHeight}
+									onChange={(e) => setScanFromHeight(e.target.value.replace(/\D/g, ""))}
+									size="sm"
+									type="text"
+									bg="rgba(255,255,255,0.03)"
+									borderColor="kk.border"
+									color="white"
+									fontFamily="mono"
+									fontSize="12px"
+									_hover={{ borderColor: "kk.textMuted" }}
+									_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
+									flex="1"
+								/>
+								<Button
+									size="sm"
+									variant="outline"
+									borderColor="kk.border"
+									color="kk.textSecondary"
+									px="4"
+									py="2"
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={() => handleScan(scanFromHeight ? parseInt(scanFromHeight, 10) : undefined)}
+									disabled={!scanFromHeight}
+									whiteSpace="nowrap"
+								>
+									{t("scanFromHeight")}
+								</Button>
+							</Flex>
+							<Button
+								size="sm"
+								variant="outline"
+								borderColor="kk.border"
+								color="kk.textSecondary"
+								px="4"
+								py="2"
+								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+								onClick={() => handleScan(undefined, true)}
+							>
+								{t("fullScan")}
+							</Button>
+						</Flex>
+					)}
+
+					{scanResult && (
+						<Text fontSize="xs" color={scanState === "done" ? "#4ADE80" : "kk.textMuted"} mt="2">
+							{scanResult}
+						</Text>
+					)}
+				</Box>
+			)}
+
+			{/* Section E: Send shielded */}
+			{orchardAddress && (
+				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
+					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
+						{t("sendPrivately")}
+					</Text>
+					<Flex direction="column" gap="2">
+						<Input
+							placeholder="u1... (Unified) or t1... (transparent)"
+							value={recipient}
+							onChange={(e) => setRecipient(e.target.value)}
+							size="sm"
+							bg="rgba(255,255,255,0.03)"
+							borderColor="kk.border"
+							color="white"
+							fontFamily="mono"
+							fontSize="12px"
+							_hover={{ borderColor: "kk.textMuted" }}
+							_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
+						/>
+						{recipientValidation && !recipientValidation.valid && recipientValidation.error && (
+							<Text fontSize="11px" color="#F87171">{t(recipientValidation.error)}</Text>
+						)}
+						<Flex gap="2">
+							<Input
+								placeholder={t("amountZec")}
+								value={amount}
+								onChange={(e) => setAmount(e.target.value)}
+								size="sm"
+								type="number"
+								step="0.00000001"
+								bg="rgba(255,255,255,0.03)"
+								borderColor="kk.border"
+								color="white"
+								fontFamily="mono"
+								fontSize="12px"
+								_hover={{ borderColor: "kk.textMuted" }}
+								_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
+								flex="1"
+							/>
+							<Input
+								placeholder={t("memo")}
+								value={memo}
+								onChange={(e) => setMemo(e.target.value)}
+								size="sm"
+								bg="rgba(255,255,255,0.03)"
+								borderColor="kk.border"
+								color="white"
+								fontSize="12px"
+								_hover={{ borderColor: "kk.textMuted" }}
+								_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
+								flex="1"
+							/>
+						</Flex>
+						<Button
+							size="sm"
+							bg="kk.gold"
+							color="black"
+							fontWeight="600"
+							px="4"
+							py="2"
+							_hover={{ bg: "rgba(192,168,96,0.9)" }}
+							onClick={handleSend}
+							disabled={!recipient || !amount || sending || (recipientValidation != null && !recipientValidation.valid)}
+						>
+							{sending ? (
+								<><Spinner size="xs" mr="2" /> {t("sending")}</>
+							) : (
+								<><Box as={FaShieldAlt} fontSize="11px" mr="1.5" /> {t("sendPrivately")}</>
+							)}
+						</Button>
+						{sendResult && (
+							<Box bg="rgba(72,187,120,0.1)" border="1px solid" borderColor="rgba(72,187,120,0.3)" borderRadius="md" px="3" py="2">
+								<Text fontSize="xs" color="#4ADE80" fontWeight="600" mb="0.5">{t("txSent")}</Text>
+								<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">
+									{sendResult}
+								</Text>
+							</Box>
+						)}
+						{sendError && (
+							<Text fontSize="xs" color="#F87171">{sendError}</Text>
+						)}
+					</Flex>
+				</Box>
+			)}
+
+			{/* Section G: Transaction History with Memos */}
+			{orchardAddress && (
+				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
+					<Flex align="center" justify="space-between" mb="2">
+						<Flex align="center" gap="2">
+							<Box as={FaEnvelope} fontSize="11px" color="kk.gold" />
+							<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">
+								{t("transactionHistory")}
+							</Text>
+						</Flex>
+						<Flex gap="2">
+							<Button
+								size="xs"
+								variant="outline"
+								borderColor="kk.border"
+								color="kk.textSecondary"
+								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+								onClick={handleBackfillMemos}
+								disabled={backfilling}
+							>
+								{backfilling ? (
+									<><Spinner size="xs" mr="1.5" /> {t("fetchingMemos")}</>
+								) : (
+									t("fetchMemos")
+								)}
+							</Button>
+						</Flex>
+					</Flex>
+
+					{backfillResult && (
+						<Text fontSize="xs" color="#4ADE80" mb="2">{backfillResult}</Text>
+					)}
+
+					{loadingTxs ? (
+						<Flex justify="center" py="3"><Spinner size="sm" color="kk.gold" /></Flex>
+					) : transactions.length === 0 ? (
+						<Text fontSize="xs" color="kk.textMuted" textAlign="center" py="3">
+							{t("noTransactions")}
+						</Text>
+					) : (
+						<Flex direction="column" gap="1.5" maxH="300px" overflowY="auto">
+							{transactions.map((tx) => (
+								<Box
+									key={tx.id}
+									px="3"
+									py="2"
+									bg={tx.is_spent ? "rgba(255,255,255,0.01)" : "rgba(72,187,120,0.04)"}
+									border="1px solid"
+									borderColor={tx.is_spent ? "rgba(255,255,255,0.04)" : "rgba(72,187,120,0.12)"}
+									borderRadius="md"
+									opacity={tx.is_spent ? 0.6 : 1}
+								>
+									<Flex justify="space-between" align="center">
+										<Flex align="center" gap="2">
+											<Text
+												fontSize="12px"
+												fontWeight="600"
+												fontFamily="mono"
+												color={tx.is_spent ? "kk.textMuted" : "#4ADE80"}
+											>
+												{tx.is_spent ? "-" : "+"}{formatZec(tx.value)} ZEC
+											</Text>
+											{tx.memo && (
+												<Box as={FaEnvelope} fontSize="9px" color="kk.gold" />
+											)}
+										</Flex>
+										<Flex align="center" gap="2">
+											<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
+												#{tx.block_height.toLocaleString()}
+											</Text>
+											<Text
+												fontSize="9px"
+												px="1.5"
+												py="0.5"
+												borderRadius="sm"
+												bg={tx.is_spent ? "rgba(248,113,113,0.1)" : "rgba(72,187,120,0.1)"}
+												color={tx.is_spent ? "#F87171" : "#4ADE80"}
+												fontWeight="600"
+											>
+												{tx.is_spent ? t("spent") : t("received")}
+											</Text>
+										</Flex>
+									</Flex>
+
+									{/* Memo display */}
+									{tx.memo && (
+										<Box mt="1.5">
+											<Flex
+												align="center"
+												gap="1"
+												cursor="pointer"
+												onClick={() => setExpandedMemo(expandedMemo === tx.id ? null : tx.id)}
+												_hover={{ color: "kk.gold" }}
+											>
+												<Box as={expandedMemo === tx.id ? FaChevronUp : FaChevronDown} fontSize="8px" color="kk.textMuted" />
+												<Text fontSize="10px" color="kk.textSecondary">
+													{expandedMemo === tx.id ? t("collapseMemo") : t("expandMemo")}
+												</Text>
+											</Flex>
+											{expandedMemo === tx.id && (
+												<Box
+													mt="1"
+													px="2"
+													py="1.5"
+													bg="rgba(236,178,68,0.05)"
+													border="1px solid"
+													borderColor="rgba(236,178,68,0.15)"
+													borderRadius="sm"
+												>
+													<Text fontSize="11px" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-word">
+														{tx.memo}
+													</Text>
+												</Box>
+											)}
+										</Box>
+									)}
+								</Box>
+							))}
+						</Flex>
+					)}
+				</Box>
+			)}
+		</Flex>
+	)
+}

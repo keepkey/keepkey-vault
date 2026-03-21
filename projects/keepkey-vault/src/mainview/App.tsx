@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
@@ -25,6 +25,7 @@ import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
+import { ActivityTracker } from "./components/ActivityTracker"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
@@ -35,12 +36,18 @@ function App() {
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
+	// Ref-based OOB lock: once the device enters an OOB state, keep the wizard
+	// mounted through disconnects. The state-based setupInProgress can lose races
+	// with React render batching on fast USB detach/reattach cycles (Windows).
+	const oobEnteredRef = useRef(false)
+	const oobClaimStuckSince = useRef<number | null>(null)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
+	const [swapsEnabled, setSwapsEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
@@ -62,7 +69,7 @@ function App() {
 			.then(setAppVersion)
 			.catch(() => {})
 		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => setRestApiEnabled(s.restApiEnabled))
+			.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
 			.catch(() => {})
 	}, [])
 
@@ -76,9 +83,11 @@ function App() {
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
 	const [pinDismissed, setPinDismissed] = useState(false)
+	const pinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
 		return onRpcMessage("pin-request", (payload) => {
+			if (pinDismissTimer.current) { clearTimeout(pinDismissTimer.current); pinDismissTimer.current = null }
 			setPinDismissed(false) // new request from device resets dismiss
 			setPinRequestType(payload.type as PinRequestType)
 		})
@@ -87,10 +96,20 @@ function App() {
 	const handlePinSubmit = useCallback(async (pin: string) => {
 		try { await rpcRequest("sendPin", { pin }) } catch (e) { console.error("sendPin:", e) }
 		setPinRequestType(null)
-		setPinDismissed(true) // prevent auto-show from re-triggering while device confirms
+		// Temporarily suppress auto-show to prevent flicker while device verifies.
+		// Reset after 5s so the overlay re-appears if PIN was wrong or device still locked.
+		setPinDismissed(true)
+		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
+		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 5000)
 	}, [])
 
-	const handlePinCancel = useCallback(() => { setPinRequestType(null); setPinDismissed(true) }, [])
+	const handlePinCancel = useCallback(() => {
+		setPinRequestType(null)
+		setPinDismissed(true)
+		// Allow re-show after 10s even on cancel — device still expects PIN
+		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
+		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 10000)
+	}, [])
 
 	const handlePinWipe = useCallback(async () => {
 		try {
@@ -121,13 +140,13 @@ function App() {
 
 	const handlePassphraseCancel = useCallback(() => { setPinRequestType(null); setPassphraseRequested(false) }, [])
 
-	// Auto-show passphrase overlay when device needs passphrase;
-	// auto-dismiss when device leaves needs_passphrase (e.g. → ready).
+	// Auto-show passphrase overlay when device needs passphrase.
+	// Do NOT auto-dismiss here — the dialog must stay visible showing
+	// "Confirm on device" after the user submits until state reaches 'ready'.
+	// Dismissal is handled by the 'ready'/'disconnected' cleanup effect below.
 	useEffect(() => {
 		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
 			setPassphraseRequested(true)
-		} else if (deviceState.state !== "needs_passphrase" && passphraseRequested) {
-			setPassphraseRequested(false)
 		}
 	}, [deviceState.state, passphraseRequested])
 
@@ -157,27 +176,40 @@ function App() {
 
 	// ── Signing approval overlay ────────────────────────────────────
 	const [signingRequest, setSigningRequest] = useState<SigningRequestInfo | null>(null)
+	const [signingPhase, setSigningPhase] = useState<'approve' | 'device-confirm'>('approve')
 
 	useEffect(() => {
 		const unsub1 = onRpcMessage("signing-request", (payload) => {
+			setSigningPhase('approve')
 			setSigningRequest(payload as SigningRequestInfo)
 		})
 		const unsub2 = onRpcMessage("signing-dismissed", () => {
 			setSigningRequest(null)
+			setSigningPhase('approve')
 		})
 		return () => { unsub1(); unsub2() }
 	}, [])
 
 	const handleApproveSign = useCallback(async () => {
 		if (!signingRequest) return
-		try { await rpcRequest("approveSigningRequest", { id: signingRequest.id }) } catch (e) { console.error("approveSign:", e) }
-		setSigningRequest(null)
+		// Transition overlay to "confirm on device" — don't dismiss yet
+		setSigningPhase('device-confirm')
+		try {
+			await rpcRequest("approveSigningRequest", { id: signingRequest.id })
+		} catch (e) {
+			console.error("approveSign:", e)
+			// RPC failed (device disconnected, timeout, etc.) — revert to actionable
+			// approve/reject state so the user isn't stuck on a dead "confirm on device" overlay.
+			setSigningPhase('approve')
+		}
+		// On success, overlay stays open until 'signing-dismissed' RPC arrives from bun side
 	}, [signingRequest])
 
 	const handleRejectSign = useCallback(async () => {
 		if (!signingRequest) return
 		try { await rpcRequest("rejectSigningRequest", { id: signingRequest.id }) } catch (e) { console.error("rejectSign:", e) }
 		setSigningRequest(null)
+		setSigningPhase('approve')
 	}, [signingRequest])
 
 	// ── Paired Apps panel ───────────────────────────────────────────
@@ -202,10 +234,8 @@ function App() {
 				const next = [entry, ...prev]
 				return next.length > 200 ? next.slice(0, 200) : next
 			})
-			// Auto-open on first non-public signing-related request
-			if (entry.appName !== "public" && entry.route !== "/api/health" && entry.route !== "/spec/swagger.json") {
-				setAuditLogOpen(true)
-			}
+			// Only auto-open for external dApp requests that need user attention
+		// (never for internal vault operations like sending a tx)
 		})
 	}, [])
 
@@ -273,7 +303,12 @@ function App() {
 			setPassphraseRequested(false)
 			setPinDismissed(false) // reset dismiss on state transitions
 		}
-	}, [deviceState.state])
+		// Device re-locked during passphrase flow (auto-lock timer) — dismiss
+		// passphrase overlay so PIN overlay can take priority.
+		if (deviceState.state === "needs_pin" && passphraseRequested) {
+			setPassphraseRequested(false)
+		}
+	}, [deviceState.state, passphraseRequested])
 
 	const handlePortfolioLoaded = useCallback(() => setPortfolioLoaded(true), [])
 
@@ -402,10 +437,29 @@ function App() {
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
 
+	// Track OOB entry — once the wizard is shown, lock it through disconnects
+	if (!wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+		oobEnteredRef.current = true
+	}
+	if (wizardComplete) {
+		oobEnteredRef.current = false
+	}
+
+	// Release OOB lock if device is persistently claimed/errored for >30s
+	// (another app holding the device, not a transient reboot)
+	if (oobEnteredRef.current && isClaimed) {
+		if (!oobClaimStuckSince.current) oobClaimStuckSince.current = Date.now()
+		else if (Date.now() - oobClaimStuckSince.current > 30000) oobEnteredRef.current = false
+	} else {
+		oobClaimStuckSince.current = null
+	}
+
+	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
+
 	const phase: AppPhase =
-		// Setup lock takes top priority — during OOB, transient states like
-		// isClaimed (LIBUSB_ERROR_ACCESS race) must not unmount the wizard.
-		!wizardComplete && setupInProgress ? "setup"
+		// oobLock takes priority — during OOB, transient claim errors are expected
+		// (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
+		oobLock ? "setup"
 		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
@@ -413,10 +467,11 @@ function App() {
 		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
 		: "splash"
 
-	// ── Overlays (render above everything, only one at a time) ──────
-	// Priority: signing > pairing > passphrase > recovery > PIN
+	// ── Overlays (render above everything) ──────────────────────────
+	// PIN is highest priority (z-index 2010) — must show above signing
+	// approval so users can unlock a PIN-locked device during API signing.
 	const signingOverlay = signingRequest ? (
-		<SigningApproval request={signingRequest} onApprove={handleApproveSign} onReject={handleRejectSign} />
+		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} />
 	) : null
 
 	const pairingOverlay = pairRequest ? (
@@ -580,16 +635,23 @@ function App() {
 					settingsOpen={settingsOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
+					passphraseActive={deviceState.passphraseProtection}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} />}
+					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} />}
 					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
 				open={settingsOpen}
-				onClose={() => setSettingsOpen(false)}
+				onClose={() => {
+					setSettingsOpen(false)
+					rpcRequest<AppSettings>("getAppSettings")
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
+						.catch(() => {})
+					window.dispatchEvent(new Event("keepkey-settings-changed"))
+				}}
 				deviceState={deviceState}
 				onCheckForUpdate={update.checkForUpdate}
 				updatePhase={update.phase}
@@ -614,6 +676,7 @@ function App() {
 				wcUri={wcUri}
 				onClose={handleCloseWalletConnect}
 			/>
+			<ActivityTracker />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{(pendingAppUrl || pendingWcOpen) && (
 				<>
@@ -669,6 +732,8 @@ function App() {
 						>
 							<Button
 								size="sm"
+								px="4"
+								py="2"
 								variant="ghost"
 								color="kk.textSecondary"
 								_hover={{ color: "kk.textPrimary" }}
@@ -679,6 +744,8 @@ function App() {
 							</Button>
 							<Button
 								size="sm"
+								px="4"
+								py="2"
 								bg="kk.gold"
 								color="black"
 								fontWeight="600"
