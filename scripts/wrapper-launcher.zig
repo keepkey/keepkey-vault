@@ -262,7 +262,7 @@ fn splashWndProc(hwnd: HWND, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(.winapi
                     _ = SelectObject(dc, @ptrCast(f));
                     _ = SetTextColor(dc, TEXT_COLOR);
                     var title_rc = RECT{ .left = 0, .top = 55, .right = SPLASH_W, .bottom = 105 };
-                    _ = DrawTextW(dc, std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault"), -1, &title_rc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+                    _ = DrawTextW(dc, std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault").ptr, -1, &title_rc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
                     _ = DeleteObject(@ptrCast(f));
                 }
 
@@ -299,7 +299,7 @@ fn splashWndProc(hwnd: HWND, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(.winapi
                         1 => std.unicode.utf8ToUtf16LeStringLiteral("Loading application..."),
                         else => std.unicode.utf8ToUtf16LeStringLiteral("Preparing workspace..."),
                     };
-                    _ = DrawTextW(dc, label, -1, &sub_rc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+                    _ = DrawTextW(dc, label.ptr, -1, &sub_rc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
                     _ = DeleteObject(@ptrCast(f));
                 }
 
