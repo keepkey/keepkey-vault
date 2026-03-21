@@ -885,13 +885,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // leaking signatures, transaction data, or typed-data content to audit log.
         if (callbacks?.onApiLog) {
           const { appName, imageUrl } = resolveAppInfo()
-          const SENSITIVE_KEYS = ['signature', 'serialized', 'serializedTx', 'signedTx', 'signed', 'typedData', 'message', 'rawTx', 'hex']
-          const sanitize = (obj: any): any => {
-            if (!obj || typeof obj !== 'object') return obj
-            if (Array.isArray(obj)) return obj.map(sanitize)
+          const SENSITIVE_KEYS = new Set([
+            'signature', 'serialized', 'serializedTx', 'signedTx', 'signed',
+            'typedData', 'message', 'rawTx', 'hex', 'data', 'signedPayload',
+            'msgs', 'memo', 'tx', 'txBytes', 'signDoc', 'authInfoBytes', 'bodyBytes',
+          ])
+          const sanitize = (obj: any, depth = 0): any => {
+            if (!obj || typeof obj !== 'object' || depth > 8) return obj
+            if (Array.isArray(obj)) return obj.map(v => sanitize(v, depth + 1))
             const out: any = {}
             for (const [k, v] of Object.entries(obj)) {
-              out[k] = SENSITIVE_KEYS.includes(k) ? '[REDACTED]' : v
+              if (SENSITIVE_KEYS.has(k)) { out[k] = '[REDACTED]'; continue }
+              out[k] = (v && typeof v === 'object') ? sanitize(v, depth + 1) : v
             }
             return out
           }
@@ -1412,15 +1417,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             addressNList = await findEthAddressNList(wallet, auth, body.from)
           }
 
-          // chainId: default to 1 if 0 or missing, validate range
+          // chainId: default to 1 if 0 or missing, strict validation
           let chainId = body.chainId ?? body.chain_id ?? 1
           if (typeof chainId === 'string') {
-            chainId = chainId.startsWith('0x') ? parseInt(chainId, 16) : parseInt(chainId, 10)
+            // Reject strings that aren't pure integers (e.g. "1abc", "1.5", "")
+            if (chainId.startsWith('0x')) {
+              if (!/^0x[0-9a-fA-F]+$/.test(chainId)) throw new HttpError(400, `Invalid chainId: ${chainId}`)
+              chainId = parseInt(chainId, 16)
+            } else {
+              if (!/^[0-9]+$/.test(chainId)) throw new HttpError(400, `Invalid chainId: ${chainId}`)
+              chainId = parseInt(chainId, 10)
+            }
           }
-          if (!Number.isFinite(chainId) || chainId < 0 || chainId > 4294967295) {
+          if (typeof chainId !== 'number' || !Number.isInteger(chainId) || chainId < 0 || chainId > 4294967295) {
             throw new HttpError(400, `Invalid chainId: ${body.chainId ?? body.chain_id}`)
           }
-          if (!chainId || chainId === 0) chainId = 1
+          if (chainId === 0) chainId = 1
 
           const msg: any = {
             addressNList,
