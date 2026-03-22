@@ -6,6 +6,12 @@
     "dev": "bunx electrobun build && bunx electrobun dev"
   },
   "dependencies": {
-    "electrobun": "1.13.1"
+    "electrobun": "1.13.1",
+    "node-hid": "3.1.0",
+    "usb": "2.14.0",
+    "ethers": "5",
+    "google-protobuf": "3.21.4",
+    "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",
+    "@keepkey/device-protocol": "file:../../modules/device-protocol"
   }
 }
