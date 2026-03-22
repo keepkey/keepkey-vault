@@ -317,6 +317,25 @@ if (-not $SkipBuild) {
         Write-Success "Patched version.json: channel=stable"
     }
 
+    # Ensure metadata.json exists (libNativeWrapper may read it for WebView2 user data path)
+    $MetadataJson = Join-Path $BuildDir "Resources\metadata.json"
+    if (-not (Test-Path $MetadataJson)) {
+        $meta = @{ identifier = "com.keepkey.vault"; name = "keepkey-vault"; channel = "stable"; hash = "" }
+        [System.IO.File]::WriteAllText($MetadataJson, ($meta | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+        Write-Success "Created metadata.json"
+    }
+
+    # CRITICAL: electrobun build downloads core binaries from GitHub releases which may
+    # be out of sync with the npm package. Force-copy the npm package's libNativeWrapper.dll
+    # and main.js to ensure we ship the version matching our electrobun dependency.
+    $NpmDistDir = Join-Path $ProjectDir "node_modules\electrobun\dist-win-x64"
+    $BuildBinDir = Join-Path $BuildDir "bin"
+    if (Test-Path (Join-Path $NpmDistDir "libNativeWrapper.dll")) {
+        Copy-Item (Join-Path $NpmDistDir "libNativeWrapper.dll") (Join-Path $BuildBinDir "libNativeWrapper.dll") -Force
+        Copy-Item (Join-Path $NpmDistDir "main.js") (Join-Path $BuildDir "Resources\main.js") -Force
+        Write-Success "Force-copied electrobun 1.16.0 core binaries (npm package → build)"
+    }
+
     Write-Success "Build completed"
 } else {
     Write-Step "Skipping build (using existing artifacts)"
