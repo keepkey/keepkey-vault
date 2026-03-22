@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Init required submodules
-        run: git submodule update --init modules/hdwallet modules/proto-tx-builder
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -80,6 +80,30 @@ jobs:
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done
+
+      - name: Populate device-protocol lib/
+        shell: bash
+        run: |
+          # device-protocol/lib/ is gitignored — protobuf build output.
+          # Building from source requires deprecated protoc-gen-js + macOS sed.
+          # Instead, copy pre-built lib/ from hdwallet's resolved copy
+          # (yarn install in hdwallet resolves @keepkey/device-protocol and
+          # includes the pre-built lib/ from the npm registry).
+          if [ -f modules/device-protocol/lib/messages_pb.js ]; then
+            echo "device-protocol lib/ already present"
+          else
+            HDWALLET_DP="modules/hdwallet/node_modules/@keepkey/device-protocol/lib"
+            if [ -d "$HDWALLET_DP" ] && [ -f "$HDWALLET_DP/messages_pb.js" ]; then
+              echo "Copying device-protocol lib/ from hdwallet resolved copy..."
+              cp -r "$HDWALLET_DP" modules/device-protocol/lib
+              echo "Done — $(ls modules/device-protocol/lib/*.js | wc -l) JS files"
+            else
+              echo "FATAL: Cannot find pre-built device-protocol lib/"
+              echo "  Not in submodule: modules/device-protocol/lib/messages_pb.js"
+              echo "  Not in hdwallet:  $HDWALLET_DP/messages_pb.js"
+              exit 1
+            fi
+          fi
 
       - name: Install vault dependencies
         run: cd projects/keepkey-vault && bun install
