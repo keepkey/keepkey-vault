@@ -6,8 +6,8 @@
  */
 import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
-import { join } from 'node:path'
-import { mkdirSync, unlinkSync, existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
 
 const SCHEMA_VERSION = '8'
@@ -17,6 +17,19 @@ let db: Database | null = null
 // ── Lifecycle ──────────────────────────────────────────────────────────
 
 export function initDb() {
+  // Fix BOM in version.json — PowerShell 5's -Encoding UTF8 writes a BOM that breaks
+  // JSON.parse() in electrobun's getVersionInfo(). Strip it so Utils.paths.userData works.
+  try {
+    const versionJsonPath = join(dirname(process.argv0), '..', 'Resources', 'version.json')
+    if (existsSync(versionJsonPath)) {
+      const raw = readFileSync(versionJsonPath, 'utf-8')
+      if (raw.charCodeAt(0) === 0xFEFF) {
+        writeFileSync(versionJsonPath, raw.slice(1), 'utf-8')
+        console.log('[db] Stripped BOM from version.json')
+      }
+    }
+  } catch { /* non-fatal */ }
+
   try {
     const dir = Utils.paths.userData
     mkdirSync(dir, { recursive: true })
