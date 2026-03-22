@@ -122,36 +122,6 @@ const DEV_BLOCKLIST = new Set([
   'node-int64', 'parse5',
   // --- Dead chain SDK (Binance Beacon Chain is decommissioned) ---
   'bnb-javascript-sdk-nobroadcast',
-  // --- Swagger ecosystem: unused spec versions (pioneer uses OpenAPI 3.0 only) ---
-  // These are transitive deps of swagger-client that are stubbed with npm:-@0.0.1
-  // but still get walked by our dependency resolver. Block them to prevent collection.
-  '@swagger-api/apidom-ns-openapi-2', '@swagger-api/apidom-ns-openapi-3-1',
-  '@swagger-api/apidom-ns-openapi-3-2',
-  '@swagger-api/apidom-ns-asyncapi-2', '@swagger-api/apidom-ns-asyncapi-3',
-  '@swagger-api/apidom-ns-api-design-systems', '@swagger-api/apidom-ns-arazzo-1',
-  '@swagger-api/apidom-ns-json-schema-draft-4', '@swagger-api/apidom-ns-json-schema-draft-6',
-  '@swagger-api/apidom-ns-json-schema-draft-7',
-  '@swagger-api/apidom-ns-json-schema-2019-09', '@swagger-api/apidom-ns-json-schema-2020-12',
-  // swagger parser adapters — YAML, AsyncAPI, Arazzo, API Design Systems, OpenAPI 2/3.1/3.2
-  // We only parse OpenAPI 3.0 JSON. These are never used.
-  '@swagger-api/apidom-parser-adapter-api-design-systems-json',
-  '@swagger-api/apidom-parser-adapter-api-design-systems-yaml',
-  '@swagger-api/apidom-parser-adapter-arazzo-json-1',
-  '@swagger-api/apidom-parser-adapter-arazzo-yaml-1',
-  '@swagger-api/apidom-parser-adapter-asyncapi-json-2',
-  '@swagger-api/apidom-parser-adapter-asyncapi-json-3',
-  '@swagger-api/apidom-parser-adapter-asyncapi-yaml-2',
-  '@swagger-api/apidom-parser-adapter-asyncapi-yaml-3',
-  '@swagger-api/apidom-parser-adapter-openapi-json-2',
-  '@swagger-api/apidom-parser-adapter-openapi-json-3-1',
-  '@swagger-api/apidom-parser-adapter-openapi-json-3-2',
-  '@swagger-api/apidom-parser-adapter-openapi-yaml-2',
-  '@swagger-api/apidom-parser-adapter-openapi-yaml-3-0',
-  '@swagger-api/apidom-parser-adapter-openapi-yaml-3-1',
-  '@swagger-api/apidom-parser-adapter-openapi-yaml-3-2',
-  '@swagger-api/apidom-parser-adapter-yaml-1-2',
-  // --- Bun provides native equivalents ---
-  'web-streams-polyfill',
   // --- TypeScript type packages (not needed at runtime) ---
   'types-ramda',
 ])
@@ -525,20 +495,6 @@ const STRIP_DIRS = [
   // --- node-notifier: test/dev utility, contains unsigned macOS binary (terminal-notifier.app) ---
   'node-notifier',
   '@keepkey/proto-tx-builder/node_modules/node-notifier',
-
-  // --- @swagger-api: OpenAPI/JSON Schema versions we don't use ---
-  // pioneer-client uses OpenAPI 3.0 only. The rest are unused spec parsers
-  // that swagger-client stubs with npm:-@0.0.1 but still ships files for.
-  // These 6 packages account for ~700 files / 3MB in the bundle.
-  '@swagger-api/apidom-ns-openapi-3-1',
-  '@swagger-api/apidom-ns-openapi-3-2',
-  '@swagger-api/apidom-ns-json-schema-draft-6',
-  '@swagger-api/apidom-ns-json-schema-draft-7',
-  '@swagger-api/apidom-ns-json-schema-2019-09',
-  '@swagger-api/apidom-ns-json-schema-2020-12',
-
-  // --- web-streams-polyfill: Bun has native ReadableStream/WritableStream ---
-  'web-streams-polyfill',
 
   // --- types-ramda: TypeScript types, not needed at runtime ---
   'types-ramda',

@@ -22,28 +22,22 @@ launches are fast.
 
 ## Quick Wins (Shipped in This PR)
 
-### 1. Strip unused swagger ecosystem from bundle
+### 1. Strip types-ramda
 
-swagger-client pulls in the entire `@swagger-api` ecosystem — parsers for
-AsyncAPI, API Design Systems, Arazzo, OpenAPI 2/3.1/3.2, JSON Schema drafts
-4/6/7/2019/2020, YAML adapters. We only use OpenAPI 3.0 JSON.
+TypeScript type definitions shipped by ramda-adjunct. Not needed at runtime.
+Added to both `DEV_BLOCKLIST` and `STRIP_DIRS`.
 
-**Blocked from collection**: 30 unused `@swagger-api` packages added to
-`DEV_BLOCKLIST` so they're never collected.
+### What We Cannot Strip (Yet)
 
-**Stripped from bundle**: 6 spec-version packages + `web-streams-polyfill` +
-`types-ramda` added to `STRIP_DIRS`.
+swagger-client statically imports `@swagger-api/apidom-ns-openapi-3-1`,
+`3-2`, and JSON Schema draft packages at module load time. Even though we
+only use OpenAPI 3.0 JSON today, stripping those packages would crash
+`require('swagger-client')`. Pioneer also accepts a configurable base URL
+that could point at a 3.1/3.2 spec in staging or local environments.
 
-**Estimated impact**: ~1,500 fewer files, ~5MB smaller bundle.
-
-### 2. Strip web-streams-polyfill
-
-Bun has native `ReadableStream`/`WritableStream`. The polyfill (2.7MB) is
-never used at runtime.
-
-### 3. Strip types-ramda
-
-TypeScript type definitions. Not needed at runtime.
+The safe path to eliminate the swagger ecosystem (~1,590 files, ~16MB) is
+to replace `@pioneer-platform/pioneer-client` with a thin fetch wrapper
+(see Medium-Term #4 below). Until then, the swagger packages must ship.
 
 ## Medium-Term Optimizations (Future PRs)
 
