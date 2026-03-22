@@ -6,7 +6,8 @@ import * as fs from "fs"
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
 try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
-const logStream = fs.createWriteStream(LOG_FILE, { flags: 'w' })
+const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' })
+logStream.write(`\n=== New session: ${new Date().toISOString()} ===\n`)
 const origLog = console.log, origWarn = console.warn, origError = console.error
 const ts = () => new Date().toISOString()
 const fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
