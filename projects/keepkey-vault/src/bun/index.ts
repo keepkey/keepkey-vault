@@ -1,3 +1,21 @@
+// ── File logger — runs before app imports so crash diagnostics are captured ──
+import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
+
+const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
+const LOG_FILE = LOG_DIR + "/vault-backend.log"
+try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
+const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' })
+const _ts = () => new Date().toISOString()
+const _fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
+const _origLog = console.log, _origWarn = console.warn, _origError = console.error
+console.log = (...args: any[]) => { const line = `[${_ts()}] ${_fmt(...args)}\n`; logStream.write(line); _origLog(...args) }
+console.warn = (...args: any[]) => { const line = `[${_ts()}] WARN: ${_fmt(...args)}\n`; logStream.write(line); _origWarn(...args) }
+console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...args)}\n`; logStream.write(line); _origError(...args) }
+logStream.write(`\n=== New session: ${_ts()} ===\n`)
+console.log(`[Boot] Log file: ${LOG_FILE}`)
+
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import pkg from "../../package.json"
 
@@ -166,19 +184,30 @@ const DEV_SERVER_PORT = 5177
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`
 const REST_API_PORT = 1646
 
-// ── Engine Controller ─────────────────────────────────────────────────
+// ── Startup performance tracking ─────────────────────────────────────
+const BOOT_START = Date.now()
+const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}ms: ${label}`)
+
+// ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
 
-// ── Custom chains (loaded from SQLite on startup) ────────────────────
-initDb()
+// ── Deferred: DB + chains loaded AFTER window is created ─────────────
 let customChainDefs: ChainDef[] = []
-try {
-	const stored = getCustomChains()
-	customChainDefs = stored.map(customChainToChainDef)
-	if (stored.length) console.log(`[Vault] Loaded ${stored.length} custom chains from DB`)
-} catch { /* db not ready yet */ }
+let dbReady = false
+
+function deferredInit() {
+	perf('deferredInit start')
+	initDb()
+	dbReady = true
+	try {
+		const stored = getCustomChains()
+		customChainDefs = stored.map(customChainToChainDef)
+		if (stored.length) console.log(`[Vault] Loaded ${stored.length} custom chains from DB`)
+	} catch {}
+	perf('db + chains loaded')
+}
 
 /** All chains: built-in + user-added custom chains */
 function getAllChains(): ChainDef[] {
@@ -198,11 +227,20 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 
 // ── REST API Server (on by default, can be disabled in Settings) ───────
 const auth = new AuthStore()
-let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF — user must opt in via Settings
-let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
-let bip85Enabled = getSetting('bip85_enabled') === '1' // default OFF
-let zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1' // default OFF, locked
-let preReleaseUpdates = getSetting('pre_release_updates') === '1' // default OFF
+// Settings loaded lazily after DB init — defaults used until then
+let restApiEnabled = false
+let swapsEnabled = false
+let bip85Enabled = false
+let zcashPrivacyEnabled = false
+let preReleaseUpdates = false
+
+function loadSettings() {
+	restApiEnabled = getSetting('rest_api_enabled') === '1'
+	swapsEnabled = getSetting('swaps_enabled') === '1'
+	bip85Enabled = getSetting('bip85_enabled') === '1'
+	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	preReleaseUpdates = getSetting('pre_release_updates') === '1'
+}
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
@@ -276,9 +314,7 @@ function applyRestApiState() {
 	}
 }
 
-// Start REST API (on by default)
-applyRestApiState()
-if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
+// REST API started in deferredInit() after DB is ready
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
 import type { SwapQuote } from '../shared/types'
@@ -2615,6 +2651,7 @@ if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 	},
 ])
 
+perf('creating BrowserWindow')
 let _mainWindow: BrowserWindow | null = null
 const mainWindow = new BrowserWindow({
 	title: `KeepKey Vault v${pkg.version}`,
@@ -2690,7 +2727,15 @@ if (process.platform === 'win32') {
 	}
 }
 
-// Start engine (USB event listeners + initial device sync)
+// ── Deferred startup: DB → settings → REST API → engine ──────────────
+// Window is already created above — now initialize backend services.
+perf('window created, starting deferred init')
+deferredInit()
+auth.reloadPairings()
+loadSettings()
+applyRestApiState()
+if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
+perf('REST API applied, starting engine')
 await engine.start()
 
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
@@ -2799,4 +2844,5 @@ if (zcashPrivacyEnabled) {
 	console.log('[zcash] Sidecar skipped (feature flag OFF)')
 }
 
+perf('boot complete')
 console.log("KeepKey Vault started!")

@@ -233,6 +233,32 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
+// Verify device-protocol lib/ was collected. The submodule has lib/ in .gitignore —
+// on fresh checkouts lib/ is empty. Missing messages_pb.js causes silent bun crash.
+const dpLibCheck = join(nmDest, '@keepkey', 'device-protocol', 'lib', 'messages_pb.js')
+if (!existsSync(dpLibCheck)) {
+  console.error('[collect-externals] FATAL: @keepkey/device-protocol/lib/messages_pb.js is MISSING')
+  console.error('[collect-externals] The device-protocol submodule has lib/ in .gitignore.')
+  console.error('[collect-externals] Build it first: cd modules/device-protocol && npm install && npm run build')
+  const dpSourceDir = fileLinkedPaths.get('@keepkey/device-protocol')
+  if (dpSourceDir) {
+    console.error('[collect-externals] Attempting auto-build...')
+    Bun.spawnSync(['bun', 'install'], { cwd: dpSourceDir, stdio: ['ignore', 'pipe', 'pipe'] })
+    const result = Bun.spawnSync(['npm', 'run', 'build'], { cwd: dpSourceDir, stdio: ['ignore', 'pipe', 'pipe'] })
+    if (result.exitCode === 0) {
+      console.log('[collect-externals] Auto-build succeeded, re-copying lib/...')
+      const libSrc = join(dpSourceDir, 'lib')
+      const libDst = join(nmDest, '@keepkey', 'device-protocol', 'lib')
+      if (existsSync(libSrc)) cpSync(libSrc, libDst, { recursive: true, dereference: true })
+    }
+  }
+  if (!existsSync(dpLibCheck)) {
+    console.error('[collect-externals] FATAL: messages_pb.js STILL missing. Cannot produce a working bundle.')
+    process.exit(1)
+  }
+}
+console.log('[collect-externals] Verified: device-protocol/lib/messages_pb.js present')
+
 // Strip node_modules from @keepkey/* packages (file: deps).
 // These are lerna monorepo artifacts — Bun copies the entire directory including
 // node_modules when resolving file: references. All their deps are already
