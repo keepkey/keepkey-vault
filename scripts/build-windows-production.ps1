@@ -266,20 +266,20 @@ if (-not $SkipBuild) {
     git submodule update --init modules/device-protocol
     Pop-Location
 
-    Write-Step "Building device-protocol (protobuf lib)"
+    Write-Step "Checking device-protocol (protobuf lib)"
     Push-Location (Join-Path $RepoRoot "modules\device-protocol")
+    # device-protocol/lib/ is gitignored -- the compiled protobuf output must
+    # exist from a prior build (macOS or CI). The build:postprocess script uses
+    # BSD sed which fails on Windows, so we cannot auto-build here reliably.
+    # Fail fast with a clear message instead.
     if (-not (Test-Path "lib\messages_pb.js")) {
-        Write-Host "  lib/messages_pb.js missing, building..."
-        npm install 2>$null
-        npm run build
-        if (-not (Test-Path "lib\messages_pb.js")) {
-            Write-Error "FATAL: device-protocol build failed - lib/messages_pb.js still missing"
-            exit 1
-        }
-        Write-Host "  device-protocol built successfully"
-    } else {
-        Write-Host "  lib/messages_pb.js already present, skipping build"
+        Write-Error "FATAL: modules/device-protocol/lib/messages_pb.js is MISSING"
+        Write-Error "This file is gitignored and must be built before the Windows build runs."
+        Write-Error "On macOS: cd modules/device-protocol && npm install && npm run build"
+        Write-Error "Then commit or copy lib/ to this machine."
+        exit 1
     }
+    Write-Host "  lib/messages_pb.js present"
     Pop-Location
 
     Write-Step "Building proto-tx-builder"

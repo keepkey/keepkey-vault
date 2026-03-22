@@ -1,4 +1,10 @@
-// ── File logger — runs before app imports so crash diagnostics are captured ──
+// ── File logger ──────────────────────────────────────────────────────────
+// NOTE: This logger captures runtime errors AFTER the module graph loads.
+// It does NOT catch import-time crashes — static ESM imports (below) are
+// resolved before module body execution. The real guard against missing
+// modules is the build-time check in collect-externals.ts which fails hard
+// if device-protocol/lib/messages_pb.js is absent. This logger is for
+// diagnosing runtime issues (uncaught exceptions, startup hangs, etc.).
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
