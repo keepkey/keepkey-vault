@@ -31,7 +31,14 @@ process.on('unhandledRejection', (reason) => {
 	console.error('[Boot] UNHANDLED REJECTION:', reason)
 })
 
-// ── STAGED IMPORTS — each one logged so we know where a hang occurs ─────
+// ── STAGED IMPORTS ──────────────────────────────────────────────────────
+// NOTE: These are static ESM imports. Bun's bundler inlines local modules,
+// so the stage logs between them run in source order in the bundled output.
+// However, external requires (node-hid, usb, etc.) are resolved at runtime
+// and CAN crash before these logs. The real safety net for missing externals
+// is the build-time check in collect-externals.ts, not these runtime logs.
+// A proper bootstrap.ts with dynamic await import() would give true
+// stage-level crash diagnostics — tracked for a future improvement.
 console.log('[Boot] STAGE 1: electrobun/bun...')
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 console.log('[Boot] STAGE 1: OK')
@@ -2786,6 +2793,7 @@ if (process.platform === 'win32') {
 // This ordering means the UI appears immediately while backend boots.
 perf('window created, starting deferred init')
 deferredInit()
+auth.reloadPairings() // DB is now ready — reload pairings that failed at construction time
 loadSettings()
 applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')

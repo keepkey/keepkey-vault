@@ -33,18 +33,27 @@ export class AuthStore {
   private pendingSigningRequests = new Map<string, { resolve: (ok: boolean) => void; timer: Timer }>()
 
   constructor() {
-    // Seed in-memory map from persisted pairings
+    // Try loading persisted pairings — may fail if DB not yet initialized
+    // (deferred init creates the window first, DB second).
+    // Call reloadPairings() after initDb() to ensure they're loaded.
+    this.reloadPairings()
+  }
+
+  /** Reload persisted pairings from DB. Safe to call multiple times. */
+  reloadPairings() {
     try {
       const stored = getStoredPairings()
       for (const row of stored) {
-        this.keys.set(row.apiKey, {
-          apiKey: row.apiKey,
-          info: { name: row.name, url: row.url, imageUrl: row.imageUrl, addedOn: row.addedOn },
-        })
+        if (!this.keys.has(row.apiKey)) {
+          this.keys.set(row.apiKey, {
+            apiKey: row.apiKey,
+            info: { name: row.name, url: row.url, imageUrl: row.imageUrl, addedOn: row.addedOn },
+          })
+        }
       }
       if (stored.length) console.log(`[auth] Loaded ${stored.length} persisted pairings`)
     } catch (e: any) {
-      console.warn('[auth] Failed to load stored pairings:', e.message)
+      // Expected on first call before DB init — silent
     }
   }
 
