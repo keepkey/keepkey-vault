@@ -1,0 +1,11 @@
+{
+  "name": "electrobun-test-app",
+  "version": "0.0.1",
+  "scripts": {
+    "build": "bunx electrobun build",
+    "dev": "bunx electrobun build && bunx electrobun dev"
+  },
+  "dependencies": {
+    "electrobun": "1.13.1"
+  }
+}

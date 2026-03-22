@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Electrobun Test</title>
+  <style>
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .box {
+      text-align: center;
+      padding: 40px;
+      border: 2px solid #4a4a6a;
+      border-radius: 12px;
+    }
+    h1 { color: #c9a227; margin: 0 0 10px; }
+    p { margin: 5px 0; }
+    .ok { color: #4ade80; font-size: 24px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="ok">WebView2 is working.</div>
+    <h1>Electrobun Test App</h1>
+    <p>If you can read this, the native layer initialized successfully.</p>
+    <p id="info"></p>
+  </div>
+  <script>
+    document.getElementById('info').textContent =
+      'User agent: ' + navigator.userAgent;
+  </script>
+</body>
+</html>
