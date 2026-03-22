@@ -3,8 +3,13 @@
  *
  * Uses @pioneer-platform/pioneer-client against a configurable base URL.
  * Priority: DB setting > PIONEER_API_BASE env var > https://api.keepkey.info
+ *
+ * PERF: Pioneer import is dynamic (lazy). The pioneer-client package pulls in
+ * swagger-client + the entire @swagger-api ecosystem (~13MB, ~3500 files).
+ * Loading this at startup adds ~15s to first launch on Windows because
+ * Defender scans every file. Deferring it to first getPioneer() call means
+ * the window appears immediately and swagger loads in background when needed.
  */
-import Pioneer from '@pioneer-platform/pioneer-client'
 import { getSetting } from './db'
 
 export const DEFAULT_API_BASE = 'https://api.keepkey.info'
@@ -62,6 +67,7 @@ export async function getPioneer(): Promise<any> {
         } catch { /* malformed URL — let Pioneer fail naturally */ }
       }
 
+      const { default: Pioneer } = await import('@pioneer-platform/pioneer-client')
       const client = new Pioneer(specUrl, { queryKey: QUERY_KEY, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
