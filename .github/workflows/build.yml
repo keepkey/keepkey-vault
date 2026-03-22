@@ -117,8 +117,15 @@ jobs:
           fi
 
           echo "Versions match ($SUBMOD_VER), copying lib/..."
-          cp -r "$HDWALLET_DP/lib" modules/device-protocol/lib
-          echo "Done — $(ls modules/device-protocol/lib/*.js | wc -l) JS files"
+          cp -r "$HDWALLET_DP/lib/"* modules/device-protocol/lib/
+          JS_COUNT=$(ls modules/device-protocol/lib/*.js 2>/dev/null | wc -l)
+          echo "Done — $JS_COUNT JS files"
+          if [ "$JS_COUNT" -eq 0 ]; then
+            echo "FATAL: copy succeeded but 0 JS files in lib/"
+            ls -la "$HDWALLET_DP/lib/" || true
+            ls -la modules/device-protocol/lib/ || true
+            exit 1
+          fi
 
       - name: Install vault dependencies
         run: cd projects/keepkey-vault && bun install
