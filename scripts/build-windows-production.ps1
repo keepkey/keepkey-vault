@@ -263,6 +263,26 @@ if (-not $SkipBuild) {
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
     git submodule update --init modules/keepkey-firmware
+    git submodule update --init modules/device-protocol
+    Pop-Location
+
+    Write-Step "Building device-protocol (protobuf lib)"
+    Push-Location (Join-Path $RepoRoot "modules\device-protocol")
+    # device-protocol/lib/ is gitignored — must build locally.
+    # Without this, collect-externals copies an empty lib/ and bun crashes
+    # on require('device-protocol/lib/messages_pb') with zero visible output.
+    if (-not (Test-Path "lib\messages_pb.js")) {
+        Write-Host "  lib/messages_pb.js missing, building..."
+        npm install 2>$null
+        npm run build
+        if (-not (Test-Path "lib\messages_pb.js")) {
+            Write-Error "FATAL: device-protocol build failed — lib/messages_pb.js still missing"
+            exit 1
+        }
+        Write-Host "  device-protocol built successfully"
+    } else {
+        Write-Host "  lib/messages_pb.js already present, skipping build"
+    }
     Pop-Location
 
     Write-Step "Building proto-tx-builder"

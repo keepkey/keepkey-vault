@@ -233,6 +233,52 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
+// ── CRITICAL: Verify device-protocol lib/ was collected ──────────────────
+// The device-protocol submodule has lib/ in .gitignore — the compiled protobuf
+// output (messages_pb.js etc) only exists if built locally. On a fresh Windows
+// checkout, lib/ is empty. If collect-externals copies the source dir without
+// built lib/, bun crashes on require('@keepkey/device-protocol/lib/messages_pb')
+// BEFORE any Electrobun code runs — producing a silent blank window with zero logs.
+// This was the root cause of the entire v1.2.5-v1.2.6 Windows release failure
+// (see retro-alpha5-2026-03-21.md).
+const dpLibCheck = join(nmDest, '@keepkey', 'device-protocol', 'lib', 'messages_pb.js')
+if (!existsSync(dpLibCheck)) {
+  console.error('[collect-externals] FATAL: @keepkey/device-protocol/lib/messages_pb.js is MISSING')
+  console.error('[collect-externals] The device-protocol submodule has lib/ in .gitignore.')
+  console.error('[collect-externals] It must be built before collect-externals runs.')
+  console.error('[collect-externals] Attempting to build now...')
+
+  // Try to build from the file: linked source directory
+  const dpSourceDir = fileLinkedPaths.get('@keepkey/device-protocol')
+  if (dpSourceDir) {
+    const buildResult = Bun.spawnSync(['bun', 'install'], { cwd: dpSourceDir, stdio: ['ignore', 'pipe', 'pipe'] })
+    if (buildResult.exitCode !== 0) {
+      console.warn('[collect-externals] bun install in device-protocol failed, trying npm install...')
+      Bun.spawnSync(['npm', 'install'], { cwd: dpSourceDir, stdio: ['ignore', 'pipe', 'pipe'] })
+    }
+    const result = Bun.spawnSync(['npm', 'run', 'build'], { cwd: dpSourceDir, stdio: ['ignore', 'pipe', 'pipe'] })
+    if (result.exitCode === 0) {
+      console.log('[collect-externals] device-protocol build succeeded, re-copying lib/...')
+      const libSrc = join(dpSourceDir, 'lib')
+      const libDst = join(nmDest, '@keepkey', 'device-protocol', 'lib')
+      if (existsSync(libSrc)) {
+        cpSync(libSrc, libDst, { recursive: true, dereference: true })
+      }
+    } else {
+      console.error('[collect-externals] device-protocol build FAILED:', result.stderr.toString())
+    }
+  }
+
+  // Final check — if still missing, fail hard
+  if (!existsSync(dpLibCheck)) {
+    console.error('[collect-externals] FATAL: messages_pb.js STILL missing after build attempt.')
+    console.error('[collect-externals] Build device-protocol manually:')
+    console.error('[collect-externals]   cd modules/device-protocol && npm install && npm run build')
+    process.exit(1)
+  }
+}
+console.log('[collect-externals] Verified: @keepkey/device-protocol/lib/messages_pb.js present')
+
 // Strip node_modules from @keepkey/* packages (file: deps).
 // These are lerna monorepo artifacts — Bun copies the entire directory including
 // node_modules when resolving file: references. All their deps are already
