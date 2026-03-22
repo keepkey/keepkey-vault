@@ -1115,6 +1115,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                             ? t('bootloader.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
                             : t('bootloader.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
                         </Text>
+                        <Box w="100%" mt={1} p={2} bg="red.900" borderRadius="sm" borderWidth="1px" borderColor="red.500">
+                          <Text fontSize="xs" color="red.200" fontWeight="bold">
+                            {t('bootloader.doNotHoldButton', { defaultValue: 'DO NOT hold down the button when reconnecting! Just plug it in normally. Holding the button will put the device back into bootloader mode.' })}
+                          </Text>
+                        </Box>
                       </VStack>
                     </Box>
 
