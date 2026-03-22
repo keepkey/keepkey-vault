@@ -233,6 +233,19 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
+// Verify device-protocol lib/ was collected. The submodule has lib/ in .gitignore —
+// on fresh checkouts lib/ is empty. Missing messages_pb.js causes a silent bun crash
+// at runtime (no window, no logs). Fail hard at build time instead.
+const dpLibCheck = join(nmDest, '@keepkey', 'device-protocol', 'lib', 'messages_pb.js')
+if (!existsSync(dpLibCheck)) {
+  console.error('[collect-externals] FATAL: @keepkey/device-protocol/lib/messages_pb.js is MISSING')
+  console.error('[collect-externals] The device-protocol submodule has lib/ in .gitignore.')
+  console.error('[collect-externals] Build it on macOS first: cd modules/device-protocol && npm install && npm run build')
+  console.error('[collect-externals] Then ensure lib/ is present on this machine before building.')
+  process.exit(1)
+}
+console.log('[collect-externals] Verified: device-protocol/lib/messages_pb.js present')
+
 // Strip node_modules from @keepkey/* packages (file: deps).
 // These are lerna monorepo artifacts — Bun copies the entire directory including
 // node_modules when resolving file: references. All their deps are already
