@@ -1,51 +1,108 @@
-import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
-import pkg from "../../package.json"
-
-// ── File logger (writes all console output to log file for diagnostics) ──
+// ── BOOTSTRAP LOGGER — runs before ALL imports ──────────────────────────
+// This MUST be the first executable code in the file. If any import hangs
+// or crashes, we need the log file to already be open so we can see where
+// it died. Every previous version had the logger after imports, which meant
+// a crashing import produced zero diagnostic output.
 import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
+
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
 try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
 const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' })
-logStream.write(`\n=== New session: ${new Date().toISOString()} ===\n`)
-const origLog = console.log, origWarn = console.warn, origError = console.error
-const ts = () => new Date().toISOString()
-const fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
-console.log = (...args: any[]) => { const line = `[${ts()}] ${fmt(...args)}\n`; logStream.write(line); origLog(...args) }
-console.warn = (...args: any[]) => { const line = `[${ts()}] WARN: ${fmt(...args)}\n`; logStream.write(line); origWarn(...args) }
-console.error = (...args: any[]) => { const line = `[${ts()}] ERR: ${fmt(...args)}\n`; logStream.write(line); origError(...args) }
-console.log(`[Vault] Log file: ${LOG_FILE}`)
+const _ts = () => new Date().toISOString()
+const _fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
+const _origLog = console.log, _origWarn = console.warn, _origError = console.error
+console.log = (...args: any[]) => { const line = `[${_ts()}] ${_fmt(...args)}\n`; logStream.write(line); _origLog(...args) }
+console.warn = (...args: any[]) => { const line = `[${_ts()}] WARN: ${_fmt(...args)}\n`; logStream.write(line); _origWarn(...args) }
+console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...args)}\n`; logStream.write(line); _origError(...args) }
 
-// ── Global error handlers (MUST be first — prevents silent crashes) ──
+logStream.write(`\n=== New session: ${_ts()} ===\n`)
+console.log(`[Boot] Log file: ${LOG_FILE}`)
+console.log(`[Boot] platform=${process.platform} arch=${os.arch()} pid=${process.pid}`)
+console.log(`[Boot] argv: ${process.argv.join(' ')}`)
+
+// Global error handlers — MUST be before any imports that could throw
 process.on('uncaughtException', (err) => {
-	console.error('[Vault] UNCAUGHT EXCEPTION:', err)
+	console.error('[Boot] UNCAUGHT EXCEPTION:', err)
 })
 process.on('unhandledRejection', (reason) => {
-	console.error('[Vault] UNHANDLED REJECTION:', reason)
+	console.error('[Boot] UNHANDLED REJECTION:', reason)
 })
 
+// ── STAGED IMPORTS — each one logged so we know where a hang occurs ─────
+console.log('[Boot] STAGE 1: electrobun/bun...')
+import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+console.log('[Boot] STAGE 1: OK')
+
+console.log('[Boot] STAGE 2: package.json...')
+import pkg from "../../package.json"
+console.log('[Boot] STAGE 2: OK — version=' + pkg.version)
+
+console.log('[Boot] STAGE 3: engine-controller...')
 import { EngineController, withTimeout } from "./engine-controller"
+console.log('[Boot] STAGE 3: OK')
+
+console.log('[Boot] STAGE 4: rest-api...')
 import { startRestApi, clearFeaturesCache, type RestApiCallbacks } from "./rest-api"
+console.log('[Boot] STAGE 4: OK')
+
+console.log('[Boot] STAGE 5: auth...')
 import { AuthStore } from "./auth"
+console.log('[Boot] STAGE 5: OK')
+
+console.log('[Boot] STAGE 6: pioneer...')
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
+console.log('[Boot] STAGE 6: OK')
+
+console.log('[Boot] STAGE 7: txbuilder...')
 import { buildTx, broadcastTx } from "./txbuilder"
+console.log('[Boot] STAGE 7: OK')
+
+console.log('[Boot] STAGE 8: cosmos txbuilder...')
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
+console.log('[Boot] STAGE 8: OK')
+
+console.log('[Boot] STAGE 9: zcash-shielded...')
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
+console.log('[Boot] STAGE 9: OK')
+
+console.log('[Boot] STAGE 10: zcash-sidecar...')
 import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
+console.log('[Boot] STAGE 10: OK')
+
+console.log('[Boot] STAGE 11: chains + firmware...')
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
+console.log('[Boot] STAGE 11: OK')
+
+console.log('[Boot] STAGE 12: btc-accounts + evm-addresses...')
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
+console.log('[Boot] STAGE 12: OK')
+
+console.log('[Boot] STAGE 13: db...')
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
+console.log('[Boot] STAGE 13: OK')
+
+console.log('[Boot] STAGE 14: reports + tax-export...')
 import { generateReport, reportToPdfBuffer } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
-import * as os from "os"
-import * as path from "path"
+console.log('[Boot] STAGE 14: OK')
+
+console.log('[Boot] STAGE 15: evm-rpc + camera...')
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import { startCamera, stopCamera } from "./camera"
+console.log('[Boot] STAGE 15: OK')
+
+console.log('[Boot] STAGE 16: types...')
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
+console.log('[Boot] STAGE 16: OK')
+
+console.log('[Boot] === ALL IMPORTS COMPLETE ===')
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
