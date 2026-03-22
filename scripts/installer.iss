@@ -37,6 +37,9 @@ UninstallDisplayIcon={app}\Resources\app-real.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
+; Kill stale bun/launcher processes that hold file locks and prevent reinstall
+CloseApplications=force
+CloseApplicationsFilter=bun.exe,launcher.exe,KeepKeyVault.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -66,5 +69,33 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 ; Always install/update WebView2 Runtime (required on Windows 10, pre-installed on Windows 11).
 ; The bootstrapper is a no-op if already present and up-to-date.
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing WebView2 Runtime..."; Flags: waituntilterminated
+; Post-install launch — user can opt in via checkbox. Uses nowait so installer exits cleanly.
+; NOTE: skipifsilent prevents zombie processes from silent/automated installs.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Force-kill any running KeepKey Vault processes before installation.
+// Without this, bun.exe holds locks on DLLs and the install directory,
+// causing partial installs and zombie processes that survive reboots.
+procedure KillKeepKeyProcesses();
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM bun.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM launcher.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM KeepKeyVault.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(2000); // Wait for file handles to release
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  KillKeepKeyProcesses();
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    KillKeepKeyProcesses();
+end;
 
