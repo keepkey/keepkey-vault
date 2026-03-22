@@ -11,6 +11,15 @@ export default defineConfig({
 		emptyOutDir: true,
 		rollupOptions: {
 			output: {
+				// Fixed filenames — no content hashes. This is a desktop app loaded
+				// via Electrobun's views:// protocol, not a browser. Content-hashed
+				// filenames cause WebView2 cache poisoning on upgrade: the cached
+				// index.html references the old hash, the new file has a different
+				// hash, the JS never loads, and the window stays blank.
+				// See retro-alpha1-2026-03-21.md for the full evidence chain.
+				entryFileNames: "assets/[name].js",
+				chunkFileNames: "assets/[name].js",
+				assetFileNames: "assets/[name][extname]",
 				manualChunks(id) {
 					// Split the large asset data JSON into its own chunk
 					if (id.includes("assetData.json")) return "asset-data";
