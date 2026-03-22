@@ -122,6 +122,8 @@ const DEV_BLOCKLIST = new Set([
   'node-int64', 'parse5',
   // --- Dead chain SDK (Binance Beacon Chain is decommissioned) ---
   'bnb-javascript-sdk-nobroadcast',
+  // --- TypeScript type packages (not needed at runtime) ---
+  'types-ramda',
 ])
 
 // Read deps from a nested package dir and add them to allDeps (so they get collected at top level).
@@ -493,6 +495,9 @@ const STRIP_DIRS = [
   // --- node-notifier: test/dev utility, contains unsigned macOS binary (terminal-notifier.app) ---
   'node-notifier',
   '@keepkey/proto-tx-builder/node_modules/node-notifier',
+
+  // --- types-ramda: TypeScript types, not needed at runtime ---
+  'types-ramda',
 ]
 
 // Remove nested node_modules that duplicate top-level packages at the SAME version.
