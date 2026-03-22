@@ -51,6 +51,17 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Clean stale hashed assets from prior versions — Vite generates unique filenames
 ; per build, and old files accumulate causing slow WebView2 startup.
 Type: filesandordirs; Name: "{app}\Resources\app\views\mainview\assets"
+; v1.2.6 antidote: clean Electrobun runtime state that survived a poisoned v1.2.5 install.
+; This repairs machines where uninstall removed {app} but left self-extraction residue,
+; orphaned update.bat scripts, and stale WebView2 profiles that block reinstallation.
+Type: filesandordirs; Name: "{localappdata}\sh.keepkey.vault"
+Type: filesandordirs; Name: "{localappdata}\com.keepkey.vault"
+
+[UninstallDelete]
+; Remove Electrobun runtime state on uninstall so reinstall starts clean.
+; Without this, %LOCALAPPDATA% residue survives uninstall and poisons future installs.
+Type: filesandordirs; Name: "{localappdata}\sh.keepkey.vault"
+Type: filesandordirs; Name: "{localappdata}\com.keepkey.vault"
 
 [Files]
 Source: "{#MySourceDir}\KeepKeyVault.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -73,6 +84,12 @@ Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"
 ; NOTE: skipifsilent prevents zombie processes from silent/automated installs.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; Remove orphaned Electrobun update scheduled tasks on uninstall.
+; These tasks run update.bat scripts that can corrupt the install directory
+; if they fire after uninstall or during a reinstall.
+Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -like 'ElectrobunUpdate_*' }} | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue"""; Flags: runhidden
+
 [Code]
 // Force-kill any running KeepKey Vault processes before installation.
 // Without this, bun.exe holds locks on DLLs and the install directory,
@@ -87,15 +104,66 @@ begin
   Sleep(2000); // Wait for file handles to release
 end;
 
+// Remove orphaned ElectrobunUpdate_* scheduled tasks that can corrupt
+// the install directory. Uses PowerShell for reliable task enumeration.
+procedure CleanOrphanedScheduledTasks();
+var
+  ResultCode: Integer;
+begin
+  Exec('powershell.exe',
+    '-NoProfile -Command "Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like ''ElectrobunUpdate_*'' } | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// Delete stale update.bat files left by Electrobun's update mechanism.
+// These scripts are scheduled via Task Scheduler and attempt to rmdir /s /q
+// the app directory — if they fire during or after a reinstall, they corrupt it.
+procedure CleanStaleUpdateScripts();
+var
+  ResultCode: Integer;
+  AppDataPath: String;
+begin
+  AppDataPath := ExpandConstant('{localappdata}');
+  // update.bat lives in the parent of the app directory under Electrobun's state tree
+  Exec('cmd.exe',
+    '/c del /q "' + AppDataPath + '\sh.keepkey.vault\stable\update.bat" 2>nul',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('cmd.exe',
+    '/c del /q "' + AppDataPath + '\sh.keepkey.vault\canary\update.bat" 2>nul',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('cmd.exe',
+    '/c del /q "' + AppDataPath + '\sh.keepkey.vault\dev\update.bat" 2>nul',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 function InitializeSetup(): Boolean;
 begin
+  // Kill processes first — they may hold locks on files we need to clean
   KillKeepKeyProcesses();
+  // Remove scheduled tasks before they can fire during install
+  CleanOrphanedScheduledTasks();
+  // Remove stale update scripts
+  CleanStaleUpdateScripts();
   Result := True;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
+  begin
+    // Kill again right before file copy in case something respawned
     KillKeepKeyProcesses();
+  end;
+end;
+
+// Also clean up on uninstall — kill processes so uninstaller can remove all files
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    KillKeepKeyProcesses();
+    CleanOrphanedScheduledTasks();
+    CleanStaleUpdateScripts();
+  end;
 end;
 
