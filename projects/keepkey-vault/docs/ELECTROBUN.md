@@ -1,5 +1,11 @@
 # Electrobun Development Notes
 
+See also:
+- `windows-release-cycle-2026-03.md` -- current Windows release blocker write-up
+- `electrobun-windows-internals.md` -- deep dive on Windows packaging, update.bat, runtime state
+- `windows-unpoison-guide.md` -- user/support recovery steps for poisoned installs
+- `electrobun-fork-plan.md` -- fork decision document and specific fixes needed
+
 ## How Electrobun Works
 
 Electrobun is a desktop app framework that uses **Bun** as the runtime and **system WebViews** (not bundled Chromium). This means:
