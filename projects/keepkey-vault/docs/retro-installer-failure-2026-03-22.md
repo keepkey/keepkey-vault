@@ -175,3 +175,42 @@ requires Visual Studio Build Tools + WebView2 SDK.
    `CreateCoreWebView2EnvironmentWithOptions` call
 4. **Add 30s watchdog** to exit if no window appears
 5. **Test on a CLEAN Windows VM** to rule out machine-specific state
+
+## Update: v1.2.6 Test (21:30 CDT)
+
+### Test 14: v1.2.3 warm → v1.2.6 upgrade → launch
+- v1.2.3 running successfully (snapshot taken)
+- Killed processes, installed v1.2.6 over it (exit 0)
+- WebView2 profile preserved (12MB)
+- Launch: FAILS. DLL hash `10ec2e...` (different from v1.2.3's `66fe88...`)
+
+### Test 15: v1.2.6 install + swap v1.2.3 DLL + main.js → launch
+- Same DLL as working v1.2.3 (`66fe88...`)
+- Launch: FAILS
+
+### Conclusion Update
+
+**It is NOT the DLL.** The v1.2.3 DLL works when v1.2.3's installer placed
+it. The same DLL fails when placed after v1.2.6's installer ran.
+
+**The Inno Setup installer changes something beyond files.** Possible causes:
+- Registry changes (AppId, uninstall metadata)
+- File permissions or ACLs
+- Alternate data streams
+- Directory junction points or reparse points
+- Something in the Inno Setup uninstall log (unins000.dat)
+
+### The Only Working Path (confirmed multiple times)
+
+```
+1. Install v1.2.3 via its installer → works
+2. Hot-patch ONLY Resources/app/bun/index.js → works with new code
+3. Do NOT run any other installer
+```
+
+### Recommended Path Forward
+
+Ship v1.2.3 with hot-patched backend code as the Windows release.
+Build a separate "updater" that replaces only app code files, not
+the Inno Setup installer. OR build electrobun from source with the
+fork to get known-good binaries that we control.
