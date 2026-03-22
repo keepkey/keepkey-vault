@@ -90,7 +90,7 @@ Many are unused. Could be vendored with only the message types we need.
 
 | Optimization | Files Saved | Size Saved | Risk | Effort |
 |--------------|------------|------------|------|--------|
-| Strip unused swagger (this PR) | ~1,500 | ~5MB | Low | Done |
+| Strip unused swagger | ~1,500 | ~5MB | Low | Blocked — needs pioneer-client replacement first |
 | Replace pioneer-client | ~3,500 | ~16MB | Medium | 1-2 days |
 | Pre-bundle externals | ~10,000 | 0 (same bytes) | High | 2-3 days |
 | Bootstrap split | ~10,000 | 0 | High | 3-5 days |
