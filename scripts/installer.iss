@@ -2,6 +2,14 @@
 ; This file is generated/maintained alongside build-windows-production.ps1
 ; NOTE: Install dir uses "KeepKeyVault" (no space) because Bun Workers
 ; silently fail when the file path contains spaces.
+;
+; IMPORTANT: This installer is intentionally minimal. The v1.2.1 installer
+; shipped successfully. Every addition after that (InstallDelete, Code section,
+; CloseApplications, process kills) correlated with launch failures on Windows.
+; Evidence (retro-installer-failure-2026-03-22.md) proved that the installer's
+; side-effects — not the binaries, not the DLL, not the profile — are what
+; poison the machine. Do NOT add cleanup logic without evidence from a
+; 4-machine test matrix proving it is safe.
 
 #define MyAppName "KeepKey Vault"
 #define MyAppDirName "KeepKeyVault"
@@ -37,8 +45,6 @@ UninstallDisplayIcon={app}\Resources\app-real.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
-CloseApplications=force
-CloseApplicationsFilter=bun.exe,launcher.exe,KeepKeyVault.exe
 SetupLogging=yes
 
 [Languages]
@@ -46,35 +52,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-
-[InstallDelete]
-; Clean stale hashed assets from prior versions — Vite generates unique filenames
-; per build, and old files accumulate causing slow WebView2 startup.
-Type: filesandordirs; Name: "{app}\Resources\app\views\mainview\assets"
-; Clean Electrobun update state (update archives, update.bat scripts).
-; This is safe — no runtime state lives here, only update mechanism residue.
-Type: filesandordirs; Name: "{localappdata}\sh.keepkey.vault"
-; Clean old Electrobun self-extractor install directory (has space in name).
-Type: filesandordirs; Name: "{localappdata}\KeepKey Vault"
-; Clean stale dev-mode WebView2 profiles (can reach 500MB+).
-Type: filesandordirs; Name: "{localappdata}\com.keepkey.vault\dev"
-;
-; IMPORTANT: Do NOT delete {localappdata}\com.keepkey.vault itself.
-; Evidence (retro-installer-failure-2026-03-22.md) proved that the warm
-; WebView2 user data profile in that directory is the only thing that
-; allows the app to launch on the affected Win11 machine.
-; CreateCoreWebView2EnvironmentWithOptions hangs on cold-start from a
-; fresh profile. Until we understand and fix the cold-start hang (likely
-; requires Electrobun fork + native layer logging), this profile MUST
-; be preserved across both install and uninstall.
-
-[UninstallDelete]
-; Same conservative policy as [InstallDelete]: clean update state and
-; old installs, but preserve the WebView2 profile so uninstall+reinstall
-; does not put the user back into cold-start territory.
-Type: filesandordirs; Name: "{localappdata}\sh.keepkey.vault"
-Type: filesandordirs; Name: "{localappdata}\KeepKey Vault"
-Type: filesandordirs; Name: "{localappdata}\com.keepkey.vault\dev"
 
 [Files]
 Source: "{#MySourceDir}\KeepKeyVault.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -94,105 +71,3 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 ; The bootstrapper is a no-op if already present and up-to-date.
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing WebView2 Runtime..."; Flags: waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-
-[UninstallRun]
-; Remove orphaned Electrobun update scheduled tasks on uninstall.
-Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -like 'ElectrobunUpdate_*' }} | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue"""; Flags: runhidden
-
-[Code]
-// Kill KeepKey Vault app processes so the installer can overwrite files.
-// Only kills our own processes — NOT msedgewebview2.exe. Evidence showed
-// that killing WebView2 processes system-wide did not fix the launch failure
-// and is too blunt for an installer action.
-procedure KillKeepKeyProcesses();
-var
-  ResultCode: Integer;
-begin
-  Log('KillKeepKeyProcesses: starting');
-  Exec('taskkill.exe', '/F /IM KeepKeyVault.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Log('KillKeepKeyProcesses: KeepKeyVault.exe result=' + IntToStr(ResultCode));
-  Exec('taskkill.exe', '/F /IM launcher.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Log('KillKeepKeyProcesses: launcher.exe result=' + IntToStr(ResultCode));
-  Exec('taskkill.exe', '/F /IM bun.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Log('KillKeepKeyProcesses: bun.exe result=' + IntToStr(ResultCode));
-  Sleep(2000);
-  Log('KillKeepKeyProcesses: done');
-end;
-
-// Remove orphaned ElectrobunUpdate_* scheduled tasks.
-procedure CleanOrphanedScheduledTasks();
-var
-  ResultCode: Integer;
-begin
-  Log('CleanOrphanedScheduledTasks: starting');
-  Exec('powershell.exe',
-    '-NoProfile -Command "Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like ''ElectrobunUpdate_*'' } | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Log('CleanOrphanedScheduledTasks: result=' + IntToStr(ResultCode));
-end;
-
-// Delete stale update.bat files left by Electrobun's update mechanism.
-procedure CleanStaleUpdateScripts();
-var
-  ResultCode: Integer;
-  AppDataPath: String;
-begin
-  Log('CleanStaleUpdateScripts: starting');
-  AppDataPath := ExpandConstant('{localappdata}');
-  Exec('cmd.exe',
-    '/c del /q "' + AppDataPath + '\sh.keepkey.vault\stable\update.bat" 2>nul',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('cmd.exe',
-    '/c del /q "' + AppDataPath + '\sh.keepkey.vault\canary\update.bat" 2>nul',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('cmd.exe',
-    '/c del /q "' + AppDataPath + '\sh.keepkey.vault\dev\update.bat" 2>nul',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Log('CleanStaleUpdateScripts: done');
-end;
-
-// Remove the old Electrobun self-extractor registry entry if present.
-procedure CleanOldElectrobunRegistry();
-var
-  ResultCode: Integer;
-begin
-  Log('CleanOldElectrobunRegistry: starting');
-  if FileExists(ExpandConstant('{localappdata}\KeepKey Vault\uninstall.exe')) then
-  begin
-    Log('CleanOldElectrobunRegistry: found old uninstaller, running silently');
-    Exec(ExpandConstant('{localappdata}\KeepKey Vault\uninstall.exe'),
-      '/SILENT', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Log('CleanOldElectrobunRegistry: old uninstaller result=' + IntToStr(ResultCode));
-  end;
-  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\KeepKey Vault');
-  Log('CleanOldElectrobunRegistry: done');
-end;
-
-function InitializeSetup(): Boolean;
-begin
-  Log('InitializeSetup: starting');
-  KillKeepKeyProcesses();
-  CleanOrphanedScheduledTasks();
-  CleanStaleUpdateScripts();
-  CleanOldElectrobunRegistry();
-  Log('InitializeSetup: cleanup complete');
-  Result := True;
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssInstall then
-  begin
-    KillKeepKeyProcesses();
-  end;
-end;
-
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-begin
-  if CurUninstallStep = usUninstall then
-  begin
-    KillKeepKeyProcesses();
-    CleanOrphanedScheduledTasks();
-    CleanStaleUpdateScripts();
-  end;
-end;
