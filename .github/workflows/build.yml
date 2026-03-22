@@ -37,7 +37,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Init required submodules
-        run: git submodule update --init modules/hdwallet modules/proto-tx-builder
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol
+
+      - name: Build device-protocol (protobuf lib)
+        run: |
+          cd modules/device-protocol
+          if [ ! -f lib/messages_pb.js ]; then
+            echo "Building device-protocol..."
+            npm install
+            npm run build
+          else
+            echo "device-protocol lib/ already present"
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
