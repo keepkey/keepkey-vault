@@ -147,7 +147,7 @@ function Sign-File {
         return $true
     }
 
-    # Skip bun shims in .bin/ directories — they are shell scripts with .exe extension,
+    # Skip bun shims in .bin/ directories -- they are shell scripts with .exe extension,
     # not real PE binaries. signtool returns 0x800700C1 (ERROR_BAD_EXE_FORMAT).
     if ($FilePath -like '*\.bin\*' -or $FilePath -like '*/.bin/*') {
         Write-Host "    [SKIP] Bun shim (not PE): $fileName" -ForegroundColor Gray
@@ -258,7 +258,7 @@ if (-not $SkipSign) {
 if (-not $SkipBuild) {
     Write-Step "Updating git submodules (selective)"
     Push-Location $RepoRoot
-    # Only init the submodules we actually need — recursive init pulls deeply
+    # Only init the submodules we actually need -- recursive init pulls deeply
     # nested firmware deps whose paths exceed Windows MAX_PATH (260 chars)
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
@@ -268,7 +268,7 @@ if (-not $SkipBuild) {
 
     Write-Step "Building device-protocol (protobuf lib)"
     Push-Location (Join-Path $RepoRoot "modules\device-protocol")
-    # device-protocol/lib/ is gitignored — must build locally.
+    # device-protocol/lib/ is gitignored -- must build locally.
     # Without this, collect-externals copies an empty lib/ and bun crashes
     # on require('device-protocol/lib/messages_pb') with zero visible output.
     if (-not (Test-Path "lib\messages_pb.js")) {
@@ -276,7 +276,7 @@ if (-not $SkipBuild) {
         npm install 2>$null
         npm run build
         if (-not (Test-Path "lib\messages_pb.js")) {
-            Write-Error "FATAL: device-protocol build failed — lib/messages_pb.js still missing"
+            Write-Error "FATAL: device-protocol build failed - lib/messages_pb.js still missing"
             exit 1
         }
         Write-Host "  device-protocol built successfully"
@@ -323,7 +323,7 @@ if (-not $SkipBuild) {
     bun run build
     Pop-Location
 
-    # Patch channel to stable — Electrobun's --env=stable produces a macOS-style
+    # Patch channel to stable -- Electrobun's --env=stable produces a macOS-style
     # bundle on Windows that our installer can't use. Build as dev, patch to stable.
     $VersionJson = Join-Path $BuildDir "Resources\version.json"
     if (Test-Path $VersionJson) {
@@ -331,7 +331,7 @@ if (-not $SkipBuild) {
         $vj.channel = "stable"
         $vj.name = "keepkey-vault"
         $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
-        # Use .NET WriteAllText to avoid BOM — PowerShell 5's -Encoding UTF8 writes a BOM
+        # Use .NET WriteAllText to avoid BOM -- PowerShell 5's -Encoding UTF8 writes a BOM
         # which breaks JSON parsing in bun's require()
         [System.IO.File]::WriteAllText($VersionJson, ($vj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
         Write-Success "Patched version.json: channel=stable"
@@ -496,7 +496,7 @@ if (-not (Test-Path $WrapperExe)) {
 
 # Copy DPI-awareness manifest next to wrapper EXE
 # Windows auto-loads <exename>.exe.manifest for per-monitor DPI scaling.
-# Without this, WebView2 renders at 96 DPI and the OS bitmap-scales it — blurry text/UI.
+# Without this, WebView2 renders at 96 DPI and the OS bitmap-scales it -- blurry text/UI.
 $ManifestSrc = Join-Path $ScriptDir "KeepKeyVault.exe.manifest"
 $ManifestDst = Join-Path $BuildDir "KeepKeyVault.exe.manifest"
 if (Test-Path $ManifestSrc) {
@@ -505,10 +505,10 @@ if (Test-Path $ManifestSrc) {
 }
 
 # Embed KeepKey icon into all EXEs
-# Electrobun's rcedit call fails (ENOENT — hardcoded CI path), so we do it ourselves.
+# Electrobun's rcedit call fails (ENOENT -- hardcoded CI path), so we do it ourselves.
 $RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
 if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
-    # Skip bun.exe — rcedit on 113MB binary can corrupt it; bun runs headless anyway
+    # Skip bun.exe -- rcedit on 113MB binary can corrupt it; bun runs headless anyway
     $exesToIcon = @($WrapperExe, (Join-Path $BuildDir "bin\launcher.exe"))
     foreach ($exePath in $exesToIcon) {
         if (Test-Path $exePath) {
