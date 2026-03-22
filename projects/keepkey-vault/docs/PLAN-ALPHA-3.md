@@ -10,6 +10,11 @@ suggest alternative approaches. You execute steps and report results.
 Three tests on one build. Each test answers a different question.
 The build is already done from ALPHA-2 — reuse the same installer exe.
 
+If TEST A fails, do NOT jump straight to framework conclusions from this plan
+alone. Run `PLAN-ALPHA-4.md` next to compare the full Vault install path
+against the minimal `projects/electrobun-test-app/` smoke test on the same
+machine.
+
 ---
 
 ## TEST A: Full wipe + fresh install (is it the profile?)
