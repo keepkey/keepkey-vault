@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Init required submodules
-        run: git submodule update --init modules/hdwallet modules/proto-tx-builder
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -80,6 +80,45 @@ jobs:
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done
+
+      - name: Populate device-protocol lib/
+        shell: bash
+        run: |
+          # device-protocol/lib/ is gitignored — protobuf build output.
+          # Building from source requires deprecated protoc-gen-js + macOS sed.
+          # Copy pre-built lib/ from hdwallet's resolved copy, but ONLY if
+          # the versions match exactly. Version skew = wire format mismatch.
+          if [ -f modules/device-protocol/lib/messages_pb.js ]; then
+            echo "device-protocol lib/ already present"
+            exit 0
+          fi
+
+          SUBMOD_VER=$(node -p "require('./modules/device-protocol/package.json').version")
+          HDWALLET_DP="modules/hdwallet/node_modules/@keepkey/device-protocol"
+
+          if [ ! -d "$HDWALLET_DP" ] || [ ! -f "$HDWALLET_DP/lib/messages_pb.js" ]; then
+            echo "FATAL: device-protocol lib/ missing and no hdwallet copy available"
+            echo "Build on macOS first: cd modules/device-protocol && npm install && npm run build"
+            exit 1
+          fi
+
+          HDWALLET_VER=$(node -p "require('./$HDWALLET_DP/package.json').version")
+          echo "Submodule version: $SUBMOD_VER"
+          echo "hdwallet resolved:  $HDWALLET_VER"
+
+          if [ "$SUBMOD_VER" != "$HDWALLET_VER" ]; then
+            echo "FATAL: version mismatch — submodule=$SUBMOD_VER, hdwallet=$HDWALLET_VER"
+            echo "Cannot safely copy lib/ from a different version (wire format risk)."
+            echo "Either:"
+            echo "  1. Pin hdwallet to the same device-protocol version"
+            echo "  2. Build lib/ on macOS and transfer to CI"
+            echo "  3. Check lib/ into the device-protocol repo"
+            exit 1
+          fi
+
+          echo "Versions match ($SUBMOD_VER), copying lib/..."
+          cp -r "$HDWALLET_DP/lib" modules/device-protocol/lib
+          echo "Done — $(ls modules/device-protocol/lib/*.js | wc -l) JS files"
 
       - name: Install vault dependencies
         run: cd projects/keepkey-vault && bun install
