@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "dev": "vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
