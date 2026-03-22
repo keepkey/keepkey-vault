@@ -39,6 +39,11 @@ jobs:
       - name: Init required submodules
         run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol
 
+      - name: Install protoc (for device-protocol build)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq protobuf-compiler
+
       - name: Build device-protocol (protobuf lib)
         run: |
           cd modules/device-protocol
