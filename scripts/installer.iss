@@ -53,14 +53,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Clean stale hashed assets from prior versions — Vite generates unique filenames
 ; per build, and old files accumulate causing slow WebView2 startup.
 Type: filesandordirs; Name: "{app}\Resources\app\views\mainview\assets"
-; v1.2.6 antidote: clean Electrobun runtime state that survived a poisoned v1.2.5 install.
-; This repairs machines where uninstall removed {app} but left self-extraction residue,
-; orphaned update.bat scripts, and stale WebView2 profiles that block reinstallation.
+; Clean Electrobun self-extraction state (update archives, update.bat scripts).
 Type: filesandordirs; Name: "{localappdata}\sh.keepkey.vault"
-Type: filesandordirs; Name: "{localappdata}\com.keepkey.vault"
 ; Clean old Electrobun self-extractor install (dir name has space — different from Inno path)
 Type: filesandordirs; Name: "{localappdata}\KeepKey Vault"
 ; Clean stale dev-mode WebView2 profiles (528MB+ of accumulated junk)
+; CRITICAL: Do NOT delete {localappdata}\com.keepkey.vault — that contains the
+; warm WebView2 profile. Evidence (retro-installer-failure-2026-03-22.md) proved
+; that deleting it forces a WebView2 cold-start which HANGS on some Win11 machines.
+; CreateCoreWebView2EnvironmentWithOptions never completes from a fresh profile.
+; Only clean the dev/ subdirectory (stale dev-mode profiles).
 Type: filesandordirs; Name: "{localappdata}\com.keepkey.vault\dev"
 
 [UninstallDelete]
