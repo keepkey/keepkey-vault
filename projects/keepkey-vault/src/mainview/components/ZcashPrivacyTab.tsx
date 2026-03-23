@@ -608,7 +608,7 @@ export function ZcashPrivacyTab() {
 						<Flex direction="column" gap="2">
 							<Flex gap="2" align="center">
 								<Input
-									placeholder={t("scanFromHeightPlaceholder")}
+									placeholder={`Block height (e.g. ${KEEPKEY_RELEASE_BLOCK})`}
 									value={scanFromHeight}
 									onChange={(e) => setScanFromHeight(e.target.value.replace(/\D/g, ""))}
 									size="sm"
@@ -813,7 +813,18 @@ export function ZcashPrivacyTab() {
 											)}
 										</Flex>
 										<Flex align="center" gap="2">
-											<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
+											<Text
+												fontSize="10px"
+												color="kk.textMuted"
+												fontFamily="mono"
+												cursor="pointer"
+												title="Click to set as rescan height"
+												_hover={{ color: "kk.gold", textDecoration: "underline" }}
+												onClick={(e) => {
+													e.stopPropagation()
+													setScanFromHeight(String(tx.block_height))
+												}}
+											>
 												#{tx.block_height.toLocaleString()}
 											</Text>
 											<Text
