@@ -56,10 +56,10 @@ async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
 	}
 	// Pioneer may nest transactions in various response shapes
 	const histories = data.histories || data?.data?.histories || []
-	const txs = histories[0]?.transactions
+	const candidate = histories[0]?.transactions
 		|| data.transactions
 		|| data?.data?.transactions
-		|| []
+	const txs = Array.isArray(candidate) ? candidate : []
 	if (txs.length === 0) {
 		console.warn(`[Report] fetchTxHistory: 0 transactions for xpub=${xpub.substring(0, 20)}... Response keys: ${Object.keys(data).join(', ')}`)
 	}

@@ -2050,12 +2050,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (params.format === 'cointracker') {
 					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
-					if (txs.length === 0) throw new Error('No transactions found in report. Generate a new report to fetch transaction history from the network.')
+					const serializableTxs = txs.filter(tx => !!tx.timestamp)
+					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
 					await Bun.write(filePath, toCoinTrackerCsv(txs))
 				} else if (params.format === 'zenledger') {
 					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
-					if (txs.length === 0) throw new Error('No transactions found in report. Generate a new report to fetch transaction history from the network.')
+					const serializableTxs = txs.filter(tx => !!tx.timestamp)
+					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
 					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
 					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
