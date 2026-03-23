@@ -592,9 +592,22 @@ export function ZcashPrivacyTab() {
 			{/* Section D: Scan controls */}
 			{orchardAddress && (
 				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
-					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
-						{t("scanPayments")}
-					</Text>
+					<Flex align="center" justify="space-between" mb="2">
+						<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">
+							{t("scanPayments")}
+						</Text>
+						<Text
+							fontSize="10px"
+							color="kk.textMuted"
+							fontFamily="mono"
+							cursor="pointer"
+							_hover={{ color: "kk.gold" }}
+							title="Click to use KeepKey release block"
+							onClick={() => setScanFromHeight(String(KEEPKEY_RELEASE_BLOCK))}
+						>
+							#{KEEPKEY_RELEASE_BLOCK.toLocaleString()}
+						</Text>
+					</Flex>
 
 					{/* Progress bar — visible during scan */}
 					{scanState === "scanning" && (
@@ -862,9 +875,14 @@ export function ZcashPrivacyTab() {
 												color="kk.textMuted"
 												fontFamily="mono"
 												cursor="pointer"
-												title="Click to set as rescan height"
+												userSelect="text"
+												title="Click to copy height · Double-click to set as rescan height"
 												_hover={{ color: "kk.gold", textDecoration: "underline" }}
 												onClick={(e) => {
+													e.stopPropagation()
+													navigator.clipboard.writeText(String(tx.block_height))
+												}}
+												onDoubleClick={(e) => {
 													e.stopPropagation()
 													setScanFromHeight(String(tx.block_height))
 												}}
