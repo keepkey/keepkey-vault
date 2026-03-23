@@ -14,16 +14,27 @@ import { join } from 'path'
 const projectRoot = join(import.meta.dir, '..')
 const buildDir = join(projectRoot, '_build')
 
-// Find the electrobun build output index.js across all env/platform combos.
-// Electrobun names build dirs as {env}-{platform}-{arch}/keepkey-vault-{env}/
-const ENVS = ['dev', 'stable', 'canary']
-const PLATFORMS = ['win-x64', 'darwin-arm64', 'darwin-x64', 'linux-x64']
-const candidates: string[] = []
-for (const env of ENVS) {
-  for (const plat of PLATFORMS) {
-    candidates.push(join(buildDir, `${env}-${plat}`, `keepkey-vault-${env}`, 'Resources', 'app', 'bun', 'index.js'))
-  }
+// Find the electrobun build output index.js by scanning _build/ recursively.
+// Electrobun uses platform names that differ from Node (macos vs darwin, win vs win32)
+// and macOS bundles nest under .app/Contents/Resources/. Just glob for the actual file.
+function findBunIndexFiles(dir: string): string[] {
+  const results: string[] = []
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        // Only descend into build output dirs, not node_modules or source
+        if (entry.name !== 'node_modules' && entry.name !== '_ext_modules' && entry.name !== '_bundled_backend') {
+          results.push(...findBunIndexFiles(full))
+        }
+      } else if (entry.name === 'index.js' && dir.endsWith(join('app', 'bun'))) {
+        results.push(full)
+      }
+    }
+  } catch {}
+  return results
 }
+const candidates = findBunIndexFiles(buildDir)
 
 let patched = false
 for (const candidate of candidates) {
