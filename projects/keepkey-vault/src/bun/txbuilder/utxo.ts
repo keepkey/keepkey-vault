@@ -288,7 +288,9 @@ export async function buildUtxoTx(
         } else {
           fee = zip317Fee
         }
-      } else {
+      } else if (isMax || memo) {
+        // Only reduce the spend output for sendMax or swap deposits (memo present).
+        // For exact-amount user sends, fail instead of silently reducing the amount.
         const spendIdx = outputs.findIndex((o: any) => o.address)
         if (spendIdx >= 0 && outputs[spendIdx].value > increase + 5000) {
           outputs[spendIdx].value -= increase
@@ -296,6 +298,8 @@ export async function buildUtxoTx(
         } else {
           throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions)`)
         }
+      } else {
+        throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions). Try sending a slightly smaller amount.`)
       }
       console.log(`${TAG} ZEC: enforced ZIP-317 fee = ${fee} zats (${logicalActions} actions, min ${zip317Fee})`)
     }

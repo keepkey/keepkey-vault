@@ -140,11 +140,19 @@ export function ZcashPrivacyTab() {
 		let cancelled = false
 		;(async () => {
 			try {
-				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null }>(
+				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null; synced_to?: number | null }>(
 					"zcashShieldedStatus", undefined, 5000
 				)
 				if (cancelled) return
 				if (!r.ready) { setStatus("not_running"); return }
+
+				// Set scan state from sidecar ready signal (available before any balance RPC)
+				if (r.synced_to != null) {
+					setSyncedTo(r.synced_to)
+					setNeedsScan(false)
+				} else {
+					setNeedsScan(true)
+				}
 
 				if (r.fvk_loaded && r.address) {
 					// FVK auto-loaded from DB — no device interaction needed
@@ -408,7 +416,7 @@ export function ZcashPrivacyTab() {
 					{needsScan ? (
 						<Flex direction="column" gap="2">
 							<Text fontSize="xs" color="#FBBF24">
-								Wallet has not been scanned yet. Scan the chain to find your shielded notes.
+								{t("needsScanPrompt")}
 							</Text>
 							<Button
 								size="sm"
@@ -422,9 +430,9 @@ export function ZcashPrivacyTab() {
 								disabled={scanState === "scanning"}
 							>
 								{scanState === "scanning" ? (
-									<><Spinner size="xs" mr="2" /> Scanning...</>
+									<><Spinner size="xs" mr="2" /> {t("scanning")}</>
 								) : (
-									<>Scan from block {KEEPKEY_RELEASE_BLOCK.toLocaleString()}</>
+									t("scanFromBlock", { block: KEEPKEY_RELEASE_BLOCK.toLocaleString() })
 								)}
 							</Button>
 						</Flex>

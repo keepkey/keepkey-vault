@@ -35,6 +35,9 @@ let lastProgressHeight = 0
 /** Cached FVK + address from auto-load or set_fvk */
 let cachedAddress: string | null = null
 let cachedFvk: { ak: string; nk: string; rivk: string } | null = null
+/** Scan state from sidecar ready signal */
+let cachedSyncedTo: number | null = null
+let cachedReleaseBlock: number | null = null
 
 /**
  * Resolve the path to the zcash-cli binary.
@@ -148,6 +151,10 @@ export async function startSidecar(): Promise<void> {
 
 			ready = true
 
+			// Capture scan state from ready signal
+			cachedSyncedTo = readyResponse.synced_to ?? null
+			cachedReleaseBlock = readyResponse.keepkey_release_block ?? null
+
 			// Capture auto-loaded FVK if the sidecar had one persisted
 			if (readyResponse.fvk_loaded && readyResponse.address) {
 				cachedAddress = readyResponse.address
@@ -251,6 +258,20 @@ export function hasFvkLoaded(): boolean {
 export function getCachedFvk(): { address: string; fvk: { ak: string; nk: string; rivk: string } } | null {
 	if (!cachedAddress || !cachedFvk) return null
 	return { address: cachedAddress, fvk: cachedFvk }
+}
+
+/**
+ * Get the scan state captured from the sidecar ready signal.
+ */
+export function getScanState(): { syncedTo: number | null; releaseBlock: number | null } {
+	return { syncedTo: cachedSyncedTo, releaseBlock: cachedReleaseBlock }
+}
+
+/**
+ * Update cached syncedTo (called after a scan completes).
+ */
+export function updateSyncedTo(height: number): void {
+	cachedSyncedTo = height
 }
 
 /**
