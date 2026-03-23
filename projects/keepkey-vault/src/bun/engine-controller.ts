@@ -84,6 +84,7 @@ export class EngineController extends EventEmitter {
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
+  private verifyInProgress = false // dry-run verify seed (PIN type stays 'current')
   private pinRequestCount = 0
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
@@ -894,7 +895,7 @@ export class EngineController extends EventEmitter {
     if (_retryCount === 0) {
       if (!this.wallet) throw new Error('No device connected')
       if (!this.wallet.transport) throw new Error('No transport available')
-      this.setupInProgress = true
+      this.verifyInProgress = true
       this.pinRequestCount = 0
     }
 
@@ -921,7 +922,7 @@ export class EngineController extends EventEmitter {
         { msgTimeout: 10 * 60 * 1000 }
       )
 
-      this.setupInProgress = false
+      this.verifyInProgress = false
       this.pinRequestCount = 0
       return { success: true, message: 'Seed verified successfully' }
     } catch (err: any) {
@@ -941,7 +942,7 @@ export class EngineController extends EventEmitter {
       }
 
       // Terminal error — clean up
-      this.setupInProgress = false
+      this.verifyInProgress = false
       this.pinRequestCount = 0
 
       let errorType: 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown' = 'unknown'
@@ -1051,9 +1052,10 @@ export class EngineController extends EventEmitter {
     await this.wallet.sendPin(pin)
     // Don't call getFeatures if another operation owns the transport:
     // - setupInProgress: reset/recover is still running
+    // - verifyInProgress: dry-run seed verification is still running
     // - promptPinActive: getPublicKeys is still pending (may also need passphrase)
-    // Both will refresh features themselves when they complete.
-    if (!this.setupInProgress && !this.promptPinActive) {
+    // All will refresh features themselves when they complete.
+    if (!this.setupInProgress && !this.verifyInProgress && !this.promptPinActive) {
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
     }
@@ -1074,19 +1076,19 @@ export class EngineController extends EventEmitter {
 
   async sendCharacter(character: string) {
     if (!this.wallet) throw new Error('No device connected')
-    if (!this.setupInProgress) return // Recovery already ended, ignore stale input
+    if (!this.setupInProgress && !this.verifyInProgress) return // Recovery/verify already ended, ignore stale input
     await this.wallet.sendCharacter(character)
   }
 
   async sendCharacterDelete() {
     if (!this.wallet) throw new Error('No device connected')
-    if (!this.setupInProgress) return
+    if (!this.setupInProgress && !this.verifyInProgress) return
     await this.wallet.sendCharacterDelete()
   }
 
   async sendCharacterDone() {
     if (!this.wallet) throw new Error('No device connected')
-    if (!this.setupInProgress) return
+    if (!this.setupInProgress && !this.verifyInProgress) return
     await this.wallet.sendCharacterDone()
   }
 
