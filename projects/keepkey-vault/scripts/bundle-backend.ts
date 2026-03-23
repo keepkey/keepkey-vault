@@ -30,11 +30,14 @@ for (const [name, spec] of Object.entries({ ...pj.dependencies, ...pj.overrides 
 
 console.log(`[bundle-backend] Resolved ${aliases.size} file: linked packages`)
 
-// These MUST stay external — native C++ addons only
+// These MUST stay external — native C++ addons and packages with nested submodule deps.
+// proto-tx-builder depends on osmosis-frontend (a git submodule) for Cosmos proto codegen;
+// inlining it breaks because Bun can't resolve the submodule-relative paths.
 const FORCE_EXTERNAL = new Set([
   'node-hid',
   'usb',
   'electrobun',
+  '@keepkey/proto-tx-builder',
 ])
 
 // Pre-flight: device-protocol lib/ must be built (submodule has lib/ in .gitignore).

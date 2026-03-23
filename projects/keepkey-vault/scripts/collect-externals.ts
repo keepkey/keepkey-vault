@@ -15,6 +15,7 @@ import { join, dirname, resolve } from 'node:path'
 const EXTERNALS = [
   'node-hid',
   'usb',
+  '@keepkey/proto-tx-builder',
 ]
 
 const projectRoot = join(import.meta.dir, '..')

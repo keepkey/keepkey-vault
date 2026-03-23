@@ -17,11 +17,12 @@ export default {
 		bun: {
 			// Point at the pre-bundled backend from scripts/bundle-backend.ts.
 			// It already inlines ALL deps (@keepkey/*, ethers, protobuf, swagger, etc.)
-			// into a single file. Only native addons remain external.
+			// into a single file. Only native addons and proto-tx-builder remain external.
 			entrypoint: "_build/_bundled_backend/index.js",
 			external: [
 				"node-hid",
 				"usb",
+				"@keepkey/proto-tx-builder",
 			],
 		},
 		// Vite builds to dist/, we copy from there
