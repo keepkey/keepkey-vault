@@ -18,7 +18,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug test test-unit test-rest test-zcash-cli
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli build-intel build-signed-intel
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -80,6 +80,61 @@ test-zcash-cli:
 build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
+
+# Cross-compile zcash-cli for Intel Mac from Apple Silicon
+build-zcash-cli-intel:
+	@echo "=== Zcash CLI: cross-compiling for x86_64-apple-darwin ==="
+	cd $(PROJECT_DIR)/zcash-cli && cargo build --release --target x86_64-apple-darwin
+ifdef ELECTROBUN_DEVELOPER_ID
+	@echo "Signing zcash-cli (Intel) binary..."
+	codesign --force --verbose --timestamp \
+		--sign "Developer ID Application: $(ELECTROBUN_DEVELOPER_ID) ($(ELECTROBUN_TEAMID))" \
+		--options runtime \
+		$(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
+endif
+	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
+
+# --- Intel Mac Build ---
+# Build the full app targeting Intel (x86_64) Macs from an Apple Silicon machine.
+# Requires: rustup target add x86_64-apple-darwin (one-time setup)
+# The Zcash CLI is cross-compiled, native node addons use prebuilt x64 binaries,
+# and Electrobun + Bun handle the rest.
+
+INTEL_DMG_NAME := KeepKey-Vault-$(VERSION)-x86_64.dmg
+
+build-intel: install build-zcash-cli-intel
+	@echo "=== Building Vault for Intel Mac (x86_64) ==="
+	@# Copy the cross-compiled zcash-cli into the expected location
+	@mkdir -p $(PROJECT_DIR)/zcash-cli/target/release
+	cp $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli \
+		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
+	@# Run the build under Rosetta so Bun + Electrobun produce x86_64 output
+	arch -x86_64 /bin/bash -c "cd $(PROJECT_DIR) && bun run build:stable"
+	@echo "=== Intel build complete ==="
+
+build-signed-intel: sign-check build-intel prune-bundle
+	@echo "Creating Intel Mac DMG..."
+	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
+	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
+	STAGING=$$(mktemp -d); \
+	trap 'rm -rf "$$STAGING"' EXIT; \
+	zstd -d "$$TAR_ZST" -o "$$STAGING/app.tar" --force; \
+	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
+	rm "$$STAGING/app.tar"; \
+	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
+	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign failed"; exit 1); \
+	ln -s /Applications "$$STAGING/Applications"; \
+	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(INTEL_DMG_NAME)"; \
+	rm -f "$$DMG_OUT"; \
+	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
+	echo "Notarizing Intel DMG..."; \
+	ZIP_TMP=$$(mktemp).zip; \
+	(cd "$$(dirname "$$DMG_OUT")" && zip -q "$$ZIP_TMP" "$$(basename "$$DMG_OUT")"); \
+	xcrun notarytool submit --apple-id "$$ELECTROBUN_APPLEID" --password "$$ELECTROBUN_APPLEIDPASS" --team-id "$$ELECTROBUN_TEAMID" --wait "$$ZIP_TMP"; \
+	rm -f "$$ZIP_TMP"; \
+	xcrun stapler staple "$$DMG_OUT"; \
+	echo "Intel DMG ready: $$DMG_OUT"
 
 # --- Vault ---
 
@@ -251,7 +306,10 @@ help:
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
+	@echo "  make build-intel    - Build for Intel Mac (x86_64) from Apple Silicon"
+	@echo "  make build-signed-intel - Full Intel Mac pipeline: build → DMG → sign → notarize"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
+	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
 	@echo "  make audit          - Generate dependency manifest + SBOM"

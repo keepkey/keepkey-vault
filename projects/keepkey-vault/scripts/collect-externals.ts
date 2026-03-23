@@ -374,19 +374,28 @@ console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize
 
 // Remove prebuilds for OTHER platforms, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
-// Platform-aware: keep prebuilds for the current build platform, strip the rest
+// Platform + architecture aware: keep prebuilds only for the current build target
 const isWindows = process.platform === 'win32'
 const isMac = process.platform === 'darwin'
+const isArm64 = process.arch === 'arm64'
+const isX64 = process.arch === 'x64'
+console.log(`[collect-externals] Platform: ${process.platform}, Arch: ${process.arch}`)
 const REMOVE_PREBUILD_PREFIXES = isWindows
   ? ['linux', 'darwin', 'android']
   : isMac
     ? ['linux', 'win32', 'android']
     : ['darwin', 'win32', 'android'] // linux build
 // HID prebuild directory prefixes (node-hid uses HID-{platform}-{arch} naming)
-const REMOVE_HID_PREFIXES = isWindows
+// On macOS, filter by architecture so only the matching HID binary is bundled.
+const REMOVE_HID_PREFIXES: string[] = isWindows
   ? ['HID-linux', 'HID-darwin', 'HID_hidraw-linux']
   : isMac
-    ? ['HID-win', 'HID-linux', 'HID_hidraw-linux']
+    ? [
+        'HID-win', 'HID-linux', 'HID_hidraw-linux',
+        // Strip the OTHER macOS architecture to reduce bundle size
+        ...(isArm64 ? ['HID-darwin-x64'] : []),
+        ...(isX64 ? ['HID-darwin-arm64'] : []),
+      ]
     : ['HID-win', 'HID-darwin']
 // C/C++ source and build artifacts not needed at runtime (~7MB)
 const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
