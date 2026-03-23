@@ -1090,7 +1090,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Single portfolio call — classify natives vs tokens (same logic as getBalances)
-				let balance = '0', balanceUsd = 0, address = pubkey
+				// For UTXO chains pubkey is an xpub, not a receive address.
+				// Leave address empty so the frontend auto-derives from the device.
+				let balance = '0', balanceUsd = 0, address = chain.chainFamily === 'utxo' ? '' : pubkey
 				let tokens: TokenBalance[] | undefined
 				try {
 					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }, { forceRefresh: true }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
@@ -2048,10 +2050,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (params.format === 'cointracker') {
 					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
+					const serializableTxs = txs.filter(tx => !!tx.timestamp)
+					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
 					await Bun.write(filePath, toCoinTrackerCsv(txs))
 				} else if (params.format === 'zenledger') {
 					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
+					const serializableTxs = txs.filter(tx => !!tx.timestamp)
+					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
 					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
 					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
