@@ -37,6 +37,21 @@ const FORCE_EXTERNAL = new Set([
   'electrobun',
 ])
 
+// Pre-flight: device-protocol lib/ must be built (submodule has lib/ in .gitignore).
+// Missing messages_pb.js causes a silent bun crash at runtime — fail hard at build time.
+for (const [name, pkgDir] of aliases) {
+  if (name === '@keepkey/device-protocol') {
+    const msgPb = join(pkgDir, 'lib', 'messages_pb.js')
+    if (!existsSync(msgPb)) {
+      console.error('[bundle-backend] FATAL: @keepkey/device-protocol/lib/messages_pb.js is MISSING')
+      console.error('[bundle-backend] Build it first: cd modules/device-protocol && npm install && npm run build')
+      process.exit(1)
+    }
+    console.log('[bundle-backend] Verified: device-protocol/lib/messages_pb.js present')
+    break
+  }
+}
+
 mkdirSync(outDir, { recursive: true })
 
 const result = await Bun.build({

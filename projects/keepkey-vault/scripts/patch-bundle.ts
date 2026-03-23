@@ -8,19 +8,22 @@
  * compiled to `__reExport(exports_protocol_import, node_buffer)` but
  * `node_buffer` is never defined. We inject the missing require().
  */
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { join, resolve } from 'path'
-import { globSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
+import { join } from 'path'
 
 const projectRoot = join(import.meta.dir, '..')
 const buildDir = join(projectRoot, '_build')
 
-// Find the electrobun build output index.js
-const candidates = [
-  join(buildDir, 'dev-win-x64', 'keepkey-vault-dev', 'Resources', 'app', 'bun', 'index.js'),
-  join(buildDir, 'dev-darwin-arm64', 'keepkey-vault-dev', 'Resources', 'app', 'bun', 'index.js'),
-  join(buildDir, 'dev-linux-x64', 'keepkey-vault-dev', 'Resources', 'app', 'bun', 'index.js'),
-]
+// Find the electrobun build output index.js across all env/platform combos.
+// Electrobun names build dirs as {env}-{platform}-{arch}/keepkey-vault-{env}/
+const ENVS = ['dev', 'stable', 'canary']
+const PLATFORMS = ['win-x64', 'darwin-arm64', 'darwin-x64', 'linux-x64']
+const candidates: string[] = []
+for (const env of ENVS) {
+  for (const plat of PLATFORMS) {
+    candidates.push(join(buildDir, `${env}-${plat}`, `keepkey-vault-${env}`, 'Resources', 'app', 'bun', 'index.js'))
+  }
+}
 
 let patched = false
 for (const candidate of candidates) {

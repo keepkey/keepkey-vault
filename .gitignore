@@ -30,3 +30,11 @@ projects/keepkey-vault/_build/
 
 # Unsigned firmware binaries
 firmware/unsigned/
+
+# Release artifacts (belong in GitHub Releases, not the repo)
+release-windows/
+
+# Developer-local files
+.claude/settings.local.json
+rmdir-result.txt
+*.bat
