@@ -90,5 +90,7 @@
 	"useKeepKeyAddress": "Use KeepKey Address",
 	"customAddressPlaceholder": "Enter destination address...",
 	"customAddressWarning": "Funds will be sent to this external address",
-	"sendMaxGasNote": "Output may be slightly less — gas is deducted from the send amount"
+	"sendMaxGasNote": "Output may be slightly less — gas is deducted from the send amount",
+	"swapTooSmallForFees": "Amount too small — outbound fees on the destination chain exceed the swap output. Try a larger amount or a cheaper destination chain.",
+	"poolNotAvailable": "This trading pool is not currently available. Try a different pair."
 }

@@ -40,7 +40,7 @@ import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
@@ -1642,13 +1642,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sidecarReady = isSidecarReady()
 				const fvkLoaded = hasFvkLoaded()
 				const cached = getCachedFvk()
+				const scanState = getScanState()
 				const result = {
 					ready: sidecarReady,
 					fvk_loaded: fvkLoaded,
 					address: cached?.address ?? null,
 					fvk: cached?.fvk ?? null,
+					synced_to: scanState.syncedTo,
+					keepkey_release_block: scanState.releaseBlock,
 				}
-				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {
@@ -1664,7 +1667,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			zcashShieldedScan: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
-				return await scanOrchardNotes(params?.startHeight, params?.fullRescan)
+				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
+				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+				return result
 			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')

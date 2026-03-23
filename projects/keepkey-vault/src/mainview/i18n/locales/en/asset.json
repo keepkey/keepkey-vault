@@ -63,5 +63,7 @@
 	"expandMemo": "Show memo",
 	"collapseMemo": "Hide memo",
 	"refresh": "Refresh",
-	"refreshing": "Refreshing..."
+	"refreshing": "Refreshing...",
+	"needsScanPrompt": "Wallet has not been scanned yet. Scan the chain to find your shielded notes.",
+	"scanFromBlock": "Scan from block {{block}}"
 }
