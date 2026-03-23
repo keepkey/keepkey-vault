@@ -212,9 +212,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 		}
 	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses])
 
-	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag
+	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
+	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
+	const isUtxo = chain.chainFamily === 'utxo'
 	useEffect(() => {
-		if (isTon || (!address && !deriveError)) deriveAddress()
+		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Token spam filter ──────────────────────────────────────────────
