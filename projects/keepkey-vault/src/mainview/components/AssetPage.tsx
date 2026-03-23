@@ -219,6 +219,22 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+	// Fetch xpub/zpub for non-BTC UTXO chains (Litecoin, DASH, DOGE, BCH)
+	const [utxoXpub, setUtxoXpub] = useState<string | null>(null)
+	useEffect(() => {
+		if (!isUtxo || isBtc) return
+		rpcRequest<Array<{ xpub: string }>>('getPublicKeys', {
+			paths: [{
+				addressNList: chain.defaultPath.slice(0, 3),
+				coin: chain.coin,
+				scriptType: chain.scriptType,
+				curve: 'secp256k1',
+			}],
+		}, 30000)
+			.then(result => { if (result?.[0]?.xpub) setUtxoXpub(result[0].xpub) })
+			.catch(e => console.warn(`[AssetPage] ${chain.coin} xpub fetch failed:`, e))
+	}, [isUtxo, isBtc, chain.coin, chain.scriptType, chain.defaultPath])
+
 	// ── Token spam filter ──────────────────────────────────────────────
 	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
@@ -594,7 +610,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							currentPath={isBtc && btcSelected ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
 							scriptType={effectiveScriptType}
-							xpub={isBtc ? btcSelected?.xpubData?.xpub : undefined}
+							xpub={isBtc ? btcSelected?.xpubData?.xpub : utxoXpub ?? undefined}
 							isBtc={isBtc}
 							btcChangeIndex={btcChangeIndex}
 							btcAddressIndex={btcAddressIndex}
