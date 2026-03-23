@@ -889,7 +889,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         setPhase('input')
       } catch (e: any) {
         if (version !== quoteVersionRef.current) return
-        setError(e.message || t("errorQuote"))
+        const msg = e.message || ''
+        // Parse common DEX node errors into user-friendly messages
+        if (/not enough asset to pay for fees/i.test(msg)) {
+          setError(t("swapTooSmallForFees"))
+        } else if (/pool.*not available|pool.*staged/i.test(msg)) {
+          setError(t("poolNotAvailable"))
+        } else {
+          setError(msg || t("errorQuote"))
+        }
         setPhase('input')
       }
     }, 800)
