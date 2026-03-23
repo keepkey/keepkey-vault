@@ -15,40 +15,31 @@ export default {
 	build: {
 		buildFolder: "_build",
 		bun: {
-			// Mark native addons and protobuf-dependent packages as external
-			// so Bun loads them at runtime instead of bundling them.
-			// Bundling breaks google-protobuf's `this || window` pattern in ESM context.
+			// Point at the pre-bundled backend from scripts/bundle-backend.ts.
+			// It already inlines ALL deps (@keepkey/*, ethers, protobuf, swagger, etc.)
+			// into a single file. Only native addons and proto-tx-builder remain external.
+			entrypoint: "_build/_bundled_backend/index.js",
 			external: [
-				"@keepkey/hdwallet-core",
-				"@keepkey/hdwallet-keepkey",
-				"@keepkey/hdwallet-keepkey-nodehid",
-				"@keepkey/hdwallet-keepkey-nodewebusb",
-				"@keepkey/device-protocol",
-				"google-protobuf",
 				"node-hid",
 				"usb",
-				"ethers",
-				"@pioneer-platform/pioneer-client",
+				"google-protobuf",
+				"@keepkey/proto-tx-builder",
 			],
 		},
 		// Vite builds to dist/, we copy from there
-		// build/_ext_modules contains native addons + transitive deps (see scripts/collect-externals.ts)
+		// _build/_ext_modules contains ONLY native addons + proto-tx-builder (~23 packages)
 		copy: {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
 			"_build/_ext_modules": "node_modules",
-			// Zcash privacy engine sidecar (Rust binary — .exe on Windows)
+			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},
 		mac: {
 			bundleCEF: false,
 			icons: "icon.iconset",
-			// Code signing — requires ELECTROBUN_DEVELOPER_ID, ELECTROBUN_TEAMID env vars
-			// Disabled in CI (no Apple certs on Linux runners)
 			codesign: process.env.CI !== 'true',
-			// Notarization — requires ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS env vars
 			notarize: process.env.CI !== 'true',
-			// Entitlements for native USB modules (node-hid, usb, hdwallet)
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,

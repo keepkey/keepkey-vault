@@ -9,6 +9,8 @@ HDWALLET_INSTALL_STAMP := $(STAMP_DIR)/hdwallet-install.stamp
 HDWALLET_BUILD_STAMP := $(STAMP_DIR)/hdwallet-build.stamp
 VAULT_INSTALL_STAMP := $(STAMP_DIR)/vault-install.stamp
 HDWALLET_BUILD_INPUTS := $(shell find modules/hdwallet/packages -type f \( -name '*.ts' -o -name '*.tsx' -o -name 'package.json' -o -name 'tsconfig.json' \))
+PROTO_BUILD_STAMP := $(STAMP_DIR)/proto-build.stamp
+PROTO_BUILD_INPUTS := $(shell find modules/proto-tx-builder/src -type f \( -name '*.ts' -o -name '*.js' \) 2>/dev/null) modules/proto-tx-builder/tsconfig.json
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
 ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
 
@@ -35,6 +37,14 @@ submodules: $(SUBMODULES_STAMP)
 
 $(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	cd modules/proto-tx-builder && bun install
+	@# Init the nested osmosis-frontend submodule (provides Cosmos/Osmosis proto codegen)
+	cd modules/proto-tx-builder && git submodule update --init osmosis-frontend
+	@touch $@
+
+$(PROTO_BUILD_STAMP): $(PROTO_BUILD_INPUTS) $(PROTO_INSTALL_STAMP) | $(STAMP_DIR)
+	@echo "=== proto-tx-builder: building ==="
+	cd modules/proto-tx-builder && npx tsc -p .
+	@test -f modules/proto-tx-builder/dist/index.js || (echo "ERROR: proto-tx-builder/dist/index.js missing after build"; exit 1)
 	@touch $@
 
 $(HDWALLET_INSTALL_STAMP): modules/hdwallet/package.json modules/hdwallet/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
@@ -47,7 +57,7 @@ $(HDWALLET_BUILD_STAMP): modules/hdwallet/tsconfig.json $(HDWALLET_BUILD_INPUTS)
 	cd modules/hdwallet && yarn tsc --build
 	@touch $@
 
-modules-build: $(HDWALLET_BUILD_STAMP)
+modules-build: $(HDWALLET_BUILD_STAMP) $(PROTO_BUILD_STAMP)
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
@@ -138,7 +148,7 @@ build-signed-intel: sign-check build-intel prune-bundle
 
 # --- Vault ---
 
-$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_INSTALL_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
+$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
 	cd $(PROJECT_DIR) && bun install
 	@touch $@
 

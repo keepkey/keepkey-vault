@@ -8,18 +8,15 @@
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 
+// Only packages left external by scripts/bundle-backend.ts.
+// Everything else (ethers, pioneer, swagger, cosmjs, protobuf, @keepkey/*)
+// is pre-bundled into a single index.js. This reduces installed file count
+// from ~13,400 to ~100, cutting Windows Defender first-launch scan from 56s to ~5s.
 const EXTERNALS = [
-  '@keepkey/hdwallet-core',
-  '@keepkey/hdwallet-keepkey',
-  '@keepkey/hdwallet-keepkey-nodehid',
-  '@keepkey/hdwallet-keepkey-nodewebusb',
-  '@keepkey/device-protocol',
-  '@keepkey/proto-tx-builder',
-  'google-protobuf',
   'node-hid',
   'usb',
-  'ethers',
-  '@pioneer-platform/pioneer-client',
+  'google-protobuf',
+  '@keepkey/proto-tx-builder',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
@@ -235,40 +232,8 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
-// Verify device-protocol lib/ was collected. The submodule has lib/ in .gitignore —
-// on fresh checkouts lib/ is empty. Missing messages_pb.js causes a silent bun crash
-// at runtime (no window, no logs). Fail hard at build time instead.
-const dpLibCheck = join(nmDest, '@keepkey', 'device-protocol', 'lib', 'messages_pb.js')
-if (!existsSync(dpLibCheck)) {
-  console.error('[collect-externals] FATAL: @keepkey/device-protocol/lib/messages_pb.js is MISSING')
-  console.error('[collect-externals] The device-protocol submodule has lib/ in .gitignore.')
-  console.error('[collect-externals] Build it on macOS first: cd modules/device-protocol && npm install && npm run build')
-  console.error('[collect-externals] Then ensure lib/ is present on this machine before building.')
-  process.exit(1)
-}
-console.log('[collect-externals] Verified: device-protocol/lib/messages_pb.js present')
-
-// Strip node_modules from @keepkey/* packages (file: deps).
-// These are lerna monorepo artifacts — Bun copies the entire directory including
-// node_modules when resolving file: references. All their deps are already
-// collected at top-level by this script, so the nested copies are pure bloat.
-const keepkeyDir = join(nmDest, '@keepkey')
-if (existsSync(keepkeyDir)) {
-  let strippedKK = 0
-  for (const entry of readdirSync(keepkeyDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const nestedNm = join(keepkeyDir, entry.name, 'node_modules')
-    if (existsSync(nestedNm)) {
-      const result = Bun.spawnSync(['du', '-sk', nestedNm])
-      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
-      try { rmSync(nestedNm, { recursive: true }) } catch { /* already removed */ }
-      strippedKK += kb
-    }
-  }
-  if (strippedKK > 0) {
-    console.log(`[collect-externals] Stripped ${(strippedKK / 1024).toFixed(1)}MB from @keepkey/*/node_modules (file: dep artifacts)`)
-  }
-}
+// device-protocol is now bundled into index.js by bundle-backend.ts,
+// so we no longer need to verify messages_pb.js here.
 
 // Copy nested node_modules (version-differing deps that packages need)
 let nestedCount = 0
