@@ -29,7 +29,18 @@ use crate::scanner::LightwalletClient;
 use crate::wallet_db::{SpendableNote, WalletDb};
 use crate::zip244;
 
-const DEFAULT_FEE: u64 = 10000; // 0.0001 ZEC
+/// ZIP-317 marginal fee per logical action (5000 zatoshis).
+const ZIP317_MARGINAL_FEE: u64 = 5000;
+/// ZIP-317 grace actions — minimum baseline (2 actions are "free").
+const ZIP317_GRACE_ACTIONS: u64 = 2;
+
+/// Compute ZIP-317 fee for an Orchard-only transaction.
+/// fee = marginal_fee × max(grace_actions, logical_actions)
+/// where logical_actions = max(n_spends, n_outputs) for Orchard.
+fn zip317_fee(n_spends: usize, n_outputs: usize) -> u64 {
+    let logical_actions = std::cmp::max(n_spends, n_outputs) as u64;
+    ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
+}
 
 /// Per-action fields needed by the device for signing + digest verification.
 #[derive(Debug, Clone, Serialize)]
@@ -134,8 +145,15 @@ pub async fn build_pczt(
     memo: Option<String>,
 ) -> Result<PcztState> {
     let mut rng = OsRng;
-    let fee = DEFAULT_FEE;
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
+
+    // ZIP-317: fee depends on number of Orchard actions.
+    // n_outputs = 1 (recipient) + 1 (change) — but we don't know if there's
+    // change until we compute it, and change depends on fee. Use a two-pass
+    // approach: assume change exists (common case), compute fee, then verify.
+    let n_spends = notes.len();
+    let n_outputs_with_change = 2usize; // recipient + change
+    let fee = zip317_fee(n_spends, n_outputs_with_change);
     let change = total_input.checked_sub(amount + fee)
         .ok_or_else(|| anyhow::anyhow!(
             "Insufficient funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
