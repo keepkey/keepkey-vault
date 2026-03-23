@@ -30,13 +30,16 @@ for (const [name, spec] of Object.entries({ ...pj.dependencies, ...pj.overrides 
 
 console.log(`[bundle-backend] Resolved ${aliases.size} file: linked packages`)
 
-// These MUST stay external — native C++ addons and packages with nested submodule deps.
-// proto-tx-builder depends on osmosis-frontend (a git submodule) for Cosmos proto codegen;
-// inlining it breaks because Bun can't resolve the submodule-relative paths.
+// These MUST stay external — native C++ addons, packages with nested submodule deps,
+// and libraries that break when bundled in ESM context.
+// - google-protobuf: uses `this || window` global pattern that breaks when inlined by Bun
+//   (causes "jspb.Message.getBooleanField is not a function" at runtime)
+// - proto-tx-builder: depends on osmosis-frontend git submodule for Cosmos proto codegen
 const FORCE_EXTERNAL = new Set([
   'node-hid',
   'usb',
   'electrobun',
+  'google-protobuf',
   '@keepkey/proto-tx-builder',
 ])
 

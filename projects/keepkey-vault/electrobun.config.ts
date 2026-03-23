@@ -22,6 +22,7 @@ export default {
 			external: [
 				"node-hid",
 				"usb",
+				"google-protobuf",
 				"@keepkey/proto-tx-builder",
 			],
 		},

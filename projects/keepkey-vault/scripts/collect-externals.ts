@@ -15,6 +15,7 @@ import { join, dirname, resolve } from 'node:path'
 const EXTERNALS = [
   'node-hid',
   'usb',
+  'google-protobuf',
   '@keepkey/proto-tx-builder',
 ]
 
