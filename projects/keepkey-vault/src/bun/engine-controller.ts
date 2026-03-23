@@ -180,6 +180,9 @@ export class EngineController extends EventEmitter {
     usb.on('attach', (device) => {
       if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
       console.log('[Engine] KeepKey USB attached')
+      // During recovery/verify, the device is already paired and the transport
+      // is locked by the cipher session — don't touch state or trigger syncState.
+      if (this.setupInProgress || this.verifyInProgress) return
       this.updateState('connected_unpaired')
       setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
     })
@@ -346,6 +349,11 @@ export class EngineController extends EventEmitter {
 
   async syncState() {
     if (this.syncing) return
+    // Recovery/verify owns the transport — a concurrent getFeatures() would
+    // corrupt the CHARACTER_REQUEST / CharacterAck message flow (the device
+    // receives GetFeatures instead of the next CharacterAck, garbling the
+    // decoded word and triggering "Word not found in BIP39 wordlist").
+    if (this.setupInProgress || this.verifyInProgress) return
     this.syncing = true
 
     try {
