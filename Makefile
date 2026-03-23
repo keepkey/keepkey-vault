@@ -11,6 +11,10 @@ VAULT_INSTALL_STAMP := $(STAMP_DIR)/vault-install.stamp
 HDWALLET_BUILD_INPUTS := $(shell find modules/hdwallet/packages -type f \( -name '*.ts' -o -name '*.tsx' -o -name 'package.json' -o -name 'tsconfig.json' \))
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
 ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
+DEVICE_PROTO_STAMP := $(STAMP_DIR)/device-protocol-lib.stamp
+# device-protocol is pinned to BitHighlander fork for pre-release firmware features.
+# See docs/device-protocol-fork.md for details. Do NOT change this without reading that doc.
+EXPECTED_DP_FORK := BitHighlander/device-protocol
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
@@ -18,7 +22,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug test test-unit test-rest test-zcash-cli
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules device-protocol-lib modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug test test-unit test-rest test-zcash-cli
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -30,6 +34,36 @@ $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
+
+# --- device-protocol lib/ bootstrap ---
+# The submodule has lib/ in .gitignore. Building from source requires protoc-gen-js
+# which most devs don't have. Instead, copy the pre-built JS from hdwallet's resolved copy.
+# This stamp depends on hdwallet being installed (which pulls the matching device-protocol).
+
+$(DEVICE_PROTO_STAMP): $(HDWALLET_INSTALL_STAMP) | $(STAMP_DIR)
+	@echo "=== device-protocol: validating fork origin ==="
+	@DP_URL=$$(cd modules/device-protocol && git remote get-url origin 2>/dev/null); \
+	if echo "$$DP_URL" | grep -q "$(EXPECTED_DP_FORK)"; then \
+		echo "  origin: $$DP_URL (expected fork)"; \
+	else \
+		echo "WARNING: device-protocol origin is '$$DP_URL', expected $(EXPECTED_DP_FORK)"; \
+		echo "  See docs/device-protocol-fork.md before changing the submodule."; \
+	fi
+	@echo "=== device-protocol: populating lib/ from hdwallet ==="
+	@SRC="modules/hdwallet/node_modules/@keepkey/device-protocol/lib"; \
+	DST="modules/device-protocol/lib"; \
+	if [ ! -f "$$SRC/messages_pb.js" ]; then \
+		echo "ERROR: $$SRC/messages_pb.js not found."; \
+		echo "  Run 'cd modules/hdwallet && yarn install' first."; \
+		exit 1; \
+	fi; \
+	mkdir -p "$$DST"; \
+	cp -r $$SRC/* "$$DST/"; \
+	COUNT=$$(ls -1 $$DST/*.js 2>/dev/null | wc -l | tr -d ' '); \
+	echo "  Copied $$COUNT JS files to $$DST"
+	@touch $@
+
+device-protocol-lib: $(DEVICE_PROTO_STAMP)
 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
@@ -83,7 +117,7 @@ build-zcash-cli-debug:
 
 # --- Vault ---
 
-$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_INSTALL_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
+$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_INSTALL_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTO_STAMP) | $(STAMP_DIR)
 	cd $(PROJECT_DIR) && bun install
 	@touch $@
 
