@@ -3,13 +3,13 @@
   "version": "1.2.6",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
-    "dev": "vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
-    "dev:hmr": "bun run hmr & vite build && bun scripts/collect-externals.ts && electrobun build && electrobun dev",
+    "dev": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
+    "dev:hmr": "bun run hmr & bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
     "dev:hmr:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-hmr-windows.ps1",
     "hmr": "vite --port 5177",
-    "build": "vite build && bun scripts/collect-externals.ts && electrobun build",
-    "build:stable": "vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
-    "build:canary": "vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
+    "build": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts",
+    "build:stable": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
+    "build:canary": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
     "start": "bun run dev",
     "postinstall": "bash scripts/patch-electrobun.sh"
   },
