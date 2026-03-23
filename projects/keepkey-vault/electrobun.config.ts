@@ -1,6 +1,9 @@
 import type { ElectrobunConfig } from "electrobun";
 
 const isWindows = process.platform === "win32";
+const isMac = process.platform === "darwin";
+const arch = process.arch; // 'arm64' or 'x64'
+if (isMac) console.log(`[electrobun] Building for macOS ${arch}`);
 
 export default {
 	app: {
