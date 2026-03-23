@@ -16,6 +16,9 @@ function validateZcashRecipient(addr: string): { valid: boolean; error?: string 
 	return { valid: false, error: 'invalidZcashRecipient' }
 }
 
+/** KeepKey didn't support Zcash shielded before this block — safe skip point */
+const KEEPKEY_RELEASE_BLOCK = 3282941
+
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
 
@@ -97,13 +100,22 @@ export function ZcashPrivacyTab() {
 		})
 	}, [])
 
+	// Whether the wallet has never been scanned (needs initial scan)
+	const [needsScan, setNeedsScan] = useState(false)
+
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
 		try {
-			const bal = await rpcRequest<{ confirmed: number; pending: number }>(
+			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null }>(
 				"zcashShieldedBalance", undefined, 10000
 			)
 			setBalance(bal)
+			if (bal.synced_to != null) {
+				setSyncedTo(bal.synced_to)
+				setNeedsScan(false)
+			} else {
+				setNeedsScan(true)
+			}
 		} catch {
 			// Balance not available yet (needs scan first)
 		}
@@ -235,6 +247,7 @@ export function ZcashPrivacyTab() {
 				"zcashShieldedScan", params, timeout
 			)
 			setSyncedTo(result.synced_to)
+			setNeedsScan(false)
 			const newInRange = result.new_notes ?? 0
 			const msg = newInRange > 0
 				? t("notesFound", { count: result.notes_found }) + ` (${newInRange} new)`
@@ -392,7 +405,30 @@ export function ZcashPrivacyTab() {
 					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
 						{t("shieldedBalance")}
 					</Text>
-					{balance ? (
+					{needsScan ? (
+						<Flex direction="column" gap="2">
+							<Text fontSize="xs" color="#FBBF24">
+								Wallet has not been scanned yet. Scan the chain to find your shielded notes.
+							</Text>
+							<Button
+								size="sm"
+								bg="kk.gold"
+								color="black"
+								fontWeight="600"
+								px="4"
+								py="2"
+								_hover={{ bg: "rgba(192,168,96,0.9)" }}
+								onClick={() => handleScan()}
+								disabled={scanState === "scanning"}
+							>
+								{scanState === "scanning" ? (
+									<><Spinner size="xs" mr="2" /> Scanning...</>
+								) : (
+									<>Scan from block {KEEPKEY_RELEASE_BLOCK.toLocaleString()}</>
+								)}
+							</Button>
+						</Flex>
+					) : balance ? (
 						<Flex direction="column" gap="1">
 							<Flex align="baseline" gap="2">
 								<Text fontSize="lg" fontWeight="700" fontFamily="mono" color="white">

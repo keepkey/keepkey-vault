@@ -940,7 +940,9 @@ async fn main() {
         Err(e) => { error!("Failed to auto-load FVK: {}", e); false }
     };
 
-    // Build ready signal with FVK status
+    // Build ready signal with FVK status + scan state
+    let synced_to = state.ensure_db().ok()
+        .and_then(|db| db.last_scanned_height().ok().flatten());
     let ready_data = if has_fvk {
         let fvk = state.fvk.as_ref().unwrap();
         let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
@@ -954,10 +956,16 @@ async fn main() {
                 "ak": hex::encode(&fvk_bytes[..32]),
                 "nk": hex::encode(&fvk_bytes[32..64]),
                 "rivk": hex::encode(&fvk_bytes[64..96]),
-            }
+            },
+            "synced_to": synced_to,
+            "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
         })
     } else {
-        serde_json::json!({"ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false})
+        serde_json::json!({
+            "ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false,
+            "synced_to": synced_to,
+            "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
+        })
     };
 
     // Send ready signal
