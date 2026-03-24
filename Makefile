@@ -122,7 +122,7 @@ build-intel: install build-zcash-cli-intel
 	arch -x86_64 /bin/bash -c "cd $(PROJECT_DIR) && bun run build:stable"
 	@echo "=== Intel build complete ==="
 
-build-signed-intel: sign-check build-intel prune-bundle
+build-signed-intel: sign-check build-intel audit prune-bundle
 	@echo "Creating Intel Mac DMG..."
 	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
 	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
