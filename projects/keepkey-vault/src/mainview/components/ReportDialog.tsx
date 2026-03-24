@@ -81,8 +81,11 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 	const handleDownload = useCallback(async (id: string, format: ExportFormat) => {
 		try {
 			setSaving(`${id}-${format}`)
+			setError(null)
 			await rpcRequest<{ filePath: string }>("saveReportFile", { id, format }, 30000)
-		} catch {} finally {
+		} catch (e: any) {
+			setError(e.message || `Failed to export ${format}`)
+		} finally {
 			setSaving(null)
 		}
 	}, [])
