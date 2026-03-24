@@ -116,6 +116,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
       zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
       zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
 

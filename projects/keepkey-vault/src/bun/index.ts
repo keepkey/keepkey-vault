@@ -1707,6 +1707,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return result
 			},
 
+			zcashDeshieldZec: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
+				try { rpc.send['shield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const result = await deshieldZec(engine.wallet as any, {
+					recipient: params.recipient,
+					amount: params.amount,
+					account: params.account,
+				})
+				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				return result
+			},
+
 			zcashGetTransactions: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const { getZcashTransactions } = await import("./zcash-sidecar")
