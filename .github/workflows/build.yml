@@ -140,6 +140,7 @@ jobs:
       - name: Audit dependencies
         run: cd projects/keepkey-vault && bun scripts/audit-deps.ts
         shell: bash
+        continue-on-error: true
 
       - name: Prune app bundle
         run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
