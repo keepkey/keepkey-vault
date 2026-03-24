@@ -25,3 +25,15 @@ if [ -f "$EBUN_CLI" ]; then
 else
   echo "[patch-electrobun] $EBUN_CLI not found, skipping (expected during CI or fresh install)"
 fi
+
+# Patch electrobun CLI bootstrap to use --force-local with tar on Windows.
+# Without this, tar interprets the "C:" in Windows paths as a remote host.
+EBUN_CJS="node_modules/electrobun/bin/electrobun.cjs"
+if [ -f "$EBUN_CJS" ]; then
+  if grep -q 'tar --force-local' "$EBUN_CJS"; then
+    echo "[patch-electrobun] tar --force-local already patched"
+  elif grep -q 'tar -xzf' "$EBUN_CJS"; then
+    sed -i 's/tar -xzf/tar --force-local -xzf/g' "$EBUN_CJS"
+    echo "[patch-electrobun] Patched tar --force-local (Windows path fix)"
+  fi
+fi
