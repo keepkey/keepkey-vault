@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Het wissen van je KeepKey verwijdert alle sleutels en instellingen. Je verliest de toegang tot je tegoeden als je geen herstelzin hebt.",
 		"wipeAcknowledge": "Ik heb een back-up van mijn herstelzin en begrijp wat ik doe",
 		"wipeDevice": "Apparaat wissen",
-		"wiping": "Wissen..."
+		"wiping": "Wissen...",
+		"incorrectPin": "Onjuiste PIN",
+		"tryAgainDescription": "Controleer het scherm van uw KeepKey en probeer het opnieuw"
 	},
 	"passphrase": {
 		"title": "Voer wachtwoordzin in",

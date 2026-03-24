@@ -1,3 +1,27 @@
+// ── File logger ──────────────────────────────────────────────────────────
+// NOTE: This logger captures runtime errors AFTER the module graph loads.
+// It does NOT catch import-time crashes — static ESM imports (below) are
+// resolved before module body execution. The real guard against missing
+// modules is the build-time check in collect-externals.ts which fails hard
+// if device-protocol/lib/messages_pb.js is absent. This logger is for
+// diagnosing runtime issues (uncaught exceptions, startup hangs, etc.).
+import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
+
+const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
+const LOG_FILE = LOG_DIR + "/vault-backend.log"
+try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
+const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' })
+const _ts = () => new Date().toISOString()
+const _fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
+const _origLog = console.log, _origWarn = console.warn, _origError = console.error
+console.log = (...args: any[]) => { const line = `[${_ts()}] ${_fmt(...args)}\n`; logStream.write(line); _origLog(...args) }
+console.warn = (...args: any[]) => { const line = `[${_ts()}] WARN: ${_fmt(...args)}\n`; logStream.write(line); _origWarn(...args) }
+console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...args)}\n`; logStream.write(line); _origError(...args) }
+logStream.write(`\n=== New session: ${_ts()} ===\n`)
+console.log(`[Boot] Log file: ${LOG_FILE}`)
+
 import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import pkg from "../../package.json"
 
@@ -16,7 +40,7 @@ import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress } from "./zcash-sidecar"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
@@ -34,6 +58,25 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
+
+// ── Desktop update — open GitHub releases page ──
+// In-app auto-update is unreliable on both platforms:
+// - macOS: zig-zstd has different CLI flags than zstd, stock macOS has no zstd
+// - Windows: in-app exe download + spawn had process lock issues
+// Both platforms now open the GitHub releases page for manual download.
+const GITHUB_REPO = 'keepkey/keepkey-vault'
+// Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
+let pendingUpdateVersion: string | null = null
+
+function openReleasePage() {
+	const version = pendingUpdateVersion || Updater.updateInfo()?.version
+	const url = version
+		? `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`
+		: `https://github.com/${GITHUB_REPO}/releases`
+	console.log(`[Update] Opening releases page: ${url}`)
+	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['open', url]
+	Bun.spawn(cmd, { stdio: ['ignore', 'ignore', 'ignore'] })
+}
 
 // ── Pioneer chain discovery catalog (lazy-loaded, 30-min cache) ──────
 const CATALOG_TTL = 30 * 60 * 1000 // 30 minutes
@@ -147,19 +190,30 @@ const DEV_SERVER_PORT = 5177
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`
 const REST_API_PORT = 1646
 
-// ── Engine Controller ─────────────────────────────────────────────────
+// ── Startup performance tracking ─────────────────────────────────────
+const BOOT_START = Date.now()
+const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}ms: ${label}`)
+
+// ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
 
-// ── Custom chains (loaded from SQLite on startup) ────────────────────
-initDb()
+// ── Deferred: DB + chains loaded AFTER window is created ─────────────
 let customChainDefs: ChainDef[] = []
-try {
-	const stored = getCustomChains()
-	customChainDefs = stored.map(customChainToChainDef)
-	if (stored.length) console.log(`[Vault] Loaded ${stored.length} custom chains from DB`)
-} catch { /* db not ready yet */ }
+let dbReady = false
+
+function deferredInit() {
+	perf('deferredInit start')
+	initDb()
+	dbReady = true
+	try {
+		const stored = getCustomChains()
+		customChainDefs = stored.map(customChainToChainDef)
+		if (stored.length) console.log(`[Vault] Loaded ${stored.length} custom chains from DB`)
+	} catch {}
+	perf('db + chains loaded')
+}
 
 /** All chains: built-in + user-added custom chains */
 function getAllChains(): ChainDef[] {
@@ -179,11 +233,20 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 
 // ── REST API Server (on by default, can be disabled in Settings) ───────
 const auth = new AuthStore()
-let restApiEnabled = getSetting('rest_api_enabled') === '1' // default OFF — user must opt in via Settings
-let swapsEnabled = getSetting('swaps_enabled') === '1' // default OFF
-let bip85Enabled = getSetting('bip85_enabled') === '1' // default OFF
-let zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1' // default OFF, locked
-let preReleaseUpdates = getSetting('pre_release_updates') === '1' // default OFF
+// Settings loaded lazily after DB init — defaults used until then
+let restApiEnabled = false
+let swapsEnabled = false
+let bip85Enabled = false
+let zcashPrivacyEnabled = false
+let preReleaseUpdates = false
+
+function loadSettings() {
+	restApiEnabled = getSetting('rest_api_enabled') === '1'
+	swapsEnabled = getSetting('swaps_enabled') === '1'
+	bip85Enabled = getSetting('bip85_enabled') === '1'
+	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	preReleaseUpdates = getSetting('pre_release_updates') === '1'
+}
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 
@@ -257,9 +320,7 @@ function applyRestApiState() {
 	}
 }
 
-// Start REST API (on by default)
-applyRestApiState()
-if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
+// REST API started in deferredInit() after DB is ready
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
 import type { SwapQuote } from '../shared/types'
@@ -1029,7 +1090,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Single portfolio call — classify natives vs tokens (same logic as getBalances)
-				let balance = '0', balanceUsd = 0, address = pubkey
+				// For UTXO chains pubkey is an xpub, not a receive address.
+				// Leave address empty so the frontend auto-derives from the device.
+				let balance = '0', balanceUsd = 0, address = chain.chainFamily === 'utxo' ? '' : pubkey
 				let tokens: TokenBalance[] | undefined
 				try {
 					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }, { forceRefresh: true }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
@@ -1579,13 +1642,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sidecarReady = isSidecarReady()
 				const fvkLoaded = hasFvkLoaded()
 				const cached = getCachedFvk()
+				const scanState = getScanState()
 				const result = {
 					ready: sidecarReady,
 					fvk_loaded: fvkLoaded,
 					address: cached?.address ?? null,
 					fvk: cached?.fvk ?? null,
+					synced_to: scanState.syncedTo,
+					keepkey_release_block: scanState.releaseBlock,
 				}
-				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {
@@ -1601,7 +1667,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			zcashShieldedScan: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
-				return await scanOrchardNotes(params?.startHeight, params?.fullRescan)
+				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
+				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+				return result
 			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
@@ -1987,10 +2055,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (params.format === 'cointracker') {
 					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
+					const serializableTxs = txs.filter(tx => !!tx.timestamp)
+					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
 					await Bun.write(filePath, toCoinTrackerCsv(txs))
 				} else if (params.format === 'zenledger') {
 					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
+					const serializableTxs = txs.filter(tx => !!tx.timestamp)
+					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
 					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
 					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
@@ -2358,60 +2430,67 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			checkForUpdate: async () => {
 				const localVer = await Updater.localInfo.version()
 
-				// Pre-release channel: check GitHub API for latest release including pre-releases
-				if (preReleaseUpdates) {
-					try {
-						const resp = await fetch('https://api.github.com/repos/keepkey/keepkey-vault/releases?per_page=5', {
-							signal: AbortSignal.timeout(10000),
-							headers: { 'Accept': 'application/vnd.github.v3+json' },
-						})
-						if (resp.ok) {
-							const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean; assets: Array<{ name: string; browser_download_url: string }> }>
-							// Find the first non-draft release (includes pre-releases)
-							const latest = releases.find(r => !r.draft)
-							if (latest) {
-								const remoteVer = latest.tag_name.replace(/^v/, '')
-								if (localVer && versionCompare(remoteVer, localVer) > 0) {
-									console.log(`[Updater] Pre-release available: ${remoteVer} > ${localVer}`)
-									return {
-										updateAvailable: true,
-										updateReady: false,
-										version: remoteVer,
-										hash: '',
-										preRelease: latest.prerelease,
-									}
-								}
-								console.log(`[Updater] Pre-release check: ${remoteVer} <= ${localVer}, up to date`)
+				// Always use GitHub API to check for updates.
+				// Electrobun's native check is unreliable:
+				// - Windows: no update.json published → 404
+				// - macOS: update.json version is stale (generated before release)
+				try {
+					const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`, {
+						signal: AbortSignal.timeout(15000),
+						headers: { 'Accept': 'application/vnd.github.v3+json' },
+					})
+					if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
+
+					const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+					const candidate = preReleaseUpdates
+						? releases.find(r => !r.draft)
+						: releases.find(r => !r.draft && !r.prerelease)
+
+					if (candidate) {
+						const remoteVer = candidate.tag_name.replace(/^v/, '')
+						if (localVer && versionCompare(remoteVer, localVer) > 0) {
+							console.log(`[Updater] Update available: ${remoteVer} > ${localVer}`)
+							pendingUpdateVersion = remoteVer
+							return {
+								updateAvailable: true,
+								updateReady: false,
+								version: remoteVer,
+								hash: '',
+								preRelease: candidate.prerelease,
 							}
 						}
-					} catch (e: any) {
-						console.warn('[Updater] Pre-release check failed:', e.message)
+						console.log(`[Updater] Up to date: ${remoteVer} <= ${localVer}`)
 					}
-				}
 
-				// Standard channel: use Electrobun's built-in updater
-				const result = await Updater.checkForUpdate()
-				const info = Updater.updateInfo()
-				// Suppress false "update available" when running a pre-release newer than the latest stable.
-				let updateAvailable = !!info?.updateAvailable
-				if (updateAvailable && info?.version) {
-					if (localVer && versionCompare(info.version, localVer) < 0) {
-						console.log(`[Updater] Suppressing update: remote ${info.version} < local ${localVer}`)
-						updateAvailable = false
+					return {
+						updateAvailable: false,
+						updateReady: false,
+						version: '',
+						hash: '',
 					}
-				}
-				return {
-					updateAvailable,
-					updateReady: !!info?.updateReady,
-					version: info?.version ?? '',
-					hash: info?.hash ?? '',
-					error: result?.error || undefined,
+				} catch (e: any) {
+					console.warn('[Updater] GitHub API check failed:', e.message)
+					return {
+						updateAvailable: false,
+						updateReady: false,
+						version: '',
+						hash: '',
+						error: `Update check failed: ${e.message}`,
+					}
 				}
 			},
 			downloadUpdate: async () => {
+				if (process.platform === 'win32' || process.platform === 'darwin') {
+					openReleasePage()
+					return
+				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
+				if (process.platform === 'win32' || process.platform === 'darwin') {
+					openReleasePage()
+					return
+				}
 				await Updater.applyUpdate()
 			},
 			getUpdateInfo: async () => {
@@ -2477,6 +2556,9 @@ onScanProgress((progress) => {
 })
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
+})
+engine.on('pin-error', (err) => {
+	try { rpc.send['pin-error'](err) } catch { /* webview not ready yet */ }
 })
 engine.on('character-request', (req) => {
 	try { rpc.send['character-request'](req) } catch { /* webview not ready yet */ }
@@ -2586,6 +2668,7 @@ if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 	},
 ])
 
+perf('creating BrowserWindow')
 let _mainWindow: BrowserWindow | null = null
 const mainWindow = new BrowserWindow({
 	title: `KeepKey Vault v${pkg.version}`,
@@ -2661,7 +2744,15 @@ if (process.platform === 'win32') {
 	}
 }
 
-// Start engine (USB event listeners + initial device sync)
+// ── Deferred startup: DB → settings → REST API → engine ──────────────
+// Window is already created above — now initialize backend services.
+perf('window created, starting deferred init')
+deferredInit()
+auth.reloadPairings()
+loadSettings()
+applyRestApiState()
+if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
+perf('REST API applied, starting engine')
 await engine.start()
 
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
@@ -2670,10 +2761,48 @@ await engine.start()
 Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 
 // Background update check (skip in dev, delay to let webview initialize)
+// Always uses GitHub API instead of Electrobun's native checker because:
+// - Windows: no update.json is published, so Electrobun check always 404s
+// - macOS: update.json version is stale (generated before release is published)
 Updater.localInfo.channel().then(ch => {
 	if (ch !== 'dev') {
-		setTimeout(() => {
-			Updater.checkForUpdate().catch(e => console.warn('[Vault] Update check failed:', e.message))
+		setTimeout(async () => {
+			try {
+				const localVer = await Updater.localInfo.version()
+				if (!localVer) return
+
+				const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=10`, {
+					signal: AbortSignal.timeout(15000),
+					headers: { 'Accept': 'application/vnd.github.v3+json' },
+				})
+				if (!resp.ok) {
+					console.warn(`[Vault] Background update check: GitHub API ${resp.status}`)
+					return
+				}
+
+				const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
+				// Pre-release channel: first non-draft release (includes pre-releases)
+				// Standard channel: first non-draft, non-prerelease release
+				const candidate = preReleaseUpdates
+					? releases.find(r => !r.draft)
+					: releases.find(r => !r.draft && !r.prerelease)
+
+				if (!candidate) {
+					console.log('[Vault] Background update check: no suitable release found')
+					return
+				}
+
+				const remoteVer = candidate.tag_name.replace(/^v/, '')
+				if (versionCompare(remoteVer, localVer) > 0) {
+					console.log(`[Vault] Update available: ${remoteVer} > ${localVer}`)
+					pendingUpdateVersion = remoteVer
+					rpc.send['update-status']({ status: 'update-available', message: `Version ${remoteVer} available` })
+				} else {
+					console.log(`[Vault] Up to date: ${remoteVer} <= ${localVer}`)
+				}
+			} catch (e: any) {
+				console.warn('[Vault] Background update check failed:', e.message)
+			}
 		}, 5000)
 	}
 })
@@ -2732,4 +2861,5 @@ if (zcashPrivacyEnabled) {
 	console.log('[zcash] Sidecar skipped (feature flag OFF)')
 }
 
+perf('boot complete')
 console.log("KeepKey Vault started!")

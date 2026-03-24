@@ -8,18 +8,15 @@
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 
+// Only packages left external by scripts/bundle-backend.ts.
+// Everything else (ethers, pioneer, swagger, cosmjs, protobuf, @keepkey/*)
+// is pre-bundled into a single index.js. This reduces installed file count
+// from ~13,400 to ~100, cutting Windows Defender first-launch scan from 56s to ~5s.
 const EXTERNALS = [
-  '@keepkey/hdwallet-core',
-  '@keepkey/hdwallet-keepkey',
-  '@keepkey/hdwallet-keepkey-nodehid',
-  '@keepkey/hdwallet-keepkey-nodewebusb',
-  '@keepkey/device-protocol',
-  '@keepkey/proto-tx-builder',
-  'google-protobuf',
   'node-hid',
   'usb',
-  'ethers',
-  '@pioneer-platform/pioneer-client',
+  'google-protobuf',
+  '@keepkey/proto-tx-builder',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
@@ -122,6 +119,8 @@ const DEV_BLOCKLIST = new Set([
   'node-int64', 'parse5',
   // --- Dead chain SDK (Binance Beacon Chain is decommissioned) ---
   'bnb-javascript-sdk-nobroadcast',
+  // --- TypeScript type packages (not needed at runtime) ---
+  'types-ramda',
 ])
 
 // Read deps from a nested package dir and add them to allDeps (so they get collected at top level).
@@ -233,27 +232,8 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
-// Strip node_modules from @keepkey/* packages (file: deps).
-// These are lerna monorepo artifacts — Bun copies the entire directory including
-// node_modules when resolving file: references. All their deps are already
-// collected at top-level by this script, so the nested copies are pure bloat.
-const keepkeyDir = join(nmDest, '@keepkey')
-if (existsSync(keepkeyDir)) {
-  let strippedKK = 0
-  for (const entry of readdirSync(keepkeyDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const nestedNm = join(keepkeyDir, entry.name, 'node_modules')
-    if (existsSync(nestedNm)) {
-      const result = Bun.spawnSync(['du', '-sk', nestedNm])
-      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
-      try { rmSync(nestedNm, { recursive: true }) } catch { /* already removed */ }
-      strippedKK += kb
-    }
-  }
-  if (strippedKK > 0) {
-    console.log(`[collect-externals] Stripped ${(strippedKK / 1024).toFixed(1)}MB from @keepkey/*/node_modules (file: dep artifacts)`)
-  }
-}
+// device-protocol is now bundled into index.js by bundle-backend.ts,
+// so we no longer need to verify messages_pb.js here.
 
 // Copy nested node_modules (version-differing deps that packages need)
 let nestedCount = 0
@@ -359,19 +339,28 @@ console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize
 
 // Remove prebuilds for OTHER platforms, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
-// Platform-aware: keep prebuilds for the current build platform, strip the rest
+// Platform + architecture aware: keep prebuilds only for the current build target
 const isWindows = process.platform === 'win32'
 const isMac = process.platform === 'darwin'
+const isArm64 = process.arch === 'arm64'
+const isX64 = process.arch === 'x64'
+console.log(`[collect-externals] Platform: ${process.platform}, Arch: ${process.arch}`)
 const REMOVE_PREBUILD_PREFIXES = isWindows
   ? ['linux', 'darwin', 'android']
   : isMac
     ? ['linux', 'win32', 'android']
     : ['darwin', 'win32', 'android'] // linux build
 // HID prebuild directory prefixes (node-hid uses HID-{platform}-{arch} naming)
-const REMOVE_HID_PREFIXES = isWindows
+// On macOS, filter by architecture so only the matching HID binary is bundled.
+const REMOVE_HID_PREFIXES: string[] = isWindows
   ? ['HID-linux', 'HID-darwin', 'HID_hidraw-linux']
   : isMac
-    ? ['HID-win', 'HID-linux', 'HID_hidraw-linux']
+    ? [
+        'HID-win', 'HID-linux', 'HID_hidraw-linux',
+        // Strip the OTHER macOS architecture to reduce bundle size
+        ...(isArm64 ? ['HID-darwin-x64'] : []),
+        ...(isX64 ? ['HID-darwin-arm64'] : []),
+      ]
     : ['HID-win', 'HID-darwin']
 // C/C++ source and build artifacts not needed at runtime (~7MB)
 const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
@@ -480,6 +469,9 @@ const STRIP_DIRS = [
   // --- node-notifier: test/dev utility, contains unsigned macOS binary (terminal-notifier.app) ---
   'node-notifier',
   '@keepkey/proto-tx-builder/node_modules/node-notifier',
+
+  // --- types-ramda: TypeScript types, not needed at runtime ---
+  'types-ramda',
 ]
 
 // Remove nested node_modules that duplicate top-level packages at the SAME version.

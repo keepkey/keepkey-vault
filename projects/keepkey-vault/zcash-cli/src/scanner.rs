@@ -42,6 +42,8 @@ const FALLBACK_LWD_SERVERS: &[&str] = &[
 ];
 // Orchard activated at NU5 height
 const ORCHARD_ACTIVATION_HEIGHT: u64 = 1687104;
+/// KeepKey first supported Zcash shielded at this block — safe to skip scanning before this.
+pub const KEEPKEY_RELEASE_BLOCK: u64 = 3282941;
 
 pub struct LightwalletClient {
     client: CompactTxStreamerClient<Channel>,
@@ -515,8 +517,12 @@ impl LightwalletClient {
         db: &WalletDb,
         force_start: Option<u64>,
     ) -> Result<OrchardScanResult> {
-        let ivk = fvk.to_ivk(Scope::External);
-        let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
+        // Scan with BOTH External (received) and Internal (change) IVKs
+        // to find all notes belonging to this wallet
+        let ivk_ext = fvk.to_ivk(Scope::External);
+        let prepared_ivk_ext = PreparedIncomingViewingKey::new(&ivk_ext);
+        let ivk_int = fvk.to_ivk(Scope::Internal);
+        let prepared_ivk_int = PreparedIncomingViewingKey::new(&ivk_int);
 
         let tip = self.get_latest_block_height().await?;
 
@@ -528,12 +534,12 @@ impl LightwalletClient {
             None => saved_height
                 .map(|h| h + 1)
                 .unwrap_or_else(|| {
-                    // First scan: start from Orchard activation height to
-                    // catch all possible notes. This is slow (~2M blocks)
-                    // but necessary to avoid silently missing funds.
-                    info!("First scan — starting from Orchard activation height {} (tip={})",
-                           ORCHARD_ACTIVATION_HEIGHT, tip);
-                    ORCHARD_ACTIVATION_HEIGHT
+                    // First scan: start from KeepKey release block — no KeepKey
+                    // user could have shielded notes before this height, so
+                    // scanning from Orchard activation (1687104) wastes ~1.6M blocks.
+                    info!("First scan — starting from KeepKey release block {} (tip={})",
+                           KEEPKEY_RELEASE_BLOCK, tip);
+                    KEEPKEY_RELEASE_BLOCK
                 }),
         };
 
@@ -605,7 +611,10 @@ impl LightwalletClient {
                         }
 
                         // Try to decrypt — is this action a note to us?
-                        if let Some((note, addr)) = try_decrypt_action(action, &prepared_ivk) {
+                        // Try External scope first (received notes), then Internal (change notes)
+                        let decrypted = try_decrypt_action(action, &prepared_ivk_ext)
+                            .or_else(|| try_decrypt_action(action, &prepared_ivk_int));
+                        if let Some((note, addr)) = decrypted {
                             let value = note.value().inner();
                             let recipient_bytes = addr.to_raw_address_bytes().to_vec();
 

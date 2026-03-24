@@ -269,6 +269,42 @@ export async function buildUtxoTx(
     console.log(`${TAG} DOGE: enforced minimum fee = ${fee} sats (${fee / 1e8} DOGE)`)
   }
 
+  // ZEC: enforce ZIP-317 minimum fee (NU5+ consensus rule)
+  // fee = 5000 × max(grace_actions, logical_actions) where grace_actions = 2
+  // logical_actions = max(transparent_inputs, transparent_outputs)
+  // coinselect uses sat/byte which produces fees far below the ZIP-317 floor.
+  if (chain.id === 'zcash') {
+    const logicalActions = Math.max(inputs.length, outputs.length)
+    const zip317Fee = 5000 * Math.max(2, logicalActions)
+    if (fee < zip317Fee) {
+      const increase = zip317Fee - fee
+      const changeIdx = outputs.findIndex((o: any) => !o.address)
+      if (changeIdx >= 0 && outputs[changeIdx].value >= increase) {
+        outputs[changeIdx].value -= increase
+        if (outputs[changeIdx].value < 5000) {
+          // Change is dust — consolidate into fee
+          fee = zip317Fee + outputs[changeIdx].value
+          outputs.splice(changeIdx, 1)
+        } else {
+          fee = zip317Fee
+        }
+      } else if (isMax || memo) {
+        // Only reduce the spend output for sendMax or swap deposits (memo present).
+        // For exact-amount user sends, fail instead of silently reducing the amount.
+        const spendIdx = outputs.findIndex((o: any) => o.address)
+        if (spendIdx >= 0 && outputs[spendIdx].value > increase + 5000) {
+          outputs[spendIdx].value -= increase
+          fee = zip317Fee
+        } else {
+          throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions)`)
+        }
+      } else {
+        throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions). Try sending a slightly smaller amount.`)
+      }
+      console.log(`${TAG} ZEC: enforced ZIP-317 fee = ${fee} zats (${logicalActions} actions, min ${zip317Fee})`)
+    }
+  }
+
   // 4. Get pubkey info — used for both address→path lookup AND change address index
   let changeAddressIndex = 0
   const addressToPath = new Map<string, string>()

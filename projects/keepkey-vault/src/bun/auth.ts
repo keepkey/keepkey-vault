@@ -33,18 +33,24 @@ export class AuthStore {
   private pendingSigningRequests = new Map<string, { resolve: (ok: boolean) => void; timer: Timer }>()
 
   constructor() {
-    // Seed in-memory map from persisted pairings
+    this.reloadPairings()
+  }
+
+  /** Reload persisted pairings from DB. Safe to call multiple times. */
+  reloadPairings() {
     try {
       const stored = getStoredPairings()
       for (const row of stored) {
-        this.keys.set(row.apiKey, {
-          apiKey: row.apiKey,
-          info: { name: row.name, url: row.url, imageUrl: row.imageUrl, addedOn: row.addedOn },
-        })
+        if (!this.keys.has(row.apiKey)) {
+          this.keys.set(row.apiKey, {
+            apiKey: row.apiKey,
+            info: { name: row.name, url: row.url, imageUrl: row.imageUrl, addedOn: row.addedOn },
+          })
+        }
       }
       if (stored.length) console.log(`[auth] Loaded ${stored.length} persisted pairings`)
-    } catch (e: any) {
-      console.warn('[auth] Failed to load stored pairings:', e.message)
+    } catch {
+      // Expected before DB init — silent
     }
   }
 
@@ -108,18 +114,41 @@ export class AuthStore {
   }
 
   validate(apiKey: string): PairedClient | null {
-    const entry = this.keys.get(apiKey)
-    if (!entry) return null
+    // Constant-time scan: iterate all keys to prevent timing-based key guessing.
+    // Map.get() would return faster for misses, leaking whether a prefix matches.
+    let found: PairedClient | null = null
+    for (const [storedKey, entry] of this.keys) {
+      if (storedKey.length === apiKey.length && this.timingSafeEqual(storedKey, apiKey)) {
+        found = entry
+      }
+    }
+    if (!found) return null
     // Check TTL — expire keys older than 30 days.
     // Legacy pairings without addedOn are treated as expired (fail-closed)
     // to prevent permanently grandfathered trust.
-    const addedOn = entry.info.addedOn
+    const addedOn = found.info.addedOn
     if (!addedOn || Date.now() - addedOn > KEY_TTL_MS) {
       this.keys.delete(apiKey)
       removePairing(apiKey)
       return null
     }
-    return entry
+    return found
+  }
+
+  /** Constant-time string comparison to prevent timing attacks */
+  private timingSafeEqual(a: string, b: string): boolean {
+    if (a.length !== b.length) return false
+    const bufA = Buffer.from(a)
+    const bufB = Buffer.from(b)
+    // Use Bun's crypto.timingSafeEqual (Node-compatible)
+    try {
+      return require('crypto').timingSafeEqual(bufA, bufB)
+    } catch {
+      // Fallback: constant-time XOR comparison
+      let result = 0
+      for (let i = 0; i < bufA.length; i++) result |= bufA[i] ^ bufB[i]
+      return result === 0
+    }
   }
 
   /** Evict oldest key when at capacity */

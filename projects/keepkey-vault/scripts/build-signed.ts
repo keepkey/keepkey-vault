@@ -26,4 +26,16 @@ const result = Bun.spawnSync(
   }
 )
 
-process.exit(result.exitCode ?? 1)
+if (result.exitCode !== 0) process.exit(result.exitCode ?? 1)
+
+// Post-build: patch Bun bundler node:buffer bug in the electrobun output
+const patch = Bun.spawnSync(
+  ['bun', join(scriptsDir, 'patch-bundle.ts')],
+  {
+    cwd: join(import.meta.dir, '..'),
+    stdout: 'inherit',
+    stderr: 'inherit',
+  }
+)
+
+process.exit(patch.exitCode ?? 1)

@@ -27,7 +27,10 @@ interface DeviceSettingsDrawerProps {
 	onClose: () => void
 	deviceState: DeviceStateInfo
 	onCheckForUpdate?: () => Promise<any>
+	onDownloadUpdate?: () => Promise<void>
+	onApplyUpdate?: () => Promise<void>
 	updatePhase?: string
+	updateVersion?: string
 	appVersion?: { version: string; channel: string } | null
 	onOpenAuditLog?: () => void
 	onOpenPairedApps?: () => void
@@ -135,7 +138,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, updatePhase, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -990,6 +993,39 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									<Text fontSize="sm" color={updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1">
 										{updateMessage}
 									</Text>
+								)}
+								{/* Download button (available state) */}
+								{updatePhase === "available" && onDownloadUpdate && (
+									<Box
+										as="button" mt="2" px="3" py="1.5" borderRadius="full"
+										bg="kk.gold" color="black" fontSize="xs" fontWeight="600"
+										cursor="pointer" _hover={{ opacity: 0.9 }}
+										onClick={onDownloadUpdate}
+									>
+										{t("downloadUpdate", { defaultValue: "Download Update" })}
+									</Box>
+								)}
+								{/* Install button (ready state — Linux native updater) */}
+								{updatePhase === "ready" && onApplyUpdate && (
+									<Box
+										as="button" mt="2" px="3" py="1.5" borderRadius="full"
+										bg="#22C55E" color="white" fontSize="xs" fontWeight="600"
+										cursor="pointer" _hover={{ bg: "#16A34A" }}
+										onClick={onApplyUpdate}
+									>
+										{t("restartToUpdate", { defaultValue: "Restart & Install" })}
+									</Box>
+								)}
+								{/* Error fallback */}
+								{updatePhase === "error" && onDownloadUpdate && (
+									<Box
+										as="button" mt="2" px="3" py="1.5" borderRadius="full"
+										bg="rgba(255,255,255,0.06)" color="kk.gold" fontSize="xs" fontWeight="500"
+										cursor="pointer" _hover={{ bg: "rgba(255,255,255,0.1)" }}
+										onClick={onDownloadUpdate}
+									>
+										{t("downloadManually", { defaultValue: "Download from GitHub" })}
+									</Box>
 								)}
 							</Box>
 

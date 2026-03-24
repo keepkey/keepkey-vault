@@ -327,7 +327,7 @@ export function ReceiveView({
 					{/* Address — copyable */}
 					<CopyableField label={t("address")} value={address!} />
 
-					{/* xpub — copyable (BTC only) */}
+					{/* xpub/zpub — copyable (UTXO chains) */}
 					{xpub && (
 						<CopyableField label={t("extendedPublicKey")} value={xpub} />
 					)}

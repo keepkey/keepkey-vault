@@ -369,14 +369,25 @@ async fn handle_scan(state: &mut State, params: &Value) -> Result<Value> {
 
     let db = state.ensure_db()?;
 
-    // Full rescan: clear DB scan progress so scanner starts from Orchard activation
     if full_rescan {
+        // Full rescan: clear DB scan progress so scanner starts from KeepKey release block
         info!("Full rescan requested — clearing scan progress");
         db.clear_scan_progress()?;
+    } else if let Some(h) = start_height {
+        // Targeted rescan: reset the scan cursor to just before the requested height
+        // so the scanner treats it as contiguous and advances the cursor forward.
+        // Existing notes are preserved (INSERT OR IGNORE on unique nullifier).
+        info!("Targeted rescan from {} — resetting scan cursor", h);
+        if h > 0 {
+            db.set_last_scanned_height(h - 1)?;
+        } else {
+            db.clear_scan_progress()?;
+        }
     }
 
     let mut client = scanner::LightwalletClient::connect(None).await?;
-    let result = client.scan_with_persistence(&fvk, db, start_height).await?;
+    // After cursor reset, the scanner picks up from last_scanned_height + 1 naturally
+    let result = client.scan_with_persistence(&fvk, db, None).await?;
 
     Ok(serde_json::json!({
         "balance": result.total_received,
@@ -391,12 +402,15 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let db = state.ensure_db()?;
     let balance = db.get_balance()?;
     let (total, unspent) = db.get_note_count()?;
+    let synced_to = db.last_scanned_height()?;
 
     Ok(serde_json::json!({
         "confirmed": balance,
         "pending": 0,
         "notes_total": total,
         "notes_unspent": unspent,
+        "synced_to": synced_to,
+        "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
     }))
 }
 
@@ -926,7 +940,9 @@ async fn main() {
         Err(e) => { error!("Failed to auto-load FVK: {}", e); false }
     };
 
-    // Build ready signal with FVK status
+    // Build ready signal with FVK status + scan state
+    let synced_to = state.ensure_db().ok()
+        .and_then(|db| db.last_scanned_height().ok().flatten());
     let ready_data = if has_fvk {
         let fvk = state.fvk.as_ref().unwrap();
         let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
@@ -940,10 +956,16 @@ async fn main() {
                 "ak": hex::encode(&fvk_bytes[..32]),
                 "nk": hex::encode(&fvk_bytes[32..64]),
                 "rivk": hex::encode(&fvk_bytes[64..96]),
-            }
+            },
+            "synced_to": synced_to,
+            "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
         })
     } else {
-        serde_json::json!({"ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false})
+        serde_json::json!({
+            "ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false,
+            "synced_to": synced_to,
+            "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
+        })
     };
 
     // Send ready signal

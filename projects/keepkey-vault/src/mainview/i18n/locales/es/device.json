@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Borrar tu KeepKey eliminará todas las claves y configuraciones. Perderás acceso a tus fondos si no tienes tu frase de recuperación.",
 		"wipeAcknowledge": "He respaldado mi frase de recuperación y entiendo lo que estoy haciendo",
 		"wipeDevice": "Borrar dispositivo",
-		"wiping": "Borrando..."
+		"wiping": "Borrando...",
+		"incorrectPin": "PIN incorrecto",
+		"tryAgainDescription": "Revisa la pantalla de tu KeepKey e inténtalo de nuevo"
 	},
 	"passphrase": {
 		"title": "Ingresar contraseña",

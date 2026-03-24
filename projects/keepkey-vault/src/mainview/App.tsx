@@ -83,6 +83,7 @@ function App() {
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
 	const [pinDismissed, setPinDismissed] = useState(false)
+	const [pinFailed, setPinFailed] = useState(false)
 	const pinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
@@ -93,7 +94,19 @@ function App() {
 		})
 	}, [])
 
+	// Listen for pin-error from backend (wrong PIN detected).
+	// Reset pinFailed first so the false→true transition fires the
+	// useEffect inside PinEntry even if it was already true.
+	useEffect(() => {
+		return onRpcMessage("pin-error", () => {
+			setPinFailed(false)
+			// Batch in next tick so React sees the transition
+			queueMicrotask(() => setPinFailed(true))
+		})
+	}, [])
+
 	const handlePinSubmit = useCallback(async (pin: string) => {
+		setPinFailed(false)
 		try { await rpcRequest("sendPin", { pin }) } catch (e) { console.error("sendPin:", e) }
 		setPinRequestType(null)
 		// Temporarily suppress auto-show to prevent flicker while device verifies.
@@ -106,6 +119,7 @@ function App() {
 	const handlePinCancel = useCallback(() => {
 		setPinRequestType(null)
 		setPinDismissed(true)
+		setPinFailed(false)
 		// Allow re-show after 10s even on cancel — device still expects PIN
 		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
 		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 10000)
@@ -117,6 +131,7 @@ function App() {
 		} catch (e) { console.error("wipeDevice from PIN:", e) }
 		setPinRequestType(null)
 		setPinDismissed(true)
+		setPinFailed(false)
 	}, [])
 
 	// ── Passphrase overlay ──────────────────────────────────────────
@@ -302,6 +317,7 @@ function App() {
 			setCharRequest(null)
 			setPassphraseRequested(false)
 			setPinDismissed(false) // reset dismiss on state transitions
+			setPinFailed(false)
 		}
 		// Device re-locked during passphrase flow (auto-lock timer) — dismiss
 		// passphrase overlay so PIN overlay can take priority.
@@ -483,7 +499,7 @@ function App() {
 	) : null
 
 	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
+		<PinEntry type={pinRequestType} failed={pinFailed} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
@@ -557,7 +573,10 @@ function App() {
 					deviceState={deviceState}
 					appVersion={appVersion}
 					onCheckForUpdate={update.checkForUpdate}
+					onDownloadUpdate={update.downloadUpdate}
+					onApplyUpdate={update.applyUpdate}
 					updatePhase={update.phase}
+					updateVersion={update.info?.version}
 				/>
 			</>
 		)
@@ -654,7 +673,10 @@ function App() {
 				}}
 				deviceState={deviceState}
 				onCheckForUpdate={update.checkForUpdate}
+				onDownloadUpdate={update.downloadUpdate}
+				onApplyUpdate={update.applyUpdate}
 				updatePhase={update.phase}
+				updateVersion={update.info?.version}
 				appVersion={appVersion}
 				onOpenAuditLog={() => setAuditLogOpen(true)}
 				onOpenPairedApps={() => setPairedAppsOpen(true)}

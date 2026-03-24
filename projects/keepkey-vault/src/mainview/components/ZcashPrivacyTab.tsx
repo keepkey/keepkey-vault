@@ -16,6 +16,9 @@ function validateZcashRecipient(addr: string): { valid: boolean; error?: string 
 	return { valid: false, error: 'invalidZcashRecipient' }
 }
 
+/** KeepKey didn't support Zcash shielded before this block — safe skip point */
+const KEEPKEY_RELEASE_BLOCK = 3282941
+
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
 
@@ -97,13 +100,22 @@ export function ZcashPrivacyTab() {
 		})
 	}, [])
 
+	// Whether the wallet has never been scanned (needs initial scan)
+	const [needsScan, setNeedsScan] = useState(false)
+
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
 		try {
-			const bal = await rpcRequest<{ confirmed: number; pending: number }>(
+			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null }>(
 				"zcashShieldedBalance", undefined, 10000
 			)
 			setBalance(bal)
+			if (bal.synced_to != null) {
+				setSyncedTo(bal.synced_to)
+				setNeedsScan(false)
+			} else {
+				setNeedsScan(true)
+			}
 		} catch {
 			// Balance not available yet (needs scan first)
 		}
@@ -128,11 +140,19 @@ export function ZcashPrivacyTab() {
 		let cancelled = false
 		;(async () => {
 			try {
-				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null }>(
+				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null; synced_to?: number | null }>(
 					"zcashShieldedStatus", undefined, 5000
 				)
 				if (cancelled) return
 				if (!r.ready) { setStatus("not_running"); return }
+
+				// Set scan state from sidecar ready signal (available before any balance RPC)
+				if (r.synced_to != null) {
+					setSyncedTo(r.synced_to)
+					setNeedsScan(false)
+				} else {
+					setNeedsScan(true)
+				}
 
 				if (r.fvk_loaded && r.address) {
 					// FVK auto-loaded from DB — no device interaction needed
@@ -235,6 +255,7 @@ export function ZcashPrivacyTab() {
 				"zcashShieldedScan", params, timeout
 			)
 			setSyncedTo(result.synced_to)
+			setNeedsScan(false)
 			const newInRange = result.new_notes ?? 0
 			const msg = newInRange > 0
 				? t("notesFound", { count: result.notes_found }) + ` (${newInRange} new)`
@@ -392,7 +413,30 @@ export function ZcashPrivacyTab() {
 					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
 						{t("shieldedBalance")}
 					</Text>
-					{balance ? (
+					{needsScan ? (
+						<Flex direction="column" gap="2">
+							<Text fontSize="xs" color="#FBBF24">
+								{t("needsScanPrompt")}
+							</Text>
+							<Button
+								size="sm"
+								bg="kk.gold"
+								color="black"
+								fontWeight="600"
+								px="4"
+								py="2"
+								_hover={{ bg: "rgba(192,168,96,0.9)" }}
+								onClick={() => handleScan()}
+								disabled={scanState === "scanning"}
+							>
+								{scanState === "scanning" ? (
+									<><Spinner size="xs" mr="2" /> {t("scanning")}</>
+								) : (
+									t("scanFromBlock", { block: KEEPKEY_RELEASE_BLOCK.toLocaleString() })
+								)}
+							</Button>
+						</Flex>
+					) : balance ? (
 						<Flex direction="column" gap="1">
 							<Flex align="baseline" gap="2">
 								<Text fontSize="lg" fontWeight="700" fontFamily="mono" color="white">
@@ -548,9 +592,22 @@ export function ZcashPrivacyTab() {
 			{/* Section D: Scan controls */}
 			{orchardAddress && (
 				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
-					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
-						{t("scanPayments")}
-					</Text>
+					<Flex align="center" justify="space-between" mb="2">
+						<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">
+							{t("scanPayments")}
+						</Text>
+						<Text
+							fontSize="10px"
+							color="kk.textMuted"
+							fontFamily="mono"
+							cursor="pointer"
+							_hover={{ color: "kk.gold" }}
+							title="Click to use KeepKey release block"
+							onClick={() => setScanFromHeight(String(KEEPKEY_RELEASE_BLOCK))}
+						>
+							#{KEEPKEY_RELEASE_BLOCK.toLocaleString()}
+						</Text>
+					</Flex>
 
 					{/* Progress bar — visible during scan */}
 					{scanState === "scanning" && (
@@ -608,7 +665,7 @@ export function ZcashPrivacyTab() {
 						<Flex direction="column" gap="2">
 							<Flex gap="2" align="center">
 								<Input
-									placeholder={t("scanFromHeightPlaceholder")}
+									placeholder={`Block height (e.g. ${KEEPKEY_RELEASE_BLOCK})`}
 									value={scanFromHeight}
 									onChange={(e) => setScanFromHeight(e.target.value.replace(/\D/g, ""))}
 									size="sm"
@@ -813,7 +870,23 @@ export function ZcashPrivacyTab() {
 											)}
 										</Flex>
 										<Flex align="center" gap="2">
-											<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
+											<Text
+												fontSize="10px"
+												color="kk.textMuted"
+												fontFamily="mono"
+												cursor="pointer"
+												userSelect="text"
+												title="Click to copy height · Double-click to set as rescan height"
+												_hover={{ color: "kk.gold", textDecoration: "underline" }}
+												onClick={(e) => {
+													e.stopPropagation()
+													navigator.clipboard.writeText(String(tx.block_height))
+												}}
+												onDoubleClick={(e) => {
+													e.stopPropagation()
+													setScanFromHeight(String(tx.block_height))
+												}}
+											>
 												#{tx.block_height.toLocaleString()}
 											</Text>
 											<Text

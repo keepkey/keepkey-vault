@@ -9,6 +9,8 @@ HDWALLET_INSTALL_STAMP := $(STAMP_DIR)/hdwallet-install.stamp
 HDWALLET_BUILD_STAMP := $(STAMP_DIR)/hdwallet-build.stamp
 VAULT_INSTALL_STAMP := $(STAMP_DIR)/vault-install.stamp
 HDWALLET_BUILD_INPUTS := $(shell find modules/hdwallet/packages -type f \( -name '*.ts' -o -name '*.tsx' -o -name 'package.json' -o -name 'tsconfig.json' \))
+PROTO_BUILD_STAMP := $(STAMP_DIR)/proto-build.stamp
+PROTO_BUILD_INPUTS := $(shell find modules/proto-tx-builder/src -type f \( -name '*.ts' -o -name '*.js' \) 2>/dev/null) modules/proto-tx-builder/tsconfig.json
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
 ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
 
@@ -18,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug test test-unit test-rest test-zcash-cli
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli build-intel build-signed-intel
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -35,6 +37,14 @@ submodules: $(SUBMODULES_STAMP)
 
 $(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	cd modules/proto-tx-builder && bun install
+	@# Init the nested osmosis-frontend submodule (provides Cosmos/Osmosis proto codegen)
+	cd modules/proto-tx-builder && git submodule update --init osmosis-frontend
+	@touch $@
+
+$(PROTO_BUILD_STAMP): $(PROTO_BUILD_INPUTS) $(PROTO_INSTALL_STAMP) | $(STAMP_DIR)
+	@echo "=== proto-tx-builder: building ==="
+	cd modules/proto-tx-builder && npx tsc -p .
+	@test -f modules/proto-tx-builder/dist/index.js || (echo "ERROR: proto-tx-builder/dist/index.js missing after build"; exit 1)
 	@touch $@
 
 $(HDWALLET_INSTALL_STAMP): modules/hdwallet/package.json modules/hdwallet/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
@@ -47,7 +57,7 @@ $(HDWALLET_BUILD_STAMP): modules/hdwallet/tsconfig.json $(HDWALLET_BUILD_INPUTS)
 	cd modules/hdwallet && yarn tsc --build
 	@touch $@
 
-modules-build: $(HDWALLET_BUILD_STAMP)
+modules-build: $(HDWALLET_BUILD_STAMP) $(PROTO_BUILD_STAMP)
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
@@ -81,9 +91,64 @@ build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
 
+# Cross-compile zcash-cli for Intel Mac from Apple Silicon
+build-zcash-cli-intel:
+	@echo "=== Zcash CLI: cross-compiling for x86_64-apple-darwin ==="
+	cd $(PROJECT_DIR)/zcash-cli && cargo build --release --target x86_64-apple-darwin
+ifdef ELECTROBUN_DEVELOPER_ID
+	@echo "Signing zcash-cli (Intel) binary..."
+	codesign --force --verbose --timestamp \
+		--sign "Developer ID Application: $(ELECTROBUN_DEVELOPER_ID) ($(ELECTROBUN_TEAMID))" \
+		--options runtime \
+		$(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
+endif
+	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
+
+# --- Intel Mac Build ---
+# Build the full app targeting Intel (x86_64) Macs from an Apple Silicon machine.
+# Requires: rustup target add x86_64-apple-darwin (one-time setup)
+# The Zcash CLI is cross-compiled, native node addons use prebuilt x64 binaries,
+# and Electrobun + Bun handle the rest.
+
+INTEL_DMG_NAME := KeepKey-Vault-$(VERSION)-x86_64.dmg
+
+build-intel: install build-zcash-cli-intel
+	@echo "=== Building Vault for Intel Mac (x86_64) ==="
+	@# Copy the cross-compiled zcash-cli into the expected location
+	@mkdir -p $(PROJECT_DIR)/zcash-cli/target/release
+	cp $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli \
+		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
+	@# Run the build under Rosetta so Bun + Electrobun produce x86_64 output
+	arch -x86_64 /bin/bash -c "cd $(PROJECT_DIR) && bun run build:stable"
+	@echo "=== Intel build complete ==="
+
+build-signed-intel: sign-check build-intel audit prune-bundle
+	@echo "Creating Intel Mac DMG..."
+	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
+	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
+	STAGING=$$(mktemp -d); \
+	trap 'rm -rf "$$STAGING"' EXIT; \
+	zstd -d "$$TAR_ZST" -o "$$STAGING/app.tar" --force; \
+	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
+	rm "$$STAGING/app.tar"; \
+	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
+	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign failed"; exit 1); \
+	ln -s /Applications "$$STAGING/Applications"; \
+	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(INTEL_DMG_NAME)"; \
+	rm -f "$$DMG_OUT"; \
+	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
+	echo "Notarizing Intel DMG..."; \
+	ZIP_TMP=$$(mktemp).zip; \
+	(cd "$$(dirname "$$DMG_OUT")" && zip -q "$$ZIP_TMP" "$$(basename "$$DMG_OUT")"); \
+	xcrun notarytool submit --apple-id "$$ELECTROBUN_APPLEID" --password "$$ELECTROBUN_APPLEIDPASS" --team-id "$$ELECTROBUN_TEAMID" --wait "$$ZIP_TMP"; \
+	rm -f "$$ZIP_TMP"; \
+	xcrun stapler staple "$$DMG_OUT"; \
+	echo "Intel DMG ready: $$DMG_OUT"
+
 # --- Vault ---
 
-$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_INSTALL_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
+$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
 	cd $(PROJECT_DIR) && bun install
 	@touch $@
 
@@ -99,7 +164,7 @@ dev-hmr: install $(ZCASH_CLI_STAMP)
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
 
-build: install
+build: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build
 
 build-stable: install build-zcash-cli
@@ -112,8 +177,11 @@ build-canary: install
 prune-bundle:
 	cd $(PROJECT_DIR) && bun scripts/prune-app-bundle.ts
 
-# Full signed build: electrobun build → prune → extract from tar → create DMG → sign + notarize DMG
-build-signed: sign-check build-stable prune-bundle dmg
+# Full signed build: electrobun build → audit → prune → extract from tar → create DMG → sign + notarize + staple
+# Force-clear zcash-cli stamp so it gets re-signed with Developer ID (stamp may be stale from unsigned build)
+build-signed: sign-check
+	@rm -f $(ZCASH_CLI_STAMP)
+	$(MAKE) build-stable audit prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
@@ -155,7 +223,7 @@ dmg:
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/wizard-messaging.test.ts
 
 test-integration: test-rest
 
@@ -246,12 +314,15 @@ help:
 	@echo "  make dev-hmr        - Dev mode with Vite HMR"
 	@echo "  make build          - Development build (no signing)"
 	@echo "  make build-stable   - Production build (signs + notarizes via Electrobun)"
-	@echo "  make build-signed   - Full pipeline: build → extract → DMG → sign → notarize"
+	@echo "  make build-signed   - Full pipeline: build → audit → prune → DMG → sign → notarize"
 	@echo "  make prune-bundle   - Prune app bundle (strip nested deps, .d.ts, etc.)"
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
+	@echo "  make build-intel    - Build for Intel Mac (x86_64) from Apple Silicon"
+	@echo "  make build-signed-intel - Full Intel Mac pipeline: build → DMG → sign → notarize"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
+	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
 	@echo "  make audit          - Generate dependency manifest + SBOM"

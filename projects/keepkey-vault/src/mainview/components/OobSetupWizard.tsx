@@ -166,8 +166,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [customFwProgress, setCustomFwProgress] = useState<FirmwareProgress | null>(null)
   const [customFwAcknowledged, setCustomFwAcknowledged] = useState(false)
 
-  // Reboot phase: after BL/FW flash, wait for device to reconnect with fresh features
-  const [rebootPhase, setRebootPhase] = useState<'idle' | 'rebooting'>('idle')
+  // Reboot phase: after BL/FW flash, wait for device to reconnect with fresh features.
+  // Bootloader flash: OLD bootloader doesn't auto-reboot → user must unplug.
+  // Firmware flash: NEW bootloader calls board_reset() → device auto-reboots.
+  const [rebootPhase, setRebootPhase] = useState<'idle' | 'bootloader-rebooting' | 'firmware-rebooting'>('idle')
+  const isRebooting = rebootPhase !== 'idle'
   // Post-flash: firmware was just flashed, waiting for user to confirm on device
   const [firmwareJustFlashed, setFirmwareJustFlashed] = useState(false)
   // Tracks elapsed time during reboot for progressive user messaging
@@ -175,7 +178,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
   // Tick reboot elapsed timer while waiting for device reconnection
   useEffect(() => {
-    if (rebootPhase !== 'rebooting') {
+    if (rebootPhase === 'idle') {
       setRebootElapsedMs(0)
       return
     }
@@ -313,7 +316,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (needsBootloader) return // BL actually needs updating
     if (updateState !== 'idle') return
-    if (rebootPhase === 'rebooting') return
+    if (isRebooting) return
     // BL is current — skip straight to firmware or init
     if (needsFirmware) {
       setStep('firmware')
@@ -332,7 +335,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     if (inBootloader) return // Already detected
     if (waitingForBootloader) return // Already polling
     if (updateState !== 'idle') return
-    if (rebootPhase === 'rebooting') return
+    if (isRebooting) return
     if (!needsBootloader) return // BL up to date, skip handled above
     handleEnterBootloaderMode()
   }, [step, inBootloader, waitingForBootloader, updateState, rebootPhase, needsBootloader, deviceStatus.state])
@@ -342,13 +345,13 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     if (step !== 'bootloader') return
     if (updateState !== 'complete') return
     resetUpdate()
-    setRebootPhase('rebooting')
+    setRebootPhase('bootloader-rebooting')
   }, [updateState, step, resetUpdate])
 
   // Advance once device reconnects with fresh features after bootloader update
   useEffect(() => {
     if (step !== 'bootloader') return
-    if (rebootPhase !== 'rebooting') return
+    if (rebootPhase !== 'bootloader-rebooting') return
     // Wait until engine has re-paired and fetched real features
     if (!deviceStatus.firmwareVersion) return
     // Ignore transitional states
@@ -410,7 +413,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     const s = deviceStatus.state
     if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
     if (updateState !== 'idle') return
-    if (rebootPhase === 'rebooting') return
+    if (isRebooting) return
     if (inBootloader) return // Already in BL — user will click to start
     if (!waitingForBootloaderFw) {
       handleEnterBootloaderForFirmware()
@@ -422,14 +425,14 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     if (step !== 'firmware') return
     if (updateState !== 'complete') return
     resetUpdate()
-    setRebootPhase('rebooting')
+    setRebootPhase('firmware-rebooting')
     setFirmwareJustFlashed(true)
   }, [updateState, step, resetUpdate])
 
   // Advance once device reconnects with fresh features after firmware update
   useEffect(() => {
     if (step !== 'firmware') return
-    if (rebootPhase !== 'rebooting') return
+    if (rebootPhase !== 'firmware-rebooting') return
     if (!deviceStatus.firmwareVersion) return
     const s = deviceStatus.state
     if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
@@ -449,7 +452,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   useEffect(() => {
     if (step !== 'firmware') return
     if (!firmwareJustFlashed) return
-    if (rebootPhase === 'rebooting') return // still waiting for reconnect
+    if (isRebooting) return // still waiting for reconnect
     const s = deviceStatus.state
     if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error' || s === 'bootloader') return
     // Device is now past bootloader — ready or needs init
@@ -479,7 +482,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
         if (payload.percent >= 100) {
           setCustomFwPhase('idle')
           resetUpdate()
-          setRebootPhase('rebooting')
+          setRebootPhase('firmware-rebooting')
         }
       }
     })
@@ -911,7 +914,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
             {step === 'bootloader' && (
               <VStack gap={3} w="100%" maxW="460px" mx="auto">
                 {/* Bootloader detected — user must click to start update */}
-                {inBootloader && updateState === 'idle' && rebootPhase !== 'rebooting' && (
+                {inBootloader && updateState === 'idle' && !isRebooting && (
                   <>
                     <FaCheckCircle color="#48BB78" size={36} />
                     <VStack gap={1.5}>
@@ -990,7 +993,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </>
                 )}
 
-                {!inBootloader && updateState !== 'updating' && updateState !== 'error' && rebootPhase !== 'rebooting' && (
+                {!inBootloader && updateState !== 'updating' && updateState !== 'error' && !isRebooting && (
                   <>
                     <VStack gap={1.5}>
                       <Text fontSize="xl" fontWeight="700" color="white" textAlign="center">
@@ -1096,8 +1099,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </>
                 )}
 
-                {/* Bootloader reboot: device says "Please disconnect and reconnect" — user must unplug */}
-                {rebootPhase === 'rebooting' && (
+                {/* Bootloader reboot: OLD bootloader doesn't auto-reboot — user must unplug */}
+                {rebootPhase === 'bootloader-rebooting' && (
                   <VStack gap={2} w="100%">
                     <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
                       <VStack gap={2} align="start">
@@ -1109,9 +1112,14 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         </HStack>
                         <Text fontSize="xs" color="yellow.300">
                           {rebootElapsedMs < 20000
-                            ? t('firmware.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
-                            : t('firmware.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
+                            ? t('bootloader.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
+                            : t('bootloader.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
                         </Text>
+                        <Box w="100%" mt={1} p={2} bg="red.900" borderRadius="sm" borderWidth="1px" borderColor="red.500">
+                          <Text fontSize="xs" color="red.200" fontWeight="bold">
+                            {t('bootloader.doNotHoldButton', { defaultValue: 'DO NOT hold down the button when reconnecting! Just plug it in normally. Holding the button will put the device back into bootloader mode.' })}
+                          </Text>
+                        </Box>
                       </VStack>
                     </Box>
 
@@ -1259,7 +1267,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 )}
 
                 {/* In bootloader — show firmware install options (user must click) */}
-                {updateState === 'idle' && inBootloader && rebootPhase !== 'rebooting' && customFwPhase === 'idle' && (
+                {updateState === 'idle' && inBootloader && !isRebooting && customFwPhase === 'idle' && (
                   <>
                     <FaCheckCircle color="#48BB78" size={24} />
                     <Text fontSize="sm" fontWeight="bold" color="green.400" textAlign="center">
@@ -1591,7 +1599,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 )}
 
                 {/* Post-flash: just show "Waiting for your device..." — no bootloader instructions */}
-                {updateState === 'idle' && !inBootloader && rebootPhase !== 'rebooting' && customFwPhase === 'idle' && firmwareJustFlashed && (
+                {updateState === 'idle' && !inBootloader && !isRebooting && customFwPhase === 'idle' && firmwareJustFlashed && (
                   <Box w="100%" p={3} bg="green.900" borderRadius="md" borderWidth="1px" borderColor="green.600">
                     <HStack gap={2} justify="center">
                       <Spinner size="sm" color="green.300" />
@@ -1603,7 +1611,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 )}
 
                 {/* Not in bootloader, not post-flash — show instructions to enter bootloader */}
-                {updateState === 'idle' && !inBootloader && rebootPhase !== 'rebooting' && customFwPhase === 'idle' && !firmwareJustFlashed && (
+                {updateState === 'idle' && !inBootloader && !isRebooting && customFwPhase === 'idle' && !firmwareJustFlashed && (
                   <>
                     <Box maxW="100px" mx="auto" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
                     <Box w="100%" p={3} bg="gray.700" borderRadius="lg" borderWidth="1px" borderColor="gray.600">
@@ -1677,42 +1685,35 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </VStack>
                 )}
 
-                {/* Firmware reboot: device says "Please disconnect and reconnect" — user must unplug */}
-                {rebootPhase === 'rebooting' && (
+                {/* Firmware reboot: NEW bootloader calls board_reset() — device auto-reboots */}
+                {rebootPhase === 'firmware-rebooting' && (
                   <VStack gap={2} w="100%">
-                    <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
-                      <VStack gap={2} align="start">
-                        <HStack gap={2}>
-                          <FaExclamationTriangle color="#ECC94B" size={16} />
-                          <Text fontSize="sm" color="yellow.200" fontWeight="bold">
-                            {t('firmware.pleaseDisconnect', { defaultValue: 'Please disconnect and reconnect your KeepKey' })}
-                          </Text>
-                        </HStack>
-                        <Text fontSize="xs" color="yellow.300">
-                          {rebootElapsedMs < 20000
-                            ? t('firmware.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
-                            : t('firmware.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
+                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
+                      <VStack gap={2} align="center">
+                        <Spinner size="md" color="blue.300" />
+                        <Text fontSize="sm" color="blue.200" fontWeight="bold">
+                          {t('firmware.autoRebooting', { defaultValue: 'Your device is restarting...' })}
+                        </Text>
+                        <Text fontSize="xs" color="blue.300">
+                          {t('firmware.autoRebootingDetail', { defaultValue: 'Your KeepKey will restart automatically with the new firmware. This usually takes a few seconds.' })}
                         </Text>
                       </VStack>
                     </Box>
 
                     {rebootElapsedMs >= 30000 && (
-                      <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.600">
+                      <Box w="100%" p={3} bg="yellow.900" borderRadius="md" borderWidth="2px" borderColor="yellow.500">
                         <VStack gap={1.5} align="start">
                           <HStack gap={2}>
-                            <FaExclamationTriangle color="#63B3ED" size={14} />
-                            <Text fontSize="sm" fontWeight="bold" color="blue.300">
-                              {t('firmware.manualReconnectTitle', { defaultValue: 'Device not reconnecting?' })}
+                            <FaExclamationTriangle color="#ECC94B" size={14} />
+                            <Text fontSize="sm" fontWeight="bold" color="yellow.300">
+                              {t('firmware.manualReconnectTitle', { defaultValue: 'Taking longer than expected?' })}
                             </Text>
                           </HStack>
                           <VStack align="start" gap={0.5} pl={5}>
-                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep1', { defaultValue: '1. Unplug your KeepKey' })}</Text>
-                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
-                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
+                            <Text fontSize="xs" color="yellow.200">{t('firmware.manualReconnectStep1', { defaultValue: '1. Unplug your KeepKey' })}</Text>
+                            <Text fontSize="xs" color="yellow.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
+                            <Text fontSize="xs" color="yellow.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
                           </VStack>
-                          <Text fontSize="2xs" color="blue.300" pl={5}>
-                            {t('firmware.manualReconnectNote', { defaultValue: 'Setup will continue automatically when the device is detected.' })}
-                          </Text>
                         </VStack>
                       </Box>
                     )}
@@ -1731,7 +1732,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </Box>
                 )}
 
-                {updateState === 'idle' && !isOobDevice && !inBootloader && rebootPhase !== 'rebooting' && !firmwareJustFlashed && (
+                {updateState === 'idle' && !isOobDevice && !inBootloader && !isRebooting && !firmwareJustFlashed && (
                   <Button
                     w="100%"
                     variant="ghost"
