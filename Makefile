@@ -177,8 +177,11 @@ build-canary: install
 prune-bundle:
 	cd $(PROJECT_DIR) && bun scripts/prune-app-bundle.ts
 
-# Full signed build: electrobun build → audit → prune → extract from tar → create DMG → sign + notarize DMG
-build-signed: sign-check build-stable audit prune-bundle dmg
+# Full signed build: electrobun build → audit → prune → extract from tar → create DMG → sign + notarize + staple
+# Force-clear zcash-cli stamp so it gets re-signed with Developer ID (stamp may be stale from unsigned build)
+build-signed: sign-check
+	@rm -f $(ZCASH_CLI_STAMP)
+	$(MAKE) build-stable audit prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
