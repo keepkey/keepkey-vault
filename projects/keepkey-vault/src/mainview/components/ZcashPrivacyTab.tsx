@@ -49,7 +49,7 @@ export function ZcashPrivacyTab() {
 	// ── State ──────────────────────────────────────────────────────────
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
-	const [balance, setBalance] = useState<{ confirmed: number; pending: number } | null>(null)
+	const [balance, setBalance] = useState<{ confirmed: number; pending: number; notes_unspent?: number } | null>(null)
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
@@ -117,16 +117,28 @@ export function ZcashPrivacyTab() {
 		})
 	}, [])
 
+	// ── Deshield progress listener ───────────────────────────────────
+	useEffect(() => {
+		return onRpcMessage("deshield-progress", (payload: { step: string; detail?: string }) => {
+			setDeshieldStep(payload.step)
+			if (payload.step === "complete" && payload.detail) {
+				setDeshieldResult(payload.detail)
+				setDeshielding(false)
+				setDeshieldStep(null)
+			}
+		})
+	}, [])
+
 	// Whether the wallet has never been scanned (needs initial scan)
 	const [needsScan, setNeedsScan] = useState(false)
 
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
 		try {
-			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null }>(
+			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null; notes_unspent?: number }>(
 				"zcashShieldedBalance", undefined, 10000
 			)
-			setBalance(bal)
+			setBalance({ confirmed: bal.confirmed, pending: bal.pending, notes_unspent: bal.notes_unspent })
 			if (bal.synced_to != null) {
 				setSyncedTo(bal.synced_to)
 				setNeedsScan(false)
@@ -662,7 +674,14 @@ export function ZcashPrivacyTab() {
 										size="xs"
 										variant="ghost"
 										color="#F87171"
-										onClick={() => setDeshieldAmount(((balance.confirmed - 10000) / 1e8).toFixed(8))}
+										onClick={() => {
+											// ZIP-317 fee: 5000 * max(2, max(n_spends, n_orchard_outputs) + 1 transparent)
+											const nSpends = balance.notes_unspent || 1
+											const orchardActions = Math.max(nSpends, 1) // at least 1 change output
+											const fee = 5000 * Math.max(2, orchardActions + 1)
+											const max = Math.max(0, balance.confirmed - fee)
+											setDeshieldAmount((max / 1e8).toFixed(8))
+										}}
 										_hover={{ bg: "rgba(248,113,113,0.1)" }}
 									>
 										Max

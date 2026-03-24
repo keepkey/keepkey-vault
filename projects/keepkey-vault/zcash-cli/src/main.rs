@@ -236,8 +236,20 @@ fn decode_transparent_address(addr: &str) -> Result<Vec<u8>> {
     }
 
     let payload = &num[..num.len() - 4];
-    let _checksum = &num[num.len() - 4..];
-    // Skip checksum verification for brevity — zcash addresses are validated by the wallet
+    let expected_checksum = &num[num.len() - 4..];
+
+    // Base58Check: checksum = first 4 bytes of SHA256(SHA256(payload))
+    use sha2::{Sha256, Digest};
+    let first = Sha256::digest(payload);
+    let second = Sha256::digest(&first);
+    if &second[..4] != expected_checksum {
+        return Err(anyhow::anyhow!(
+            "Invalid address checksum — address may contain a typo. \
+             Expected {:02x}{:02x}{:02x}{:02x}, got {:02x}{:02x}{:02x}{:02x}",
+            second[0], second[1], second[2], second[3],
+            expected_checksum[0], expected_checksum[1], expected_checksum[2], expected_checksum[3],
+        ));
+    }
 
     let version = &payload[..2];
     let hash = &payload[2..];

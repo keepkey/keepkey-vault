@@ -230,6 +230,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
       'shield-progress': { step: string; detail?: string }
+      'deshield-progress': { step: string; detail?: string }
     }
   }
   webview: {
