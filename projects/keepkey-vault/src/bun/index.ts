@@ -2320,9 +2320,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
 
 				const resp = await withTimeout(
-					pioneer.GetTxHistory({ queries: [{ pubkey, caip: chain.caip }] }),
+					pioneer.GetTransactionHistory({ queries: [{ pubkey, caip: chain.caip }] }),
 					PIONEER_TIMEOUT_MS,
-					`GetTxHistory(${chain.symbol})`
+					`GetTransactionHistory(${chain.symbol})`
 				)
 				const data = resp?.data || resp
 				const histories = data?.histories || data?.data?.histories || []
