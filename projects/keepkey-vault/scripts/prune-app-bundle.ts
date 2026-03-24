@@ -368,6 +368,27 @@ console.log(`[prune-bundle] node_modules: ${(sizeBefore / 1024).toFixed(1)}MB â†
 
 // === RE-PACK ===
 
+// Patch node:buffer bug â€” Bun bundler compiles `export * from 'node:buffer'`
+// to `__reExport(exports, node_buffer)` but never defines `node_buffer`.
+// Electrobun creates the tar.zst BEFORE patch-bundle.ts runs on _build/,
+// so the archive always has the unpatched file. Fix it here after extracting.
+const bunIndexPath = join(appPath, 'Contents', 'Resources', 'app', 'bun', 'index.js')
+if (existsSync(bunIndexPath)) {
+  const { readFileSync: readF, writeFileSync: writeF } = await import('node:fs')
+  let code = readF(bunIndexPath, 'utf8')
+  const patchMarker = '/* node_buffer_patch */'
+  const needle = 'var exports_protocol_import = {};'
+  if (code.includes(needle) && !code.includes(patchMarker)) {
+    code = `${patchMarker}\nimport * as node_buffer from "node:buffer";\n${code}`
+    writeF(bunIndexPath, code)
+    console.log('[prune-bundle] Patched node_buffer bug in bun/index.js')
+  } else if (code.includes(patchMarker)) {
+    console.log('[prune-bundle] node_buffer already patched')
+  } else {
+    console.log('[prune-bundle] No node_buffer patch needed')
+  }
+}
+
 // Re-sign native binaries after pruning (signatures may have been invalidated)
 const DEVELOPER_ID = process.env.ELECTROBUN_DEVELOPER_ID
 const TEAM_ID = process.env.ELECTROBUN_TEAMID
