@@ -48,22 +48,48 @@ async function fetchPubkeyInfo(xpub: string): Promise<any> {
 
 async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
 	const pioneer = await getPioneer()
-	const resp = await pioneer.GetTxHistory({ queries: [{ pubkey: xpub, caip }] })
-	const data = resp?.data || resp
-	if (typeof data !== 'object' || data === null) {
-		console.warn('[Report] fetchTxHistory: unexpected response shape:', typeof data)
-		return []
+
+	// Pioneer's tx history is async: first call triggers a background worker and
+	// returns { transactions: [], loading: true }. We poll up to 3 times (5s apart)
+	// to wait for the worker to finish fetching from Blockbook.
+	const MAX_RETRIES = 3
+	const RETRY_DELAY = 5000
+
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		const resp = await pioneer.GetTransactionHistory({ queries: [{ pubkey: xpub, caip }] })
+		const data = resp?.data || resp
+		if (typeof data !== 'object' || data === null) {
+			console.warn('[Report] fetchTxHistory: unexpected response shape:', typeof data)
+			return []
+		}
+
+		const histories = data.histories || data?.data?.histories || []
+		const hist = histories[0]
+		const candidate = hist?.transactions
+			|| data.transactions
+			|| data?.data?.transactions
+		const txs = Array.isArray(candidate) ? candidate : []
+
+		// If we got transactions, return them
+		if (txs.length > 0) {
+			console.log(`[Report] fetchTxHistory: ${txs.length} txs for xpub=${xpub.substring(0, 20)}... (attempt ${attempt + 1})`)
+			return txs
+		}
+
+		// If Pioneer says it's still loading, wait and retry
+		const isLoading = hist?.loading || hist?.cached === false
+		if (isLoading && attempt < MAX_RETRIES) {
+			console.log(`[Report] fetchTxHistory: loading (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY / 1000}s...`)
+			await new Promise(r => setTimeout(r, RETRY_DELAY))
+			continue
+		}
+
+		// Not loading, just no transactions
+		console.warn(`[Report] fetchTxHistory: 0 transactions for xpub=${xpub.substring(0, 20)}... cached=${hist?.cached} loading=${hist?.loading}`)
+		return txs
 	}
-	// Pioneer may nest transactions in various response shapes
-	const histories = data.histories || data?.data?.histories || []
-	const candidate = histories[0]?.transactions
-		|| data.transactions
-		|| data?.data?.transactions
-	const txs = Array.isArray(candidate) ? candidate : []
-	if (txs.length === 0) {
-		console.warn(`[Report] fetchTxHistory: 0 transactions for xpub=${xpub.substring(0, 20)}... Response keys: ${Object.keys(data).join(', ')}`)
-	}
-	return txs
+
+	return []
 }
 
 // ── Section Builders ─────────────────────────────────────────────────

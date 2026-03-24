@@ -8,12 +8,13 @@ import keepkeyLogo from "../assets/icon.png"
 import coinTrackerLogo from "../assets/logo/cointracker.png"
 import zenLedgerLogo from "../assets/logo/zenledger.png"
 
-type ExportFormat = "pdf" | "cointracker" | "zenledger"
+type ExportFormat = "pdf" | "csv" | "cointracker" | "zenledger"
 
 const EXPORT_OPTIONS: { key: ExportFormat; label: string; sub: string; logo: string; bg: string }[] = [
 	{ key: "pdf", label: "KeepKey PDF", sub: "Full portfolio report", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
-	{ key: "cointracker", label: "CoinTracker", sub: "Tax CSV export", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
-	{ key: "zenledger", label: "ZenLedger", sub: "Tax CSV export", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
+	{ key: "csv", label: "KeepKey CSV", sub: "Full portfolio data", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
+	{ key: "cointracker", label: "CoinTracker", sub: "Tax transactions", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
+	{ key: "zenledger", label: "ZenLedger", sub: "Tax transactions", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
 ]
 
 interface ReportDialogProps {

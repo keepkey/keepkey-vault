@@ -154,7 +154,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       listReports: { params: void; response: ReportMeta[] }
       getReport: { params: { id: string }; response: { meta: ReportMeta; data: ReportData } | null }
       deleteReport: { params: { id: string }; response: void }
-      saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
+      saveReportFile: { params: { id: string; format: 'pdf' | 'csv' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
 
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }

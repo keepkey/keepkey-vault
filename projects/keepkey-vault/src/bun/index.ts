@@ -47,7 +47,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
-import { generateReport, reportToPdfBuffer } from "./reports"
+import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -2052,7 +2052,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[reports] saveReportFile: format=${params.format}, id=${params.id}`)
 
 				let filePath: string
-				if (params.format === 'cointracker') {
+				if (params.format === 'csv') {
+					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
+					filePath = path.join(downloadsDir, `keepkey-report-${dateSuffix}-${shortId}.csv`)
+					await Bun.write(filePath, reportToCsv(report.data))
+					console.log(`[reports] Full CSV written: ${report.data.sections.length} sections`)
+				} else if (params.format === 'cointracker') {
 					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
 					console.log(`[reports] CoinTracker: ${txs.length} transactions extracted`)
@@ -2315,9 +2320,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
 
 				const resp = await withTimeout(
-					pioneer.GetTxHistory({ queries: [{ pubkey, caip: chain.caip }] }),
+					pioneer.GetTransactionHistory({ queries: [{ pubkey, caip: chain.caip }] }),
 					PIONEER_TIMEOUT_MS,
-					`GetTxHistory(${chain.symbol})`
+					`GetTransactionHistory(${chain.symbol})`
 				)
 				const data = resp?.data || resp
 				const histories = data?.histories || data?.data?.histories || []
