@@ -257,6 +257,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     return () => onSetupInProgress?.(false)
   }, [onSetupInProgress])
 
+  // ── Clear stale setup errors on reconnect ─────────────────────────────
+  // LIBUSB_TRANSFER_ERROR etc. from a previous session should not persist
+  // once the device is back in a connected state with real features.
+  useEffect(() => {
+    if (deviceStatus.state === 'needs_init' || deviceStatus.state === 'ready') {
+      setSetupError(null)
+    }
+  }, [deviceStatus.state])
+
   // ── Welcome → user clicks to advance ───────────────────────────────────
   // Only enable "Get Started" when real device features are available.
   // connected_unpaired has no features yet — routing from that state would
