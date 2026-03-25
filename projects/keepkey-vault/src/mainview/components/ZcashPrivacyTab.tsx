@@ -49,7 +49,7 @@ export function ZcashPrivacyTab() {
 	// ── State ──────────────────────────────────────────────────────────
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
-	const [balance, setBalance] = useState<{ confirmed: number; pending: number } | null>(null)
+	const [balance, setBalance] = useState<{ confirmed: number; pending: number; notes_unspent?: number } | null>(null)
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
@@ -71,6 +71,14 @@ export function ZcashPrivacyTab() {
 	const [shieldStep, setShieldStep] = useState<string | null>(null)
 	const [transparentBalance, setTransparentBalance] = useState<number | null>(null)
 
+	// Deshield form state
+	const [deshieldRecipient, setDeshieldRecipient] = useState("")
+	const [deshieldAmount, setDeshieldAmount] = useState("")
+	const [deshielding, setDeshielding] = useState(false)
+	const [deshieldResult, setDeshieldResult] = useState<string | null>(null)
+	const [deshieldError, setDeshieldError] = useState<string | null>(null)
+	const [deshieldStep, setDeshieldStep] = useState<string | null>(null)
+
 	// Transaction history state
 	const [transactions, setTransactions] = useState<Array<{
 		id: number; value: number; block_height: number; tx_index: number
@@ -81,6 +89,15 @@ export function ZcashPrivacyTab() {
 	const [backfilling, setBackfilling] = useState(false)
 	const [backfillResult, setBackfillResult] = useState<string | null>(null)
 	const [expandedMemo, setExpandedMemo] = useState<number | null>(null)
+
+	// Deshield address validation (transparent only)
+	const deshieldRecipientValidation = useMemo(() => {
+		if (!deshieldRecipient) return null
+		const s = deshieldRecipient.trim()
+		const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
+		if ((s.startsWith('t1') || s.startsWith('t3')) && s.length === 35 && BASE58.test(s)) return { valid: true }
+		return { valid: false, error: 'deshieldRequiresTransparent' }
+	}, [deshieldRecipient])
 
 	// Address validation
 	const recipientValidation = useMemo(() => {
@@ -100,16 +117,28 @@ export function ZcashPrivacyTab() {
 		})
 	}, [])
 
+	// ── Deshield progress listener ───────────────────────────────────
+	useEffect(() => {
+		return onRpcMessage("deshield-progress", (payload: { step: string; detail?: string }) => {
+			setDeshieldStep(payload.step)
+			if (payload.step === "complete" && payload.detail) {
+				setDeshieldResult(payload.detail)
+				setDeshielding(false)
+				setDeshieldStep(null)
+			}
+		})
+	}, [])
+
 	// Whether the wallet has never been scanned (needs initial scan)
 	const [needsScan, setNeedsScan] = useState(false)
 
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
 		try {
-			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null }>(
+			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null; notes_unspent?: number }>(
 				"zcashShieldedBalance", undefined, 10000
 			)
-			setBalance(bal)
+			setBalance({ confirmed: bal.confirmed, pending: bal.pending, notes_unspent: bal.notes_unspent })
 			if (bal.synced_to != null) {
 				setSyncedTo(bal.synced_to)
 				setNeedsScan(false)
@@ -360,6 +389,42 @@ export function ZcashPrivacyTab() {
 		setShieldStep(null)
 	}, [shieldAmount, refreshBalance])
 
+	// ── Deshield to transparent ──────────────────────────────────────
+	const handleDeshield = useCallback(async () => {
+		if (!deshieldRecipient || !deshieldAmount) return
+		if (deshieldRecipientValidation && !deshieldRecipientValidation.valid) {
+			setDeshieldError(deshieldRecipientValidation.error ? t(deshieldRecipientValidation.error) : t("invalidAddress"))
+			return
+		}
+		setDeshielding(true)
+		setDeshieldError(null)
+		setDeshieldResult(null)
+		setDeshieldStep("building")
+		try {
+			const parts = deshieldAmount.split(".")
+			const whole = BigInt(parts[0] || "0") * 100_000_000n
+			const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
+			const frac = BigInt(fracStr)
+			const zatoshisBig = whole + frac
+			if (zatoshisBig <= 0n || zatoshisBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Invalid amount")
+			const zatoshis = Number(zatoshisBig)
+
+			const result = await rpcRequest<{ txid: string }>(
+				"zcashDeshieldZec",
+				{ recipient: deshieldRecipient, amount: zatoshis },
+				600000 // 10 min — Halo2 proof + device signing
+			)
+			setDeshieldResult(result.txid)
+			setDeshieldRecipient("")
+			setDeshieldAmount("")
+			refreshBalance()
+		} catch (e: any) {
+			setDeshieldError(e.message || "Deshield failed")
+		}
+		setDeshielding(false)
+		setDeshieldStep(null)
+	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance])
+
 	// ── Copy address ──────────────────────────────────────────────────
 	const copyAddress = useCallback(() => {
 		if (!orchardAddress) return
@@ -542,6 +607,114 @@ export function ZcashPrivacyTab() {
 					)}
 					{shieldError && (
 						<Text fontSize="xs" color="#F87171" mt="2">{shieldError}</Text>
+					)}
+				</Box>
+			)}
+
+			{/* Section F2: Deshield Orchard → transparent */}
+			{orchardAddress && balance && balance.confirmed > 0 && (
+				<Box px="3" py="3" bg="rgba(248,113,113,0.04)" border="1px solid" borderColor="rgba(248,113,113,0.15)" borderRadius="lg">
+					<Flex align="center" gap="2" mb="2">
+						<Box as={FaShieldAlt} fontSize="11px" color="#F87171" />
+						<Text fontSize="10px" color="#F87171" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">
+							{t("deshieldToTransparent")}
+						</Text>
+					</Flex>
+					<Text fontSize="11px" color="kk.textMuted" mb="3" lineHeight="1.4">
+						{t("deshieldDescription")}
+					</Text>
+
+					{deshielding ? (
+						<Flex direction="column" align="center" gap="2" py="3">
+							<Spinner size="sm" color="#F87171" />
+							<Text fontSize="12px" color="kk.textSecondary" fontWeight="500">
+								{deshieldStep === "building" ? t("shieldBuilding") :
+								 deshieldStep === "signing" ? t("shieldSigning") :
+								 deshieldStep === "broadcasting" ? t("shieldBroadcasting") :
+								 t("shieldProcessing")}
+							</Text>
+						</Flex>
+					) : (
+						<Flex direction="column" gap="2">
+							<Input
+								placeholder="t1... or t3... (transparent address)"
+								value={deshieldRecipient}
+								onChange={(e) => setDeshieldRecipient(e.target.value)}
+								size="sm"
+								bg="rgba(255,255,255,0.03)"
+								borderColor="kk.border"
+								color="white"
+								fontFamily="mono"
+								fontSize="12px"
+								_hover={{ borderColor: "kk.textMuted" }}
+								_focus={{ borderColor: "#F87171", boxShadow: "none" }}
+							/>
+							{deshieldRecipientValidation && !deshieldRecipientValidation.valid && deshieldRecipientValidation.error && (
+								<Text fontSize="11px" color="#F87171">{t(deshieldRecipientValidation.error)}</Text>
+							)}
+							<Flex gap="2" align="center">
+								<Input
+									placeholder={t("amountZec")}
+									value={deshieldAmount}
+									onChange={(e) => setDeshieldAmount(e.target.value)}
+									size="sm"
+									type="number"
+									step="0.00000001"
+									bg="rgba(255,255,255,0.03)"
+									borderColor="kk.border"
+									color="white"
+									fontFamily="mono"
+									fontSize="12px"
+									_hover={{ borderColor: "kk.textMuted" }}
+									_focus={{ borderColor: "#F87171", boxShadow: "none" }}
+									flex="1"
+								/>
+								{balance && balance.confirmed > 0 && (
+									<Button
+										size="xs"
+										variant="ghost"
+										color="#F87171"
+										onClick={() => {
+											// ZIP-317 fee: 5000 * max(2, max(n_spends, n_orchard_outputs) + 1 transparent)
+											const nSpends = balance.notes_unspent || 1
+											const orchardActions = Math.max(nSpends, 1) // at least 1 change output
+											const fee = 5000 * Math.max(2, orchardActions + 1)
+											const max = Math.max(0, balance.confirmed - fee)
+											setDeshieldAmount((max / 1e8).toFixed(8))
+										}}
+										_hover={{ bg: "rgba(248,113,113,0.1)" }}
+									>
+										Max
+									</Button>
+								)}
+							</Flex>
+							<Button
+								size="sm"
+								bg="#F87171"
+								color="white"
+								fontWeight="600"
+								px="4"
+								py="2"
+								_hover={{ bg: "rgba(248,113,113,0.85)" }}
+								onClick={handleDeshield}
+								disabled={!deshieldRecipient || !deshieldAmount || deshielding || (deshieldRecipientValidation != null && !deshieldRecipientValidation.valid)}
+							>
+								<Box as={FaShieldAlt} fontSize="11px" mr="1.5" />
+								{t("deshieldToTransparent")}
+							</Button>
+						</Flex>
+					)}
+
+					{deshieldResult && (
+						<Box mt="2" bg="rgba(72,187,120,0.1)" border="1px solid" borderColor="rgba(72,187,120,0.3)" borderRadius="md" px="3" py="2">
+							<Text fontSize="xs" color="#4ADE80" fontWeight="600" mb="0.5">{t("deshielded")}</Text>
+							<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">
+								{deshieldResult}
+							</Text>
+						</Box>
+					)}
+					{deshieldError && (
+						<Text fontSize="xs" color="#F87171" mt="2">{deshieldError}</Text>
 					)}
 				</Box>
 			)}
