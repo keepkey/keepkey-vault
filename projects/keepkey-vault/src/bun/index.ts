@@ -742,8 +742,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId })
 				}
 
-				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.)
+				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
 				for (const chain of nonEvmChains) {
+					if (chain.hidden) continue
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 						if (chain.scriptType) addrParams.scriptType = chain.scriptType
@@ -791,7 +792,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Build networkId → chainId lookup for token grouping (lowercase keys — Pioneer may return different casing)
 				const networkToChain = new Map<string, string>()
 				for (const chain of allChains) {
-					if (chain.networkId) networkToChain.set(chain.networkId.toLowerCase(), chain.id)
+					if (!chain.networkId) continue
+					// Non-hidden chains take priority (zcash vs zcash-shielded share the same networkId)
+					if (chain.hidden && networkToChain.has(chain.networkId.toLowerCase())) continue
+					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
 				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
