@@ -47,7 +47,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
-import { generateReport, reportToPdfBuffer } from "./reports"
+import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -1707,6 +1707,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return result
 			},
 
+			zcashDeshieldZec: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
+				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const result = await deshieldZec(engine.wallet as any, {
+					recipient: params.recipient,
+					amount: params.amount,
+					account: params.account,
+				})
+				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				return result
+			},
+
 			zcashGetTransactions: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const { getZcashTransactions } = await import("./zcash-sidecar")
@@ -1758,6 +1772,173 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			revokePairing: async (params) => {
 				if (!params.apiKey) throw new Error('apiKey required')
 				auth.revoke(params.apiKey)
+			},
+
+			// ── Mobile pairing (relay via vault.keepkey.com) ─────────
+			generateMobilePairing: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const wallet = engine.wallet as any
+
+				// Get device info
+				const features = await wallet.getFeatures()
+				const deviceId = features?.deviceId || features?.device_id || engine.getDeviceState().deviceId || 'keepkey-device'
+				const deviceLabel = features?.label || engine.getDeviceState().label || 'My KeepKey'
+				const context = `keepkey:${deviceLabel}.json`
+
+				// Helper: convert hardened BIP44 path array to string
+				const pathToString = (p: number[]) => 'm/' + p.map((n: number) => n >= 0x80000000 ? `${n - 0x80000000}'` : String(n)).join('/')
+				// Helper: account-level path (first 3 elements)
+				const accountPath = (p: number[]) => p.slice(0, 3)
+
+				// Only use built-in CHAINS (not custom chains — those may lack rpc methods)
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const builtinChains = CHAINS.filter(c => isChainSupported(c, fwVersion) && !c.hidden)
+
+				const pubkeys: any[] = []
+
+				// ── BTC: all 3 script types ──
+				const btcScripts = [
+					{ scriptType: 'p2pkh', purpose: 44, type: 'xpub', note: 'Bitcoin Legacy' },
+					{ scriptType: 'p2sh-p2wpkh', purpose: 49, type: 'ypub', note: 'Bitcoin SegWit' },
+					{ scriptType: 'p2wpkh', purpose: 84, type: 'zpub', note: 'Bitcoin Native SegWit' },
+				]
+				const btcChain = builtinChains.find(c => c.id === 'bitcoin')
+				const btcNetwork = btcChain?.networkId || 'bip122:000000000019d6689c085ae165831e93'
+				for (const s of btcScripts) {
+					try {
+						const addressNList = [s.purpose + 0x80000000, 0x80000000, 0x80000000]
+						const addressNListMaster = [...addressNList, 0, 0]
+						const result = await wallet.getPublicKeys([{
+							addressNList, coin: 'Bitcoin', scriptType: s.scriptType, curve: 'secp256k1',
+						}])
+						const xpub = result?.[0]?.xpub
+						if (xpub && typeof xpub === 'string') {
+							pubkeys.push({
+								type: s.type, pubkey: xpub, master: xpub,
+								address: xpub, // SDK expects address field
+								path: pathToString(addressNList),
+								pathMaster: pathToString(addressNListMaster),
+								scriptType: s.scriptType,
+								available_scripts_types: ['p2pkh', 'p2sh', 'p2wpkh', 'p2sh-p2wpkh'],
+								note: s.note, context,
+								networks: [btcNetwork],
+								addressNList, addressNListMaster,
+							})
+						}
+					} catch (e: any) { console.warn(`[mobilePairing] BTC ${s.scriptType} failed:`, e.message) }
+				}
+
+				// ── Non-BTC UTXO chains: batch xpub derivation ──
+				const utxoChains = builtinChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
+				if (utxoChains.length > 0) {
+					try {
+						const xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
+							addressNList: accountPath(c.defaultPath), coin: c.coin,
+							scriptType: c.scriptType, curve: 'secp256k1',
+						}))) || []
+						for (let i = 0; i < utxoChains.length; i++) {
+							const xpub = xpubResults?.[i]?.xpub
+							if (xpub && typeof xpub === 'string') {
+								const chain = utxoChains[i]
+								const addressNList = accountPath(chain.defaultPath)
+								const addressNListMaster = [...addressNList, 0, 0]
+								pubkeys.push({
+									type: 'xpub', pubkey: xpub, master: xpub,
+									address: xpub,
+									path: pathToString(addressNList),
+									pathMaster: pathToString(addressNListMaster),
+									scriptType: chain.scriptType,
+									available_scripts_types: [chain.scriptType || 'p2pkh'],
+									note: `${chain.symbol} Default path`, context,
+									networks: [chain.networkId],
+									addressNList, addressNListMaster,
+								})
+							}
+						}
+					} catch (e: any) { console.warn('[mobilePairing] UTXO xpub batch failed:', e.message) }
+				}
+
+				// ── EVM chains: derive ONCE, emit with all EVM networkIds + wildcard ──
+				const evmChains = builtinChains.filter(c => c.chainFamily === 'evm')
+				if (evmChains.length > 0) {
+					try {
+						const addressNList = [0x8000002C, 0x8000003C, 0x80000000]
+						const addressNListMaster = [0x8000002C, 0x8000003C, 0x80000000, 0, 0]
+						const result = await wallet.ethGetAddress({ addressNList: addressNListMaster, showDisplay: false, coin: 'Ethereum' })
+						const address = typeof result === 'string' ? result : result?.address
+						if (address && typeof address === 'string') {
+							const evmNetworks = [...evmChains.map(c => c.networkId), 'eip155:*']
+							pubkeys.push({
+								type: 'address', pubkey: address, master: address, address,
+								path: pathToString(addressNList),
+								pathMaster: pathToString(addressNListMaster),
+								note: 'ETH primary (default)', context,
+								networks: evmNetworks,
+								addressNList, addressNListMaster,
+							})
+						}
+					} catch (e: any) { console.warn('[mobilePairing] EVM address failed:', e.message) }
+				}
+
+				// ── Non-EVM, non-UTXO chains: individual address derivation ──
+				const otherChains = builtinChains.filter(c =>
+					c.chainFamily !== 'utxo' && c.chainFamily !== 'evm' && c.chainFamily !== 'zcash-shielded'
+				)
+				for (const chain of otherChains) {
+					try {
+						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
+						if (chain.scriptType) addrParams.scriptType = chain.scriptType
+						if (chain.chainFamily === 'ton') addrParams.bounceable = false
+						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+						if (typeof wallet[method] !== 'function') {
+							console.warn(`[mobilePairing] ${chain.coin}: wallet.${method} not found, skipping`)
+							continue
+						}
+						const result = await wallet[method](addrParams)
+						const address = typeof result === 'string' ? result : result?.address
+						if (address && typeof address === 'string') {
+							pubkeys.push({
+								type: 'address', pubkey: address, master: address, address,
+								path: pathToString(chain.defaultPath),
+								pathMaster: pathToString(chain.defaultPath),
+								scriptType: chain.scriptType || chain.chainFamily,
+								note: `Default ${chain.symbol} path`, context,
+								networks: [chain.networkId],
+								addressNList: chain.defaultPath,
+								addressNListMaster: chain.defaultPath,
+							})
+						}
+					} catch (e: any) { console.warn(`[mobilePairing] ${chain.coin} address failed:`, e.message) }
+				}
+
+				// Final safety: strip any entry with missing required fields
+				const validPubkeys = pubkeys.filter(p =>
+					p.pubkey && typeof p.pubkey === 'string' &&
+					p.pathMaster && typeof p.pathMaster === 'string' &&
+					Array.isArray(p.networks) && p.networks.length > 0
+				)
+
+				if (validPubkeys.length === 0) throw new Error('No pubkeys could be derived from device')
+				console.log(`[mobilePairing] ${validPubkeys.length} valid pubkeys (${pubkeys.length - validPubkeys.length} dropped)`)
+
+				// POST to vault.keepkey.com relay
+				const RELAY_URL = 'https://vault.keepkey.com/api/pairing'
+				const resp = await fetch(RELAY_URL, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ deviceId, label: deviceLabel, pubkeys: validPubkeys }),
+				})
+				if (!resp.ok) {
+					const body = await resp.text().catch(() => '')
+					throw new Error(`Pairing relay returned ${resp.status}: ${body}`)
+				}
+				const data = await resp.json() as { success: boolean; code: string; expiresAt: number; expiresIn: number }
+				if (!data.success || !data.code) throw new Error('Invalid response from pairing relay')
+
+				const qrPayload = JSON.stringify({ code: data.code, url: 'https://vault.keepkey.com' })
+				console.log(`[mobilePairing] Code ${data.code} — ${validPubkeys.length} pubkeys sent to relay`)
+
+				return { code: data.code, expiresAt: data.expiresAt, expiresIn: data.expiresIn, qrPayload }
 			},
 
 			// ── App Settings ─────────────────────────────────────────
@@ -2052,17 +2233,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[reports] saveReportFile: format=${params.format}, id=${params.id}`)
 
 				let filePath: string
-				if (params.format === 'cointracker') {
+				if (params.format === 'csv') {
+					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
+					filePath = path.join(downloadsDir, `keepkey-report-${dateSuffix}-${shortId}.csv`)
+					await Bun.write(filePath, reportToCsv(report.data))
+					console.log(`[reports] Full CSV written: ${report.data.sections.length} sections`)
+				} else if (params.format === 'cointracker') {
 					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
-					const serializableTxs = txs.filter(tx => !!tx.timestamp)
-					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
+					console.log(`[reports] CoinTracker: ${txs.length} transactions extracted`)
 					await Bun.write(filePath, toCoinTrackerCsv(txs))
 				} else if (params.format === 'zenledger') {
 					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
-					const serializableTxs = txs.filter(tx => !!tx.timestamp)
-					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
+					console.log(`[reports] ZenLedger: ${txs.length} transactions extracted`)
 					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
 					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
@@ -2317,9 +2501,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
 
 				const resp = await withTimeout(
-					pioneer.GetTxHistory({ queries: [{ pubkey, caip: chain.caip }] }),
+					pioneer.GetTransactionHistory({ queries: [{ pubkey, caip: chain.caip }] }),
 					PIONEER_TIMEOUT_MS,
-					`GetTxHistory(${chain.symbol})`
+					`GetTransactionHistory(${chain.symbol})`
 				)
 				const data = resp?.data || resp
 				const histories = data?.histories || data?.data?.histories || []

@@ -27,10 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS and Windows are built + signed locally (see `make build-signed`)
           - name: Linux x64
             runner: ubuntu-latest
             artifact-suffix: linux-x64
+
+          - name: macOS
+            runner: macos-14
+            artifact-suffix: macos
+            expected-arch: arm64
 
     steps:
       - name: Checkout
@@ -71,6 +75,16 @@ jobs:
         with:
           path: projects/keepkey-vault/node_modules
           key: vault-${{ runner.os }}-${{ hashFiles('projects/keepkey-vault/package.json') }}
+
+      - name: Cache Rust/Cargo (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/keepkey-vault/zcash-cli/target
+          key: zcash-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('projects/keepkey-vault/zcash-cli/Cargo.lock') }}
 
       - name: Build modules (hdwallet + proto-tx-builder)
         shell: bash
@@ -131,6 +145,20 @@ jobs:
         run: cd projects/keepkey-vault && bun install
         shell: bash
 
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Build zcash-cli sidecar (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "=== Building zcash-cli for $(uname -m) ==="
+          cd projects/keepkey-vault/zcash-cli
+          cargo test
+          cargo build --release
+          file target/release/zcash-cli
+
       - name: Build unsigned app (CI mode)
         env:
           CI: 'true'
@@ -140,6 +168,198 @@ jobs:
       - name: Prune app bundle
         run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
         shell: bash
+
+      - name: Verify binary architecture (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          EXPECTED="${{ matrix.expected-arch }}"
+          echo "=== Verifying macOS binary architecture (expecting $EXPECTED) ==="
+
+          TAR_ZST=$(find projects/keepkey-vault/artifacts -name "*.app.tar.zst" | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "::error::No .app.tar.zst found"; exit 1; fi
+
+          WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK"' EXIT
+
+          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
+          LAUNCHER=$(tar tf "$WORK/app.tar" | grep "MacOS/launcher$" | head -1)
+          BUN_BIN=$(tar tf "$WORK/app.tar" | grep "MacOS/bun$" | head -1)
+
+          if [ -z "$LAUNCHER" ]; then echo "::error::No launcher binary found in archive"; exit 1; fi
+          tar xf "$WORK/app.tar" -C "$WORK/" "$LAUNCHER"
+          if [ -n "$BUN_BIN" ]; then tar xf "$WORK/app.tar" -C "$WORK/" "$BUN_BIN"; fi
+
+          echo "Checking binaries:"
+          for BIN in "$WORK/$LAUNCHER" "$WORK/$BUN_BIN"; do
+            [ -f "$BIN" ] || continue
+            ACTUAL=$(lipo -archs "$BIN" 2>/dev/null)
+            NAME=$(basename "$BIN")
+            echo "  $NAME: $ACTUAL"
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error::Architecture mismatch! $NAME is $ACTUAL but expected $EXPECTED"
+              exit 1
+            fi
+          done
+
+          # Also verify node-hid prebuild matches
+          HID_DIR=$(tar tf "$WORK/app.tar" | grep "node-hid/prebuilds/HID-darwin" | head -1)
+          if [ -n "$HID_DIR" ]; then
+            echo "  node-hid prebuild dir: $(dirname $HID_DIR | xargs basename)"
+          fi
+
+          echo "Architecture verified: $EXPECTED"
+
+      - name: Create unsigned DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST=$(ls *.app.tar.zst 2>/dev/null | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "No .app.tar.zst found, skipping DMG"; exit 0; fi
+
+          VERSION=$(grep '"version"' ../package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
+          ARCH=$(uname -m)
+          DMG_NAME="KeepKey-Vault-${VERSION}-${ARCH}.dmg"
+          echo "Creating unsigned DMG: $DMG_NAME"
+
+          STAGING=$(mktemp -d)
+          trap 'rm -rf "$STAGING"' EXIT
+
+          zstd -d "$TAR_ZST" -o "$STAGING/app.tar" --force
+          tar xf "$STAGING/app.tar" -C "$STAGING/"
+          rm "$STAGING/app.tar"
+
+          APP=$(find "$STAGING" -name "*.app" -maxdepth 1 | head -1)
+          if [ -z "$APP" ]; then echo "No .app found after extraction"; exit 1; fi
+
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "KeepKey Vault" -srcfolder "$STAGING" -ov -format UDZO "$DMG_NAME"
+          echo "Created: $DMG_NAME (unsigned — sign locally with 'make sign-release')"
+
+      - name: Create x86_64 variant (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "=== Creating x86_64 variant from ARM64 build ==="
+
+          # Get Electrobun version for downloading matching x64 binaries
+          ELECTROBUN_VER=$(node -p "require('./projects/keepkey-vault/node_modules/electrobun/package.json').version")
+          echo "Electrobun version: v$ELECTROBUN_VER"
+
+          # Download x64 Electrobun core binaries
+          echo "Downloading Electrobun core for x86_64..."
+          curl -fsSL "https://github.com/blackboardsh/electrobun/releases/download/v${ELECTROBUN_VER}/electrobun-core-darwin-x64.tar.gz" \
+            -o /tmp/electrobun-core-x64.tar.gz
+          mkdir -p /tmp/electrobun-x64
+          tar xzf /tmp/electrobun-core-x64.tar.gz -C /tmp/electrobun-x64/
+
+          # Find the directory containing the x64 binaries (handles nested or flat tar structure)
+          X64_BIN_DIR=$(find /tmp/electrobun-x64 -name "launcher" -type f -exec dirname {} \; | head -1)
+          if [ -z "$X64_BIN_DIR" ]; then echo "::error::No launcher found in electrobun-core-x64"; exit 1; fi
+          echo "x64 binaries at: $X64_BIN_DIR"
+          ls "$X64_BIN_DIR/"
+
+          # Find the ARM64 tar.zst
+          ARM64_TAR=$(find projects/keepkey-vault/artifacts -name "*.app.tar.zst" | head -1)
+          if [ -z "$ARM64_TAR" ]; then echo "::error::No ARM64 tar.zst found"; exit 1; fi
+          echo "Source: $ARM64_TAR"
+
+          # Extract the ARM64 .app
+          WORK=$(mktemp -d)
+          zstd -d "$ARM64_TAR" -o "$WORK/app.tar" --force
+          tar xf "$WORK/app.tar" -C "$WORK/"
+          rm "$WORK/app.tar"
+
+          APP=$(find "$WORK" -name "*.app" -maxdepth 1 | head -1)
+          if [ -z "$APP" ]; then echo "::error::No .app found after extraction"; exit 1; fi
+
+          # Swap Electrobun runtime binaries with x64 versions
+          echo "Swapping Electrobun binaries for x86_64..."
+          for BIN in launcher bun libNativeWrapper.dylib libasar.dylib; do
+            SRC="$X64_BIN_DIR/$BIN"
+            DEST=$(find "$APP" -name "$BIN" -type f | head -1)
+            if [ -f "$SRC" ] && [ -n "$DEST" ]; then
+              cp "$SRC" "$DEST"
+              ARCH=$(lipo -archs "$DEST" 2>/dev/null || echo "non-macho")
+              echo "  $BIN: $ARCH"
+            elif [ -f "$SRC" ]; then
+              echo "  $BIN: not found in .app (skipping)"
+            fi
+          done
+
+          # Swap node-hid prebuilds: replace ARM64 with x64 (required for firmware updates + HID transport)
+          HID_SRC="projects/keepkey-vault/node_modules/node-hid/prebuilds/HID-darwin-x64"
+          if [ -d "$HID_SRC" ]; then
+            HID_DEST=$(find "$APP" -type d -name "HID-darwin-arm64" | head -1)
+            if [ -n "$HID_DEST" ]; then
+              HID_PARENT=$(dirname "$HID_DEST")
+              rm -rf "$HID_DEST"
+              cp -r "$HID_SRC" "$HID_PARENT/HID-darwin-x64"
+              echo "  node-hid: swapped ARM64 → x64 prebuild"
+            else
+              echo "  node-hid: HID-darwin-arm64 not found in bundle (skipping)"
+            fi
+          else
+            echo "::warning::node-hid HID-darwin-x64 prebuild not found in node_modules"
+          fi
+
+          # Remove zcash-cli from x64 bundle (Zcash shielded not supported on Intel)
+          ZCASH_DEST=$(find "$APP" -name "zcash-cli" -type f | head -1)
+          if [ -n "$ZCASH_DEST" ]; then
+            rm "$ZCASH_DEST"
+            echo "  zcash-cli: removed (Intel not supported)"
+          fi
+
+          # Verify key binaries are now x86_64
+          echo "Verifying swapped binaries:"
+          FAIL=0
+          for BIN in launcher bun; do
+            FOUND=$(find "$APP" -name "$BIN" -path "*/MacOS/*" | head -1)
+            if [ -n "$FOUND" ]; then
+              ACTUAL=$(lipo -archs "$FOUND" 2>/dev/null)
+              echo "  $BIN: $ACTUAL"
+              if [ "$ACTUAL" != "x86_64" ]; then
+                echo "::error::$BIN is $ACTUAL, expected x86_64"
+                FAIL=1
+              fi
+            fi
+          done
+          if [ "$FAIL" = "1" ]; then exit 1; fi
+
+          # Re-pack as x64 tar.zst
+          X64_TAR="projects/keepkey-vault/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst"
+          (cd "$WORK" && tar cf - "$(basename "$APP")") | zstd -o "$X64_TAR" --force
+          echo "Created: $X64_TAR ($(du -h "$X64_TAR" | cut -f1))"
+
+          # Cleanup
+          rm -rf "$WORK" /tmp/electrobun-x64 /tmp/electrobun-core-x64.tar.gz
+
+      - name: Create unsigned x86_64 DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST="stable-macos-x64-keepkey-vault.app.tar.zst"
+          if [ ! -f "$TAR_ZST" ]; then echo "No x64 tar.zst, skipping DMG"; exit 0; fi
+
+          VERSION=$(grep '"version"' ../package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
+          DMG_NAME="KeepKey-Vault-${VERSION}-x86_64.dmg"
+          echo "Creating unsigned x86_64 DMG: $DMG_NAME"
+
+          STAGING=$(mktemp -d)
+          trap 'rm -rf "$STAGING"' EXIT
+
+          zstd -d "$TAR_ZST" -o "$STAGING/app.tar" --force
+          tar xf "$STAGING/app.tar" -C "$STAGING/"
+          rm "$STAGING/app.tar"
+
+          APP=$(find "$STAGING" -name "*.app" -maxdepth 1 | head -1)
+          if [ -z "$APP" ]; then echo "No .app found after extraction"; exit 1; fi
+
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "KeepKey Vault" -srcfolder "$STAGING" -ov -format UDZO "$DMG_NAME"
+          echo "Created: $DMG_NAME (unsigned — sign locally with 'make sign-release')"
 
       - name: Package AppImage (Linux)
         if: runner.os == 'Linux'
@@ -203,8 +423,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd projects/keepkey-vault/artifacts
-          shasum -a 256 * > SHA256SUMS.txt 2>/dev/null || true
-          cat SHA256SUMS.txt
+          shasum -a 256 * > SHA256SUMS-${{ matrix.artifact-suffix }}.txt 2>/dev/null || true
+          cat SHA256SUMS-${{ matrix.artifact-suffix }}.txt
 
       - name: List artifacts
         run: ls -lh projects/keepkey-vault/artifacts/
@@ -245,6 +465,16 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Generate combined checksums
+        run: |
+          cd artifacts
+          # Remove per-platform checksum files (will regenerate combined)
+          rm -f SHA256SUMS-*.txt SHA256SUMS.txt
+          # Generate checksums for release-worthy files only
+          shasum -a 256 *.dmg *.AppImage *.exe *.tar.zst 2>/dev/null > SHA256SUMS.txt || true
+          echo "=== Release checksums ==="
+          cat SHA256SUMS.txt
 
       - name: List release artifacts
         run: find artifacts -type f | sort

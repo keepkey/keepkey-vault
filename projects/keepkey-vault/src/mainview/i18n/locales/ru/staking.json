@@ -11,7 +11,7 @@
 	"topValidatorExamples": "Примеры лучших валидаторов",
 	"browseAllValidators": "Просмотреть всех валидаторов",
 	"rewardsAvailable": "Доступные вознаграждения: {{amount}} {{symbol}}",
-	"rewardsAvailableWithUsd": "Доступные вознаграждения: {{amount}} {{symbol}} (~${{usd}})",
+	"rewardsAvailableWithUsd": "Доступные вознаграждения: {{amount}} {{symbol}} (~{{fiatValue}})",
 	"amount": "Сумма",
 	"max": "МАКС",
 	"memoOptional": "Memo (необязательно)",

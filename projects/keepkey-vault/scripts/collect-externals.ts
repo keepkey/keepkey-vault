@@ -232,6 +232,18 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
+// Strip node_modules from file:-linked packages in the staging area.
+// npm/bun may have installed transitive deps INSIDE the source directory
+// (e.g. modules/proto-tx-builder/node_modules/). These should be resolved
+// at top level, not nested. Leaving them causes Inno Setup MAX_PATH failures.
+for (const [name] of fileLinkedPaths) {
+  const nestedNm = join(nmDest, name, 'node_modules')
+  if (existsSync(nestedNm)) {
+    rmSync(nestedNm, { recursive: true })
+    console.log(`[collect-externals] Stripped nested node_modules from file:-linked ${name}`)
+  }
+}
+
 // device-protocol is now bundled into index.js by bundle-backend.ts,
 // so we no longer need to verify messages_pb.js here.
 

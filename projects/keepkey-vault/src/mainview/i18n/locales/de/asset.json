@@ -10,7 +10,7 @@
 	"showFiltered_other": "{{count}} gefilterte Token anzeigen",
 	"hideFiltered_one": "{{count}} gefilterten Token ausblenden",
 	"hideFiltered_other": "{{count}} gefilterte Token ausblenden",
-	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Verdächtiger Spam ({{count}})",
 	"markAsSafe": "Als sicher markieren",
 	"hideToken": "Token ausblenden",

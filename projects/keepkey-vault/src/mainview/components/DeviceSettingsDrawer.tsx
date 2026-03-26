@@ -34,6 +34,7 @@ interface DeviceSettingsDrawerProps {
 	appVersion?: { version: string; channel: string } | null
 	onOpenAuditLog?: () => void
 	onOpenPairedApps?: () => void
+	onOpenMobilePairing?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
 	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
@@ -138,7 +139,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -959,6 +960,37 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										)}
 									</Flex>
 								)}
+							</Box>
+
+							{/* ── Mobile Pairing ────── */}
+							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+								<Flex justify="space-between" align="center">
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">
+											{t("mobilePairing.title")}
+										</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+											{t("mobilePairing.securityNote")}
+										</Text>
+									</Box>
+									<Box
+										as="button"
+										px="3"
+										py="1.5"
+										borderRadius="full"
+										bg="rgba(192,168,96,0.12)"
+										color="kk.gold"
+										fontSize="xs"
+										fontWeight="500"
+										cursor={deviceState.state !== "ready" ? "not-allowed" : "pointer"}
+										opacity={deviceState.state !== "ready" ? 0.4 : 1}
+										_hover={deviceState.state === "ready" ? { bg: "rgba(192,168,96,0.22)" } : {}}
+										transition="all 0.15s"
+										onClick={() => { if (deviceState.state === "ready") onOpenMobilePairing?.() }}
+									>
+										{t("mobilePairing.button")}
+									</Box>
+								</Flex>
 							</Box>
 
 							{/* ── App Version + Update Check ────── */}

@@ -116,6 +116,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
       zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
       zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
 
@@ -130,6 +131,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       rejectSigningRequest: { params: { id: string }; response: void }
       listPairedApps: { params: void; response: PairedAppInfo[] }
       revokePairing: { params: { apiKey: string }; response: void }
+
+      // ── Mobile pairing (via vault.keepkey.com relay) ─────────────────
+      generateMobilePairing: { params: void; response: { code: string; expiresAt: number; expiresIn: number; qrPayload: string } }
 
       // ── API Audit Log ──────────────────────────────────────────────────
       getApiLogs: { params: { limit?: number; offset?: number } | void; response: ApiLogEntry[] }
@@ -154,7 +158,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       listReports: { params: void; response: ReportMeta[] }
       getReport: { params: { id: string }; response: { meta: ReportMeta; data: ReportData } | null }
       deleteReport: { params: { id: string }; response: void }
-      saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
+      saveReportFile: { params: { id: string; format: 'pdf' | 'csv' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
 
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }
@@ -229,6 +233,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
       'shield-progress': { step: string; detail?: string }
+      'deshield-progress': { step: string; detail?: string }
     }
   }
   webview: {
