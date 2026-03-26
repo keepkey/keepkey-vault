@@ -107,5 +107,40 @@
 		"title": "WalletConnect",
 		"closePanel": "Close WalletConnect panel",
 		"iframeTitle": "WalletConnect dApp"
+	},
+	"mobile": {
+		"panelTitle": "Mobile App",
+		"close": "Close mobile panel",
+		"getTheApp": "Get the App",
+		"getTheAppDescription": "Download KeepKey Mobile to view your portfolio on the go.",
+		"scanToDownload": "Scan to download from the App Store",
+		"openAppStore": "Open in App Store",
+		"pairDevice": "Pair Your Device",
+		"pairDescription": "Sync your public keys to view balances on mobile. Private keys never leave your KeepKey.",
+		"pairNow": "Pair Mobile Device",
+		"connectDevice": "Connect KeepKey to pair",
+		"about": "What is KeepKey Mobile?",
+		"feature1": "View your full portfolio and balances from anywhere",
+		"feature2": "Receive addresses for all supported chains",
+		"feature3": "Watch-only mode — no transaction signing",
+		"watchOnlyNote": "KeepKey Mobile is strictly watch-only. Your private keys remain on your hardware wallet at all times."
+	},
+	"mobilePairing": {
+		"title": "Pair Mobile Device",
+		"button": "Pair Mobile",
+		"generating": "Generating pairing code...",
+		"derivingKeys": "Deriving public keys from device — this may take a moment.",
+		"codeLabel": "Pairing Code",
+		"expiresIn": "Expires in {{time}}",
+		"expired": "Expired",
+		"scanQr": "Or scan with the KeepKey mobile app",
+		"instructions": "Instructions",
+		"step1": "Open the KeepKey mobile app",
+		"step2": "Tap \"Pair via QR Code\"",
+		"step3": "Scan the QR code or enter the code manually",
+		"security": "Security",
+		"securityNote": "Code expires in 15 minutes, one-time use only. Only public keys are shared — private keys never leave your device.",
+		"retry": "Retry",
+		"regenerate": "New Code"
 	}
 }

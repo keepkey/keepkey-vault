@@ -132,6 +132,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       listPairedApps: { params: void; response: PairedAppInfo[] }
       revokePairing: { params: { apiKey: string }; response: void }
 
+      // ── Mobile pairing (via vault.keepkey.com relay) ─────────────────
+      generateMobilePairing: { params: void; response: { code: string; expiresAt: number; expiresIn: number; qrPayload: string } }
+
       // ── API Audit Log ──────────────────────────────────────────────────
       getApiLogs: { params: { limit?: number; offset?: number } | void; response: ApiLogEntry[] }
       clearApiLogs: { params: void; response: void }
