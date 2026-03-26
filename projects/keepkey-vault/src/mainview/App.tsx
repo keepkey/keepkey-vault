@@ -8,6 +8,8 @@ import { PairingApproval } from "./components/device/PairingApproval"
 import { SigningApproval } from "./components/device/SigningApproval"
 import { ApiAuditLog } from "./components/ApiAuditLog"
 import { PairedAppsPanel } from "./components/PairedAppsPanel"
+import { MobilePairingDialog } from "./components/MobilePairingDialog"
+import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
@@ -229,6 +231,10 @@ function App() {
 
 	// ── Paired Apps panel ───────────────────────────────────────────
 	const [pairedAppsOpen, setPairedAppsOpen] = useState(false)
+
+	// ── Mobile panel + pairing dialog ───────────────────────────────
+	const [mobilePanelOpen, setMobilePanelOpen] = useState(false)
+	const [mobilePairingOpen, setMobilePairingOpen] = useState(false)
 
 	// ── API Audit Log ───────────────────────────────────────────────
 	const [auditLogOpen, setAuditLogOpen] = useState(false)
@@ -651,7 +657,9 @@ function App() {
 					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
 					latestFirmware={deviceState.latestFirmware}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
+					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
 					settingsOpen={settingsOpen}
+					mobileOpen={mobilePanelOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.passphraseProtection}
@@ -680,8 +688,13 @@ function App() {
 				appVersion={appVersion}
 				onOpenAuditLog={() => setAuditLogOpen(true)}
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
+				onOpenMobilePairing={() => setMobilePairingOpen(true)}
 				onRestApiChanged={setRestApiEnabled}
 				onWordCountChange={setRecoveryWordCount}
+			/>
+			<MobilePairingDialog
+				open={mobilePairingOpen}
+				onClose={() => setMobilePairingOpen(false)}
 			/>
 			<ApiAuditLog
 				open={auditLogOpen}
@@ -692,6 +705,12 @@ function App() {
 			<PairedAppsPanel
 				open={pairedAppsOpen}
 				onClose={() => setPairedAppsOpen(false)}
+			/>
+			<MobilePanel
+				open={mobilePanelOpen}
+				onClose={() => setMobilePanelOpen(false)}
+				deviceReady={deviceState.state === "ready"}
+				onOpenPairing={() => { setMobilePanelOpen(false); setMobilePairingOpen(true) }}
 			/>
 			<WalletConnectPanel
 				open={wcPanelOpen}
