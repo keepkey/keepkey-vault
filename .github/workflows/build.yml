@@ -37,7 +37,7 @@ jobs:
             expected-arch: arm64
 
           - name: macOS x64
-            runner: macos-13
+            runner: macos-15-intel
             artifact-suffix: macos-x64
             expected-arch: x86_64
 
