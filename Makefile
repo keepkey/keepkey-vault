@@ -162,7 +162,8 @@ build-intel:
 	@echo "wrapper has no effect — the output is still ARM64, just mislabeled."
 	@echo ""
 	@echo "For real Intel Mac builds:"
-	@echo "  1. Push to develop or release/* branch (CI builds both architectures)"
+	@echo "  1. Push to a release/* branch or v* tag (CI creates draft release)"
+	@echo "     Or trigger manually:  gh workflow run build.yml"
 	@echo "  2. Sign the CI artifacts locally:  make sign-release"
 	@echo ""
 	@exit 1
@@ -335,20 +336,38 @@ release: sign-check build-signed
 
 # Sign CI-built macOS artifacts and upload to draft release.
 # Downloads both arm64 and x64 tar.zst from CI, signs all binaries,
-# creates DMGs, notarizes, and uploads to the GitHub release.
+# re-packs signed tar.zst (auto-update), creates DMGs, notarizes, and uploads.
+# Requires: draft release v$(VERSION) created by CI (push to release/* or v* tag).
 # Usage: make sign-release
 sign-release: sign-check
 	@echo "=== Signing macOS release v$(VERSION) ==="
+	@# Verify draft release exists before doing any work
+	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
+		(echo "ERROR: No release v$(VERSION) found." && \
+		 echo "Create one by pushing to a release/* branch or v* tag, or run:" && \
+		 echo "  gh workflow run build.yml --repo $(GITHUB_REPO)" && exit 1)
+	@# Clean stale artifacts from previous runs to prevent uploading old files
+	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg
+	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst
 	@mkdir -p $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
 	@echo "Downloading CI-built macOS artifacts..."
 	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
 		--pattern "stable-macos-arm64-keepkey-vault.app.tar.zst" \
 		--dir $(PROJECT_DIR)/artifacts/ci-arm64 --clobber 2>/dev/null && \
-		echo "  Downloaded arm64 artifact" || echo "  No arm64 artifact found (skipping)"
+		echo "  Downloaded arm64 artifact" || echo "  No arm64 artifact found"
 	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
 		--pattern "stable-macos-x64-keepkey-vault.app.tar.zst" \
 		--dir $(PROJECT_DIR)/artifacts/ci-x64 --clobber 2>/dev/null && \
-		echo "  Downloaded x64 artifact" || echo "  No x64 artifact found (skipping)"
+		echo "  Downloaded x64 artifact" || echo "  No x64 artifact found"
+	@# Fail if neither artifact was found
+	@if [ ! -f $(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst ] && \
+	    [ ! -f $(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst ]; then \
+		echo ""; \
+		echo "ERROR: No CI macOS artifacts found on release v$(VERSION)."; \
+		echo "Ensure CI has completed and uploaded artifacts before running sign-release."; \
+		rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64; \
+		exit 1; \
+	fi
 	@echo ""
 	@# Process arm64
 	@if [ -f $(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst ]; then \
@@ -365,11 +384,26 @@ sign-release: sign-check
 			_DMG_ARCH=x86_64; \
 	fi
 	@echo ""
-	@echo "=== Uploading signed DMGs ==="
+	@# Verify at least one DMG was produced in this run
+	@PRODUCED=0; \
+	for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
+		[ -f "$$DMG" ] && PRODUCED=1; \
+	done; \
+	if [ "$$PRODUCED" = "0" ]; then \
+		echo "ERROR: No DMGs were produced — signing may have failed."; \
+		rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64; \
+		exit 1; \
+	fi
+	@echo "=== Uploading signed artifacts ==="
 	@for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
 		[ -f "$$DMG" ] || continue; \
 		echo "  Uploading $$(basename $$DMG)..."; \
 		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$DMG"; \
+	done
+	@for TAR in $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst; do \
+		[ -f "$$TAR" ] || continue; \
+		echo "  Uploading $$(basename $$TAR) (signed auto-update payload)..."; \
+		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$TAR"; \
 	done
 	@echo ""
 	@echo "=== Release v$(VERSION) signed and uploaded ==="
@@ -377,7 +411,7 @@ sign-release: sign-check
 	@# Cleanup CI temp dirs
 	@rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
 
-# Internal: sign a single tar.zst and produce a DMG
+# Internal: sign a single tar.zst, produce a signed tar.zst (auto-update) and DMG
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
 _sign-one-dmg:
 	@test -f "$(_SRC_TAR)" || (echo "ERROR: $(_SRC_TAR) not found"; exit 1)
@@ -405,6 +439,10 @@ _sign-one-dmg:
 		--entitlements $(PROJECT_DIR)/entitlements.plist \
 		"$$APP"; \
 	codesign --verify --deep --strict "$$APP" || (echo "ERROR: Signature verification failed"; exit 1); \
+	echo "  Re-packing signed app into tar.zst for auto-update..."; \
+	SIGNED_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/$$(basename $(_SRC_TAR))"; \
+	(cd "$$STAGING" && tar cf - "$$(basename $$APP)") | zstd -o "$$SIGNED_TAR" --force; \
+	echo "  Signed tar.zst: $$SIGNED_TAR"; \
 	ln -s /Applications "$$STAGING/Applications"; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-$(_DMG_ARCH).dmg"; \
 	rm -f "$$DMG_OUT"; \
@@ -452,7 +490,7 @@ help:
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
 	@echo "  make verify-arch    - Verify build artifact matches expected architecture"
-	@echo "  make sign-release   - Download CI artifacts, sign both architectures, upload DMGs"
+	@echo "  make sign-release   - Download CI artifacts, sign + repack, upload DMGs + auto-update tar.zst"
 	@echo "  make upload-all-dmgs - Upload all signed DMGs to draft release"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
 	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
