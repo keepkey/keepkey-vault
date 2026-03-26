@@ -288,6 +288,22 @@ jobs:
             fi
           done
 
+          # Swap node-hid prebuilds: replace ARM64 with x64 (required for firmware updates + HID transport)
+          HID_SRC="projects/keepkey-vault/node_modules/node-hid/prebuilds/HID-darwin-x64"
+          if [ -d "$HID_SRC" ]; then
+            HID_DEST=$(find "$APP" -type d -name "HID-darwin-arm64" | head -1)
+            if [ -n "$HID_DEST" ]; then
+              HID_PARENT=$(dirname "$HID_DEST")
+              rm -rf "$HID_DEST"
+              cp -r "$HID_SRC" "$HID_PARENT/HID-darwin-x64"
+              echo "  node-hid: swapped ARM64 → x64 prebuild"
+            else
+              echo "  node-hid: HID-darwin-arm64 not found in bundle (skipping)"
+            fi
+          else
+            echo "::warning::node-hid HID-darwin-x64 prebuild not found in node_modules"
+          fi
+
           # Remove zcash-cli from x64 bundle (Zcash shielded not supported on Intel)
           ZCASH_DEST=$(find "$APP" -name "zcash-cli" -type f | head -1)
           if [ -n "$ZCASH_DEST" ]; then
