@@ -12,4 +12,4 @@
 	url = https://github.com/keepkey/device-protocol
 [submodule "modules/electrobun"]
 	path = modules/electrobun
-	url = https://github.com/blackboardsh/electrobun.git
+	url = https://github.com/BitHighlander/electrobun.git
