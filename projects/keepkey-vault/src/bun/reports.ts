@@ -768,7 +768,8 @@ function sanitize(text: string): string {
 export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib')
 	const reportLocale = getSetting('number_locale') || 'en-US'
-	const reportCurrency = getSetting('fiat_currency') || 'USD'
+	// Stored values are always USD — use USD currency label with user's number locale for separators
+	const reportCurrency = 'USD'
 
 	console.log('[reports] Starting PDF generation...')
 
