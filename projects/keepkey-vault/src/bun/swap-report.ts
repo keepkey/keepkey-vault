@@ -5,6 +5,7 @@
  * CSV is plain-text, compatible with spreadsheet apps and tax tools.
  */
 import type { SwapHistoryRecord } from '../shared/types'
+import { getSetting } from './db'
 
 // ── CSV Export ────────────────────────────────────────────────────────
 
@@ -189,7 +190,8 @@ export async function generateSwapPdf(records: SwapHistoryRecord[]): Promise<Buf
     colX = ML + 4
 
     // Date
-    const dateStr = new Date(r.createdAt).toLocaleString('en-US', {
+    const swapLocale = getSetting('number_locale') || 'en-US'
+    const dateStr = new Date(r.createdAt).toLocaleString(swapLocale, {
       month: '2-digit', day: '2-digit', year: '2-digit',
       hour: '2-digit', minute: '2-digit', hour12: false,
     })
