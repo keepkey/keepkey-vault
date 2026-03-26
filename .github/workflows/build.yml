@@ -150,6 +150,10 @@ jobs:
         run: cd projects/keepkey-vault && bun install
         shell: bash
 
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
       - name: Build zcash-cli sidecar (macOS)
         if: runner.os == 'macOS'
         shell: bash
