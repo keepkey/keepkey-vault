@@ -1,4 +1,3 @@
-import { useState, useCallback } from "react"
 import { Box, Flex, Text, VStack, IconButton } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { generateQRSvg } from "../lib/qr"
