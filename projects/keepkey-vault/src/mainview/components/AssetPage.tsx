@@ -8,7 +8,8 @@ import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../.
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
 
@@ -48,6 +49,7 @@ interface AssetPageProps {
 
 export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPageProps) {
 	const { t } = useTranslation("asset")
+	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
@@ -381,7 +383,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							</Text>
 							{tok.balanceUsd > 0 && (
 								<Text fontSize="11px" color="kk.textMuted" lineHeight="1.2">
-									${formatUsd(tok.balanceUsd)}
+									{fmtCompact(tok.balanceUsd)}
 								</Text>
 							)}
 						</Box>
@@ -476,7 +478,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								{activeBalance.balance} {chain.symbol}
 							</Text>
 							{cleanBalanceUsd > 0 && (
-								<AnimatedUsd value={cleanBalanceUsd} prefix="($" suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
+								<AnimatedUsd value={cleanBalanceUsd} prefix={`(${fiatSymbol}`} suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
 							)}
 							<Box
 								as="button"
@@ -651,7 +653,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 									</Text>
 								)}
 								{tokenTotalUsd > 0 && (
-									<Text fontSize="xs" color="kk.gold" fontWeight="500">${formatUsd(tokenTotalUsd)}</Text>
+									<Text fontSize="xs" color="kk.gold" fontWeight="500">{fmtCompact(tokenTotalUsd)}</Text>
 								)}
 								{isEvmChain && (
 									<IconButton
@@ -694,7 +696,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 										{zeroValueTokens.length > 0 && (
 											<>
 												<Text fontSize="10px" color="kk.textMuted" w="100%" px="1" mt="1">
-													{t("zeroValueTokens", { count: zeroValueTokens.length })}
+													{t("zeroValueTokens", { count: zeroValueTokens.length, zeroValue: fmtCompact(0) || `${fiatSymbol}0` })}
 												</Text>
 												{zeroValueTokens.map((tok) => renderTokenRow(tok))}
 											</>

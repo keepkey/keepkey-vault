@@ -2,7 +2,8 @@ import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import { BTC_SCRIPT_TYPES } from "../../shared/chains"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import type { BtcAccountSet, BtcScriptType } from "../../shared/types"
 
 interface BtcXpubSelectorProps {
@@ -15,6 +16,7 @@ interface BtcXpubSelectorProps {
 export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addingAccount }: BtcXpubSelectorProps) {
   const { accounts, selectedXpub } = btcAccounts
   const { t } = useTranslation("receive")
+  const { fmtCompact } = useFiat()
   if (accounts.length === 0) return null
 
   const selAcct = selectedXpub?.accountIndex ?? 0
@@ -95,7 +97,7 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
                 )}
                 {xpubData && xpubData.balanceUsd > 0 && (
                   <Text fontSize="9px" color="kk.textMuted" lineHeight="1.2">
-                    ${formatUsd(xpubData.balanceUsd)}
+                    {fmtCompact(xpubData.balanceUsd)}
                   </Text>
                 )}
               </Flex>

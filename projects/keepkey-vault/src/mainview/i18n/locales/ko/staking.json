@@ -11,7 +11,7 @@
 	"topValidatorExamples": "상위 검증자 예시",
 	"browseAllValidators": "모든 검증자 탐색",
 	"rewardsAvailable": "사용 가능한 보상: {{amount}} {{symbol}}",
-	"rewardsAvailableWithUsd": "사용 가능한 보상: {{amount}} {{symbol}} (~${{usd}})",
+	"rewardsAvailableWithUsd": "사용 가능한 보상: {{amount}} {{symbol}} (~{{fiatValue}})",
 	"amount": "금액",
 	"max": "최대",
 	"memoOptional": "메모 (선택사항)",

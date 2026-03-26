@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Spinner, Image } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 import type { ReportMeta } from "../../shared/types"
 
@@ -22,6 +23,7 @@ interface ReportDialogProps {
 }
 
 export function ReportDialog({ onClose }: ReportDialogProps) {
+	const { locale: fiatLocale, fmtCompact } = useFiat()
 	const [generating, setGenerating] = useState(false)
 	const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
 	const [reports, setReports] = useState<ReportMeta[]>([])
@@ -250,11 +252,11 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 												Full Detail Report
 											</Text>
 											<Text fontSize="10px" color={r.status === "error" ? "#DC3545" : "kk.textMuted"}>
-												{r.status === "error" ? "Failed" : `$${r.totalUsd.toFixed(2)}`}
+												{r.status === "error" ? "Failed" : fmtCompact(r.totalUsd)}
 											</Text>
 										</Flex>
 										<Text fontSize="10px" color="kk.textMuted" mb="3">
-											{new Date(r.createdAt).toLocaleString()}
+											{new Date(r.createdAt).toLocaleString(fiatLocale)}
 										</Text>
 										{r.error && (
 											<Text fontSize="10px" color="#DC3545" mb="3">{r.error}</Text>

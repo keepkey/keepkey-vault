@@ -11,7 +11,7 @@
 	"topValidatorExamples": "顶级验证者示例",
 	"browseAllValidators": "浏览所有验证者",
 	"rewardsAvailable": "可用奖励: {{amount}} {{symbol}}",
-	"rewardsAvailableWithUsd": "可用奖励: {{amount}} {{symbol}} (~${{usd}})",
+	"rewardsAvailableWithUsd": "可用奖励: {{amount}} {{symbol}} (~{{fiatValue}})",
 	"amount": "金额",
 	"max": "最大",
 	"memoOptional": "备注（可选）",

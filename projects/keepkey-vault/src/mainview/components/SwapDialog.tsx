@@ -10,7 +10,7 @@ import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-u
 import CountUp from "react-countup"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
-import { formatUsd } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
@@ -240,7 +240,7 @@ interface AssetSelectorProps {
 
 function AssetSelector({ label, selected, assets, onSelect, balances, exclude, disabled, nativeOnly }: AssetSelectorProps) {
   const { t } = useTranslation("swap")
-  const fmtCompact = (v: number | string | null | undefined) => { const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0); return !isFinite(n) || n === 0 ? '' : `$${formatUsd(n)}` }
+  const { fmtCompact } = useFiat()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -445,8 +445,7 @@ interface SwapDialogProps {
 // ── Main SwapDialog ─────────────────────────────────────────────────
 export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap }: SwapDialogProps) {
   const { t } = useTranslation("swap")
-  const fmtCompact = (v: number | string | null | undefined) => { const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0); return !isFinite(n) || n === 0 ? '' : `$${formatUsd(n)}` }
-  const fiatSymbol = '$'
+  const { fmtCompact, symbol: fiatSymbol } = useFiat()
 
   // ── State ─────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SwapPhase>('input')

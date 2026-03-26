@@ -12,7 +12,7 @@
  */
 
 import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
-import { getLatestDeviceSnapshot, getCachedPubkeys } from './db'
+import { getLatestDeviceSnapshot, getCachedPubkeys, getSetting } from './db'
 import { getPioneer } from './pioneer'
 
 /** Section title prefixes — shared with tax-export.ts for reliable extraction. */
@@ -767,6 +767,8 @@ function sanitize(text: string): string {
 
 export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib')
+	const reportLocale = getSetting('number_locale') || 'en-US'
+	const reportCurrency = getSetting('fiat_currency') || 'USD'
 
 	console.log('[reports] Starting PDF generation...')
 
@@ -897,7 +899,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	y -= 30
 
 	// ── Total Portfolio Value (big number) ──
-	const totalStr = `$${totalPortfolioUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+	const totalStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalPortfolioUsd)
 	const totalLabel = 'Total Portfolio Value'
 	const totalLabelW = font.widthOfTextAtSize(totalLabel, 11)
 	const totalValW = bold.widthOfTextAtSize(totalStr, 28)
@@ -958,7 +960,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 		for (const slice of slices.slice(0, 12)) {
 			const pct = ((slice.usd / totalPortfolioUsd) * 100).toFixed(1)
-			const usdStr = `$${slice.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+			const usdStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(slice.usd)
 
 			// Color swatch
 			page.drawRectangle({
