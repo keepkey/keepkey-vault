@@ -11,7 +11,7 @@
 	"showFiltered_other": "Toon {{count}} gefilterde tokens",
 	"hideFiltered_one": "Verberg {{count}} gefilterde token",
 	"hideFiltered_other": "Verberg {{count}} gefilterde tokens",
-	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Vermoedelijke spam ({{count}})",
 	"markAsSafe": "Markeer als veilig",
 	"hideToken": "Verberg token",

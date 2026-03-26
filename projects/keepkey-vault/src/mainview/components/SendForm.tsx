@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
@@ -41,6 +42,7 @@ interface SendFormProps {
 
 export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
 	const { t } = useTranslation("send")
+	const { fmt, fmtCompact } = useFiat()
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [usdAmount, setUsdAmount] = useState("")
@@ -301,7 +303,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					</Text>
 					{hasPrice && (
 						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
-							${formatUsd(parseFloat(displayBalance) * pricePerUnit)}
+							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
 						</Text>
 					)}
 				</Flex>
@@ -408,7 +410,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									<Flex align="center" gap="1">
 										{inputMode === 'crypto' ? (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amountUsdPreview !== null ? `$${formatUsd(amountUsdPreview)}` : '$0.00'}
+												{amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0)}
 											</Text>
 										) : (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
@@ -421,7 +423,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									</Flex>
 								)}
 								{pricePerUnit > 0 && (
-									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = ${formatUsd(pricePerUnit)}</Text>
+									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = {fmtCompact(pricePerUnit)}</Text>
 								)}
 							</Flex>
 						)}
@@ -492,7 +494,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(amountUsdPreview)}</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}
 							</Flex>
 						</Flex>
@@ -501,7 +503,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
 								{buildResult.feeUsd != null && buildResult.feeUsd > 0 && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(buildResult.feeUsd)}</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(buildResult.feeUsd)}</Text>
 								)}
 							</Flex>
 						</Flex>

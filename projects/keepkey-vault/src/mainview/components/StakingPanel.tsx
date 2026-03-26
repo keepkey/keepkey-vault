@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import type { ChainDef } from "../../shared/chains"
 import type { BuildTxResult, BroadcastResult, StakingPosition } from "../../shared/types"
 import { rpcRequest } from "../lib/rpc"
+import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 
 interface StakingPanelProps {
@@ -53,6 +54,7 @@ interface DelegateDialogProps {
 
 function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount, rewardUsd, onSuccess, watchOnly }: DelegateDialogProps) {
 	const { t } = useTranslation("staking")
+	const { fmtCompact } = useFiat()
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState(t('defaultDelegationMemo'))
@@ -287,7 +289,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 								{rewardAmount && (
 									<Text fontSize="10px" color="kk.textMuted" mt="2">
 										{rewardUsd && rewardUsd > 0
-											? t('rewardsAvailableWithUsd', { amount: rewardAmount, symbol: chain.symbol, usd: rewardUsd.toFixed(2) })
+											? t('rewardsAvailableWithUsd', { amount: rewardAmount, symbol: chain.symbol, fiatValue: fmtCompact(rewardUsd) })
 											: t('rewardsAvailable', { amount: rewardAmount, symbol: chain.symbol })}
 									</Text>
 								)}

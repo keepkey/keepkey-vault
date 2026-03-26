@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
 import { FaShieldAlt, FaCopy, FaCheck, FaEnvelope, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
 
 /** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
@@ -45,6 +46,7 @@ function formatEta(seconds: number): string {
 
 export function ZcashPrivacyTab() {
 	const { t } = useTranslation("asset")
+	const { locale: fiatLocale } = useFiat()
 
 	// ── State ──────────────────────────────────────────────────────────
 	const [status, setStatus] = useState<SidecarStatus>("checking")
@@ -497,7 +499,7 @@ export function ZcashPrivacyTab() {
 								{scanState === "scanning" ? (
 									<><Spinner size="xs" mr="2" /> {t("scanning")}</>
 								) : (
-									t("scanFromBlock", { block: KEEPKEY_RELEASE_BLOCK.toLocaleString() })
+									t("scanFromBlock", { block: KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale) })
 								)}
 							</Button>
 						</Flex>
@@ -516,7 +518,7 @@ export function ZcashPrivacyTab() {
 							)}
 							{syncedTo && (
 								<Text fontSize="10px" color="kk.textMuted" mt="0.5">
-									{t("lastSynced", { height: syncedTo.toLocaleString() })}
+									{t("lastSynced", { height: syncedTo.toLocaleString(fiatLocale) })}
 								</Text>
 							)}
 						</Flex>
@@ -778,7 +780,7 @@ export function ZcashPrivacyTab() {
 							title="Click to use KeepKey release block"
 							onClick={() => setScanFromHeight(String(KEEPKEY_RELEASE_BLOCK))}
 						>
-							#{KEEPKEY_RELEASE_BLOCK.toLocaleString()}
+							#{KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)}
 						</Text>
 					</Flex>
 
@@ -812,11 +814,11 @@ export function ZcashPrivacyTab() {
 								{scanProgress ? (
 									<Flex gap="3" align="center">
 										<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
-											{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()}
+											{scanProgress.scannedHeight.toLocaleString(fiatLocale)} / {scanProgress.tipHeight.toLocaleString(fiatLocale)}
 										</Text>
 										{scanProgress.blocksPerSec > 0 && (
 											<Text fontSize="10px" color="kk.textMuted">
-												{scanProgress.blocksPerSec.toLocaleString()} blk/s
+												{scanProgress.blocksPerSec.toLocaleString(fiatLocale)} blk/s
 											</Text>
 										)}
 										<Text fontSize="10px" color="kk.textSecondary" fontWeight="500">
@@ -1060,7 +1062,7 @@ export function ZcashPrivacyTab() {
 													setScanFromHeight(String(tx.block_height))
 												}}
 											>
-												#{tx.block_height.toLocaleString()}
+												#{tx.block_height.toLocaleString(fiatLocale)}
 											</Text>
 											<Text
 												fontSize="9px"
