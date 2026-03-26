@@ -478,7 +478,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								{activeBalance.balance} {chain.symbol}
 							</Text>
 							{cleanBalanceUsd > 0 && (
-								<AnimatedUsd value={cleanBalanceUsd} prefix={`(${fiatSymbol}`} suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
+								<AnimatedUsd value={cleanBalanceUsd} prefix="(" suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
 							)}
 							<Box
 								as="button"

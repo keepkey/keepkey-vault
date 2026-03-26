@@ -42,7 +42,7 @@ interface SendFormProps {
 
 export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
 	const { t } = useTranslation("send")
-	const { fmtCompact } = useFiat()
+	const { fmt, fmtCompact } = useFiat()
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [usdAmount, setUsdAmount] = useState("")
@@ -410,7 +410,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									<Flex align="center" gap="1">
 										{inputMode === 'crypto' ? (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amountUsdPreview !== null ? fmtCompact(amountUsdPreview) : fmtCompact(0)}
+												{amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0)}
 											</Text>
 										) : (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
