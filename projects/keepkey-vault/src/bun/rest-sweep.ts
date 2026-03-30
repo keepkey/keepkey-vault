@@ -9,6 +9,7 @@ import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { RestApiCallbacks } from './rest-api'
+import type { SigningRequestInfo } from '../shared/types'
 import { parseRequest } from './validate'
 import * as S from './schemas'
 import { startScan, getScan, buildSweepTx } from './sweep-engine'
@@ -82,7 +83,7 @@ export async function handleSweepRoute(
 
     // ── Execute sweep ──────────────────────────────────────────────
     if (path === '/api/v2/sweep/execute' && method === 'POST') {
-      auth.requireAuth(req)
+      const pairedClient = auth.requireAuth(req)
       const wallet = requireWallet(engine)
       const body = await parseRequest(req, S.SweepExecuteRequest)
 
@@ -119,6 +120,23 @@ export async function handleSweepRoute(
           outputSats: sweepResult.totalInputSats - sweepResult.fee,
           unsignedTx: sweepResult.unsignedTx,
         })
+      }
+
+      // ── Signing approval gate ──────────────────────────────────
+      if (callbacks?.onSigningRequest) {
+        const appName = pairedClient.info?.name || 'Sweep Scanner'
+        const signingInfo: SigningRequestInfo = {
+          id: crypto.randomUUID(),
+          method: '/api/v2/sweep/execute',
+          appName,
+          chain: 'utxo',
+          to: destination,
+          value: `${sweepResult.totalInputSats} sats (${sweepResult.inputCount} inputs, fee ${sweepResult.fee} sats)`,
+        }
+        const approved = await callbacks.onSigningRequest(signingInfo)
+        if (!approved) {
+          return json({ error: 'Signing rejected by user' }, 403)
+        }
       }
 
       // Sign on device
