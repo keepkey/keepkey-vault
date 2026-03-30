@@ -1179,6 +1179,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               const policies: any[] = features?.policiesList || features?.policies || []
               const advPol = policies.find((p: any) => (p.policyName || p.policy_name) === 'AdvancedMode')
               signingInfo.advancedModeEnabled = advPol?.enabled ?? false
+              // Pass firmware version so UI can gate blind-signing warnings (7.14.0+)
+              if (features?.majorVersion) {
+                signingInfo.firmwareVersion = `${features.majorVersion}.${features.minorVersion}.${features.patchVersion}`
+              }
             }
           } catch (e: any) {
             console.warn('[rest-api] Failed to read AdvancedMode policy:', e?.message || e)

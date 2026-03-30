@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
 import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo } from "../../../shared/types"
+import { versionCompare } from "../../../shared/firmware-versions"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
@@ -242,8 +243,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 	const [advancedModeEnabled, setAdvancedModeEnabled] = useState(request.advancedModeEnabled ?? false)
 	const [enablingPolicy, setEnablingPolicy] = useState(false)
 
+	// Only show blind-signing warnings on firmware 7.14.0+
+	const fwSupportsBlindSignGate = request.firmwareVersion
+		? versionCompare(request.firmwareVersion, '7.14.0') >= 0
+		: false
+
 	const decoded = request.calldataDecoded
-	const hasCalldata = request.needsBlindSigning !== undefined || (decoded && decoded.source !== undefined)
+	const hasCalldata = fwSupportsBlindSignGate
+		&& (request.needsBlindSigning !== undefined || (decoded && decoded.source !== undefined))
 	const hasSignedBlob = !!decoded?.signedInsightBlob
 
 	let trustLevel: 'verified' | 'known' | 'unknown' = 'verified'
@@ -258,7 +265,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 	}
 
 	const isSimpleTransfer = !hasCalldata && !request.typedDataDecoded
-	const blindSigningBlocked = request.needsBlindSigning && !advancedModeEnabled
+	const blindSigningWarning = fwSupportsBlindSignGate && request.needsBlindSigning && !advancedModeEnabled
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
@@ -280,12 +287,12 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
-			if (e.key === "Enter" && !blindSigningBlocked && phase === 'approve') { e.preventDefault(); onApprove() }
+			if (e.key === "Enter" && phase === 'approve') { e.preventDefault(); onApprove() }
 			if (e.key === "Escape" && phase === 'approve') { e.preventDefault(); onReject() }
 		}
 		document.addEventListener("keydown", handler)
 		return () => document.removeEventListener("keydown", handler)
-	}, [onApprove, onReject, blindSigningBlocked, phase])
+	}, [onApprove, onReject, phase])
 
 	useEffect(() => {
 		if (phase !== 'approve') return
@@ -361,7 +368,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 			<style>{SIGNING_ANIMATIONS}</style>
 			<VStack
 				bg="kk.cardBg" border="2px solid"
-				borderColor={blindSigningBlocked ? "rgba(245,163,59,0.6)" : "kk.gold"}
+				borderColor={blindSigningWarning ? "rgba(245,163,59,0.6)" : "kk.gold"}
 				borderRadius="2xl" p="6" gap="3"
 				maxW="640px" w="95vw" maxH="90vh" overflowY="auto"
 				css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 2s ease-in-out infinite 0.3s" }}
@@ -392,8 +399,8 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 				{/* ── Method ── */}
 				<Text fontSize="sm" fontWeight="600" color="white">{methodLabel}</Text>
 
-				{/* ── Blind signing warning ── */}
-				{request.needsBlindSigning && (
+				{/* ── Blind signing warning (firmware 7.14.0+ only) ── */}
+				{fwSupportsBlindSignGate && request.needsBlindSigning && (
 					<BlindSigningBanner enabled={advancedModeEnabled} confirming={showAdvancedConfirm} onEnable={handleEnableAdvancedMode} onCancel={() => setShowAdvancedConfirm(false)} t={t} />
 				)}
 
@@ -435,11 +442,11 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 				{/* ── Action buttons ── */}
 				<Flex gap="3" w="100%">
 					<Button
-						flex="1" bg={blindSigningBlocked ? "rgba(192,168,96,0.3)" : "kk.gold"}
-						color={blindSigningBlocked ? "kk.textSecondary" : "black"} fontWeight="600" size="md"
-						_hover={blindSigningBlocked ? {} : { bg: "kk.goldHover" }}
-						onClick={onApprove} disabled={blindSigningBlocked || enablingPolicy}
-						cursor={blindSigningBlocked ? "not-allowed" : "pointer"}
+						flex="1" bg="kk.gold"
+						color="black" fontWeight="600" size="md"
+						_hover={{ bg: "kk.goldHover" }}
+						onClick={onApprove} disabled={enablingPolicy}
+						cursor="pointer"
 					>
 						{t("signing.approve")}
 					</Button>
@@ -454,10 +461,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 				</Flex>
 
 				<Text fontSize="2xs" color="kk.textMuted">
-					{blindSigningBlocked
-						? t("signing.enableAdvancedModeHint", "Enable Advanced Mode above to unlock signing")
-						: t("signing.keyboardHint")
-					}
+					{t("signing.keyboardHint")}
 				</Text>
 			</VStack>
 		</Box>

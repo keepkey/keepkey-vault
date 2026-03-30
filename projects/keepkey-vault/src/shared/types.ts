@@ -313,6 +313,8 @@ export interface SigningRequestInfo {
   needsBlindSigning?: boolean
   /** true when device AdvancedMode policy is currently enabled */
   advancedModeEnabled?: boolean
+  /** Device firmware version string e.g. "7.14.0" — used to gate blind-signing UI */
+  firmwareVersion?: string
   /** Full raw request body from the REST API caller — shown in UI for debugging/transparency */
   rawRequestBody?: Record<string, unknown>
 }
