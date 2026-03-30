@@ -904,7 +904,6 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 					</svg>
 				</Box>
 			)}
-
 			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.14.0) */}
 			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.14.0') >= 0 && (
 				<Box
