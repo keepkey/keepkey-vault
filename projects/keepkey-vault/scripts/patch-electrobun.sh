@@ -27,8 +27,6 @@ else
 fi
 
 # 3. Add NSCameraUsageDescription to Info.plist (getUserMedia needs it on macOS)
-EBUN_CLI_DIR="$(dirname "$EBUN_CLI")"
-# Electrobun generates Info.plist during build — patch the template to include camera usage
 if [ -f "$EBUN_CLI" ]; then
   if grep -q 'NSCameraUsageDescription' "$EBUN_CLI"; then
     echo "[patch-electrobun] NSCameraUsageDescription already patched"
@@ -47,7 +45,7 @@ if [ -f "$EBUN_CJS" ]; then
   if grep -q 'tar --force-local' "$EBUN_CJS"; then
     echo "[patch-electrobun] tar --force-local already patched"
   elif grep -q 'tar -xzf' "$EBUN_CJS"; then
-    sed -i 's/tar -xzf/tar --force-local -xzf/g' "$EBUN_CJS"
+    sed -i '' 's/tar -xzf/tar --force-local -xzf/g' "$EBUN_CJS"
     echo "[patch-electrobun] Patched tar --force-local (Windows path fix)"
   fi
 fi

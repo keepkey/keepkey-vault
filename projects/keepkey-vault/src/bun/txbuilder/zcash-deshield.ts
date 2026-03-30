@@ -70,7 +70,15 @@ async function _deshieldZecInner(
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
-	// 0. Ensure sidecar running + FVK set
+	// 0a. Validate inputs
+	if (!params.recipient || !/^t[13][a-km-zA-HJ-NP-Z1-9]{33}$/.test(params.recipient)) {
+		throw new Error("Invalid transparent Zcash address — must be t1... (P2PKH) or t3... (P2SH)")
+	}
+	if (!Number.isInteger(params.amount) || params.amount <= 0) {
+		throw new Error("Deshield amount must be a positive integer (zatoshis)")
+	}
+
+	// 0b. Ensure sidecar running + FVK set
 	if (!isSidecarReady()) {
 		await startSidecar()
 	}
@@ -111,7 +119,10 @@ async function _deshieldZecInner(
 	})
 
 	// 4. Broadcast
-	console.log(`[zcash-deshield] raw_tx length: ${raw_tx?.length / 2} bytes`)
+	if (!raw_tx) {
+		throw new Error("Sidecar returned no raw_tx from finalize_deshield")
+	}
+	console.log(`[zcash-deshield] raw_tx length: ${raw_tx.length / 2} bytes`)
 	console.log("[zcash-deshield] Broadcasting...")
 	await sendCommand("broadcast", { raw_tx })
 
