@@ -315,6 +315,9 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
       }
+      // Compute native-only USD by subtracting token totals
+      const tokenUsdTotal = entry.tokens?.reduce((sum, t) => sum + (t.balanceUsd || 0), 0) || 0
+      entry.nativeBalanceUsd = r.balance_usd - tokenUsdTotal
       return entry
     })
     return { balances, updatedAt: maxUpdatedAt }
@@ -795,6 +798,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
         amount: r.from_amount,
         asset: `${r.from_symbol}\u2192${r.to_symbol}`,
         status: r.status === 'completed' ? 'completed' as const : r.status === 'failed' ? 'failed' as const : r.status === 'refunded' ? 'refunded' as const : 'broadcast' as const,
+        swapStatus: r.status as any,
         createdAt: r.created_at,
       }))
 

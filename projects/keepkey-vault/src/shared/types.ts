@@ -96,7 +96,8 @@ export interface ChainBalance {
   chainId: string
   symbol: string
   balance: string       // human-readable (e.g. "0.001")
-  balanceUsd: number
+  balanceUsd: number    // total USD (native + tokens)
+  nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
 }
@@ -661,6 +662,7 @@ export interface RecentActivity {
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities
   status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
+  swapStatus?: SwapTrackingStatus  // detailed swap lifecycle status (only for type === 'swap')
   createdAt: number
   // ── On-chain confirmation data (populated by scan, updated on rescan) ──
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
