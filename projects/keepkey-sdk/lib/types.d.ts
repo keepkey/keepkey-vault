@@ -174,4 +174,100 @@ export interface SupportedAsset {
     caip: string;
     chainFamily: string;
 }
+export interface PubkeyEntry {
+    caip: string;
+    pubkey: string;
+}
+export interface PortfolioBalancesParams {
+    pubkeys: PubkeyEntry[];
+}
+export interface MarketInfoParams {
+    caips: string[];
+}
+export interface SearchAssetsParams {
+    q: string;
+    limit?: number;
+}
+export interface ListUnspentParams {
+    network: string;
+    xpub: string;
+}
+export interface PubkeyInfoParams {
+    network: string;
+    xpub: string;
+}
+export interface TxHistoryParams {
+    queries: Array<{
+        pubkey: string;
+        caip: string;
+    }>;
+}
+export interface BroadcastParams {
+    networkId: string;
+    serialized: string;
+}
+export interface NetworkIdParams {
+    networkId: string;
+}
+export interface NetworkAddressParams {
+    networkId: string;
+    address: string;
+}
+export interface TokenDecimalsParams {
+    networkId: string;
+    contractAddress: string;
+}
+export interface StakingParams {
+    network: string;
+    address: string;
+}
+export interface SwapQuoteParams {
+    sellAsset: string;
+    buyAsset: string;
+    sellAmount: string;
+    senderAddress: string;
+    recipientAddress: string;
+    slippage?: number;
+}
+export interface SweepScanParams {
+    accountRange?: [number, number];
+    mismatchAccounts?: number;
+}
+export interface SweepScanStatus {
+    id: string;
+    status: 'scanning' | 'complete' | 'error';
+    progress: {
+        current: number;
+        total: number;
+        phase: string;
+    };
+    startedAt: number;
+    completedAt?: number;
+    totalFoundSats: number;
+    results: SweepResult[];
+    error?: string;
+}
+export interface SweepResult {
+    path: string;
+    scriptType: string;
+    address: string;
+    category: 'account-key' | 'mismatch';
+    balanceSats: number;
+    utxoCount: number;
+}
+export interface SweepExecuteParams {
+    scanId: string;
+    destinationAddress?: string;
+    dryRun?: boolean;
+}
+export interface SweepExecuteResult {
+    txid?: string;
+    destination: string;
+    inputCount: number;
+    totalSweptSats: number;
+    fee: number;
+    outputSats: number;
+    dryRun?: boolean;
+    unsignedTx?: any;
+}
 //# sourceMappingURL=types.d.ts.map

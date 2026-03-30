@@ -7,7 +7,11 @@
   "files": ["lib"],
   "scripts": {
     "build": "tsc",
-    "test": "tsc && node __tests__/test.js"
+    "test": "tsc && node __tests__/test.js",
+    "test:chain": "tsc && node tests/run-all.js chain",
+    "test:sweep": "tsc && node tests/run-all.js sweep",
+    "test:all": "tsc && node tests/run-all.js",
+    "test:device": "tsc && node tests/run-all.js"
   },
   "devDependencies": {
     "typescript": "^5.5.0"

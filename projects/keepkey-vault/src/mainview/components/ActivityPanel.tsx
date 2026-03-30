@@ -93,7 +93,10 @@ function getExplorerUrl(chainSymbol: string, txid: string): string | null {
   if (!chainSymbol || !txid) return null
   const chain = CHAINS.find(c => c.symbol === chainSymbol || c.id === chainSymbol)
   if (!chain?.explorerTxUrl) return null
-  return chain.explorerTxUrl.replace('{{txid}}', txid)
+  const normalizedTxid = chain.chainFamily === 'evm'
+    ? (txid.startsWith('0x') ? txid : '0x' + txid)
+    : txid.replace(/^0x/i, '')
+  return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 
 function truncateTxid(txid: string): string {

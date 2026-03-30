@@ -203,7 +203,7 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#ECB244',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
-    minFirmware: '7.14.0',
+    minFirmware: '7.15.0',
   },
   {
     id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
@@ -211,7 +211,7 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
     defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
     hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
-    minFirmware: '7.14.0',
+    minFirmware: '7.15.0',
   },
   {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
@@ -287,7 +287,11 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
 export function getExplorerTxUrl(chainId: string, txid: string): string | null {
   const chain = CHAINS.find(c => c.id === chainId)
   if (!chain?.explorerTxUrl) return null
-  return chain.explorerTxUrl.replace('{{txid}}', txid)
+  // EVM explorers expect 0x prefix; all others (Mintscan, Runescan, Blockchair, etc.) do not
+  const normalizedTxid = chain.chainFamily === 'evm'
+    ? (txid.startsWith('0x') ? txid : '0x' + txid)
+    : txid.replace(/^0x/i, '')
+  return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 
 /** Check if a chain is supported by the given firmware version. Chains without minFirmware are always supported. */
