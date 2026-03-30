@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction, EmulatorStatus } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -191,6 +191,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       sweepGetStatus: { params: { scanId: string }; response: any }
       sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
 
+      // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
+      emulatorPair: { params: void; response: EmulatorStatus }
+      emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
+      emulatorStop: { params: void; response: EmulatorStatus }
+      emulatorSave: { params: void; response: void }
+      emulatorStatus: { params: void; response: EmulatorStatus }
+      emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
+
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
 
@@ -234,6 +242,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }
+      'emulator-status': EmulatorStatus
     }
   }
   webview: {

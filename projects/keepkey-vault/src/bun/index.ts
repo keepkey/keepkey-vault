@@ -2684,6 +2684,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
 
+			// ── Emulator (macOS only) ────────────────────────────────
+			emulatorPair: async () => {
+				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
+				pairEmulator()
+				return getEmulatorStatus()
+			},
+			emulatorInit: async (params) => {
+				const { initEmulator } = await import('./emulator')
+				return initEmulator(params?.flashName)
+			},
+			emulatorStop: async () => {
+				const { stopEmulator } = await import('./emulator')
+				return stopEmulator()
+			},
+			emulatorSave: async () => {
+				const { saveEmulatorState } = await import('./emulator')
+				saveEmulatorState()
+			},
+			emulatorStatus: async () => {
+				const { getEmulatorStatus } = await import('./emulator')
+				return getEmulatorStatus()
+			},
+			emulatorDeleteFlash: async (params) => {
+				const { deleteFlash, getEmulatorStatus } = await import('./emulator')
+				deleteFlash(params.name)
+				return getEmulatorStatus()
+			},
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				try {

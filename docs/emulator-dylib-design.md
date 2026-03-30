@@ -146,9 +146,56 @@ const char* kkemu_get_version(KKemuContext *ctx);
 #endif /* LIBKKEMU_H */
 ```
 
-## Seed / Flash Storage
+## Security: Encrypted Flash with Keychain
 
-### Flash Image Layout
+### Threat Model
+
+The emulator stores seed material in a 1MB flash image. Without protection,
+anyone with the file can extract the mnemonic (trivially if no PIN is set,
+or via fast brute-force with the emulator's 10-iteration PBKDF2).
+
+### Defense: In-Memory Only + Keychain Encryption
+
+**Plaintext never touches disk.** The architecture:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  macOS Keychain (hardware-backed on Apple Silicon)  │
+│  Service: "keepkey-vault-emulator"                  │
+│  Contains: 32-byte AES-256 encryption key           │
+└──────────────────────┬──────────────────────────────┘
+                       │ key
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  ~/.keepkey/emulator/default.enc                    │
+│  Format: [IV (12)] [AES-256-GCM ciphertext] [TAG (16)] │
+│  Contains: 1MB encrypted flash image                │
+└──────────────────────┬──────────────────────────────┘
+                       │ decrypt into RAM only
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  In-process memory (mlock'd, MADV_DONTDUMP)         │
+│  1MB buffer — passed to dylib via pointer            │
+│  Zeroed (explicit_bzero) on shutdown                 │
+│  NEVER written to disk unencrypted                   │
+└─────────────────────────────────────────────────────┘
+```
+
+### Lifecycle
+
+1. **Pair** — user clicks button → generate 32 random bytes → store in Keychain
+2. **Start** — read `.enc` from disk → decrypt with Keychain key → hold in memory
+3. **Run** — dylib operates on the memory buffer (emulator_flash_base pointer)
+4. **Save** — encrypt memory buffer → write `.enc` to disk (periodic or on-demand)
+5. **Stop** — save → zero memory → release
+
+### macOS-Only
+
+Hard dependency on macOS Keychain. The emulator section in settings is hidden
+on non-macOS platforms. This is a dev-only feature — production users use
+real hardware.
+
+## Flash Image Layout
 
 The flash image (`emulator.img`) is a 1 MB file that mirrors the STM32's flash:
 
