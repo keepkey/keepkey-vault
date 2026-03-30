@@ -2010,6 +2010,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setZcashPrivacyEnabled: async (params) => {
+				// Zcash shielded requires firmware >= 7.14.0
+				const fwVer = engine.getDeviceState().firmwareVersion
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
+					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+					return getAppSettings()
+				}
 				zcashPrivacyEnabled = params.enabled
 				setSetting('zcash_privacy_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] Zcash privacy enabled:', params.enabled)
@@ -2810,13 +2816,20 @@ if (swapsEnabled) {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
-	// Auto-disable BIP-85 if firmware doesn't support it
-	if (state.state === 'ready' && bip85Enabled) {
+	// Auto-disable 7.14.0+ features if firmware doesn't support them
+	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		if (!fw || versionCompare(fw, '7.14.0') < 0) {
+		const fwTooOld = !fw || versionCompare(fw, '7.14.0') < 0
+		if (fwTooOld && bip85Enabled) {
 			bip85Enabled = false
 			setSetting('bip85_enabled', '0')
 			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+		}
+		if (fwTooOld && zcashPrivacyEnabled) {
+			zcashPrivacyEnabled = false
+			setSetting('zcash_privacy_enabled', '0')
+			stopSidecar()
+			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
 		}
 	}
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }

@@ -1155,27 +1155,32 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)
 							})()}
 
-							{/* Zcash Shielded Privacy toggle */}
-							<Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-										</svg>
+							{/* Zcash Shielded Privacy toggle — requires firmware >= 7.14.0 */}
+							{(() => {
+								const zcashFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.14.0') >= 0
+								return (
+									<Flex justify="space-between" align="center" opacity={zcashFwOk ? 1 : 0.45}>
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
+												<Text fontSize="sm" color={zcashFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
+													{zcashFwOk ? t("zcashPrivacyFeatureDescription") : "Requires firmware 7.14.0 or later"}
+												</Text>
+											</Box>
+										</Flex>
+										<Toggle
+											checked={zcashFwOk && appSettings.zcashPrivacyEnabled}
+											onChange={toggleZcashPrivacy}
+											disabled={!zcashFwOk || togglingZcashPrivacy}
+										/>
 									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("zcashPrivacyFeatureDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={appSettings.zcashPrivacyEnabled}
-									onChange={toggleZcashPrivacy}
-									disabled={togglingZcashPrivacy}
-								/>
-							</Flex>
+								)
+							})()}
 						</VStack>
 					</Section>
 
