@@ -26,6 +26,20 @@ else
   echo "[patch-electrobun] $EBUN_CLI not found, skipping (expected during CI or fresh install)"
 fi
 
+# 3. Add NSCameraUsageDescription to Info.plist (getUserMedia needs it on macOS)
+EBUN_CLI_DIR="$(dirname "$EBUN_CLI")"
+# Electrobun generates Info.plist during build — patch the template to include camera usage
+if [ -f "$EBUN_CLI" ]; then
+  if grep -q 'NSCameraUsageDescription' "$EBUN_CLI"; then
+    echo "[patch-electrobun] NSCameraUsageDescription already patched"
+  elif grep -q 'NSAppTransportSecurity' "$EBUN_CLI"; then
+    sed -i '' 's|</dict>|<key>NSCameraUsageDescription</key>\n\t<string>KeepKey Vault uses the camera to scan QR codes for wallet addresses.</string>\n</dict>|' "$EBUN_CLI"
+    echo "[patch-electrobun] Patched NSCameraUsageDescription"
+  else
+    echo "[patch-electrobun] WARNING: Info.plist pattern not found — camera permission may not work"
+  fi
+fi
+
 # Patch electrobun CLI bootstrap to use --force-local with tar on Windows.
 # Without this, tar interprets the "C:" in Windows paths as a remote host.
 EBUN_CJS="node_modules/electrobun/bin/electrobun.cjs"

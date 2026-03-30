@@ -52,7 +52,6 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
@@ -1742,17 +1741,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return await diagnoseAnchor(params?.shardIndex)
 			},
 
-			// ── Camera / QR scanning ─────────────────────────────────
-			startQrScan: async () => {
-				startCamera(
-					(base64) => { try { rpc.send['camera-frame'](base64) } catch { /* webview not ready */ } },
-					(message) => { try { rpc.send['camera-error'](message) } catch { /* webview not ready */ } },
-				)
-			},
-			stopQrScan: async () => {
-				stopCamera()
-			},
-
 			// ── Pairing & Signing approval ───────────────────────────
 			approvePairing: async () => {
 				const apiKey = auth.approvePairing()
@@ -3019,7 +3007,6 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
-	stopCamera()
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()
