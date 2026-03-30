@@ -2,6 +2,7 @@ import { Component, useState, useEffect, useCallback, useMemo, type ReactNode, t
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
+import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
@@ -860,8 +861,8 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
 			)}
 
-			{/* BIP-85 lock icon — bottom right (only when feature enabled) */}
-			{bip85Enabled && !watchOnly && (
+			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.14.0) */}
+			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.14.0') >= 0 && (
 				<Box
 					as="button"
 					position="fixed"
