@@ -2716,6 +2716,15 @@ if (swapsEnabled) {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Auto-disable BIP-85 if firmware doesn't support it
+	if (state.state === 'ready' && bip85Enabled) {
+		const fw = state.firmwareVersion
+		if (!fw || versionCompare(fw, '7.14.0') < 0) {
+			bip85Enabled = false
+			setSetting('bip85_enabled', '0')
+			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+		}
+	}
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
