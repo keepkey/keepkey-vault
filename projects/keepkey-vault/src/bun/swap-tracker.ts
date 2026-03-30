@@ -39,6 +39,7 @@ const dismissedSwaps = new Set<string>() // prevents race between dismiss and po
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
+let initPromise: Promise<void> | null = null
 
 /** Adaptive polling: fast at first, backs off as swap ages, gives up after 1 hour */
 const FAST_POLL_MS = 10_000       // 10s for first 2 minutes
@@ -56,28 +57,46 @@ const REQUIRED_METHODS = ['CreatePendingSwap', 'GetPendingSwap'] as const
 
 // ── Public API ──────────────────────────────────────────────────────
 
-/** Initialize the tracker — verifies Pioneer SDK has required methods. Throws on failure. */
+/** Check if the tracker has been initialized with a message sender */
+export function isTrackerInitialized(): boolean {
+  return sendMessage !== null
+}
+
+/** Initialize the tracker — verifies Pioneer SDK has required methods. Idempotent: safe to call multiple times. */
 export async function initSwapTracker(messageSender: (msg: string, data: any) => void): Promise<void> {
+  // Always update the message sender (supports re-init after failure)
   sendMessage = messageSender
 
-  // FAIL FAST: Verify Pioneer SDK exposes the swap tracking methods
-  const pioneer = await getPioneer()
-  const missing: string[] = []
-  for (const method of REQUIRED_METHODS) {
-    if (typeof pioneer[method] !== 'function') {
-      missing.push(method)
-    }
-  }
-  if (missing.length > 0) {
-    // Log all available methods for debugging
-    const available = Object.keys(pioneer).filter(k => typeof pioneer[k] === 'function')
-    console.error(`${TAG} FATAL: Pioneer SDK missing required methods: ${missing.join(', ')}`)
-    console.error(`${TAG} Available methods: ${available.join(', ')}`)
-    throw new Error(`Pioneer SDK missing swap tracking methods: ${missing.join(', ')}. Cannot track swaps.`)
-  }
+  // If already verified, just update the sender and return
+  if (pioneerVerified) return
 
-  pioneerVerified = true
-  console.log(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+  // Deduplicate concurrent init calls
+  if (initPromise) return initPromise
+  initPromise = (async () => {
+    // FAIL FAST: Verify Pioneer SDK exposes the swap tracking methods
+    const pioneer = await getPioneer()
+    const missing: string[] = []
+    for (const method of REQUIRED_METHODS) {
+      if (typeof pioneer[method] !== 'function') {
+        missing.push(method)
+      }
+    }
+    if (missing.length > 0) {
+      const available = Object.keys(pioneer).filter(k => typeof pioneer[k] === 'function')
+      console.error(`${TAG} FATAL: Pioneer SDK missing required methods: ${missing.join(', ')}`)
+      console.error(`${TAG} Available methods: ${available.join(', ')}`)
+      throw new Error(`Pioneer SDK missing swap tracking methods: ${missing.join(', ')}. Cannot track swaps.`)
+    }
+
+    pioneerVerified = true
+    console.log(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+  })()
+
+  try {
+    await initPromise
+  } finally {
+    initPromise = null
+  }
 
   // Rehydrate active swaps from SQLite (survives app restart)
   try {

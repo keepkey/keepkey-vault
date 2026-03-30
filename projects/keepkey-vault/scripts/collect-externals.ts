@@ -17,6 +17,7 @@ const EXTERNALS = [
   'usb',
   'google-protobuf',
   '@keepkey/proto-tx-builder',
+  'swagger-client',
 ]
 
 const projectRoot = join(import.meta.dir, '..')

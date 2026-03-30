@@ -88,14 +88,17 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
 	// Derive per-unit USD price from available balance data
+	// NOTE: balance.balanceUsd includes token USD — use nativeBalanceUsd for native price
 	const pricePerUnit = useMemo(() => {
 		if (isTokenSend && token?.priceUsd) return token.priceUsd
-		if (!isTokenSend && balance?.balanceUsd && balance.balance) {
+		if (!isTokenSend && balance?.balance) {
 			const bal = parseFloat(balance.balance)
-			if (bal > 0) return balance.balanceUsd / bal
+			if (bal <= 0) return 0
+			const nativeUsd = balance.nativeBalanceUsd ?? balance.balanceUsd ?? 0
+			return nativeUsd > 0 ? nativeUsd / bal : 0
 		}
 		return 0
-	}, [isTokenSend, token?.priceUsd, balance?.balanceUsd, balance?.balance])
+	}, [isTokenSend, token?.priceUsd, balance?.nativeBalanceUsd, balance?.balanceUsd, balance?.balance])
 
 	const hasPrice = pricePerUnit > 0
 
@@ -260,12 +263,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Build explorer URL from assetData
 	const explorerUrl = useMemo(() => {
 		if (!txid) return null
+		// EVM explorers expect 0x prefix; all others do not
+		const normalizedTxid = chain.chainFamily === 'evm'
+			? (txid.startsWith('0x') ? txid : '0x' + txid)
+			: txid.replace(/^0x/i, '')
 		const caip = isTokenSend && token?.caip ? token.caip : chain.caip
 		const asset = getAsset(caip)
-		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', txid)
+		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', normalizedTxid)
 		// Fallback: try the chain's native CAIP
 		const chainAsset = getAsset(chain.caip)
-		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', txid)
+		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', normalizedTxid)
 		return null
 	}, [txid, chain, token, isTokenSend])
 

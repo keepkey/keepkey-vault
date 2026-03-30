@@ -186,6 +186,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Factory Reset ──────────────────────────────────────────────────
       factoryReset: { params: void; response: void }
 
+      // ── Sweep (non-standard BTC path recovery) ──────────────────────
+      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number }; response: { scanId: string } }
+      sweepGetStatus: { params: { scanId: string }; response: any }
+      sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
+
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
 
@@ -226,6 +231,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }
     }

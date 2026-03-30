@@ -2,6 +2,7 @@ import { Component, useState, useEffect, useCallback, useMemo, type ReactNode, t
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
+import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
@@ -10,6 +11,7 @@ import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
+import { SweepDialog } from "./SweepDialog"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
@@ -112,6 +114,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
+	const [showSweep, setShowSweep] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
@@ -860,8 +863,50 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
 			)}
 
-			{/* BIP-85 lock icon — bottom right (only when feature enabled) */}
-			{bip85Enabled && !watchOnly && (
+			{showSweep && (
+				<SweepDialog onClose={() => setShowSweep(false)} />
+			)}
+
+			{/* Sweep broom — bottom left */}
+			{!watchOnly && (
+				<Box
+					as="button"
+					position="fixed"
+					bottom="24px"
+					left="24px"
+					w="40px"
+					h="40px"
+					borderRadius="full"
+					bg="rgba(255,255,255,0.04)"
+					border="1px solid"
+					borderColor="rgba(255,255,255,0.08)"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					cursor="pointer"
+					transition="all 0.2s"
+					opacity={0.4}
+					_hover={{
+						opacity: 1,
+						bg: "rgba(192,168,96,0.15)",
+						borderColor: "rgba(192,168,96,0.3)",
+						transform: "scale(1.08)",
+					}}
+					_active={{ transform: "scale(0.95)" }}
+					onClick={() => setShowSweep(true)}
+					zIndex={10}
+					title="Sweep Scanner — find BTC on non-standard paths"
+				>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#C0A860' }}>
+						<path d="M3 21h4l-1-3-3 3z" />
+						<path d="M6 18L18 6" />
+						<path d="M14 6h4v4" />
+					</svg>
+				</Box>
+			)}
+
+			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.14.0) */}
+			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.14.0') >= 0 && (
 				<Box
 					as="button"
 					position="fixed"

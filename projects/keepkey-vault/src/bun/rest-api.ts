@@ -14,6 +14,8 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
+import { handleV2DataRoute } from './rest-pioneer'
+import { handleSweepRoute } from './rest-sweep'
 
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
@@ -46,6 +48,13 @@ const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
   20: 'DigiByte', 60: 'Ethereum', 118: 'Cosmos', 144: 'Ripple',
   145: 'BitcoinCash', 195: 'Tron', 501: 'Solana', 607: 'Ton', 931: 'Rune',
+}
+
+/** Ticker/symbol → firmware coin name. Callers may send 'BTC' but firmware needs 'Bitcoin'. */
+const TICKER_TO_COIN: Record<string, string> = {
+  BTC: 'Bitcoin', LTC: 'Litecoin', DOGE: 'Dogecoin', DASH: 'Dash',
+  DGB: 'DigiByte', ETH: 'Ethereum', ATOM: 'Cosmos', XRP: 'Ripple',
+  BCH: 'BitcoinCash', TRX: 'Tron', SOL: 'Solana', TON: 'Ton', RUNE: 'Rune',
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -2040,7 +2049,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               continue
             }
             const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
-            const coin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
+            const rawCoin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
+            const coin = TICKER_TO_COIN[rawCoin] || rawCoin
             try {
               const result = await wallet.getPublicKeys([{
                 addressNList: p.address_n,
@@ -2249,6 +2259,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.ZcashBroadcastRequest)
           const result = await broadcastShieldedTx(body.raw_tx)
           return json(result)
+        }
+
+        // ── REST v2 data routes (balances, market, UTXOs, swap, etc.) ──
+        if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/')) {
+          const resp = await handleV2DataRoute(path, method, req, auth, json)
+          if (resp) return resp
+        }
+
+        // ── BTC Sweep tool ──────────────────────────────────────────
+        if (path.startsWith('/api/v2/sweep/')) {
+          const resp = await handleSweepRoute(path, method, req, engine, auth, json, callbacks)
+          if (resp) return resp
         }
 
         // ── Catch-all ────────────────────────────────────────────────

@@ -24,6 +24,7 @@ export default {
 				"usb",
 				"google-protobuf",
 				"@keepkey/proto-tx-builder",
+				"swagger-client",
 			],
 		},
 		// Vite builds to dist/, we copy from there

@@ -188,6 +188,45 @@ class KeepKeySdk {
                 }
             },
         };
+        // ═══════════════════════════════════════════════════════════════════
+        // chain — chain data queries (balances, market, UTXOs, tx, swap)
+        // ═══════════════════════════════════════════════════════════════════
+        this.chain = {
+            // ── Portfolio & Market ────────────────────────────────────────
+            getPortfolioBalances: (params) => this.client.post('/api/v2/portfolio/balances', params),
+            getMarketInfo: (params) => this.client.post('/api/v2/market/info', params),
+            // ── Assets ────────────────────────────────────────────────���──
+            getAvailableAssets: () => this.client.get('/api/v2/assets/available'),
+            searchAssets: (params) => this.client.post('/api/v2/assets/search', params),
+            // ── UTXO ─────────────────────────────────────────────────────
+            listUnspent: (params) => this.client.post('/api/v2/utxo/unspent', params),
+            getPubkeyInfo: (params) => this.client.post('/api/v2/utxo/pubkey-info', params),
+            // ── Transactions ─────────────────────────────────────────────
+            getTransactionHistory: (params) => this.client.post('/api/v2/tx/history', params),
+            broadcast: (params) => this.client.post('/api/v2/tx/broadcast', params),
+            // ── Network info ─────────────────────────────────────────────
+            getFeeRate: (params) => this.client.post('/api/v2/network/fee-rate', params),
+            getGasPrice: (params) => this.client.post('/api/v2/network/gas-price', params),
+            getNonce: (params) => this.client.post('/api/v2/network/nonce', params),
+            getBalance: (params) => this.client.post('/api/v2/network/balance', params),
+            getTokenDecimals: (params) => this.client.post('/api/v2/network/token-decimals', params),
+            // ── Staking ──────────────────────────────────────────────────
+            getStakingPositions: (params) => this.client.post('/api/v2/staking/positions', params),
+            // ── Swap ─────────────────────────────────────────────────────
+            getSwapQuote: (params) => this.client.post('/api/v2/swap/quote', params),
+            getInboundAddresses: () => this.client.get('/api/v2/swap/inbound-addresses'),
+        };
+        // ═══════════════════════════════════════════════════════════════════
+        // sweep — BTC non-standard path recovery
+        // ═══════════════════════════════════════════════════════════════════
+        this.sweep = {
+            /** Start an async scan for funds on non-standard BTC paths */
+            startScan: (params = {}) => this.client.post('/api/v2/sweep/scan', params),
+            /** Poll scan progress and results */
+            getScanStatus: (scanId) => this.client.get(`/api/v2/sweep/scan/${scanId}`),
+            /** Execute sweep: build tx, sign on device, broadcast */
+            execute: (params) => this.client.post('/api/v2/sweep/execute', params),
+        };
         this.client = client;
         // ── v1 SDK compat aliases (top-level namespaces) ───────────────
         // Old SDK exposes `sdk.info` directly (same as `sdk.system.info`)

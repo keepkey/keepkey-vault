@@ -6,6 +6,7 @@ import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
+import { versionCompare } from "../../shared/firmware-versions"
 
 interface DevicePolicy {
 	policyName?: string
@@ -1126,28 +1127,33 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* BIP-85 Derived Seeds toggle */}
-							<Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-										</svg>
+							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.14.0 */}
+							{(() => {
+								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.14.0') >= 0
+								return (
+									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
+												<Text fontSize="sm" color={bip85FwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
+													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.14.0 or later"}
+												</Text>
+											</Box>
+										</Flex>
+										<Toggle
+											checked={bip85FwOk && appSettings.bip85Enabled}
+											onChange={toggleBip85}
+											disabled={!bip85FwOk || togglingBip85}
+										/>
 									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("bip85FeatureDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={appSettings.bip85Enabled}
-									onChange={toggleBip85}
-									disabled={togglingBip85}
-								/>
-							</Flex>
+								)
+							})()}
 
 							{/* Zcash Shielded Privacy toggle */}
 							<Flex justify="space-between" align="center">

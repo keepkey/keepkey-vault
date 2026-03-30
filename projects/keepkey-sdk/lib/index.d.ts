@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, TronSignTxParams, TonSignTxParams, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, TronSignTxParams, TonSignTxParams, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
 export { SdkError } from './client';
 export * from './types';
 export declare class KeepKeySdk {
@@ -204,6 +204,34 @@ export declare class KeepKeySdk {
     };
     deviceStatus: {
         isDeviceConnected: () => Promise<boolean>;
+    };
+    chain: {
+        getPortfolioBalances: (params: PortfolioBalancesParams) => Promise<any>;
+        getMarketInfo: (params: MarketInfoParams) => Promise<any>;
+        getAvailableAssets: () => Promise<any>;
+        searchAssets: (params: SearchAssetsParams) => Promise<any>;
+        listUnspent: (params: ListUnspentParams) => Promise<any>;
+        getPubkeyInfo: (params: PubkeyInfoParams) => Promise<any>;
+        getTransactionHistory: (params: TxHistoryParams) => Promise<any>;
+        broadcast: (params: BroadcastParams) => Promise<any>;
+        getFeeRate: (params: NetworkIdParams) => Promise<any>;
+        getGasPrice: (params: NetworkIdParams) => Promise<any>;
+        getNonce: (params: NetworkAddressParams) => Promise<any>;
+        getBalance: (params: NetworkAddressParams) => Promise<any>;
+        getTokenDecimals: (params: TokenDecimalsParams) => Promise<any>;
+        getStakingPositions: (params: StakingParams) => Promise<any>;
+        getSwapQuote: (params: SwapQuoteParams) => Promise<any>;
+        getInboundAddresses: () => Promise<any>;
+    };
+    sweep: {
+        /** Start an async scan for funds on non-standard BTC paths */
+        startScan: (params?: SweepScanParams) => Promise<{
+            scanId: string;
+        }>;
+        /** Poll scan progress and results */
+        getScanStatus: (scanId: string) => Promise<SweepScanStatus>;
+        /** Execute sweep: build tx, sign on device, broadcast */
+        execute: (params: SweepExecuteParams) => Promise<SweepExecuteResult>;
     };
 }
 //# sourceMappingURL=index.d.ts.map

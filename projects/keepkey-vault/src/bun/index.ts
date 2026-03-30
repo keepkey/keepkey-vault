@@ -931,11 +931,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					let btcTotalBalance = 0
 					let btcTotalUsd = 0
-					let btcAddress = ''
+					let btcSelectedAddress = '' // address from the user's selected script type
+					let btcFallbackAddress = '' // first address from any xpub (fallback)
 
 					// Aggregate EVM entries per-chain (sum across address indices)
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
+					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
 					for (const entry of pubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
@@ -946,7 +948,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const usd = Number(match?.valueUsd ?? 0)
 							btcTotalBalance += bal
 							btcTotalUsd += usd
-							if (!btcAddress && match?.address) btcAddress = match.address
+							// Prefer address from user's selected xpub type for display + swaps
+							if (match?.address) {
+								if (!btcFallbackAddress) btcFallbackAddress = match.address
+								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
+							}
 							// Update per-xpub balance in BtcAccountManager
 							btcAccounts.updateXpubBalance(entry.pubkey, String(match?.balance ?? '0'), usd)
 							continue
@@ -991,6 +997,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							chainId: entry.chainId, symbol: entry.symbol,
 							balance: String(match?.balance ?? '0'),
 							balanceUsd: nativeUsd + tokenUsdTotal,
+							nativeBalanceUsd: nativeUsd,
 							address: match?.address || entry.pubkey,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
 						})
@@ -1005,19 +1012,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
 							balanceUsd: agg.usd + tokenUsdTotal,
+							nativeBalanceUsd: agg.usd,
 							address: agg.address,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
 						})
 					}
 
-					// Push one aggregated BTC entry
+					// Push one aggregated BTC entry — use selected xpub's address so swaps/display match user's chosen script type
 					if (btcPubkeyEntries.length > 0) {
-						const selectedXpub = btcAccounts.getSelectedXpub()
+						const btcAddress = btcSelectedAddress || btcFallbackAddress
 						results.push({
 							chainId: 'bitcoin', symbol: 'BTC',
 							balance: btcTotalBalance > 0 ? btcTotalBalance.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') : '0',
 							balanceUsd: btcTotalUsd,
-							address: btcAddress || selectedXpub?.xpub || btcPubkeyEntries[0]?.pubkey || '',
+							nativeBalanceUsd: btcTotalUsd,
+							address: btcAddress || btcAccounts.getSelectedXpub()?.xpub || btcPubkeyEntries[0]?.pubkey || '',
 						})
 					}
 
@@ -1173,7 +1182,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
 				}
-				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address, tokens }
+				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
+				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync
 				try {
@@ -1988,6 +1998,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setBip85Enabled: async (params) => {
+				// BIP-85 requires firmware >= 7.14.0
+				const fwVer = engine.getDeviceState().firmwareVersion
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
+					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+					return getAppSettings()
+				}
 				bip85Enabled = params.enabled
 				setSetting('bip85_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] BIP-85 enabled:', params.enabled)
@@ -2302,7 +2318,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// Use selected BTC account path/scriptType when available
 							const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
 								? btcAccounts.getSelectedXpub() : undefined
-							const addressNList = selected?.path || chainDef.defaultPath
+							// selected.path is account-level (3 elements: m/purpose'/0'/account')
+							// btcGetAddress needs full 5-element path — append /0/0 (first receive address)
+							const acctPath = selected?.path || chainDef.defaultPath
+							const addressNList = acctPath.length === 3 ? [...acctPath, 0, 0] : acctPath
 							const scriptType = selected?.scriptType || chainDef.scriptType
 							const result = await engine.wallet.btcGetAddress({
 								addressNList,
@@ -2351,7 +2370,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
 				const { executeSwap } = await import('./swap')
-				const { trackSwap } = await import('./swap-tracker')
+				const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
+				// Ensure tracker is initialized before tracking (guards against race/init failure)
+				if (!isTrackerInitialized()) {
+					await initSwapTracker((msg: string, data: any) => {
+						try {
+							if (msg === 'swap-update') rpc.send['swap-update'](data)
+							else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+						} catch (e: any) {
+							console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+						}
+					})
+				}
 				const result = await executeSwap(params, {
 					wallet: engine.wallet,
 					getAllChains,
@@ -2583,6 +2613,76 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getCachedPubkeys(snap.deviceId)
 			},
 
+
+			// ── Sweep (non-standard BTC path recovery) ──────────────
+			sweepScan: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const { startScan } = await import('./sweep-engine')
+				const scanId = await startScan(engine.wallet, {
+					accountRange: params.accountRange,
+					mismatchAccounts: params.mismatchAccounts,
+				})
+				return { scanId }
+			},
+			sweepGetStatus: async (params) => {
+				const { getScan } = await import('./sweep-engine')
+				const scan = getScan(params.scanId)
+				if (!scan) throw new Error('Scan not found')
+				return {
+					id: scan.id,
+					status: scan.status,
+					progress: scan.progress,
+					startedAt: scan.startedAt,
+					completedAt: scan.completedAt,
+					totalFoundSats: scan.totalFoundSats,
+					results: scan.results.map(r => ({
+						path: r.pathStr,
+						scriptType: r.scriptType,
+						address: r.address,
+						category: r.category,
+						balanceSats: r.balanceSats,
+						utxoCount: r.utxos.length,
+					})),
+					error: scan.error,
+				}
+			},
+			sweepExecute: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const { getScan, buildSweepTx } = await import('./sweep-engine')
+				const scan = getScan(params.scanId)
+				if (!scan) throw new Error('Scan not found')
+				if (scan.status !== 'complete') throw new Error(`Scan status is '${scan.status}', must be 'complete'`)
+				if (scan.totalFoundSats === 0) throw new Error('No funds found to sweep')
+
+				let destination = params.destinationAddress
+				if (!destination) {
+					const result = await engine.wallet.btcGetAddress({
+						addressNList: [0x80000054, 0x80000000, 0x80000000, 0, 0],
+						coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+					})
+					destination = typeof result === 'string' ? result : result?.address
+					if (!destination) throw new Error('Could not derive standard BTC receive address')
+				}
+
+				const sweepResult = await buildSweepTx(scan, destination)
+
+				if (params.dryRun) {
+					return { dryRun: true, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee, unsignedTx: sweepResult.unsignedTx }
+				}
+
+				const signedTx = await engine.wallet.btcSignTx(sweepResult.unsignedTx)
+				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
+				if (!serializedTx) throw new Error('Device signing failed')
+
+				const { getPioneer } = await import('./pioneer')
+				const pioneer = await getPioneer()
+				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
+				const bdata = broadcastResp?.data || broadcastResp
+				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
+				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+
+				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+			},
 
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {

@@ -21,6 +21,22 @@ import type {
   ApplySettingsParams,
   HealthResponse,
   SupportedAsset,
+  PortfolioBalancesParams,
+  MarketInfoParams,
+  SearchAssetsParams,
+  ListUnspentParams,
+  PubkeyInfoParams,
+  TxHistoryParams,
+  BroadcastParams,
+  NetworkIdParams,
+  NetworkAddressParams,
+  TokenDecimalsParams,
+  StakingParams,
+  SwapQuoteParams,
+  SweepScanParams,
+  SweepScanStatus,
+  SweepExecuteParams,
+  SweepExecuteResult,
 } from './types'
 
 export { SdkError } from './client'
@@ -443,5 +459,82 @@ export class KeepKeySdk {
         return health.device_connected ?? health.connected ?? false
       } catch { return false }
     },
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // chain — chain data queries (balances, market, UTXOs, tx, swap)
+  // ═══════════════════════════════════════════════════════════════════
+  chain = {
+    // ── Portfolio & Market ────────────────────────────────────────
+    getPortfolioBalances: (params: PortfolioBalancesParams): Promise<any> =>
+      this.client.post('/api/v2/portfolio/balances', params),
+
+    getMarketInfo: (params: MarketInfoParams): Promise<any> =>
+      this.client.post('/api/v2/market/info', params),
+
+    // ── Assets ────────────────────────────────────────────────���──
+    getAvailableAssets: (): Promise<any> =>
+      this.client.get('/api/v2/assets/available'),
+
+    searchAssets: (params: SearchAssetsParams): Promise<any> =>
+      this.client.post('/api/v2/assets/search', params),
+
+    // ── UTXO ─────────────────────────────────────────────────────
+    listUnspent: (params: ListUnspentParams): Promise<any> =>
+      this.client.post('/api/v2/utxo/unspent', params),
+
+    getPubkeyInfo: (params: PubkeyInfoParams): Promise<any> =>
+      this.client.post('/api/v2/utxo/pubkey-info', params),
+
+    // ── Transactions ─────────────────────────────────────────────
+    getTransactionHistory: (params: TxHistoryParams): Promise<any> =>
+      this.client.post('/api/v2/tx/history', params),
+
+    broadcast: (params: BroadcastParams): Promise<any> =>
+      this.client.post('/api/v2/tx/broadcast', params),
+
+    // ── Network info ─────────────────────────────────────────────
+    getFeeRate: (params: NetworkIdParams): Promise<any> =>
+      this.client.post('/api/v2/network/fee-rate', params),
+
+    getGasPrice: (params: NetworkIdParams): Promise<any> =>
+      this.client.post('/api/v2/network/gas-price', params),
+
+    getNonce: (params: NetworkAddressParams): Promise<any> =>
+      this.client.post('/api/v2/network/nonce', params),
+
+    getBalance: (params: NetworkAddressParams): Promise<any> =>
+      this.client.post('/api/v2/network/balance', params),
+
+    getTokenDecimals: (params: TokenDecimalsParams): Promise<any> =>
+      this.client.post('/api/v2/network/token-decimals', params),
+
+    // ── Staking ──────────────────────────────────────────────────
+    getStakingPositions: (params: StakingParams): Promise<any> =>
+      this.client.post('/api/v2/staking/positions', params),
+
+    // ── Swap ─────────────────────────────────────────────────────
+    getSwapQuote: (params: SwapQuoteParams): Promise<any> =>
+      this.client.post('/api/v2/swap/quote', params),
+
+    getInboundAddresses: (): Promise<any> =>
+      this.client.get('/api/v2/swap/inbound-addresses'),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // sweep — BTC non-standard path recovery
+  // ═══════════════════════════════════════════════════════════════════
+  sweep = {
+    /** Start an async scan for funds on non-standard BTC paths */
+    startScan: (params: SweepScanParams = {}): Promise<{ scanId: string }> =>
+      this.client.post('/api/v2/sweep/scan', params),
+
+    /** Poll scan progress and results */
+    getScanStatus: (scanId: string): Promise<SweepScanStatus> =>
+      this.client.get(`/api/v2/sweep/scan/${scanId}`),
+
+    /** Execute sweep: build tx, sign on device, broadcast */
+    execute: (params: SweepExecuteParams): Promise<SweepExecuteResult> =>
+      this.client.post('/api/v2/sweep/execute', params),
   }
 }
