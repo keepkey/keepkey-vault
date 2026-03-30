@@ -15,6 +15,8 @@ concurrency:
 env:
   BUN_VERSION: '1.3.5'
   NODE_VERSION: '20'
+  ELECTROBUN_X64_CORE_URL: ${{ vars.ELECTROBUN_X64_CORE_URL }}
+  ELECTROBUN_X64_CORE_SHA256: ${{ vars.ELECTROBUN_X64_CORE_SHA256 }}
 
 jobs:
   build:
@@ -243,14 +245,25 @@ jobs:
         run: |
           echo "=== Creating x86_64 variant from ARM64 build ==="
 
+          if [ -z "${ELECTROBUN_X64_CORE_URL}" ]; then
+            echo "::warning::ELECTROBUN_X64_CORE_URL is not configured; skipping x86_64 artifact generation"
+            exit 0
+          fi
+
           # Get Electrobun version for downloading matching x64 binaries
           ELECTROBUN_VER=$(node -p "require('./projects/keepkey-vault/node_modules/electrobun/package.json').version")
           echo "Electrobun version: v$ELECTROBUN_VER"
 
-          # Download x64 Electrobun core binaries
-          echo "Downloading Electrobun core for x86_64..."
-          curl -fsSL "https://github.com/blackboardsh/electrobun/releases/download/v${ELECTROBUN_VER}/electrobun-core-darwin-x64.tar.gz" \
+          # Download x64 Electrobun core binaries from the approved fork artifact.
+          # The Intel/macOS 12 crash fix depends on the exact libNativeWrapper provenance.
+          echo "Downloading Electrobun core for x86_64 from configured source..."
+          curl -fsSL "${ELECTROBUN_X64_CORE_URL}" \
             -o /tmp/electrobun-core-x64.tar.gz
+          if [ -n "${ELECTROBUN_X64_CORE_SHA256}" ]; then
+            echo "${ELECTROBUN_X64_CORE_SHA256}  /tmp/electrobun-core-x64.tar.gz" | shasum -a 256 -c -
+          else
+            echo "::warning::ELECTROBUN_X64_CORE_SHA256 is not configured; provenance check skipped"
+          fi
           mkdir -p /tmp/electrobun-x64
           tar xzf /tmp/electrobun-core-x64.tar.gz -C /tmp/electrobun-x64/
 
@@ -298,8 +311,8 @@ jobs:
           # Verify key binaries are now x86_64
           echo "Verifying swapped binaries:"
           FAIL=0
-          for BIN in launcher bun; do
-            FOUND=$(find "$APP" -name "$BIN" -path "*/MacOS/*" | head -1)
+          for BIN in launcher bun libNativeWrapper.dylib libasar.dylib; do
+            FOUND=$(find "$APP" -name "$BIN" -type f | head -1)
             if [ -n "$FOUND" ]; then
               ACTUAL=$(lipo -archs "$FOUND" 2>/dev/null)
               echo "  $BIN: $ACTUAL"
@@ -310,6 +323,12 @@ jobs:
             fi
           done
           if [ "$FAIL" = "1" ]; then exit 1; fi
+
+          echo "Verifying Bun entitlements..."
+          if ! codesign -d --entitlements :- "$APP/Contents/MacOS/bun" 2>/dev/null | grep -q "com.apple.security.cs.allow-jit"; then
+            echo "::error::bun is missing allow-jit entitlement"
+            exit 1
+          fi
 
           # Re-pack as x64 tar.zst
           X64_TAR="projects/keepkey-vault/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst"

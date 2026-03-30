@@ -122,6 +122,7 @@ keepkey-vault-v11/
 ## Documentation
 
 - [Build and Signing Guide](projects/keepkey-vault/docs/BUILD.md)
+- [macOS 12 / Intel Validation](projects/keepkey-vault/docs/MACOS12-VALIDATION.md)
 - [REST API Reference](projects/keepkey-vault/docs/API.md)
 - [Electrobun Integration](projects/keepkey-vault/docs/ELECTROBUN.md)
 - [Architecture](docs/ARCHITECTURE.md)

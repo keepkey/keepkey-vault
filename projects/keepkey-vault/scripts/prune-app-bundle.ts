@@ -392,6 +392,21 @@ if (existsSync(bunIndexPath)) {
 // Re-sign native binaries after pruning (signatures may have been invalidated)
 const DEVELOPER_ID = process.env.ELECTROBUN_DEVELOPER_ID
 const TEAM_ID = process.env.ELECTROBUN_TEAMID
+const entitlementsPath = join(projectRoot, 'entitlements.plist')
+
+function codesignFile(target: string, opts: { entitlements?: boolean } = {}) {
+  const args = [
+    'codesign', '--force', '--verbose', '--timestamp',
+    '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
+    '--options', 'runtime',
+  ]
+  if (opts.entitlements && existsSync(entitlementsPath)) {
+    args.push('--entitlements', entitlementsPath)
+  }
+  args.push(target)
+  return Bun.spawnSync(args)
+}
+
 if (DEVELOPER_ID && TEAM_ID) {
   console.log('[prune-bundle] Re-signing native binaries...')
   let signedCount = 0
@@ -402,12 +417,7 @@ if (DEVELOPER_ID && TEAM_ID) {
         if (entry.isDirectory()) {
           signBinaries(fullPath)
         } else if (entry.name.endsWith('.node') || entry.name.endsWith('.dylib') || entry.name.endsWith('.so')) {
-          const r = Bun.spawnSync([
-            'codesign', '--force', '--verbose', '--timestamp',
-            '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
-            '--options', 'runtime',
-            fullPath,
-          ])
+          const r = codesignFile(fullPath)
           if (r.exitCode === 0) signedCount++
         }
       }
@@ -417,18 +427,36 @@ if (DEVELOPER_ID && TEAM_ID) {
   console.log(`[prune-bundle] Re-signed ${signedCount} native binaries`)
 }
 
-// Re-sign the entire .app bundle with entitlements (JIT required for Bun)
-const entitlementsPath = join(projectRoot, 'entitlements.plist')
+// Re-sign Electrobun runtime binaries explicitly.
+// Bun needs JIT entitlements on the binary itself; relying on a later
+// `codesign --deep` pass on the .app can leave nested executables without them.
 if (DEVELOPER_ID && TEAM_ID) {
+  const runtimeBins = [
+    { path: join(appPath, 'Contents', 'MacOS', 'launcher'), entitlements: true },
+    { path: join(appPath, 'Contents', 'MacOS', 'bun'), entitlements: true },
+    { path: join(appPath, 'Contents', 'MacOS', 'libNativeWrapper.dylib'), entitlements: false },
+    { path: join(appPath, 'Contents', 'MacOS', 'libasar.dylib'), entitlements: false },
+  ]
+
+  console.log('[prune-bundle] Re-signing Electrobun runtime binaries...')
+  for (const runtimeBin of runtimeBins) {
+    if (!existsSync(runtimeBin.path)) continue
+    const r = codesignFile(runtimeBin.path, { entitlements: runtimeBin.entitlements })
+    if (r.exitCode !== 0) {
+      console.warn(`[prune-bundle] WARNING: Failed to sign runtime binary ${runtimeBin.path}: ${r.stderr.toString()}`)
+    } else {
+      console.log(`[prune-bundle] Signed runtime binary: ${basename(runtimeBin.path)}${runtimeBin.entitlements ? ' (entitlements)' : ''}`)
+    }
+  }
+
+  // Sign the bundle wrapper last, without --deep, so nested signatures remain intact.
   console.log('[prune-bundle] Re-signing .app bundle with entitlements...')
   const signArgs = [
-    'codesign', '--force', '--deep', '--verbose', '--timestamp',
+    'codesign', '--force', '--verbose', '--timestamp',
     '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
     '--options', 'runtime',
   ]
-  if (existsSync(entitlementsPath)) {
-    signArgs.push('--entitlements', entitlementsPath)
-  }
+  if (existsSync(entitlementsPath)) signArgs.push('--entitlements', entitlementsPath)
   signArgs.push(appPath)
   result = Bun.spawnSync(signArgs)
   if (result.exitCode !== 0) {
