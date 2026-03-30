@@ -510,6 +510,11 @@ export class EngineController extends EventEmitter {
     let usbDetected = false
     let lastError: string | null = null
 
+    // Clear stale keyring entries before attempting to pair — without this,
+    // a previous failed pairing leaves the transport in "opened" state and
+    // WebUSB rejects with "cannot connect an already-connected connection".
+    try { await this.keyring.removeAll() } catch (_) {}
+
     // Try WebUSB first (modern firmware, PID 0x0002)
     console.log('[Engine] Scanning for WebUSB device...')
     try {
