@@ -77,6 +77,8 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 					const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
 					if (code?.data) {
 						foundRef.current = true
+						if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
+						if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
 						onScan(code.data)
 					}
 				}, 100)

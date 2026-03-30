@@ -120,10 +120,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
 
-      // ── Camera / QR scanning ──────────────────────────────────────────
-      startQrScan: { params: void; response: void }
-      stopQrScan: { params: void; response: void }
-
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }
       rejectPairing: { params: void; response: void }
@@ -217,9 +213,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown'; autoRetrying?: boolean }
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
-      'camera-frame': string
-      'camera-error': string
-      'update-status': UpdateStatus
+'update-status': UpdateStatus
       'pioneer-error': { message: string; url: string }
       'pair-request': PairingRequestInfo
       'pair-dismissed': Record<string, never>
