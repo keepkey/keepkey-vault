@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli build-intel build-signed-intel
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -174,6 +174,30 @@ build-signed-intel:
 	@echo "Use:  make sign-release"
 	@echo ""
 	@exit 1
+
+# --- Electrobun x64 Core (macOS 12 support) ---
+# Cross-compiles Electrobun core binaries for Intel Mac from ARM64.
+# Produces: artifacts/electrobun-core-darwin-x64.tar.gz
+# Prerequisites: run `cd modules/electrobun/package && bun install && bun build.ts` once to vendor deps.
+
+ELECTROBUN_FORK_REPO ?= BitHighlander/electrobun
+ELECTROBUN_FORK_TAG ?= v1.16.1-keepkey.1
+
+build-electrobun-x64-core:
+	@echo "Cross-compiling Electrobun x64 core from fork..."
+	./scripts/build-electrobun-x64-core.sh
+
+publish-electrobun-x64-core: build-electrobun-x64-core
+	@test -f artifacts/electrobun-core-darwin-x64.tar.gz || (echo "ERROR: tarball not found"; exit 1)
+	@echo "Publishing Electrobun x64 core to $(ELECTROBUN_FORK_REPO)..."
+	@gh release view $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) >/dev/null 2>&1 && \
+		gh release upload $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) --clobber \
+			artifacts/electrobun-core-darwin-x64.tar.gz || \
+		gh release create $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) \
+			--title "Electrobun Core x64 (macOS 12 support)" \
+			--notes "Cross-compiled Electrobun core for macOS 12+ Intel. Built from keepkey/macos-12-support branch. Bun 1.1.20 (last macOS 12 compatible). No resign-swizzle (fixes crash on app deactivation)." \
+			artifacts/electrobun-core-darwin-x64.tar.gz
+	@echo "Published: https://github.com/$(ELECTROBUN_FORK_REPO)/releases/tag/$(ELECTROBUN_FORK_TAG)"
 
 # --- Vault ---
 
@@ -428,17 +452,7 @@ _sign-one-dmg:
 	if [ "$$ACTUAL" != "$(_DMG_ARCH)" ]; then \
 		echo "ERROR: Binary is $$ACTUAL but expected $(_DMG_ARCH)"; exit 1; \
 	fi; \
-	echo "  Signing Mach-O binaries..."; \
-	find "$$APP" -type f -exec sh -c 'file "$$1" 2>/dev/null | grep -q "Mach-O" && \
-		codesign --force --timestamp --sign "Developer ID Application: '"$$ELECTROBUN_DEVELOPER_ID"' ('"$$ELECTROBUN_TEAMID"')" \
-		--options runtime "$$1" 2>/dev/null' _ {} \; ; \
-	echo "  Signing .app bundle with entitlements..."; \
-	codesign --force --timestamp \
-		--sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" \
-		--options runtime \
-		--entitlements $(PROJECT_DIR)/entitlements.plist \
-		"$$APP"; \
-	codesign --verify --deep --strict "$$APP" || (echo "ERROR: Signature verification failed"; exit 1); \
+	./scripts/sign-macos-app.sh "$$APP" "$(PROJECT_DIR)/entitlements.plist"; \
 	echo "  Re-packing signed app into tar.zst for auto-update..."; \
 	SIGNED_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/$$(basename $(_SRC_TAR))"; \
 	(cd "$$STAGING" && tar cf - "$$(basename $$APP)") | zstd -o "$$SIGNED_TAR" --force; \
@@ -461,6 +475,44 @@ _sign-one-dmg:
 	echo "  Stapling notarization ticket..."; \
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "  Done: $$DMG_OUT"
+
+# Verify that all MacOS/ binaries have required entitlements (allow-jit).
+# Use after signing to confirm bun won't crash with SIGTRAP.
+verify-entitlements:
+	@echo "Verifying entitlements on signed artifacts..."
+	@FOUND=0; \
+	for TAR_ZST in $(PROJECT_DIR)/artifacts/*-keepkey-vault.app.tar.zst; do \
+		[ -f "$$TAR_ZST" ] || continue; \
+		FOUND=1; \
+		LABEL=$$(basename "$$TAR_ZST" .app.tar.zst); \
+		echo "--- $$LABEL ---"; \
+		TMPDIR=$$(mktemp -d); \
+		trap 'rm -rf "$$TMPDIR"' EXIT; \
+		zstd -d "$$TAR_ZST" -o "$$TMPDIR/app.tar" --force 2>/dev/null; \
+		tar xf "$$TMPDIR/app.tar" -C "$$TMPDIR/"; \
+		rm "$$TMPDIR/app.tar"; \
+		APP=$$(find "$$TMPDIR" -name "*.app" -maxdepth 1 | head -1); \
+		if [ -z "$$APP" ]; then echo "  ERROR: No .app found"; continue; fi; \
+		FAIL=0; \
+		for BIN in "$$APP/Contents/MacOS/"*; do \
+			[ -f "$$BIN" ] || continue; \
+			NAME=$$(basename "$$BIN"); \
+			file -b "$$BIN" 2>/dev/null | grep -q "Mach-O" || continue; \
+			if codesign -d --entitlements :- "$$BIN" 2>/dev/null | grep -q "allow-jit"; then \
+				echo "  PASS: $$NAME has allow-jit"; \
+			else \
+				echo "  FAIL: $$NAME missing allow-jit"; FAIL=1; \
+			fi; \
+		done; \
+		rm -rf "$$TMPDIR"; \
+		if [ "$$FAIL" = "1" ]; then \
+			echo "  ENTITLEMENT CHECK FAILED — bun will crash with SIGTRAP"; \
+			exit 1; \
+		fi; \
+	done; \
+	if [ "$$FOUND" = "0" ]; then echo "No tar.zst artifacts found in $(PROJECT_DIR)/artifacts/"; exit 1; fi; \
+	echo ""; \
+	echo "All MacOS/ binaries have required entitlements."
 
 # Upload all signed DMGs to the draft release
 upload-all-dmgs: sign-check
@@ -490,9 +542,12 @@ help:
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
 	@echo "  make verify-arch    - Verify build artifact matches expected architecture"
+	@echo "  make verify-entitlements - Verify MacOS/ binaries have allow-jit entitlement"
 	@echo "  make sign-release   - Download CI artifacts, sign + repack, upload DMGs + auto-update tar.zst"
 	@echo "  make upload-all-dmgs - Upload all signed DMGs to draft release"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
+	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 12)"
+	@echo "  make publish-electrobun-x64-core - Build + publish x64 core to fork releases"
 	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"

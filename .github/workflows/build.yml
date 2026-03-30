@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Init required submodules
-        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -243,13 +243,10 @@ jobs:
         run: |
           echo "=== Creating x86_64 variant from ARM64 build ==="
 
-          # Get Electrobun version for downloading matching x64 binaries
-          ELECTROBUN_VER=$(node -p "require('./projects/keepkey-vault/node_modules/electrobun/package.json').version")
-          echo "Electrobun version: v$ELECTROBUN_VER"
-
-          # Download x64 Electrobun core binaries
-          echo "Downloading Electrobun core for x86_64..."
-          curl -fsSL "https://github.com/blackboardsh/electrobun/releases/download/v${ELECTROBUN_VER}/electrobun-core-darwin-x64.tar.gz" \
+          # Download x64 Electrobun core from KeepKey fork (macOS 12 support, no resign-swizzle, bun 1.1.20)
+          FORK_TAG="v1.16.1-keepkey.1"
+          echo "Downloading Electrobun x64 core from BitHighlander/electrobun @ $FORK_TAG..."
+          curl -fsSL "https://github.com/BitHighlander/electrobun/releases/download/${FORK_TAG}/electrobun-core-darwin-x64.tar.gz" \
             -o /tmp/electrobun-core-x64.tar.gz
           mkdir -p /tmp/electrobun-x64
           tar xzf /tmp/electrobun-core-x64.tar.gz -C /tmp/electrobun-x64/
@@ -310,6 +307,14 @@ jobs:
             fi
           done
           if [ "$FAIL" = "1" ]; then exit 1; fi
+
+          # Verify libNativeWrapper has no resign-swizzle (macOS 12 crash fix)
+          NATIVE_LIB=$(find "$APP" -name "libNativeWrapper.dylib" | head -1)
+          if [ -n "$NATIVE_LIB" ] && nm "$NATIVE_LIB" 2>/dev/null | grep -q "resignKeyWindow"; then
+            echo "::error::libNativeWrapper.dylib contains resign-swizzle symbols (will crash on macOS 12)"
+            exit 1
+          fi
+          echo "  libNativeWrapper: no resign-swizzle (macOS 12 safe)"
 
           # Re-pack as x64 tar.zst
           X64_TAR="projects/keepkey-vault/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst"
