@@ -370,11 +370,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
-					// Drain stale ring buffer data + reconnect for clean state
-					await new Promise(r => setTimeout(r, 200))
-					const { emuRead } = await import('./emulator')
-					while (emuRead(0)) {}
-					while (emuRead(1)) {}
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
 					await engine.connectEmulator()
 					return
 				}
@@ -384,10 +381,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			applySettings: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
-					await new Promise(r => setTimeout(r, 200))
-					const { emuRead } = await import('./emulator')
-					while (emuRead(0)) {}
-					while (emuRead(1)) {}
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
 					await engine.connectEmulator()
 					return
 				}
@@ -2786,11 +2781,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
 				}
 
-				// Settle, drain stale ring buffer data, reconnect
-				await new Promise(r => setTimeout(r, 200))
-				const { emuRead } = await import('./emulator')
-				while (emuRead(0)) {}
-				while (emuRead(1)) {}
+				// Flush stale ring buffer data + reconnect
+				const { flushRingBuffers } = await import('./emulator')
+				flushRingBuffers()
 				await engine.connectEmulator()
 				return { mnemonic }
 			},

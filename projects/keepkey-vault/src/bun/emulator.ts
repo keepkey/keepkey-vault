@@ -275,6 +275,27 @@ export function emuRead(iface: number): Uint8Array | null {
   return n > 0 ? buf : null
 }
 
+// ── Ring buffer flush ───────────────────────────────────────────────────
+
+/**
+ * Flush stale messages from all ring buffers.
+ * Calls kkemu_poll() several times to process stale input (e.g. ButtonAck
+ * left by the transport), then drains all output so the next transport
+ * connection starts clean.
+ */
+export function flushRingBuffers(): void {
+  if (!ffi) return
+  // Process any stale messages in rb_main_in / rb_debug_in
+  for (let i = 0; i < 10; i++) {
+    try { ffi.symbols.kkemu_poll() } catch {}
+  }
+  // Drain rb_main_out and rb_debug_out
+  const buf = new Uint8Array(64)
+  while (ffi.symbols.kkemu_read(ptr(buf), 64, 0) > 0) {}
+  while (ffi.symbols.kkemu_read(ptr(buf), 64, 1) > 0) {}
+  console.log(`${TAG} Ring buffers flushed`)
+}
+
 // ── Poll control (for pre-writing confirmations) ────────────────────────
 
 /** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
