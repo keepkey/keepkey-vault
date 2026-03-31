@@ -1,7 +1,7 @@
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
-export type ActiveTransport = 'hid' | 'webusb' | 'tcp' | null
+export type ActiveTransport = 'hid' | 'webusb' | 'tcp' | 'emulator' | null
 
 // PIN request types — maps to KeepKey PinMatrixRequestType
 export type PinRequestType = 'current' | 'new-first' | 'new-second'
@@ -37,6 +37,7 @@ export interface DeviceStateInfo {
   firmwareVerified?: boolean
   bootloaderVerified?: boolean
   error?: string | null
+  isEmulator: boolean
 }
 
 export interface FirmwareProgress {

@@ -6,6 +6,7 @@ import { usb } from 'usb'
 import { saveDeviceSnapshot } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
+import { EmulatorKeepKeyAdapter, emuPressYes } from './emulator-transport'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -147,6 +148,9 @@ export class EngineController extends EventEmitter {
 
     transport.on(String(core.Events.BUTTON_REQUEST), () => {
       console.log('[Engine] BUTTON_REQUEST — confirm on device')
+      // Emulator button presses are handled by prewriteConfirmations() in
+      // the RPC handler — NOT here. Sending stale DebugLinkDecision from a
+      // setTimeout poisons the ring buffer and causes "Unexpected message".
     })
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
@@ -591,6 +595,69 @@ export class EngineController extends EventEmitter {
     return { wallet: undefined, usbDetected, error: lastError }
   }
 
+  // ── Emulator Transport ────────────────────────────────────────────────
+
+  /**
+   * Connect the engine to the running emulator.
+   * Creates an hdwallet adapter backed by FFI emuRead/emuWrite,
+   * pairs it, and runs syncState to derive the UI phase (needs_init, ready, etc.).
+   */
+  async connectEmulator(): Promise<void> {
+    console.log('[Engine] Connecting to emulator...')
+
+    // Disconnect any existing physical device first
+    this.clearWallet()
+
+    try {
+      const adapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+      const device = await adapter.getDevice()
+      const wallet = await adapter.pairRawDevice(device, true /* tryDebugLink */)
+
+      if (!wallet) {
+        throw new Error('pairRawDevice returned falsy')
+      }
+
+      this.wallet = wallet as any
+      this.activeTransport = 'emulator'
+      this.attachTransportListeners()
+      this.lastError = null
+
+      // Initialize — sends Initialize → Features (works for both fresh and configured devices)
+      console.log('[Engine] Initializing emulator device...')
+      this.cachedFeatures = await withTimeout(
+        wallet.initialize(),
+        PAIR_TIMEOUT_MS,
+        'emulator initialize'
+      )
+
+      console.log('[Engine] Emulator features:', JSON.stringify({
+        deviceId: this.cachedFeatures?.deviceId || '(empty)',
+        initialized: this.cachedFeatures?.initialized ?? '(undefined)',
+        firmwareVersion: this.extractVersion(this.cachedFeatures),
+        label: this.cachedFeatures?.label || '(none)',
+      }))
+
+      this.updateState(this.deriveState(this.cachedFeatures))
+    } catch (err: any) {
+      console.error('[Engine] Emulator connection failed:', err?.message || err)
+      this.clearWallet()
+      this.lastError = `Emulator: ${err?.message || err}`
+      this.updateState('error')
+      throw err
+    }
+  }
+
+  /**
+   * Disconnect the emulator from the engine (called when emulator stops).
+   */
+  disconnectEmulator(): void {
+    if (this.activeTransport !== 'emulator') return
+    console.log('[Engine] Disconnecting emulator')
+    this.clearWallet()
+    this.lastError = null
+    this.updateState('disconnected')
+  }
+
   // ── State Derivation ───────────────────────────────────────────────────
 
   private deriveState(features: any): DeviceState {
@@ -706,6 +773,36 @@ export class EngineController extends EventEmitter {
       firmwareVerified: hashes.firmwareVerified,
       bootloaderVerified: hashes.bootloaderVerified,
       error: this.lastError,
+      isEmulator: this.activeTransport === 'emulator',
+    }
+  }
+
+  // ── Emulator Debug Link ───────────────────────────────────────────────
+
+  /**
+   * Read the mnemonic from the emulator via DebugLinkGetState.
+   * Only works when connected to the emulator with debug link enabled.
+   */
+  async getEmulatorMnemonic(): Promise<string | null> {
+    if (this.activeTransport !== 'emulator' || !this.wallet) {
+      return null
+    }
+    try {
+      const Messages = require('@keepkey/device-protocol/lib/messages_pb')
+      const msg = new Messages.DebugLinkGetState()
+      const response = await (this.wallet as any).transport.call(
+        Messages.MessageType.MESSAGETYPE_DEBUGLINKGETSTATE,
+        msg,
+        { debugLink: true, msgTimeout: 5000 }
+      )
+      const mnemonic = response?.proto?.getMnemonic?.() || null
+      if (mnemonic) {
+        console.log('[Engine] Emulator mnemonic retrieved via DebugLink')
+      }
+      return mnemonic
+    } catch (err: any) {
+      console.warn('[Engine] Failed to read emulator mnemonic:', err?.message)
+      return null
     }
   }
 

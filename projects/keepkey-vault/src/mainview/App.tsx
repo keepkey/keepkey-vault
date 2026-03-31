@@ -626,9 +626,7 @@ function App() {
 						/>
 					)}
 					{/* Emulator button — macOS only, bottom-right corner */}
-					{deviceState.state === "disconnected" && (
-						<EmulatorButton />
-					)}
+					<EmulatorButton />
 				</SplashScreen>
 			</>
 		)
@@ -661,6 +659,7 @@ function App() {
 					firmwareVerified={deviceState.firmwareVerified}
 					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
 					latestFirmware={deviceState.latestFirmware}
+					isEmulator={deviceState.isEmulator}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
 					settingsOpen={settingsOpen}

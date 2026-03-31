@@ -146,6 +146,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   // Advanced seed length toggle for create wallet
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
 
+  // Emulator state — moved below deviceStatus declaration
+  const [emulatorMnemonic, setEmulatorMnemonic] = useState<string | null>(null)
+  const [emulatorMnemonicAcked, setEmulatorMnemonicAcked] = useState(false)
+
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
   const [devSeed, setDevSeed] = useState('')
@@ -205,6 +209,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const needsInit = deviceStatus.needsInit
   const inBootloader = deviceStatus.bootloaderMode
   const isOobDevice = deviceStatus.isOob
+  const isEmulator = deviceStatus.isEmulator ?? false
 
   // Bootloader skip is only safe on firmware >= 6.1.1.
   // In bootloader mode we don't know the FW version — never allow skip.
@@ -581,9 +586,25 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const handleCreateWallet = async () => {
     setSetupType('create')
     setStep('init-progress')
+    setEmulatorMnemonic(null)
+    setEmulatorMnemonicAcked(false)
 
     setSetupError(null)
     try {
+      if (isEmulator) {
+        // Emulator: generate mnemonic on backend (bip39 needs Node Buffer),
+        // use loadDevice (single confirm). resetDevice uses 13+ confirmations
+        // which block kkemu_poll() due to libkkemu_socketRead() priority drain.
+        const result = await rpcRequest('emulatorCreateWallet', { wordCount }, DEVICE_INTERACTION_TIMEOUT) as { mnemonic: string }
+        if (result?.mnemonic) {
+          setEmulatorMnemonic(result.mnemonic)
+          return
+        }
+        // If no mnemonic returned, skip to complete (label was set server-side)
+        setStep('complete')
+        return
+      }
+
       await rpcRequest('resetDevice', {
         wordCount,
         pin: true,
@@ -593,8 +614,6 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     } catch (err) {
       setSetupError(err instanceof Error ? err.message : t('initProgress.failedToCreate'))
       setStep('init-choose')
-    } finally {
-
     }
   }
 
@@ -1993,51 +2012,102 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
-              <VStack gap={4} textAlign="center" w="100%" maxW="400px" mx="auto">
-                <Spinner
-                  size="lg"
-                  color={HIGHLIGHT}
-                  borderWidth="3px"
-                />
-                <VStack gap={1}>
-                  <Text fontSize="md" fontWeight="bold" color="white">
-                    {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
-                  </Text>
-                  <Text fontSize="xs" color="gray.400" maxW="320px">
-                    {setupType === 'create'
-                      ? t('initProgress.followPromptsCreate')
-                      : setupType === 'recover'
-                        ? t('initProgress.followPromptsRecover')
-                        : t('initProgress.followPrompts')}
-                  </Text>
-                </VStack>
-
-                {setupType === 'create' && (
-                  <Box w="100%" p={4} bg="red.900" borderRadius="lg" borderWidth="2px" borderColor="red.400"
-                    css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(245,101,101,0.4)' }}>
-                    <VStack gap={2}>
+              <VStack gap={4} textAlign="center" w="100%" maxW="480px" mx="auto">
+                {/* ── Emulator: show generated mnemonic ────────────────── */}
+                {isEmulator && emulatorMnemonic ? (
+                  <VStack gap={4} w="100%">
+                    <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor="orange.400">
                       <HStack gap={2} justify="center">
-                        <FaExclamationTriangle color="#FC8181" size={20} />
-                        <Text fontSize="md" color="red.200" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
-                          {t('initProgress.writeDownWarning', { defaultValue: 'Write down every word!' })}
+                        <FaExclamationTriangle color="#F6AD55" size={16} />
+                        <Text fontSize="sm" color="orange.200" fontWeight="bold" textTransform="uppercase" letterSpacing="wider">
+                          Emulator Mode
                         </Text>
-                        <FaExclamationTriangle color="#FC8181" size={20} />
+                        <FaExclamationTriangle color="#F6AD55" size={16} />
                       </HStack>
-                      <Text fontSize="xs" color="red.300" textAlign="center" fontWeight="600">
-                        {t('initProgress.writeDownDetail', { defaultValue: 'Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup — you will NOT see these words again.' })}
+                      <Text fontSize="xs" color="orange.300" textAlign="center" mt={1}>
+                        This is a simulated device. The seed below exists only in the emulator's encrypted flash.
+                      </Text>
+                    </Box>
+
+                    <Text fontSize="md" fontWeight="bold" color="white">Your Recovery Phrase</Text>
+                    <Text fontSize="xs" color="gray.400">Write these words down if you want to restore this emulator wallet later.</Text>
+
+                    <Box w="100%" p={4} bg="gray.800" borderRadius="lg" borderWidth="1px" borderColor="gray.600">
+                      <Flex wrap="wrap" gap={2} justify="center">
+                        {emulatorMnemonic.split(/\s+/).map((word, i) => (
+                          <Box key={i} px={3} py={1.5} bg="gray.700" borderRadius="md" minW="80px" textAlign="center">
+                            <Text fontSize="xs" color="gray.500" lineHeight="1">{i + 1}</Text>
+                            <Text fontSize="sm" color="white" fontWeight="600">{word}</Text>
+                          </Box>
+                        ))}
+                      </Flex>
+                    </Box>
+
+                    <Button
+                      w="100%" colorScheme="green" size="md"
+                      onClick={() => { setEmulatorMnemonicAcked(true); setStep('init-label') }}
+                    >
+                      I've saved my words — Continue
+                    </Button>
+                  </VStack>
+                ) : (
+                  /* ── Normal device: spinner + "look at device" ─────── */
+                  <>
+                    <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
+                    <VStack gap={1}>
+                      <Text fontSize="md" fontWeight="bold" color="white">
+                        {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400" maxW="320px">
+                        {setupType === 'create'
+                          ? t('initProgress.followPromptsCreate')
+                          : setupType === 'recover'
+                            ? t('initProgress.followPromptsRecover')
+                            : t('initProgress.followPrompts')}
                       </Text>
                     </VStack>
-                  </Box>
-                )}
 
-                <Box w="100%" p={3} bg="green.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
-                  <HStack gap={2} justify="center">
-                    <FaExclamationTriangle color="#48BB78" size={14} />
-                    <Text fontSize="xs" color="green.200" fontWeight="bold">
-                      {t('initProgress.lookAtDevice')}
-                    </Text>
-                  </HStack>
-                </Box>
+                    {setupType === 'create' && (
+                      <Box w="100%" p={4} bg="red.900" borderRadius="lg" borderWidth="2px" borderColor="red.400"
+                        css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(245,101,101,0.4)' }}>
+                        <VStack gap={2}>
+                          <HStack gap={2} justify="center">
+                            <FaExclamationTriangle color="#FC8181" size={20} />
+                            <Text fontSize="md" color="red.200" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
+                              {t('initProgress.writeDownWarning', { defaultValue: 'Write down every word!' })}
+                            </Text>
+                            <FaExclamationTriangle color="#FC8181" size={20} />
+                          </HStack>
+                          <Text fontSize="xs" color="red.300" textAlign="center" fontWeight="600">
+                            {t('initProgress.writeDownDetail', { defaultValue: 'Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup — you will NOT see these words again.' })}
+                          </Text>
+                        </VStack>
+                      </Box>
+                    )}
+
+                    {isEmulator && (
+                      <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor="orange.400">
+                        <HStack gap={2} justify="center">
+                          <Spinner size="xs" color="orange.300" />
+                          <Text fontSize="xs" color="orange.200" fontWeight="bold">
+                            Emulator: auto-confirming button presses...
+                          </Text>
+                        </HStack>
+                      </Box>
+                    )}
+
+                    {!isEmulator && (
+                      <Box w="100%" p={3} bg="green.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
+                        <HStack gap={2} justify="center">
+                          <FaExclamationTriangle color="#48BB78" size={14} />
+                          <Text fontSize="xs" color="green.200" fontWeight="bold">
+                            {t('initProgress.lookAtDevice')}
+                          </Text>
+                        </HStack>
+                      </Box>
+                    )}
+                  </>
+                )}
 
                 {setupError && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="lg" borderWidth="1px" borderColor="red.500">

@@ -176,8 +176,6 @@ export function loadFlash(name = 'default'): EmulatorFlash {
 
   if (existsSync(encPath)) {
     console.log(`${TAG} Loading encrypted flash: ${encPath}`)
-    const blob = Buffer.from(Bun.file(encPath).arrayBuffer() as unknown as ArrayBuffer)
-    // Bun.file().arrayBuffer() is async — use readFileSync for sync path
     const fs = require('fs')
     const encData = fs.readFileSync(encPath) as Buffer
     const plaintext = decrypt(encData, key)

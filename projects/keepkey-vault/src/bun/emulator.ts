@@ -275,6 +275,22 @@ export function emuRead(iface: number): Uint8Array | null {
   return n > 0 ? buf : null
 }
 
+// ── Poll control (for pre-writing confirmations) ────────────────────────
+
+/** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
+export function pausePoll(): void {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+
+/** Resume kkemu_poll timer. */
+export function resumePoll(): void {
+  if (!pollTimer && ffi) {
+    pollTimer = setInterval(() => {
+      try { ffi?.symbols.kkemu_poll() } catch {}
+    }, 16)
+  }
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────
 
 export { listFlashImages, deleteFlash }
