@@ -2760,7 +2760,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				resumePoll()
 
 				await writePromise
-				console.log('[Emulator] loadDevice complete, setting label...')
+				console.log('[Emulator] loadDevice complete — persisting flash...')
+				const { saveEmulatorState } = await import('./emulator')
+				saveEmulatorState()
+				console.log('[Emulator] Setting label...')
 				// Auto-set label with EMU prefix (also needs 1 confirm)
 				try {
 					await (engine.wallet as any).applySettings({ label: 'EMU KeepKey' })
@@ -2768,6 +2771,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
 				}
+				// Persist again after label change
+				saveEmulatorState()
 				console.log('[Emulator] Waiting for firmware to settle...')
 				// Let firmware run a few poll cycles to commit storage and return to home
 				await new Promise(r => setTimeout(r, 200))
@@ -3203,6 +3208,13 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+	// Persist emulator flash before exit (seed lives only in RAM otherwise)
+	try {
+		const { stopEmulator, getEmulatorStatus } = require('./emulator')
+		if (getEmulatorStatus().state === 'running') {
+			stopEmulator()
+		}
+	} catch {}
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()
