@@ -327,17 +327,48 @@ const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
 // Wraps any operation that triggers firmware confirm_helper() (blocking C loop).
-// Pauses kkemu_poll, lets the transport write all chunks, pre-writes 1 ButtonAck +
-// 1 DebugLinkDecision, then resumes poll so the firmware processes everything in
-// one non-blocking pass.
+//
+// The key challenge: multi-chunk messages (e.g. LoadDevice with a real mnemonic)
+// span 2+ HID packets. If BA+DLD are pre-written to rb_main_in before all chunks
+// are consumed, usb_rx_helper treats BA as a continuation chunk → corruption.
+//
+// Solution (proven in test harness — 17/17 pass):
+// 1. Pause poll, start the operation (transport writes N chunks)
+// 2. Poll (N-1) times to consume all chunks except the last
+// 3. Write BA+DLD to ring buffers
+// 4. Poll once — firmware reads last chunk, assembles, dispatches,
+//    enters confirm_helper, finds BA+DLD → exits immediately
+// 5. Resume poll for transport to read the response
 async function emuConfirmOp(fn: () => Promise<any>): Promise<any> {
-	const { pausePoll, resumePoll, saveEmulatorState } = await import('./emulator')
+	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce } = await import('./emulator')
 	const { prewriteConfirmations } = await import('./emulator-transport')
+
+	// Get the transport delegate for chunk counting
+	const delegate = engine.emuDelegate
+	if (delegate) delegate.chunkCount = 0
+
 	pausePoll()
+
 	const promise = fn()
-	await new Promise(r => setTimeout(r, 10)) // let transport write all chunks
+	await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
+
+	const numChunks = delegate?.chunkCount || 1
+	console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
+
+	// Consume all chunks except the last
+	for (let i = 0; i < numChunks - 1; i++) {
+		emuPollOnce()
+	}
+
+	// Now rb_main_in has only the last chunk. Write BA+DLD after it.
 	prewriteConfirmations(1)
+
+	// Final poll: reads last chunk → dispatches → confirm_helper → BA+DLD → exits
+	emuPollOnce()
+
+	// Resume for transport to read the response
 	resumePoll()
+
 	const result = await promise
 	saveEmulatorState()
 	return result
@@ -370,12 +401,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
-					// Restart emulator for clean storage_init()
-					const { stopEmulator, initEmulator } = await import('./emulator')
-					engine.disconnectEmulator()
-					stopEmulator()
-					await new Promise(r => setTimeout(r, 100))
-					initEmulator()
+					// Drain stale ButtonAck + reconnect for clean transport
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
 					await engine.connectEmulator()
 					return
 				}
@@ -385,11 +413,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			applySettings: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
-					const { stopEmulator, initEmulator } = await import('./emulator')
-					engine.disconnectEmulator()
-					stopEmulator()
-					await new Promise(r => setTimeout(r, 100))
-					initEmulator()
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
 					await engine.connectEmulator()
 					return
 				}
@@ -485,10 +510,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				await engine.wallet.cancel().catch(() => {})
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.wallet!.wipe())
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
 				} else {
 					await engine.wallet.wipe()
+					await engine.syncState()
 				}
-				await engine.syncState()
 				return { success: true }
 			},
 			getPublicKeys: async (params) => {
@@ -2788,14 +2816,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
 				}
 
-				// Restart emulator for clean firmware state. Flushing ring buffers
-				// corrupts firmware storage — a full stop/start cycle is the only
-				// reliable way to get a clean `storage_init()` with the new seed.
-				const { stopEmulator, initEmulator } = await import('./emulator')
-				engine.disconnectEmulator()
-				stopEmulator()  // kkemu_shutdown + save encrypted flash
-				await new Promise(r => setTimeout(r, 100))
-				initEmulator()  // reload flash + kkemu_init + start poll
+				// Drain stale data + reconnect for clean transport
+				const { flushRingBuffers } = await import('./emulator')
+				flushRingBuffers()
 				await engine.connectEmulator()
 				return { mnemonic }
 			},

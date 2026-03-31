@@ -22,6 +22,8 @@ const READ_TIMEOUT_MS = 120_000
 
 export class EmulatorTransportDelegate implements TransportDelegate {
   private connected = false
+  /** Chunk counter — reset before confirmOp, read after to know how many polls needed. */
+  chunkCount = 0
 
   constructor(private deviceId: string = 'emulator-default') {}
 
@@ -61,9 +63,7 @@ export class EmulatorTransportDelegate implements TransportDelegate {
     if (!ok) {
       throw new Error(`${TAG} emuWrite failed (iface=${iface}, len=${buf.length})`)
     }
-
-    // NOTE: Pre-write confirmations are handled by emuConfirmOp() in the RPC
-    // handlers, NOT here. This ensures all chunks are written before pre-writing.
+    if (!debugLink) this.chunkCount++
   }
 
   async readChunk(debugLink?: boolean): Promise<Uint8Array> {

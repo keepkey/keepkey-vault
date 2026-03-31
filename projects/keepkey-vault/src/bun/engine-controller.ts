@@ -94,6 +94,8 @@ export class EngineController extends EventEmitter {
 
   get isSyncing(): boolean { return this.syncing }
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
+  /** Get the emulator transport delegate (for chunk counting in confirmOp). */
+  get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
 
   constructor() {
     super()

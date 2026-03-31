@@ -303,6 +303,13 @@ export function pausePoll(): void {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 
+/** Run a single kkemu_poll tick synchronously. */
+export function emuPollOnce(): void {
+  if (ffi) {
+    try { ffi.symbols.kkemu_poll() } catch {}
+  }
+}
+
 /** Resume kkemu_poll timer. */
 export function resumePoll(): void {
   if (!pollTimer && ffi) {
