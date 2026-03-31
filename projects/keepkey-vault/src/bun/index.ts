@@ -370,8 +370,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
-					const { flushRingBuffers } = await import('./emulator')
-					flushRingBuffers()
+					// Restart emulator for clean storage_init()
+					const { stopEmulator, initEmulator } = await import('./emulator')
+					engine.disconnectEmulator()
+					stopEmulator()
+					await new Promise(r => setTimeout(r, 100))
+					initEmulator()
 					await engine.connectEmulator()
 					return
 				}
@@ -381,8 +385,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			applySettings: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
-					const { flushRingBuffers } = await import('./emulator')
-					flushRingBuffers()
+					const { stopEmulator, initEmulator } = await import('./emulator')
+					engine.disconnectEmulator()
+					stopEmulator()
+					await new Promise(r => setTimeout(r, 100))
+					initEmulator()
 					await engine.connectEmulator()
 					return
 				}
@@ -2773,7 +2780,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}))
 				console.log('[Emulator] loadDevice complete')
 
-				// Auto-set label with EMU prefix (skipRefresh: stale BA in ring buffer)
+				// Auto-set label with EMU prefix
 				try {
 					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
 					console.log('[Emulator] Label set')
@@ -2781,9 +2788,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
 				}
 
-				// Flush stale ring buffer data + reconnect
-				const { flushRingBuffers } = await import('./emulator')
-				flushRingBuffers()
+				// Restart emulator for clean firmware state. Flushing ring buffers
+				// corrupts firmware storage — a full stop/start cycle is the only
+				// reliable way to get a clean `storage_init()` with the new seed.
+				const { stopEmulator, initEmulator } = await import('./emulator')
+				engine.disconnectEmulator()
+				stopEmulator()  // kkemu_shutdown + save encrypted flash
+				await new Promise(r => setTimeout(r, 100))
+				initEmulator()  // reload flash + kkemu_init + start poll
 				await engine.connectEmulator()
 				return { mnemonic }
 			},
