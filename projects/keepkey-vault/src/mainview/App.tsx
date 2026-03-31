@@ -13,6 +13,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
+import { EmulatorButton } from "./components/EmulatorButton"
 import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
@@ -28,7 +29,7 @@ import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
-import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
+import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
@@ -623,6 +624,10 @@ function App() {
 							onViewPortfolio={handleViewPortfolio}
 							onConnectWallet={handleConnectWallet}
 						/>
+					)}
+					{/* Emulator button — macOS only, bottom-right corner */}
+					{deviceState.state === "disconnected" && (
+						<EmulatorButton />
 					)}
 				</SplashScreen>
 			</>

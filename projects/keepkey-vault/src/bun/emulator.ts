@@ -277,4 +277,4 @@ export function emuRead(iface: number): Uint8Array | null {
 
 // ── Exports ─────────────────────────────────────────────────────────────
 
-export { listFlashImages, deleteFlash, getAvailableEmulators }
+export { listFlashImages, deleteFlash }
