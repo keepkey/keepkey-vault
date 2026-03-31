@@ -62,21 +62,8 @@ export class EmulatorTransportDelegate implements TransportDelegate {
       throw new Error(`${TAG} emuWrite failed (iface=${iface}, len=${buf.length})`)
     }
 
-    // Pre-write confirmations for single-chunk messages that trigger confirm.
-    // Multi-chunk messages (like LoadDevice with long mnemonic) are handled
-    // from the RPC handler instead (emulatorCreateWallet).
-    if (iface === 0 && buf[0] === 0x3F && buf[1] === 0x23 && buf[2] === 0x23) {
-      const msgType = (buf[3] << 8) | buf[4]
-      const msgLen = (buf[5] << 24) | (buf[6] << 16) | (buf[7] << 8) | buf[8]
-      // Only pre-write for messages that fit in a single 64-byte chunk
-      // (payload ≤ 55 bytes = 64 - 9 header bytes)
-      if (msgLen <= 55) {
-        // ApplySettings (25), WipeDevice (5)
-        if (msgType === 25 || msgType === 5) {
-          prewriteConfirmations(1)
-        }
-      }
-    }
+    // NOTE: Pre-write confirmations are handled by emuConfirmOp() in the RPC
+    // handlers, NOT here. This ensures all chunks are written before pre-writing.
   }
 
   async readChunk(debugLink?: boolean): Promise<Uint8Array> {

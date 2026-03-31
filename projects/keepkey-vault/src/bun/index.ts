@@ -325,6 +325,24 @@ function applyRestApiState() {
 import type { SwapQuote } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
+// ── Emulator confirm helper ──────────────────────────────────────────
+// Wraps any operation that triggers firmware confirm_helper() (blocking C loop).
+// Pauses kkemu_poll, lets the transport write all chunks, pre-writes 1 ButtonAck +
+// 1 DebugLinkDecision, then resumes poll so the firmware processes everything in
+// one non-blocking pass.
+async function emuConfirmOp(fn: () => Promise<any>): Promise<any> {
+	const { pausePoll, resumePoll, saveEmulatorState } = await import('./emulator')
+	const { prewriteConfirmations } = await import('./emulator-transport')
+	pausePoll()
+	const promise = fn()
+	await new Promise(r => setTimeout(r, 10)) // let transport write all chunks
+	prewriteConfirmations(1)
+	resumePoll()
+	const result = await promise
+	saveEmulatorState()
+	return result
+}
+
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
@@ -349,9 +367,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			resetDevice: async (params) => { await engine.resetDevice(params) },
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
-			loadDevice: async (params) => { await engine.loadDevice(params) },
+			loadDevice: async (params) => {
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.loadDevice(params))
+					return
+				}
+				await engine.loadDevice(params)
+			},
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
-			applySettings: async (params) => { await engine.applySettings(params) },
+			applySettings: async (params) => {
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.applySettings(params))
+					return
+				}
+				await engine.applySettings(params)
+			},
 			changePin: async () => { await engine.changePin() },
 			removePin: async () => { await engine.removePin() },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
@@ -440,7 +470,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// the transport lock is held while waiting for PIN input,
 				// so wipe() would deadlock without this.
 				await engine.wallet.cancel().catch(() => {})
-				await engine.wallet.wipe()
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.wallet!.wipe())
+				} else {
+					await engine.wallet.wipe()
+				}
 				await engine.syncState()
 				return { success: true }
 			},
@@ -2723,64 +2757,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorCreateWallet: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const bip39 = require('bip39')
-				const { pausePoll, resumePoll } = await import('./emulator')
-				const { prewriteConfirmations } = await import('./emulator-transport')
 				const wc = params?.wordCount || 12
 				const strength = wc === 24 ? 256 : wc === 18 ? 192 : 128
 				const mnemonic = bip39.generateMnemonic(strength)
 				console.log(`[Emulator] Generated ${wc}-word mnemonic, calling loadDevice...`)
 
-				// 1. Pause poll so kkemu_poll() doesn't run mid-write
-				pausePoll()
+				await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+					mnemonic, pin: false, passphrase: false, skipChecksum: false,
+				}))
+				console.log('[Emulator] loadDevice complete')
 
-				// 2. Write LoadDevice message (transport writes all chunks to ring buffer)
-				//    The transport.call() writes then tries to read the response.
-				//    Before the read can succeed, we need kkemu_poll() to run and
-				//    process the message — but we paused it. So we:
-				//    3. Pre-write 1 ButtonAck + 1 DebugLinkDecision for the confirm
-				//    4. Resume poll — firmware processes LoadDevice + finds confirmations
-				//
-				// We use a microtask to inject the pre-write between the transport's
-				// write and its readChunk poll loop.
-				const writePromise = (engine.wallet as any).loadDevice({
-					mnemonic,
-					pin: false,
-					passphrase: false,
-					skipChecksum: false,
-				})
-
-				// Give the transport time to write all chunks (runs on next microtick)
-				await new Promise(r => setTimeout(r, 10))
-
-				// Now all chunks are in rb_main_in. Pre-write confirmations.
-				prewriteConfirmations(1)
-				console.log('[Emulator] Pre-wrote 1 confirmation, resuming poll...')
-
-				// Resume — kkemu_poll() will process LoadDevice + auto-confirm
-				resumePoll()
-
-				await writePromise
-				console.log('[Emulator] loadDevice complete — persisting flash...')
-				const { saveEmulatorState } = await import('./emulator')
-				saveEmulatorState()
-				console.log('[Emulator] Setting label...')
-				// Auto-set label with EMU prefix (also needs 1 confirm)
+				// Auto-set label with EMU prefix
 				try {
-					await (engine.wallet as any).applySettings({ label: 'EMU KeepKey' })
+					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey' }))
 					console.log('[Emulator] Label set')
 				} catch (e: any) {
 					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
 				}
-				// Persist again after label change
-				saveEmulatorState()
-				console.log('[Emulator] Waiting for firmware to settle...')
-				// Let firmware run a few poll cycles to commit storage and return to home
+
+				// Settle, drain stale ring buffer data, reconnect
 				await new Promise(r => setTimeout(r, 200))
-				// Drain any stale data from output ring buffer
 				const { emuRead } = await import('./emulator')
-				while (emuRead(0)) { /* drain main out */ }
-				while (emuRead(1)) { /* drain debug out */ }
-				// Reconnect with fresh transport
+				while (emuRead(0)) {}
+				while (emuRead(1)) {}
 				await engine.connectEmulator()
 				return { mnemonic }
 			},

@@ -93,6 +93,7 @@ export class EngineController extends EventEmitter {
   private promptPinActive = false
 
   get isSyncing(): boolean { return this.syncing }
+  get isEmulator(): boolean { return this.activeTransport === 'emulator' }
 
   constructor() {
     super()
