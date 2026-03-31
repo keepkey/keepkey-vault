@@ -369,7 +369,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
-					await emuConfirmOp(() => engine.loadDevice(params))
+					await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
+					// Drain stale ring buffer data + reconnect for clean state
+					await new Promise(r => setTimeout(r, 200))
+					const { emuRead } = await import('./emulator')
+					while (emuRead(0)) {}
+					while (emuRead(1)) {}
+					await engine.connectEmulator()
 					return
 				}
 				await engine.loadDevice(params)
@@ -377,7 +383,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
 			applySettings: async (params) => {
 				if (engine.isEmulator) {
-					await emuConfirmOp(() => engine.applySettings(params))
+					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
+					await new Promise(r => setTimeout(r, 200))
+					const { emuRead } = await import('./emulator')
+					while (emuRead(0)) {}
+					while (emuRead(1)) {}
+					await engine.connectEmulator()
 					return
 				}
 				await engine.applySettings(params)
@@ -2767,9 +2778,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}))
 				console.log('[Emulator] loadDevice complete')
 
-				// Auto-set label with EMU prefix
+				// Auto-set label with EMU prefix (skipRefresh: stale BA in ring buffer)
 				try {
-					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey' }))
+					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
 					console.log('[Emulator] Label set')
 				} catch (e: any) {
 					console.warn('[Emulator] Label set failed (non-critical):', e?.message)

@@ -1072,7 +1072,7 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async loadDevice(opts: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }) {
+  async loadDevice(opts: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string; skipRefresh?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
     await (this.wallet as any).loadDevice({
       mnemonic: opts.mnemonic,
@@ -1080,11 +1080,15 @@ export class EngineController extends EventEmitter {
       passphrase: opts.passphrase ?? false,
       label: opts.label || 'KeepKey',
     })
+    // Emulator: skip getFeatures — the transport's auto-ButtonAck leaves a stale
+    // message in rb_main_in that causes "Unexpected message". The caller should
+    // reconnect via connectEmulator() which drains ring buffers and re-initializes.
+    if (opts.skipRefresh) return
     this.cachedFeatures = await this.wallet.getFeatures()
     this.updateState(this.deriveState(this.cachedFeatures))
   }
 
-  async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }) {
+  async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number; skipRefresh?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
     const settings: any = {}
     if (opts.label !== undefined) settings.label = opts.label
@@ -1095,6 +1099,9 @@ export class EngineController extends EventEmitter {
     }
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
+    // Emulator: skip getFeatures — stale ButtonAck in rb_main_in causes failure.
+    // Caller should reconnect via connectEmulator() for clean state.
+    if (opts.skipRefresh) return
     this.cachedFeatures = await this.wallet.getFeatures()
     // Route through updateState so needs_passphrase triggers promptPin() →
     // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
