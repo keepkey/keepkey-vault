@@ -124,9 +124,20 @@ export const EmulatorKeepKeyAdapter = Adapter.fromDelegate(EmulatorAdapterDelega
 // ── Raw HID frame helpers ───────────────────────────────────────────────
 //
 // The firmware's confirm_helper() is a BLOCKING C loop inside kkemu_poll().
-// It waits for ButtonAck (iface 0) + DebugLinkDecision (iface 1).
-// Since kkemu_poll() blocks the JS event loop, we must pre-write these
-// into the ring buffer BEFORE the firmware enters the confirm loop.
+// It needs both ButtonAck AND DebugLinkDecision to exit (debug_decided &&
+// button_request_acked). It reads messages via check_for_tiny_msg →
+// usbPoll → emulatorSocketRead.
+//
+// CRITICAL: emulatorSocketRead ALWAYS checks iface 0 before iface 1.
+// If BA is on iface 0 and DLD is on iface 1, the confirm_helper loop
+// drains ALL BA from iface 0 (each iteration re-sets button_request_acked)
+// before reading any DLD from iface 1. With N pre-written BA+DLD pairs,
+// the first confirm eats all N BA, leaving none for subsequent confirms.
+//
+// FIX: Write BOTH BA and DLD to iface 1 (debug interface) in alternating
+// order. Since iface 1 is a single FIFO, confirm_helper reads BA→DLD
+// in order — exactly one pair per confirm. All confirms within a single
+// kkemu_poll() tick work correctly.
 
 function buildHidFrame(msgType: number, payload: Uint8Array = new Uint8Array(0)): Uint8Array {
   const frame = new Uint8Array(64)
@@ -150,15 +161,19 @@ const DEBUG_LINK_DECISION_YES = buildHidFrame(100, new Uint8Array([0x08, 0x01]))
 
 /**
  * Pre-write N button confirmations into the emulator ring buffers.
- * Each confirmation = ButtonAck on iface 0 + DebugLinkDecision on iface 1.
+ *
+ * Both BA and DLD are written to iface 1 (debug) in alternating order so
+ * they share a single FIFO. confirm_helper reads BA→DLD per iteration,
+ * consuming exactly one pair per confirm. This avoids the iface-priority
+ * starvation bug where emulatorSocketRead drains all of iface 0 first.
  *
  * Must be called BEFORE kkemu_poll() processes a message that triggers
  * confirm_helper() (e.g., after EntropyAck or ResetDevice).
  */
 export function prewriteConfirmations(count: number): void {
-  console.log(`${TAG} Pre-writing ${count} button confirmations`)
+  console.log(`${TAG} Pre-writing ${count} button confirmations (both on iface 1)`)
   for (let i = 0; i < count; i++) {
-    emuWrite(BUTTON_ACK_FRAME, 0)
+    emuWrite(BUTTON_ACK_FRAME, 1)
     emuWrite(DEBUG_LINK_DECISION_YES, 1)
   }
 }

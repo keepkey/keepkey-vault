@@ -53,6 +53,8 @@ export interface EmulatorConfirmDetails {
   to?: string
   value?: string
   memo?: string
+  /** Override firmware confirmation count (default: auto-detected from operation) */
+  confirmCount?: number
 }
 
 // ── Bridge server (webview → bun) ───────────────────────────────────────
@@ -243,6 +245,8 @@ export function dismissSeedDisplay(): void {
 
 // ── Interactive confirm ─────────────────────────────────────────────────
 
+const CONFIRM_TIMEOUT_MS = 120_000 // 2 minutes — reject if emulator window is dead/unresponsive
+
 async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
   if (!emuWindow) {
     console.warn(`${TAG} No emulator window — auto-approving`)
@@ -254,7 +258,22 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
     if (pendingConfirm) {
       pendingConfirm.resolve(false)
     }
-    pendingConfirm = { id: details.id, resolve }
+
+    const timer = setTimeout(() => {
+      console.error(`${TAG} Confirm timed out after ${CONFIRM_TIMEOUT_MS / 1000}s — rejecting`)
+      if (pendingConfirm?.id === details.id) {
+        pendingConfirm = null
+      }
+      resolve(false)
+    }, CONFIRM_TIMEOUT_MS)
+
+    pendingConfirm = {
+      id: details.id,
+      resolve: (value: boolean) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+    }
 
     console.log(`${TAG} Sending confirm-request: op=${details.operation}`)
     sendToWindow('confirm-request', details)
@@ -267,6 +286,38 @@ function sendDismiss(): void {
   sendToWindow('emu-state', { state: 'idle' })
 }
 
+// Firmware confirmation counts by operation type.
+// kkemu_poll() BLOCKS inside confirm_helper() until BA+DLD are in the ring
+// buffer, so ALL confirmations must be pre-written before the final poll tick.
+// Over-writing is safe — unused pairs get consumed as no-ops by subsequent polls.
+const CONFIRM_COUNTS: Record<string, number> = {
+  ethSignTx: 4,         // approve/transfer + data warning + fee + margin
+  btcSignTx: 10,        // per-output confirm + fee + final (varies by output count)
+  cosmosSignTx: 3,
+  thorchainSignTx: 7,   // router + vault + asset + amount + memo + fee + margin
+  mayachainSignTx: 7,
+  osmosisSignTx: 3,
+  binanceSignTx: 3,
+  xrpSignTx: 3,
+  btcGetAddress: 2,
+  ethGetAddress: 2,
+  cosmosGetAddress: 2,
+  thorchainGetAddress: 2,
+  mayachainGetAddress: 2,
+  osmosisGetAddress: 2,
+  binanceGetAddress: 2,
+  xrpGetAddress: 2,
+  ethSignMessage: 3,
+  ethSignTypedData: 3,
+  ethVerifyMessage: 3,
+}
+const DEFAULT_CONFIRM_COUNT = 5
+
+function getConfirmCount(details: EmulatorConfirmDetails): number {
+  if (details.confirmCount) return details.confirmCount
+  return CONFIRM_COUNTS[details.operation] ?? DEFAULT_CONFIRM_COUNT
+}
+
 /**
  * Interactive confirm wrapper for emulator signing/address operations.
  *
@@ -274,15 +325,19 @@ function sendDismiss(): void {
  * 2. Poll N-1 times (consume all but last chunk)
  * 3. Send confirm-request to emulator window
  * 4. Wait for user Confirm/Reject (arrives via bridge HTTP POST)
- * 5. If approved: prewriteConfirmations → final poll → return result
+ * 5. If approved: prewriteConfirmations(N) → final poll → return result
  * 6. If rejected: throw error
+ *
+ * CRITICAL: kkemu_poll() blocks inside confirm_helper(). The firmware may
+ * call confirm_helper() multiple times per operation (e.g. ETH: data + fee).
+ * ALL confirmations must be pre-written before the poll tick or it blocks forever.
  */
 export async function emuInteractiveConfirm(
   fn: () => Promise<any>,
   details: EmulatorConfirmDetails,
   engineDelegate?: { chunkCount: number } | null,
 ): Promise<any> {
-  const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce } = await import('./emulator')
+  const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
   const { prewriteConfirmations } = await import('./emulator-transport')
 
   const id = crypto.randomUUID()
@@ -309,8 +364,14 @@ export async function emuInteractiveConfirm(
       throw new Error('Transaction rejected by user on emulator')
     }
 
-    console.log(`${TAG} Pre-writing confirmations + final poll`)
-    prewriteConfirmations(1)
+    const nConfirms = getConfirmCount(details)
+    console.log(`${TAG} Pre-writing ${nConfirms} confirmations (op=${details.operation}) + final poll`)
+
+    // Pre-write all needed confirmations, then run ONE poll tick.
+    // All confirms happen inside a single kkemu_poll() C call — we can't
+    // inject between them. Both BA+DLD go to iface 1 (same FIFO) so
+    // confirm_helper reads them in order without iface-priority starvation.
+    prewriteConfirmations(nConfirms)
     emuPollOnce()
 
     // Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
@@ -319,6 +380,8 @@ export async function emuInteractiveConfirm(
 
     const result = await promise
     console.log(`${TAG} Operation complete, saving state`)
+
+    flushRingBuffers()
     saveEmulatorState()
     return result
   } finally {

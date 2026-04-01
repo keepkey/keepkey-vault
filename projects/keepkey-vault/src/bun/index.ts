@@ -308,11 +308,50 @@ const restCallbacks: RestApiCallbacks = {
 	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
 }
 
+/** Check if a port is already in use by trying to connect to it */
+async function isPortInUse(port: number): Promise<boolean> {
+	try {
+		const resp = await fetch(`http://localhost:${port}/api/v1/health/fast`, { signal: AbortSignal.timeout(2000) })
+		return resp.ok
+	} catch {
+		return false
+	}
+}
+
 /** Start or stop the REST API server based on the persisted setting */
-function applyRestApiState() {
+async function applyRestApiState() {
 	if (restApiEnabled && !restServer) {
-		restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
-		console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+		// Check if another instance is already bound to the port
+		const inUse = await isPortInUse(REST_API_PORT)
+		if (inUse) {
+			console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance`)
+			console.error(`[Vault] Attempting to shut down the stale instance...`)
+			try {
+				await fetch(`http://localhost:${REST_API_PORT}/api/shutdown`, {
+					method: 'POST',
+					signal: AbortSignal.timeout(3000),
+				})
+				// Wait for the old instance to exit
+				await new Promise(resolve => setTimeout(resolve, 1500))
+				// Verify it's gone
+				const stillInUse = await isPortInUse(REST_API_PORT)
+				if (stillInUse) {
+					console.error(`[Vault] FATAL: could not kill stale instance on port ${REST_API_PORT}. Exiting.`)
+					process.exit(1)
+				}
+				console.log(`[Vault] Stale instance shut down successfully`)
+			} catch {
+				console.error(`[Vault] FATAL: could not reach stale instance for shutdown. Port ${REST_API_PORT} blocked. Exiting.`)
+				process.exit(1)
+			}
+		}
+		try {
+			restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
+			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+		} catch (err) {
+			console.error(`[Vault] FATAL: failed to bind REST API on port ${REST_API_PORT}:`, err)
+			process.exit(1)
+		}
 	} else if (!restApiEnabled && restServer) {
 		restServer.stop()
 		restServer = null
@@ -340,8 +379,8 @@ const swapQuoteCache = new Map<string, SwapQuote>()
 // 4. Poll once — firmware reads last chunk, assembles, dispatches,
 //    enters confirm_helper, finds BA+DLD → exits immediately
 // 5. Resume poll for transport to read the response
-async function emuConfirmOp(fn: () => Promise<any>): Promise<any> {
-	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce } = await import('./emulator')
+async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
+	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
 	const { prewriteConfirmations } = await import('./emulator-transport')
 
 	// Get the transport delegate for chunk counting
@@ -362,13 +401,13 @@ async function emuConfirmOp(fn: () => Promise<any>): Promise<any> {
 			emuPollOnce()
 		}
 
-		// Now rb_main_in has only the last chunk. Write BA+DLD after it.
-		prewriteConfirmations(1)
-
-		// Final poll: reads last chunk → dispatches → confirm_helper → BA+DLD → exits
+		// Pre-write all confirmations then poll once. Both BA+DLD go to iface 1
+		// (same FIFO) so confirm_helper reads them in order without starvation.
+		prewriteConfirmations(confirmCount)
 		emuPollOnce()
 
 		const result = await promise
+		flushRingBuffers() // drain any unused pre-written confirmations
 		saveEmulatorState()
 		return result
 	} finally {
@@ -2110,7 +2149,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setRestApiEnabled: async (params) => {
 				restApiEnabled = params.enabled
 				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
-				applyRestApiState()
+				await applyRestApiState()
 				return getAppSettings()
 			},
 			setPioneerApiBase: async (params) => {
@@ -3267,7 +3306,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
-applyRestApiState()
+await applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
 await engine.start()
@@ -3348,6 +3387,16 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+
+	// Stop heartbeat — watchdog will SIGKILL us if cleanup takes >15s
+	stopHeartbeatWatchdog()
+
+	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway
+	setTimeout(() => {
+		console.error('[cleanup] Force-exiting after 5s timeout')
+		process.exit(1)
+	}, 5000).unref?.()
+
 	// Close emulator window + persist flash before exit
 	try {
 		const { closeEmulatorWindow } = require('./emulator-window')
@@ -3373,6 +3422,46 @@ if (typeof process !== 'undefined') {
 	process.on('SIGTERM', cleanupAndQuit)
 	process.on('SIGINT', cleanupAndQuit)
 }
+
+// ── FFI watchdog ──────────────────────────────────────────────────────
+// When kkemu_poll() blocks inside confirm_helper (C busy-loop), the JS event
+// loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
+// This watchdog subprocess monitors liveness via a heartbeat file.
+// If the heartbeat stops for >15s, it sends SIGKILL to this process.
+const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+function startHeartbeatWatchdog() {
+	// Write heartbeat every 5s — proves the event loop is alive
+	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
+	heartbeatTimer = setInterval(() => {
+		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
+	}, 5000)
+
+	// Spawn a tiny watchdog that kills us if heartbeat goes stale
+	const watchdog = Bun.spawn(['bash', '-c', `
+		while true; do
+			sleep 5
+			if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
+			last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+			now=$(date +%s)
+			age=$(( now - last / 1000 ))
+			if [ "$age" -gt 15 ]; then
+				kill -9 ${process.pid} 2>/dev/null
+				rm -f "${HEARTBEAT_FILE}"
+				exit 0
+			fi
+		done
+	`], { stdout: 'ignore', stderr: 'ignore' })
+	watchdog.unref()
+}
+
+function stopHeartbeatWatchdog() {
+	if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+	try { fs.unlinkSync(HEARTBEAT_FILE) } catch {}
+}
+
+startHeartbeatWatchdog()
 
 // ── Start Zcash sidecar only if feature flag is ON ──────────────────
 if (zcashPrivacyEnabled) {

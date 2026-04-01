@@ -13,7 +13,7 @@
  * Emulator binaries are bundled at: firmware/emulators/<version>/libkkemu.dylib
  * Manifest at: firmware/emulators/manifest.json
  */
-import { dlopen, FFIType, ptr } from 'bun:ffi'
+import { dlopen, FFIType, ptr, toBuffer } from 'bun:ffi'
 import { resolve, join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import {
@@ -87,6 +87,7 @@ function loadDylib(path: string) {
     kkemu_read:         { args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32 },
     kkemu_poll:         { args: [], returns: FFIType.i32 },
     kkemu_is_running:   { args: [], returns: FFIType.i32 },
+    kkemu_get_display:  { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
   })
 }
 
@@ -276,24 +277,42 @@ export function emuRead(iface: number): Uint8Array | null {
  * left by the transport), then drains all output so the next transport
  * connection starts clean.
  */
+const FLUSH_MAX_READS = 1000 // safety cap — prevent infinite drain loop
+
 export function flushRingBuffers(): void {
   if (!ffi) return
   // Process any stale messages in rb_main_in / rb_debug_in
   for (let i = 0; i < 10; i++) {
     try { ffi.symbols.kkemu_poll() } catch {}
   }
-  // Drain rb_main_out and rb_debug_out
+  // Drain rb_main_out and rb_debug_out (bounded to prevent spin)
   const buf = new Uint8Array(64)
-  while (ffi.symbols.kkemu_read(ptr(buf), 64, 0) > 0) {}
-  while (ffi.symbols.kkemu_read(ptr(buf), 64, 1) > 0) {}
-  console.log(`${TAG} Ring buffers flushed`)
+  let reads = 0
+  while (reads < FLUSH_MAX_READS && ffi.symbols.kkemu_read(ptr(buf), 64, 0) > 0) reads++
+  while (reads < FLUSH_MAX_READS && ffi.symbols.kkemu_read(ptr(buf), 64, 1) > 0) reads++
+  if (reads >= FLUSH_MAX_READS) {
+    console.warn(`${TAG} Ring buffer flush hit safety cap (${FLUSH_MAX_READS} reads)`)
+  }
+  console.log(`${TAG} Ring buffers flushed (${reads} reads)`)
 }
 
 // ── Poll control (for pre-writing confirmations) ────────────────────────
 
+let pollSafetyTimer: ReturnType<typeof setTimeout> | null = null
+const POLL_SAFETY_MS = 30_000 // auto-resume poll after 30s to prevent permanent stall
+
 /** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
 export function pausePoll(): void {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  // Safety net: auto-resume if nothing calls resumePoll() within timeout
+  if (pollSafetyTimer) clearTimeout(pollSafetyTimer)
+  pollSafetyTimer = setTimeout(() => {
+    pollSafetyTimer = null
+    if (!pollTimer && ffi) {
+      console.warn(`${TAG} Poll safety timeout — auto-resuming after ${POLL_SAFETY_MS / 1000}s`)
+      resumePoll()
+    }
+  }, POLL_SAFETY_MS)
 }
 
 /** Run a single kkemu_poll tick synchronously. */
@@ -305,11 +324,32 @@ export function emuPollOnce(): void {
 
 /** Resume kkemu_poll timer. */
 export function resumePoll(): void {
+  if (pollSafetyTimer) { clearTimeout(pollSafetyTimer); pollSafetyTimer = null }
   if (!pollTimer && ffi) {
     pollTimer = setInterval(() => {
       try { ffi?.symbols.kkemu_poll() } catch {}
     }, 16)
   }
+}
+
+// ── Display (OLED framebuffer) ──────────────────────────────────────────
+
+/**
+ * Read the emulator's 256x64 OLED framebuffer.
+ * Returns null if the dylib doesn't expose a framebuffer (current alpha returns NULL).
+ * Call between kkemu_poll() ticks — pointer is valid until next poll.
+ */
+export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number; height: number } {
+  if (!ffi) return { framebuffer: null, width: 0, height: 0 }
+  const widthBuf = new Int32Array(1)
+  const heightBuf = new Int32Array(1)
+  const fbPtr = ffi.symbols.kkemu_get_display(ptr(widthBuf), ptr(heightBuf))
+  const w = widthBuf[0]
+  const h = heightBuf[0]
+  if (!fbPtr || w === 0 || h === 0) return { framebuffer: null, width: w, height: h }
+  const byteLen = (w * h) / 8 // 2048 bytes for 256x64 1-bit
+  const framebuffer = new Uint8Array(toBuffer(fbPtr, 0, byteLen))
+  return { framebuffer, width: w, height: h }
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────
