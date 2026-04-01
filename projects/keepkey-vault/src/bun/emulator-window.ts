@@ -112,6 +112,7 @@ const emuRpc = BrowserView.defineRPC<EmulatorWindowRPC>({
   handlers: {
     requests: {
       emuConfirm: ({ id, approved }) => {
+        console.log(`${TAG} emuConfirm received: id=${id}, approved=${approved}, pending=${!!pendingConfirm}`)
         if (pendingConfirm && pendingConfirm.id === id) {
           pendingConfirm.resolve(approved)
           pendingConfirm = null
@@ -307,17 +308,21 @@ export async function emuInteractiveConfirm(
     }
 
     // Ask user for confirmation
+    console.log(`${TAG} Waiting for user confirmation (id=${id.slice(0, 8)}...)`)
     const approved = await requestUserConfirm({ id, ...details })
+    console.log(`${TAG} User responded: approved=${approved}`)
 
     if (!approved) {
       throw new Error('Transaction rejected by user on emulator')
     }
 
     // User approved — pre-write BA+DLD and execute
+    console.log(`${TAG} Pre-writing confirmations + final poll`)
     prewriteConfirmations(1)
     emuPollOnce()
 
     const result = await promise
+    console.log(`${TAG} Operation complete, saving state`)
     saveEmulatorState()
     return result
   } finally {
@@ -548,10 +553,17 @@ const EMULATOR_HTML = `<!DOCTYPE html>
         const data = typeof event.data === 'string' ? event.data : await event.data.text();
         const parsed = JSON.parse(data);
         let packet = parsed;
-        if (parsed.encryptedData && w.__electrobun_decrypt) {
-          const decrypted = await w.__electrobun_decrypt(parsed.encryptedData, parsed.iv, parsed.tag);
-          packet = JSON.parse(decrypted);
+        if (parsed.encryptedData) {
+          if (w.__electrobun_decrypt) {
+            const decrypted = await w.__electrobun_decrypt(parsed.encryptedData, parsed.iv, parsed.tag);
+            packet = JSON.parse(decrypted);
+          } else {
+            console.warn('[emu-ui] Received encrypted packet but no decryptor available — dropping');
+            console.warn('[emu-ui] Keys in packet:', Object.keys(parsed).join(', '));
+            return;
+          }
         }
+        console.log('[emu-ui] Packet received:', packet.type, packet.id || packet.method || '');
         handlePacket(packet);
       } catch (err) {
         console.error('[emu-ui] Parse error:', err);
@@ -559,7 +571,8 @@ const EMULATOR_HTML = `<!DOCTYPE html>
     });
 
     socket.addEventListener('open', function() {
-      console.log('[emu-ui] RPC connected');
+      console.log('[emu-ui] RPC connected, port=' + port + ' webviewId=' + webviewId);
+      console.log('[emu-ui] Encryption available:', !!w.__electrobun_decrypt);
     });
 
     sendPacket = async function(pkt) {
@@ -578,11 +591,14 @@ const EMULATOR_HTML = `<!DOCTYPE html>
 
   function handlePacket(packet) {
     if (packet.type === 'message') {
+      console.log('[emu-ui] Message:', packet.id, JSON.stringify(packet.payload || {}).slice(0, 120));
       if (packet.id === 'confirm-request') onConfirmRequest(packet.payload);
       if (packet.id === 'confirm-dismiss') onConfirmDismiss();
       if (packet.id === 'emu-state') onStateChange(packet.payload);
       if (packet.id === 'seed-display') onSeedDisplay(packet.payload);
       if (packet.id === 'seed-dismiss') onSeedDismiss();
+    } else {
+      console.log('[emu-ui] Non-message packet type:', packet.type, Object.keys(packet).join(','));
     }
   }
 
@@ -595,6 +611,7 @@ const EMULATOR_HTML = `<!DOCTYPE html>
   // ── UI handlers ──
 
   function onConfirmRequest(details) {
+    console.log('[emu-ui] Confirm request received: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
 
     // Format operation name
@@ -669,6 +686,7 @@ const EMULATOR_HTML = `<!DOCTYPE html>
 
   confirmBtn.addEventListener('click', function() {
     if (!currentConfirmId) return;
+    console.log('[emu-ui] CONFIRM clicked, id=' + currentConfirmId);
     rpcRequest('emuConfirm', { id: currentConfirmId, approved: true });
     oled.innerHTML = '<div class="idle-text" style="color:#4fc3f7">Processing...</div>';
     buttons.classList.remove('visible');
@@ -676,6 +694,7 @@ const EMULATOR_HTML = `<!DOCTYPE html>
 
   rejectBtn.addEventListener('click', function() {
     if (!currentConfirmId) return;
+    console.log('[emu-ui] REJECT clicked, id=' + currentConfirmId);
     rpcRequest('emuConfirm', { id: currentConfirmId, approved: false });
     oled.innerHTML = '<div class="idle-text" style="color:#e57373">Rejected</div>';
     buttons.classList.remove('visible');
