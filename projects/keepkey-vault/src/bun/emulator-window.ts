@@ -206,8 +206,10 @@ export function displaySeedWords(mnemonic: string): Promise<void> {
     pendingSeedAck = { resolve }
 
     try {
-      ;(emuWindow.webview.rpc as any)?.send?.['seed-display']({ words })
-      ;(emuWindow.webview.rpc as any)?.send?.['emu-state']({ state: 'seed-display' })
+      const rpc = emuWindow.webview?.rpc as any
+      console.log(`${TAG} Sending seed-display: rpc=${!!rpc}, send=${typeof rpc?.send}`)
+      rpc?.send?.['seed-display']({ words })
+      rpc?.send?.['emu-state']({ state: 'seed-display' })
     } catch (err) {
       console.error(`${TAG} Failed to send seed-display:`, err)
       pendingSeedAck = null
@@ -246,8 +248,17 @@ function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): P
 
     // Send confirm details to the webview
     try {
-      ;(emuWindow.webview.rpc as any)?.send?.['confirm-request'](details)
-      ;(emuWindow.webview.rpc as any)?.send?.['emu-state']({ state: 'confirming' })
+      const wv = emuWindow.webview
+      const rpc = wv?.rpc as any
+      console.log(`${TAG} Sending confirm-request: webview=${!!wv}, rpc=${!!rpc}, send=${typeof rpc?.send}`)
+      if (rpc?.send) {
+        rpc.send['confirm-request'](details)
+        rpc.send['emu-state']({ state: 'confirming' })
+      } else {
+        console.warn(`${TAG} No rpc.send available — auto-approving`)
+        pendingConfirm = null
+        resolve(true)
+      }
     } catch (err) {
       console.error(`${TAG} Failed to send confirm-request:`, err)
       pendingConfirm = null

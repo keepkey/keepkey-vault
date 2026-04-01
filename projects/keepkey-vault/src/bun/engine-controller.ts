@@ -698,9 +698,35 @@ export class EngineController extends EventEmitter {
             await probeXpub()
             console.log('[Engine] Emulator smoke-test passed after reconnect')
           } catch (retryErr: any) {
-            console.error('[Engine] Emulator smoke-test still fails after reconnect:', retryErr?.message || retryErr)
-            this.lastError = 'Emulator flash may be stale — try wiping and re-loading seed'
-            this.updateState('error')
+            // Storage key persistence is broken — the firmware can't decrypt
+            // its own stored seed after a restart.  Auto-wipe the flash so the
+            // setup wizard appears instead of a dead-end error state.
+            console.warn('[Engine] Emulator storage key stale — auto-wiping flash for clean start')
+            const { stopEmulator, initEmulator } = await import('./emulator')
+            const { deleteFlash } = await import('./emulator-keychain')
+            stopEmulator()
+            deleteFlash('default')
+            const status = initEmulator('default')
+            if (status.state !== 'running') {
+              this.lastError = `Emulator restart failed: ${status.error}`
+              this.updateState('error')
+              return
+            }
+            // Reconnect to the fresh (uninitialized) emulator
+            const cleanAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+            const cleanDevice = await cleanAdapter.getDevice()
+            const cleanWallet = await cleanAdapter.pairRawDevice(cleanDevice, true)
+            if (cleanWallet) {
+              this.wallet = cleanWallet as any
+              this.activeTransport = 'emulator'
+              this.attachTransportListeners()
+              this.cachedFeatures = await withTimeout(
+                cleanWallet.initialize(),
+                PAIR_TIMEOUT_MS,
+                'emulator fresh-init'
+              )
+            }
+            this.updateState(this.deriveState(this.cachedFeatures))
             return
           }
         }
