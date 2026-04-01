@@ -1,19 +1,14 @@
 /**
  * Emulator Window — a second BrowserWindow that shows a "fake KeepKey"
- * device screen and gates signing/address-display operations on user
- * confirmation.
+ * device screen and Confirm/Reject buttons for signing operations.
  *
- * The window uses inline HTML (no separate Vite build) and communicates
- * with the Bun backend via Electrobun RPC.
+ * Communication bypasses Electrobun's encrypted WebSocket because the
+ * inline HTML loads at about:blank which has no crypto.subtle (not a
+ * secure context in WKWebView).
  *
- * Architecture:
- *   [RPC handler] → emuInteractiveConfirm(fn, details)
- *     1. Pause poll, start operation (chunks queue in ring buffer)
- *     2. Poll N-1 times (consume all but last chunk)
- *     3. Send confirm-request to emulator window
- *     4. Wait for user Confirm/Reject click
- *     5. If approved: prewriteConfirmations → final poll → return result
- *     6. If rejected: throw error
+ * Transport:
+ *   bun → webview:  executeJavascript → window.handlePacket(...)
+ *   webview → bun:  fetch('http://localhost:EMU_BRIDGE_PORT/_emu/confirm')
  */
 import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/bun'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
@@ -50,7 +45,7 @@ function saveWindowState(state: WindowState): void {
   }
 }
 
-// ── RPC Schema ──────────────────────────────────────────────────────────
+// ── Confirm details ─────────────────────────────────────────────────────
 
 export interface EmulatorConfirmDetails {
   operation: string
@@ -60,96 +55,116 @@ export interface EmulatorConfirmDetails {
   memo?: string
 }
 
-type EmulatorWindowRPC = {
-  bun: RPCSchema<{
-    requests: {
-      emuConfirm: {
-        params: { id: string; approved: boolean }
-        response: { ok: boolean }
-      }
-      seedAcked: {
-        params: {}
-        response: { ok: boolean }
-      }
-    }
-    messages: {}
-  }>
-  webview: RPCSchema<{
-    requests: {}
-    messages: {
-      'confirm-request': {
-        id: string
-        operation: string
-        chain?: string
-        to?: string
-        value?: string
-        memo?: string
-      }
-      'confirm-dismiss': {}
-      'emu-state': { state: 'idle' | 'confirming' | 'processing' | 'seed-display' }
-      'seed-display': { words: string[] }
-      'seed-dismiss': {}
-    }
-  }>
-}
+// ── Bridge server (webview → bun) ───────────────────────────────────────
+//
+// Tiny HTTP server that the emulator webview fetches to send button clicks
+// back to bun. Separate from the REST API (port 1646) to avoid auth/CORS.
 
-// ── State ───────────────────────────────────────────────────────────────
+let bridgeServer: ReturnType<typeof Bun.serve> | null = null
+let bridgePort = 0
 
-let emuWindow: BrowserWindow<typeof emuRpc> | null = null
+/** Pending confirm — resolved when the webview POSTs to the bridge */
 let pendingConfirm: {
   id: string
   resolve: (approved: boolean) => void
 } | null = null
+
+/** Pending seed ack — resolved when the webview POSTs to the bridge */
 let pendingSeedAck: {
   resolve: () => void
 } | null = null
 
+function startBridge(): number {
+  if (bridgeServer) return bridgePort
 
-// ── RPC handlers ────────────────────────────────────────────────────────
+  bridgeServer = Bun.serve({
+    port: 0, // OS picks a free port
+    reusePort: true,
+    fetch(req) {
+      const url = new URL(req.url)
 
-const emuRpc = BrowserView.defineRPC<EmulatorWindowRPC>({
-  maxRequestTime: 600_000, // 10 min — user may take time to review
-  handlers: {
-    requests: {
-      emuConfirm: ({ id, approved }) => {
-        console.log(`${TAG} emuConfirm received: id=${id}, approved=${approved}, pending=${!!pendingConfirm}`)
-        if (pendingConfirm && pendingConfirm.id === id) {
-          pendingConfirm.resolve(approved)
-          pendingConfirm = null
-          return { ok: true }
-        }
-        console.warn(`${TAG} emuConfirm for unknown/stale id=${id}`)
-        return { ok: false }
-      },
-      seedAcked: () => {
+      if (url.pathname === '/_emu/confirm' && req.method === 'POST') {
+        return req.json().then((body: any) => {
+          console.log(`${TAG} Bridge: confirm id=${body.id}, approved=${body.approved}`)
+          if (pendingConfirm && pendingConfirm.id === body.id) {
+            pendingConfirm.resolve(body.approved)
+            pendingConfirm = null
+          }
+          return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        })
+      }
+
+      if (url.pathname === '/_emu/seed-ack' && req.method === 'POST') {
+        console.log(`${TAG} Bridge: seed acknowledged`)
         if (pendingSeedAck) {
           pendingSeedAck.resolve()
           pendingSeedAck = null
         }
-        return { ok: true }
-      },
+        return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+      }
+
+      // CORS preflight
+      if (req.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          },
+        })
+      }
+
+      return new Response('not found', { status: 404 })
     },
-    messages: {},
-  },
+  })
+
+  bridgePort = bridgeServer.port
+  console.log(`${TAG} Bridge server on port ${bridgePort}`)
+  return bridgePort
+}
+
+function stopBridge(): void {
+  if (bridgeServer) {
+    bridgeServer.stop()
+    bridgeServer = null
+    bridgePort = 0
+  }
+}
+
+// ── RPC Schema (still needed for BrowserWindow constructor) ─────────────
+
+type EmulatorWindowRPC = {
+  bun: RPCSchema<{ requests: {}; messages: {} }>
+  webview: RPCSchema<{ requests: {}; messages: {} }>
+}
+
+const emuRpc = BrowserView.defineRPC<EmulatorWindowRPC>({
+  maxRequestTime: 600_000,
+  handlers: { requests: {}, messages: {} },
 })
+
+// ── Window state ────────────────────────────────────────────────────────
+
+let emuWindow: BrowserWindow<typeof emuRpc> | null = null
 
 // ── Window lifecycle ────────────────────────────────────────────────────
 
 export function openEmulatorWindow(): void {
   if (emuWindow) return
 
+  const port = startBridge()
   const saved = loadWindowState()
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
 
   emuWindow = new BrowserWindow({
     title: 'KeepKey Emulator',
-    html: EMULATOR_HTML,
+    html: buildEmulatorHTML(port),
     rpc: emuRpc,
     frame: { width: saved.width, height: saved.height, x: saved.x, y: saved.y },
   })
 
   emuWindow.on('close', () => {
-    // Persist window position/size for next session
     try {
       const frame = emuWindow?.getFrame?.()
       if (frame) saveWindowState(frame)
@@ -170,7 +185,6 @@ export function openEmulatorWindow(): void {
 
 export function closeEmulatorWindow(): void {
   if (!emuWindow) return
-  // Persist position before closing
   try {
     const frame = emuWindow.getFrame?.()
     if (frame) saveWindowState(frame)
@@ -182,18 +196,23 @@ export function closeEmulatorWindow(): void {
   }
   try { emuWindow.close() } catch {}
   emuWindow = null
+  stopBridge()
 }
 
 export function isEmulatorWindowOpen(): boolean {
   return emuWindow !== null
 }
 
+// ── Send to webview (bun → webview via executeJavascript) ───────────────
+
+function sendToWindow(messageName: string, payload: any): void {
+  if (!emuWindow) return
+  const packet = JSON.stringify({ type: 'message', id: messageName, payload })
+  emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+}
+
 // ── Seed word display ───────────────────────────────────────────────────
 
-/**
- * Show seed words on the emulator window and wait for user acknowledgement.
- * Words are ONLY displayed on the emulator "device screen", never sent to the main UI.
- */
 export function displaySeedWords(mnemonic: string): Promise<void> {
   return new Promise((resolve) => {
     const words = mnemonic.trim().split(/\s+/)
@@ -207,10 +226,8 @@ export function displaySeedWords(mnemonic: string): Promise<void> {
     pendingSeedAck = { resolve }
 
     try {
-      const rpc = emuWindow.webview?.rpc as any
-      console.log(`${TAG} Sending seed-display: rpc=${!!rpc}, send=${typeof rpc?.send}`)
-      rpc?.send?.['seed-display']({ words })
-      rpc?.send?.['emu-state']({ state: 'seed-display' })
+      sendToWindow('seed-display', { words })
+      sendToWindow('emu-state', { state: 'seed-display' })
     } catch (err) {
       console.error(`${TAG} Failed to send seed-display:`, err)
       pendingSeedAck = null
@@ -220,66 +237,45 @@ export function displaySeedWords(mnemonic: string): Promise<void> {
 }
 
 export function dismissSeedDisplay(): void {
-  try {
-    ;(emuWindow?.webview.rpc as any)?.send?.['seed-dismiss']({})
-    ;(emuWindow?.webview.rpc as any)?.send?.['emu-state']({ state: 'idle' })
-  } catch {}
+  sendToWindow('seed-dismiss', {})
+  sendToWindow('emu-state', { state: 'idle' })
 }
 
 // ── Interactive confirm ─────────────────────────────────────────────────
 
-/**
- * Request user confirmation via the emulator window.
- * Returns a promise that resolves to true (approved) or false (rejected).
- */
-function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (!emuWindow) {
-      console.warn(`${TAG} No emulator window — auto-approving`)
-      resolve(true)
-      return
-    }
+async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
+  if (!emuWindow) {
+    console.warn(`${TAG} No emulator window — auto-approving`)
+    return true
+  }
 
+  return new Promise((resolve) => {
     // Reject any stale pending confirm
     if (pendingConfirm) {
       pendingConfirm.resolve(false)
     }
-
     pendingConfirm = { id: details.id, resolve }
 
-    // Send confirm details to the webview
-    try {
-      const wv = emuWindow.webview
-      const rpc = wv?.rpc as any
-      console.log(`${TAG} Sending confirm-request: webview=${!!wv}, rpc=${!!rpc}, send=${typeof rpc?.send}`)
-      if (rpc?.send) {
-        rpc.send['confirm-request'](details)
-        rpc.send['emu-state']({ state: 'confirming' })
-      } else {
-        console.warn(`${TAG} No rpc.send available — auto-approving`)
-        pendingConfirm = null
-        resolve(true)
-      }
-    } catch (err) {
-      console.error(`${TAG} Failed to send confirm-request:`, err)
-      pendingConfirm = null
-      resolve(true) // fall back to auto-approve
-    }
+    console.log(`${TAG} Sending confirm-request: op=${details.operation}`)
+    sendToWindow('confirm-request', details)
+    sendToWindow('emu-state', { state: 'confirming' })
   })
 }
 
 function sendDismiss(): void {
-  try {
-    ;(emuWindow?.webview.rpc as any)?.send?.['confirm-dismiss']({})
-    ;(emuWindow?.webview.rpc as any)?.send?.['emu-state']({ state: 'idle' })
-  } catch {}
+  sendToWindow('confirm-dismiss', {})
+  sendToWindow('emu-state', { state: 'idle' })
 }
 
 /**
  * Interactive confirm wrapper for emulator signing/address operations.
  *
- * Same as emuConfirmOp but waits for user to click Confirm/Reject in the
- * emulator window before pre-writing ButtonAck + DebugLinkDecision.
+ * 1. Pause poll, start operation (chunks queue in ring buffer)
+ * 2. Poll N-1 times (consume all but last chunk)
+ * 3. Send confirm-request to emulator window
+ * 4. Wait for user Confirm/Reject (arrives via bridge HTTP POST)
+ * 5. If approved: prewriteConfirmations → final poll → return result
+ * 6. If rejected: throw error
  */
 export async function emuInteractiveConfirm(
   fn: () => Promise<any>,
@@ -295,19 +291,16 @@ export async function emuInteractiveConfirm(
   pausePoll()
 
   try {
-    // Start operation — transport writes chunks to ring buffer
     const promise = fn()
     await new Promise(r => setTimeout(r, 30))
 
     const numChunks = engineDelegate?.chunkCount || 1
     console.log(`${TAG} ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
 
-    // Consume all chunks except the last
     for (let i = 0; i < numChunks - 1; i++) {
       emuPollOnce()
     }
 
-    // Ask user for confirmation
     console.log(`${TAG} Waiting for user confirmation (id=${id.slice(0, 8)}...)`)
     const approved = await requestUserConfirm({ id, ...details })
     console.log(`${TAG} User responded: approved=${approved}`)
@@ -316,7 +309,6 @@ export async function emuInteractiveConfirm(
       throw new Error('Transaction rejected by user on emulator')
     }
 
-    // User approved — pre-write BA+DLD and execute
     console.log(`${TAG} Pre-writing confirmations + final poll`)
     prewriteConfirmations(1)
     emuPollOnce()
@@ -333,7 +325,8 @@ export async function emuInteractiveConfirm(
 
 // ── Inline HTML ─────────────────────────────────────────────────────────
 
-const EMULATOR_HTML = `<!DOCTYPE html>
+function buildEmulatorHTML(bridgePort: number): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -404,93 +397,39 @@ const EMULATOR_HTML = `<!DOCTYPE html>
     text-align: center;
     word-break: break-all;
   }
-  .oled-content .op-label {
-    color: #4fc3f7;
-    font-weight: bold;
-    font-size: 12px;
-    margin-bottom: 4px;
-  }
-  .oled-content .detail {
-    color: #ccc;
-    font-size: 10px;
-  }
-  .oled-content .addr {
-    color: #81c784;
-    font-size: 10px;
-    font-family: 'Courier New', monospace;
-  }
-  .idle-text {
-    color: #666;
-    font-size: 12px;
-  }
-  .buttons {
-    display: none;
-    padding: 10px 16px 14px;
-    gap: 12px;
-    justify-content: center;
-  }
+  .oled-content .op-label { color: #4fc3f7; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
+  .oled-content .detail { color: #ccc; font-size: 10px; }
+  .oled-content .addr { color: #81c784; font-size: 10px; font-family: 'Courier New', monospace; }
+  .idle-text { color: #666; font-size: 12px; }
+  .buttons { display: none; padding: 10px 16px 14px; gap: 12px; justify-content: center; }
   .buttons.visible { display: flex; }
   .btn {
-    padding: 8px 24px;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
+    padding: 8px 24px; border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s;
   }
   .btn:active { transform: scale(0.96); }
-  .btn-confirm {
-    background: #2e7d32;
-    color: #fff;
-  }
+  .btn-confirm { background: #2e7d32; color: #fff; }
   .btn-confirm:hover { background: #388e3c; }
-  .btn-reject {
-    background: #c62828;
-    color: #fff;
-  }
+  .btn-reject { background: #c62828; color: #fff; }
   .btn-reject:hover { background: #d32f2f; }
-  /* Seed word display */
   .seed-section { display: none; padding: 8px 12px; }
   .seed-section.visible { display: block; }
   .seed-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: #e67e22;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    text-align: center;
-    margin-bottom: 6px;
+    font-size: 11px; font-weight: 700; color: #e67e22;
+    text-transform: uppercase; letter-spacing: 1px; text-align: center; margin-bottom: 6px;
   }
-  .seed-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    justify-content: center;
-  }
+  .seed-grid { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
   .seed-word {
-    background: #2a2a2a;
-    border: 1px solid #444;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 10px;
-    font-family: 'Courier New', monospace;
-    min-width: 70px;
-    text-align: center;
+    background: #2a2a2a; border: 1px solid #444; border-radius: 4px;
+    padding: 2px 6px; font-size: 10px; font-family: 'Courier New', monospace;
+    min-width: 70px; text-align: center;
   }
   .seed-word .num { color: #666; font-size: 9px; }
   .seed-word .word { color: #81c784; font-weight: 600; }
   .seed-ack-btn {
-    display: none;
-    margin: 8px auto;
-    padding: 8px 20px;
-    background: #2e7d32;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
+    display: none; margin: 8px auto; padding: 8px 20px;
+    background: #2e7d32; color: #fff; border: none; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
   }
   .seed-ack-btn.visible { display: block; }
   .seed-ack-btn:hover { background: #388e3c; }
@@ -510,7 +449,7 @@ const EMULATOR_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div class="seed-section" id="seedSection">
-    <div class="seed-title">Recovery Phrase — Write These Down</div>
+    <div class="seed-title">Recovery Phrase</div>
     <div class="seed-grid" id="seedGrid"></div>
   </div>
   <button class="seed-ack-btn" id="seedAckBtn">I've recorded my words</button>
@@ -521,122 +460,59 @@ const EMULATOR_HTML = `<!DOCTYPE html>
 
 <script>
 (function() {
-  const oled = document.getElementById('oled');
-  const buttons = document.getElementById('buttons');
-  const confirmBtn = document.getElementById('confirmBtn');
-  const rejectBtn = document.getElementById('rejectBtn');
-  const displayArea = document.getElementById('displayArea');
-  const seedSection = document.getElementById('seedSection');
-  const seedGrid = document.getElementById('seedGrid');
-  const seedAckBtn = document.getElementById('seedAckBtn');
+  var BRIDGE = 'http://localhost:${bridgePort}';
+  var oled = document.getElementById('oled');
+  var buttons = document.getElementById('buttons');
+  var confirmBtn = document.getElementById('confirmBtn');
+  var rejectBtn = document.getElementById('rejectBtn');
+  var displayArea = document.getElementById('displayArea');
+  var seedSection = document.getElementById('seedSection');
+  var seedGrid = document.getElementById('seedGrid');
+  var seedAckBtn = document.getElementById('seedAckBtn');
+  var currentConfirmId = null;
 
-  let currentConfirmId = null;
-  let sendPacket = null;
-  let nextReqId = 0;
+  // ── Receive messages from bun (via executeJavascript) ──
 
-  // ── Minimal RPC client (same WebSocket protocol as Electrobun) ──
-
-  function initRpc() {
-    const w = window;
-    const port = w.__electrobunRpcSocketPort;
-    const webviewId = w.__electrobunWebviewId;
-
-    if (!port || !webviewId) {
-      console.warn('[emu-ui] Electrobun globals not injected');
-      return;
-    }
-
-    const socket = new WebSocket('ws://localhost:' + port + '/socket?webviewId=' + webviewId);
-
-    socket.addEventListener('message', async function(event) {
-      try {
-        const data = typeof event.data === 'string' ? event.data : await event.data.text();
-        const parsed = JSON.parse(data);
-        let packet = parsed;
-        if (parsed.encryptedData) {
-          if (w.__electrobun_decrypt) {
-            const decrypted = await w.__electrobun_decrypt(parsed.encryptedData, parsed.iv, parsed.tag);
-            packet = JSON.parse(decrypted);
-          } else {
-            console.warn('[emu-ui] Received encrypted packet but no decryptor available — dropping');
-            console.warn('[emu-ui] Keys in packet:', Object.keys(parsed).join(', '));
-            return;
-          }
-        }
-        console.log('[emu-ui] Packet received:', packet.type, packet.id || packet.method || '');
-        handlePacket(packet);
-      } catch (err) {
-        console.error('[emu-ui] Parse error:', err);
-      }
-    });
-
-    socket.addEventListener('open', function() {
-      console.log('[emu-ui] RPC connected, port=' + port + ' webviewId=' + webviewId);
-      console.log('[emu-ui] Encryption available:', !!w.__electrobun_decrypt);
-    });
-
-    sendPacket = async function(pkt) {
-      if (socket.readyState !== WebSocket.OPEN) return;
-      const json = JSON.stringify(pkt);
-      if (w.__electrobun_encrypt) {
-        try {
-          const enc = await w.__electrobun_encrypt(json);
-          socket.send(JSON.stringify(enc));
-          return;
-        } catch {}
-      }
-      socket.send(json);
-    };
-  }
-
-  function handlePacket(packet) {
+  window.handlePacket = function(packet) {
     if (packet.type === 'message') {
-      console.log('[emu-ui] Message:', packet.id, JSON.stringify(packet.payload || {}).slice(0, 120));
+      console.log('[emu-ui] Received:', packet.id);
       if (packet.id === 'confirm-request') onConfirmRequest(packet.payload);
       if (packet.id === 'confirm-dismiss') onConfirmDismiss();
-      if (packet.id === 'emu-state') onStateChange(packet.payload);
       if (packet.id === 'seed-display') onSeedDisplay(packet.payload);
       if (packet.id === 'seed-dismiss') onSeedDismiss();
-    } else {
-      console.log('[emu-ui] Non-message packet type:', packet.type, Object.keys(packet).join(','));
     }
-  }
+  };
 
-  function rpcRequest(method, params) {
-    if (!sendPacket) return;
-    const id = ++nextReqId;
-    sendPacket({ type: 'request', id: id, method: method, params: params });
+  // ── Send responses to bun (via fetch to bridge server) ──
+
+  function postBridge(path, body) {
+    fetch(BRIDGE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(function(err) {
+      console.error('[emu-ui] Bridge POST failed:', err);
+    });
   }
 
   // ── UI handlers ──
 
   function onConfirmRequest(details) {
-    console.log('[emu-ui] Confirm request received: op=' + details.operation + ' id=' + details.id);
+    console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
-
-    // Format operation name
     var opName = details.operation
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/^\\s/, '')
+      .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
       .replace('Sign Tx', 'Sign Transaction')
       .replace('Get Address', 'Verify Address');
-
-    var html = '<div class="op-label">' + escHtml(opName) + '</div>';
-    if (details.chain) {
-      html += '<div class="detail">Chain: ' + escHtml(details.chain) + '</div>';
-    }
+    var html = '<div class="op-label">' + esc(opName) + '</div>';
+    if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
     if (details.to) {
       var addr = details.to;
       if (addr.length > 20) addr = addr.slice(0, 10) + '...' + addr.slice(-8);
-      html += '<div class="addr">To: ' + escHtml(addr) + '</div>';
+      html += '<div class="addr">To: ' + esc(addr) + '</div>';
     }
-    if (details.value) {
-      html += '<div class="detail">Amount: ' + escHtml(details.value) + '</div>';
-    }
-    if (details.memo) {
-      html += '<div class="detail">Memo: ' + escHtml(details.memo) + '</div>';
-    }
-
+    if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
+    if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
     oled.innerHTML = html;
     buttons.classList.add('visible');
   }
@@ -653,15 +529,13 @@ const EMULATOR_HTML = `<!DOCTYPE html>
     words.forEach(function(word, i) {
       var el = document.createElement('div');
       el.className = 'seed-word';
-      el.innerHTML = '<span class="num">' + (i + 1) + '</span> <span class="word">' + escHtml(word) + '</span>';
+      el.innerHTML = '<span class="num">' + (i+1) + '</span> <span class="word">' + esc(word) + '</span>';
       seedGrid.appendChild(el);
     });
-    // Hide OLED area, show seed section
     displayArea.style.display = 'none';
     seedSection.classList.add('visible');
     seedAckBtn.classList.add('visible');
     buttons.classList.remove('visible');
-    oled.innerHTML = '<div class="idle-text" style="color:#e67e22">Seed words shown below</div>';
   }
 
   function onSeedDismiss() {
@@ -672,30 +546,26 @@ const EMULATOR_HTML = `<!DOCTYPE html>
     oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
   }
 
-  function onStateChange(data) {
-    // Could add visual state indicators later
-  }
-
-  function escHtml(str) {
+  function esc(str) {
     var d = document.createElement('div');
     d.textContent = str || '';
     return d.innerHTML;
   }
 
-  // ── Button clicks ──
+  // ── Button clicks → bridge POST ──
 
   confirmBtn.addEventListener('click', function() {
     if (!currentConfirmId) return;
-    console.log('[emu-ui] CONFIRM clicked, id=' + currentConfirmId);
-    rpcRequest('emuConfirm', { id: currentConfirmId, approved: true });
+    console.log('[emu-ui] CONFIRM clicked');
+    postBridge('/_emu/confirm', { id: currentConfirmId, approved: true });
     oled.innerHTML = '<div class="idle-text" style="color:#4fc3f7">Processing...</div>';
     buttons.classList.remove('visible');
   });
 
   rejectBtn.addEventListener('click', function() {
     if (!currentConfirmId) return;
-    console.log('[emu-ui] REJECT clicked, id=' + currentConfirmId);
-    rpcRequest('emuConfirm', { id: currentConfirmId, approved: false });
+    console.log('[emu-ui] REJECT clicked');
+    postBridge('/_emu/confirm', { id: currentConfirmId, approved: false });
     oled.innerHTML = '<div class="idle-text" style="color:#e57373">Rejected</div>';
     buttons.classList.remove('visible');
     setTimeout(function() {
@@ -704,14 +574,15 @@ const EMULATOR_HTML = `<!DOCTYPE html>
   });
 
   seedAckBtn.addEventListener('click', function() {
-    rpcRequest('seedAcked', {});
+    console.log('[emu-ui] Seed acknowledged');
+    postBridge('/_emu/seed-ack', {});
     onSeedDismiss();
   });
 
-  // ── Init ──
-  initRpc();
+  console.log('[emu-ui] Ready, bridge=' + BRIDGE);
 })();
 </script>
 </body>
 </html>
 `
+}
