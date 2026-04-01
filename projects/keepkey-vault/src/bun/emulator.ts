@@ -17,7 +17,7 @@ import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { resolve, join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import {
-  isMacOS, hasKeychainKey, getOrCreateKey, getPairingStatus,
+  isMacOS, getOrCreateKey, getPairingStatus,
   loadFlash, saveFlash, zeroFlash, listFlashImages, deleteFlash,
   type EmulatorFlash, type EmulatorPairingStatus,
 } from './emulator-keychain'
@@ -244,13 +244,6 @@ export function stopEmulator(): EmulatorStatus {
   }
 
   return getEmulatorStatus()
-}
-
-/**
- * Get the active flash buffer pointer (for direct FFI use).
- */
-export function getActiveFlashBuffer(): Buffer | null {
-  return activeFlash?.buffer ?? null
 }
 
 // ── FFI Message I/O (for hdwallet TransportDelegate) ────────────────────

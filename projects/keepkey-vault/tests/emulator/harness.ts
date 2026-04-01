@@ -149,9 +149,6 @@ export class EmuHarness {
     this.transportDelegate = null
   }
 
-  /** Number of pending auto-confirms to inject when ButtonRequest appears. */
-  private pendingConfirms = 0
-
   /** Pause the poll timer (needed before confirm ops). */
   pausePoll(): void {
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null }
@@ -162,41 +159,7 @@ export class EmuHarness {
     if (!this.pollTimer && this.ffi) {
       this.pollTimer = setInterval(() => {
         try { this.ffi?.symbols.kkemu_poll() } catch {}
-        // Check if firmware wrote a ButtonRequest — if so, inject BA+DLD
-        // into the input ring buffers so confirm_helper finds them on its
-        // next check_for_tiny_msg() call (inside the SAME kkemu_poll).
-        // This doesn't work for blocking confirms because kkemu_poll hasn't
-        // returned yet. But it handles non-blocking confirm scenarios.
       }, 16)
-    }
-  }
-
-  /**
-   * Smart poll that checks for ButtonRequest after each tick and injects
-   * confirmations. Runs synchronously — call in a loop or use with
-   * confirmOp().
-   */
-  private smartPollOnce(): void {
-    if (!this.ffi) return
-    this.ffi.symbols.kkemu_poll()
-
-    // Check output for ButtonRequest — if found, write BA+DLD immediately
-    // so the NEXT poll tick's confirm_helper can consume them.
-    if (this.pendingConfirms > 0) {
-      const buf = new Uint8Array(64)
-      const n = this.ffi.symbols.kkemu_read(ptr(buf), 64, 0)
-      if (n > 0) {
-        const msgType = (buf[3] << 8) | buf[4]
-        if (msgType === 26) { // ButtonRequest
-          // Put ButtonRequest back in output so the transport can read it
-          // Actually — we can't put it back. Instead, consume it and inject confirms.
-          this.ffi.symbols.kkemu_write(ptr(BUTTON_ACK_FRAME), 64, 0)
-          this.ffi.symbols.kkemu_write(ptr(DEBUG_LINK_DECISION_YES), 64, 1)
-          this.pendingConfirms--
-        }
-        // Non-ButtonRequest messages stay consumed — they'll be re-read by transport
-        // This is a problem. Let me use a different approach.
-      }
     }
   }
 

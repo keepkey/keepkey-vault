@@ -349,29 +349,31 @@ async function emuConfirmOp(fn: () => Promise<any>): Promise<any> {
 
 	pausePoll()
 
-	const promise = fn()
-	await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
+	try {
+		const promise = fn()
+		await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
 
-	const numChunks = delegate?.chunkCount || 1
-	console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
+		const numChunks = delegate?.chunkCount || 1
+		console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
 
-	// Consume all chunks except the last
-	for (let i = 0; i < numChunks - 1; i++) {
+		// Consume all chunks except the last
+		for (let i = 0; i < numChunks - 1; i++) {
+			emuPollOnce()
+		}
+
+		// Now rb_main_in has only the last chunk. Write BA+DLD after it.
+		prewriteConfirmations(1)
+
+		// Final poll: reads last chunk → dispatches → confirm_helper → BA+DLD → exits
 		emuPollOnce()
+
+		const result = await promise
+		saveEmulatorState()
+		return result
+	} finally {
+		// Resume for transport to read the response
+		resumePoll()
 	}
-
-	// Now rb_main_in has only the last chunk. Write BA+DLD after it.
-	prewriteConfirmations(1)
-
-	// Final poll: reads last chunk → dispatches → confirm_helper → BA+DLD → exits
-	emuPollOnce()
-
-	// Resume for transport to read the response
-	resumePoll()
-
-	const result = await promise
-	saveEmulatorState()
-	return result
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────

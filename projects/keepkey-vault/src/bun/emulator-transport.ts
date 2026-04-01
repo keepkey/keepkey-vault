@@ -57,8 +57,6 @@ export class EmulatorTransportDelegate implements TransportDelegate {
 
   async writeChunk(buf: Uint8Array, debugLink?: boolean): Promise<void> {
     const iface = debugLink ? 1 : 0
-    const hdr = Array.from(buf.slice(0, 9)).map(b => b.toString(16).padStart(2, '0')).join(' ')
-    console.log(`${TAG} writeChunk iface=${iface} len=${buf.length} hdr=[${hdr}]`)
     const ok = emuWrite(buf, iface)
     if (!ok) {
       throw new Error(`${TAG} emuWrite failed (iface=${iface}, len=${buf.length})`)
@@ -73,15 +71,8 @@ export class EmulatorTransportDelegate implements TransportDelegate {
 
     while (Date.now() < deadline) {
       const data = emuRead(iface)
-      if (data) {
-        const hdr = Array.from(data.slice(0, 9)).map(b => b.toString(16).padStart(2, '0')).join(' ')
-        console.log(`${TAG} readChunk iface=${iface} got ${data.length}b after ${pollCount} polls hdr=[${hdr}]`)
-        return data
-      }
+      if (data) return data
       pollCount++
-      if (pollCount === 1 || pollCount % 200 === 0) {
-        console.log(`${TAG} readChunk iface=${iface} polling... (${pollCount})`)
-      }
       // Non-blocking read returned nothing — yield then retry
       await new Promise(r => setTimeout(r, READ_POLL_MS))
     }
@@ -172,10 +163,3 @@ export function prewriteConfirmations(count: number): void {
   }
 }
 
-/**
- * Send DebugLinkDecision(yes_no=true) directly to the emulator on interface 1.
- */
-export function emuPressYes(): boolean {
-  console.log(`${TAG} emuPressYes → writing DebugLinkDecision(yes) to iface=1`)
-  return emuWrite(DEBUG_LINK_DECISION_YES, 1)
-}

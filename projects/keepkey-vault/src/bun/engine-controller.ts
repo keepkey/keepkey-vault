@@ -6,7 +6,7 @@ import { usb } from 'usb'
 import { saveDeviceSnapshot } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
-import { EmulatorKeepKeyAdapter, emuPressYes } from './emulator-transport'
+import { EmulatorKeepKeyAdapter } from './emulator-transport'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'

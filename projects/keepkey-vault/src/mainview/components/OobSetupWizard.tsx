@@ -2045,7 +2045,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
                     <Button
                       w="100%" colorScheme="green" size="md"
-                      onClick={() => { setEmulatorMnemonicAcked(true); setStep('init-label') }}
+                      onClick={() => { setEmulatorMnemonicAcked(true); setEmulatorMnemonic(null); setStep('init-label') }}
                     >
                       I've saved my words — Continue
                     </Button>
