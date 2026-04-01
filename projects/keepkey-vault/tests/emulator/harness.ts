@@ -135,6 +135,25 @@ export class EmuHarness {
     }, 16)
   }
 
+  /** Boot the emulator from an existing flash buffer (for persistence tests). */
+  async bootFromFlash(flashBuf: Buffer): Promise<void> {
+    if (flashBuf.length !== FLASH_SIZE) throw new Error(`Flash buffer wrong size: ${flashBuf.length}`)
+    this.ffi = loadDylib()
+    this.flash = flashBuf
+    const rc = this.ffi.symbols.kkemu_init(ptr(this.flash), FLASH_SIZE)
+    if (rc !== 0) throw new Error(`kkemu_init failed: ${rc}`)
+
+    this.pollTimer = setInterval(() => {
+      try { this.ffi?.symbols.kkemu_poll() } catch {}
+    }, 16)
+  }
+
+  /** Get a copy of the current flash buffer (for saving/restoring). */
+  getFlashSnapshot(): Buffer | null {
+    if (!this.flash) return null
+    return Buffer.from(this.flash)
+  }
+
   /** Shutdown emulator and release resources. */
   shutdown(): void {
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null }
