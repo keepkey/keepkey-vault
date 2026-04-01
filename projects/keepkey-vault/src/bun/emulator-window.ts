@@ -313,12 +313,16 @@ export async function emuInteractiveConfirm(
     prewriteConfirmations(1)
     emuPollOnce()
 
+    // Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
+    // to deliver the firmware response. Without this, await hangs forever.
+    resumePoll()
+
     const result = await promise
     console.log(`${TAG} Operation complete, saving state`)
     saveEmulatorState()
     return result
   } finally {
-    resumePoll()
+    resumePoll() // idempotent — ensures poll is always restored
     sendDismiss()
   }
 }
