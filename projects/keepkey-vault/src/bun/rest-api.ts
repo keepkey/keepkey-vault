@@ -17,6 +17,14 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
 
+export interface EmuSigningDetails {
+  operation: string
+  chain?: string
+  to?: string
+  value?: string
+  memo?: string
+}
+
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
   onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
@@ -24,6 +32,8 @@ export interface RestApiCallbacks {
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
   onPairDismissed?: () => void
   getVersion: () => string
+  /** Wrap a signing/display op for the emulator (pre-writes confirmations, interactive approve) */
+  emuSigningOp?: (fn: () => Promise<any>, details: EmuSigningDetails) => Promise<any>
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -147,6 +157,7 @@ async function cosmosAminoSign(
   defaultDenom: string,
   defaultFeeAmount: string,
   defaultGas: string,
+  wrapper?: (fn: () => Promise<any>) => Promise<any>,
 ): Promise<any> {
   const { signDoc, signerAddress } = body
 
@@ -181,7 +192,8 @@ async function cosmosAminoSign(
     sequence: tx.sequence,
   }
 
-  const response = await (wallet as any)[walletMethod](input)
+  const callFn = () => (wallet as any)[walletMethod](input)
+  const response = wrapper ? await wrapper(callFn) : await callFn()
 
   return {
     signature: response?.signatures?.[0] ?? response?.signature,
@@ -857,6 +869,24 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     if (state.state === 'disconnected') clearFeaturesCache()
   })
 
+  /**
+   * Wrap a device operation for emulator safety.
+   * When the emulator is active, signing/display ops trigger firmware's
+   * confirm_helper() — a blocking C loop inside kkemu_poll(). Without the
+   * wrapper, the JS event loop freezes permanently (83% CPU spin).
+   */
+  function emuWrap<T>(fn: () => Promise<T>, details: EmuSigningDetails, condition = true): Promise<T> {
+    if (condition && engine.isEmulator && callbacks?.emuSigningOp) {
+      return callbacks.emuSigningOp(fn, details) as Promise<T>
+    }
+    return fn()
+  }
+
+  /** Normalize showDisplay to boolean (undefined → false). */
+  function showDisplay(requested: boolean | undefined): boolean {
+    return requested ?? false
+  }
+
   const server = Bun.serve({
     reusePort: true,
     port,
@@ -1224,12 +1254,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'utxo:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.btcGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.btcGetAddress({
             addressNList: body.address_n,
             coin: body.coin || 'Bitcoin',
             scriptType: body.script_type,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'btcGetAddress', chain: 'Bitcoin' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1244,10 +1275,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'cosmos:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.cosmosGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.cosmosGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'cosmosGetAddress', chain: 'Cosmos' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1262,10 +1294,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'osmo:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.osmosisGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.osmosisGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'osmosisGetAddress', chain: 'Osmosis' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1280,10 +1313,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'eth:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.ethGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.ethGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'ethGetAddress', chain: 'Ethereum' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1298,10 +1332,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'tendermint:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.cosmosGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.cosmosGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'cosmosGetAddress', chain: 'Cosmos' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1316,10 +1351,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'thor:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.thorchainGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.thorchainGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'thorchainGetAddress', chain: 'THORChain' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1334,10 +1370,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'maya:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.mayachainGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.mayachainGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'mayachainGetAddress', chain: 'Maya' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1352,10 +1389,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'xrp:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.rippleGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.rippleGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'xrpGetAddress', chain: 'XRP' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1370,10 +1408,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'sol:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.solanaGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.solanaGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'solanaGetAddress', chain: 'Solana' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1388,10 +1427,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'trx:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.tronGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.tronGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
-          })
+            showDisplay: sd,
+          }), { operation: 'tronGetAddress', chain: 'Tron' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1406,11 +1446,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = 'ton:' + JSON.stringify(body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
-          const result = await wallet.tonGetAddress({
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.tonGetAddress({
             addressNList: body.address_n,
-            showDisplay: body.show_display ?? false,
+            showDisplay: sd,
             bounceable: false, // UQ prefix — safe for uninitialized wallets
-          })
+          }), { operation: 'tonGetAddress', chain: 'TON' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
@@ -1490,7 +1531,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
           try {
-            const result = await wallet.ethSignTx(msg)
+            const result = await emuWrap(() => wallet.ethSignTx(msg), { operation: 'ethSignTx', chain: 'Ethereum', to: msg.to, value: msg.value })
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
             return json(validateResponse(result, S.EthSignTransactionResponse, path))
           } catch (err: any) {
@@ -1517,7 +1558,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           try {
-            const result = await wallet.ethSignTypedData({ addressNList, typedData: body.typedData })
+            const result = await emuWrap(() => wallet.ethSignTypedData({ addressNList, typedData: body.typedData }), { operation: 'ethSignTypedData', chain: 'Ethereum' })
             return json(result)
           } catch (err: any) {
             // Distinguish user cancellation from actual failures
@@ -1535,7 +1576,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.EthSignRequest)
           const { addressNList } = auth.getAccount(body.address)
           // hdwallet expects message as a hex string (isHexString check), not Buffer
-          const result = await wallet.ethSignMessage({ addressNList, message: body.message })
+          const result = await emuWrap(() => wallet.ethSignMessage({ addressNList, message: body.message }), { operation: 'ethSignMessage', chain: 'Ethereum' })
           return json(result)
         }
 
@@ -1568,7 +1609,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
-          const result = await wallet.btcSignTx({
+          const result = await emuWrap(() => wallet.btcSignTx({
             coin,
             inputs: body.inputs,
             outputs: body.outputs,
@@ -1578,7 +1619,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
             ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
             ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
-          })
+          }), { operation: 'btcSignTx', chain: coin })
           // Explicit chain for UTXO — auto-detect defaults to BTC but could be LTC/DOGE/etc
           const coinSymbol = coin === 'Bitcoin' ? 'BTC' : coin === 'Litecoin' ? 'LTC' : coin === 'Dogecoin' ? 'DOGE' : coin === 'Dash' ? 'DASH' : coin === 'BitcoinCash' ? 'BCH' : coin
           return json(validateResponse(result, S.UtxoSignTransactionResponse, path), 200, { chain: coinSymbol, activityType: 'sign' })
@@ -1589,37 +1630,37 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-delegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-undelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-redelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-withdraw-delegator-rewards-all' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-ibc-transfer' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
 
         // ── OSMOSIS SIGNING (9 endpoints) ────────────────────────────
@@ -1627,55 +1668,55 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-delegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-undelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-redelegate' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-withdraw-delegator-rewards-all' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-ibc-transfer' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-lp-remove' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-lp-add' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-swap' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
 
         // ── THORCHAIN SIGNING (2 endpoints) ──────────────────────────
@@ -1683,13 +1724,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000', (fn) => emuWrap(fn, { operation: 'thorchainSignTx', chain: 'THORChain' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/thorchain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000', (fn) => emuWrap(fn, { operation: 'thorchainSignTx', chain: 'THORChain' })), S.CosmosAminoSignResponse, path))
         }
 
         // ── MAYACHAIN SIGNING (2 endpoints) ──────────────────────────
@@ -1697,13 +1738,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000', (fn) => emuWrap(fn, { operation: 'mayachainSignTx', chain: 'Maya' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/mayachain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
-          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000'), S.CosmosAminoSignResponse, path))
+          return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000', (fn) => emuWrap(fn, { operation: 'mayachainSignTx', chain: 'Maya' })), S.CosmosAminoSignResponse, path))
         }
 
         // ── XRP SIGNING (1 endpoint) ─────────────────────────────────
@@ -1711,7 +1752,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.XrpSignRequest)
-          const result = await wallet.rippleSignTx(body)
+          const result = await emuWrap(() => wallet.rippleSignTx(body), { operation: 'rippleSignTx', chain: 'XRP' })
           return json(result)
         }
 
@@ -1738,10 +1779,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             deviceRawTx = Buffer.from(fullTx.subarray(messageStart)).toString('base64')
           }
 
-          const result = await wallet.solanaSignTx({
+          const result = await emuWrap(() => wallet.solanaSignTx({
             addressNList,
             rawTx: deviceRawTx,
-          })
+          }), { operation: 'solanaSignTx', chain: 'Solana' })
           // Assemble signed tx: replace dummy 64-byte signature in full tx with real signature
           if (result?.signature && body.raw_tx) {
             const rawBytes = Buffer.from(body.raw_tx, 'base64')
@@ -1762,11 +1803,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
-          const result = await wallet.solanaSignMessage({
+          const result = await emuWrap(() => wallet.solanaSignMessage({
             addressNList,
             message: body.message,
             showDisplay: body.show_display !== false,
-          })
+          }), { operation: 'solanaSignMessage', chain: 'Solana' })
           // result: { publicKey: Uint8Array, signature: Uint8Array }
           return json({
             signature: result.signature instanceof Uint8Array
@@ -1784,12 +1825,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.TronSignRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
-          const result = await wallet.tronSignTx({
+          const result = await emuWrap(() => wallet.tronSignTx({
             addressNList,
             rawTx: body.raw_tx,
             toAddress: body.to_address,
             amount: body.amount,
-          })
+          }), { operation: 'tronSignTx', chain: 'Tron' })
           return json({
             signature: result?.signature instanceof Uint8Array
               ? Buffer.from(result.signature).toString('hex')
@@ -1803,12 +1844,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.TonSignRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
-          const result = await wallet.tonSignTx({
+          const result = await emuWrap(() => wallet.tonSignTx({
             addressNList,
             rawTx: body.raw_tx,
             toAddress: body.to_address,
             amount: body.amount,
-          })
+          }), { operation: 'tonSignTx', chain: 'TON' })
           if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
           return json(result)
         }
@@ -1828,13 +1869,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cacheKey = JSON.stringify(body)
           const cached = pubkeyCache.get(cacheKey)
           if (cached) return json(cached)
-          const result = await wallet.getPublicKeys([{
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => wallet.getPublicKeys([{
             addressNList: body.address_n,
             curve: body.ecdsa_curve_name || 'secp256k1',
-            showDisplay: body.show_display ?? false,
+            showDisplay: sd,
             coin: body.coin_name || 'Bitcoin',
             scriptType: body.script_type,
-          }])
+          }]), { operation: 'getPublicKeys', chain: 'Bitcoin' }, sd)
           const xpub = result?.[0]?.xpub
           const out = { xpub }
           if (pubkeyCache.size >= MAX_CACHE_SIZE) evictOldest(pubkeyCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
@@ -2282,8 +2324,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (err.status) {
           return json({ error: err.message }, err.status)
         }
-        console.error('[REST] Error:', err)
-        return json({ error: 'Internal error' }, 500)
+        // Extract firmware Failure message if present (hdwallet wraps them)
+        const fwMsg = err?.message?.message || err?.message || 'Internal error'
+        const fwCode = err?.message?.code ?? err?.code
+        console.error('[REST] Error:', typeof fwMsg === 'string' ? fwMsg : JSON.stringify(fwMsg),
+          fwCode != null ? `(code ${fwCode})` : '')
+        return json({ error: typeof fwMsg === 'string' ? fwMsg : 'Internal error', code: fwCode }, 500)
       } finally {
         // Dismiss signing overlay AFTER the handler completes (success, error, or cancellation)
         if (activeSigningId && callbacks?.onSigningDismissed) {

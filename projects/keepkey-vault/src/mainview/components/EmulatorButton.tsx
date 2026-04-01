@@ -30,6 +30,24 @@ export function EmulatorButton() {
 
 	console.log("[EMU-BTN] render — mounted:", mounted, "status:", status ? "loaded" : "null", "rpcError:", rpcError)
 
+	const handleWipe = async () => {
+		if (loading) return
+		setLoading(true)
+		try {
+			console.log("[EMU-BTN] Wiping emulator flash...")
+			// Stop emulator, delete flash, restart fresh
+			await rpcRequest("emulatorStop", undefined, 10000)
+			await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
+			const s = await rpcRequest<EmulatorStatus>("emulatorInit", undefined, 15000)
+			console.log("[EMU-BTN] Wipe complete, restarted:", JSON.stringify(s))
+			setStatus(s)
+		} catch (e: any) {
+			console.error("[EMU-BTN] Wipe FAILED:", e)
+			setRpcError(e?.message || String(e))
+		}
+		setLoading(false)
+	}
+
 	const handleClick = async () => {
 		console.log("[EMU-BTN] handleClick — status:", status, "loading:", loading)
 		if (loading) return
@@ -136,25 +154,45 @@ export function EmulatorButton() {
 						</Flex>
 					)}
 
-					<Box
-						as="button"
-						mt="2"
-						w="100%"
-						py="6px"
-						borderRadius="md"
-						fontSize="xs"
-						fontWeight="700"
-						textAlign="center"
-						cursor={loading ? "wait" : "pointer"}
-						bg={isRunning ? "rgba(239,68,68,0.2)" : "rgba(192,168,96,0.2)"}
-						color={isRunning ? "#EF4444" : "#C0A860"}
-						border="1px solid"
-						borderColor={isRunning ? "rgba(239,68,68,0.4)" : "rgba(192,168,96,0.4)"}
-						_hover={{ bg: isRunning ? "rgba(239,68,68,0.35)" : "rgba(192,168,96,0.35)" }}
-						onClick={handleClick}
-					>
-						{label}
-					</Box>
+					<Flex mt="2" gap="2">
+						<Box
+							as="button"
+							flex="1"
+							py="6px"
+							borderRadius="md"
+							fontSize="xs"
+							fontWeight="700"
+							textAlign="center"
+							cursor={loading ? "wait" : "pointer"}
+							bg={isRunning ? "rgba(239,68,68,0.2)" : "rgba(192,168,96,0.2)"}
+							color={isRunning ? "#EF4444" : "#C0A860"}
+							border="1px solid"
+							borderColor={isRunning ? "rgba(239,68,68,0.4)" : "rgba(192,168,96,0.4)"}
+							_hover={{ bg: isRunning ? "rgba(239,68,68,0.35)" : "rgba(192,168,96,0.35)" }}
+							onClick={handleClick}
+						>
+							{label}
+						</Box>
+						{isRunning && (
+							<Box
+								as="button"
+								py="6px"
+								px="10px"
+								borderRadius="md"
+								fontSize="xs"
+								fontWeight="700"
+								textAlign="center"
+								cursor={loading ? "wait" : "pointer"}
+								bg="rgba(239,68,68,0.1)"
+								color="#EF4444"
+								border="1px solid rgba(239,68,68,0.3)"
+								_hover={{ bg: "rgba(239,68,68,0.25)" }}
+								onClick={handleWipe}
+							>
+								Wipe
+							</Box>
+						)}
+					</Flex>
 
 					<Text fontSize="9px" color="gray.500" mt="2" textAlign="center">
 						Testing only — not for real funds

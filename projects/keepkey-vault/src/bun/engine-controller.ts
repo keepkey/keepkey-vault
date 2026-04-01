@@ -239,10 +239,13 @@ export class EngineController extends EventEmitter {
 
       // Pre-cache wallet fingerprint so BIP-85 and other ops don't need
       // a separate btcGetAddress call (which can trigger BUTTON_REQUEST).
-      if (!this.cachedFingerprint) {
+      // Skip for emulator — the first address call may fail with code 11
+      // on stale/incompatible flash, and the fire-and-forget error can
+      // leave the transport in a bad state for subsequent REST calls.
+      if (!this.cachedFingerprint && this.activeTransport !== 'emulator') {
         this.getWalletFingerprint()
           .then(fp => console.log('[Engine] Fingerprint pre-cached:', fp.slice(0, 12) + '...'))
-          .catch(err => console.warn('[Engine] Fingerprint pre-cache failed (will retry on demand):', err?.message))
+          .catch(err => console.warn('[Engine] Fingerprint pre-cache failed (will retry on demand):', err?.message || err))
       }
     }
 
@@ -638,9 +641,72 @@ export class EngineController extends EventEmitter {
         initialized: this.cachedFeatures?.initialized ?? '(undefined)',
         firmwareVersion: this.extractVersion(this.cachedFeatures),
         label: this.cachedFeatures?.label || '(none)',
+        pinProtection: this.cachedFeatures?.pinProtection,
+        pinCached: this.cachedFeatures?.pinCached,
+        passphraseProtection: this.cachedFeatures?.passphraseProtection,
+        passphraseCached: this.cachedFeatures?.passphraseCached,
       }))
 
-      this.updateState(this.deriveState(this.cachedFeatures))
+      const derivedState = this.deriveState(this.cachedFeatures)
+
+      // Smoke-test: if state looks 'ready', verify the firmware can actually
+      // derive keys.  After kkemu_init() with existing flash, the firmware may
+      // need extra poll cycles before key derivation works.  The test harness
+      // gets these naturally (loadSeed → drain → reconnect), but the app goes
+      // straight from Initialize to key ops.
+      //
+      // Recovery: flush ring buffers, reconnect transport, re-initialize, retry.
+      if (derivedState === 'ready') {
+        const probeXpub = async () => {
+          await withTimeout(
+            (this.wallet as any).getPublicKeys([{
+              addressNList: [0x80000000 + 44, 0x80000000 + 0, 0x80000000 + 0],
+              coin: 'Bitcoin',
+              scriptType: 'p2pkh',
+              showDisplay: false,
+            }]),
+            10_000,
+            'emulator smoke-test'
+          )
+        }
+
+        try {
+          await probeXpub()
+          console.log('[Engine] Emulator smoke-test passed (key derivation OK)')
+        } catch (probeErr: any) {
+          console.warn('[Engine] Emulator smoke-test failed, flushing + reconnecting...', probeErr?.message || probeErr)
+          // Flush stale ring-buffer data and let firmware settle
+          const { flushRingBuffers } = await import('./emulator')
+          flushRingBuffers()
+
+          // Reconnect transport (same pattern as test harness after loadSeed)
+          const freshAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+          const freshDevice = await freshAdapter.getDevice()
+          const freshWallet = await freshAdapter.pairRawDevice(freshDevice, true)
+          if (freshWallet) {
+            this.wallet = freshWallet as any
+            this.attachTransportListeners()
+            this.cachedFeatures = await withTimeout(
+              freshWallet.initialize(),
+              PAIR_TIMEOUT_MS,
+              'emulator re-initialize'
+            )
+          }
+
+          // Retry
+          try {
+            await probeXpub()
+            console.log('[Engine] Emulator smoke-test passed after reconnect')
+          } catch (retryErr: any) {
+            console.error('[Engine] Emulator smoke-test still fails after reconnect:', retryErr?.message || retryErr)
+            this.lastError = 'Emulator flash may be stale — try wiping and re-loading seed'
+            this.updateState('error')
+            return
+          }
+        }
+      }
+
+      this.updateState(derivedState)
     } catch (err: any) {
       console.error('[Engine] Emulator connection failed:', err?.message || err)
       this.clearWallet()
