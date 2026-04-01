@@ -699,11 +699,12 @@ export class EngineController extends EventEmitter {
             console.log('[Engine] Emulator smoke-test passed after reconnect')
           } catch (retryErr: any) {
             // Storage key persistence is broken — the firmware can't decrypt
-            // its own stored seed after a restart.  Auto-wipe the flash so the
-            // setup wizard appears instead of a dead-end error state.
-            console.warn('[Engine] Emulator storage key stale — auto-wiping flash for clean start')
+            // its own stored seed after a restart.  Auto-wipe the flash and
+            // reload the saved mnemonic from Keychain if available.
+            console.warn('[Engine] Emulator storage key stale — auto-wiping flash')
             const { stopEmulator, initEmulator } = await import('./emulator')
-            const { deleteFlash } = await import('./emulator-keychain')
+            const { deleteFlash, loadMnemonic } = await import('./emulator-keychain')
+            const savedMnemonic = loadMnemonic('default')
             stopEmulator()
             deleteFlash('default')
             const status = initEmulator('default')
@@ -716,17 +717,61 @@ export class EngineController extends EventEmitter {
             const cleanAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
             const cleanDevice = await cleanAdapter.getDevice()
             const cleanWallet = await cleanAdapter.pairRawDevice(cleanDevice, true)
-            if (cleanWallet) {
-              this.wallet = cleanWallet as any
-              this.activeTransport = 'emulator'
-              this.attachTransportListeners()
-              this.cachedFeatures = await withTimeout(
-                cleanWallet.initialize(),
-                PAIR_TIMEOUT_MS,
-                'emulator fresh-init'
-              )
+            if (!cleanWallet) {
+              this.lastError = 'Emulator reconnect failed after wipe'
+              this.updateState('error')
+              return
             }
-            this.updateState(this.deriveState(this.cachedFeatures))
+            this.wallet = cleanWallet as any
+            this.activeTransport = 'emulator'
+            this.attachTransportListeners()
+            this.cachedFeatures = await withTimeout(
+              cleanWallet.initialize(),
+              PAIR_TIMEOUT_MS,
+              'emulator fresh-init'
+            )
+
+            // Auto-reload saved mnemonic if available
+            if (savedMnemonic) {
+              console.log('[Engine] Auto-reloading saved mnemonic from Keychain...')
+              const { prewriteConfirmations } = await import('./emulator-transport')
+              const { pausePoll, resumePoll, emuPollOnce, saveEmulatorState } = await import('./emulator')
+              const delegate = (this.wallet as any)?.transport?.delegate
+              if (delegate) delegate.chunkCount = 0
+              pausePoll()
+              const loadPromise = (this.wallet as any).loadDevice({
+                mnemonic: savedMnemonic, pin: false, passphrase: false, skipChecksum: false,
+              })
+              await new Promise(r => setTimeout(r, 30))
+              const numChunks = delegate?.chunkCount || 1
+              for (let i = 0; i < numChunks - 1; i++) emuPollOnce()
+              prewriteConfirmations(1)
+              emuPollOnce()
+              resumePoll()
+              await loadPromise
+              saveEmulatorState()
+              console.log('[Engine] Mnemonic auto-loaded successfully')
+
+              // Flush + reconnect for clean state
+              const { flushRingBuffers } = await import('./emulator')
+              flushRingBuffers()
+              const reAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+              const reDevice = await reAdapter.getDevice()
+              const reWallet = await reAdapter.pairRawDevice(reDevice, true)
+              if (reWallet) {
+                this.wallet = reWallet as any
+                this.attachTransportListeners()
+                this.cachedFeatures = await withTimeout(
+                  reWallet.initialize(),
+                  PAIR_TIMEOUT_MS,
+                  'emulator post-reload'
+                )
+              }
+              this.updateState(this.deriveState(this.cachedFeatures))
+            } else {
+              console.log('[Engine] No saved mnemonic — showing setup wizard')
+              this.updateState(this.deriveState(this.cachedFeatures))
+            }
             return
           }
         }

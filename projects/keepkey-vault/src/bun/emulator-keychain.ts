@@ -249,6 +249,67 @@ export function deleteFlash(name: string): boolean {
   }
 }
 
+// ── Mnemonic Persistence (workaround for firmware storage key bug) ──────
+//
+// The firmware's storage_deriveWrappingKey uses HW entropy that changes
+// per kkemu_init() call, so the encrypted sec section can't be decrypted
+// after a restart.  We save the mnemonic separately so the app can
+// auto-loadDevice on restart.
+
+/** Path to an encrypted mnemonic file */
+function getMnemonicPath(flashName: string): string {
+  return join(getStorageDir(), `${flashName}.mnemonic.enc`)
+}
+
+/**
+ * Save a mnemonic encrypted with the Keychain key.
+ * Stored alongside the flash image as <name>.mnemonic.enc
+ */
+export function saveMnemonic(flashName: string, mnemonic: string): void {
+  const key = getOrCreateKey()
+  const plaintext = Buffer.from(mnemonic, 'utf-8')
+  const encrypted = encrypt(plaintext, key)
+  const encPath = getMnemonicPath(flashName)
+  const fs = require('fs')
+  fs.writeFileSync(encPath, encrypted, { mode: 0o600 })
+  console.log(`${TAG} Mnemonic saved for flash "${flashName}"`)
+}
+
+/**
+ * Load a saved mnemonic (decrypted from Keychain key).
+ * Returns null if no mnemonic is saved for this flash.
+ */
+export function loadMnemonic(flashName: string): string | null {
+  const encPath = getMnemonicPath(flashName)
+  if (!existsSync(encPath)) return null
+  try {
+    const key = getOrCreateKey()
+    const fs = require('fs')
+    const encData = fs.readFileSync(encPath) as Buffer
+    const plaintext = decrypt(encData, key)
+    console.log(`${TAG} Mnemonic loaded for flash "${flashName}"`)
+    return plaintext.toString('utf-8')
+  } catch (err: any) {
+    console.warn(`${TAG} Failed to load mnemonic for "${flashName}":`, err?.message)
+    return null
+  }
+}
+
+/**
+ * Delete a saved mnemonic.
+ */
+export function deleteMnemonic(flashName: string): boolean {
+  const encPath = getMnemonicPath(flashName)
+  try {
+    const fs = require('fs')
+    fs.unlinkSync(encPath)
+    console.log(`${TAG} Deleted mnemonic for flash "${flashName}"`)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ── Pairing Status ──────────────────────────────────────────────────────
 
 export interface EmulatorPairingStatus {
