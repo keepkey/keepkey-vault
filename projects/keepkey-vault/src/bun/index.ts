@@ -3109,22 +3109,6 @@ engine.on('state-change', (state) => {
 		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
 	}
 })
-// Seed changed — wipe stale balance/address caches for this device.
-// Triggered by verifySeedIdentity() when the derived ETH address
-// doesn't match what was stored from the previous session.
-engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
-	console.warn(`[Vault] SEED CHANGED for ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
-	console.warn('[Vault] Wiping stale balances, cached pubkeys, and EVM indices')
-	btcAccounts.reset()
-	evmAddresses.reset()
-	clearCachedPubkeys(deviceId)
-	clearBalances(deviceId)
-	// Clear EVM tracked indices so auto-discover starts fresh
-	setSetting('evm_tracked_indices', '[]')
-	// Notify frontend to refresh
-	try { rpc.send['device-state'](engine.getDeviceState()) } catch {}
-})
-
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
 })
