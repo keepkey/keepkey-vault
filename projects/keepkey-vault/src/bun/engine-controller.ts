@@ -237,6 +237,11 @@ export class EngineController extends EventEmitter {
         saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
       } catch { /* never block on cache failure */ }
 
+      // Verify seed identity — detects wipe+restore or emulator seed swap.
+      // Emits 'seed-changed' if the derived ETH address differs from the stored one.
+      this.verifySeedIdentity()
+        .catch(err => console.warn('[Engine] Seed identity check failed:', err?.message))
+
       // Pre-cache wallet fingerprint so BIP-85 and other ops don't need
       // a separate btcGetAddress call (which can trigger BUTTON_REQUEST).
       // Skip for emulator — the first address call may fail with code 11
@@ -1493,6 +1498,43 @@ export class EngineController extends EventEmitter {
     if (!address) throw new Error('Failed to derive fingerprint address')
     this.cachedFingerprint = address
     return address
+  }
+
+  /**
+   * Derive the primary ETH address (m/44'/60'/0'/0/0) and compare against
+   * the last known address in the DB. If they differ, the seed changed —
+   * emit 'seed-changed' so the app can wipe stale balances/caches.
+   */
+  async verifySeedIdentity(): Promise<void> {
+    if (!this.wallet) return
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const ethAddress = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (!ethAddress) {
+        console.warn('[Engine] verifySeedIdentity: could not derive ETH address')
+        return
+      }
+      const deviceId = this.cachedFeatures?.deviceId || 'unknown'
+      const { getSetting, setSetting } = await import('./db')
+      const storedKey = `seed_eth_${deviceId}`
+      const storedAddress = getSetting(storedKey)?.toLowerCase() || null
+
+      if (storedAddress && storedAddress !== ethAddress) {
+        console.warn(`[Engine] SEED CHANGED — stored ${storedAddress.slice(0, 10)}... ≠ device ${ethAddress.slice(0, 10)}...`)
+        this.emit('seed-changed', { deviceId, oldAddress: storedAddress, newAddress: ethAddress })
+      } else if (!storedAddress) {
+        console.log(`[Engine] First-time seed identity: ${ethAddress.slice(0, 10)}...`)
+      } else {
+        console.log(`[Engine] Seed identity verified: ${ethAddress.slice(0, 10)}...`)
+      }
+      // Always store the current address
+      setSetting(storedKey, ethAddress)
+    } catch (err: any) {
+      console.warn('[Engine] verifySeedIdentity failed:', err?.message)
+    }
   }
 
   // ── BIP-85 Derived Seeds ────────────────────────────────────────────────
