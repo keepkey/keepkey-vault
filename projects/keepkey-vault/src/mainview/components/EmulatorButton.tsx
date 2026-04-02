@@ -195,7 +195,7 @@ export function EmulatorButton() {
 					</Flex>
 
 					<Text fontSize="9px" color="gray.500" mt="2" textAlign="center">
-						Testing only — not for real funds
+						For development purposes only
 					</Text>
 				</Box>
 			)}

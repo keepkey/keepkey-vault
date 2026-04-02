@@ -147,8 +147,6 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
 
   // Emulator state — moved below deviceStatus declaration
-  const [emulatorMnemonic, setEmulatorMnemonic] = useState<string | null>(null)
-  const [emulatorMnemonicAcked, setEmulatorMnemonicAcked] = useState(false)
 
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
@@ -586,22 +584,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const handleCreateWallet = async () => {
     setSetupType('create')
     setStep('init-progress')
-    setEmulatorMnemonic(null)
-    setEmulatorMnemonicAcked(false)
-
     setSetupError(null)
     try {
       if (isEmulator) {
-        // Emulator: generate mnemonic on backend (bip39 needs Node Buffer),
-        // use loadDevice (single confirm). resetDevice uses 13+ confirmations
-        // which block kkemu_poll() due to libkkemu_socketRead() priority drain.
-        const result = await rpcRequest('emulatorCreateWallet', { wordCount }, DEVICE_INTERACTION_TIMEOUT) as { mnemonic: string }
-        if (result?.mnemonic) {
-          setEmulatorMnemonic(result.mnemonic)
-          return
-        }
-        // If no mnemonic returned, skip to complete (label was set server-side)
-        setStep('complete')
+        // Emulator: generate mnemonic on backend, load device, then display
+        // seed words on the emulator device window (not here in the main UI).
+        // The RPC blocks until the user acknowledges the words on the emulator.
+        await rpcRequest('emulatorCreateWallet', { wordCount }, DEVICE_INTERACTION_TIMEOUT)
+        // Seed was shown + acked on emulator window — skip to label step
+        setStep('init-label')
         return
       }
 
@@ -2013,47 +2004,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
               <VStack gap={4} textAlign="center" w="100%" maxW="480px" mx="auto">
-                {/* ── Emulator: show generated mnemonic ────────────────── */}
-                {isEmulator && emulatorMnemonic ? (
-                  <VStack gap={4} w="100%">
-                    <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor="orange.400">
-                      <HStack gap={2} justify="center">
-                        <FaExclamationTriangle color="#F6AD55" size={16} />
-                        <Text fontSize="sm" color="orange.200" fontWeight="bold" textTransform="uppercase" letterSpacing="wider">
-                          Emulator Mode
-                        </Text>
-                        <FaExclamationTriangle color="#F6AD55" size={16} />
-                      </HStack>
-                      <Text fontSize="xs" color="orange.300" textAlign="center" mt={1}>
-                        This is a simulated device. The seed below exists only in the emulator's encrypted flash.
-                      </Text>
-                    </Box>
-
-                    <Text fontSize="md" fontWeight="bold" color="white">Your Recovery Phrase</Text>
-                    <Text fontSize="xs" color="gray.400">Write these words down if you want to restore this emulator wallet later.</Text>
-
-                    <Box w="100%" p={4} bg="gray.800" borderRadius="lg" borderWidth="1px" borderColor="gray.600">
-                      <Flex wrap="wrap" gap={2} justify="center">
-                        {emulatorMnemonic.split(/\s+/).map((word, i) => (
-                          <Box key={i} px={3} py={1.5} bg="gray.700" borderRadius="md" minW="80px" textAlign="center">
-                            <Text fontSize="xs" color="gray.500" lineHeight="1">{i + 1}</Text>
-                            <Text fontSize="sm" color="white" fontWeight="600">{word}</Text>
-                          </Box>
-                        ))}
-                      </Flex>
-                    </Box>
-
-                    <Button
-                      w="100%" colorScheme="green" size="md"
-                      onClick={() => { setEmulatorMnemonicAcked(true); setEmulatorMnemonic(null); setStep('init-label') }}
-                    >
-                      I've saved my words — Continue
-                    </Button>
-                  </VStack>
-                ) : (
-                  /* ── Normal device: spinner + "look at device" ─────── */
-                  <>
-                    <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
+                {/* ── Spinner + "look at device" (or emulator window) ─────── */}
+                <>
+                  <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
                     <VStack gap={1}>
                       <Text fontSize="md" fontWeight="bold" color="white">
                         {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
@@ -2090,7 +2043,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         <HStack gap={2} justify="center">
                           <Spinner size="xs" color="orange.300" />
                           <Text fontSize="xs" color="orange.200" fontWeight="bold">
-                            Emulator: auto-confirming button presses...
+                            Check the Emulator window for prompts
                           </Text>
                         </HStack>
                       </Box>
@@ -2106,8 +2059,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         </HStack>
                       </Box>
                     )}
-                  </>
-                )}
+                </>
 
                 {setupError && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="lg" borderWidth="1px" borderColor="red.500">
@@ -2473,7 +2425,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     entirely.
                   </Text>
                   <Text fontSize="xs" color="red.300" lineHeight="tall">
-                    Only use this for throwaway development and testing wallets.
+                    For development purposes only.
                     Never load a seed that controls real funds.
                   </Text>
                 </VStack>

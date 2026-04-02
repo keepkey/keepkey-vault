@@ -603,7 +603,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						<Section title="Emulator" defaultOpen={true}>
 							<VStack gap="2" align="stretch">
 								<Box bg="rgba(255,152,0,0.08)" border="1px solid" borderColor="rgba(255,152,0,0.3)" borderRadius="md" px="3" py="2">
-									<Text fontSize="xs" color="orange.300" fontWeight="600">Testing Only — Not for Real Funds</Text>
+									<Text fontSize="xs" color="orange.300" fontWeight="600">For Development Purposes Only</Text>
 								</Box>
 								<InfoRow label="Mode" value="In-Process (dylib FFI)" />
 								<InfoRow label="Transport" value="Ring Buffer" />
