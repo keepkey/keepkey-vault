@@ -286,6 +286,28 @@ test-rest:
 test-emu:
 	cd $(PROJECT_DIR) && bun test tests/emulator/
 
+# Run python-keepkey consistency tests against the kkemu binary (UDP).
+# Launches kkemu, runs pytest, then kills kkemu.
+test-emu-python:
+	@echo "Starting kkemu (UDP 11044/11045)..."
+	@./firmware/emulators/7.10.0-alpha/kkemu & KKPID=$$!; \
+	sleep 1; \
+	echo "Running python-keepkey tests..."; \
+	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
+	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python \
+	python3 -m pytest \
+		test_basic.py \
+		test_msg_getaddress.py \
+		test_msg_ethereum_getaddress.py \
+		test_msg_ethereum_signtx_xfer.py \
+		test_msg_ethereum_erc20_approve.py \
+		test_msg_cosmos_getaddress.py \
+		test_msg_ethereum_message.py \
+		-v 2>&1; \
+	EXIT=$$?; \
+	kill $$KKPID 2>/dev/null; \
+	exit $$EXIT
+
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
 
