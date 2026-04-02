@@ -7,7 +7,7 @@
  * - Encrypted blob persisted at ~/.keepkey/emulator/<name>.enc
  */
 import { execSync } from 'child_process'
-import { mkdirSync, existsSync, chmodSync } from 'fs'
+import { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -91,11 +91,9 @@ export function getOrCreateKey(): Buffer {
 
   let key = readKeychainKey()
   if (key && key.length === KEY_SIZE) {
-    console.log(`${TAG} Key loaded from Keychain`)
     return key
   }
 
-  // Generate new key
   console.log(`${TAG} Generating new encryption key...`)
   key = Buffer.from(crypto.getRandomValues(new Uint8Array(KEY_SIZE)))
   writeKeychainKey(key)
@@ -111,11 +109,6 @@ export function getOrCreateKey(): Buffer {
  */
 function encrypt(plaintext: Buffer, key: Buffer): Buffer {
   const iv = Buffer.from(crypto.getRandomValues(new Uint8Array(IV_SIZE)))
-  const cryptoKey = crypto.subtle
-  // Use Bun's native crypto
-  const cipher = new Bun.CryptoHasher('sha256') // placeholder — use actual AES below
-
-  // Bun supports node:crypto — use createCipheriv
   const nodeCrypto = require('crypto')
   const cipherGcm = nodeCrypto.createCipheriv('aes-256-gcm', key, iv)
   const encrypted = Buffer.concat([
@@ -176,8 +169,7 @@ export function loadFlash(name = 'default'): EmulatorFlash {
 
   if (existsSync(encPath)) {
     console.log(`${TAG} Loading encrypted flash: ${encPath}`)
-    const fs = require('fs')
-    const encData = fs.readFileSync(encPath) as Buffer
+    const encData = readFileSync(encPath) as Buffer
     const plaintext = decrypt(encData, key)
 
     if (plaintext.length !== FLASH_SIZE) {
@@ -205,8 +197,7 @@ export function saveFlash(flash: EmulatorFlash): void {
   console.log(`${TAG} Encrypting flash to: ${encPath}`)
   const encrypted = encrypt(flash.buffer, key)
 
-  const fs = require('fs')
-  fs.writeFileSync(encPath, encrypted, { mode: 0o600 })
+  writeFileSync(encPath, encrypted, { mode: 0o600 })
   console.log(`${TAG} Flash saved (${encrypted.length} bytes encrypted)`)
 }
 
@@ -224,10 +215,9 @@ export function zeroFlash(flash: EmulatorFlash): void {
  */
 export function listFlashImages(): string[] {
   const dir = getStorageDir()
-  const fs = require('fs')
   try {
-    return (fs.readdirSync(dir) as string[])
-      .filter((f: string) => f.endsWith('.enc'))
+    return (readdirSync(dir) as string[])
+      .filter((f: string) => f.endsWith('.enc') && !f.includes('.mnemonic.'))
       .map((f: string) => f.replace('.enc', ''))
   } catch {
     return []
@@ -240,8 +230,7 @@ export function listFlashImages(): string[] {
 export function deleteFlash(name: string): boolean {
   const encPath = getFlashPath(name)
   try {
-    const fs = require('fs')
-    fs.unlinkSync(encPath)
+    unlinkSync(encPath)
     console.log(`${TAG} Deleted flash image: ${name}`)
     return true
   } catch {
@@ -270,8 +259,7 @@ export function saveMnemonic(flashName: string, mnemonic: string): void {
   const plaintext = Buffer.from(mnemonic, 'utf-8')
   const encrypted = encrypt(plaintext, key)
   const encPath = getMnemonicPath(flashName)
-  const fs = require('fs')
-  fs.writeFileSync(encPath, encrypted, { mode: 0o600 })
+  writeFileSync(encPath, encrypted, { mode: 0o600 })
   console.log(`${TAG} Mnemonic saved for flash "${flashName}"`)
 }
 
@@ -284,8 +272,7 @@ export function loadMnemonic(flashName: string): string | null {
   if (!existsSync(encPath)) return null
   try {
     const key = getOrCreateKey()
-    const fs = require('fs')
-    const encData = fs.readFileSync(encPath) as Buffer
+    const encData = readFileSync(encPath) as Buffer
     const plaintext = decrypt(encData, key)
     console.log(`${TAG} Mnemonic loaded for flash "${flashName}"`)
     return plaintext.toString('utf-8')
@@ -301,8 +288,7 @@ export function loadMnemonic(flashName: string): string | null {
 export function deleteMnemonic(flashName: string): boolean {
   const encPath = getMnemonicPath(flashName)
   try {
-    const fs = require('fs')
-    fs.unlinkSync(encPath)
+    unlinkSync(encPath)
     console.log(`${TAG} Deleted mnemonic for flash "${flashName}"`)
     return true
   } catch {

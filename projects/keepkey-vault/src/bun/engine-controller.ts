@@ -610,6 +610,33 @@ export class EngineController extends EventEmitter {
   // ── Emulator Transport ────────────────────────────────────────────────
 
   /**
+   * Run a firmware operation that requires button confirmations on the emulator.
+   * Shared by loadDevice, wipe, applySettings, and auto-reload recovery.
+   */
+  async emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
+    const { pausePoll, resumePoll, emuPollOnce, saveEmulatorState, flushRingBuffers } = await import('./emulator')
+    const { prewriteConfirmations } = await import('./emulator-transport')
+    const delegate = this.emuDelegate
+    if (delegate) delegate.chunkCount = 0
+    pausePoll()
+    try {
+      const promise = fn()
+      await new Promise(r => setTimeout(r, 30))
+      const numChunks = delegate?.chunkCount || 1
+      for (let i = 0; i < numChunks - 1; i++) emuPollOnce()
+      prewriteConfirmations(confirmCount)
+      emuPollOnce()
+      resumePoll()
+      const result = await promise
+      flushRingBuffers()
+      saveEmulatorState()
+      return result
+    } finally {
+      resumePoll()
+    }
+  }
+
+  /**
    * Connect the engine to the running emulator.
    * Creates an hdwallet adapter backed by FFI emuRead/emuWrite,
    * pairs it, and runs syncState to derive the UI phase (needs_init, ready, etc.).
@@ -741,33 +768,13 @@ export class EngineController extends EventEmitter {
             // Auto-reload saved mnemonic if available
             if (savedMnemonic) {
               console.log('[Engine] Auto-reloading saved mnemonic from Keychain...')
-              // Use the same confirm helper that loadDevice/wipe use —
-              // the inline version had prewriteConfirmations(1) which is
-              // insufficient for loadDevice (needs 2) and caused the reload
-              // to block, falling through to emulatorCreateWallet with a random seed.
-              const { pausePoll, resumePoll, emuPollOnce, saveEmulatorState, flushRingBuffers } = await import('./emulator')
-              const { prewriteConfirmations } = await import('./emulator-transport')
-              const delegate = (this.wallet as any)?.transport?.delegate
-              if (delegate) delegate.chunkCount = 0
-              pausePoll()
-              try {
-                const loadPromise = (this.wallet as any).loadDevice({
-                  mnemonic: savedMnemonic, pin: false, passphrase: false, skipChecksum: false,
-                })
-                await new Promise(r => setTimeout(r, 30))
-                const numChunks = delegate?.chunkCount || 1
-                for (let i = 0; i < numChunks - 1; i++) emuPollOnce()
-                prewriteConfirmations(2)
-                emuPollOnce()
-                resumePoll()
-                await loadPromise
-                saveEmulatorState()
-                console.log('[Engine] Mnemonic auto-loaded successfully')
-              } finally {
-                resumePoll()
-              }
+              await this.emuConfirmOp(() => (this.wallet as any).loadDevice({
+                mnemonic: savedMnemonic, pin: false, passphrase: false, skipChecksum: false,
+              }), 2)
+              console.log('[Engine] Mnemonic auto-loaded successfully')
 
               // Flush + reconnect for clean state
+              const { flushRingBuffers } = await import('./emulator')
               flushRingBuffers()
               const reAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
               const reDevice = await reAdapter.getDevice()

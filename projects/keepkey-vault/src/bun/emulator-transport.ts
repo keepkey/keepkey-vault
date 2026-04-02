@@ -140,6 +140,7 @@ export const EmulatorKeepKeyAdapter = Adapter.fromDelegate(EmulatorAdapterDelega
 // kkemu_poll() tick work correctly.
 
 function buildHidFrame(msgType: number, payload: Uint8Array = new Uint8Array(0)): Uint8Array {
+  if (payload.length > 55) throw new Error(`HID frame payload too large: ${payload.length} > 55 bytes`)
   const frame = new Uint8Array(64)
   frame[0] = 0x3F  // '?' HID report marker
   frame[1] = 0x23  // '#'

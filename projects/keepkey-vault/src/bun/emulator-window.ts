@@ -81,6 +81,7 @@ function startBridge(): number {
 
   bridgeServer = Bun.serve({
     port: 0, // OS picks a free port
+    hostname: '127.0.0.1', // localhost only — bridge carries confirm/reject decisions
     reusePort: true,
     fetch(req) {
       const url = new URL(req.url)
@@ -326,7 +327,7 @@ export function stopDisplayPoll(): void {
 // Over-writing is safe — unused pairs get consumed as no-ops by subsequent polls.
 const CONFIRM_COUNTS: Record<string, number> = {
   ethSignTx: 4,         // approve/transfer + data warning + fee + margin
-  btcSignTx: 10,        // per-output confirm + fee + final (varies by output count)
+  btcSignTx: 20,        // per-output confirm + fee + final (varies by output count, over-allocate is safe)
   cosmosSignTx: 3,
   thorchainSignTx: 7,   // router + vault + asset + amount + memo + fee + margin
   mayachainSignTx: 7,

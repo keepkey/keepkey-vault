@@ -2159,12 +2159,12 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaKey color="#C0A860" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="white">
-                        Verify Your Recovery Phrase
+                        {t('verifySeed.title', { defaultValue: 'Verify Your Recovery Phrase' })}
                       </Text>
                       <Text fontSize="xs" color="gray.400" maxW="320px">
                         {isEmulator
-                          ? 'We\'ll ask you for 3 random words from your seed to confirm you have a correct backup.'
-                          : 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.'}
+                          ? t('verifySeed.descriptionEmulator', { defaultValue: 'We\'ll ask you for 3 random words from your seed to confirm you have a correct backup.' })
+                          : t('verifySeed.description', { defaultValue: 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.' })}
                       </Text>
                     </VStack>
                     <Button
@@ -2198,7 +2198,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         }
                       }}
                     >
-                      Verify Now
+                      {t('verifySeed.verifyNow', { defaultValue: 'Verify Now' })}
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
@@ -2206,7 +2206,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      Skip — I'll verify later
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later" })}
                     </Button>
                   </>
                 )}
@@ -2215,10 +2215,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaKey color="#C0A860" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="white">
-                        Enter the requested words
+                        {t('verifySeed.enterWords', { defaultValue: 'Enter the requested words' })}
                       </Text>
                       <Text fontSize="xs" color="gray.400" maxW="320px">
-                        Type the correct word for each position from your recovery phrase.
+                        {t('verifySeed.enterWordsDetail', { defaultValue: 'Type the correct word for each position from your recovery phrase.' })}
                       </Text>
                     </VStack>
                     <VStack gap={3} w="100%">
@@ -2275,7 +2275,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         }
                       }}
                     >
-                      Check Words
+                      {t('verifySeed.checkWords', { defaultValue: 'Check Words' })}
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
@@ -2283,7 +2283,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
-                      Back
+                      {t('common.back', { defaultValue: 'Back' })}
                     </Button>
                   </>
                 )}
@@ -2292,10 +2292,12 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <Spinner size="lg" color="#C0A860" borderWidth="3px" />
                     <VStack gap={1}>
                       <Text fontSize="md" fontWeight="bold" color="white">
-                        Verifying...
+                        {t('verifySeed.verifying', { defaultValue: 'Verifying...' })}
                       </Text>
                       <Text fontSize="xs" color="gray.400">
-                        {isEmulator ? 'Checking your answers...' : 'Follow the prompts on your KeepKey to enter the requested words.'}
+                        {isEmulator
+                          ? t('verifySeed.checkingAnswers', { defaultValue: 'Checking your answers...' })
+                          : t('verifySeed.followDevice', { defaultValue: 'Follow the prompts on your KeepKey to enter the requested words.' })}
                       </Text>
                     </VStack>
                   </>
@@ -2305,10 +2307,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaCheckCircle color="#48BB78" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="green.400">
-                        Recovery Phrase Verified!
+                        {t('verifySeed.verified', { defaultValue: 'Recovery Phrase Verified!' })}
                       </Text>
                       <Text fontSize="xs" color="gray.400">
-                        Your backup is correct. Keep it safe — never share it with anyone.
+                        {t('verifySeed.verifiedDetail', { defaultValue: 'Your backup is correct. Keep it safe — never share it with anyone.' })}
                       </Text>
                     </VStack>
                     <Button
@@ -2316,7 +2318,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      Continue
+                      {t('verifySeed.continue', { defaultValue: 'Continue' })}
                     </Button>
                   </>
                 )}
@@ -2325,10 +2327,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaExclamationTriangle color="#FC8181" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="red.400">
-                        Verification Failed
+                        {t('verifySeed.failed', { defaultValue: 'Verification Failed' })}
                       </Text>
                       <Text fontSize="xs" color="red.300" maxW="320px">
-                        {verifyError || 'The words you entered did not match. Please try again or check your written backup.'}
+                        {verifyError || t('verifySeed.failedDetail', { defaultValue: 'The words you entered did not match. Please try again or check your written backup.' })}
                       </Text>
                     </VStack>
                     <Button
@@ -2336,7 +2338,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
-                      Try Again
+                      {t('verifySeed.tryAgain', { defaultValue: 'Try Again' })}
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
@@ -2344,7 +2346,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      Skip — I'll verify later
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later" })}
                     </Button>
                   </>
                 )}
