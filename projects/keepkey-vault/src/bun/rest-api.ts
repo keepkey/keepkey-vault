@@ -888,7 +888,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   }
 
   const server = Bun.serve({
-    reusePort: true,
     port,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
     async fetch(req) {
@@ -1085,6 +1084,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/v1/health/fast' && method === 'GET') {
           return json({ status: 'ok', uptime: Math.floor((Date.now() - startTime) / 1000) })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SHUTDOWN (public — allows external tools to kill a stuck instance)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/shutdown' && method === 'POST') {
+          // Respond before exiting so the caller gets a clean 200
+          const resp = json({ status: 'shutting_down', message: 'Vault will exit in 500ms' })
+          setTimeout(() => process.exit(0), 500)
+          return resp
         }
 
         // ═══════════════════════════════════════════════════════════════

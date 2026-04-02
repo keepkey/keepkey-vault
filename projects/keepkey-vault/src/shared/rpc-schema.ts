@@ -23,6 +23,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       recoverDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
       loadDevice: { params: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }; response: void }
       verifySeed: { params: { wordCount: 12 | 18 | 24 }; response: { success: boolean; message: string } }
+      verifySeedChallenge: { params: void; response: { positions: number[]; wordCount: number } }
+      verifySeedSubmit: { params: { answers: { position: number; word: string }[] }; response: { success: boolean; message: string } }
       applySettings: { params: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }; response: void }
       applyPolicy: { params: { policyName: string; enabled: boolean }; response: void }
       changePin: { params: void; response: void }

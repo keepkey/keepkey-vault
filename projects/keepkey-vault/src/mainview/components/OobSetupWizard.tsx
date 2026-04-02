@@ -118,8 +118,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [deviceLabel, setDeviceLabel] = useState('')
   const [setupError, setSetupError] = useState<string | null>(null)
   // Seed verification state
-  const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'verifying' | 'success' | 'failed'>('idle')
+  const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'quiz' | 'verifying' | 'success' | 'failed'>('idle')
   const [verifyError, setVerifyError] = useState<string | null>(null)
+  // Emulator quiz-based verify
+  const [quizPositions, setQuizPositions] = useState<number[]>([])
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
   // L1 fix: removed unused setupLoading state (value was never read)
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
@@ -2156,10 +2159,12 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaKey color="#C0A860" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="white">
-                        {t('verifySeed.title', { defaultValue: 'Verify Your Recovery Phrase' })}
+                        Verify Your Recovery Phrase
                       </Text>
                       <Text fontSize="xs" color="gray.400" maxW="320px">
-                        {t('verifySeed.description', { defaultValue: 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.' })}
+                        {isEmulator
+                          ? 'We\'ll ask you for 3 random words from your seed to confirm you have a correct backup.'
+                          : 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.'}
                       </Text>
                     </VStack>
                     <Button
@@ -2168,11 +2173,100 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={async () => {
-                        setVerifyingPhase('verifying')
                         setVerifyError(null)
-                        onWordCountChange?.(wordCount)
+                        if (isEmulator) {
+                          try {
+                            const challenge = await rpcRequest('verifySeedChallenge', undefined) as { positions: number[]; wordCount: number }
+                            setQuizPositions(challenge.positions)
+                            setQuizAnswers({})
+                            setVerifyingPhase('quiz')
+                          } catch (e: any) {
+                            setVerifyingPhase('failed')
+                            setVerifyError(e?.message || 'Could not generate challenge')
+                          }
+                        } else {
+                          setVerifyingPhase('verifying')
+                          onWordCountChange?.(wordCount)
+                          try {
+                            const result = await rpcRequest('verifySeed', { wordCount }, 0) as { success: boolean; message: string }
+                            setVerifyingPhase(result.success ? 'success' : 'failed')
+                            if (!result.success) setVerifyError(result.message)
+                          } catch (e: any) {
+                            setVerifyingPhase('failed')
+                            setVerifyError(e?.message || 'Verification failed')
+                          }
+                        }
+                      }}
+                    >
+                      Verify Now
+                    </Button>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={() => setStep('security-tips')}
+                    >
+                      Skip — I'll verify later
+                    </Button>
+                  </>
+                )}
+                {verifyingPhase === 'quiz' && (
+                  <>
+                    <FaKey color="#C0A860" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="white">
+                        Enter the requested words
+                      </Text>
+                      <Text fontSize="xs" color="gray.400" maxW="320px">
+                        Type the correct word for each position from your recovery phrase.
+                      </Text>
+                    </VStack>
+                    <VStack gap={3} w="100%">
+                      {quizPositions.map((pos) => (
+                        <Box key={pos} w="100%">
+                          <Text fontSize="xs" color="gray.400" mb={1} textAlign="left">
+                            Word #{pos}
+                          </Text>
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            value={quizAnswers[pos] || ''}
+                            onChange={(e) => setQuizAnswers(prev => ({ ...prev, [pos]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const idx = quizPositions.indexOf(pos)
+                                if (idx < quizPositions.length - 1) {
+                                  const next = document.querySelector(`[data-quiz-pos="${quizPositions[idx + 1]}"]`) as HTMLInputElement
+                                  next?.focus()
+                                }
+                              }
+                            }}
+                            data-quiz-pos={pos}
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(192, 168, 96, 0.3)',
+                              background: 'rgba(0,0,0,0.3)',
+                              color: 'white',
+                              fontSize: '14px',
+                              outline: 'none',
+                            }}
+                          />
+                        </Box>
+                      ))}
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      disabled={quizPositions.some(p => !quizAnswers[p]?.trim())}
+                      onClick={async () => {
+                        setVerifyingPhase('verifying')
                         try {
-                          const result = await rpcRequest('verifySeed', { wordCount }, 0) as { success: boolean; message: string }
+                          const answers = quizPositions.map(p => ({ position: p, word: quizAnswers[p].trim() }))
+                          const result = await rpcRequest('verifySeedSubmit', { answers }) as { success: boolean; message: string }
                           setVerifyingPhase(result.success ? 'success' : 'failed')
                           if (!result.success) setVerifyError(result.message)
                         } catch (e: any) {
@@ -2181,15 +2275,15 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         }
                       }}
                     >
-                      {t('verifySeed.verifyNow', { defaultValue: 'Verify Now' })}
+                      Check Words
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
                       _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
-                      onClick={() => setStep('security-tips')}
+                      onClick={() => setVerifyingPhase('idle')}
                     >
-                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                      Back
                     </Button>
                   </>
                 )}
@@ -2198,10 +2292,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <Spinner size="lg" color="#C0A860" borderWidth="3px" />
                     <VStack gap={1}>
                       <Text fontSize="md" fontWeight="bold" color="white">
-                        {t('verifySeed.verifying', { defaultValue: 'Verifying...' })}
+                        Verifying...
                       </Text>
                       <Text fontSize="xs" color="gray.400">
-                        {t('verifySeed.followDevice', { defaultValue: 'Follow the prompts on your KeepKey to enter the requested words.' })}
+                        {isEmulator ? 'Checking your answers...' : 'Follow the prompts on your KeepKey to enter the requested words.'}
                       </Text>
                     </VStack>
                   </>
@@ -2211,10 +2305,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaCheckCircle color="#48BB78" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="green.400">
-                        {t('verifySeed.verified', { defaultValue: 'Recovery Phrase Verified!' })}
+                        Recovery Phrase Verified!
                       </Text>
                       <Text fontSize="xs" color="gray.400">
-                        {t('verifySeed.verifiedDetail', { defaultValue: 'Your backup is correct. Keep it safe — never share it with anyone.' })}
+                        Your backup is correct. Keep it safe — never share it with anyone.
                       </Text>
                     </VStack>
                     <Button
@@ -2222,7 +2316,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      {t('verifySeed.continue', { defaultValue: 'Continue' })}
+                      Continue
                     </Button>
                   </>
                 )}
@@ -2231,10 +2325,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <FaExclamationTriangle color="#FC8181" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="red.400">
-                        {t('verifySeed.failed', { defaultValue: 'Verification Failed' })}
+                        Verification Failed
                       </Text>
                       <Text fontSize="xs" color="red.300" maxW="320px">
-                        {verifyError || t('verifySeed.failedDetail', { defaultValue: 'The words you entered did not match. Please try again or check your written backup.' })}
+                        {verifyError || 'The words you entered did not match. Please try again or check your written backup.'}
                       </Text>
                     </VStack>
                     <Button
@@ -2242,7 +2336,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
-                      {t('verifySeed.tryAgain', { defaultValue: 'Try Again' })}
+                      Try Again
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
@@ -2250,7 +2344,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                      Skip — I'll verify later
                     </Button>
                   </>
                 )}

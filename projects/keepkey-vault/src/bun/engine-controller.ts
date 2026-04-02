@@ -781,6 +781,19 @@ export class EngineController extends EventEmitter {
                   'emulator post-reload'
                 )
               }
+
+              // Verify auto-reload actually took effect
+              const verifyMnemonic = await this.getEmulatorMnemonic()
+              if (!verifyMnemonic) {
+                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
+              } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
+                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
+                console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
+                console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
+              } else {
+                console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
+              }
+
               this.updateState(this.deriveState(this.cachedFeatures))
             } else {
               console.log('[Engine] No saved mnemonic — showing setup wizard')

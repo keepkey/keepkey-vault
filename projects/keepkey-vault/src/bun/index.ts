@@ -457,6 +457,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
+					// Save mnemonic FIRST — connectEmulator's auto-reload (stale
+					// storage key recovery) will pick up the NEW seed instead of
+					// the previously saved one.
+					if (params.mnemonic) {
+						const { saveMnemonic } = await import('./emulator-keychain')
+						const { getActiveFlashName } = await import('./emulator')
+						console.log('[Vault] Saving new mnemonic before load (flash=%s)', getActiveFlashName())
+						saveMnemonic(getActiveFlashName(), params.mnemonic)
+					}
+
 					// Firmware rejects loadDevice on an already-initialized device.
 					// Wipe first so the new mnemonic actually takes effect.
 					if (engine.cachedFeatures?.initialized) {
@@ -464,24 +474,76 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						await emuConfirmOp(() => engine.wallet!.wipe())
 						const { flushRingBuffers } = await import('./emulator')
 						flushRingBuffers()
+						// connectEmulator may auto-reload our just-saved mnemonic
+						// via the stale-storage-key recovery path.
 						await engine.connectEmulator()
 					}
-					await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
-					// Save mnemonic to Keychain for auto-reload on restart
-					if (params.mnemonic) {
-						const { saveMnemonic } = await import('./emulator-keychain')
-						const { getActiveFlashName } = await import('./emulator')
-						saveMnemonic(getActiveFlashName(), params.mnemonic)
+
+					// If auto-reload already initialized the device with the new
+					// seed, skip the manual loadDevice — firmware would reject it.
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
+					} else {
+						console.log('[Vault] Device already initialized after reconnect — skipping manual loadDevice')
 					}
+
 					// Drain stale ButtonAck + reconnect for clean transport
 					const { flushRingBuffers: flush } = await import('./emulator')
 					flush()
 					await engine.connectEmulator()
+
+					// Verify the firmware actually holds the mnemonic we loaded
+					if (params.mnemonic) {
+						const actual = await engine.getEmulatorMnemonic()
+						if (!actual) {
+							console.error('[Vault] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+						} else if (actual.trim() !== params.mnemonic.trim()) {
+							console.error('[Vault] SEED VERIFY FAIL — firmware mnemonic does NOT match loaded seed')
+							console.error('[Vault]   expected first word: %s', params.mnemonic.trim().split(/\s+/)[0])
+							console.error('[Vault]   actual first word:   %s', actual.trim().split(/\s+/)[0])
+						} else {
+							console.log('[Vault] SEED VERIFY OK — firmware mnemonic matches loaded seed')
+						}
+					}
 					return
 				}
 				await engine.loadDevice(params)
 			},
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
+			verifySeedChallenge: async () => {
+				if (!engine.isEmulator) throw new Error('Challenge-based verify is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const mnemonic = loadMnemonic(getActiveFlashName())
+				if (!mnemonic) throw new Error('No saved mnemonic found for this emulator')
+				const words = mnemonic.trim().split(/\s+/)
+				const wordCount = words.length
+				// Pick 3 random unique positions (1-indexed)
+				const all = Array.from({ length: wordCount }, (_, i) => i + 1)
+				for (let i = all.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[all[i], all[j]] = [all[j], all[i]]
+				}
+				const positions = all.slice(0, 3).sort((a, b) => a - b)
+				return { positions, wordCount }
+			},
+			verifySeedSubmit: async (params) => {
+				if (!engine.isEmulator) throw new Error('Challenge-based verify is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const mnemonic = loadMnemonic(getActiveFlashName())
+				if (!mnemonic) return { success: false, message: 'No saved mnemonic — cannot verify' }
+				const words = mnemonic.trim().split(/\s+/)
+				for (const { position, word } of params.answers) {
+					if (position < 1 || position > words.length) {
+						return { success: false, message: `Invalid word position: ${position}` }
+					}
+					if (word.trim().toLowerCase() !== words[position - 1].toLowerCase()) {
+						return { success: false, message: `Word #${position} is incorrect` }
+					}
+				}
+				return { success: true, message: 'Seed verified successfully' }
+			},
 			applySettings: async (params) => {
 				if (engine.isEmulator) {
 					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
@@ -2940,6 +3002,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorCreateWallet: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 
+				const bip39 = require('bip39')
+				const wc = params?.wordCount || 12
+				const strength = wc === 24 ? 256 : wc === 18 ? 192 : 128
+				const mnemonic = bip39.generateMnemonic(strength)
+				console.log(`[Emulator] Generated ${wc}-word mnemonic`)
+
+				// Save mnemonic FIRST — connectEmulator's auto-reload uses it
+				const { saveMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				saveMnemonic(getActiveFlashName(), mnemonic)
+
 				// Wipe first if already initialized — firmware rejects loadDevice otherwise
 				if (engine.cachedFeatures?.initialized) {
 					console.log('[Emulator] Already initialized — wiping before create')
@@ -2949,21 +3022,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					await engine.connectEmulator()
 				}
 
-				const bip39 = require('bip39')
-				const wc = params?.wordCount || 12
-				const strength = wc === 24 ? 256 : wc === 18 ? 192 : 128
-				const mnemonic = bip39.generateMnemonic(strength)
-				console.log(`[Emulator] Generated ${wc}-word mnemonic, calling loadDevice...`)
-
-				await emuConfirmOp(() => (engine.wallet as any).loadDevice({
-					mnemonic, pin: false, passphrase: false, skipChecksum: false,
-				}))
-				console.log('[Emulator] loadDevice complete')
-
-				// Save mnemonic to Keychain for auto-reload on restart
-				const { saveMnemonic } = await import('./emulator-keychain')
-				const { getActiveFlashName } = await import('./emulator')
-				saveMnemonic(getActiveFlashName(), mnemonic)
+				// If auto-reload already initialized with the new seed, skip manual load
+				if (!engine.cachedFeatures?.initialized) {
+					await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+						mnemonic, pin: false, passphrase: false, skipChecksum: false,
+					}))
+					console.log('[Emulator] loadDevice complete')
+				} else {
+					console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
+				}
 
 				// Auto-set label with EMU prefix
 				try {
@@ -2977,6 +3044,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { flushRingBuffers } = await import('./emulator')
 				flushRingBuffers()
 				await engine.connectEmulator()
+
+				// Verify the firmware actually holds the mnemonic we generated
+				const actualMnemonic = await engine.getEmulatorMnemonic()
+				if (!actualMnemonic) {
+					console.error('[Emulator] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+				} else if (actualMnemonic.trim() !== mnemonic.trim()) {
+					console.error('[Emulator] SEED VERIFY FAIL — firmware mnemonic does NOT match generated seed')
+					console.error('[Emulator]   expected first word: %s', mnemonic.trim().split(/\s+/)[0])
+					console.error('[Emulator]   actual first word:   %s', actualMnemonic.trim().split(/\s+/)[0])
+				} else {
+					console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
+				}
 
 				// Show seed words on emulator device window (NOT the main UI)
 				const { displaySeedWords, isEmulatorWindowOpen } = await import('./emulator-window')
@@ -3135,6 +3214,12 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	btcAccounts.reset()
 	evmAddresses.reset()
+	// Clear stale DB caches — old seed's pubkeys and balances are wrong for the new seed
+	if (deviceId) {
+		clearCachedPubkeys(deviceId)
+		clearBalances(deviceId)
+		console.log('[Vault] Seed changed: cleared cached pubkeys + balances for', deviceId)
+	}
 	// Push fresh state to frontend so it re-renders
 	try { rpc.send['device-state'](engine.getDeviceState()) } catch {}
 })

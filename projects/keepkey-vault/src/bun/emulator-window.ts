@@ -173,6 +173,7 @@ export function openEmulatorWindow(): void {
     } catch {}
 
     console.log(`${TAG} Emulator window closed`)
+    stopDisplayPoll()
     if (pendingConfirm) {
       pendingConfirm.resolve(false)
       pendingConfirm = null
@@ -183,10 +184,13 @@ export function openEmulatorWindow(): void {
     }
     emuWindow = null
   })
+
+  startDisplayPoll()
 }
 
 export function closeEmulatorWindow(): void {
   if (!emuWindow) return
+  stopDisplayPoll()
   try {
     const frame = emuWindow.getFrame?.()
     if (frame) saveWindowState(frame)
@@ -284,6 +288,36 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
 function sendDismiss(): void {
   sendToWindow('confirm-dismiss', {})
   sendToWindow('emu-state', { state: 'idle' })
+}
+
+// ── Display polling (real OLED framebuffer) ─────────────────────────────
+
+let displayPollTimer: ReturnType<typeof setInterval> | null = null
+let cachedGetDisplay: (() => { framebuffer: Uint8Array | null; width: number; height: number }) | null = null
+
+export function startDisplayPoll(): void {
+  if (displayPollTimer) return
+  import('./emulator').then(mod => {
+    cachedGetDisplay = mod.emuGetDisplay
+    let lastHadDisplay = false
+    displayPollTimer = setInterval(() => {
+      if (!emuWindow || !cachedGetDisplay) return
+      const { framebuffer, width, height } = cachedGetDisplay()
+      if (framebuffer && width > 0 && height > 0) {
+        lastHadDisplay = true
+        const b64 = Buffer.from(framebuffer).toString('base64')
+        sendToWindow('display-update', { fb: b64, w: width, h: height })
+      } else if (lastHadDisplay) {
+        lastHadDisplay = false
+        sendToWindow('display-lost', {})
+      }
+    }, 66) // ~15fps
+  })
+}
+
+export function stopDisplayPoll(): void {
+  if (displayPollTimer) { clearInterval(displayPollTimer); displayPollTimer = null }
+  cachedGetDisplay = null
 }
 
 // Firmware confirmation counts by operation type.
@@ -452,20 +486,30 @@ function buildEmulatorHTML(bridgePort: number): string {
     border: 2px solid #333;
     border-radius: 4px;
     width: 320px;
-    height: 100px;
+    height: 80px;
+    position: relative;
+    overflow: hidden;
+  }
+  #oledCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+  }
+  .oled-content {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 8px 12px;
-    overflow: hidden;
-  }
-  .oled-content {
     color: #fff;
     font-family: 'Courier New', monospace;
     font-size: 11px;
     line-height: 1.4;
     text-align: center;
     word-break: break-all;
+    padding: 8px 12px;
   }
   .oled-content .op-label { color: #4fc3f7; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
   .oled-content .detail { color: #ccc; font-size: 10px; }
@@ -513,6 +557,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   </div>
   <div class="display-area" id="displayArea">
     <div class="oled">
+      <canvas id="oledCanvas" width="256" height="64"></canvas>
       <div class="oled-content" id="oled">
         <div class="idle-text">KeepKey Emulator Ready</div>
       </div>
@@ -539,12 +584,17 @@ function buildEmulatorHTML(bridgePort: number): string {
   var seedSection = document.getElementById('seedSection');
   var seedGrid = document.getElementById('seedGrid');
   var seedAckBtn = document.getElementById('seedAckBtn');
+  var oledCanvas = document.getElementById('oledCanvas');
+  var oledCtx = oledCanvas.getContext('2d');
+  var hasRealDisplay = false;
   var currentConfirmId = null;
 
   // ── Receive messages from bun (via executeJavascript) ──
 
   window.handlePacket = function(packet) {
     if (packet.type === 'message') {
+      if (packet.id === 'display-update') { onDisplayUpdate(packet.payload); return; }
+      if (packet.id === 'display-lost') { onDisplayLost(); return; }
       console.log('[emu-ui] Received:', packet.id);
       if (packet.id === 'confirm-request') onConfirmRequest(packet.payload);
       if (packet.id === 'confirm-dismiss') onConfirmDismiss();
@@ -552,6 +602,44 @@ function buildEmulatorHTML(bridgePort: number): string {
       if (packet.id === 'seed-dismiss') onSeedDismiss();
     }
   };
+
+  // ── OLED framebuffer rendering ──
+
+  function onDisplayUpdate(data) {
+    var raw = atob(data.fb);
+    var w = data.w;
+    var h = data.h;
+    if (oledCanvas.width !== w) oledCanvas.width = w;
+    if (oledCanvas.height !== h) oledCanvas.height = h;
+    var imgData = oledCtx.createImageData(w, h);
+    var px = imgData.data;
+    // SSD1306 page format: 8 pages x 256 cols, each byte = 8 vertical pixels
+    var pages = h >> 3;
+    for (var page = 0; page < pages; page++) {
+      for (var x = 0; x < w; x++) {
+        var b = raw.charCodeAt(page * w + x);
+        for (var bit = 0; bit < 8; bit++) {
+          var y = page * 8 + bit;
+          var on = (b >> bit) & 1;
+          var idx = (y * w + x) << 2;
+          px[idx] = on ? 255 : 0;
+          px[idx + 1] = on ? 255 : 0;
+          px[idx + 2] = on ? 255 : 0;
+          px[idx + 3] = 255;
+        }
+      }
+    }
+    oledCtx.putImageData(imgData, 0, 0);
+    if (!hasRealDisplay) {
+      hasRealDisplay = true;
+      oled.style.display = 'none';
+    }
+  }
+
+  function onDisplayLost() {
+    hasRealDisplay = false;
+    oled.style.display = '';
+  }
 
   // ── Send responses to bun (via fetch to bridge server) ──
 
@@ -570,26 +658,30 @@ function buildEmulatorHTML(bridgePort: number): string {
   function onConfirmRequest(details) {
     console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
-    var opName = details.operation
-      .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
-      .replace('Sign Tx', 'Sign Transaction')
-      .replace('Get Address', 'Verify Address');
-    var html = '<div class="op-label">' + esc(opName) + '</div>';
-    if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
-    if (details.to) {
-      var addr = details.to;
-      if (addr.length > 20) addr = addr.slice(0, 10) + '...' + addr.slice(-8);
-      html += '<div class="addr">To: ' + esc(addr) + '</div>';
+    if (!hasRealDisplay) {
+      var opName = details.operation
+        .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
+        .replace('Sign Tx', 'Sign Transaction')
+        .replace('Get Address', 'Verify Address');
+      var html = '<div class="op-label">' + esc(opName) + '</div>';
+      if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
+      if (details.to) {
+        var addr = details.to;
+        if (addr.length > 20) addr = addr.slice(0, 10) + '...' + addr.slice(-8);
+        html += '<div class="addr">To: ' + esc(addr) + '</div>';
+      }
+      if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
+      if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
+      oled.innerHTML = html;
     }
-    if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
-    if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
-    oled.innerHTML = html;
     buttons.classList.add('visible');
   }
 
   function onConfirmDismiss() {
     currentConfirmId = null;
-    oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
+    if (!hasRealDisplay) {
+      oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
+    }
     buttons.classList.remove('visible');
   }
 
@@ -613,7 +705,9 @@ function buildEmulatorHTML(bridgePort: number): string {
     seedSection.classList.remove('visible');
     seedAckBtn.classList.remove('visible');
     seedGrid.innerHTML = '';
-    oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
+    if (!hasRealDisplay) {
+      oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
+    }
   }
 
   function esc(str) {
@@ -628,7 +722,9 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!currentConfirmId) return;
     console.log('[emu-ui] CONFIRM clicked');
     postBridge('/_emu/confirm', { id: currentConfirmId, approved: true });
-    oled.innerHTML = '<div class="idle-text" style="color:#4fc3f7">Processing...</div>';
+    if (!hasRealDisplay) {
+      oled.innerHTML = '<div class="idle-text" style="color:#4fc3f7">Processing...</div>';
+    }
     buttons.classList.remove('visible');
   });
 
@@ -636,11 +732,13 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!currentConfirmId) return;
     console.log('[emu-ui] REJECT clicked');
     postBridge('/_emu/confirm', { id: currentConfirmId, approved: false });
-    oled.innerHTML = '<div class="idle-text" style="color:#e57373">Rejected</div>';
+    if (!hasRealDisplay) {
+      oled.innerHTML = '<div class="idle-text" style="color:#e57373">Rejected</div>';
+      setTimeout(function() {
+        oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
+      }, 1500);
+    }
     buttons.classList.remove('visible');
-    setTimeout(function() {
-      oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
-    }, 1500);
   });
 
   seedAckBtn.addEventListener('click', function() {
