@@ -457,6 +457,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
+					// Firmware rejects loadDevice on an already-initialized device.
+					// Wipe first so the new mnemonic actually takes effect.
+					if (engine.cachedFeatures?.initialized) {
+						console.log('[Vault] Emulator already initialized — wiping before loadDevice')
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						const { flushRingBuffers } = await import('./emulator')
+						flushRingBuffers()
+						await engine.connectEmulator()
+					}
 					await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
 					// Save mnemonic to Keychain for auto-reload on restart
 					if (params.mnemonic) {
@@ -465,8 +474,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						saveMnemonic(getActiveFlashName(), params.mnemonic)
 					}
 					// Drain stale ButtonAck + reconnect for clean transport
-					const { flushRingBuffers } = await import('./emulator')
-					flushRingBuffers()
+					const { flushRingBuffers: flush } = await import('./emulator')
+					flush()
 					await engine.connectEmulator()
 					return
 				}
@@ -2930,6 +2939,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorCreateWallet: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+
+				// Wipe first if already initialized — firmware rejects loadDevice otherwise
+				if (engine.cachedFeatures?.initialized) {
+					console.log('[Emulator] Already initialized — wiping before create')
+					await emuConfirmOp(() => engine.wallet!.wipe())
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+				}
+
 				const bip39 = require('bip39')
 				const wc = params?.wordCount || 12
 				const strength = wc === 24 ? 256 : wc === 18 ? 192 : 128
