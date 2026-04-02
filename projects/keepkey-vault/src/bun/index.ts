@@ -406,13 +406,16 @@ async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<a
 		prewriteConfirmations(confirmCount)
 		emuPollOnce()
 
+		// Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
+		// to deliver the firmware response.
+		resumePoll()
+
 		const result = await promise
 		flushRingBuffers() // drain any unused pre-written confirmations
 		saveEmulatorState()
 		return result
 	} finally {
-		// Resume for transport to read the response
-		resumePoll()
+		resumePoll() // idempotent — ensures poll is always restored
 	}
 }
 
@@ -458,7 +461,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Save mnemonic to Keychain for auto-reload on restart
 					if (params.mnemonic) {
 						const { saveMnemonic } = await import('./emulator-keychain')
-						saveMnemonic('default', params.mnemonic)
+						const { getActiveFlashName } = await import('./emulator')
+						saveMnemonic(getActiveFlashName(), params.mnemonic)
 					}
 					// Drain stale ButtonAck + reconnect for clean transport
 					const { flushRingBuffers } = await import('./emulator')
@@ -2939,7 +2943,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Save mnemonic to Keychain for auto-reload on restart
 				const { saveMnemonic } = await import('./emulator-keychain')
-				saveMnemonic('default', mnemonic)
+				const { getActiveFlashName } = await import('./emulator')
+				saveMnemonic(getActiveFlashName(), mnemonic)
 
 				// Auto-set label with EMU prefix
 				try {

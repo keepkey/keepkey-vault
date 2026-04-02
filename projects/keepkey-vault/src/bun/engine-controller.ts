@@ -702,12 +702,13 @@ export class EngineController extends EventEmitter {
             // its own stored seed after a restart.  Auto-wipe the flash and
             // reload the saved mnemonic from Keychain if available.
             console.warn('[Engine] Emulator storage key stale — auto-wiping flash')
-            const { stopEmulator, initEmulator } = await import('./emulator')
+            const { stopEmulator, initEmulator, getActiveFlashName } = await import('./emulator')
             const { deleteFlash, loadMnemonic } = await import('./emulator-keychain')
-            const savedMnemonic = loadMnemonic('default')
+            const flashName = getActiveFlashName()
+            const savedMnemonic = loadMnemonic(flashName)
             stopEmulator()
-            deleteFlash('default')
-            const status = initEmulator('default')
+            deleteFlash(flashName)
+            const status = initEmulator(flashName)
             if (status.state !== 'running') {
               this.lastError = `Emulator restart failed: ${status.error}`
               this.updateState('error')

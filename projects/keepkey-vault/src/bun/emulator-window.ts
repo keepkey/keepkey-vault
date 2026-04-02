@@ -249,8 +249,8 @@ const CONFIRM_TIMEOUT_MS = 120_000 // 2 minutes — reject if emulator window is
 
 async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
   if (!emuWindow) {
-    console.warn(`${TAG} No emulator window — auto-approving`)
-    return true
+    console.error(`${TAG} No emulator window — rejecting (fail closed)`)
+    return false
   }
 
   return new Promise((resolve) => {
@@ -361,6 +361,9 @@ export async function emuInteractiveConfirm(
     console.log(`${TAG} User responded: approved=${approved}`)
 
     if (!approved) {
+      // Flush the last queued chunk + any stale data so the next background
+      // kkemu_poll() doesn't enter confirm_helper and spin forever.
+      flushRingBuffers()
       throw new Error('Transaction rejected by user on emulator')
     }
 

@@ -94,9 +94,13 @@ function loadDylib(path: string) {
 // ── State ───────────────────────────────────────────────────────────────
 
 let activeFlash: EmulatorFlash | null = null
+let activeFlashName: string = 'default'
 let activeVersion: string | null = null
 let emuState: EmulatorProcessState = 'stopped'
 let emuError: string | undefined
+
+/** Returns the name of the currently active flash image (for mnemonic persistence). */
+export function getActiveFlashName(): string { return activeFlashName }
 
 // ── Status ──────────────────────────────────────────────────────────────
 
@@ -145,6 +149,7 @@ export function initEmulator(flashName = 'default', version?: string): EmulatorS
   try {
     emuState = 'starting'
     emuError = undefined
+    activeFlashName = flashName
 
     // 1. Decrypt flash
     activeFlash = loadFlash(flashName)
