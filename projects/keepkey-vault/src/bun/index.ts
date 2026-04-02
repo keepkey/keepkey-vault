@@ -3109,6 +3109,17 @@ engine.on('state-change', (state) => {
 		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
 	}
 })
+// Seed changed — different mnemonic loaded on the same hardware.
+// Reset in-memory address managers so they re-derive from the new seed.
+// Don't wipe DB — let the fresh Pioneer fetch naturally overwrite stale entries.
+engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
+	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
+	btcAccounts.reset()
+	evmAddresses.reset()
+	// Push fresh state to frontend so it re-renders
+	try { rpc.send['device-state'](engine.getDeviceState()) } catch {}
+})
+
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
 })

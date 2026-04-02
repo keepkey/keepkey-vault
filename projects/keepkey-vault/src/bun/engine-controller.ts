@@ -238,14 +238,10 @@ export class EngineController extends EventEmitter {
         saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
       } catch { /* never block on cache failure */ }
 
-      // Derive seed-aware device ID so the DB partitions data by seed.
-      // Each unique seed gets its own balances/pubkeys — no stale data.
-      this.deriveSeedDeviceId()
-        .then(() => {
-          // Re-emit state with the seed-aware deviceId
-          this.emit('state-change', this.getDeviceState())
-        })
-        .catch(err => console.warn('[Engine] Seed device ID derivation failed:', err?.message))
+      // Check if the seed changed since last session — emits 'seed-changed'
+      // if the ETH primary address differs from what's stored.
+      this.checkSeedIdentity()
+        .catch(err => console.warn('[Engine] Seed identity check failed:', err?.message))
 
       // Pre-cache wallet fingerprint so BIP-85 and other ops don't need
       // a separate btcGetAddress call (which can trigger BUTTON_REQUEST).
@@ -902,7 +898,7 @@ export class EngineController extends EventEmitter {
       state: this.lastState,
       activeTransport: this.activeTransport,
       updatePhase: this.updatePhase,
-      deviceId: this.effectiveDeviceId !== 'unknown' ? this.effectiveDeviceId : (features?.deviceId || undefined),
+      deviceId: features?.deviceId || undefined,
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
       bootloaderVersion: effectiveBlVersion || blVersion,
@@ -1507,49 +1503,54 @@ export class EngineController extends EventEmitter {
     return address
   }
 
-  // ── Seed-Aware Device ID ─────────────────────────────────────────────
+  // ── Seed Change Detection ────────────────────────────────────────────
   //
-  // The hardware deviceId (from Features) is a serial number that doesn't
-  // change when the seed changes. The DB uses deviceId as partition key for
-  // balances and cached pubkeys. Without seed awareness, a wipe+restore
-  // shows stale balances from the old seed.
-  //
-  // Fix: derive ETH m/44'/60'/0'/0/0 on ready, incorporate it into the
-  // effective deviceId. Each seed gets its own DB partition — no wiping,
-  // old data stays accessible if the user switches back.
+  // The hardware deviceId (from Features) doesn't change when the seed
+  // changes. On state → ready, derive ETH m/44'/60'/0'/0/0 and compare
+  // against the last known address. If different, emit 'seed-changed'
+  // so the app can reset in-memory caches and let fresh Pioneer data
+  // overwrite the stale DB entries.
 
   private seedEthAddress: string | null = null
 
+  /** The primary ETH address for the current seed (available after ready). */
+  get currentSeedEthAddress(): string | null { return this.seedEthAddress }
+
   /**
-   * Derive the primary ETH address and build a seed-aware device ID.
-   * Format: `{hardwareId}:{ethAddr_first8}` e.g. `5E4E6B69:0x1d1c3287`
-   * Falls back to raw hardwareId if derivation fails.
+   * Derive ETH primary address and check if the seed changed since last session.
+   * Emits 'seed-changed' if the address differs from what's stored in settings DB.
    */
-  async deriveSeedDeviceId(): Promise<string> {
-    const hwId = this.cachedFeatures?.deviceId || 'unknown'
-    if (!this.wallet) return hwId
+  async checkSeedIdentity(): Promise<void> {
+    if (!this.wallet) return
     try {
       const result = await (this.wallet as any).ethGetAddress({
         addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
         showDisplay: false,
       })
       const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
-      if (!addr) return hwId
+      if (!addr) {
+        console.warn('[Engine] checkSeedIdentity: could not derive ETH address')
+        return
+      }
       this.seedEthAddress = addr
-      const seedId = `${hwId}:${addr.slice(0, 10)}`
-      console.log(`[Engine] Seed device ID: ${seedId}`)
-      return seedId
-    } catch (err: any) {
-      console.warn('[Engine] deriveSeedDeviceId failed:', err?.message)
-      return hwId
-    }
-  }
 
-  /** The current seed-aware device ID (available after ready). */
-  get effectiveDeviceId(): string {
-    const hwId = this.cachedFeatures?.deviceId || 'unknown'
-    if (this.seedEthAddress) return `${hwId}:${this.seedEthAddress.slice(0, 10)}`
-    return hwId
+      const deviceId = this.cachedFeatures?.deviceId || 'unknown'
+      const { getSetting, setSetting } = await import('./db')
+      const key = `seed_eth_${deviceId}`
+      const stored = getSetting(key)?.toLowerCase() || null
+
+      if (stored && stored !== addr) {
+        console.warn(`[Engine] SEED CHANGED on ${deviceId}: ${stored.slice(0, 10)}... → ${addr.slice(0, 10)}...`)
+        this.emit('seed-changed', { deviceId, oldAddress: stored, newAddress: addr })
+      } else if (!stored) {
+        console.log(`[Engine] First seed identity for ${deviceId}: ${addr.slice(0, 10)}...`)
+      } else {
+        console.log(`[Engine] Seed identity OK: ${addr.slice(0, 10)}...`)
+      }
+      setSetting(key, addr)
+    } catch (err: any) {
+      console.warn('[Engine] checkSeedIdentity failed:', err?.message)
+    }
   }
 
   // ── BIP-85 Derived Seeds ────────────────────────────────────────────────
