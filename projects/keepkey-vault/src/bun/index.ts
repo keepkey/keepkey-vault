@@ -2853,7 +2853,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					getBtcXpub: () => {
 						if (btcAccounts.isInitialized) {
 							const selected = btcAccounts.getSelectedXpub()
-							if (selected) return selected.xpub
+							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
 						}
 						return undefined
 					},

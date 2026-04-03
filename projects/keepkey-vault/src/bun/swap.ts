@@ -210,7 +210,7 @@ export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
   getRpcUrl: (chain: ChainDef) => string | undefined
-  getBtcXpub: () => string | undefined  // selected BTC xpub if available
+  getBtcXpub: () => { xpub: string; accountPath?: number[] } | undefined  // selected BTC xpub + account path
 }
 
 /** Execute a swap: build tx, sign on device, broadcast */
@@ -303,8 +303,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Only use BTC multi-account xpub for Bitcoin — other UTXO chains (DOGE, LTC, etc.)
     // have their own xpub formats and must derive their own
     let xpub: string | undefined
+    let accountPath: number[] | undefined
     if (fromChain.id === 'bitcoin') {
-      try { xpub = getBtcXpub() } catch { /* BTC account manager not ready */ }
+      try {
+        const btcInfo = getBtcXpub()
+        if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+      } catch { /* BTC account manager not ready */ }
       if (!xpub) {
         console.warn(`${TAG} BTC multi-account xpub unavailable — falling back to default account 0`)
       }
@@ -332,6 +336,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       isMax: params.isMax,
       fromAddress,
       xpub,
+      accountPath,
     })
     unsignedTx = buildResult.unsignedTx
 
