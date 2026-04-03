@@ -65,7 +65,10 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 		try {
 			await rpcRequest("wcDisconnectSession", { topic })
 			setSessions(prev => prev.filter(s => s.topic !== topic))
-		} catch { /* best effort */ }
+		} catch {
+			// Refresh from backend to resync on failure
+			rpcRequest<WcSessionInfo[]>("wcGetSessions").then(setSessions).catch(() => {})
+		}
 	}, [])
 
 	if (!open) return null

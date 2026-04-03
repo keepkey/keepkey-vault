@@ -3589,10 +3589,18 @@ function handleKeepKeyUrl(url: string) {
 	console.log('[Vault] keepkey:// URL:', url)
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
-		if (walletConnectEnabled) {
+		if (walletConnectEnabled && engine.wallet) {
 			// Native WC v2 — pair directly in the backend
 			const wc = getOrCreateWcManager()
-			wc.pair(wcUri).catch(e => console.error('[WC] Pair failed:', e.message))
+			wc.pair(wcUri).catch(e => {
+				console.error('[WC] Pair failed:', e.message)
+				// Store for retry via getPendingDeepLink when device becomes ready
+				pendingDeepLinkUri = wcUri
+			})
+		} else if (walletConnectEnabled && !engine.wallet) {
+			// Device not ready — queue for later
+			pendingDeepLinkUri = wcUri
+			console.log('[Vault] Device not ready, queued WC URI for later')
 		} else {
 			// WC disabled — notify frontend to show "not supported" dialog
 			try {

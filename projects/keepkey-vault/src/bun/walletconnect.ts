@@ -381,7 +381,17 @@ export class WalletConnectManager {
     broadcast: boolean,
   ): Promise<string> {
     const signingId = crypto.randomUUID()
-    const effectiveChainId = tx.chainId ? parseInt(tx.chainId, 16) : chainId
+    // Parse chainId: handle both hex (0x1) and decimal ("1") strings, matching rest-api.ts
+    let effectiveChainId: number
+    if (tx.chainId) {
+      const raw = String(tx.chainId)
+      effectiveChainId = raw.startsWith('0x') ? parseInt(raw, 16) : parseInt(raw, 10)
+    } else {
+      effectiveChainId = chainId
+    }
+    if (!Number.isInteger(effectiveChainId) || effectiveChainId <= 0) {
+      throw new Error(`Invalid chainId: ${tx.chainId}`)
+    }
 
     const signingInfo: SigningRequestInfo = {
       id: signingId,
@@ -400,6 +410,7 @@ export class WalletConnectManager {
 
     try {
       const from = tx.from ?? this.callbacks.getEvmAddressInfo()?.address
+      if (!from) throw new Error('Missing sender address')
 
       // Fetch nonce if not provided (most dApps omit it)
       const nonce = tx.nonce ?? await this.rpcCall(effectiveChainId, 'eth_getTransactionCount', [from, 'latest'])
@@ -421,7 +432,7 @@ export class WalletConnectManager {
         addressNList,
         to: tx.to,
         value: tx.value ?? '0x0',
-        data: tx.data ?? '',
+        data: tx.data ?? '0x',
         chainId: effectiveChainId,
         nonce,
         gasLimit,

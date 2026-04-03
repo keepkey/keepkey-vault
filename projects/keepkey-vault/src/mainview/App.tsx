@@ -277,8 +277,8 @@ function App() {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
 			if (uri) {
 				if (walletConnectEnabled) {
-					// Pair natively and open the sessions panel
-					rpcRequest("wcPair", { uri }).catch(() => {})
+					// Set URI and open panel — panel's auto-pair effect handles pairing + errors
+					setWcUri(uri)
 					setWcPanelOpen(true)
 				} else {
 					setWcNotSupportedOpen(true)
