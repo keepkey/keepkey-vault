@@ -86,9 +86,11 @@ export function SplashNav() {
 				<Image
 					src={kkIcon}
 					alt="KeepKey"
-					w="24px"
-					h="24px"
-					borderRadius="4px"
+					w="29px"
+					h="29px"
+					borderRadius="6px"
+					border="1.5px solid"
+					borderColor="kk.gold"
 				/>
 				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
 					KeepKey Vault
@@ -139,13 +141,20 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1">
-				<Box position="relative">
+				<Box
+					position="relative"
+					cursor="pointer"
+					onClick={() => rpcRequest("openUrl", { url: "https://keepkey.com" }).catch(() => {})}
+					className="electrobun-webkit-app-region-no-drag"
+				>
 					<Image
 						src={kkIcon}
 						alt="KeepKey"
-						w="24px"
-						h="24px"
-						borderRadius="4px"
+						w="29px"
+						h="29px"
+						borderRadius="6px"
+						border="1.5px solid"
+						borderColor="kk.gold"
 					/>
 					<Box
 						position="absolute"
