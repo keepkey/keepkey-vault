@@ -1461,8 +1461,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Single portfolio call with all pubkeys for this chain
 				const isBtc = chain.id === 'bitcoin'
 				const isEvm = chain.chainFamily === 'evm'
+				const isUtxo = chain.chainFamily === 'utxo'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
+				let cachedAddress = ''
+				try {
+					const devId = engine.getDeviceState().deviceId
+					if (devId) {
+						const cached = getCachedBalances(devId)
+						cachedAddress = cached?.balances.find(b => b.chainId === chain.id)?.address || ''
+					}
+				} catch { /* cache lookup failed, non-fatal */ }
 
 				// Reset per-address balances for this refresh (mirrors getBalances line 991)
 				if (isEvm) evmAddresses.resetBalances()
@@ -1523,11 +1533,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// pubkey, zero missing entries explicitly. Mirrors getBalances BTC/EVM aggregation.
 					let nativeTotalBalance = 0
 					let nativeTotalUsd = 0
-					// BTC address tracking: prefer selected xpub, fallback to first Pioneer address
-					// (needed for fallback/cached-pubkey modes where selectedXpub is unavailable)
+					// Address tracking for UTXO chains (BTC + LTC/DOGE/etc.)
 					const selectedXpubStr = isBtc ? btcAccounts.getSelectedXpub()?.xpub : undefined
-					let btcSelectedAddress = ''
-					let btcFallbackAddress = ''
+					let selectedPkAddress = ''  // address from selected xpub (BTC) or sole xpub (other UTXO)
+					let fallbackPkAddress = ''  // first Pioneer-returned address from any xpub
 
 					for (const pk of pubkeys) {
 						// Find ONE matching native entry for this requested pubkey (no double-counting)
@@ -1539,13 +1548,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						nativeTotalBalance += bal
 						nativeTotalUsd += usd
 
+						// Capture Pioneer-returned address for this pubkey
+						if (match?.address) {
+							if (!fallbackPkAddress) fallbackPkAddress = match.address
+							// BTC: prefer selected xpub's address; non-BTC UTXO: first (only) xpub
+							if (isBtc && selectedXpubStr && pk.pubkey === selectedXpubStr) selectedPkAddress = match.address
+							if (!isBtc && isUtxo) selectedPkAddress = match.address
+						}
+
 						if (isBtc) {
-							// Update per-xpub balance keyed on REQUESTED pubkey, not Pioneer's entry
 							btcAccounts.updateXpubBalance(pk.pubkey, String(match?.balance ?? '0'), usd)
-							if (match?.address) {
-								if (!btcFallbackAddress) btcFallbackAddress = match.address
-								if (selectedXpubStr && pk.pubkey === selectedXpubStr) btcSelectedAddress = match.address
-							}
 						} else if (isEvm && usd > 0) {
 							evmAddresses.updateAddressBalance(pk.pubkey, usd)
 						}
@@ -1555,11 +1567,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
 						balanceUsd = nativeTotalUsd
 					}
-					// BTC address: selected xpub's address if available, otherwise first Pioneer
-					// address (covers fallback/cached-pubkey modes). Never leave empty when Pioneer
-					// returned a usable address — that breaks swap dialog. (Findings 1-3)
-					if (isBtc) {
-						address = btcSelectedAddress || btcFallbackAddress
+					// UTXO chains: set address from Pioneer response (selected xpub preferred)
+					if (isBtc || isUtxo) {
+						const pioneerAddr = selectedPkAddress || fallbackPkAddress
+						if (pioneerAddr) address = pioneerAddr
 					}
 
 					// Process tokens — already filtered to this chain + our pubkeys
@@ -1609,6 +1620,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
 				}
+				// If Pioneer failed or returned no address, preserve the cached address
+				// so we don't wipe a previously good address from the shared cache (Finding 3)
+				if (!address && cachedAddress) address = cachedAddress
 				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
