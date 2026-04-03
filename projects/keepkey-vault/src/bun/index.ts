@@ -1252,8 +1252,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
 								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
 							}
-							// Update per-xpub balance in BtcAccountManager
-							btcAccounts.updateXpubBalance(entry.pubkey, String(match?.balance ?? '0'), usd)
+							// Update per-xpub balance in BtcAccountManager + persist to cache
+							const xpubBal = String(match?.balance ?? '0')
+							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
+							try {
+								const devId = engine.getDeviceState().deviceId
+								if (devId) saveCachedPubkey(devId, 'bitcoin', '', entry.pubkey, match?.address || '', '', xpubBal, usd)
+							} catch { /* non-fatal */ }
 							continue
 						}
 
@@ -1557,7 +1562,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 
 						if (isBtc) {
-							btcAccounts.updateXpubBalance(pk.pubkey, String(match?.balance ?? '0'), usd)
+							const xpubBal = String(match?.balance ?? '0')
+							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							try {
+								const devId = engine.getDeviceState().deviceId
+								if (devId) saveCachedPubkey(devId, 'bitcoin', '', pk.pubkey, match?.address || '', '', xpubBal, usd)
+							} catch { /* non-fatal */ }
 						} else if (isEvm && usd > 0) {
 							evmAddresses.updateAddressBalance(pk.pubkey, usd)
 						}
@@ -1935,6 +1945,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (!btcAccounts.isInitialized) {
 					await btcAccounts.initialize(engine.wallet as any)
+				}
+				// Hydrate per-xpub balances from DB cache (so pills show values on first load)
+				const devId = engine.getDeviceState().deviceId
+				if (devId) {
+					const cachedPks = getCachedPubkeys(devId).filter(p => p.chainId === 'bitcoin' && p.xpub)
+					for (const pk of cachedPks) {
+						if (pk.balance !== '0' || pk.balanceUsd > 0) {
+							btcAccounts.updateXpubBalance(pk.xpub, pk.balance, pk.balanceUsd)
+						}
+					}
 				}
 				return btcAccounts.toAccountSet()
 			},
