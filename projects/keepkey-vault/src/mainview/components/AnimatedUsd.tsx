@@ -16,7 +16,7 @@ interface AnimatedUsdProps extends TextProps {
 }
 
 /** Animated fiat counter. Delegates all number+symbol formatting to Intl.NumberFormat. */
-export function AnimatedUsd({ value, prefix = "", suffix = "", duration = 30, decimals, color = "#23DCC8", ...textProps }: AnimatedUsdProps) {
+export function AnimatedUsd({ value, prefix = "", suffix = "", duration = 1.5, decimals, color = "#23DCC8", ...textProps }: AnimatedUsdProps) {
 	const { currency, locale } = useFiat()
 	const cfg = getFiatConfig(currency)
 	const dec = decimals ?? cfg.decimals
