@@ -25,6 +25,11 @@ export default {
 				"google-protobuf",
 				"@keepkey/proto-tx-builder",
 				"swagger-client",
+				"@walletconnect/web3wallet",
+				"@walletconnect/core",
+				"@walletconnect/types",
+				"@walletconnect/utils",
+				"@walletconnect/jsonrpc-utils",
 			],
 		},
 		// Vite builds to dist/, we copy from there

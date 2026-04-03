@@ -22,7 +22,7 @@ console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...ar
 logStream.write(`\n=== New session: ${_ts()} ===\n`)
 console.log(`[Boot] Log file: ${LOG_FILE}`)
 
-import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import pkg from "../../package.json"
 
 // ── Global error handlers (MUST be first — prevents silent crashes) ──
@@ -46,6 +46,7 @@ import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
+import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
@@ -234,6 +235,7 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 const auth = new AuthStore()
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
+let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
@@ -241,6 +243,7 @@ let preReleaseUpdates = false
 
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
+	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	swapsEnabled = getSetting('swaps_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
@@ -248,6 +251,40 @@ function loadSettings() {
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
+// WalletConnect manager — lazily initialized when user pairs
+let wcManager: WalletConnectManager | null = null
+function getOrCreateWcManager(): WalletConnectManager {
+	if (wcManager) return wcManager
+	wcManager = new WalletConnectManager({
+		getEvmAddressInfo: () => {
+			const sel = evmAddresses.getSelectedAddress()
+			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
+		},
+		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
+		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
+		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
+		requestSigningApproval: async (info) => {
+			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
+			try {
+				mainWindow.setAlwaysOnTop(true)
+				mainWindow.focus()
+			} catch { /* window not ready */ }
+			try {
+				return await auth.requestSigningApproval(info.id)
+			} finally {
+				try { mainWindow.setAlwaysOnTop(false) } catch {}
+			}
+		},
+		dismissSigning: (id) => {
+			try { rpc.send['signing-dismissed']({ id }) } catch {}
+		},
+		log: (msg) => console.log(msg),
+		onSessionsChanged: (sessions) => {
+			try { rpc.send['wc-sessions'](sessions) } catch {}
+		},
+	})
+	return wcManager
+}
 
 function getAppSettings() {
 	const servers = getPioneerServers()
@@ -261,6 +298,7 @@ function getAppSettings() {
 		activePioneerServer,
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
+		walletConnectEnabled,
 		swapsEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
@@ -2320,6 +2358,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] Number locale set to:', params.locale)
 				return getAppSettings()
 			},
+			setWalletConnectEnabled: async (params) => {
+				walletConnectEnabled = params.enabled
+				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] WalletConnect enabled:', params.enabled)
+				return getAppSettings()
+			},
 			setSwapsEnabled: async (params) => {
 				swapsEnabled = params.enabled
 				setSetting('swaps_enabled', params.enabled ? '1' : '0')
@@ -3146,6 +3190,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { seedDisplayed: true }
 			},
 
+			// ── WalletConnect (native v2) ────────────────────────────
+			wcPair: async (params) => {
+				if (!walletConnectEnabled) throw new Error('WalletConnect is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const wc = getOrCreateWcManager()
+				await wc.pair(params.uri)
+			},
+			wcGetSessions: async () => {
+				if (!wcManager) return []
+				return wcManager.getSessions()
+			},
+			wcDisconnectSession: async (params) => {
+				if (!wcManager) return
+				await wcManager.disconnectSession(params.topic)
+			},
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				try {
@@ -3162,6 +3222,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch {
 					throw new Error('Invalid URL')
 				}
+			},
+			getPendingDeepLink: async () => {
+				// Return but don't consume — frontend will clear via consumePendingDeepLink
+				// so the user can retry if processing fails
+				return pendingDeepLinkUri
+			},
+			consumePendingDeepLink: async () => {
+				pendingDeepLinkUri = null
 			},
 
 			// ── App Updates ──────────────────────────────────────────
@@ -3578,7 +3646,29 @@ Updater.localInfo.channel().then(ch => {
 	}
 })
 
+// ── Force keepkey:// protocol registration (override old keepkey-desktop) ──
+if (process.platform === 'darwin') {
+	// Re-register this app as the handler for keepkey:// via Launch Services.
+	// When both keepkey-desktop (Electron) and keepkey-vault (Electrobun) are
+	// installed, the last one to register wins. We force it on every launch.
+	try {
+		const appPath = path.resolve(import.meta.dir, '..', '..', '..')
+		const lsregister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister'
+		// -f forces re-registration of the app's URL schemes from its Info.plist,
+		// ensuring keepkey:// points to this vault instead of the old Electron desktop app.
+		Bun.spawn([lsregister, '-f', appPath], {
+			stdout: 'ignore',
+			stderr: 'ignore',
+		})
+		console.log('[Vault] Re-registered keepkey:// protocol handler for:', appPath)
+	} catch (e: any) {
+		console.warn('[Vault] Failed to re-register protocol:', e.message)
+	}
+}
+
 // ── keepkey:// Protocol Handler ────────────────────────────────────────
+let pendingDeepLinkUri: string | null = null
+
 function getWalletConnectUri(inputUri: string): string | undefined {
 	const uri = inputUri
 		.replace('keepkey://launch/wc?uri=', '')
@@ -3587,14 +3677,41 @@ function getWalletConnectUri(inputUri: string): string | undefined {
 	return decodeURIComponent(uri.replace('wc/?uri=', '').replace('wc?uri=', ''))
 }
 
-mainWindow.on("open-url", (e: any) => {
-	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
-	if (url.startsWith('keepkey://')) {
-		const wcUri = getWalletConnectUri(url)
-		if (wcUri) {
-			try { rpc.send['walletconnect-uri'](wcUri) } catch { /* webview not ready */ }
+function handleKeepKeyUrl(url: string) {
+	console.log('[Vault] keepkey:// URL:', url)
+	const wcUri = getWalletConnectUri(url)
+	if (wcUri) {
+		if (walletConnectEnabled && engine.wallet) {
+			// Native WC v2 — pair directly in the backend
+			const wc = getOrCreateWcManager()
+			wc.pair(wcUri).catch(e => {
+				console.error('[WC] Pair failed:', e.message)
+				// Store for retry via getPendingDeepLink when device becomes ready
+				pendingDeepLinkUri = wcUri
+			})
+		} else if (walletConnectEnabled && !engine.wallet) {
+			// Device not ready — queue for later
+			pendingDeepLinkUri = wcUri
+			console.log('[Vault] Device not ready, queued WC URI for later')
+		} else {
+			// WC disabled — notify frontend to show "not supported" dialog
+			try {
+				rpc.send['walletconnect-uri'](wcUri)
+				pendingDeepLinkUri = null
+			} catch {
+				pendingDeepLinkUri = wcUri
+			}
 		}
 	}
+	// Bring window to front
+	try { mainWindow.focus() } catch {}
+}
+
+// Use global Electrobun event emitter — BrowserWindow.on() scopes to window-{id},
+// but open-url is an APPLICATION-level event fired by the native URL handler.
+Electrobun.events.on("open-url", (e: any) => {
+	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
+	if (url.startsWith('keepkey://')) handleKeepKeyUrl(url)
 })
 
 // Cleanup and quit helper — shared between window close and app quit
@@ -3623,6 +3740,9 @@ function cleanupAndQuit() {
 			stopEmulator()
 		}
 	} catch {}
+	// Disconnect WalletConnect sessions so dApps aren't left in stale state.
+	// Fire-and-forget — relay WebSocket close is best-effort within the 5s force-exit.
+	try { wcManager?.destroy().catch((e: any) => console.warn('[cleanup] WC destroy:', e.message)) } catch {}
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()

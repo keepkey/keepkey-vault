@@ -355,10 +355,21 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+}
+
+// ── WalletConnect types ─────────────────────────────────────────────────
+export interface WcSessionInfo {
+  topic: string
+  peerName: string
+  peerUrl: string
+  peerIcon: string
+  chains: string[]
+  expiry: number
 }
 
 // ── Emulator types (macOS only — encrypted flash with Keychain) ────────
