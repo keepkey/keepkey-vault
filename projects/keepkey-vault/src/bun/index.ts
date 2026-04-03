@@ -256,7 +256,10 @@ let wcManager: WalletConnectManager | null = null
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
 	wcManager = new WalletConnectManager({
-		getEvmAddress: () => evmAddresses.getSelectedAddress()?.address ?? null,
+		getEvmAddressInfo: () => {
+			const sel = evmAddresses.getSelectedAddress()
+			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
+		},
 		ethSignTx: (params) => engine.wallet!.ethSignTx(params),
 		ethSignMessage: (params) => engine.wallet!.ethSignMessage(params),
 		ethSignTypedData: (params) => engine.wallet!.ethSignTypedData(params),
@@ -3637,6 +3640,8 @@ function cleanupAndQuit() {
 			stopEmulator()
 		}
 	} catch {}
+	// Disconnect WalletConnect sessions so dApps aren't left in stale state
+	try { wcManager?.destroy() } catch {}
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()
