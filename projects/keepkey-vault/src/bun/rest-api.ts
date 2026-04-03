@@ -1087,16 +1087,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // SHUTDOWN (public — allows external tools to kill a stuck instance)
-        // ═══════════════════════════════════════════════════════════════
-        if (path === '/api/shutdown' && method === 'POST') {
-          // Respond before exiting so the caller gets a clean 200
-          const resp = json({ status: 'shutting_down', message: 'Vault will exit in 500ms' })
-          setTimeout(() => process.exit(0), 500)
-          return resp
-        }
-
-        // ═══════════════════════════════════════════════════════════════
         // SDK DETECTION (public — used by keepkey-website-v7 + Pioneer)
         // ═══════════════════════════════════════════════════════════════
         if (path === '/info/ping' && method === 'GET') {

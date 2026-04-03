@@ -324,26 +324,8 @@ async function applyRestApiState() {
 		// Check if another instance is already bound to the port
 		const inUse = await isPortInUse(REST_API_PORT)
 		if (inUse) {
-			console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance`)
-			console.error(`[Vault] Attempting to shut down the stale instance...`)
-			try {
-				await fetch(`http://localhost:${REST_API_PORT}/api/shutdown`, {
-					method: 'POST',
-					signal: AbortSignal.timeout(3000),
-				})
-				// Wait for the old instance to exit
-				await new Promise(resolve => setTimeout(resolve, 1500))
-				// Verify it's gone
-				const stillInUse = await isPortInUse(REST_API_PORT)
-				if (stillInUse) {
-					console.error(`[Vault] FATAL: could not kill stale instance on port ${REST_API_PORT}. Exiting.`)
-					process.exit(1)
-				}
-				console.log(`[Vault] Stale instance shut down successfully`)
-			} catch {
-				console.error(`[Vault] FATAL: could not reach stale instance for shutdown. Port ${REST_API_PORT} blocked. Exiting.`)
-				process.exit(1)
-			}
+			console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance. Exiting.`)
+			process.exit(1)
 		}
 		try {
 			restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
@@ -2993,7 +2975,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorDeleteFlash: async (params) => {
 				const { deleteFlash, getEmulatorStatus } = await import('./emulator')
+				const { deleteMnemonic } = await import('./emulator-keychain')
 				deleteFlash(params.name)
+				deleteMnemonic(params.name)
 				return getEmulatorStatus()
 			},
 			emulatorGetMnemonic: async () => {
