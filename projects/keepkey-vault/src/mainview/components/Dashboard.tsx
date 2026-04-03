@@ -116,6 +116,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 	const [showBip85, setShowBip85] = useState(false)
 	const [showSweep, setShowSweep] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
+	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [tokenWarning, setTokenWarning] = useState(false)
@@ -129,19 +130,22 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 			.catch(() => {})
 	}, [])
 
-	// Load BIP-85 feature flag (re-check when settings change)
-	const refreshBip85Flag = useCallback(() => {
+	// Load feature flags (re-check when settings change)
+	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
-			.then(s => setBip85Enabled(s.bip85Enabled))
+			.then(s => {
+				setBip85Enabled(s.bip85Enabled)
+				setZcashEnabled(s.zcashPrivacyEnabled)
+			})
 			.catch(() => {})
 	}, [])
 
-	useEffect(() => { refreshBip85Flag() }, [refreshBip85Flag])
+	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
 
 	useEffect(() => {
-		window.addEventListener('keepkey-settings-changed', refreshBip85Flag)
-		return () => window.removeEventListener('keepkey-settings-changed', refreshBip85Flag)
-	}, [refreshBip85Flag])
+		window.addEventListener('keepkey-settings-changed', refreshFeatureFlags)
+		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
+	}, [refreshFeatureFlags])
 
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
@@ -337,7 +341,12 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 
 	const hasAnyBalance = chartData.length > 0
 
-	const visibleChains = useMemo(() => allChains.filter(c => !c.hidden && isChainSupported(c, firmwareVersion)), [allChains, firmwareVersion])
+	const visibleChains = useMemo(() => allChains.filter(c => {
+		if (!isChainSupported(c, firmwareVersion)) return false
+		// Zcash transparent is hidden by default — show when feature flag is on
+		if (c.id === 'zcash') return zcashEnabled
+		return !c.hidden
+	}), [allChains, firmwareVersion, zcashEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0

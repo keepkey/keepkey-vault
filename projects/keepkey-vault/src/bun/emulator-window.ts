@@ -370,7 +370,7 @@ function getConfirmCount(details: EmulatorConfirmDetails): number {
 export async function emuInteractiveConfirm(
   fn: () => Promise<any>,
   details: EmulatorConfirmDetails,
-  engineDelegate?: { chunkCount: number } | null,
+  engineDelegate?: { chunkCount: number; autoConfirm?: boolean } | null,
 ): Promise<any> {
   const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
   const { prewriteConfirmations } = await import('./emulator-transport')
@@ -405,6 +405,11 @@ export async function emuInteractiveConfirm(
     const nConfirms = getConfirmCount(details)
     console.log(`${TAG} Pre-writing ${nConfirms} confirmations (op=${details.operation}) + final poll`)
 
+    // Suppress hdwallet's ButtonAck writes — pre-written BA+DLD satisfy
+    // confirm_helper, and the orphaned ButtonAck would cause "Unexpected
+    // message" during BTC's multi-round TxRequest/TxAck protocol.
+    if (engineDelegate) engineDelegate.autoConfirm = true
+
     // Pre-write all needed confirmations, then run ONE poll tick.
     // All confirms happen inside a single kkemu_poll() C call — we can't
     // inject between them. Both BA+DLD go to iface 1 (same FIFO) so
@@ -423,6 +428,7 @@ export async function emuInteractiveConfirm(
     saveEmulatorState()
     return result
   } finally {
+    if (engineDelegate) engineDelegate.autoConfirm = false
     resumePoll() // idempotent — ensures poll is always restored
     sendDismiss()
   }
