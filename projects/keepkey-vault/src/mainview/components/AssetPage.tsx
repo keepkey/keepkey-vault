@@ -589,6 +589,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 				{/* Content */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }} minH="280px">
 					{view === "send" ? (
+						isBtc && !btcSelected?.xpubData ? (
+							<Flex align="center" justify="center" minH="200px">
+								<Spinner size="sm" color="kk.gold" mr="2" />
+								<Text color="kk.textMuted" fontSize="sm">Loading BTC accounts...</Text>
+							</Flex>
+						) : (
 						<SendForm
 							chain={chain}
 							address={address}
@@ -604,6 +610,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
+						)
 					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab />

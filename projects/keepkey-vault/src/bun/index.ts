@@ -1523,6 +1523,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// pubkey, zero missing entries explicitly. Mirrors getBalances BTC/EVM aggregation.
 					let nativeTotalBalance = 0
 					let nativeTotalUsd = 0
+					// BTC address tracking: prefer selected xpub, fallback to first Pioneer address
+					// (needed for fallback/cached-pubkey modes where selectedXpub is unavailable)
 					const selectedXpubStr = isBtc ? btcAccounts.getSelectedXpub()?.xpub : undefined
 					let btcSelectedAddress = ''
 					let btcFallbackAddress = ''
@@ -1540,7 +1542,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (isBtc) {
 							// Update per-xpub balance keyed on REQUESTED pubkey, not Pioneer's entry
 							btcAccounts.updateXpubBalance(pk.pubkey, String(match?.balance ?? '0'), usd)
-							// Derive BTC display address (selected xpub preferred, then first fallback)
 							if (match?.address) {
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
 								if (selectedXpubStr && pk.pubkey === selectedXpubStr) btcSelectedAddress = match.address
@@ -1554,10 +1555,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
 						balanceUsd = nativeTotalUsd
 					}
-					// BTC: use ONLY the selected xpub's address — never silently fall back to
-					// a different account's address (that would break the selected-account contract)
+					// BTC address: selected xpub's address if available, otherwise first Pioneer
+					// address (covers fallback/cached-pubkey modes). Never leave empty when Pioneer
+					// returned a usable address — that breaks swap dialog. (Findings 1-3)
 					if (isBtc) {
-						address = btcSelectedAddress || ''
+						address = btcSelectedAddress || btcFallbackAddress
 					}
 
 					// Process tokens — already filtered to this chain + our pubkeys
@@ -1611,16 +1613,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync
-				// BTC: only write cache if we have a non-empty address — don't overwrite
-				// a good cached address with '' from an account-scoped refresh (Finding 4)
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					if (isBtc && !address) {
-						// Preserve existing cached address — only update balance/tokens
-						const existing = getCachedBalances(deviceId)
-						const cachedBtc = existing?.balances.find(b => b.chainId === 'bitcoin')
-						if (cachedBtc?.address) result.address = cachedBtc.address
-					}
 					updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
@@ -1674,16 +1668,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
 					console.debug(`[buildTx] Derived ${chain.coin} address OK`)
 				} else if (chain.id === 'bitcoin') {
-					// BTC multi-account: use override or selected xpub + scriptType
-					const selectedBtcXpub = btcAccounts.getSelectedXpub()
-					xpub = params.xpubOverride || selectedBtcXpub?.xpub
-					// Ensure scriptTypeOverride is set when using a selected xpub
-					if (!params.scriptTypeOverride && selectedBtcXpub?.scriptType) {
-						params = { ...params, scriptTypeOverride: selectedBtcXpub.scriptType }
+					// BTC multi-account: resolve xpub, scriptType, and accountPath from the
+					// override string itself (not from getSelectedXpub(), which can drift
+					// between render and RPC handling). Finding 5 fix.
+					const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
+					xpub = resolvedXpub
+					// Look up the BtcXpub entry that owns this xpub string for scriptType + path
+					let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
+					if (resolvedXpub) {
+						for (const account of btcAccounts.toAccountSet().accounts) {
+							for (const xp of account.xpubs) {
+								if (xp.xpub === resolvedXpub) {
+									matchedXpubEntry = { scriptType: xp.scriptType, path: xp.path }
+									break
+								}
+							}
+							if (matchedXpubEntry) break
+						}
 					}
-					// Pass account-level path so UTXO builder can correct blockbook's always-account-0 paths
-					if (selectedBtcXpub?.path) {
-						params = { ...params, accountPath: selectedBtcXpub.path }
+					if (matchedXpubEntry) {
+						if (!params.scriptTypeOverride) params = { ...params, scriptTypeOverride: matchedXpubEntry.scriptType }
+						params = { ...params, accountPath: matchedXpubEntry.path }
 					}
 					if (!xpub) {
 						// Fallback: derive from default path
