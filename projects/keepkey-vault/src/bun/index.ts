@@ -1386,26 +1386,37 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let displayAddress = '' // address shown in UI / used for swaps
 
 				if (chain.id === 'bitcoin') {
-					// BTC multi-account: send ALL xpubs (matches getBalances behavior)
+					// BTC multi-account: send ALL xpubs (mirrors getBalances lines 1065-1086)
 					if (!btcAccounts.isInitialized) {
 						try { await btcAccounts.initialize(wallet) } catch (e: any) {
 							console.warn(`[getBalance] BTC accounts init failed:`, e.message)
 						}
 					}
-					const btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(chain.caip)
-					if (btcPubkeyEntries.length > 0) {
-						for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
-					} else {
-						// Fallback: derive single xpub if multi-account manager not ready
+					let btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(chain.caip)
+					// Fallback: if btcAccounts empty, try cached pubkeys from DB (mirrors getBalances line 1069-1080)
+					if (btcPubkeyEntries.length === 0) {
+						const devId = engine.getDeviceState().deviceId
+						if (devId) {
+							const cachedPks = getCachedPubkeys(devId)
+							const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
+							if (btcPks.length > 0) {
+								btcPubkeyEntries = btcPks.map(p => ({ caip: chain.caip, pubkey: p.xpub }))
+								console.log(`[getBalance] BTC xpubs from cached_pubkeys DB fallback: ${btcPubkeyEntries.length}`)
+							}
+						}
+					}
+					// Last resort: derive single default xpub from device
+					if (btcPubkeyEntries.length === 0) {
 						const result = await wallet.getPublicKeys([{
 							addressNList: chain.defaultPath.slice(0, 3),
 							coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
 						}])
 						const xpub = result?.[0]?.xpub || ''
 						if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
-						pubkeys.push({ caip: chain.caip, pubkey: xpub })
+						btcPubkeyEntries = [{ caip: chain.caip, pubkey: xpub }]
 					}
-					// UTXO: leave displayAddress empty so frontend auto-derives from device
+					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+					// displayAddress left empty — UTXO: frontend auto-derives from device
 				} else if (chain.chainFamily === 'utxo') {
 					// Non-BTC UTXO chains (LTC, DOGE, etc.) — single xpub
 					const result = await wallet.getPublicKeys([{
@@ -1476,12 +1487,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const chainCaipPrefix = (chain.caip || '').split('/')[0].toLowerCase() // e.g. "eip155:1"
 					const pubkeySet = new Set(pubkeys.map(p => p.pubkey.toLowerCase()))
 
-					// Classify entries, requiring both chain-match AND pubkey-ownership
-					let nativeTotalBalance = 0
-					let nativeTotalUsd = 0
+					// Classify entries: filter by chain, separate natives vs tokens
+					const pureNatives: any[] = []
 					const tokenEntries: any[] = []
 					let skippedCrossChain = 0
-					let skippedForeignPubkey = 0
 
 					for (const entry of allEntries) {
 						// Gate 1: entry must belong to THIS chain (networkId or CAIP prefix)
@@ -1499,39 +1508,55 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (isTokenByCaip || isTokenByType) {
 							// Gate 2 (tokens): owner address must be one we requested
 							const ownerAddr = (entry.address || entry.pubkey || '').toLowerCase()
-							if (ownerAddr && !pubkeySet.has(ownerAddr)) { skippedForeignPubkey++; continue }
+							if (ownerAddr && !pubkeySet.has(ownerAddr)) continue
 							tokenEntries.push(entry)
 						} else {
-							// Gate 2 (natives): match against our pubkeys explicitly
-							// (mirrors getBalances EVM logic at line 1219-1236)
-							const entryPubkey = (entry.pubkey || '').toLowerCase()
-							const entryAddr = (entry.address || '').toLowerCase()
-							if (!pubkeySet.has(entryPubkey) && !pubkeySet.has(entryAddr)) {
-								skippedForeignPubkey++; continue
-							}
-							const bal = parseFloat(String(entry.balance ?? '0'))
-							const usd = Number(entry.valueUsd ?? 0)
-							nativeTotalBalance += bal
-							nativeTotalUsd += usd
-							// Update per-address USD in EvmAddressManager (mirrors getBalances line 1224)
-							if (isEvm && usd > 0) {
-								evmAddresses.updateAddressBalance(entryAddr || entryPubkey, usd)
-							}
-							// Update per-xpub balance in BtcAccountManager (mirrors getBalances line 1256)
-							if (isBtc) {
-								btcAccounts.updateXpubBalance(entry.pubkey || '', String(entry.balance ?? '0'), usd)
-							}
+							pureNatives.push(entry)
 						}
 					}
 
-					if (skippedCrossChain > 0 || skippedForeignPubkey > 0) {
-						console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain, ${skippedForeignPubkey} foreign-pubkey entries`)
+					if (skippedCrossChain > 0) {
+						console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain entries`)
+					}
+
+					// Aggregate natives: iterate REQUESTED pubkeys, match at most one response per
+					// pubkey, zero missing entries explicitly. Mirrors getBalances BTC/EVM aggregation.
+					let nativeTotalBalance = 0
+					let nativeTotalUsd = 0
+					const selectedXpubStr = isBtc ? btcAccounts.getSelectedXpub()?.xpub : undefined
+					let btcSelectedAddress = ''
+					let btcFallbackAddress = ''
+
+					for (const pk of pubkeys) {
+						// Find ONE matching native entry for this requested pubkey (no double-counting)
+						const match = pureNatives.find((d: any) => d.pubkey === pk.pubkey)
+							|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
+							|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
+						const bal = parseFloat(String(match?.balance ?? '0'))
+						const usd = Number(match?.valueUsd ?? 0)
+						nativeTotalBalance += bal
+						nativeTotalUsd += usd
+
+						if (isBtc) {
+							// Update per-xpub balance keyed on REQUESTED pubkey, not Pioneer's entry
+							btcAccounts.updateXpubBalance(pk.pubkey, String(match?.balance ?? '0'), usd)
+							// Derive BTC display address (selected xpub preferred, then first fallback)
+							if (match?.address) {
+								if (!btcFallbackAddress) btcFallbackAddress = match.address
+								if (selectedXpubStr && pk.pubkey === selectedXpubStr) btcSelectedAddress = match.address
+							}
+						} else if (isEvm && usd > 0) {
+							evmAddresses.updateAddressBalance(pk.pubkey, usd)
+						}
 					}
 
 					if (nativeTotalBalance > 0 || nativeTotalUsd > 0) {
 						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
 						balanceUsd = nativeTotalUsd
-						// Keep displayAddress (selected EVM address) — don't overwrite from Pioneer
+					}
+					// BTC: set display address from selected xpub (non-empty for swap dialog)
+					if (isBtc) {
+						address = btcSelectedAddress || btcFallbackAddress || btcAccounts.getSelectedXpub()?.xpub || ''
 					}
 
 					// Process tokens — already filtered to this chain + our pubkeys
