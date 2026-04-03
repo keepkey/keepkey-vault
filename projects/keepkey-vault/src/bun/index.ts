@@ -305,13 +305,35 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['pair-dismissed']({}) } catch { /* webview not ready */ }
 	},
 	getVersion: () => appVersionCache,
+	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
+}
+
+/** Check if a port is already in use by trying to connect to it */
+async function isPortInUse(port: number): Promise<boolean> {
+	try {
+		const resp = await fetch(`http://localhost:${port}/api/v1/health/fast`, { signal: AbortSignal.timeout(2000) })
+		return resp.ok
+	} catch {
+		return false
+	}
 }
 
 /** Start or stop the REST API server based on the persisted setting */
-function applyRestApiState() {
+async function applyRestApiState() {
 	if (restApiEnabled && !restServer) {
-		restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
-		console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+		// Check if another instance is already bound to the port
+		const inUse = await isPortInUse(REST_API_PORT)
+		if (inUse) {
+			console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance. Exiting.`)
+			process.exit(1)
+		}
+		try {
+			restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
+			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+		} catch (err) {
+			console.error(`[Vault] FATAL: failed to bind REST API on port ${REST_API_PORT}:`, err)
+			process.exit(1)
+		}
 	} else if (!restApiEnabled && restServer) {
 		restServer.stop()
 		restServer = null
@@ -324,6 +346,72 @@ function applyRestApiState() {
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
 import type { SwapQuote } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
+
+// ── Emulator confirm helper ──────────────────────────────────────────
+// Wraps any operation that triggers firmware confirm_helper() (blocking C loop).
+//
+// The key challenge: multi-chunk messages (e.g. LoadDevice with a real mnemonic)
+// span 2+ HID packets. If BA+DLD are pre-written to rb_main_in before all chunks
+// are consumed, usb_rx_helper treats BA as a continuation chunk → corruption.
+//
+// Solution (proven in test harness — 17/17 pass):
+// 1. Pause poll, start the operation (transport writes N chunks)
+// 2. Poll (N-1) times to consume all chunks except the last
+// 3. Write BA+DLD to ring buffers
+// 4. Poll once — firmware reads last chunk, assembles, dispatches,
+//    enters confirm_helper, finds BA+DLD → exits immediately
+// 5. Resume poll for transport to read the response
+async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
+	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
+	const { prewriteConfirmations } = await import('./emulator-transport')
+
+	// Get the transport delegate for chunk counting
+	const delegate = engine.emuDelegate
+	if (delegate) delegate.chunkCount = 0
+
+	pausePoll()
+
+	try {
+		const promise = fn()
+		await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
+
+		const numChunks = delegate?.chunkCount || 1
+		console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
+
+		// Consume all chunks except the last
+		for (let i = 0; i < numChunks - 1; i++) {
+			emuPollOnce()
+		}
+
+		// Pre-write all confirmations then poll once. Both BA+DLD go to iface 1
+		// (same FIFO) so confirm_helper reads them in order without starvation.
+		prewriteConfirmations(confirmCount)
+		emuPollOnce()
+
+		// Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
+		// to deliver the firmware response.
+		resumePoll()
+
+		const result = await promise
+		flushRingBuffers() // drain any unused pre-written confirmations
+		saveEmulatorState()
+		return result
+	} finally {
+		resumePoll() // idempotent — ensures poll is always restored
+	}
+}
+
+// ── Emulator interactive signing helper ─────────────────────────────
+// Wraps signing/address-display operations that need user confirmation
+// on the emulator window. Setup ops (loadDevice, wipe) keep using
+// emuConfirmOp for auto-confirm.
+async function emuSigningOp(
+	fn: () => Promise<any>,
+	details: { operation: string; chain?: string; to?: string; value?: string; memo?: string },
+): Promise<any> {
+	const { emuInteractiveConfirm } = await import('./emulator-window')
+	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
+}
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -349,9 +437,105 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			resetDevice: async (params) => { await engine.resetDevice(params) },
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
-			loadDevice: async (params) => { await engine.loadDevice(params) },
+			loadDevice: async (params) => {
+				if (engine.isEmulator) {
+					// Save mnemonic FIRST — connectEmulator's auto-reload (stale
+					// storage key recovery) will pick up the NEW seed instead of
+					// the previously saved one.
+					if (params.mnemonic) {
+						const { saveMnemonic } = await import('./emulator-keychain')
+						const { getActiveFlashName } = await import('./emulator')
+						console.log('[Vault] Saving new mnemonic before load (flash=%s)', getActiveFlashName())
+						saveMnemonic(getActiveFlashName(), params.mnemonic)
+					}
+
+					// Firmware rejects loadDevice on an already-initialized device.
+					// Wipe first so the new mnemonic actually takes effect.
+					if (engine.cachedFeatures?.initialized) {
+						console.log('[Vault] Emulator already initialized — wiping before loadDevice')
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						const { flushRingBuffers } = await import('./emulator')
+						flushRingBuffers()
+						// connectEmulator may auto-reload our just-saved mnemonic
+						// via the stale-storage-key recovery path.
+						await engine.connectEmulator()
+					}
+
+					// If auto-reload already initialized the device with the new
+					// seed, skip the manual loadDevice — firmware would reject it.
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
+					} else {
+						console.log('[Vault] Device already initialized after reconnect — skipping manual loadDevice')
+					}
+
+					// Drain stale ButtonAck + reconnect for clean transport
+					const { flushRingBuffers: flush } = await import('./emulator')
+					flush()
+					await engine.connectEmulator()
+
+					// Verify the firmware actually holds the mnemonic we loaded
+					if (params.mnemonic) {
+						const actual = await engine.getEmulatorMnemonic()
+						if (!actual) {
+							console.error('[Vault] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+						} else if (actual.trim() !== params.mnemonic.trim()) {
+							console.error('[Vault] SEED VERIFY FAIL — firmware mnemonic does NOT match loaded seed')
+							console.error('[Vault]   expected first word: %s', params.mnemonic.trim().split(/\s+/)[0])
+							console.error('[Vault]   actual first word:   %s', actual.trim().split(/\s+/)[0])
+						} else {
+							console.log('[Vault] SEED VERIFY OK — firmware mnemonic matches loaded seed')
+						}
+					}
+					return
+				}
+				await engine.loadDevice(params)
+			},
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
-			applySettings: async (params) => { await engine.applySettings(params) },
+			verifySeedChallenge: async () => {
+				if (!engine.isEmulator) throw new Error('Challenge-based verify is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const mnemonic = loadMnemonic(getActiveFlashName())
+				if (!mnemonic) throw new Error('No saved mnemonic found for this emulator')
+				const words = mnemonic.trim().split(/\s+/)
+				const wordCount = words.length
+				// Pick 3 random unique positions (1-indexed)
+				const all = Array.from({ length: wordCount }, (_, i) => i + 1)
+				for (let i = all.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[all[i], all[j]] = [all[j], all[i]]
+				}
+				const positions = all.slice(0, 3).sort((a, b) => a - b)
+				return { positions, wordCount }
+			},
+			verifySeedSubmit: async (params) => {
+				if (!engine.isEmulator) throw new Error('Challenge-based verify is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const mnemonic = loadMnemonic(getActiveFlashName())
+				if (!mnemonic) return { success: false, message: 'No saved mnemonic — cannot verify' }
+				const words = mnemonic.trim().split(/\s+/)
+				for (const { position, word } of params.answers) {
+					if (position < 1 || position > words.length) {
+						return { success: false, message: `Invalid word position: ${position}` }
+					}
+					if (word.trim().toLowerCase() !== words[position - 1].toLowerCase()) {
+						return { success: false, message: `Word #${position} is incorrect` }
+					}
+				}
+				return { success: true, message: 'Seed verified successfully' }
+			},
+			applySettings: async (params) => {
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+					return
+				}
+				await engine.applySettings(params)
+			},
 			changePin: async () => { await engine.changePin() },
 			removePin: async () => { await engine.removePin() },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
@@ -440,8 +624,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// the transport lock is held while waiting for PIN input,
 				// so wipe() would deadlock without this.
 				await engine.wallet.cancel().catch(() => {})
-				await engine.wallet.wipe()
-				await engine.syncState()
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.wallet!.wipe())
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+				} else {
+					await engine.wallet.wipe()
+					await engine.syncState()
+				}
 				return { success: true }
 			},
 			getPublicKeys: async (params) => {
@@ -452,63 +643,81 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Address derivation ────────────────────────────────────
 			btcGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.btcGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.btcGetAddress(params), { operation: 'btcGetAddress', chain: 'Bitcoin' })
+					: await engine.wallet.btcGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('bitcoin', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			ethGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.ethGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.ethGetAddress(params), { operation: 'ethGetAddress', chain: 'Ethereum' })
+					: await engine.wallet.ethGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('ethereum', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			cosmosGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.cosmosGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.cosmosGetAddress(params), { operation: 'cosmosGetAddress', chain: 'Cosmos' })
+					: await engine.wallet.cosmosGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('cosmos', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			thorchainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.thorchainGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.thorchainGetAddress(params), { operation: 'thorchainGetAddress', chain: 'THORChain' })
+					: await engine.wallet.thorchainGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('thorchain', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			mayachainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.mayachainGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.mayachainGetAddress(params), { operation: 'mayachainGetAddress', chain: 'Maya' })
+					: await engine.wallet.mayachainGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('mayachain', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			osmosisGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.osmosisGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.osmosisGetAddress(params), { operation: 'osmosisGetAddress', chain: 'Osmosis' })
+					: await engine.wallet.osmosisGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('osmosis', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			xrpGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.rippleGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.rippleGetAddress(params), { operation: 'xrpGetAddress', chain: 'XRP' })
+					: await engine.wallet.rippleGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('ripple', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			solanaGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.solanaGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.solanaGetAddress(params), { operation: 'solanaGetAddress', chain: 'Solana' })
+					: await engine.wallet.solanaGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			tronGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.tronGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.tronGetAddress(params), { operation: 'tronGetAddress', chain: 'Tron' })
+					: await engine.wallet.tronGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr)
 				return result
@@ -517,7 +726,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				// Default to non-bounceable (UQ) — bounceable (EQ) bounces funds if wallet is uninitialized
 				const bounceable = params.bounceable ?? false
-				const result = await engine.wallet.tonGetAddress({ ...params, bounceable })
+				const addrParams = { ...params, bounceable }
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.tonGetAddress(addrParams), { operation: 'tonGetAddress', chain: 'TON' })
+					: await engine.wallet.tonGetAddress(addrParams)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('ton', JSON.stringify(params.addressNList || []), addr)
 				return result
@@ -526,18 +738,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.btcSignTx(params),
+					{ operation: 'btcSignTx', chain: 'Bitcoin', to: params.outputs?.[0]?.address, value: params.outputs?.[0]?.amount },
+				)
 				return await engine.wallet.btcSignTx(params)
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.ethSignTx(params),
+					{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value },
+				)
 				return await engine.wallet.ethSignTx(params)
 			},
 			ethSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.ethSignMessage(params),
+					{ operation: 'ethSignMessage', chain: 'Ethereum', memo: params.message?.toString()?.slice(0, 64) },
+				)
 				return await engine.wallet.ethSignMessage(params)
 			},
 			ethSignTypedData: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.ethSignTypedData(params),
+					{ operation: 'ethSignTypedData', chain: 'Ethereum' },
+				)
 				return await engine.wallet.ethSignTypedData(params)
 			},
 			ethVerifyMessage: async (params) => {
@@ -546,22 +774,42 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			cosmosSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.cosmosSignTx(params),
+					{ operation: 'cosmosSignTx', chain: 'Cosmos' },
+				)
 				return await engine.wallet.cosmosSignTx(params)
 			},
 			thorchainSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.thorchainSignTx(params),
+					{ operation: 'thorchainSignTx', chain: 'THORChain' },
+				)
 				return await engine.wallet.thorchainSignTx(params)
 			},
 			mayachainSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.mayachainSignTx(params),
+					{ operation: 'mayachainSignTx', chain: 'Maya' },
+				)
 				return await engine.wallet.mayachainSignTx(params)
 			},
 			osmosisSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.osmosisSignTx(params),
+					{ operation: 'osmosisSignTx', chain: 'Osmosis' },
+				)
 				return await engine.wallet.osmosisSignTx(params)
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.rippleSignTx(params),
+					{ operation: 'xrpSignTx', chain: 'XRP' },
+				)
 				return await engine.wallet.rippleSignTx(params)
 			},
 			solanaSignTx: async (params) => {
@@ -602,7 +850,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				console.debug(`[solanaSignTx] Calling hdwallet.solanaSignTx`)
-				const result = await engine.wallet.solanaSignTx(deviceParams)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.solanaSignTx(deviceParams), { operation: 'solanaSignTx', chain: 'Solana' })
+					: await engine.wallet.solanaSignTx(deviceParams)
 
 				console.debug(`[solanaSignTx] hdwallet result: hasSig=${!!result?.signature} sigLen=${result?.signature?.length || 0}`)
 
@@ -630,7 +880,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.solanaSignMessage(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.solanaSignMessage(params), { operation: 'solanaSignMessage', chain: 'Solana' })
+					: await engine.wallet.solanaSignMessage(params)
 				if (!result) throw new Error('solanaSignMessage returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -643,7 +895,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			tronSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.tronSignTx(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tronSignTx(params), { operation: 'tronSignTx', chain: 'Tron' })
+					: await engine.wallet.tronSignTx(params)
 				if (!result) throw new Error('tronSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -658,7 +912,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			tonSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.tonSignTx(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tonSignTx(params), { operation: 'tonSignTx', chain: 'TON' })
+					: await engine.wallet.tonSignTx(params)
 				if (!result) throw new Error('tonSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -1950,7 +2206,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setRestApiEnabled: async (params) => {
 				restApiEnabled = params.enabled
 				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
-				applyRestApiState()
+				await applyRestApiState()
 				return getAppSettings()
 			},
 			setPioneerApiBase: async (params) => {
@@ -2690,6 +2946,117 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
 
+			// ── Emulator (macOS only) ────────────────────────────────
+			emulatorPair: async () => {
+				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
+				pairEmulator()
+				return getEmulatorStatus()
+			},
+			emulatorInit: async (params) => {
+				const { initEmulator } = await import('./emulator')
+				const status = initEmulator(params?.flashName)
+				if (status.state === 'running') {
+					// Open the emulator device window
+					const { openEmulatorWindow } = await import('./emulator-window')
+					openEmulatorWindow()
+					// Bridge emulator to engine so UI transitions through onboarding
+					await engine.connectEmulator()
+				}
+				return status
+			},
+			emulatorStop: async () => {
+				const { closeEmulatorWindow } = await import('./emulator-window')
+				closeEmulatorWindow()
+				const { stopEmulator } = await import('./emulator')
+				engine.disconnectEmulator()
+				return stopEmulator()
+			},
+			emulatorSave: async () => {
+				const { saveEmulatorState } = await import('./emulator')
+				saveEmulatorState()
+			},
+			emulatorStatus: async () => {
+				const { getEmulatorStatus } = await import('./emulator')
+				return getEmulatorStatus()
+			},
+			emulatorDeleteFlash: async (params) => {
+				const { deleteFlash, getEmulatorStatus } = await import('./emulator')
+				const { deleteMnemonic } = await import('./emulator-keychain')
+				deleteFlash(params.name)
+				deleteMnemonic(params.name)
+				return getEmulatorStatus()
+			},
+			emulatorGetMnemonic: async () => {
+				return await engine.getEmulatorMnemonic()
+			},
+			emulatorCreateWallet: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+
+				const bip39 = require('bip39')
+				const wc = params?.wordCount || 12
+				const strength = wc === 24 ? 256 : wc === 18 ? 192 : 128
+				const mnemonic = bip39.generateMnemonic(strength)
+				console.log(`[Emulator] Generated ${wc}-word mnemonic`)
+
+				// Save mnemonic FIRST — connectEmulator's auto-reload uses it
+				const { saveMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				saveMnemonic(getActiveFlashName(), mnemonic)
+
+				// Wipe first if already initialized — firmware rejects loadDevice otherwise
+				if (engine.cachedFeatures?.initialized) {
+					console.log('[Emulator] Already initialized — wiping before create')
+					await emuConfirmOp(() => engine.wallet!.wipe())
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+				}
+
+				// If auto-reload already initialized with the new seed, skip manual load
+				if (!engine.cachedFeatures?.initialized) {
+					await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+						mnemonic, pin: false, passphrase: false, skipChecksum: false,
+					}))
+					console.log('[Emulator] loadDevice complete')
+				} else {
+					console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
+				}
+
+				// Auto-set label with EMU prefix
+				try {
+					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
+					console.log('[Emulator] Label set')
+				} catch (e: any) {
+					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
+				}
+
+				// Drain stale data + reconnect for clean transport
+				const { flushRingBuffers } = await import('./emulator')
+				flushRingBuffers()
+				await engine.connectEmulator()
+
+				// Verify the firmware actually holds the mnemonic we generated
+				const actualMnemonic = await engine.getEmulatorMnemonic()
+				if (!actualMnemonic) {
+					console.error('[Emulator] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+				} else if (actualMnemonic.trim() !== mnemonic.trim()) {
+					console.error('[Emulator] SEED VERIFY FAIL — firmware mnemonic does NOT match generated seed')
+					console.error('[Emulator]   expected first word: %s', mnemonic.trim().split(/\s+/)[0])
+					console.error('[Emulator]   actual first word:   %s', actualMnemonic.trim().split(/\s+/)[0])
+				} else {
+					console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
+				}
+
+				// Show seed words on emulator device window (NOT the main UI)
+				const { displaySeedWords, isEmulatorWindowOpen } = await import('./emulator-window')
+				if (isEmulatorWindowOpen()) {
+					await displaySeedWords(mnemonic)
+				}
+
+				// Return success flag only — mnemonic stays on the "device"
+				return { seedDisplayed: true }
+			},
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				try {
@@ -2846,6 +3213,23 @@ engine.on('state-change', (state) => {
 		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
 	}
 })
+// Seed changed — different mnemonic loaded on the same hardware.
+// Reset in-memory address managers so they re-derive from the new seed.
+// Don't wipe DB — let the fresh Pioneer fetch naturally overwrite stale entries.
+engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
+	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
+	btcAccounts.reset()
+	evmAddresses.reset()
+	// Clear stale DB caches — old seed's pubkeys and balances are wrong for the new seed
+	if (deviceId) {
+		clearCachedPubkeys(deviceId)
+		clearBalances(deviceId)
+		console.log('[Vault] Seed changed: cleared cached pubkeys + balances for', deviceId)
+	}
+	// Push fresh state to frontend so it re-renders
+	try { rpc.send['device-state'](engine.getDeviceState()) } catch {}
+})
+
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
 })
@@ -3048,7 +3432,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
-applyRestApiState()
+await applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
 await engine.start()
@@ -3129,6 +3513,27 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+
+	// Stop heartbeat — watchdog will SIGKILL us if cleanup takes >15s
+	stopHeartbeatWatchdog()
+
+	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway
+	setTimeout(() => {
+		console.error('[cleanup] Force-exiting after 5s timeout')
+		process.exit(1)
+	}, 5000).unref?.()
+
+	// Close emulator window + persist flash before exit
+	try {
+		const { closeEmulatorWindow } = require('./emulator-window')
+		closeEmulatorWindow()
+	} catch {}
+	try {
+		const { stopEmulator, getEmulatorStatus } = require('./emulator')
+		if (getEmulatorStatus().state === 'running') {
+			stopEmulator()
+		}
+	} catch {}
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()
@@ -3143,6 +3548,46 @@ if (typeof process !== 'undefined') {
 	process.on('SIGTERM', cleanupAndQuit)
 	process.on('SIGINT', cleanupAndQuit)
 }
+
+// ── FFI watchdog ──────────────────────────────────────────────────────
+// When kkemu_poll() blocks inside confirm_helper (C busy-loop), the JS event
+// loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
+// This watchdog subprocess monitors liveness via a heartbeat file.
+// If the heartbeat stops for >15s, it sends SIGKILL to this process.
+const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+function startHeartbeatWatchdog() {
+	// Write heartbeat every 5s — proves the event loop is alive
+	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
+	heartbeatTimer = setInterval(() => {
+		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
+	}, 5000)
+
+	// Spawn a tiny watchdog that kills us if heartbeat goes stale
+	const watchdog = Bun.spawn(['bash', '-c', `
+		while true; do
+			sleep 5
+			if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
+			last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+			now=$(date +%s)
+			age=$(( now - last / 1000 ))
+			if [ "$age" -gt 15 ]; then
+				kill -9 ${process.pid} 2>/dev/null
+				rm -f "${HEARTBEAT_FILE}"
+				exit 0
+			fi
+		done
+	`], { stdout: 'ignore', stderr: 'ignore' })
+	watchdog.unref()
+}
+
+function stopHeartbeatWatchdog() {
+	if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+	try { fs.unlinkSync(HEARTBEAT_FILE) } catch {}
+}
+
+startHeartbeatWatchdog()
 
 // ── Start Zcash sidecar only if feature flag is ON ──────────────────
 if (zcashPrivacyEnabled) {

@@ -23,6 +23,7 @@ interface TopNavProps {
 	firmwareVerified?: boolean
 	needsFirmwareUpdate?: boolean
 	latestFirmware?: string
+	isEmulator?: boolean
 	onSettingsToggle: () => void
 	onMobileToggle?: () => void
 	settingsOpen?: boolean
@@ -97,7 +98,7 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, onMobileToggle, settingsOpen, mobileOpen, activeTab, onTabChange, watchOnly, passphraseActive }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, isEmulator, onSettingsToggle, onMobileToggle, settingsOpen, mobileOpen, activeTab, onTabChange, watchOnly, passphraseActive }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -167,6 +168,11 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 					</Text>
 				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
+						{isEmulator && (
+							<Text fontSize="9px" color="orange.300" fontWeight="700" bg="rgba(251,146,60,0.15)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="wider">
+								EMU
+							</Text>
+						)}
 						{firmwareVerified === false ? (
 							<>
 								<ConstructionIcon />

@@ -13,6 +13,7 @@ const DEFAULT_STATE: DeviceStateInfo = {
   initialized: false,
   passphraseProtection: false,
   isOob: false,
+  isEmulator: false,
 }
 
 export function useDeviceState() {

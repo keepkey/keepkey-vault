@@ -118,8 +118,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [deviceLabel, setDeviceLabel] = useState('')
   const [setupError, setSetupError] = useState<string | null>(null)
   // Seed verification state
-  const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'verifying' | 'success' | 'failed'>('idle')
+  const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'quiz' | 'verifying' | 'success' | 'failed'>('idle')
   const [verifyError, setVerifyError] = useState<string | null>(null)
+  // Emulator quiz-based verify
+  const [quizPositions, setQuizPositions] = useState<number[]>([])
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
   // L1 fix: removed unused setupLoading state (value was never read)
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
@@ -145,6 +148,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [showReadMore, setShowReadMore] = useState(false)
   // Advanced seed length toggle for create wallet
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
+
+  // Emulator state — moved below deviceStatus declaration
 
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
@@ -205,6 +210,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const needsInit = deviceStatus.needsInit
   const inBootloader = deviceStatus.bootloaderMode
   const isOobDevice = deviceStatus.isOob
+  const isEmulator = deviceStatus.isEmulator ?? false
 
   // Bootloader skip is only safe on firmware >= 6.1.1.
   // In bootloader mode we don't know the FW version — never allow skip.
@@ -581,9 +587,18 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const handleCreateWallet = async () => {
     setSetupType('create')
     setStep('init-progress')
-
     setSetupError(null)
     try {
+      if (isEmulator) {
+        // Emulator: generate mnemonic on backend, load device, then display
+        // seed words on the emulator device window (not here in the main UI).
+        // The RPC blocks until the user acknowledges the words on the emulator.
+        await rpcRequest('emulatorCreateWallet', { wordCount }, DEVICE_INTERACTION_TIMEOUT)
+        // Seed was shown + acked on emulator window — skip to label step
+        setStep('init-label')
+        return
+      }
+
       await rpcRequest('resetDevice', {
         wordCount,
         pin: true,
@@ -593,8 +608,6 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
     } catch (err) {
       setSetupError(err instanceof Error ? err.message : t('initProgress.failedToCreate'))
       setStep('init-choose')
-    } finally {
-
     }
   }
 
@@ -1993,51 +2006,63 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
-              <VStack gap={4} textAlign="center" w="100%" maxW="400px" mx="auto">
-                <Spinner
-                  size="lg"
-                  color={HIGHLIGHT}
-                  borderWidth="3px"
-                />
-                <VStack gap={1}>
-                  <Text fontSize="md" fontWeight="bold" color="white">
-                    {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
-                  </Text>
-                  <Text fontSize="xs" color="gray.400" maxW="320px">
-                    {setupType === 'create'
-                      ? t('initProgress.followPromptsCreate')
-                      : setupType === 'recover'
-                        ? t('initProgress.followPromptsRecover')
-                        : t('initProgress.followPrompts')}
-                  </Text>
-                </VStack>
-
-                {setupType === 'create' && (
-                  <Box w="100%" p={4} bg="red.900" borderRadius="lg" borderWidth="2px" borderColor="red.400"
-                    css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(245,101,101,0.4)' }}>
-                    <VStack gap={2}>
-                      <HStack gap={2} justify="center">
-                        <FaExclamationTriangle color="#FC8181" size={20} />
-                        <Text fontSize="md" color="red.200" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
-                          {t('initProgress.writeDownWarning', { defaultValue: 'Write down every word!' })}
-                        </Text>
-                        <FaExclamationTriangle color="#FC8181" size={20} />
-                      </HStack>
-                      <Text fontSize="xs" color="red.300" textAlign="center" fontWeight="600">
-                        {t('initProgress.writeDownDetail', { defaultValue: 'Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup — you will NOT see these words again.' })}
+              <VStack gap={4} textAlign="center" w="100%" maxW="480px" mx="auto">
+                {/* ── Spinner + "look at device" (or emulator window) ─────── */}
+                <>
+                  <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
+                    <VStack gap={1}>
+                      <Text fontSize="md" fontWeight="bold" color="white">
+                        {setupType === 'create' ? t('initProgress.creatingWallet') : t('initProgress.recoveringWallet')}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400" maxW="320px">
+                        {setupType === 'create'
+                          ? t('initProgress.followPromptsCreate')
+                          : setupType === 'recover'
+                            ? t('initProgress.followPromptsRecover')
+                            : t('initProgress.followPrompts')}
                       </Text>
                     </VStack>
-                  </Box>
-                )}
 
-                <Box w="100%" p={3} bg="green.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
-                  <HStack gap={2} justify="center">
-                    <FaExclamationTriangle color="#48BB78" size={14} />
-                    <Text fontSize="xs" color="green.200" fontWeight="bold">
-                      {t('initProgress.lookAtDevice')}
-                    </Text>
-                  </HStack>
-                </Box>
+                    {setupType === 'create' && (
+                      <Box w="100%" p={4} bg="red.900" borderRadius="lg" borderWidth="2px" borderColor="red.400"
+                        css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(245,101,101,0.4)' }}>
+                        <VStack gap={2}>
+                          <HStack gap={2} justify="center">
+                            <FaExclamationTriangle color="#FC8181" size={20} />
+                            <Text fontSize="md" color="red.200" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
+                              {t('initProgress.writeDownWarning', { defaultValue: 'Write down every word!' })}
+                            </Text>
+                            <FaExclamationTriangle color="#FC8181" size={20} />
+                          </HStack>
+                          <Text fontSize="xs" color="red.300" textAlign="center" fontWeight="600">
+                            {t('initProgress.writeDownDetail', { defaultValue: 'Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup — you will NOT see these words again.' })}
+                          </Text>
+                        </VStack>
+                      </Box>
+                    )}
+
+                    {isEmulator && (
+                      <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor="orange.400">
+                        <HStack gap={2} justify="center">
+                          <Spinner size="xs" color="orange.300" />
+                          <Text fontSize="xs" color="orange.200" fontWeight="bold">
+                            Check the Emulator window for prompts
+                          </Text>
+                        </HStack>
+                      </Box>
+                    )}
+
+                    {!isEmulator && (
+                      <Box w="100%" p={3} bg="green.900" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
+                        <HStack gap={2} justify="center">
+                          <FaExclamationTriangle color="#48BB78" size={14} />
+                          <Text fontSize="xs" color="green.200" fontWeight="bold">
+                            {t('initProgress.lookAtDevice')}
+                          </Text>
+                        </HStack>
+                      </Box>
+                    )}
+                </>
 
                 {setupError && (
                   <Box w="100%" p={3} bg="red.900" borderRadius="lg" borderWidth="1px" borderColor="red.500">
@@ -2137,7 +2162,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         {t('verifySeed.title', { defaultValue: 'Verify Your Recovery Phrase' })}
                       </Text>
                       <Text fontSize="xs" color="gray.400" maxW="320px">
-                        {t('verifySeed.description', { defaultValue: 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.' })}
+                        {isEmulator
+                          ? t('verifySeed.descriptionEmulator', { defaultValue: 'We\'ll ask you for 3 random words from your seed to confirm you have a correct backup.' })
+                          : t('verifySeed.description', { defaultValue: 'Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.' })}
                       </Text>
                     </VStack>
                     <Button
@@ -2146,16 +2173,28 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={async () => {
-                        setVerifyingPhase('verifying')
                         setVerifyError(null)
-                        onWordCountChange?.(wordCount)
-                        try {
-                          const result = await rpcRequest('verifySeed', { wordCount }, 0) as { success: boolean; message: string }
-                          setVerifyingPhase(result.success ? 'success' : 'failed')
-                          if (!result.success) setVerifyError(result.message)
-                        } catch (e: any) {
-                          setVerifyingPhase('failed')
-                          setVerifyError(e?.message || 'Verification failed')
+                        if (isEmulator) {
+                          try {
+                            const challenge = await rpcRequest('verifySeedChallenge', undefined) as { positions: number[]; wordCount: number }
+                            setQuizPositions(challenge.positions)
+                            setQuizAnswers({})
+                            setVerifyingPhase('quiz')
+                          } catch (e: any) {
+                            setVerifyingPhase('failed')
+                            setVerifyError(e?.message || 'Could not generate challenge')
+                          }
+                        } else {
+                          setVerifyingPhase('verifying')
+                          onWordCountChange?.(wordCount)
+                          try {
+                            const result = await rpcRequest('verifySeed', { wordCount }, 0) as { success: boolean; message: string }
+                            setVerifyingPhase(result.success ? 'success' : 'failed')
+                            if (!result.success) setVerifyError(result.message)
+                          } catch (e: any) {
+                            setVerifyingPhase('failed')
+                            setVerifyError(e?.message || 'Verification failed')
+                          }
                         }
                       }}
                     >
@@ -2167,7 +2206,84 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later" })}
+                    </Button>
+                  </>
+                )}
+                {verifyingPhase === 'quiz' && (
+                  <>
+                    <FaKey color="#C0A860" size={36} />
+                    <VStack gap={1}>
+                      <Text fontSize="lg" fontWeight="bold" color="white">
+                        {t('verifySeed.enterWords', { defaultValue: 'Enter the requested words' })}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400" maxW="320px">
+                        {t('verifySeed.enterWordsDetail', { defaultValue: 'Type the correct word for each position from your recovery phrase.' })}
+                      </Text>
+                    </VStack>
+                    <VStack gap={3} w="100%">
+                      {quizPositions.map((pos) => (
+                        <Box key={pos} w="100%">
+                          <Text fontSize="xs" color="gray.400" mb={1} textAlign="left">
+                            Word #{pos}
+                          </Text>
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            value={quizAnswers[pos] || ''}
+                            onChange={(e) => setQuizAnswers(prev => ({ ...prev, [pos]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const idx = quizPositions.indexOf(pos)
+                                if (idx < quizPositions.length - 1) {
+                                  const next = document.querySelector(`[data-quiz-pos="${quizPositions[idx + 1]}"]`) as HTMLInputElement
+                                  next?.focus()
+                                }
+                              }
+                            }}
+                            data-quiz-pos={pos}
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(192, 168, 96, 0.3)',
+                              background: 'rgba(0,0,0,0.3)',
+                              color: 'white',
+                              fontSize: '14px',
+                              outline: 'none',
+                            }}
+                          />
+                        </Box>
+                      ))}
+                    </VStack>
+                    <Button
+                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      disabled={quizPositions.some(p => !quizAnswers[p]?.trim())}
+                      onClick={async () => {
+                        setVerifyingPhase('verifying')
+                        try {
+                          const answers = quizPositions.map(p => ({ position: p, word: quizAnswers[p].trim() }))
+                          const result = await rpcRequest('verifySeedSubmit', { answers }) as { success: boolean; message: string }
+                          setVerifyingPhase(result.success ? 'success' : 'failed')
+                          if (!result.success) setVerifyError(result.message)
+                        } catch (e: any) {
+                          setVerifyingPhase('failed')
+                          setVerifyError(e?.message || 'Verification failed')
+                        }
+                      }}
+                    >
+                      {t('verifySeed.checkWords', { defaultValue: 'Check Words' })}
+                    </Button>
+                    <Button
+                      w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={() => setVerifyingPhase('idle')}
+                    >
+                      {t('common.back', { defaultValue: 'Back' })}
                     </Button>
                   </>
                 )}
@@ -2179,7 +2295,9 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         {t('verifySeed.verifying', { defaultValue: 'Verifying...' })}
                       </Text>
                       <Text fontSize="xs" color="gray.400">
-                        {t('verifySeed.followDevice', { defaultValue: 'Follow the prompts on your KeepKey to enter the requested words.' })}
+                        {isEmulator
+                          ? t('verifySeed.checkingAnswers', { defaultValue: 'Checking your answers...' })
+                          : t('verifySeed.followDevice', { defaultValue: 'Follow the prompts on your KeepKey to enter the requested words.' })}
                       </Text>
                     </VStack>
                   </>
@@ -2228,7 +2346,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
-                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later in Settings" })}
+                      {t('verifySeed.skipForNow', { defaultValue: "Skip — I'll verify later" })}
                     </Button>
                   </>
                 )}
@@ -2403,7 +2521,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     entirely.
                   </Text>
                   <Text fontSize="xs" color="red.300" lineHeight="tall">
-                    Only use this for throwaway development and testing wallets.
+                    For development purposes only.
                     Never load a seed that controls real funds.
                   </Text>
                 </VStack>

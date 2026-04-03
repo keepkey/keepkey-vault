@@ -598,6 +598,67 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Flex>
 					</Section>
 
+					{/* ── Emulator ────────────────────────────────────── */}
+					{deviceState.isEmulator && (
+						<Section title="Emulator" defaultOpen={true}>
+							<VStack gap="2" align="stretch">
+								<Box bg="rgba(255,152,0,0.08)" border="1px solid" borderColor="rgba(255,152,0,0.3)" borderRadius="md" px="3" py="2">
+									<Text fontSize="xs" color="orange.300" fontWeight="600">For Development Purposes Only</Text>
+								</Box>
+								<InfoRow label="Mode" value="In-Process (dylib FFI)" />
+								<InfoRow label="Transport" value="Ring Buffer" />
+								<InfoRow label="Flash" value={deviceState.deviceId?.split(":")[0]?.slice(0, 12) + "..." || "—"} />
+								<InfoRow label="Seed ID" value={deviceState.deviceId?.includes(":") ? deviceState.deviceId.split(":")[1] : "—"} />
+							</VStack>
+
+							<Flex gap="3" mt="4" wrap="wrap">
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "orange.400", color: "orange.400" }}
+									onClick={async () => {
+										try {
+											setWiping(true)
+											await rpcRequest("wipeDevice", undefined, 30000)
+										} catch (e: any) {
+											console.error("Emulator wipe failed:", e?.message)
+										} finally { setWiping(false) }
+									}}
+									disabled={wiping}
+								>
+									{wiping ? "Wiping..." : "Wipe Emulator"}
+								</Button>
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "kk.error", color: "kk.error" }}
+									onClick={async () => {
+										try {
+											await rpcRequest("emulatorStop", undefined, 10000)
+										} catch (e: any) {
+											console.error("Emulator stop failed:", e?.message)
+										}
+									}}
+								>
+									Stop Emulator
+								</Button>
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "kk.error", color: "kk.error" }}
+									onClick={async () => {
+										if (!confirm("Delete flash and stop? This erases the emulator seed.")) return
+										try {
+											await rpcRequest("emulatorStop", undefined, 10000)
+											await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
+										} catch (e: any) {
+											console.error("Flash delete failed:", e?.message)
+										}
+									}}
+								>
+									Delete Flash
+								</Button>
+							</Flex>
+						</Section>
+					)}
+
 					{/* ── Security ────────────────────────────────────── */}
 					<Section title={t("security")}>
 						{featuresError && (

@@ -1,7 +1,7 @@
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
-export type ActiveTransport = 'hid' | 'webusb' | null
+export type ActiveTransport = 'hid' | 'webusb' | 'tcp' | 'emulator' | null
 
 // PIN request types — maps to KeepKey PinMatrixRequestType
 export type PinRequestType = 'current' | 'new-first' | 'new-second'
@@ -37,6 +37,7 @@ export interface DeviceStateInfo {
   firmwareVerified?: boolean
   bootloaderVerified?: boolean
   error?: string | null
+  isEmulator: boolean
 }
 
 export interface FirmwareProgress {
@@ -358,6 +359,20 @@ export interface AppSettings {
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+}
+
+// ── Emulator types (macOS only — encrypted flash with Keychain) ────────
+export type EmulatorProcessState = 'stopped' | 'starting' | 'running' | 'error'
+
+export interface EmulatorStatus {
+  state: EmulatorProcessState
+  bridgeReady: boolean            // true when emulator is loaded and responding
+  host: string                    // transport description
+  error?: string
+  paired: boolean                 // true when Keychain key exists
+  platform: string                // 'darwin' for macOS
+  flashImages: string[]           // available encrypted flash images
+  storagePath: string             // ~/.keepkey/emulator/
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
