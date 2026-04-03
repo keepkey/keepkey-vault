@@ -2056,8 +2056,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Only use built-in CHAINS (not custom chains — those may lack rpc methods)
 				const fwVersion = engine.getDeviceState().firmwareVersion
 				const builtinChains = CHAINS.filter(c => {
-					if (!isChainSupported(c, fwVersion) || c.hidden) return false
-					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (!isChainSupported(c, fwVersion)) return false
+					// Zcash: gated by feature flag, not by hidden (hidden keeps it off Dashboard grid)
+					if (c.id === 'zcash' || c.id === 'zcash-shielded') return zcashPrivacyEnabled
+					if (c.hidden) return false
 					return true
 				})
 
