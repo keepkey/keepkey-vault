@@ -240,8 +240,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
 	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
+	// BTC is excluded — it has its own cancellation-guarded effect (line 170) that uses
+	// the selected account/script path instead of the default path.
 	const isUtxo = chain.chainFamily === 'utxo'
 	useEffect(() => {
+		if (isBtc) return // BTC address derived by account-aware effect above
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
