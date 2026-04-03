@@ -1554,9 +1554,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
 						balanceUsd = nativeTotalUsd
 					}
-					// BTC: set display address from selected xpub (non-empty for swap dialog)
+					// BTC: use ONLY the selected xpub's address — never silently fall back to
+					// a different account's address (that would break the selected-account contract)
 					if (isBtc) {
-						address = btcSelectedAddress || btcFallbackAddress || btcAccounts.getSelectedXpub()?.xpub || ''
+						address = btcSelectedAddress || ''
 					}
 
 					// Process tokens — already filtered to this chain + our pubkeys
@@ -1610,8 +1611,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				// BTC: only write cache if we have a non-empty address — don't overwrite
+				// a good cached address with '' from an account-scoped refresh (Finding 4)
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
+					if (isBtc && !address) {
+						// Preserve existing cached address — only update balance/tokens
+						const existing = getCachedBalances(deviceId)
+						const cachedBtc = existing?.balances.find(b => b.chainId === 'bitcoin')
+						if (cachedBtc?.address) result.address = cachedBtc.address
+					}
 					updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
@@ -1619,8 +1628,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (isEvm) {
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
 				}
-				// Push updated BTC per-xpub balances so account selector stays current
-				if (isBtc) {
+				// Push updated BTC per-xpub balances — only if manager is hydrated (Finding 2)
+				if (isBtc && btcAccounts.isInitialized && btcAccounts.getAllPubkeyEntries(chain.caip).length > 0) {
 					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
 				}
 

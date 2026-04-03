@@ -592,7 +592,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						<SendForm
 							chain={chain}
 							address={address}
-							balance={activeBalance}
+							balance={isBtc && btcSelected?.xpubData ? {
+								...activeBalance!,
+								balance: btcSelected.xpubData.balance,
+								balanceUsd: btcSelected.xpubData.balanceUsd,
+								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+							} : activeBalance}
 							token={selectedToken}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
