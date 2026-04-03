@@ -3090,7 +3090,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!deviceId) return null
 				const result = getCachedBalances(deviceId)
 				if (!result) return null
-				return { balances: result.balances, updatedAt: result.updatedAt }
+
+				// Detect incomplete/stale cache — frontend can auto-refresh when staleReasons is non-empty
+				const staleReasons: string[] = []
+
+				// 2. Incomplete: fewer cached chains than supported (e.g. app update added new chains)
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const supportedChains = getAllChains().filter(c => !c.hidden && isChainSupported(c, fwVersion))
+				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
+				const missingChains = supportedChains.filter(c => !cachedChainIds.has(c.id))
+				if (missingChains.length > 0) {
+					staleReasons.push(`missing_chains:${missingChains.map(c => c.id).join(',')}`)
+				}
+
+				// 3. Device mismatch: cached balances exist but current device has different ID
+				// (This case is already handled by the deviceId key — getCachedBalances returns
+				// null for a new device. But partial migration from old device can leave gaps.)
+
+				// 4. Missing BTC xpubs: btcAccounts has more accounts than cached pubkeys
+				if (btcAccounts.isInitialized) {
+					const btcXpubs = btcAccounts.getAllPubkeyEntries('').length
+					const cachedBtcPks = getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub)
+					const cachedWithBalance = cachedBtcPks.filter(p => p.balance !== '0' || p.balanceUsd > 0)
+					if (btcXpubs > 0 && cachedWithBalance.length < btcXpubs) {
+						staleReasons.push(`btc_xpubs_missing:${cachedWithBalance.length}/${btcXpubs}`)
+					}
+				}
+
+				return { balances: result.balances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
