@@ -1384,8 +1384,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Single portfolio call with all pubkeys for this chain
+				const isEvm = chain.chainFamily === 'evm'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+
+				// Reset per-address balances for this refresh (mirrors getBalances line 991)
+				if (isEvm) evmAddresses.resetBalances()
+
 				try {
 					const resp = await withTimeout(
 						pioneer.GetPortfolioBalances(
@@ -1400,54 +1405,67 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
-					// Pioneer may return cross-chain data with forceRefresh — filter to THIS chain only
+					// Pioneer may return cross-chain data with forceRefresh — filter to THIS chain
+					// AND to the pubkeys we actually requested (prevents same-network contamination).
 					const chainNetworkId = (chain.networkId || '').toLowerCase()
 					const chainCaipPrefix = (chain.caip || '').split('/')[0].toLowerCase() // e.g. "eip155:1"
 					const pubkeySet = new Set(pubkeys.map(p => p.pubkey.toLowerCase()))
 
-					// Classify entries into natives vs tokens, filtering by chain
+					// Classify entries, requiring both chain-match AND pubkey-ownership
 					let nativeTotalBalance = 0
 					let nativeTotalUsd = 0
-					let nativeAddress = ''
 					const tokenEntries: any[] = []
 					let skippedCrossChain = 0
+					let skippedForeignPubkey = 0
 
 					for (const entry of allEntries) {
-						// Filter: only keep entries belonging to THIS chain
+						// Gate 1: entry must belong to THIS chain (networkId or CAIP prefix)
 						const entryNetworkId = (entry.networkId || '').toLowerCase()
 						const entryCaipPrefix = ((entry.caip || '').split('/')[0]).toLowerCase()
 						const belongsToChain = entryNetworkId === chainNetworkId
 							|| entryCaipPrefix === chainCaipPrefix
-							|| (!entryNetworkId && !entryCaipPrefix && pubkeySet.has((entry.pubkey || entry.address || '').toLowerCase()))
 						if (!belongsToChain) { skippedCrossChain++; continue }
 
 						const caip = entry.caip || ''
 						const caipPath = caip.split('/')[1] || ''
 						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
 						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
+
 						if (isTokenByCaip || isTokenByType) {
+							// Gate 2 (tokens): owner address must be one we requested
+							const ownerAddr = (entry.address || entry.pubkey || '').toLowerCase()
+							if (ownerAddr && !pubkeySet.has(ownerAddr)) { skippedForeignPubkey++; continue }
 							tokenEntries.push(entry)
 						} else {
-							// Aggregate native balances (multiple addresses for EVM)
+							// Gate 2 (natives): match against our pubkeys explicitly
+							// (mirrors getBalances EVM logic at line 1219-1236)
+							const entryPubkey = (entry.pubkey || '').toLowerCase()
+							const entryAddr = (entry.address || '').toLowerCase()
+							if (!pubkeySet.has(entryPubkey) && !pubkeySet.has(entryAddr)) {
+								skippedForeignPubkey++; continue
+							}
 							const bal = parseFloat(String(entry.balance ?? '0'))
 							const usd = Number(entry.valueUsd ?? 0)
 							nativeTotalBalance += bal
 							nativeTotalUsd += usd
-							if (entry.address && !nativeAddress) nativeAddress = entry.address
+							// Update per-address USD in EvmAddressManager (mirrors getBalances line 1224)
+							if (isEvm && usd > 0) {
+								evmAddresses.updateAddressBalance(entryAddr || entryPubkey, usd)
+							}
 						}
 					}
 
-					if (skippedCrossChain > 0) {
-						console.log(`[getBalance] ${chain.coin}: filtered out ${skippedCrossChain} cross-chain entries`)
+					if (skippedCrossChain > 0 || skippedForeignPubkey > 0) {
+						console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain, ${skippedForeignPubkey} foreign-pubkey entries`)
 					}
 
 					if (nativeTotalBalance > 0 || nativeTotalUsd > 0) {
 						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
 						balanceUsd = nativeTotalUsd
-						if (nativeAddress) address = nativeAddress
+						// Keep displayAddress (selected EVM address) — don't overwrite from Pioneer
 					}
 
-					// Process tokens — already filtered to this chain
+					// Process tokens — already filtered to this chain + our pubkeys
 					if (tokenEntries.length > 0) {
 						const parsedTokens: TokenBalance[] = []
 						for (const tok of tokenEntries) {
@@ -1503,6 +1521,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
+				// Push updated EVM per-address balances so address selector stays current
+				if (isEvm) {
+					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+				}
 
 				return result
 			},
