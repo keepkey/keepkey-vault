@@ -1,4 +1,4 @@
-import { Component, useState, useEffect, useCallback, useMemo, type ReactNode, type ErrorInfo } from "react"
+import { Component, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
@@ -221,6 +221,57 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 		loadCached()
 		return () => { cancelled = true }
 	}, [watchOnly, forceRefresh])
+
+	// One-shot price refresh: update cached USD values with fresh market prices on load/navigate.
+	// Does NOT re-fetch balances from Pioneer — only reprices existing cached amounts.
+	const priceRefreshedRef = useRef(false)
+	useEffect(() => {
+		if (!initialLoaded || balances.size === 0 || watchOnly || loadingBalances) return
+		if (priceRefreshedRef.current) return
+		priceRefreshedRef.current = true
+
+		const allChains = [...CHAINS, ...customChainDefs].filter(c => !c.hidden)
+		const chainsWithBalance = allChains.filter(c => {
+			const bal = balances.get(c.id)
+			return bal && parseFloat(bal.balance || '0') > 0
+		})
+		if (chainsWithBalance.length === 0) return
+		const caips = chainsWithBalance.map(c => c.caip).filter(Boolean)
+		if (caips.length === 0) return
+
+		let cancelled = false
+		rpcRequest<any>('getMarketData', { caips }, 15000)
+			.then(resp => {
+				if (cancelled) return
+				// resp.data is an array of USD prices in the same order as caips
+				const prices: number[] = resp?.data || (Array.isArray(resp) ? resp : [])
+				if (prices.length !== caips.length) return
+
+				setBalances(prev => {
+					const next = new Map(prev)
+					let changed = false
+					for (let i = 0; i < chainsWithBalance.length; i++) {
+						const chain = chainsWithBalance[i]
+						const freshPrice = prices[i]
+						if (!freshPrice || freshPrice <= 0) continue
+						const bal = next.get(chain.id)
+						if (!bal) continue
+						const amount = parseFloat(bal.balance || '0')
+						if (amount <= 0) continue
+						const newNativeUsd = amount * freshPrice
+						const tokenUsd = bal.tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
+						const updated = { ...bal, nativeBalanceUsd: newNativeUsd, balanceUsd: newNativeUsd + tokenUsd }
+						next.set(chain.id, updated)
+						changed = true
+					}
+					return changed ? next : prev
+				})
+				console.log(`[Dashboard] Price refresh: ${prices.length} prices updated`)
+			})
+			.catch(() => { /* price refresh is best-effort */ })
+
+		return () => { cancelled = true }
+	}) // runs on every render but ref-gated to fire once
 
 	// Manual refresh: fetch live data from Pioneer API
 	const refreshBalances = useCallback(async () => {
