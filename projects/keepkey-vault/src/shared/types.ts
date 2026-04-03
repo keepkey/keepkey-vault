@@ -362,6 +362,16 @@ export interface AppSettings {
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
 }
 
+// ── WalletConnect types ─────────────────────────────────────────────────
+export interface WcSessionInfo {
+  topic: string
+  peerName: string
+  peerUrl: string
+  peerIcon: string
+  chains: string[]
+  expiry: number
+}
+
 // ── Emulator types (macOS only — encrypted flash with Keychain) ────────
 export type EmulatorProcessState = 'stopped' | 'starting' | 'running' | 'error'
 

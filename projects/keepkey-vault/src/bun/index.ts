@@ -46,6 +46,7 @@ import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
+import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
@@ -250,6 +251,37 @@ function loadSettings() {
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
+// WalletConnect manager — lazily initialized when user pairs
+let wcManager: WalletConnectManager | null = null
+function getOrCreateWcManager(): WalletConnectManager {
+	if (wcManager) return wcManager
+	wcManager = new WalletConnectManager({
+		getEvmAddress: () => evmAddresses.getSelectedAddress()?.address ?? null,
+		ethSignTx: (params) => engine.wallet!.ethSignTx(params),
+		ethSignMessage: (params) => engine.wallet!.ethSignMessage(params),
+		ethSignTypedData: (params) => engine.wallet!.ethSignTypedData(params),
+		requestSigningApproval: async (info) => {
+			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
+			try {
+				mainWindow.setAlwaysOnTop(true)
+				mainWindow.focus()
+			} catch { /* window not ready */ }
+			try {
+				return await auth.requestSigningApproval(info.id)
+			} finally {
+				try { mainWindow.setAlwaysOnTop(false) } catch {}
+			}
+		},
+		dismissSigning: (id) => {
+			try { rpc.send['signing-dismissed']({ id }) } catch {}
+		},
+		log: (msg) => console.log(msg),
+		onSessionsChanged: (sessions) => {
+			try { rpc.send['wc-sessions'](sessions) } catch {}
+		},
+	})
+	return wcManager
+}
 
 function getAppSettings() {
 	const servers = getPioneerServers()
@@ -3066,6 +3098,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { seedDisplayed: true }
 			},
 
+			// ── WalletConnect (native v2) ────────────────────────────
+			wcPair: async (params) => {
+				if (!walletConnectEnabled) throw new Error('WalletConnect is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const wc = getOrCreateWcManager()
+				await wc.pair(params.uri)
+			},
+			wcGetSessions: async () => {
+				if (!wcManager) return []
+				return wcManager.getSessions()
+			},
+			wcDisconnectSession: async (params) => {
+				if (!wcManager) return
+				await wcManager.disconnectSession(params.topic)
+			},
+
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
 				try {
@@ -3536,19 +3584,23 @@ function getWalletConnectUri(inputUri: string): string | undefined {
 
 function handleKeepKeyUrl(url: string) {
 	console.log('[Vault] keepkey:// URL:', url)
-	// Extract WalletConnect URI if present (keepkey://launch/wc?uri=... or keepkey://wc?uri=...)
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
-		try {
-			rpc.send['walletconnect-uri'](wcUri)
-			pendingDeepLinkUri = null
-		} catch {
-			// WebView not ready yet — queue for delivery when frontend connects
-			pendingDeepLinkUri = wcUri
-			console.log('[Vault] WebView not ready, queued WC URI for later delivery')
+		if (walletConnectEnabled) {
+			// Native WC v2 — pair directly in the backend
+			const wc = getOrCreateWcManager()
+			wc.pair(wcUri).catch(e => console.error('[WC] Pair failed:', e.message))
+		} else {
+			// WC disabled — notify frontend to show "not supported" dialog
+			try {
+				rpc.send['walletconnect-uri'](wcUri)
+				pendingDeepLinkUri = null
+			} catch {
+				pendingDeepLinkUri = wcUri
+			}
 		}
 	}
-	// keepkey://launch (no WC) — just bring the app to the foreground
+	// Bring window to front
 	try { mainWindow.focus() } catch {}
 }
 

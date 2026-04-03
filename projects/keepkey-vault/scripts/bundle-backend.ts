@@ -44,6 +44,14 @@ const FORCE_EXTERNAL = new Set([
   'google-protobuf',
   '@keepkey/proto-tx-builder',
   'swagger-client',
+  // WalletConnect: ESM/CJS dual-package resolution breaks in Bun bundler
+  // (auth-client imports isBrowser/TYPE_1 from utils — not in CJS exports).
+  // Runtime Bun resolves them correctly.
+  '@walletconnect/web3wallet',
+  '@walletconnect/core',
+  '@walletconnect/types',
+  '@walletconnect/utils',
+  '@walletconnect/jsonrpc-utils',
 ])
 
 // Pre-flight: device-protocol lib/ must be built (submodule has lib/ in .gitignore).

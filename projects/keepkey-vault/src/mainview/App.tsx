@@ -264,29 +264,25 @@ function App() {
 	}, [])
 
 	// ── WalletConnect deep link listener ────────────────────────────
+	// This fires only when WC is DISABLED (backend sends URI to frontend).
+	// When WC is enabled, the backend pairs natively and never sends this message.
 	useEffect(() => {
-		return onRpcMessage("walletconnect-uri", (uri) => {
-			if (!walletConnectEnabled) {
-				setWcNotSupportedOpen(true)
-				return
-			}
-			setWcUri(uri as string)
-			setPendingWcOpen(true)
-			setPendingAppUrl("walletconnect")
+		return onRpcMessage("walletconnect-uri", (_uri) => {
+			setWcNotSupportedOpen(true)
 		})
-	}, [walletConnectEnabled])
+	}, [])
 
 	// ── Check for pending deep link from cold start ─────────────────
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
 			if (uri) {
-				if (!walletConnectEnabled) {
+				if (walletConnectEnabled) {
+					// Pair natively and open the sessions panel
+					rpcRequest("wcPair", { uri }).catch(() => {})
+					setWcPanelOpen(true)
+				} else {
 					setWcNotSupportedOpen(true)
-					return
 				}
-				setWcUri(uri)
-				setPendingWcOpen(true)
-				setPendingAppUrl("walletconnect")
 			}
 		}).catch(() => {})
 	}, [walletConnectEnabled])
@@ -470,10 +466,8 @@ function App() {
 			setWcNotSupportedOpen(true)
 			return
 		}
-		// Always gate WalletConnect through the API Bridge dialog —
-		// the WC dapp iframe needs port 1646 to be up and responding
-		setPendingWcOpen(true)
-		setPendingAppUrl("walletconnect") // sentinel to trigger the dialog
+		// Native WC — open the panel directly (no REST API needed)
+		setWcPanelOpen(true)
 	}, [walletConnectEnabled])
 
 	const handleCloseWalletConnect = useCallback(() => {
@@ -744,6 +738,7 @@ function App() {
 				open={wcPanelOpen}
 				wcUri={wcUri}
 				onClose={handleCloseWalletConnect}
+				nativeEnabled={walletConnectEnabled}
 			/>
 			<ActivityTracker />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
