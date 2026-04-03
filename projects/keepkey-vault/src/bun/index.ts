@@ -1338,59 +1338,116 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 				const wallet = engine.wallet as any
 
-				// Derive pubkey (xpub for UTXO, address for others)
-				let pubkey: string
+				// Build pubkey list — EVM chains send ALL multi-address entries, others send one
+				const pubkeys: Array<{ caip: string; pubkey: string }> = []
+				let displayAddress = '' // address shown in UI / used for swaps
+
 				if (chain.chainFamily === 'utxo') {
 					const result = await wallet.getPublicKeys([{
 						addressNList: chain.defaultPath.slice(0, 3),
 						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
 					}])
-					pubkey = result?.[0]?.xpub || ''
-					if (!pubkey) throw new Error(`Could not derive xpub for ${chain.coin}`)
+					const xpub = result?.[0]?.xpub || ''
+					if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
+					pubkeys.push({ caip: chain.caip, pubkey: xpub })
+					// UTXO: leave displayAddress empty so frontend auto-derives from device
+				} else if (chain.chainFamily === 'evm') {
+					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
+					if (!evmAddresses.isInitialized) {
+						try { await evmAddresses.initialize(wallet) } catch (e: any) {
+							console.warn(`[getBalance] EVM addresses init failed:`, e.message)
+						}
+					}
+					const evmEntries = evmAddresses.getAllPubkeyEntries([chain])
+					if (evmEntries.length > 0) {
+						for (const entry of evmEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+						const selectedAddr = evmAddresses.getSelectedAddress()
+						displayAddress = selectedAddr?.address || evmEntries[0].pubkey
+					} else {
+						// Fallback: derive single address if multi-address manager not ready
+						const result = await wallet.ethGetAddress({ addressNList: chain.defaultPath, showDisplay: false, coin: 'Ethereum' })
+						const addr = typeof result === 'string' ? result : result?.address || ''
+						if (!addr) throw new Error(`Could not derive address for ${chain.coin}`)
+						pubkeys.push({ caip: chain.caip, pubkey: addr })
+						displayAddress = addr
+					}
 				} else {
-					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin }
+					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 					if (chain.scriptType) addrParams.scriptType = chain.scriptType
 					if (chain.chainFamily === 'ton') addrParams.bounceable = false
 					const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 					const result = await wallet[method](addrParams)
-					pubkey = typeof result === 'string' ? result : result?.address || ''
-					if (!pubkey) throw new Error(`Could not derive address for ${chain.coin}`)
+					const addr = typeof result === 'string' ? result : result?.address || ''
+					if (!addr) throw new Error(`Could not derive address for ${chain.coin}`)
+					pubkeys.push({ caip: chain.caip, pubkey: addr })
+					displayAddress = addr
 				}
 
-				// Single portfolio call — classify natives vs tokens (same logic as getBalances)
-				// For UTXO chains pubkey is an xpub, not a receive address.
-				// Leave address empty so the frontend auto-derives from the device.
-				let balance = '0', balanceUsd = 0, address = chain.chainFamily === 'utxo' ? '' : pubkey
+				// Single portfolio call with all pubkeys for this chain
+				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
 				try {
-					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }, { forceRefresh: true }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
+					const resp = await withTimeout(
+						pioneer.GetPortfolioBalances(
+							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{ forceRefresh: true }
+						),
+						PIONEER_TIMEOUT_MS,
+						'GetPortfolioBalances'
+					)
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 
-					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer`)
+					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
-					// Classify entries into natives vs tokens
-					let nativeMatch: any = null
+					// Pioneer may return cross-chain data with forceRefresh — filter to THIS chain only
+					const chainNetworkId = (chain.networkId || '').toLowerCase()
+					const chainCaipPrefix = (chain.caip || '').split('/')[0].toLowerCase() // e.g. "eip155:1"
+					const pubkeySet = new Set(pubkeys.map(p => p.pubkey.toLowerCase()))
+
+					// Classify entries into natives vs tokens, filtering by chain
+					let nativeTotalBalance = 0
+					let nativeTotalUsd = 0
+					let nativeAddress = ''
 					const tokenEntries: any[] = []
+					let skippedCrossChain = 0
+
 					for (const entry of allEntries) {
+						// Filter: only keep entries belonging to THIS chain
+						const entryNetworkId = (entry.networkId || '').toLowerCase()
+						const entryCaipPrefix = ((entry.caip || '').split('/')[0]).toLowerCase()
+						const belongsToChain = entryNetworkId === chainNetworkId
+							|| entryCaipPrefix === chainCaipPrefix
+							|| (!entryNetworkId && !entryCaipPrefix && pubkeySet.has((entry.pubkey || entry.address || '').toLowerCase()))
+						if (!belongsToChain) { skippedCrossChain++; continue }
+
 						const caip = entry.caip || ''
 						const caipPath = caip.split('/')[1] || ''
 						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
 						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
 						if (isTokenByCaip || isTokenByType) {
 							tokenEntries.push(entry)
-						} else if (!nativeMatch) {
-							nativeMatch = entry
+						} else {
+							// Aggregate native balances (multiple addresses for EVM)
+							const bal = parseFloat(String(entry.balance ?? '0'))
+							const usd = Number(entry.valueUsd ?? 0)
+							nativeTotalBalance += bal
+							nativeTotalUsd += usd
+							if (entry.address && !nativeAddress) nativeAddress = entry.address
 						}
 					}
 
-					if (nativeMatch) {
-						balance = String(nativeMatch.balance ?? '0')
-						balanceUsd = Number(nativeMatch.valueUsd ?? 0)
-						if (nativeMatch.address) address = nativeMatch.address
+					if (skippedCrossChain > 0) {
+						console.log(`[getBalance] ${chain.coin}: filtered out ${skippedCrossChain} cross-chain entries`)
 					}
 
-					// Process tokens
+					if (nativeTotalBalance > 0 || nativeTotalUsd > 0) {
+						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
+						balanceUsd = nativeTotalUsd
+						if (nativeAddress) address = nativeAddress
+					}
+
+					// Process tokens — already filtered to this chain
 					if (tokenEntries.length > 0) {
 						const parsedTokens: TokenBalance[] = []
 						for (const tok of tokenEntries) {
@@ -1429,7 +1486,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 						if (parsedTokens.length > 0) {
 							tokens = parsedTokens
-							// Include token USD in chain total
 							const tokenUsdTotal = parsedTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
 							balanceUsd += tokenUsdTotal
 						}
