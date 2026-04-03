@@ -441,7 +441,9 @@ export class WalletConnectManager {
       // EIP-1559 vs legacy gas — fetch from network if not provided
       if (tx.maxFeePerGas) {
         msg.maxFeePerGas = tx.maxFeePerGas
-        msg.maxPriorityFeePerGas = tx.maxPriorityFeePerGas ?? '0x0'
+        // Fetch tip if omitted — 0x0 works but produces slow txs
+        msg.maxPriorityFeePerGas = tx.maxPriorityFeePerGas
+          ?? await this.rpcCall(effectiveChainId, 'eth_maxPriorityFeePerGas', []).catch(() => '0x59682F00') // 1.5 gwei fallback
       } else if (tx.gasPrice) {
         msg.gasPrice = tx.gasPrice
       } else {

@@ -260,9 +260,9 @@ function getOrCreateWcManager(): WalletConnectManager {
 			const sel = evmAddresses.getSelectedAddress()
 			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
 		},
-		ethSignTx: (params) => engine.wallet!.ethSignTx(params),
-		ethSignMessage: (params) => engine.wallet!.ethSignMessage(params),
-		ethSignTypedData: (params) => engine.wallet!.ethSignTypedData(params),
+		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
+		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
+		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
 		requestSigningApproval: async (info) => {
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			try {
@@ -3135,9 +3135,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			getPendingDeepLink: async () => {
-				const uri = pendingDeepLinkUri
+				// Return but don't consume — frontend will clear via consumePendingDeepLink
+				// so the user can retry if processing fails
+				return pendingDeepLinkUri
+			},
+			consumePendingDeepLink: async () => {
 				pendingDeepLinkUri = null
-				return uri
 			},
 
 			// ── App Updates ──────────────────────────────────────────
@@ -3648,8 +3651,9 @@ function cleanupAndQuit() {
 			stopEmulator()
 		}
 	} catch {}
-	// Disconnect WalletConnect sessions so dApps aren't left in stale state
-	try { wcManager?.destroy() } catch {}
+	// Disconnect WalletConnect sessions so dApps aren't left in stale state.
+	// Fire-and-forget — relay WebSocket close is best-effort within the 5s force-exit.
+	try { wcManager?.destroy().catch((e: any) => console.warn('[cleanup] WC destroy:', e.message)) } catch {}
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()

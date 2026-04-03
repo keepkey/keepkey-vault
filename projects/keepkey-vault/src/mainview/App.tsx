@@ -283,6 +283,8 @@ function App() {
 				} else {
 					setWcNotSupportedOpen(true)
 				}
+				// Consume so it's not re-delivered on next mount
+				rpcRequest("consumePendingDeepLink").catch(() => {})
 			}
 		}).catch(() => {})
 	}, [walletConnectEnabled])

@@ -210,6 +210,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
       getPendingDeepLink: { params: void; response: string | null }
+      consumePendingDeepLink: { params: void; response: void }
 
       // ── App Updates ────────────────────────────────────────────────────
       checkForUpdate: { params: void; response: UpdateInfo }
