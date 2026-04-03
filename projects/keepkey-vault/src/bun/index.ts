@@ -1257,7 +1257,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', '', entry.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 							continue
 						}
@@ -1566,7 +1566,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', '', pk.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 						} else if (isEvm && usd > 0) {
 							evmAddresses.updateAddressBalance(pk.pubkey, usd)
