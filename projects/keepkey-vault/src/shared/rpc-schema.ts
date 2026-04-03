@@ -143,6 +143,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setSwapsEnabled: { params: { enabled: boolean }; response: AppSettings }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
@@ -203,6 +204,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
+      getPendingDeepLink: { params: void; response: string | null }
 
       // ── App Updates ────────────────────────────────────────────────────
       checkForUpdate: { params: void; response: UpdateInfo }

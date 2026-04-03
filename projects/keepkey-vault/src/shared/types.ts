@@ -355,6 +355,7 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)

@@ -159,8 +159,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
+	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
@@ -274,6 +275,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { console.error("setRestApiEnabled:", e) }
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
+
+	const toggleWalletConnect = useCallback(async (enabled: boolean) => {
+		setTogglingWalletConnect(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setWalletConnectEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setWalletConnectEnabled:", e) }
+		setTogglingWalletConnect(false)
+	}, [])
 
 	const toggleSwaps = useCallback(async (enabled: boolean) => {
 		setTogglingSwaps(true)
@@ -1163,6 +1173,30 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={t("featureFlags")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
+							{/* WalletConnect toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(59,153,252,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3B99FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M6.5 9.5c3-3 8-3 11 0" />
+											<path d="M4 7c4.5-4.5 11.5-4.5 16 0" />
+											<circle cx="12" cy="15" r="1.5" fill="#3B99FC" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("walletConnectFeature")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("walletConnectFeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.walletConnectEnabled}
+									onChange={toggleWalletConnect}
+									disabled={togglingWalletConnect}
+								/>
+							</Flex>
+
 							{/* Swaps toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">

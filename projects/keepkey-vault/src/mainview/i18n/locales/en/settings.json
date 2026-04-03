@@ -49,6 +49,8 @@
 	"experimentalFeatures": "Experimental",
 	"experimentalFeaturesDescription": "Enable experimental firmware features.",
 	"featureFlags": "Feature Flags",
+	"walletConnectFeature": "WalletConnect",
+	"walletConnectFeatureDescription": "Connect to dApps via WalletConnect protocol.",
 	"swapsFeature": "Cross-Chain Swaps",
 	"swapsFeatureDescription": "Enable token swaps via THORChain and other DEXes.",
 	"bip85Feature": "BIP-85 Seed Vault",

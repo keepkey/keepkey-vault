@@ -50,6 +50,7 @@ function App() {
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
+	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
@@ -58,6 +59,7 @@ function App() {
 	// ── WalletConnect sidebar ────────────────────────────────────
 	const [wcPanelOpen, setWcPanelOpen] = useState(false)
 	const [wcUri, setWcUri] = useState<string | null>(null)
+	const [wcNotSupportedOpen, setWcNotSupportedOpen] = useState(false)
 
 	// ── Watch-only mode ──────────────────────────────────────────
 	const [watchOnlyAvailable, setWatchOnlyAvailable] = useState(false)
@@ -72,7 +74,7 @@ function App() {
 			.then(setAppVersion)
 			.catch(() => {})
 		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
+			.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled) })
 			.catch(() => {})
 	}, [])
 
@@ -264,12 +266,30 @@ function App() {
 	// ── WalletConnect deep link listener ────────────────────────────
 	useEffect(() => {
 		return onRpcMessage("walletconnect-uri", (uri) => {
+			if (!walletConnectEnabled) {
+				setWcNotSupportedOpen(true)
+				return
+			}
 			setWcUri(uri as string)
-			// Gate through the same API Bridge dialog
 			setPendingWcOpen(true)
 			setPendingAppUrl("walletconnect")
 		})
-	}, [])
+	}, [walletConnectEnabled])
+
+	// ── Check for pending deep link from cold start ─────────────────
+	useEffect(() => {
+		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
+			if (uri) {
+				if (!walletConnectEnabled) {
+					setWcNotSupportedOpen(true)
+					return
+				}
+				setWcUri(uri)
+				setPendingWcOpen(true)
+				setPendingAppUrl("walletconnect")
+			}
+		}).catch(() => {})
+	}, [walletConnectEnabled])
 
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
@@ -446,11 +466,15 @@ function App() {
 
 	// ── WalletConnect panel handlers ─────────────────────────────
 	const handleOpenWalletConnect = useCallback(() => {
+		if (!walletConnectEnabled) {
+			setWcNotSupportedOpen(true)
+			return
+		}
 		// Always gate WalletConnect through the API Bridge dialog —
 		// the WC dapp iframe needs port 1646 to be up and responding
 		setPendingWcOpen(true)
 		setPendingAppUrl("walletconnect") // sentinel to trigger the dialog
-	}, [])
+	}, [walletConnectEnabled])
 
 	const handleCloseWalletConnect = useCallback(() => {
 		setWcPanelOpen(false)
@@ -679,7 +703,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
@@ -723,6 +747,82 @@ function App() {
 			/>
 			<ActivityTracker />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
+			{/* ── WalletConnect Not Supported dialog ──────────────────── */}
+			{wcNotSupportedOpen && (
+				<>
+					<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={() => setWcNotSupportedOpen(false)} />
+					<Box
+						position="fixed"
+						top="50%"
+						left="50%"
+						transform="translate(-50%, -50%)"
+						w="420px"
+						maxW="90vw"
+						bg="kk.bg"
+						border="1px solid"
+						borderColor="kk.border"
+						borderRadius="xl"
+						zIndex={Z.dialog + 1}
+						overflow="hidden"
+						role="dialog"
+						aria-modal="true"
+						aria-label="WalletConnect Not Supported"
+					>
+						<Box px="6" pt="5" pb="4">
+							<Flex align="center" gap="2" mb="3">
+								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B99FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M6.5 9.5c3-3 8-3 11 0" />
+									<path d="M4 7c4.5-4.5 11.5-4.5 16 0" />
+									<circle cx="12" cy="15" r="1.5" fill="#3B99FC" />
+								</svg>
+								<Text fontSize="md" fontWeight="600" color="kk.textPrimary">
+									WalletConnect
+								</Text>
+							</Flex>
+							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">
+								WalletConnect is not supported in KeepKey Vault. Please use the KeepKey Browser Extension instead.
+							</Text>
+							<Box
+								as="a"
+								href="#"
+								onClick={(e: React.MouseEvent) => {
+									e.preventDefault()
+									rpcRequest("openUrl", { url: "https://keepkey.com/keepkey-browser-extension" }).catch(() => {})
+								}}
+								color="kk.gold"
+								fontSize="sm"
+								fontWeight="500"
+								_hover={{ textDecoration: "underline" }}
+							>
+								https://keepkey.com/keepkey-browser-extension
+							</Box>
+						</Box>
+						<Flex
+							px="6"
+							py="4"
+							gap="3"
+							justify="flex-end"
+							borderTop="1px solid"
+							borderColor="kk.border"
+							bg="rgba(255,255,255,0.02)"
+						>
+							<Button
+								size="sm"
+								px="4"
+								py="2"
+								bg="kk.gold"
+								color="black"
+								fontWeight="600"
+								_hover={{ bg: "kk.goldHover" }}
+								onClick={() => setWcNotSupportedOpen(false)}
+							>
+								OK
+							</Button>
+						</Flex>
+					</Box>
+				</>
+			)}
+
 			{(pendingAppUrl || pendingWcOpen) && (
 				<>
 					<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={handleCancelAppLaunch} />
