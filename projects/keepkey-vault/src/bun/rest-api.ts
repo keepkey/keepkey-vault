@@ -16,6 +16,7 @@ import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
+import { getSetting } from './db'
 
 export interface EmuSigningDetails {
   operation: string
@@ -2242,6 +2243,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ── Zcash Shielded (Orchard) ────────────────────────────────
+
+        // Gate ALL zcash endpoints behind the feature flag (matches RPC handlers in index.ts)
+        if (path.startsWith('/api/zcash/') && getSetting('zcash_privacy_enabled') !== '1') {
+          return json({ error: 'Zcash privacy feature is disabled' }, 403)
+        }
 
         const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
         const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.state?.firmwareVersion)

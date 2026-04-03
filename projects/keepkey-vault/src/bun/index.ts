@@ -2057,7 +2057,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const fwVersion = engine.getDeviceState().firmwareVersion
 				const builtinChains = CHAINS.filter(c => {
 					if (!isChainSupported(c, fwVersion) || c.hidden) return false
-					if (c.id === 'zcash' && !zcashPrivacyEnabled) return false
+					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					return true
 				})
 

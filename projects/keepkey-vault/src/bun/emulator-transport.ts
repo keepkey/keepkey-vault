@@ -135,7 +135,7 @@ export const EmulatorKeepKeyAdapter = Adapter.fromDelegate(EmulatorAdapterDelega
 /** Check if a 64-byte HID frame is a ButtonAck (msg type 27 = 0x001B). */
 function isButtonAck(buf: Uint8Array): boolean {
   // First-chunk header: [0x3F][0x23][0x23][msgType_high][msgType_low]...
-  return buf.length >= 5 && buf[1] === 0x23 && buf[2] === 0x23 && buf[3] === 0x00 && buf[4] === 0x1B
+  return buf.length >= 5 && buf[0] === 0x3F && buf[1] === 0x23 && buf[2] === 0x23 && buf[3] === 0x00 && buf[4] === 0x1B
 }
 
 // ── Raw DebugLinkDecision (bypasses hdwallet transport) ─────────────────

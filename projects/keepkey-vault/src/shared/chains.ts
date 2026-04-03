@@ -204,6 +204,7 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
     hidden: true, // Shown only when zcashPrivacyEnabled feature flag is ON
+    minFirmware: '7.15.0',
   },
   {
     id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
