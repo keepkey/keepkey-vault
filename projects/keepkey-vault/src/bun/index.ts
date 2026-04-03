@@ -3087,14 +3087,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
-				if (!deviceId) return null
+				if (!deviceId) { console.log('[cache-health] No deviceId — skipping'); return null }
 				const result = getCachedBalances(deviceId)
-				if (!result) return null
+				if (!result) { console.log('[cache-health] No cached balances for device', deviceId); return null }
 
 				// Detect incomplete/stale cache — frontend can auto-refresh when staleReasons is non-empty
 				const staleReasons: string[] = []
 
-				// 2. Incomplete: fewer cached chains than supported (e.g. app update added new chains)
+				// Incomplete: fewer cached chains than supported (e.g. app update added new chains)
 				const fwVersion = engine.getDeviceState().firmwareVersion
 				const supportedChains = getAllChains().filter(c => !c.hidden && isChainSupported(c, fwVersion))
 				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
@@ -3102,19 +3102,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (missingChains.length > 0) {
 					staleReasons.push(`missing_chains:${missingChains.map(c => c.id).join(',')}`)
 				}
+				console.log(`[cache-health] ${result.balances.length} cached chains, ${supportedChains.length} supported, ${missingChains.length} missing`)
 
-				// 3. Device mismatch: cached balances exist but current device has different ID
-				// (This case is already handled by the deviceId key — getCachedBalances returns
-				// null for a new device. But partial migration from old device can leave gaps.)
-
-				// 4. Missing BTC xpubs: btcAccounts has more accounts than cached pubkeys
-				if (btcAccounts.isInitialized) {
-					const btcXpubs = btcAccounts.getAllPubkeyEntries('').length
-					const cachedBtcPks = getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub)
-					const cachedWithBalance = cachedBtcPks.filter(p => p.balance !== '0' || p.balanceUsd > 0)
-					if (btcXpubs > 0 && cachedWithBalance.length < btcXpubs) {
-						staleReasons.push(`btc_xpubs_missing:${cachedWithBalance.length}/${btcXpubs}`)
+				// Missing BTC xpub balances: BTC has a cached aggregate but no per-xpub breakdown
+				const btcCached = result.balances.find(b => b.chainId === 'bitcoin')
+				if (btcCached && parseFloat(btcCached.balance || '0') > 0) {
+					const allBtcPks = getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin')
+					const withXpub = allBtcPks.filter(p => p.xpub)
+					const withBalance = withXpub.filter(p => p.balance !== '0' || p.balanceUsd > 0)
+					console.log(`[cache-health] BTC: aggregate=${btcCached.balance}, cached_pubkeys=${allBtcPks.length} total, ${withXpub.length} with xpub, ${withBalance.length} with balance`)
+					if (withBalance.length === 0) {
+						staleReasons.push('btc_xpub_balances_missing')
 					}
+				}
+
+				if (staleReasons.length > 0) {
+					console.log(`[cache-health] STALE: ${staleReasons.join(', ')}`)
+				} else {
+					console.log('[cache-health] Cache OK — no staleness detected')
 				}
 
 				return { balances: result.balances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
