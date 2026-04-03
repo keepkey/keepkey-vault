@@ -3,7 +3,7 @@ import { FaPlus } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import { BTC_SCRIPT_TYPES } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
-import { useFiat } from "../lib/fiat-context"
+import { AnimatedUsd } from "./AnimatedUsd"
 import type { BtcAccountSet, BtcScriptType } from "../../shared/types"
 
 interface BtcXpubSelectorProps {
@@ -16,7 +16,6 @@ interface BtcXpubSelectorProps {
 export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addingAccount }: BtcXpubSelectorProps) {
   const { accounts, selectedXpub } = btcAccounts
   const { t } = useTranslation("receive")
-  const { fmtCompact } = useFiat()
   if (accounts.length === 0) return null
 
   const selAcct = selectedXpub?.accountIndex ?? 0
@@ -91,14 +90,12 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
                   {st.addressPrefix}...
                 </Text>
                 {xpubData && hasBalance && (
-                  <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" lineHeight="1.2">
+                  <Text fontSize="10px" fontFamily="mono" color="white" fontWeight="500" lineHeight="1.2">
                     {formatBalance(xpubData.balance)} BTC
                   </Text>
                 )}
                 {xpubData && xpubData.balanceUsd > 0 && (
-                  <Text fontSize="9px" color="kk.textMuted" lineHeight="1.2">
-                    {fmtCompact(xpubData.balanceUsd)}
-                  </Text>
+                  <AnimatedUsd value={xpubData.balanceUsd} fontSize="9px" fontWeight="500" lineHeight="1.2" />
                 )}
               </Flex>
             </Box>
