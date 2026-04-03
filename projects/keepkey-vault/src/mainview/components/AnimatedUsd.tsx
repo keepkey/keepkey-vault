@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import CountUp from "react-countup"
 import { Text, type TextProps } from "@chakra-ui/react"
 import { useFiat } from "../lib/fiat-context"
@@ -35,10 +35,11 @@ export function AnimatedUsd({ value, prefix = "", suffix = "", duration = 1.5, d
 		}
 	}, [locale, currency, dec])
 
-	const formatValue = (n: number) => {
+	// Stable ref — react-countup restarts animation when formattingFn identity changes
+	const formatValue = useCallback((n: number) => {
 		const formatted = formatter ? formatter.format(n) : `${cfg.symbol}${n.toFixed(dec)}`
 		return `${prefix}${formatted}${suffix}`
-	}
+	}, [formatter, cfg.symbol, dec, prefix, suffix])
 
 	if (!isFinite(value) || value <= 0) {
 		return <Text as="span" color={color} {...textProps}>{formatValue(0)}</Text>
