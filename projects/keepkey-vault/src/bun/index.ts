@@ -1385,7 +1385,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pubkeys: Array<{ caip: string; pubkey: string }> = []
 				let displayAddress = '' // address shown in UI / used for swaps
 
-				if (chain.chainFamily === 'utxo') {
+				if (chain.id === 'bitcoin') {
+					// BTC multi-account: send ALL xpubs (matches getBalances behavior)
+					if (!btcAccounts.isInitialized) {
+						try { await btcAccounts.initialize(wallet) } catch (e: any) {
+							console.warn(`[getBalance] BTC accounts init failed:`, e.message)
+						}
+					}
+					const btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(chain.caip)
+					if (btcPubkeyEntries.length > 0) {
+						for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+					} else {
+						// Fallback: derive single xpub if multi-account manager not ready
+						const result = await wallet.getPublicKeys([{
+							addressNList: chain.defaultPath.slice(0, 3),
+							coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
+						}])
+						const xpub = result?.[0]?.xpub || ''
+						if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
+						pubkeys.push({ caip: chain.caip, pubkey: xpub })
+					}
+					// UTXO: leave displayAddress empty so frontend auto-derives from device
+				} else if (chain.chainFamily === 'utxo') {
+					// Non-BTC UTXO chains (LTC, DOGE, etc.) — single xpub
 					const result = await wallet.getPublicKeys([{
 						addressNList: chain.defaultPath.slice(0, 3),
 						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
@@ -1393,7 +1415,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const xpub = result?.[0]?.xpub || ''
 					if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
 					pubkeys.push({ caip: chain.caip, pubkey: xpub })
-					// UTXO: leave displayAddress empty so frontend auto-derives from device
 				} else if (chain.chainFamily === 'evm') {
 					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
 					if (!evmAddresses.isInitialized) {
@@ -1427,6 +1448,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Single portfolio call with all pubkeys for this chain
+				const isBtc = chain.id === 'bitcoin'
 				const isEvm = chain.chainFamily === 'evm'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
@@ -1494,6 +1516,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// Update per-address USD in EvmAddressManager (mirrors getBalances line 1224)
 							if (isEvm && usd > 0) {
 								evmAddresses.updateAddressBalance(entryAddr || entryPubkey, usd)
+							}
+							// Update per-xpub balance in BtcAccountManager (mirrors getBalances line 1256)
+							if (isBtc) {
+								btcAccounts.updateXpubBalance(entry.pubkey || '', String(entry.balance ?? '0'), usd)
 							}
 						}
 					}
@@ -1567,6 +1593,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Push updated EVM per-address balances so address selector stays current
 				if (isEvm) {
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+				}
+				// Push updated BTC per-xpub balances so account selector stays current
+				if (isBtc) {
+					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
 				}
 
 				return result
