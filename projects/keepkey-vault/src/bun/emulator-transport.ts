@@ -24,6 +24,15 @@ export class EmulatorTransportDelegate implements TransportDelegate {
   private connected = false
   /** Chunk counter — reset before confirmOp, read after to know how many polls needed. */
   chunkCount = 0
+  /**
+   * When true, suppress ButtonAck writes from hdwallet on iface 0.
+   *
+   * Pre-written BA+DLD on iface 1 satisfy confirm_helper inside kkemu_poll().
+   * But hdwallet still sends ButtonAck in response to ButtonRequest — this
+   * orphaned BA arrives during the next TxRequest/TxAck exchange (BTC signing)
+   * and causes "Unexpected message". Suppressing the write prevents this.
+   */
+  autoConfirm = false
 
   constructor(private deviceId: string = 'emulator-default') {}
 
@@ -57,6 +66,15 @@ export class EmulatorTransportDelegate implements TransportDelegate {
 
   async writeChunk(buf: Uint8Array, debugLink?: boolean): Promise<void> {
     const iface = debugLink ? 1 : 0
+
+    // Suppress ButtonAck (msg type 27) when autoConfirm is active.
+    // Pre-written BA+DLD already satisfied confirm_helper; hdwallet's
+    // ButtonAck response would arrive during TxRequest/TxAck and cause
+    // "Unexpected message" in multi-round protocols (BTC signing).
+    if (!debugLink && this.autoConfirm && isButtonAck(buf)) {
+      return
+    }
+
     const ok = emuWrite(buf, iface)
     if (!ok) {
       throw new Error(`${TAG} emuWrite failed (iface=${iface}, len=${buf.length})`)
@@ -111,6 +129,14 @@ const EmulatorAdapterDelegate: AdapterDelegate<EmulatorDevice> = {
 }
 
 export const EmulatorKeepKeyAdapter = Adapter.fromDelegate(EmulatorAdapterDelegate)
+
+// ── ButtonAck detection ─────────────────────────────────────────────────
+
+/** Check if a 64-byte HID frame is a ButtonAck (msg type 27 = 0x001B). */
+function isButtonAck(buf: Uint8Array): boolean {
+  // First-chunk header: [0x3F][0x23][0x23][msgType_high][msgType_low]...
+  return buf.length >= 5 && buf[1] === 0x23 && buf[2] === 0x23 && buf[3] === 0x00 && buf[4] === 0x1B
+}
 
 // ── Raw DebugLinkDecision (bypasses hdwallet transport) ─────────────────
 //

@@ -949,8 +949,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Filter chains by firmware version — don't derive addresses for unsupported chains
+				// Zcash (transparent + shielded) gated behind feature flag
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const allChains = getAllChains().filter(c => isChainSupported(c, fwVersion))
+				const allChains = getAllChains().filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					return true
+				})
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
@@ -2050,7 +2055,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Only use built-in CHAINS (not custom chains — those may lack rpc methods)
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const builtinChains = CHAINS.filter(c => isChainSupported(c, fwVersion) && !c.hidden)
+				const builtinChains = CHAINS.filter(c => {
+					if (!isChainSupported(c, fwVersion) || c.hidden) return false
+					if (c.id === 'zcash' && !zcashPrivacyEnabled) return false
+					return true
+				})
 
 				const pubkeys: any[] = []
 
