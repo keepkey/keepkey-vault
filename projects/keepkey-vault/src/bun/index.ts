@@ -3298,7 +3298,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorInit: async (params) => {
 				const { initEmulator } = await import('./emulator')
-				const status = initEmulator(params?.flashName)
+				const status = initEmulator(params?.flashName, undefined, params?.channel)
 				if (status.state === 'running') {
 					// Open the emulator device window
 					const { openEmulatorWindow } = await import('./emulator-window')
@@ -3322,6 +3322,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorStatus: async () => {
 				const { getEmulatorStatus } = await import('./emulator')
 				return getEmulatorStatus()
+			},
+			emulatorGetChannels: async () => {
+				const { getEmulatorChannels } = await import('./emulator')
+				return getEmulatorChannels()
 			},
 			emulatorDeleteFlash: async (params) => {
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
@@ -3377,8 +3381,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					stopEmulator()
 				}
 
-				// Init with the new flash name (creates flash file on disk)
-				const status = initEmulator(params.name)
+				// Init with the new flash name + channel (creates flash file on disk)
+				const status = initEmulator(params.name, undefined, params.channel)
 				if (status.state !== 'running') return status
 
 				try {
@@ -3429,7 +3433,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					deleteFlash(params.name)
 					deleteMnemonic(params.name)
 
-					// Restore previous emulator if one was running
+					// Restore previous emulator if one was running (channel preserved by selectedChannel)
 					if (prevFlashName) {
 						const restored = initEmulator(prevFlashName)
 						if (restored.state === 'running') {
@@ -3452,8 +3456,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					stopEmulator()
 				}
 
-				// Init with the requested flash name
-				const status = initEmulator(params.name)
+				// Init with the requested flash name + channel
+				const status = initEmulator(params.name, undefined, params.channel)
 				if (status.state !== 'running') return status
 
 				// Open window + connect engine (auto-reloads saved mnemonic)

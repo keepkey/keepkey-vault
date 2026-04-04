@@ -201,14 +201,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
       emulatorPair: { params: void; response: EmulatorStatus }
-      emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
+      emulatorInit: { params: { flashName?: string; channel?: 'alpha' | 'beta' | 'release' } | void; response: EmulatorStatus }
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
+      emulatorGetChannels: { params: void; response: Array<{ channel: string; version: string; description: string; installed: boolean; source: { repo: string; ref: string; type: string } }> }
       emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
       emulatorListWallets: { params: void; response: EmulatorWalletInfo[] }
-      emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string }; response: EmulatorStatus }
-      emulatorSwitchWallet: { params: { name: string }; response: EmulatorStatus }
+      emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string; channel?: 'alpha' | 'beta' | 'release' }; response: EmulatorStatus }
+      emulatorSwitchWallet: { params: { name: string; channel?: 'alpha' | 'beta' | 'release' }; response: EmulatorStatus }
 
       // ── WalletConnect (native v2) ────────────────────────────────────
       wcPair: { params: { uri: string }; response: void }
