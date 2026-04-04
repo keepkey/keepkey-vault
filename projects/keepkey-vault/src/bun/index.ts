@@ -997,14 +997,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
-				// 1. Batch-fetch non-BTC UTXO xpubs in a single device call
+				// 1. Batch-fetch non-BTC UTXO xpubs in a single device call.
+				// LTC supports multiple script types (p2pkh, p2sh-p2wpkh, p2wpkh) — derive
+				// all so Pioneer reports balances from every address type.
+				const utxoPubKeyPaths: Array<{ chain: typeof utxoChains[0]; scriptType: string; path: number[] }> = []
+				for (const c of utxoChains) {
+					const scriptTypes = c.id === 'litecoin'
+						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+						: [{ scriptType: c.scriptType || 'p2pkh', purpose: 44 }]
+					for (const st of scriptTypes) {
+						utxoPubKeyPaths.push({
+							chain: c,
+							scriptType: st.scriptType,
+							path: [st.purpose + 0x80000000, c.defaultPath[1], 0x80000000],
+						})
+					}
+				}
 				let xpubResults: any[] = []
 				try {
-					if (utxoChains.length > 0) {
-						xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
-							addressNList: c.defaultPath.slice(0, 3),
-							coin: c.coin,
-							scriptType: c.scriptType,
+					if (utxoPubKeyPaths.length > 0) {
+						xpubResults = await wallet.getPublicKeys(utxoPubKeyPaths.map(p => ({
+							addressNList: p.path,
+							coin: p.chain.coin,
+							scriptType: p.scriptType,
 							curve: 'secp256k1',
 						}))) || []
 					}
@@ -1015,9 +1030,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// 2. Derive non-UTXO addresses (one device call per chain — unavoidable)
 				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
 
-				for (let i = 0; i < utxoChains.length; i++) {
+				for (let i = 0; i < utxoPubKeyPaths.length; i++) {
 					const xpub = xpubResults?.[i]?.xpub
-					if (xpub) pubkeys.push({ caip: utxoChains[i].caip, pubkey: xpub, chainId: utxoChains[i].id, symbol: utxoChains[i].symbol, networkId: utxoChains[i].networkId })
+					const c = utxoPubKeyPaths[i].chain
+					if (xpub) pubkeys.push({ caip: c.caip, pubkey: xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
 				}
 
 				// Initialize EVM multi-address manager
@@ -1423,14 +1439,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
 					// displayAddress left empty — UTXO: frontend auto-derives from device
 				} else if (chain.chainFamily === 'utxo') {
-					// Non-BTC UTXO chains (LTC, DOGE, etc.) — single xpub
-					const result = await wallet.getPublicKeys([{
-						addressNList: chain.defaultPath.slice(0, 3),
-						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
-					}])
-					const xpub = result?.[0]?.xpub || ''
-					if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
-					pubkeys.push({ caip: chain.caip, pubkey: xpub })
+					// Non-BTC UTXO: derive all script-type xpubs (LTC has 3, others have 1)
+					const scriptTypes = chain.id === 'litecoin'
+						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+						: [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+					const paths = scriptTypes.map(st => ({
+						addressNList: [st.purpose + 0x80000000, chain.defaultPath[1], 0x80000000],
+						coin: chain.coin, scriptType: st.scriptType, curve: 'secp256k1',
+					}))
+					const results = await wallet.getPublicKeys(paths)
+					let anyXpub = false
+					for (let i = 0; i < scriptTypes.length; i++) {
+						const xpub = results?.[i]?.xpub
+						if (xpub) { pubkeys.push({ caip: chain.caip, pubkey: xpub }); anyXpub = true }
+					}
+					if (!anyXpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
 				} else if (chain.chainFamily === 'evm') {
 					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
 					if (!evmAddresses.isInitialized) {
