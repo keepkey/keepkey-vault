@@ -2812,18 +2812,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// H1: Scope getReport/deleteReport to the current device
 			getReport: async (params) => {
+				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				return getReportById(params.id, deviceId)
 			},
 
 			deleteReport: async (params) => {
+				if (engine.isPassphraseWallet) return
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				deleteReport(params.id, deviceId)
 			},
 
 			saveReportFile: async (params) => {
+				if (engine.isPassphraseWallet) throw new Error('Reports are not available for passphrase-protected wallets (privacy).')
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				const report = getReportById(params.id, deviceId)
@@ -3038,6 +3041,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getPendingSwaps: async () => {
 				if (!swapsEnabled) return []
+				if (engine.isPassphraseWallet) return []
 				const { getPendingSwaps } = await import('./swap-tracker')
 				return getPendingSwaps()
 			},
