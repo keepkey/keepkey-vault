@@ -998,6 +998,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         feeLevel: 5,
         fromAddressOverride: fromAddress,
         toAddressOverride: toAddress,
+        integration: quote.integration,
+        relayTx: quote.relayTx,
       }, 180000)
 
       setTxid(result.txid)

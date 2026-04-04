@@ -276,17 +276,25 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   // 2. Validate required fields
+  // Relay integration provides pre-built tx with calldata — no memo or inbound address needed
+  const isRelay = params.integration === 'relay' && !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
-  if (!params.inboundAddress && !isNativeDeposit) throw new Error('Missing inbound vault address from quote')
-  if (!params.memo) throw new Error('Missing swap memo from quote')
-  const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
-  if (memoByteLength > MEMO_LIMIT) {
-    throw new Error(`Swap memo too long (${memoByteLength} bytes, THORChain max ${MEMO_LIMIT})`)
+  if (!params.inboundAddress && !isNativeDeposit && !isRelay) throw new Error('Missing inbound vault address from quote')
+  if (!params.memo && !isRelay) throw new Error('Missing swap memo from quote')
+  if (params.memo) {
+    const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
+    if (memoByteLength > MEMO_LIMIT) {
+      throw new Error(`Swap memo too long (${memoByteLength} bytes, THORChain max ${MEMO_LIMIT})`)
+    }
   }
 
   console.log(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)
-  console.log(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
+  if (isRelay) {
+    console.log(`${TAG} Relay integration — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
+  } else {
+    console.log(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
+  }
   if (isErc20Source) console.log(`${TAG} ERC-20 source detected: ${params.fromAsset}`)
 
   // 3. Get Pioneer for tx building
@@ -295,8 +303,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   let unsignedTx: any
   let approvalTxid: string | undefined
 
+  // ── Relay integration: sign pre-built tx directly ──
+  if (isRelay) {
+    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl)
+    unsignedTx = result.unsignedTx
+
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
-  if (fromChain.chainFamily === 'evm') {
+  } else if (fromChain.chainFamily === 'evm') {
     const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getRpcUrl, isErc20Source, wallet)
     unsignedTx = result.unsignedTx
     approvalTxid = result.approvalTxid
@@ -433,6 +446,81 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
   }
+}
+
+// ── Relay swap tx building (pre-built calldata from bridge protocol) ──
+
+async function buildRelaySwapTx(
+  params: ExecuteSwapParams,
+  fromChain: ChainDef,
+  fromAddress: string,
+  getRpcUrl: (chain: ChainDef) => string | undefined,
+): Promise<{ unsignedTx: any }> {
+  const relay = params.relayTx!
+  const chainId = relay.chainId
+  const rpcUrl = getRpcUrl(fromChain)
+
+  // Fetch nonce (relay tx doesn't include it)
+  let nonce: number | undefined
+  if (rpcUrl) {
+    try { nonce = await getEvmNonce(rpcUrl, fromAddress) } catch (e: any) {
+      console.warn(`${TAG} Failed to fetch nonce via RPC for relay tx: ${e.message}`)
+    }
+  }
+  if (nonce === undefined) {
+    const pioneer = await getPioneer()
+    try {
+      const nd = await pioneer.GetNonceByNetwork({ networkId: fromChain.networkId, address: fromAddress })
+      nonce = nd?.data?.nonce
+    } catch (e: any) {
+      console.warn(`${TAG} Failed to fetch nonce via Pioneer for relay tx: ${e.message}`)
+    }
+  }
+  if (nonce === undefined || nonce === null) {
+    throw new Error(`Failed to fetch nonce for ${fromAddress} on ${fromChain.id} — cannot build relay tx`)
+  }
+
+  // Use gas params from relay quote, with sane fallbacks
+  const gasLimit = relay.gasLimit || '300000'
+  let gasPrice: string | undefined
+  let maxFeePerGas: string | undefined
+  let maxPriorityFeePerGas: string | undefined
+
+  if (relay.maxFeePerGas) {
+    // EIP-1559 tx
+    maxFeePerGas = relay.maxFeePerGas
+    maxPriorityFeePerGas = relay.maxPriorityFeePerGas || '1000000' // 0.001 gwei fallback
+  } else if (rpcUrl) {
+    // Legacy gas price
+    try {
+      const gp = await getEvmGasPrice(rpcUrl)
+      gasPrice = toHex(gp)
+    } catch {
+      gasPrice = toHex(BigInt(25e9)) // 25 gwei fallback for AVAX
+    }
+  }
+
+  // Build ethSignTx params for hdwallet
+  const unsignedTx: any = {
+    addressNList: fromChain.defaultPath,
+    chainId,
+    nonce: toHex(BigInt(nonce)),
+    gasLimit: toHex(BigInt(gasLimit)),
+    to: relay.to,
+    value: toHex(BigInt(relay.value)),
+    data: relay.data,
+  }
+
+  // EIP-1559 fields
+  if (maxFeePerGas) {
+    unsignedTx.maxFeePerGas = toHex(BigInt(maxFeePerGas))
+    unsignedTx.maxPriorityFeePerGas = toHex(BigInt(maxPriorityFeePerGas || '1000000'))
+  } else if (gasPrice) {
+    unsignedTx.gasPrice = gasPrice
+  }
+
+  console.log(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, to=${relay.to}, value=${relay.value}`)
+  return { unsignedTx }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────
