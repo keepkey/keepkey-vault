@@ -15,6 +15,37 @@ interface DeviceGridProps {
 }
 
 const REVEAL_DELAY_MS = 2500
+const CHANNEL_COLORS: Record<string, string> = { alpha: '#F59E0B', beta: '#3B82F6', release: '#22C55E' }
+
+function ChannelPicker({ name, channels, onSelect, onCancel, loading }: {
+	name: string
+	channels: { channel: string; installed: boolean }[]
+	onSelect: (name: string, channel: string) => void
+	onCancel: () => void
+	loading: boolean
+}) {
+	const installed = channels.filter(c => c.installed)
+	return (
+		<Box mt="auto">
+			<Text fontSize="9px" color="gray.400" mb="1.5">Select firmware:</Text>
+			<Flex gap="1.5" wrap="wrap">
+				{installed.map(c => (
+					<SolidBtn
+						key={c.channel}
+						label={c.channel}
+						bg={CHANNEL_COLORS[c.channel] || '#C0A860'}
+						onClick={() => onSelect(name, c.channel)}
+						loading={loading}
+					/>
+				))}
+				<SmallCircleBtn color="#666" label="&times;" onClick={onCancel} />
+			</Flex>
+			{installed.length === 0 && (
+				<Text fontSize="9px" color="#EF4444" mt="1">No firmware installed</Text>
+			)}
+		</Box>
+	)
+}
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
 export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
@@ -266,24 +297,13 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 									</Flex>
 								</Box>
 							) : channelPicker === w.name ? (
-								<Box mt="auto">
-									<Text fontSize="9px" color="gray.400" mb="1.5">Select firmware:</Text>
-									<Flex gap="1.5" wrap="wrap">
-										{emuChannels.filter(c => c.installed).map(c => (
-											<SolidBtn
-												key={c.channel}
-												label={c.channel}
-												bg={c.channel === 'alpha' ? '#F59E0B' : c.channel === 'beta' ? '#3B82F6' : '#22C55E'}
-												onClick={() => handleStartEmuWithChannel(w.name, c.channel)}
-												loading={loading === `emu:${w.name}`}
-											/>
-										))}
-										<SmallCircleBtn color="#666" label="&times;" onClick={() => setChannelPicker(null)} />
-									</Flex>
-									{emuChannels.filter(c => c.installed).length === 0 && (
-										<Text fontSize="9px" color="#EF4444" mt="1">No firmware installed</Text>
-									)}
-								</Box>
+								<ChannelPicker
+									name={w.name}
+									channels={emuChannels}
+									onSelect={handleStartEmuWithChannel}
+									onCancel={() => setChannelPicker(null)}
+									loading={loading === `emu:${w.name}`}
+								/>
 							) : (
 								<Flex mt="auto" justify="space-between" align="center">
 									{active ? (
@@ -311,24 +331,13 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 								<Text fontSize="9px" color="gray.500">new emulator</Text>
 							</Box>
 						</Flex>
-						<Box mt="auto">
-							<Text fontSize="9px" color="gray.400" mb="1.5">Select firmware:</Text>
-							<Flex gap="1.5" wrap="wrap">
-								{emuChannels.filter(c => c.installed).map(c => (
-									<SolidBtn
-										key={c.channel}
-										label={c.channel}
-										bg={c.channel === 'alpha' ? '#F59E0B' : c.channel === 'beta' ? '#3B82F6' : '#22C55E'}
-										onClick={() => handleStartEmuWithChannel(channelPicker, c.channel)}
-										loading={loading === `emu:${channelPicker}`}
-									/>
-								))}
-								<SmallCircleBtn color="#666" label="&times;" onClick={() => setChannelPicker(null)} />
-							</Flex>
-							{emuChannels.filter(c => c.installed).length === 0 && (
-								<Text fontSize="9px" color="#EF4444" mt="1">No firmware installed</Text>
-							)}
-						</Box>
+						<ChannelPicker
+							name={channelPicker}
+							channels={emuChannels}
+							onSelect={handleStartEmuWithChannel}
+							onCancel={() => setChannelPicker(null)}
+							loading={loading === `emu:${channelPicker}`}
+						/>
 					</DeviceCard>
 				) : emuPaired && (
 					<Box
