@@ -81,6 +81,8 @@ export class EngineController extends EventEmitter {
   private syncing = false
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryCount = 0
+  private static readonly MAX_PAIR_RETRIES = 24 // ~2 minutes at 5s intervals
   private rebootPollTimer: ReturnType<typeof setInterval> | null = null
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
@@ -411,6 +413,7 @@ export class EngineController extends EventEmitter {
 
       if (result.wallet) {
         this.wallet = result.wallet
+        this.retryCount = 0
         this.attachTransportListeners()
         this.lastError = null
         try {
@@ -477,7 +480,14 @@ export class EngineController extends EventEmitter {
 
   private scheduleRetry() {
     this.clearRetry()
-    console.log(`[Engine] Will retry pairing in ${CLAIMED_RETRY_MS / 1000}s...`)
+    this.retryCount++
+    if (this.retryCount > EngineController.MAX_PAIR_RETRIES) {
+      console.error(`[Engine] Pairing failed after ${this.retryCount} retries (~2 min) — giving up`)
+      this.lastError = 'Could not connect to KeepKey after multiple attempts. Unplug and re-plug the device, or click the logo to retry.'
+      this.updateState('error')
+      return
+    }
+    console.log(`[Engine] Will retry pairing in ${CLAIMED_RETRY_MS / 1000}s... (attempt ${this.retryCount}/${EngineController.MAX_PAIR_RETRIES})`)
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
       this.syncState()
@@ -489,6 +499,19 @@ export class EngineController extends EventEmitter {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+  }
+
+  /** Force a fresh pairing attempt — clears stale state and resets retry counter. */
+  async retryConnect() {
+    console.log('[Engine] Manual retry requested — clearing state and reconnecting')
+    this.clearRetry()
+    this.retryCount = 0
+    this.clearWallet()
+    this.lastError = null
+    this.updateState('disconnected')
+    // Small delay to let USB settle after state reset
+    await new Promise(r => setTimeout(r, 500))
+    await this.syncState()
   }
 
   /**
@@ -578,6 +601,9 @@ export class EngineController extends EventEmitter {
         } catch (err: any) {
           lastError = err?.message || String(err)
           console.warn('[Engine] WebUSB pair failed:', lastError)
+          // Close the raw USB device so its `opened` flag resets — without this,
+          // the next retry sees opened=true and throws "already-connected".
+          try { await webUsbDevice.close() } catch (_) {}
           if (lastError.includes('LIBUSB_ERROR_ACCESS')) {
             console.warn('[Engine] Device claimed by another process, trying HID...')
           }

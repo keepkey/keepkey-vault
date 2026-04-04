@@ -14,6 +14,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
     requests: {
       // ── Device lifecycle ──────────────────────────────────────────
       getDeviceState: { params: void; response: DeviceStateInfo }
+      retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
       startFirmwareUpdate: { params: void; response: void }
       flashFirmware: { params: void; response: void }
