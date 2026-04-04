@@ -178,8 +178,11 @@ function browseChains(query: string, page: number, pageSize: number): { chains: 
 	}
 }
 
-/** Fire-and-forget: cache a derived address for watch-only mode */
+/** Fire-and-forget: cache a derived address for watch-only mode.
+ *  PRIVACY: Never persist addresses from a passphrase wallet — doing so
+ *  leaks the existence and contents of the hidden wallet to disk. */
 function cacheAddress(chainId: string, path: string, address: string) {
+	if (engine.isPassphraseWallet) return
 	try {
 		const deviceId = engine.getDeviceState().deviceId || 'unknown'
 		saveCachedPubkey(deviceId, chainId, path, '', address, '')
@@ -1350,10 +1353,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}).catch(() => {})
 					}
 
-					// Cache balances (fire-and-forget) — only on successful Pioneer response
+					// Cache balances (fire-and-forget) — only on successful Pioneer response.
+					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					console.warn('[getBalances] Portfolio API failed:', e.message)
@@ -1636,10 +1640,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
-				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				// Update single-chain cache + push to frontend so Dashboard stays in sync.
+				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					updateCachedBalance(deviceId, result)
+					if (!engine.isPassphraseWallet) updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
 				// Push updated EVM per-address balances so address selector stays current
@@ -3647,12 +3652,13 @@ engine.on('state-change', (state) => {
 	if (state.state === 'needs_passphrase') {
 		btcAccounts.reset()
 		evmAddresses.reset()
+		evmAddresses.clearPersistedIndices()
 		const deviceId = state.deviceId
 		if (deviceId) {
 			clearCachedPubkeys(deviceId)
 			clearBalances(deviceId)
 		}
-		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
+		console.log('[Vault] Passphrase mode: cleared address + balance + EVM index caches — different passphrase = different wallet')
 	}
 })
 // Seed changed — different mnemonic loaded on the same hardware.

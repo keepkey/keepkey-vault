@@ -205,6 +205,13 @@ export class EvmAddressManager extends EventEmitter {
     this.initPromise = null
   }
 
+  /** Clear persisted EVM address indices from settings DB.
+   *  Called on passphrase mode entry to prevent leaking which indices
+   *  were tracked under a hidden wallet. */
+  clearPersistedIndices(): void {
+    setSetting(SETTINGS_KEY, JSON.stringify([0]))
+  }
+
   get isInitialized(): boolean {
     return this.addresses.length > 0
   }
