@@ -54,26 +54,31 @@ interface EmulatorManifest {
 
 export type EmulatorChannel = 'alpha' | 'beta' | 'release'
 
+let _emuDirCache: string | null = null
 function getEmulatorsDir(): string {
-  // firmware/emulators/ lives at the vault-v11 project root.
-  // Try multiple resolution strategies (bundled app vs source vs cwd):
-  const candidates = [
-    // 1. Relative to import.meta.dir (works in bundled Bun — app/bun/ → ../../firmware/emulators)
-    resolve(import.meta.dir, '..', '..', 'firmware', 'emulators'),
-    // 2. From Electrobun app root (Resources/app/ → ../../firmware/emulators)
-    resolve(import.meta.dir, '..', '..', '..', 'firmware', 'emulators'),
-    // 3. From source tree (src/bun/ → ../../../../firmware/emulators)
-    resolve(import.meta.dir, '..', '..', '..', '..', 'firmware', 'emulators'),
-    // 4. cwd-relative (if cwd is project root)
-    resolve(process.cwd(), 'firmware', 'emulators'),
-    // 5. cwd relative for vault-v11 root
-    resolve(process.cwd(), '..', '..', 'firmware', 'emulators'),
-  ]
-  for (const dir of candidates) {
-    if (existsSync(join(dir, 'manifest.json'))) return dir
+  if (_emuDirCache) return _emuDirCache
+  // firmware/emulators/ lives at the vault-v11 project root, which is
+  // outside the Electrobun .app bundle. Walk up from import.meta.dir
+  // (app/bun/) through the .app structure to find it.
+  const candidates: string[] = []
+  // Walk 2..12 levels up from import.meta.dir — covers source tree,
+  // dev .app bundle, and production .app bundle depths.
+  for (let depth = 2; depth <= 12; depth++) {
+    candidates.push(resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware', 'emulators'))
   }
-  // Fallback to source-tree path (will fail with clear error)
-  return candidates[2]
+  // Also try cwd-relative
+  candidates.push(resolve(process.cwd(), 'firmware', 'emulators'))
+  candidates.push(resolve(process.cwd(), '..', '..', 'firmware', 'emulators'))
+
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'manifest.json'))) {
+      _emuDirCache = dir
+      console.log(`${TAG} Emulators dir resolved: ${dir}`)
+      return dir
+    }
+  }
+  console.error(`${TAG} Could not find firmware/emulators/manifest.json (tried ${candidates.length} paths from import.meta.dir=${import.meta.dir})`)
+  return candidates[0]
 }
 
 function loadManifest(): EmulatorManifest | null {
