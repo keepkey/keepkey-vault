@@ -470,6 +470,29 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 			)}
 
+			{/* Hidden wallet privacy banner */}
+			{isHiddenWallet && !watchOnly && (
+				<Flex
+					align="center"
+					gap="2"
+					mb="3"
+					px="3"
+					py="2"
+					bg="rgba(168,85,247,0.08)"
+					border="1px solid"
+					borderColor="rgba(168,85,247,0.25)"
+					borderRadius="lg"
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+					</svg>
+					<Text fontSize="xs" color="#A855F7" fontWeight="500">
+						Passphrase wallet active — reports, history, and caching are disabled for privacy. To restore full features, lock the device and re-enter your passphrase through Vault.
+					</Text>
+				</Flex>
+			)}
+
 			{/* Pioneer connection error banner */}
 			{pioneerError && (
 				<Box

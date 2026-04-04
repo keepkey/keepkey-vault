@@ -631,6 +631,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			// DB read — uses fingerprint to isolate per-wallet when device is available
 			listBip85Seeds: async () => {
+				// PRIVACY: Don't expose standard-wallet BIP-85 metadata during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				let fp: string | undefined
 				try { fp = await engine.getWalletFingerprint() } catch { /* device not connected */ }
 				const seeds = getBip85Seeds(fp)
@@ -2691,6 +2693,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── API Audit Log ────────────────────────────────────────
 			getApiLogs: async (params) => {
+				// PRIVACY: Don't expose standard-wallet activity logs during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0)
 			},
 			clearApiLogs: async () => {
@@ -2799,6 +2803,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			listReports: async () => {
+				// PRIVACY: Don't expose standard-wallet reports during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return []
 				return getReportsList(deviceId)
@@ -3042,6 +3048,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Swap History (SQLite-persisted) ─────────────────────
 			getSwapByTxid: async (params) => {
+				// PRIVACY: Don't expose standard-wallet swap records during hidden sessions.
+				if (engine.isPassphraseWallet) return null
 				const record = getSwapHistoryByTxid(params.txid)
 				if (!record) return null
 				const { inferConfirmationsFromStatus } = await import('./swap-tracker')
@@ -3068,12 +3076,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			getSwapHistory: async (params) => {
+				if (engine.isPassphraseWallet) return []
 				return getSwapHistory(params || undefined)
 			},
 			getSwapHistoryStats: async () => {
+				if (engine.isPassphraseWallet) return { total: 0, completed: 0, failed: 0, pending: 0, totalVolumeUsd: 0 }
 				return getSwapHistoryStats()
 			},
 			exportSwapReport: async (params) => {
+				if (engine.isPassphraseWallet) throw new Error('Swap reports are not available for passphrase-protected wallets (privacy).')
 				const records = getSwapHistory({
 					fromDate: params.fromDate,
 					toDate: params.toDate,
@@ -3102,6 +3113,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
+				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				return getRecentActivityFromLog(params?.limit || 50, params?.chainId)
 			},
 			scanChainHistory: async (params) => {
@@ -3196,6 +3209,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
+				// PRIVACY: Hidden wallet sessions must not see standard-wallet cached data.
+				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) { console.log('[cache-health] No deviceId — skipping'); return null }
 				const result = getCachedBalances(deviceId)
