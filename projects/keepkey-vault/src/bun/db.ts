@@ -848,6 +848,20 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
   }
 }
 
+export function getDeviceSnapshotById(deviceId: string): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number } | null {
+  try {
+    if (!db) return null
+    const row = db.query(
+      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot WHERE device_id = ?'
+    ).get(deviceId) as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
+    if (!row) return null
+    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
+  } catch (e: any) {
+    console.warn('[db] getDeviceSnapshotById failed:', e.message)
+    return null
+  }
+}
+
 export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number }> {
   try {
     if (!db) return []
@@ -867,6 +881,7 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM device_snapshot WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM balances WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM reports WHERE device_id = ?', [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
   }

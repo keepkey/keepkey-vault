@@ -3131,14 +3131,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!snap) return { available: false }
 				return { available: true, deviceLabel: snap.label || undefined, lastSynced: snap.updatedAt }
 			},
-			getWatchOnlyBalances: async () => {
-				const snap = getLatestDeviceSnapshot()
+			getWatchOnlyBalances: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
 				if (!snap) return null
 				const result = getCachedBalances(snap.deviceId)
 				return result?.balances ?? null
 			},
-			getWatchOnlyPubkeys: async () => {
-				const snap = getLatestDeviceSnapshot()
+			getWatchOnlyPubkeys: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
 				if (!snap) return []
 				return getCachedPubkeys(snap.deviceId)
 			},
@@ -3285,10 +3291,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}))
 			},
 			emulatorImportWallet: async (params) => {
-				// Validate wallet name — names containing '.mnemonic.' are invisible to listFlashImages()
-				if (params.name.includes('.mnemonic.')) {
-					throw new Error('Wallet name cannot contain ".mnemonic."')
-				}
+				// Sanitize wallet name — prevent path traversal and invisible names
+				const name = params.name.trim()
+				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
+				if (/[\/\\]/.test(name)) throw new Error('Wallet name cannot contain path separators')
+				if (name.includes('..')) throw new Error('Wallet name cannot contain ".."')
+				if (name.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
+				if (name.includes('.mnemonic.')) throw new Error('Wallet name cannot contain ".mnemonic."')
+				params = { ...params, name }
 
 				const { stopEmulator, initEmulator, getEmulatorStatus, flushRingBuffers, getActiveFlashName } = await import('./emulator')
 				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')

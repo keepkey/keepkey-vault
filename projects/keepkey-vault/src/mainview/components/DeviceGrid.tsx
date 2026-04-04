@@ -108,6 +108,9 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 		const name = newName.trim()
 		const mnemonic = newMnemonic.trim()
 		if (!name || !mnemonic) return
+		if (name.length > 64 || /[\/\\]/.test(name) || name.includes('..') || name.includes('.mnemonic.')) {
+			setError('Invalid name: avoid path characters (/ \\ ..), max 64 chars'); return
+		}
 		setLoading("emu:__import")
 		setError(null)
 		try {
@@ -135,7 +138,9 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	}
 
 	const emuRunning = emuStatus?.state === "running"
-	const hasContent = devices.length > 0 || emuWallets.length > 0 || emuPaired
+	// Show grid if there are devices, emulator wallets, OR if the emulator
+	// system responded at all (so "Pair Emulator" card is reachable on clean install)
+	const hasContent = devices.length > 0 || emuWallets.length > 0 || emuPaired || emuStatus !== null
 
 	if (!hasContent) return null
 

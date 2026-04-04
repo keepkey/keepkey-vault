@@ -63,6 +63,7 @@ function App() {
 	// ── Watch-only mode ──────────────────────────────────────────
 	const [watchOnlyAvailable, setWatchOnlyAvailable] = useState(false)
 	const [watchOnlyMode, setWatchOnlyMode] = useState(false)
+	const [watchOnlyDeviceId, setWatchOnlyDeviceId] = useState<string | undefined>(undefined)
 	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
 
@@ -590,7 +591,7 @@ function App() {
 						watchOnly
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
-						<Dashboard watchOnly onLoaded={() => {}} />
+						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
 				<DeviceSettingsDrawer
@@ -637,7 +638,7 @@ function App() {
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 				>
 					{/* Unified device grid — registered devices + emulator wallets */}
-					<DeviceGrid onViewPortfolio={() => setWatchOnlyMode(true)} />
+					<DeviceGrid onViewPortfolio={(id) => { setWatchOnlyDeviceId(id); setWatchOnlyMode(true) }} />
 				</SplashScreen>
 			</>
 		)

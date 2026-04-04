@@ -183,8 +183,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
-      getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }
-      getWatchOnlyPubkeys: { params: void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+      getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
+      getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
 
       // ── Registered devices (device history) ──────────────────────────
       getRegisteredDevices: { params: void; response: RegisteredDevice[] }

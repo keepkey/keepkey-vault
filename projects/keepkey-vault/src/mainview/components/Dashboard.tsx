@@ -83,6 +83,8 @@ interface PioneerError {
 interface DashboardProps {
 	onLoaded?: () => void
 	watchOnly?: boolean
+	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
+	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
 	firmwareVersion?: string
 	/** When true (e.g. after OOB setup), skip stale cache and auto-refresh live balances */
@@ -103,7 +105,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -183,7 +185,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 
 			if (watchOnly) {
 				try {
-					const result = await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000)
+					const result = await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 5000)
 					if (!cancelled && result && result.length > 0) {
 						const map = new Map<string, ChainBalance>()
 						for (const b of result) map.set(b.chainId, b)
@@ -224,7 +226,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 
 		loadCached()
 		return () => { cancelled = true }
-	}, [watchOnly, forceRefresh])
+	}, [watchOnly, watchOnlyDeviceId, forceRefresh])
 
 	// One-shot price refresh: update cached USD values with fresh market prices on load/navigate.
 	// Does NOT re-fetch balances from Pioneer — only reprices existing cached amounts.
