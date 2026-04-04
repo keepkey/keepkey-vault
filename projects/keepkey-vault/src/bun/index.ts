@@ -1723,13 +1723,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						xpub = xpubResult?.[0]?.xpub
 					}
 				} else {
-					const xpubResult = await wallet.getPublicKeys([{
-						addressNList: chain.defaultPath.slice(0, 3),
+					// Non-BTC UTXO: derive all applicable script-type xpubs so buildUtxoTx
+					// can aggregate UTXOs from any address type (mirrors BTC multi-xpub logic).
+					const scriptTypes = chain.id === 'litecoin'
+						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+						: [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+
+					const coinType = chain.defaultPath[1] // already hardened (0x80000000 + slip44)
+					const pubKeyPaths = scriptTypes.map(st => ({
+						addressNList: [st.purpose + 0x80000000, coinType, 0x80000000],
 						coin: chain.coin,
-						scriptType: chain.scriptType,
+						scriptType: st.scriptType,
 						curve: 'secp256k1',
-					}])
-					xpub = xpubResult?.[0]?.xpub
+					}))
+					const pubKeyResults = await wallet.getPublicKeys(pubKeyPaths)
+
+					const derivedXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+					for (let i = 0; i < scriptTypes.length; i++) {
+						const xp = pubKeyResults?.[i]?.xpub
+						if (xp) {
+							derivedXpubs.push({
+								xpub: xp,
+								scriptType: scriptTypes[i].scriptType,
+								accountPath: pubKeyPaths[i].addressNList,
+							})
+						}
+					}
+					if (derivedXpubs.length > 0) {
+						xpub = derivedXpubs[0].xpub
+						if (derivedXpubs.length > 1) {
+							allXpubs = derivedXpubs
+						}
+					}
 				}
 
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
@@ -1787,9 +1812,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				// BTC sends always use the selected xpub — user chose which account to send from.
-				// Multi-xpub aggregation is only for swaps (which show aggregate balance).
-				const allXpubs = undefined
+				// Multi-xpub aggregation: BTC uses the selected xpub only (user chose account);
+				// non-BTC UTXO chains derive all script-type xpubs below.
+				let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
 				const result = await buildTx(pioneer, chain, {
 					...params,
