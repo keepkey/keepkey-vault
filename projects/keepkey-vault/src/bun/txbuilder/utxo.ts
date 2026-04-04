@@ -158,9 +158,10 @@ function unwrapUtxoResponse(resp: any): any[] {
     : []
 }
 
-/** Fetch UTXOs for a single xpub, tag each with its scriptType */
+/** Fetch UTXOs for a single xpub, tag each with its scriptType and source accountPath */
 async function fetchUtxosForXpub(
   pioneer: any, network: string, xpub: string, defaultScriptType: string,
+  sourceAccountPath?: number[],
 ): Promise<any[]> {
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
   const resp = await pioneer.ListUnspent({ network, xpub })
@@ -168,6 +169,8 @@ async function fetchUtxosForXpub(
   for (const u of utxos) {
     u.value = Number(u.value)
     u.scriptType = u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType
+    // Tag with source xpub's account path so input preparation can rewrite correctly
+    if (sourceAccountPath) u._sourceAccountPath = sourceAccountPath
   }
   console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs, ${utxos.reduce((s: number, u: any) => s + u.value, 0) / 1e8}`)
   return utxos
@@ -199,12 +202,20 @@ export async function buildUtxoTx(
   let utxos: any[]
   if (allXpubs && allXpubs.length > 0) {
     console.log(`${TAG} Multi-xpub aggregation: ${allXpubs.length} xpubs`)
-    const results = await Promise.all(
-      allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.chain, x.xpub, x.scriptType))
+    // Finding 5: tolerate individual xpub failures — use allSettled
+    const settled = await Promise.allSettled(
+      allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.chain, x.xpub, x.scriptType, x.accountPath))
     )
-    utxos = results.flat()
+    utxos = []
+    for (let i = 0; i < settled.length; i++) {
+      if (settled[i].status === 'fulfilled') {
+        utxos.push(...(settled[i] as PromiseFulfilledResult<any[]>).value)
+      } else {
+        console.warn(`${TAG} ListUnspent failed for ${allXpubs[i].xpub.slice(0, 12)}...: ${(settled[i] as PromiseRejectedResult).reason?.message}`)
+      }
+    }
   } else {
-    utxos = await fetchUtxosForXpub(pioneer, chain.chain, primaryXpub, scriptType)
+    utxos = await fetchUtxosForXpub(pioneer, chain.chain, primaryXpub, scriptType, accountPath || undefined)
   }
   if (!utxos.length) throw new Error(`No UTXOs found for ${chain.coin}`)
 
@@ -431,30 +442,26 @@ export async function buildUtxoTx(
     : bip32ToAddressNList(`m/${purpose}'/${coinType}'/0'/1/${changeAddressIndex}`)
 
   // 5. Prepare inputs/outputs for hdwallet
-  // Fallback path when UTXO has no path: use scriptType-derived purpose with correct account index
-  const fallbackBasePath = accountPath
-    ? [...accountPath, 0, 0]
-    : [purpose + 0x80000000, coinType + 0x80000000, 0x80000000, 0, 0]
   const preparedInputs = inputs.map((input: any) => {
     const inputScriptType = input.scriptType || scriptType
+    // Per-input accountPath: from source xpub tag (multi-xpub) or global accountPath (single-xpub)
+    const inputAccountPath: number[] | undefined = input._sourceAccountPath || accountPath
     let addressNList: number[]
     if (input.path) {
       const rawNList = bip32ToAddressNList(input.path)
-      if (allXpubs && allXpubs.length > 0) {
-        // Multi-xpub mode: use the raw path as-is — each UTXO carries its own
-        // purpose/account from its source xpub (p2pkh=44, p2sh-p2wpkh=49, p2wpkh=84)
-        addressNList = rawNList
-      } else if (accountPath && rawNList.length === 5) {
-        // Single-xpub mode: Blockbook returns account 0 in paths — replace first 3
-        // segments with the correct account-level path (for multi-account support)
-        addressNList = [...accountPath, rawNList[3], rawNList[4]]
+      if (inputAccountPath && rawNList.length === 5) {
+        // Blockbook returns account-0 paths — rewrite first 3 segments to the
+        // UTXO's own source account path (correct for both single- and multi-xpub)
+        addressNList = [...inputAccountPath, rawNList[3], rawNList[4]]
       } else {
         addressNList = rawNList
       }
     } else {
-      // No path from API — use scriptType-derived base path
-      console.warn(`${TAG} UTXO ${input.txid?.slice(0, 12)}...:${input.vout} missing path — using fallback`)
-      addressNList = fallbackBasePath
+      // No path from API — derive from this input's scriptType + account path
+      const inputPurpose = PURPOSE[inputScriptType] ?? purpose
+      const fb = inputAccountPath || [inputPurpose + 0x80000000, coinType + 0x80000000, 0x80000000]
+      addressNList = [...fb, 0, 0]
+      console.warn(`${TAG} UTXO ${input.txid?.slice(0, 12)}...:${input.vout} missing path — using fallback from scriptType=${inputScriptType}`)
     }
     return {
       addressNList,

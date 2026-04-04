@@ -1787,10 +1787,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				// BTC send-max: aggregate UTXOs from all funded xpubs across address types
-				// Normal sends: respect the user's selected xpub only (don't widen scope)
-				const allXpubs = chain.id === 'bitcoin' && params.isMax && btcAccounts.isInitialized
-					? btcAccounts.getFundedXpubs() : undefined
+				// BTC sends always use the selected xpub — user chose which account to send from.
+				// Multi-xpub aggregation is only for swaps (which show aggregate balance).
+				const allXpubs = undefined
 
 				const result = await buildTx(pioneer, chain, {
 					...params,
