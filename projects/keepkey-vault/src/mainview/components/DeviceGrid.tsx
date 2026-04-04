@@ -261,7 +261,7 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 									{active ? (
 										<CardBtn label="Stop" color="#EF4444" onClick={handleStopEmu} loading={loading === "emu:__stop"} />
 									) : (
-										<CardBtn label="Start" color="#C0A860" onClick={() => handleStartEmu(w.name)} loading={loading === `emu:${w.name}`} />
+										<SolidBtn label="Start" bg="#22C55E" onClick={() => handleStartEmu(w.name)} loading={loading === `emu:${w.name}`} />
 									)}
 									{!active && (
 										<SmallCircleBtn color="#EF4444" label="&times;" onClick={() => setConfirmDeleteEmu(w.name)} />
@@ -416,6 +416,22 @@ function SmallCircleBtn({ color, label, onClick, loading }: { color: string; lab
 			_hover={{ bg: `rgba(${rgb},0.35)` }} transition="all 0.15s"
 			onClick={onClick} dangerouslySetInnerHTML={{ __html: label }}
 		/>
+	)
+}
+
+function SolidBtn({ label, bg, onClick, loading }: { label: string; bg: string; onClick: () => void; loading?: boolean }) {
+	return (
+		<Box
+			as="button"
+			px="12px" py="4px"
+			borderRadius="md" fontSize="11px" fontWeight="700"
+			color="black" bg={bg}
+			cursor={loading ? "wait" : "pointer"} opacity={loading ? 0.6 : 1}
+			_hover={{ opacity: 0.85 }} transition="all 0.15s"
+			onClick={onClick}
+		>
+			{label}
+		</Box>
 	)
 }
 
