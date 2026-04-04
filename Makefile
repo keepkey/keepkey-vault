@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -587,3 +587,59 @@ help:
 	@echo "  make test           - Run all tests"
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
+	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
+
+# --- Pre-release Validation ---
+preflight: submodules
+	@echo "╔══════════════════════════════════════════╗"
+	@echo "║   PRE-RELEASE VALIDATION                 ║"
+	@echo "╚══════════════════════════════════════════╝"
+	@echo ""
+	@echo "1. SUBMODULE PINS"
+	@fail=0; \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do \
+		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
+		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
+		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
+		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
+	done; \
+	echo ""; \
+	echo "2. FIRMWARE NESTED SUBMODULES"; \
+	drift=$$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+' || true); \
+	if [ -n "$$drift" ]; then echo "   ❌ DRIFT:"; echo "$$drift"; fail=1; \
+	else echo "   ✅ All clean"; fi; \
+	echo ""; \
+	echo "3. UPSTREAM BEHIND"; \
+	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/keepkey-firmware|origin/master" "modules/electrobun|origin/keepkey/macos-12-support"; do \
+		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
+		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
+		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
+		else echo "   ⚠️  $$mod: $$behind behind $$ref"; fi; \
+	done; \
+	echo ""; \
+	echo "4. CI STATUS"; \
+	for pair in "modules/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun"; do \
+		mod="$${pair%%|*}"; repo="$${pair##*|}"; \
+		sha=$$(cd "$$mod" && git rev-parse HEAD); \
+		total=$$(gh api "repos/$$repo/commits/$$sha/check-runs" --jq '.total_count' 2>/dev/null || echo "0"); \
+		if [ "$$total" = "0" ]; then echo "   ⚠️  $$mod: no CI"; \
+		else \
+			failed=$$(gh api "repos/$$repo/commits/$$sha/check-runs" --jq '[.check_runs[] | select(.conclusion == "failure")] | length' 2>/dev/null || echo "0"); \
+			if [ "$$failed" = "0" ]; then echo "   ✅ $$mod: $$total checks passed"; \
+			else echo "   ❌ $$mod: $$failed/$$total FAILED"; fail=1; fi; \
+		fi; \
+	done; \
+	echo ""; \
+	echo "5. LOCAL BUILD ARTIFACTS"; \
+	test -f modules/hdwallet/packages/hdwallet-keepkey/dist/typeRegistry.js && echo "   ✅ hdwallet dist/" || { echo "   ❌ hdwallet dist/ — run: make modules-build"; fail=1; }; \
+	test -f modules/proto-tx-builder/dist/index.js && echo "   ✅ proto-tx-builder dist/" || { echo "   ❌ proto-tx-builder dist/ — run: make modules-build"; fail=1; }; \
+	test -f modules/device-protocol/lib/messages_pb.js && echo "   ✅ device-protocol lib/" || { echo "   ❌ device-protocol lib/ — run: cd modules/device-protocol && npm run build"; fail=1; }; \
+	echo ""; \
+	echo "6. VAULT TYPECHECK"; \
+	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
+	if [ "$$errs" = "0" ]; then echo "   ✅ clean"; \
+	else echo "   ❌ $$errs type errors"; fail=1; fi; \
+	echo ""; \
+	echo "════════════════════════════════════════════"; \
+	if [ "$$fail" = "0" ]; then echo "✅ ALL GATES PASSED — ready to cut release"; \
+	else echo "❌ ISSUES FOUND — fix before release"; exit 1; fi
