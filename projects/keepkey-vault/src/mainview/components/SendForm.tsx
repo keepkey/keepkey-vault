@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
@@ -41,6 +42,7 @@ interface SendFormProps {
 
 export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
 	const { t } = useTranslation("send")
+	const { fmt, fmtCompact } = useFiat()
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [usdAmount, setUsdAmount] = useState("")
@@ -86,14 +88,17 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
 	// Derive per-unit USD price from available balance data
+	// NOTE: balance.balanceUsd includes token USD — use nativeBalanceUsd for native price
 	const pricePerUnit = useMemo(() => {
 		if (isTokenSend && token?.priceUsd) return token.priceUsd
-		if (!isTokenSend && balance?.balanceUsd && balance.balance) {
+		if (!isTokenSend && balance?.balance) {
 			const bal = parseFloat(balance.balance)
-			if (bal > 0) return balance.balanceUsd / bal
+			if (bal <= 0) return 0
+			const nativeUsd = balance.nativeBalanceUsd ?? balance.balanceUsd ?? 0
+			return nativeUsd > 0 ? nativeUsd / bal : 0
 		}
 		return 0
-	}, [isTokenSend, token?.priceUsd, balance?.balanceUsd, balance?.balance])
+	}, [isTokenSend, token?.priceUsd, balance?.nativeBalanceUsd, balance?.balanceUsd, balance?.balance])
 
 	const hasPrice = pricePerUnit > 0
 
@@ -258,12 +263,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Build explorer URL from assetData
 	const explorerUrl = useMemo(() => {
 		if (!txid) return null
+		// EVM explorers expect 0x prefix; all others do not
+		const normalizedTxid = chain.chainFamily === 'evm'
+			? (txid.startsWith('0x') ? txid : '0x' + txid)
+			: txid.replace(/^0x/i, '')
 		const caip = isTokenSend && token?.caip ? token.caip : chain.caip
 		const asset = getAsset(caip)
-		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', txid)
+		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', normalizedTxid)
 		// Fallback: try the chain's native CAIP
 		const chainAsset = getAsset(chain.caip)
-		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', txid)
+		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', normalizedTxid)
 		return null
 	}, [txid, chain, token, isTokenSend])
 
@@ -301,7 +310,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					</Text>
 					{hasPrice && (
 						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
-							${formatUsd(parseFloat(displayBalance) * pricePerUnit)}
+							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
 						</Text>
 					)}
 				</Flex>
@@ -408,7 +417,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									<Flex align="center" gap="1">
 										{inputMode === 'crypto' ? (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amountUsdPreview !== null ? `$${formatUsd(amountUsdPreview)}` : '$0.00'}
+												{amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0)}
 											</Text>
 										) : (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
@@ -421,7 +430,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									</Flex>
 								)}
 								{pricePerUnit > 0 && (
-									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = ${formatUsd(pricePerUnit)}</Text>
+									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = {fmtCompact(pricePerUnit)}</Text>
 								)}
 							</Flex>
 						)}
@@ -492,7 +501,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(amountUsdPreview)}</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}
 							</Flex>
 						</Flex>
@@ -501,7 +510,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
 								{buildResult.feeUsd != null && buildResult.feeUsd > 0 && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(buildResult.feeUsd)}</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(buildResult.feeUsd)}</Text>
 								)}
 							</Flex>
 						</Flex>

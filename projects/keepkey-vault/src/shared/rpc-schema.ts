@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -23,6 +23,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       recoverDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
       loadDevice: { params: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }; response: void }
       verifySeed: { params: { wordCount: 12 | 18 | 24 }; response: { success: boolean; message: string } }
+      verifySeedChallenge: { params: void; response: { positions: number[]; wordCount: number } }
+      verifySeedSubmit: { params: { answers: { position: number; word: string }[] }; response: { success: boolean; message: string } }
       applySettings: { params: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }; response: void }
       applyPolicy: { params: { policyName: string; enabled: boolean }; response: void }
       changePin: { params: void; response: void }
@@ -116,12 +118,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
       zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
       zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
-
-      // ── Camera / QR scanning ──────────────────────────────────────────
-      startQrScan: { params: void; response: void }
-      stopQrScan: { params: void; response: void }
 
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }
@@ -130,6 +129,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       rejectSigningRequest: { params: { id: string }; response: void }
       listPairedApps: { params: void; response: PairedAppInfo[] }
       revokePairing: { params: { apiKey: string }; response: void }
+
+      // ── Mobile pairing (via vault.keepkey.com relay) ─────────────────
+      generateMobilePairing: { params: void; response: { code: string; expiresAt: number; expiresIn: number; qrPayload: string } }
 
       // ── API Audit Log ──────────────────────────────────────────────────
       getApiLogs: { params: { limit?: number; offset?: number } | void; response: ApiLogEntry[] }
@@ -141,6 +143,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setSwapsEnabled: { params: { enabled: boolean }; response: AppSettings }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
@@ -154,7 +157,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       listReports: { params: void; response: ReportMeta[] }
       getReport: { params: { id: string }; response: { meta: ReportMeta; data: ReportData } | null }
       deleteReport: { params: { id: string }; response: void }
-      saveReportFile: { params: { id: string; format: 'pdf' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
+      saveReportFile: { params: { id: string; format: 'pdf' | 'csv' | 'cointracker' | 'zenledger' }; response: { filePath: string } }
 
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }
@@ -176,18 +179,45 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       clearRecentActivity: { params: void; response: void }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
-      getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
+      getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null }
 
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
-      getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }
-      getWatchOnlyPubkeys: { params: void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+      getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
+      getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+
+      // ── Registered devices (device history) ──────────────────────────
+      getRegisteredDevices: { params: void; response: RegisteredDevice[] }
+      forgetDevice: { params: { deviceId: string }; response: void }
 
       // ── Factory Reset ──────────────────────────────────────────────────
       factoryReset: { params: void; response: void }
 
+      // ── Sweep (non-standard BTC path recovery) ──────────────────────
+      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number; currentMaxAccount?: number; higherAccountScanLimit?: number }; response: { scanId: string } }
+      sweepGetStatus: { params: { scanId: string }; response: any }
+      sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
+
+      // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
+      emulatorPair: { params: void; response: EmulatorStatus }
+      emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
+      emulatorStop: { params: void; response: EmulatorStatus }
+      emulatorSave: { params: void; response: void }
+      emulatorStatus: { params: void; response: EmulatorStatus }
+      emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
+      emulatorListWallets: { params: void; response: EmulatorWalletInfo[] }
+      emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string }; response: EmulatorStatus }
+      emulatorSwitchWallet: { params: { name: string }; response: EmulatorStatus }
+
+      // ── WalletConnect (native v2) ────────────────────────────────────
+      wcPair: { params: { uri: string }; response: void }
+      wcGetSessions: { params: void; response: WcSessionInfo[] }
+      wcDisconnectSession: { params: { topic: string }; response: void }
+
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
+      getPendingDeepLink: { params: void; response: string | null }
+      consumePendingDeepLink: { params: void; response: void }
 
       // ── App Updates ────────────────────────────────────────────────────
       checkForUpdate: { params: void; response: UpdateInfo }
@@ -213,9 +243,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown'; autoRetrying?: boolean }
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
-      'camera-frame': string
-      'camera-error': string
-      'update-status': UpdateStatus
+'update-status': UpdateStatus
       'pioneer-error': { message: string; url: string }
       'pair-request': PairingRequestInfo
       'pair-dismissed': Record<string, never>
@@ -224,11 +252,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
+      'wc-sessions': WcSessionInfo[]
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
+      'deshield-progress': { step: string; detail?: string }
+      'emulator-status': EmulatorStatus
     }
   }
   webview: {

@@ -31,15 +31,16 @@ function formatWei(wei: bigint, decimals = 18): string {
   return fracStr ? `${whole}.${fracStr}` : `${whole}`
 }
 
-/** Chain-aware minimum gas price fallbacks (gwei) — used when RPC/Pioneer both fail */
+/** Chain-aware minimum gas price floors (gwei) — enforced even when RPC/Pioneer report lower.
+ *  L2s and less-used chains frequently report unrealistically low fees that cause mempool drops. */
 const MIN_GAS_GWEI: Record<string, number> = {
-  ethereum: 10,
+  ethereum: 1,
   polygon: 30,
   avalanche: 25,
   bsc: 3,
-  base: 0.01,
-  arbitrum: 0.01,
-  optimism: 0.01,
+  base: 1,
+  arbitrum: 1,
+  optimism: 1,
 }
 
 /** Chain-aware gas limits for depositWithExpiry — L2s need more for L1 data posting */
@@ -209,12 +210,15 @@ export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
   getRpcUrl: (chain: ChainDef) => string | undefined
-  getBtcXpub: () => string | undefined  // selected BTC xpub if available
+  getBtcXpub: () => { xpub: string; accountPath?: number[] } | undefined  // selected BTC xpub + account path
+  getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
+  /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
+  wrapSign: (fn: () => Promise<any>, details: { operation: string; chain?: string; to?: string; value?: string; memo?: string }) => Promise<any>
 }
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub } = ctx
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign } = ctx
 
   // Resolve source chain
   const allChains = getAllChains()
@@ -299,13 +303,28 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── UTXO chains: send to vault, memo in OP_RETURN ──
   } else if (fromChain.chainFamily === 'utxo') {
-    // Only use BTC multi-account xpub for Bitcoin — other UTXO chains (DOGE, LTC, etc.)
-    // have their own xpub formats and must derive their own
     let xpub: string | undefined
+    let accountPath: number[] | undefined
+    let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+
     if (fromChain.id === 'bitcoin') {
-      try { xpub = getBtcXpub() } catch { /* BTC account manager not ready */ }
+      // BTC: aggregate UTXOs from ALL funded xpubs (p2pkh + p2sh-p2wpkh + p2wpkh)
+      try {
+        allXpubs = getAllBtcXpubs()
+        if (allXpubs.length > 0) {
+          console.log(`${TAG} BTC multi-xpub: ${allXpubs.length} funded xpubs`)
+          // Primary xpub for change address = selected, or first funded
+          const btcInfo = getBtcXpub()
+          xpub = btcInfo?.xpub || allXpubs[0].xpub
+          accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
+        }
+      } catch { /* BTC account manager not ready */ }
       if (!xpub) {
-        console.warn(`${TAG} BTC multi-account xpub unavailable — falling back to default account 0`)
+        // Fallback: single selected xpub
+        try {
+          const btcInfo = getBtcXpub()
+          if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+        } catch {}
       }
     }
     if (!xpub) {
@@ -331,6 +350,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       isMax: params.isMax,
       fromAddress,
       xpub,
+      allXpubs,
+      accountPath,
     })
     unsignedTx = buildResult.unsignedTx
 
@@ -354,7 +375,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   console.log(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
   let signedTx: any
   try {
-    signedTx = await txb.signTx(wallet, fromChain, unsignedTx)
+    signedTx = await wrapSign(
+      () => txb.signTx(wallet, fromChain, unsignedTx),
+      { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
+    )
   } catch (e: any) {
     console.error(`${TAG} SIGN FAILED: ${e.message}`)
     console.error(`${TAG}   chain=${fromChain.id}, method=${fromChain.signMethod}`)
@@ -363,15 +387,40 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
   console.log(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
 
-  // 5. Broadcast
+  // 5. Broadcast — prefer direct RPC for EVM chains (Pioneer relay can silently drop txs)
   let txid: string
-  try {
-    const result = await txb.broadcastTx(pioneer, fromChain, signedTx)
-    txid = result.txid
-  } catch (e: any) {
-    console.error(`${TAG} BROADCAST FAILED: ${e.message}`)
-    console.error(`${TAG}   signedTx keys: ${signedTx ? Object.keys(signedTx).join(', ') : 'null'}`)
-    throw e
+  const swapRpcUrl = fromChain.chainFamily === 'evm' ? getRpcUrl(fromChain) : undefined
+  if (swapRpcUrl && fromChain.chainFamily === 'evm') {
+    // Extract serialized tx hex from signed result
+    const serializedHex: string | undefined = typeof signedTx === 'string' ? signedTx
+      : signedTx?.serializedTx || signedTx?.serialized
+    if (!serializedHex) {
+      throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
+    }
+    try {
+      txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
+      console.log(`${TAG} Broadcast via direct RPC: ${txid}`)
+    } catch (directErr: any) {
+      console.warn(`${TAG} Direct RPC broadcast failed (${directErr.message}), falling back to Pioneer...`)
+      try {
+        const result = await txb.broadcastTx(pioneer, fromChain, signedTx)
+        txid = result.txid
+      } catch (pioneerErr: any) {
+        console.error(`${TAG} BROADCAST FAILED (both direct RPC and Pioneer):`)
+        console.error(`${TAG}   Direct: ${directErr.message}`)
+        console.error(`${TAG}   Pioneer: ${pioneerErr.message}`)
+        throw pioneerErr
+      }
+    }
+  } else {
+    try {
+      const result = await txb.broadcastTx(pioneer, fromChain, signedTx)
+      txid = result.txid
+    } catch (e: any) {
+      console.error(`${TAG} BROADCAST FAILED: ${e.message}`)
+      console.error(`${TAG}   signedTx keys: ${signedTx ? Object.keys(signedTx).join(', ') : 'null'}`)
+      throw e
+    }
   }
 
   console.log(`${TAG} Broadcast success: ${txid}`)
@@ -429,6 +478,12 @@ async function buildEvmSwapTx(
       gasPrice = fallbackGasPrice
     }
   }
+  // Enforce minimum gas price floor — RPC/Pioneer frequently report unrealistically low fees
+  if (gasPrice < fallbackGasPrice) {
+    console.log(`${TAG} Gas price ${gasPrice} below floor ${fallbackGasPrice} (${fallbackGwei} gwei) — using floor`)
+    gasPrice = fallbackGasPrice
+  }
+
   if (params.feeLevel != null && params.feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
   else if (params.feeLevel != null && params.feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
 
@@ -664,14 +719,21 @@ async function buildEvmSwapTx(
 
     const finalGasFee = gasPrice * gasLimit
 
-    // Re-adjust for sendMax with refined gas estimate
-    if (params.isMax && nativeBalance > finalGasFee) {
-      amountWei = nativeBalance - finalGasFee
+    // L2 chains (OP Stack): reserve extra for L1 data posting fee, which is separate from
+    // gasPrice * gasLimit. Without this, sendMax overspends by the L1 fee and gets rejected.
+    const L2_DATA_FEE_CHAINS = ['base', 'optimism', 'arbitrum']
+    const l1DataFeeBuffer = L2_DATA_FEE_CHAINS.includes(fromChain.id) ? BigInt(5e13) : 0n // 0.00005 ETH
+    const totalGasReserve = finalGasFee + l1DataFeeBuffer
+
+    // Re-adjust for sendMax with refined gas estimate + L1 data fee buffer
+    if (params.isMax && nativeBalance > totalGasReserve) {
+      amountWei = nativeBalance - totalGasReserve
+      if (l1DataFeeBuffer > 0n) console.log(`${TAG} sendMax includes L1 data fee buffer: ${formatWei(l1DataFeeBuffer)}`)
     }
 
-    if (nativeBalance < amountWei + finalGasFee) {
+    if (nativeBalance < amountWei + totalGasReserve) {
       throw new Error(
-        `Insufficient ${fromChain.symbol}: need ${formatWei(amountWei + finalGasFee)}, ` +
+        `Insufficient ${fromChain.symbol}: need ${formatWei(amountWei + totalGasReserve)}, ` +
         `have ${formatWei(nativeBalance)}`
       )
     }

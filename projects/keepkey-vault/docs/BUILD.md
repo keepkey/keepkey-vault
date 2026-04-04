@@ -108,10 +108,11 @@ Electrobun:
 3. Prunes `.d.ts`, `.ts`, `.map`, `README`, `CHANGELOG`, `LICENSE` files
 4. Strips known large directories (protobufjs, ethers, libsodium ESM, etc.)
 5. Re-signs all native `.node` binaries
-6. **Re-signs the entire `.app` with `entitlements.plist`** — JIT, unsigned executable memory, dyld env vars, and library validation bypass (all required for Bun runtime)
+6. **Re-signs Electrobun runtime binaries explicitly** — `bun` and `launcher` get `entitlements.plist` before the bundle wrapper is signed
+7. **Re-signs the `.app` bundle wrapper** — final outer signature, without `--deep`, so nested runtime entitlements are preserved
 7. Repackages into tar.zst
 
-> **CRITICAL**: The `entitlements.plist` step was added in v1.0.1. Without it, macOS Sequoia kills the Bun process on launch (hardened runtime blocks JIT which Bun requires).
+> **CRITICAL**: `bun` itself must carry the JIT entitlements. Signing only the outer `.app` is not sufficient for the macOS 12/Intel crash path.
 
 ### Stage 7: DMG Creation (`make dmg`)
 
@@ -137,8 +138,9 @@ The build has **three signing passes** to satisfy Apple notarization:
 | Pass | Script | What | Why |
 |------|--------|------|-----|
 | 1 | `collect-externals.ts` | All `.node`, `.dylib`, `.so`, extensionless Mach-O binaries in `build/_ext_modules/` | Native addons must be signed before Electrobun packages them |
-| 2 | `prune-app-bundle.ts` | All native binaries in the extracted `.app` | Re-sign after pruning modifies the bundle |
-| 3 | `prune-app-bundle.ts` | The entire `.app` bundle with `--entitlements entitlements.plist` | Hardened runtime + JIT entitlements for Bun |
+| 2 | `prune-app-bundle.ts` | All native add-ons in the extracted `.app` | Re-sign after pruning modifies the bundle |
+| 3 | `prune-app-bundle.ts` | `Contents/MacOS/launcher` and `Contents/MacOS/bun` with `entitlements.plist` | Bun runtime needs JIT entitlements on the binary itself |
+| 4 | `prune-app-bundle.ts` | The outer `.app` bundle | Final wrapper signature without clobbering nested entitlements |
 
 ### Entitlements (`entitlements.plist`)
 
@@ -149,7 +151,7 @@ The build has **three signing passes** to satisfy Apple notarization:
 <key>com.apple.security.cs.allow-dyld-environment-variables</key>  <!-- Module loading -->
 ```
 
-All four are required. Missing `allow-jit` causes the app to be killed immediately on macOS Sequoia.
+All four are required. Missing `allow-jit` on `Contents/MacOS/bun` causes an immediate launch crash.
 
 ### Extensionless Mach-O Detection
 
@@ -166,7 +168,7 @@ Unsigned Mach-O binaries cause notarization to fail with a cryptic error.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Notarization rejects with "unsigned binary" | Nested `node_modules/` contains unsigned Mach-O | Check banned packages list, run `find` for unsigned binaries (see Troubleshooting) |
-| App killed on launch (no error) | Missing JIT entitlement | Verify `entitlements.plist` is applied in `prune-app-bundle.ts` |
+| App killed on launch (no error) | `bun` missing JIT entitlement | Verify entitlements on `Contents/MacOS/bun`, not just the outer `.app` |
 | `codesign: resource fork, Finder information, or similar detritus not allowed` | `.DS_Store` or extended attributes in bundle | Add `xattr -cr` step before signing |
 | Stapling fails after notarization succeeds | Network issue or Apple CDN delay | Retry `xcrun stapler staple` after a few minutes |
 
@@ -293,6 +295,12 @@ timeout 10 ./bun ../Resources/app/bun/index.js 2>&1
 
 ### Bundle too large
 Run `du -sh build/_ext_modules/` (expected ~38MB). Check collect-externals output for "Keeping nested" lines. Consider `package.json` `overrides` to align versions.
+
+## macOS 12 / Intel
+
+Use [MACOS12-VALIDATION.md](MACOS12-VALIDATION.md) for the release checklist.
+
+For Intel artifacts, the Electrobun x64 runtime must come from an approved fork tarball via CI configuration. Do not silently fall back to upstream prebuilt runtime binaries for release candidates.
 
 ## Security & Audit
 

@@ -152,10 +152,19 @@ export function initDb() {
         xpub        TEXT NOT NULL DEFAULT '',
         address     TEXT NOT NULL DEFAULT '',
         script_type TEXT NOT NULL DEFAULT '',
+        balance     TEXT NOT NULL DEFAULT '0',
+        balance_usd REAL NOT NULL DEFAULT 0,
         updated_at  INTEGER NOT NULL,
         PRIMARY KEY (device_id, chain_id, path)
       )
     `)
+    // Migration: add balance columns if missing (existing installs)
+    try {
+      db.exec(`ALTER TABLE cached_pubkeys ADD COLUMN balance TEXT NOT NULL DEFAULT '0'`)
+    } catch { /* column already exists */ }
+    try {
+      db.exec(`ALTER TABLE cached_pubkeys ADD COLUMN balance_usd REAL NOT NULL DEFAULT 0`)
+    } catch { /* column already exists */ }
 
 
     db.exec(`
@@ -315,6 +324,9 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
       }
+      // Compute native-only USD by subtracting token totals
+      const tokenUsdTotal = entry.tokens?.reduce((sum, t) => sum + (t.balanceUsd || 0), 0) || 0
+      entry.nativeBalanceUsd = r.balance_usd - tokenUsdTotal
       return entry
     })
     return { balances, updatedAt: maxUpdatedAt }
@@ -795,6 +807,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
         amount: r.from_amount,
         asset: `${r.from_symbol}\u2192${r.to_symbol}`,
         status: r.status === 'completed' ? 'completed' as const : r.status === 'failed' ? 'failed' as const : r.status === 'refunded' ? 'refunded' as const : 'broadcast' as const,
+        swapStatus: r.status as any,
         createdAt: r.created_at,
       }))
 
@@ -835,27 +848,71 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
   }
 }
 
+export function getDeviceSnapshotById(deviceId: string): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number } | null {
+  try {
+    if (!db) return null
+    const row = db.query(
+      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot WHERE device_id = ?'
+    ).get(deviceId) as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
+    if (!row) return null
+    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
+  } catch (e: any) {
+    console.warn('[db] getDeviceSnapshotById failed:', e.message)
+    return null
+  }
+}
+
+export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
+  try {
+    if (!db) return []
+    const rows = db.query(`
+      SELECT s.device_id, s.label, s.firmware_ver, s.updated_at,
+             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+      FROM device_snapshot s
+      LEFT JOIN balances b ON b.device_id = s.device_id
+      GROUP BY s.device_id
+      ORDER BY s.updated_at DESC
+    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number }>
+    return rows.map(r => ({ deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd }))
+  } catch (e: any) {
+    console.warn('[db] getAllDeviceSnapshots failed:', e.message)
+    return []
+  }
+}
+
+export function deleteDeviceSnapshot(deviceId: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM device_snapshot WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM balances WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM reports WHERE device_id = ?', [deviceId])
+  } catch (e: any) {
+    console.warn('[db] deleteDeviceSnapshot failed:', e.message)
+  }
+}
+
 // ── Cached Pubkeys (watch-only address cache) ───────────────────────
 
-export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string) {
+export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string, balance?: string, balanceUsd?: number) {
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', Date.now()]
+      `INSERT OR REPLACE INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', balance || '0', balanceUsd ?? 0, Date.now()]
     )
   } catch (e: any) {
     console.warn('[db] saveCachedPubkey failed:', e.message)
   }
 }
 
-export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; path: string; xpub: string; address: string; scriptType: string }> {
+export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; path: string; xpub: string; address: string; scriptType: string; balance: string; balanceUsd: number }> {
   try {
     if (!db) return []
     const rows = db.query(
-      'SELECT chain_id, path, xpub, address, script_type FROM cached_pubkeys WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; path: string; xpub: string; address: string; script_type: string }>
-    return rows.map(r => ({ chainId: r.chain_id, path: r.path, xpub: r.xpub, address: r.address, scriptType: r.script_type }))
+      'SELECT chain_id, path, xpub, address, script_type, balance, balance_usd FROM cached_pubkeys WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; path: string; xpub: string; address: string; script_type: string; balance: string; balance_usd: number }>
+    return rows.map(r => ({ chainId: r.chain_id, path: r.path, xpub: r.xpub, address: r.address, scriptType: r.script_type, balance: r.balance || '0', balanceUsd: r.balance_usd || 0 }))
   } catch (e: any) {
     console.warn('[db] getCachedPubkeys failed:', e.message)
     return []

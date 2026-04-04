@@ -295,3 +295,84 @@ export const FeaturesResponse = z.object({
 export const GetPublicKeyResponse = z.object({
   xpub: z.string(),
 }).passthrough()
+
+// ═══════════════════════════════════════════════════════════════════════
+// REST v2 data schemas (balances, market, UTXOs, tx, network, swap)
+// ═══════════════════════════════════════════════════════════════════════
+
+export const PortfolioBalancesRequest = z.object({
+  pubkeys: z.array(z.object({ caip: z.string(), pubkey: z.string() })).min(1),
+}).passthrough()
+
+export const MarketInfoRequest = z.object({
+  caips: z.array(z.string()).min(1),
+}).passthrough()
+
+export const SearchAssetsRequest = z.object({
+  q: z.string().min(1),
+  limit: z.number().int().positive().optional(),
+}).passthrough()
+
+export const ListUnspentRequest = z.object({
+  network: z.string(),
+  xpub: z.string(),
+}).passthrough()
+
+export const PubkeyInfoRequest = z.object({
+  network: z.string(),
+  xpub: z.string(),
+}).passthrough()
+
+export const TxHistoryRequest = z.object({
+  queries: z.array(z.object({ pubkey: z.string(), caip: z.string() })).min(1),
+}).passthrough()
+
+export const BroadcastRequest = z.object({
+  networkId: z.string(),
+  serialized: z.string(),
+}).passthrough()
+
+export const NetworkIdRequest = z.object({
+  networkId: z.string(),
+}).passthrough()
+
+export const NetworkAddressRequest = z.object({
+  networkId: z.string(),
+  address: z.string(),
+}).passthrough()
+
+export const TokenDecimalsRequest = z.object({
+  networkId: z.string(),
+  contractAddress: z.string(),
+}).passthrough()
+
+export const StakingRequest = z.object({
+  network: z.string(),
+  address: z.string(),
+}).passthrough()
+
+export const SwapQuoteRequest = z.object({
+  sellAsset: z.string(),
+  buyAsset: z.string(),
+  sellAmount: z.string(),
+  senderAddress: z.string(),
+  recipientAddress: z.string(),
+  slippage: z.number().optional(),
+}).passthrough()
+
+// ═══════════════════════════════════════════════════════════════════════
+// Sweep tool schemas
+// ═══════════════════════════════════════════════════════════════════════
+
+export const SweepScanRequest = z.object({
+  accountRange: z.tuple([z.number().int().min(0), z.number().int().max(9)]).optional(),
+  mismatchAccounts: z.number().int().min(0).max(5).optional(),
+  currentMaxAccount: z.number().int().min(0).max(19).optional(),
+  higherAccountScanLimit: z.number().int().min(0).max(19).optional(),
+}).passthrough()
+
+export const SweepExecuteRequest = z.object({
+  scanId: z.string(),
+  destinationAddress: z.string().optional(),
+  dryRun: z.boolean().optional(),
+}).strip()

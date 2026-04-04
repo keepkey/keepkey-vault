@@ -10,7 +10,7 @@
 	"showFiltered_other": "Afficher {{count}} jetons filtrés",
 	"hideFiltered_one": "Masquer {{count}} jeton filtré",
 	"hideFiltered_other": "Masquer {{count}} jetons filtrés",
-	"zeroValueTokens": "0,00 $ USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Spam suspecté ({{count}})",
 	"markAsSafe": "Marquer comme sûr",
 	"hideToken": "Masquer le jeton",

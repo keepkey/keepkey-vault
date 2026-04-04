@@ -10,7 +10,7 @@ import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-u
 import CountUp from "react-countup"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
-import { formatUsd } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
@@ -240,7 +240,7 @@ interface AssetSelectorProps {
 
 function AssetSelector({ label, selected, assets, onSelect, balances, exclude, disabled, nativeOnly }: AssetSelectorProps) {
   const { t } = useTranslation("swap")
-  const fmtCompact = (v: number | string | null | undefined) => { const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0); return !isFinite(n) || n === 0 ? '' : `$${formatUsd(n)}` }
+  const { fmtCompact } = useFiat()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -445,8 +445,7 @@ interface SwapDialogProps {
 // ── Main SwapDialog ─────────────────────────────────────────────────
 export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap }: SwapDialogProps) {
   const { t } = useTranslation("swap")
-  const fmtCompact = (v: number | string | null | undefined) => { const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0); return !isFinite(n) || n === 0 ? '' : `$${formatUsd(n)}` }
-  const fiatSymbol = '$'
+  const { fmtCompact, symbol: fiatSymbol } = useFiat()
 
   // ── State ─────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SwapPhase>('input')
@@ -722,44 +721,82 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // ── Derived values ────────────────────────────────────────────────
   const fromBalance = useMemo(() => {
     if (!fromAsset) return null
+    // Check cached balances first (most up-to-date from getCachedBalances RPC)
+    const cb = balances.find(b => b.chainId === fromAsset.chainId)
+    if (cb) {
+      if (fromAsset.contractAddress && cb.tokens) {
+        const token = cb.tokens.find(t =>
+          t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
+        )
+        if (token) return token.balance
+      }
+      if (!fromAsset.contractAddress) return cb.balance
+    }
+    // Fall back to prop balance only when cache has no entry for this chain
     if (balance && chain && fromAsset.chainId === chain.id && !fromAsset.contractAddress) {
       return balance.balance
     }
-    const cb = balances.find(b => b.chainId === fromAsset.chainId)
-    if (!cb) return null
-    if (fromAsset.contractAddress && cb.tokens) {
-      const token = cb.tokens.find(t =>
-        t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
-      )
-      return token ? token.balance : null
-    }
-    return cb.balance
+    return null
   }, [fromAsset, balance, chain, balances])
 
   // Derive per-unit USD price for from/to assets from cached balances
+  // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
   const fromPriceUsd = useMemo(() => {
-    if (!fromAsset) return 0
+    if (!fromAsset) { console.log('[SWAP-PRICE] fromPriceUsd: no fromAsset'); return 0 }
     const cb = balance && chain && fromAsset.chainId === chain.id ? balance : balances.find(b => b.chainId === fromAsset.chainId)
-    if (!cb) return 0
+    if (!cb) { console.log(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
     if (fromAsset.contractAddress && cb.tokens) {
       const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
+      console.log(`[SWAP-PRICE] fromPriceUsd: token path, contract=${fromAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
-    return bal > 0 ? (cb.balanceUsd || 0) / bal : 0
+    console.log(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    if (bal <= 0) return 0
+    const nativeUsd = cb.nativeBalanceUsd ?? 0
+    const result = nativeUsd > 0 ? nativeUsd / bal : 0
+    console.log(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
+    return result
   }, [fromAsset, balance, chain, balances])
 
-  const toPriceUsd = useMemo(() => {
-    if (!toAsset) return 0
+  const toPriceUsdFromBalance = useMemo(() => {
+    if (!toAsset) { console.log('[SWAP-PRICE] toPriceUsdFromBalance: no toAsset'); return 0 }
     const cb = balances.find(b => b.chainId === toAsset.chainId)
-    if (!cb) return 0
+    if (!cb) { console.log(`[SWAP-PRICE] toPriceUsdFromBalance: no balance for chainId=${toAsset.chainId}, available=${balances.map(b => b.chainId).join(',')}`); return 0 }
     if (toAsset.contractAddress && cb.tokens) {
       const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === toAsset.contractAddress?.toLowerCase())
+      console.log(`[SWAP-PRICE] toPriceUsdFromBalance: token path, contract=${toAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
-    return bal > 0 ? (cb.balanceUsd || 0) / bal : 0
+    const nativeUsd = cb.nativeBalanceUsd ?? 0
+    console.log(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    if (bal <= 0) return 0
+    const result = nativeUsd > 0 ? nativeUsd / bal : 0
+    console.log(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
+    return result
   }, [toAsset, balances])
+
+  // Derive TO price from quote exchange rate when balance-based price is unavailable
+  // (e.g., user has dust/zero native balance but tokens on the chain)
+  const toPriceUsd = useMemo(() => {
+    // When isMax, amount is "" — use fromBalance instead (same as quote request logic)
+    const effectiveAmount = isMax ? (fromBalance || '0') : amount
+    console.log(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
+    if (toPriceUsdFromBalance > 0) return toPriceUsdFromBalance
+    // Fallback: derive from FROM price and quote ratio
+    if (fromPriceUsd > 0 && quote?.expectedOutput && effectiveAmount) {
+      const inAmt = parseFloat(effectiveAmount)
+      const outAmt = parseFloat(quote.expectedOutput)
+      if (inAmt > 0 && outAmt > 0) {
+        const derived = (inAmt / outAmt) * fromPriceUsd
+        console.log(`[SWAP-PRICE] toPriceUsd FALLBACK: (${inAmt}/${outAmt}) * $${fromPriceUsd} = $${derived}`)
+        return derived
+      }
+    }
+    console.log('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
+    return 0
+  }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, amount, isMax, fromBalance])
 
   const hasFromPrice = fromPriceUsd > 0
   const hasToPrice = toPriceUsd > 0
@@ -1309,7 +1346,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   })()}
                   <Button size="xs" flex="1" variant="outline" borderColor="rgba(35,220,200,0.3)" color="#23DCC8"
                     _hover={{ bg: "rgba(35,220,200,0.08)", borderColor: "#23DCC8" }}
-                    onClick={() => rpcRequest('openUrl', { url: `https://track.ninerealms.com/${txid.toUpperCase()}` }).catch(() => {})}>
+                    onClick={() => rpcRequest('openUrl', { url: `https://track.ninerealms.com/${txid.replace(/^0x/i, '').toUpperCase()}` }).catch(() => {})}>
                     <HStack gap="1">
                       <Image src="https://pioneers.dev/coins/thorchain.png" w="12px" h="12px" borderRadius="full" />
                       <Text fontSize="10px">Track Swap</Text>

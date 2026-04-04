@@ -10,7 +10,7 @@ import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import { caipToIcon } from "../../shared/assetLookup"
-import type { RecentActivity, PendingSwap, ChainBalance } from "../../shared/types"
+import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
 
 interface ActivityPanelProps {
   open: boolean
@@ -39,6 +39,29 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   completed: { label: 'Completed', color: '#4ADE80' },
   refunded: { label: 'Refunded', color: '#FB923C' },
   failed: { label: 'Failed', color: '#E53E3E' },
+}
+
+const SWAP_STATUS_CONFIG: Record<string, { label: string; color: string; dot?: boolean }> = {
+  signing:             { label: 'Signing',            color: '#627EEA', dot: true },
+  pending:             { label: 'Pending',            color: '#F7931A', dot: true },
+  confirming:          { label: 'Confirming',         color: '#627EEA', dot: true },
+  output_detected:     { label: 'Output Detected',    color: '#23DCC8', dot: true },
+  output_confirming:   { label: 'Confirming Output',  color: '#23DCC8', dot: true },
+  output_confirmed:    { label: 'Output Confirmed',   color: '#4ADE80' },
+  completed:           { label: 'Complete',            color: '#4ADE80' },
+  failed:              { label: 'Failed',              color: '#E53E3E' },
+  refunded:            { label: 'Refunded',            color: '#FB923C' },
+}
+
+function SwapStatusBadge({ status }: { status?: SwapTrackingStatus | string }) {
+  if (!status) return null
+  const conf = SWAP_STATUS_CONFIG[status] || { label: status, color: '#627EEA' }
+  return (
+    <HStack gap="1" px="1.5" py="0.5" borderRadius="md" bg={`${conf.color}18`}>
+      {conf.dot && <Box w="6px" h="6px" borderRadius="full" bg={conf.color} flexShrink={0} style={{ animation: 'kkActivityPulse 2s ease-in-out infinite' }} />}
+      <Text fontSize="2xs" fontWeight="700" color={conf.color}>{conf.label}</Text>
+    </HStack>
+  )
 }
 
 // Required confirmations per chain family before considered "confirmed"
@@ -70,7 +93,10 @@ function getExplorerUrl(chainSymbol: string, txid: string): string | null {
   if (!chainSymbol || !txid) return null
   const chain = CHAINS.find(c => c.symbol === chainSymbol || c.id === chainSymbol)
   if (!chain?.explorerTxUrl) return null
-  return chain.explorerTxUrl.replace('{{txid}}', txid)
+  const normalizedTxid = chain.chainFamily === 'evm'
+    ? (txid.startsWith('0x') ? txid : '0x' + txid)
+    : txid.replace(/^0x/i, '')
+  return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 
 function truncateTxid(txid: string): string {
@@ -162,7 +188,11 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
           <Flex px="5" py="3" borderBottom="1px solid" borderColor="rgba(255,255,255,0.08)" align="center" justify="space-between">
             <HStack gap="2">
               <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
-              <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{statusConf.label}</Box>
+              {a.type === 'swap' && a.swapStatus ? (
+                <SwapStatusBadge status={a.swapStatus} />
+              ) : (
+                <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{statusConf.label}</Box>
+              )}
               {a.source === 'api' && <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>}
             </HStack>
             <Text as="button" fontSize="lg" color="whiteAlpha.500" _hover={{ color: 'white' }} onClick={onClose}>&times;</Text>
@@ -245,7 +275,6 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
 
   // ── Swap detail ───────────────────────────────────────────────────
   const s = detail.swap
-  const statusColor = s.status === 'completed' ? '#4ADE80' : s.status === 'failed' ? '#E53E3E' : s.status === 'refunded' ? '#FB923C' : '#627EEA'
   const inboundUrl = getExplorerTxUrl(s.fromChainId, s.txid)
   const outboundUrl = s.outboundTxid ? getExplorerTxUrl(s.toChainId, s.outboundTxid) : null
   const isFinal = s.status === 'completed' || s.status === 'failed' || s.status === 'refunded'
@@ -265,7 +294,7 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
           <HStack gap="2">
             <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
             <Text fontSize="sm" fontWeight="600" color="white">{s.fromSymbol} &rarr; {s.toSymbol}</Text>
-            <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusColor}22`} color={statusColor}>{s.status}</Box>
+            <SwapStatusBadge status={s.status} />
           </HStack>
           <Text as="button" fontSize="lg" color="whiteAlpha.500" _hover={{ color: 'white' }} onClick={onClose}>&times;</Text>
         </Flex>
@@ -371,7 +400,11 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
           {activity.source === 'api' && (
             <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>
           )}
-          <ConfBadge confirmations={activity.confirmations} chain={activity.chain} />
+          {activity.type === 'swap' && activity.swapStatus ? (
+            <SwapStatusBadge status={activity.swapStatus} />
+          ) : (
+            <ConfBadge confirmations={activity.confirmations} chain={activity.chain} />
+          )}
         </HStack>
         <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
       </Flex>
@@ -402,7 +435,6 @@ function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingS
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
-  const statusColor = swap.status === 'completed' ? '#23DCC8' : swap.status === 'failed' ? '#E53E3E' : swap.status === 'refunded' ? '#F7931A' : '#627EEA'
 
   return (
     <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3"
@@ -414,9 +446,9 @@ function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingS
       <Flex justify="space-between" align="center" mb="1">
         <HStack gap="2">
           <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
-          <Text fontSize="xs" fontWeight="600" color="white">{swap.fromSymbol} \u2192 {swap.toSymbol}</Text>
+          <Text fontSize="xs" fontWeight="600" color="white">{swap.fromSymbol} {'\u2192'} {swap.toSymbol}</Text>
         </HStack>
-        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${statusColor}22`} color={statusColor}>{swap.status}</Box>
+        <SwapStatusBadge status={swap.status} />
       </Flex>
       {swap.fromAmount && <Text fontSize="2xs" color="whiteAlpha.500" mb="1">{swap.fromAmount} {swap.fromSymbol}{swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}</Text>}
       <Flex justify="space-between" align="center">

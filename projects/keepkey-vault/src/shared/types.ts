@@ -1,7 +1,7 @@
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
-export type ActiveTransport = 'hid' | 'webusb' | null
+export type ActiveTransport = 'hid' | 'webusb' | 'tcp' | 'emulator' | null
 
 // PIN request types — maps to KeepKey PinMatrixRequestType
 export type PinRequestType = 'current' | 'new-first' | 'new-second'
@@ -37,6 +37,7 @@ export interface DeviceStateInfo {
   firmwareVerified?: boolean
   bootloaderVerified?: boolean
   error?: string | null
+  isEmulator: boolean
 }
 
 export interface FirmwareProgress {
@@ -96,7 +97,8 @@ export interface ChainBalance {
   chainId: string
   symbol: string
   balance: string       // human-readable (e.g. "0.001")
-  balanceUsd: number
+  balanceUsd: number    // total USD (native + tokens)
+  nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
 }
@@ -312,6 +314,8 @@ export interface SigningRequestInfo {
   needsBlindSigning?: boolean
   /** true when device AdvancedMode policy is currently enabled */
   advancedModeEnabled?: boolean
+  /** Device firmware version string e.g. "7.14.0" — used to gate blind-signing UI */
+  firmwareVersion?: string
   /** Full raw request body from the REST API caller — shown in UI for debugging/transparency */
   rawRequestBody?: Record<string, unknown>
 }
@@ -351,10 +355,51 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+}
+
+// ── WalletConnect types ─────────────────────────────────────────────────
+export interface WcSessionInfo {
+  topic: string
+  peerName: string
+  peerUrl: string
+  peerIcon: string
+  chains: string[]
+  expiry: number
+}
+
+// ── Emulator types (macOS only — encrypted flash with Keychain) ────────
+export type EmulatorProcessState = 'stopped' | 'starting' | 'running' | 'error'
+
+export interface EmulatorStatus {
+  state: EmulatorProcessState
+  bridgeReady: boolean            // true when emulator is loaded and responding
+  host: string                    // transport description
+  error?: string
+  paired: boolean                 // true when Keychain key exists
+  platform: string                // 'darwin' for macOS
+  flashImages: string[]           // available encrypted flash images
+  storagePath: string             // ~/.keepkey/emulator/
+}
+
+/** Info about a single emulator wallet profile (flash image + optional seed). */
+export interface EmulatorWalletInfo {
+  name: string
+  hasMnemonic: boolean
+  isActive: boolean
+}
+
+/** Persisted device snapshot — one per device_id, stored in SQLite. */
+export interface RegisteredDevice {
+  deviceId: string
+  label: string
+  firmwareVer: string
+  updatedAt: number
+  totalUsd: number       // sum of cached balance_usd across all chains
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
@@ -661,6 +706,7 @@ export interface RecentActivity {
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities
   status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
+  swapStatus?: SwapTrackingStatus  // detailed swap lifecycle status (only for type === 'swap')
   createdAt: number
   // ── On-chain confirmation data (populated by scan, updated on rescan) ──
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)

@@ -1,0 +1,16 @@
+{
+  "emulators": [
+    {
+      "version": "7.10.0-alpha",
+      "firmwareVersion": "7.10.0",
+      "channel": "alpha",
+      "arch": "arm64",
+      "platform": "darwin",
+      "dylib": "7.10.0-alpha/libkkemu.dylib",
+      "binary": "7.10.0-alpha/kkemu",
+      "debugLink": true,
+      "description": "Alpha emulator with DebugLink — for development and testing"
+    }
+  ],
+  "default": "7.10.0-alpha"
+}

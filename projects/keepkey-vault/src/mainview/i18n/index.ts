@@ -20,8 +20,20 @@ import staking from "./locales/en/staking.json"
 
 const STORAGE_KEY = "keepkey-vault-lang"
 
-let savedLang = "en"
-try { savedLang = localStorage.getItem(STORAGE_KEY) || "en" } catch { /* private browsing / blocked */ }
+const SUPPORTED_LANGS = ["en","es","fr","de","ja","zh","ko","pt","ru","it","pl","nl","th","tr","vi"]
+
+function detectInitialLang(): string {
+	try {
+		const saved = localStorage.getItem(STORAGE_KEY)
+		if (saved) return saved
+		// Auto-detect from browser on first launch
+		const browserLang = (navigator.language || '').split('-')[0]
+		if (browserLang && SUPPORTED_LANGS.includes(browserLang)) return browserLang
+	} catch { /* private browsing / blocked */ }
+	return "en"
+}
+
+let savedLang = detectInitialLang()
 
 i18n
 	.use(initReactI18next)

@@ -1,7 +1,8 @@
-import { Component, useState, useEffect, useCallback, useMemo, type ReactNode, type ErrorInfo } from "react"
+import { Component, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
+import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
@@ -10,6 +11,7 @@ import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
+
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
@@ -81,6 +83,8 @@ interface PioneerError {
 interface DashboardProps {
 	onLoaded?: () => void
 	watchOnly?: boolean
+	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
+	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
 	firmwareVersion?: string
 	/** When true (e.g. after OOB setup), skip stale cache and auto-refresh live balances */
@@ -101,7 +105,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -113,6 +117,7 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 	const [showReports, setShowReports] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
+	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [tokenWarning, setTokenWarning] = useState(false)
@@ -126,19 +131,22 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 			.catch(() => {})
 	}, [])
 
-	// Load BIP-85 feature flag (re-check when settings change)
-	const refreshBip85Flag = useCallback(() => {
+	// Load feature flags (re-check when settings change)
+	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
-			.then(s => setBip85Enabled(s.bip85Enabled))
+			.then(s => {
+				setBip85Enabled(s.bip85Enabled)
+				setZcashEnabled(s.zcashPrivacyEnabled)
+			})
 			.catch(() => {})
 	}, [])
 
-	useEffect(() => { refreshBip85Flag() }, [refreshBip85Flag])
+	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
 
 	useEffect(() => {
-		window.addEventListener('keepkey-settings-changed', refreshBip85Flag)
-		return () => window.removeEventListener('keepkey-settings-changed', refreshBip85Flag)
-	}, [refreshBip85Flag])
+		window.addEventListener('keepkey-settings-changed', refreshFeatureFlags)
+		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
+	}, [refreshFeatureFlags])
 
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
@@ -172,33 +180,35 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 		let cancelled = false
 
 		async function loadCached() {
+			let needsAutoRefresh = false
+
 			if (watchOnly) {
-				// Watch-only still auto-fetches from cache
 				try {
-					const result = await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000)
+					const result = await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 5000)
 					if (!cancelled && result && result.length > 0) {
 						const map = new Map<string, ChainBalance>()
 						for (const b of result) map.set(b.chainId, b)
 						setBalances(map)
 					}
 				} catch { /* watch-only cache unavailable */ }
-				if (!cancelled) {
-					setInitialLoaded(true)
-					onLoaded?.()
-				}
+				if (!cancelled) { setInitialLoaded(true); onLoaded?.() }
 				return
 			}
 
 			// New seed: cache belongs to the old seed — skip it
 			if (!forceRefresh) {
 				try {
-					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 3000)
+					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null>('getCachedBalances', undefined, 3000)
 					if (!cancelled && cached && cached.balances.length > 0) {
 						const map = new Map<string, ChainBalance>()
 						for (const b of cached.balances) map.set(b.chainId, b)
 						setBalances(map)
 						setCacheUpdatedAt(cached.updatedAt)
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
+						if (cached.staleReasons && cached.staleReasons.length > 0) {
+							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
+							needsAutoRefresh = true
+						}
 					}
 				} catch { /* cache unavailable */ }
 			} else {
@@ -208,12 +218,65 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 			if (!cancelled) {
 				setInitialLoaded(true)
 				onLoaded?.()
+				// Auto-refresh in background when cache is incomplete
+				if (needsAutoRefresh) refreshBalances()
 			}
 		}
 
 		loadCached()
 		return () => { cancelled = true }
-	}, [watchOnly, forceRefresh])
+	}, [watchOnly, watchOnlyDeviceId, forceRefresh])
+
+	// One-shot price refresh: update cached USD values with fresh market prices on load/navigate.
+	// Does NOT re-fetch balances from Pioneer — only reprices existing cached amounts.
+	const priceRefreshedRef = useRef(false)
+	useEffect(() => {
+		if (!initialLoaded || balances.size === 0 || watchOnly || loadingBalances) return
+		if (priceRefreshedRef.current) return
+		priceRefreshedRef.current = true
+
+		const allChains = [...CHAINS, ...customChainDefs].filter(c => !c.hidden)
+		const chainsWithBalance = allChains.filter(c => {
+			const bal = balances.get(c.id)
+			return bal && parseFloat(bal.balance || '0') > 0
+		})
+		if (chainsWithBalance.length === 0) return
+		const caips = chainsWithBalance.map(c => c.caip).filter(Boolean)
+		if (caips.length === 0) return
+
+		let cancelled = false
+		rpcRequest<any>('getMarketData', { caips }, 15000)
+			.then(resp => {
+				if (cancelled) return
+				// resp.data is an array of USD prices in the same order as caips
+				const prices: number[] = resp?.data || (Array.isArray(resp) ? resp : [])
+				if (prices.length !== caips.length) return
+
+				setBalances(prev => {
+					const next = new Map(prev)
+					let changed = false
+					for (let i = 0; i < chainsWithBalance.length; i++) {
+						const chain = chainsWithBalance[i]
+						const freshPrice = prices[i]
+						if (!freshPrice || freshPrice <= 0) continue
+						const bal = next.get(chain.id)
+						if (!bal) continue
+						const amount = parseFloat(bal.balance || '0')
+						if (amount <= 0) continue
+						const newNativeUsd = amount * freshPrice
+						const tokenUsd = bal.tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
+						const updated = { ...bal, nativeBalanceUsd: newNativeUsd, balanceUsd: newNativeUsd + tokenUsd }
+						next.set(chain.id, updated)
+						changed = true
+					}
+					return changed ? next : prev
+				})
+				console.log(`[Dashboard] Price refresh: ${prices.length} prices updated`)
+			})
+			.catch(() => { /* price refresh is best-effort */ })
+
+		return () => { cancelled = true }
+	}) // runs on every render but ref-gated to fire once
 
 	// Manual refresh: fetch live data from Pioneer API
 	const refreshBalances = useCallback(async () => {
@@ -334,7 +397,12 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 
 	const hasAnyBalance = chartData.length > 0
 
-	const visibleChains = useMemo(() => allChains.filter(c => !c.hidden && isChainSupported(c, firmwareVersion)), [allChains, firmwareVersion])
+	const visibleChains = useMemo(() => allChains.filter(c => {
+		if (!isChainSupported(c, firmwareVersion)) return false
+		// Zcash transparent is hidden by default — show when feature flag is on
+		if (c.id === 'zcash') return zcashEnabled
+		return !c.hidden
+	}), [allChains, firmwareVersion, zcashEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
@@ -860,8 +928,8 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
 			)}
 
-			{/* BIP-85 lock icon — bottom right (only when feature enabled) */}
-			{bip85Enabled && !watchOnly && (
+			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.14.0) */}
+			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.14.0') >= 0 && (
 				<Box
 					as="button"
 					position="fixed"

@@ -9,7 +9,7 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.2.9",
+		version: "1.2.11",
 		urlSchemes: ["keepkey"],
 	},
 	build: {
@@ -24,6 +24,12 @@ export default {
 				"usb",
 				"google-protobuf",
 				"@keepkey/proto-tx-builder",
+				"swagger-client",
+				"@walletconnect/web3wallet",
+				"@walletconnect/core",
+				"@walletconnect/types",
+				"@walletconnect/utils",
+				"@walletconnect/jsonrpc-utils",
 			],
 		},
 		// Vite builds to dist/, we copy from there
@@ -45,6 +51,7 @@ export default {
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,
 				"com.apple.security.cs.disable-library-validation": true,
 				"com.apple.security.cs.allow-dyld-environment-variables": true,
+				"com.apple.security.device.camera": true,
 			},
 		},
 		linux: {

@@ -8,10 +8,12 @@ import { PairingApproval } from "./components/device/PairingApproval"
 import { SigningApproval } from "./components/device/SigningApproval"
 import { ApiAuditLog } from "./components/ApiAuditLog"
 import { PairedAppsPanel } from "./components/PairedAppsPanel"
+import { MobilePairingDialog } from "./components/MobilePairingDialog"
+import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
-import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
+import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
@@ -26,7 +28,7 @@ import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
-import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings } from "../shared/types"
+import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 
@@ -42,11 +44,13 @@ function App() {
 	const oobEnteredRef = useRef(false)
 	const oobClaimStuckSince = useRef<number | null>(null)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
+	const [gridReady, setGridReady] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
+	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
@@ -55,10 +59,12 @@ function App() {
 	// ── WalletConnect sidebar ────────────────────────────────────
 	const [wcPanelOpen, setWcPanelOpen] = useState(false)
 	const [wcUri, setWcUri] = useState<string | null>(null)
+	const [wcNotSupportedOpen, setWcNotSupportedOpen] = useState(false)
 
 	// ── Watch-only mode ──────────────────────────────────────────
 	const [watchOnlyAvailable, setWatchOnlyAvailable] = useState(false)
 	const [watchOnlyMode, setWatchOnlyMode] = useState(false)
+	const [watchOnlyDeviceId, setWatchOnlyDeviceId] = useState<string | undefined>(undefined)
 	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
 
@@ -69,7 +75,7 @@ function App() {
 			.then(setAppVersion)
 			.catch(() => {})
 		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
+			.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled) })
 			.catch(() => {})
 	}, [])
 
@@ -230,6 +236,10 @@ function App() {
 	// ── Paired Apps panel ───────────────────────────────────────────
 	const [pairedAppsOpen, setPairedAppsOpen] = useState(false)
 
+	// ── Mobile panel + pairing dialog ───────────────────────────────
+	const [mobilePanelOpen, setMobilePanelOpen] = useState(false)
+	const [mobilePairingOpen, setMobilePairingOpen] = useState(false)
+
 	// ── API Audit Log ───────────────────────────────────────────────
 	const [auditLogOpen, setAuditLogOpen] = useState(false)
 	const [auditLogEntries, setAuditLogEntries] = useState<ApiLogEntry[]>([])
@@ -255,14 +265,30 @@ function App() {
 	}, [])
 
 	// ── WalletConnect deep link listener ────────────────────────────
+	// This fires only when WC is DISABLED (backend sends URI to frontend).
+	// When WC is enabled, the backend pairs natively and never sends this message.
 	useEffect(() => {
-		return onRpcMessage("walletconnect-uri", (uri) => {
-			setWcUri(uri as string)
-			// Gate through the same API Bridge dialog
-			setPendingWcOpen(true)
-			setPendingAppUrl("walletconnect")
+		return onRpcMessage("walletconnect-uri", (_uri) => {
+			setWcNotSupportedOpen(true)
 		})
 	}, [])
+
+	// ── Check for pending deep link from cold start ─────────────────
+	useEffect(() => {
+		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
+			if (uri) {
+				if (walletConnectEnabled) {
+					// Set URI and open panel — panel's auto-pair effect handles pairing + errors
+					setWcUri(uri)
+					setWcPanelOpen(true)
+				} else {
+					setWcNotSupportedOpen(true)
+				}
+				// Consume so it's not re-delivered on next mount
+				rpcRequest("consumePendingDeepLink").catch(() => {})
+			}
+		}).catch(() => {})
+	}, [walletConnectEnabled])
 
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)
@@ -439,11 +465,13 @@ function App() {
 
 	// ── WalletConnect panel handlers ─────────────────────────────
 	const handleOpenWalletConnect = useCallback(() => {
-		// Always gate WalletConnect through the API Bridge dialog —
-		// the WC dapp iframe needs port 1646 to be up and responding
-		setPendingWcOpen(true)
-		setPendingAppUrl("walletconnect") // sentinel to trigger the dialog
-	}, [])
+		if (!walletConnectEnabled) {
+			setWcNotSupportedOpen(true)
+			return
+		}
+		// Native WC — open the panel directly (no REST API needed)
+		setWcPanelOpen(true)
+	}, [walletConnectEnabled])
 
 	const handleCloseWalletConnect = useCallback(() => {
 		setWcPanelOpen(false)
@@ -562,9 +590,10 @@ function App() {
 						activeTab="vault"
 						onTabChange={() => {}}
 						watchOnly
+						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
-						<Dashboard watchOnly onLoaded={() => {}} />
+						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
 				<DeviceSettingsDrawer
@@ -609,15 +638,13 @@ function App() {
 					}
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
+					childrenReady={gridReady}
 				>
-					{watchOnlyAvailable && deviceState.state === "disconnected" && (
-						<WatchOnlyPrompt
-							deviceLabel={watchOnlyLabel}
-							lastSynced={watchOnlyLastSynced}
-							onViewPortfolio={handleViewPortfolio}
-							onConnectWallet={handleConnectWallet}
-						/>
-					)}
+					{/* Unified device grid — registered devices + emulator wallets */}
+					<DeviceGrid
+						onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
+						onReady={() => setGridReady(true)}
+					/>
 				</SplashScreen>
 			</>
 		)
@@ -650,11 +677,15 @@ function App() {
 					firmwareVerified={deviceState.firmwareVerified}
 					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
 					latestFirmware={deviceState.latestFirmware}
+					isEmulator={deviceState.isEmulator}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
+					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
 					settingsOpen={settingsOpen}
+					mobileOpen={mobilePanelOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.passphraseProtection}
+					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
@@ -667,7 +698,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setSwapsEnabled(s.swapsEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
@@ -680,8 +711,13 @@ function App() {
 				appVersion={appVersion}
 				onOpenAuditLog={() => setAuditLogOpen(true)}
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
+				onOpenMobilePairing={() => setMobilePairingOpen(true)}
 				onRestApiChanged={setRestApiEnabled}
 				onWordCountChange={setRecoveryWordCount}
+			/>
+			<MobilePairingDialog
+				open={mobilePairingOpen}
+				onClose={() => setMobilePairingOpen(false)}
 			/>
 			<ApiAuditLog
 				open={auditLogOpen}
@@ -693,13 +729,96 @@ function App() {
 				open={pairedAppsOpen}
 				onClose={() => setPairedAppsOpen(false)}
 			/>
+			<MobilePanel
+				open={mobilePanelOpen}
+				onClose={() => setMobilePanelOpen(false)}
+				deviceReady={deviceState.state === "ready"}
+				onOpenPairing={() => { setMobilePanelOpen(false); setMobilePairingOpen(true) }}
+			/>
 			<WalletConnectPanel
 				open={wcPanelOpen}
 				wcUri={wcUri}
 				onClose={handleCloseWalletConnect}
+				nativeEnabled={walletConnectEnabled}
 			/>
 			<ActivityTracker />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
+			{/* ── WalletConnect Not Supported dialog ──────────────────── */}
+			{wcNotSupportedOpen && (
+				<>
+					<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={() => setWcNotSupportedOpen(false)} />
+					<Box
+						position="fixed"
+						top="50%"
+						left="50%"
+						transform="translate(-50%, -50%)"
+						w="420px"
+						maxW="90vw"
+						bg="kk.bg"
+						border="1px solid"
+						borderColor="kk.border"
+						borderRadius="xl"
+						zIndex={Z.dialog + 1}
+						overflow="hidden"
+						role="dialog"
+						aria-modal="true"
+						aria-label="WalletConnect Not Supported"
+					>
+						<Box px="6" pt="5" pb="4">
+							<Flex align="center" gap="2" mb="3">
+								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B99FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M6.5 9.5c3-3 8-3 11 0" />
+									<path d="M4 7c4.5-4.5 11.5-4.5 16 0" />
+									<circle cx="12" cy="15" r="1.5" fill="#3B99FC" />
+								</svg>
+								<Text fontSize="md" fontWeight="600" color="kk.textPrimary">
+									WalletConnect
+								</Text>
+							</Flex>
+							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">
+								WalletConnect is not supported in KeepKey Vault. Please use the KeepKey Browser Extension instead.
+							</Text>
+							<Box
+								as="a"
+								href="#"
+								onClick={(e: React.MouseEvent) => {
+									e.preventDefault()
+									rpcRequest("openUrl", { url: "https://keepkey.com/keepkey-browser-extension" }).catch(() => {})
+								}}
+								color="kk.gold"
+								fontSize="sm"
+								fontWeight="500"
+								_hover={{ textDecoration: "underline" }}
+							>
+								https://keepkey.com/keepkey-browser-extension
+							</Box>
+						</Box>
+						<Flex
+							px="6"
+							py="4"
+							gap="3"
+							justify="flex-end"
+							borderTop="1px solid"
+							borderColor="kk.border"
+							bg="rgba(255,255,255,0.02)"
+						>
+							<Button
+								size="sm"
+								px="4"
+								py="2"
+								bg="kk.gold"
+								color="black"
+								fontWeight="600"
+								_hover={{ bg: "kk.goldHover" }}
+								onClick={() => setWcNotSupportedOpen(false)}
+							>
+								OK
+							</Button>
+						</Flex>
+					</Box>
+				</>
+			)}
+
 			{(pendingAppUrl || pendingWcOpen) && (
 				<>
 					<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={handleCancelAppLaunch} />

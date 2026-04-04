@@ -4467,6 +4467,30 @@
         ]
       }
     },
+    "/api/shutdown": {
+      "post": {
+        "operationId": "Shutdown",
+        "summary": "Gracefully shut down the Vault process",
+        "description": "Sends a shutdown signal. The process exits after ~500ms. Used to kill stuck instances before relaunching.",
+        "responses": {
+          "200": {
+            "description": "Shutdown acknowledged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Health"]
+      }
+    },
     "/api/v2/devices": {
       "get": {
         "operationId": "V2ListDevices",

@@ -1487,6 +1487,441 @@ fn write_compact_size(buf: &mut Vec<u8>, n: u64) {
     }
 }
 
+// ── Deshielding (Orchard → transparent) ──────────────────────────────
+
+/// Transparent output for deshield PCZT construction.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeshieldTransparentOutput {
+    pub script_pubkey: String,  // hex
+    pub value: u64,             // zatoshis
+}
+
+/// Intermediate state for deshield PCZT (between build and finalize).
+pub struct DeshieldPcztState {
+    pub pczt_bundle: orchard::pczt::Bundle,
+    pub sighash: [u8; 32],
+    pub branch_id: u32,
+    pub orchard_signing_request: SigningRequest,
+    pub transparent_outputs: Vec<zip244::TransparentOutput>,
+}
+
+/// Build a deshield PCZT: Orchard spends → transparent output.
+///
+/// Uses the same tree-building + witness extraction as `build_pczt`, but instead
+/// of an Orchard recipient output, the value goes to a transparent output.
+/// Orchard change (if any) goes back to an internal Orchard address.
+pub async fn build_deshield_pczt(
+    fvk: &FullViewingKey,
+    notes: Vec<SpendableNote>,
+    transparent_output: DeshieldTransparentOutput,
+    amount: u64,
+    account: u32,
+    branch_id: u32,
+    lwd_client: &mut crate::scanner::LightwalletClient,
+    _db: &crate::wallet_db::WalletDb,
+) -> Result<DeshieldPcztState> {
+    let mut rng = OsRng;
+    let total_input: u64 = notes.iter().map(|n| n.value).sum();
+
+    // ZIP-317 fee for a deshield tx:
+    // Orchard actions = max(n_spends, n_orchard_outputs) where n_orchard_outputs = change only
+    // Transparent logical actions = max(0 inputs, 1 output) = 1
+    let n_spends = notes.len();
+    let n_orchard_outputs = 1usize; // change output (or dummy pad)
+    let orchard_actions = std::cmp::max(n_spends, n_orchard_outputs);
+    let transparent_actions = 1usize; // one transparent output
+    let logical_actions = orchard_actions + transparent_actions;
+    let fee = ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions as u64);
+
+    let change = total_input.checked_sub(amount + fee)
+        .ok_or_else(|| anyhow::anyhow!(
+            "Insufficient shielded funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
+            total_input, amount + fee, amount, fee
+        ))?;
+
+    info!("Building deshield transaction:");
+    info!("  Inputs:  {} ZAT from {} notes", total_input, notes.len());
+    info!("  Amount:  {} ZAT → transparent", amount);
+    info!("  Fee:     {} ZAT", fee);
+    info!("  Change:  {} ZAT → Orchard", change);
+
+    // Build transparent output
+    let script_pubkey_bytes = hex::decode(&transparent_output.script_pubkey)?;
+    let transparent_outputs = vec![
+        zip244::TransparentOutput {
+            value: amount,
+            script_pubkey: script_pubkey_bytes,
+        },
+    ];
+
+    // ── Tree building: reuse exact same pattern as build_pczt ──────────────
+
+    const SHARD_SIZE: u64 = 1 << 16;
+    let mut note_positions: Vec<u64> = vec![0; notes.len()];
+    let mut found_notes = vec![false; notes.len()];
+    let mut note_shards: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+
+    for (i, spendable) in notes.iter().enumerate() {
+        let approx_pos = if let Some(pos) = spendable.position {
+            pos
+        } else {
+            let tree_size_before = if spendable.block_height > 0 {
+                lwd_client.get_orchard_tree_size_at(spendable.block_height - 1).await?
+            } else { 0 };
+            tree_size_before
+        };
+        note_shards.insert((approx_pos / SHARD_SIZE) as u32);
+        info!("Note {}: block={}, approx_shard={}", i, spendable.block_height, approx_pos / SHARD_SIZE);
+    }
+
+    let lwd_tip_height = lwd_client.get_latest_block_height().await?;
+    let subtree_roots = lwd_client.get_subtree_roots(0, 0).await?;
+    let num_shards = subtree_roots.len();
+
+    if subtree_roots.is_empty() {
+        return Err(anyhow::anyhow!("No Orchard subtree roots available from lightwalletd"));
+    }
+
+    let note_cmx_set: std::collections::HashMap<[u8; 32], usize> = notes.iter().enumerate()
+        .map(|(i, n)| (n.cmx, i))
+        .collect();
+
+    let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        ShardTree::new(MemoryShardStore::empty(), 100);
+
+    // Insert completed shard roots (not containing our notes)
+    for (shard_idx, root_hash, completing_height) in &subtree_roots {
+        if note_shards.contains(shard_idx) { continue; }
+        let root = MerkleHashOrchard::from_bytes(&root_hash);
+        if bool::from(root.is_none()) { continue; }
+        let addr = incrementalmerkletree::Address::above_position(
+            16.into(),
+            incrementalmerkletree::Position::from((*shard_idx as u64) * SHARD_SIZE),
+        );
+        tree.insert(addr, root.unwrap())
+            .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx, e))?;
+        debug!("Inserted shard {} root (completing_height={})", shard_idx, completing_height);
+    }
+
+    // For shards containing our notes, fetch all leaves and append
+    for shard_idx in &note_shards {
+        let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
+
+        let (fetch_start_height, actions_to_skip) = if *shard_idx == 0 {
+            (1687104u64, 0u64)
+        } else {
+            let prev_completing = subtree_roots.iter()
+                .find(|(idx, _, _)| *idx == shard_idx - 1)
+                .map(|(_, _, h)| *h)
+                .unwrap_or(1687104);
+            let tree_size_before_completing = if prev_completing > 0 {
+                lwd_client.get_orchard_tree_size_at(prev_completing - 1).await?
+            } else { 0 };
+            let tree_size_after_completing = lwd_client.get_orchard_tree_size_at(prev_completing).await?;
+            let plan = plan_incomplete_shard_fetch(
+                prev_completing, shard_start_pos,
+                tree_size_before_completing, tree_size_after_completing,
+            );
+            (plan.fetch_start_height, plan.actions_to_skip)
+        };
+
+        let is_complete_shard = subtree_roots.iter().any(|(idx, _, _)| idx == shard_idx);
+        let shard_end_height = if is_complete_shard {
+            subtree_roots.iter().find(|(idx, _, _)| idx == shard_idx).map(|(_, _, h)| *h).unwrap()
+        } else { lwd_tip_height };
+        let shard_end_pos = if is_complete_shard {
+            (*shard_idx as u64 + 1) * SHARD_SIZE
+        } else { u64::MAX };
+
+        info!("Fetching leaves for shard {} (heights {} to {})", shard_idx, fetch_start_height, shard_end_height);
+
+        let chunk_size = 10000u64;
+        let mut current_pos = shard_start_pos;
+        let mut current_height = fetch_start_height;
+        let mut global_action_counter = 0u64;
+        'block_fetch: while current_height <= shard_end_height {
+            let end = std::cmp::min(current_height + chunk_size - 1, shard_end_height);
+            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+
+            for (_block_height, txs) in &blocks {
+                for (_tx_idx, cmxs) in txs {
+                    for cmx_bytes in cmxs.iter() {
+                        if global_action_counter < actions_to_skip {
+                            global_action_counter += 1;
+                            continue;
+                        }
+                        global_action_counter += 1;
+                        if current_pos >= shard_end_pos { break 'block_fetch; }
+
+                        let cmx = orchard::note::ExtractedNoteCommitment::from_bytes(cmx_bytes);
+                        if bool::from(cmx.is_none()) { continue; }
+                        let leaf = MerkleHashOrchard::from_cmx(&cmx.unwrap());
+
+                        let retention = if let Some(&note_idx) = note_cmx_set.get(cmx_bytes) {
+                            note_positions[note_idx] = current_pos;
+                            found_notes[note_idx] = true;
+                            info!("Note {} found at pos {}", note_idx, current_pos);
+                            Retention::Marked
+                        } else {
+                            Retention::Ephemeral
+                        };
+
+                        tree.append(leaf, retention)
+                            .context(format!("Failed to append leaf at pos {}", current_pos))?;
+                        current_pos += 1;
+                    }
+                }
+            }
+            current_height = end + 1;
+        }
+    }
+
+    // Reconstruct notes
+    let mut orchard_notes: Vec<Note> = Vec::new();
+    for (i, spendable) in notes.iter().enumerate() {
+        let recipient_arr: [u8; 43] = spendable.recipient.clone().try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid recipient bytes for note {}", i))?;
+        let note_recipient = Address::from_raw_address_bytes(&recipient_arr)
+            .into_option()
+            .ok_or_else(|| anyhow::anyhow!("Invalid Orchard address for note {}", i))?;
+        let rho = Rho::from_bytes(&spendable.rho)
+            .into_option()
+            .ok_or_else(|| anyhow::anyhow!("Invalid rho for note {}", i))?;
+        let rseed = RandomSeed::from_bytes(spendable.rseed, &rho)
+            .into_option()
+            .ok_or_else(|| anyhow::anyhow!("Invalid rseed for note {}", i))?;
+        let note = Note::from_parts(
+            note_recipient, NoteValue::from_raw(spendable.value), rho, rseed,
+        ).into_option()
+            .ok_or_else(|| anyhow::anyhow!("Failed to reconstruct note {}", i))?;
+        orchard_notes.push(note);
+    }
+
+    if found_notes.iter().any(|found| !found) {
+        return Err(anyhow::anyhow!("Not all note cmxs found during tree walk"));
+    }
+
+    // Checkpoint and validate anchor
+    let anchor_checkpoint_id = u32::MAX;
+    tree.checkpoint(anchor_checkpoint_id).context("Failed to checkpoint")?;
+    let root = tree.root_at_checkpoint_id(&anchor_checkpoint_id)
+        .context("Failed to get root")?
+        .ok_or_else(|| anyhow::anyhow!("Empty Merkle tree"))?;
+
+    let computed_anchor_bytes = root.to_bytes();
+    let expected_anchor = lwd_client.get_orchard_anchor(lwd_tip_height).await?;
+    if computed_anchor_bytes != expected_anchor {
+        return Err(anyhow::anyhow!(
+            "Orchard anchor mismatch: computed={} vs expected={}",
+            hex::encode(&computed_anchor_bytes), hex::encode(&expected_anchor),
+        ));
+    }
+    let anchor: Anchor = root.into();
+
+    // ── Build PCZT bundle ──────────────────────────────────────────
+
+    let mut builder = Builder::new(BundleType::DEFAULT, anchor);
+
+    let mut sorted_notes: Vec<(u64, usize)> = note_positions.iter().enumerate()
+        .map(|(i, &pos)| (pos, i)).collect();
+    sorted_notes.sort_by_key(|(pos, _)| *pos);
+
+    for &(pos, orig_idx) in &sorted_notes {
+        let position = incrementalmerkletree::Position::from(pos);
+        let merkle_path = tree.witness_at_checkpoint_id(position, &anchor_checkpoint_id)
+            .context(format!("Failed to get witness for note {} at pos {}", orig_idx, pos))?
+            .ok_or_else(|| anyhow::anyhow!("No witness for note {} at pos {}", orig_idx, pos))?;
+        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), merkle_path.into())
+            .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", orig_idx, e))?;
+    }
+
+    // Change goes to Orchard (internal)
+    if change > 0 {
+        let change_addr = fvk.address_at(0u32, Scope::Internal);
+        let internal_ovk = fvk.to_ovk(Scope::Internal);
+        let empty_memo = { let mut m = [0u8; 512]; m[0] = 0xF6; m };
+        builder.add_output(Some(internal_ovk), change_addr, NoteValue::from_raw(change), empty_memo)
+            .map_err(|e| anyhow::anyhow!("Failed to add change output: {:?}", e))?;
+    }
+
+    let (mut pczt_bundle, _) = builder.build_for_pczt(&mut rng)
+        .map_err(|e| anyhow::anyhow!("Failed to build PCZT: {:?}", e))?;
+
+    // ── Compute ZIP-244 digests (hybrid: transparent outputs + Orchard) ──
+
+    let effects_bundle = pczt_bundle.extract_effects::<i64>()
+        .map_err(|e| anyhow::anyhow!("Failed to extract effects: {:?}", e))?
+        .ok_or_else(|| anyhow::anyhow!("Empty effects bundle"))?;
+
+    let digests = zip244::compute_zip244_digests_hybrid(
+        &effects_bundle, &[], &transparent_outputs, branch_id, 0, 0,
+    );
+    let sighash = zip244::compute_sighash(&digests, branch_id);
+
+    pczt_bundle.finalize_io(sighash, &mut rng)
+        .map_err(|e| anyhow::anyhow!("IO finalization failed: {:?}", e))?;
+
+    info!("Generating Halo2 proof for deshield...");
+    let pk = ProvingKey::build();
+    pczt_bundle.create_proof(&pk, &mut rng)
+        .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
+    info!("Proof generated successfully");
+
+    // ── Extract signing fields ──────────────────────────────────────
+
+    let n_actions = pczt_bundle.actions().len();
+    let mut action_fields: Vec<ActionFields> = Vec::new();
+
+    for i in 0..n_actions {
+        let alpha_bytes = pczt_bundle.actions()[i].spend().alpha()
+            .map(|a| a.to_repr().to_vec())
+            .unwrap_or_else(|| vec![0u8; 32]);
+        let cv_net_bytes = pczt_bundle.actions()[i].cv_net().to_bytes().to_vec();
+        let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
+        let value = pczt_bundle.actions()[i].spend().value()
+            .map(|v| v.inner()).unwrap_or(0);
+
+        let effects_action = &effects_bundle.actions()[i];
+        let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
+        let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let enc = &effects_action.encrypted_note().enc_ciphertext;
+        if enc.len() != 580 {
+            return Err(anyhow::anyhow!("Invalid enc_ciphertext length: {}", enc.len()));
+        }
+        let rk_bytes: [u8; 32] = effects_action.rk().into();
+
+        action_fields.push(ActionFields {
+            index: i as u32,
+            alpha: alpha_bytes,
+            cv_net: cv_net_bytes,
+            nullifier: nullifier_bytes,
+            cmx: cmx_bytes,
+            epk: epk_bytes,
+            enc_compact: enc[..52].to_vec(),
+            enc_memo: enc[52..564].to_vec(),
+            enc_noncompact: enc[564..].to_vec(),
+            rk: rk_bytes.to_vec(),
+            out_ciphertext: effects_action.encrypted_note().out_ciphertext.to_vec(),
+            value,
+            is_spend,
+        });
+    }
+
+    let signing_request = SigningRequest {
+        n_actions: n_actions as u32,
+        account,
+        branch_id,
+        sighash: sighash.to_vec(),
+        digests: DigestFields {
+            header: digests.header_digest.to_vec(),
+            transparent: digests.transparent_digest.to_vec(),
+            sapling: digests.sapling_digest.to_vec(),
+            orchard: digests.orchard_digest.to_vec(),
+        },
+        bundle_meta: BundleMeta {
+            flags: effects_bundle.flags().to_byte() as u32,
+            value_balance: *effects_bundle.value_balance(),
+            anchor: effects_bundle.anchor().to_bytes().to_vec(),
+        },
+        actions: action_fields,
+        display: DisplayInfo {
+            amount: format!("{:.8} ZEC", amount as f64 / 1e8),
+            fee: format!("{:.8} ZEC", fee as f64 / 1e8),
+            to: format!("transparent (deshield)"),
+        },
+    };
+
+    Ok(DeshieldPcztState {
+        pczt_bundle,
+        sighash,
+        branch_id,
+        orchard_signing_request: signing_request,
+        transparent_outputs,
+    })
+}
+
+/// Finalize a deshield PCZT: apply Orchard signatures, serialize hybrid v5 tx.
+///
+/// No transparent signatures needed — deshield has no transparent inputs.
+pub fn finalize_deshield_pczt(
+    state: DeshieldPcztState,
+    orchard_signatures: &[Vec<u8>],
+) -> Result<(Vec<u8>, String)> {
+    let mut rng = OsRng;
+    let mut pczt_bundle = state.pczt_bundle;
+    let sighash = state.sighash;
+
+    let n_actions = pczt_bundle.actions().len();
+    let is_real_spend: Vec<bool> = (0..n_actions)
+        .map(|i| pczt_bundle.actions()[i].spend().spend_auth_sig().is_none())
+        .collect();
+    let signature_plan = plan_orchard_signature_application(&is_real_spend, orchard_signatures.len())?;
+
+    // Apply Orchard signatures
+    for (i, sig_index) in signature_plan.iter().enumerate() {
+        let Some(sig_index) = sig_index else {
+            info!("Action {}: dummy spend — skipping", i);
+            continue;
+        };
+        let sig_bytes = &orchard_signatures[*sig_index];
+        if sig_bytes.len() != 64 {
+            return Err(anyhow::anyhow!("Invalid Orchard sig length for action {}: {}", i, sig_bytes.len()));
+        }
+
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(sig_bytes);
+        let signature: orchard::primitives::redpallas::Signature<orchard::primitives::redpallas::SpendAuth> = sig_arr.into();
+
+        let rk = pczt_bundle.actions()[i].spend().rk();
+        let verify_result = rk.verify(&sighash, &signature);
+        if verify_result.is_err() {
+            return Err(anyhow::anyhow!("Orchard sig verification failed for action {}", i));
+        }
+
+        pczt_bundle.actions_mut()[i]
+            .apply_signature(sighash, signature)
+            .map_err(|e| anyhow::anyhow!("Failed to apply sig for action {}: {}", i, e))?;
+    }
+
+    // Extract final bundle
+    let unbound_bundle = pczt_bundle.extract::<i64>()
+        .map_err(|e| anyhow::anyhow!("Failed to extract bundle: {}", e))?
+        .ok_or_else(|| anyhow::anyhow!("Empty bundle after extraction"))?;
+
+    let authorized_bundle = unbound_bundle.apply_binding_signature(sighash, &mut rng)
+        .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
+
+    // Serialize as hybrid v5 tx: no transparent inputs, transparent outputs, Orchard bundle
+    let tx_bytes = serialize_v5_hybrid_tx(
+        &authorized_bundle,
+        &[],   // no transparent inputs
+        &state.transparent_outputs,
+        &[],   // no transparent signatures
+        state.branch_id,
+        None,  // no pubkey needed (no transparent inputs)
+    )?;
+
+    // Compute txid
+    let header_digest = zip244::digest_header(state.branch_id, 0, 0);
+    let transparent_txid_digest = zip244::digest_transparent_txid(
+        &[],
+        &state.transparent_outputs,
+    );
+    let orchard_digest = zip244::digest_orchard(&authorized_bundle);
+    let txid_digests = zip244::Zip244Digests {
+        header_digest,
+        transparent_digest: transparent_txid_digest,
+        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+        orchard_digest,
+    };
+    let txid_hash = zip244::compute_sighash(&txid_digests, state.branch_id);
+    let txid = hex::encode(&txid_hash);
+
+    info!("Deshield tx built: {} bytes, txid: {}", tx_bytes.len(), txid);
+    Ok((tx_bytes, txid))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

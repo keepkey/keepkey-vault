@@ -6,6 +6,7 @@ import { usb } from 'usb'
 import { saveDeviceSnapshot } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
+import { EmulatorKeepKeyAdapter } from './emulator-transport'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -92,6 +93,9 @@ export class EngineController extends EventEmitter {
   private promptPinActive = false
 
   get isSyncing(): boolean { return this.syncing }
+  get isEmulator(): boolean { return this.activeTransport === 'emulator' }
+  /** Get the emulator transport delegate (for chunk counting in confirmOp). */
+  get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
 
   constructor() {
     super()
@@ -111,6 +115,7 @@ export class EngineController extends EventEmitter {
     this.activeTransport = null
     this.cachedFeatures = null
     this.cachedFingerprint = null
+    this.seedEthAddress = null
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -147,6 +152,9 @@ export class EngineController extends EventEmitter {
 
     transport.on(String(core.Events.BUTTON_REQUEST), () => {
       console.log('[Engine] BUTTON_REQUEST — confirm on device')
+      // Emulator button presses are handled by prewriteConfirmations() in
+      // the RPC handler — NOT here. Sending stale DebugLinkDecision from a
+      // setTimeout poisons the ring buffer and causes "Unexpected message".
     })
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
@@ -205,7 +213,15 @@ export class EngineController extends EventEmitter {
 
     await this.fetchFirmwareManifest()
 
-    // Device may already be plugged in
+    // Device may already be plugged in.  If a KeepKey is present, give
+    // libusb the same stabilisation window as the hot-plug attach handler
+    // before calling pairRawDevice() — without it, the native addon can
+    // SIGTRAP on macOS when the device is connected at launch.
+    const alreadyConnected = usb.getDeviceList()
+      .some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    if (alreadyConnected) {
+      await new Promise(r => setTimeout(r, ATTACH_DELAY_MS))
+    }
     await this.syncState()
   }
 
@@ -221,21 +237,39 @@ export class EngineController extends EventEmitter {
     console.log(`[Engine] State → ${state}`)
     this.emit('state-change', this.getDeviceState())
 
-    // Persist device snapshot for watch-only mode (fire-and-forget)
+    // Persist device snapshot for watch-only mode (fire-and-forget).
+    // PRIVACY: Skip ALL persistent caching for passphrase wallets — writing
+    // addresses, snapshots, or seed identity to disk leaks the hidden wallet.
     if (state === 'ready' && this.cachedFeatures) {
-      try {
-        const deviceId = this.cachedFeatures.deviceId || 'unknown'
-        const label = this.cachedFeatures.label || ''
-        const fwVer = this.extractVersion(this.cachedFeatures)
-        saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
-      } catch { /* never block on cache failure */ }
+      if (this.isPassphraseWallet) {
+        console.log('[Engine] Passphrase wallet active — skipping device snapshot, seed identity, and fingerprint cache (privacy)')
+      } else if (this.isEmulator) {
+        console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
+      } else {
+        try {
+          const deviceId = this.cachedFeatures.deviceId || 'unknown'
+          const label = this.cachedFeatures.label || ''
+          const fwVer = this.extractVersion(this.cachedFeatures)
+          saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+        } catch { /* never block on cache failure */ }
+
+        // Check if the seed changed since last session — emits 'seed-changed'
+        // if the ETH primary address differs from what's stored.
+        this.checkSeedIdentity()
+          .catch(err => console.warn('[Engine] Seed identity check failed:', err?.message))
+      }
 
       // Pre-cache wallet fingerprint so BIP-85 and other ops don't need
       // a separate btcGetAddress call (which can trigger BUTTON_REQUEST).
-      if (!this.cachedFingerprint) {
+      // Skip for emulator — the first address call may fail with code 11
+      // on stale/incompatible flash, and the fire-and-forget error can
+      // leave the transport in a bad state for subsequent REST calls.
+      // Note: fingerprint is in-memory only (not persisted), so it's safe
+      // for passphrase wallets — it's cleared on disconnect/passphrase change.
+      if (!this.cachedFingerprint && this.activeTransport !== 'emulator') {
         this.getWalletFingerprint()
           .then(fp => console.log('[Engine] Fingerprint pre-cached:', fp.slice(0, 12) + '...'))
-          .catch(err => console.warn('[Engine] Fingerprint pre-cache failed (will retry on demand):', err?.message))
+          .catch(err => console.warn('[Engine] Fingerprint pre-cache failed (will retry on demand):', err?.message || err))
       }
     }
 
@@ -510,6 +544,11 @@ export class EngineController extends EventEmitter {
     let usbDetected = false
     let lastError: string | null = null
 
+    // Clear stale keyring entries before attempting to pair — without this,
+    // a previous failed pairing leaves the transport in "opened" state and
+    // WebUSB rejects with "cannot connect an already-connected connection".
+    try { await this.keyring.removeAll() } catch (_) {}
+
     // Try WebUSB first (modern firmware, PID 0x0002)
     console.log('[Engine] Scanning for WebUSB device...')
     try {
@@ -584,6 +623,231 @@ export class EngineController extends EventEmitter {
 
     console.log(`[Engine] initializeWallet done — usbDetected=${usbDetected}, error=${lastError}`)
     return { wallet: undefined, usbDetected, error: lastError }
+  }
+
+  // ── Emulator Transport ────────────────────────────────────────────────
+
+  /**
+   * Run a firmware operation that requires button confirmations on the emulator.
+   * Shared by loadDevice, wipe, applySettings, and auto-reload recovery.
+   */
+  async emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
+    const { pausePoll, resumePoll, emuPollOnce, saveEmulatorState, flushRingBuffers } = await import('./emulator')
+    const { prewriteConfirmations } = await import('./emulator-transport')
+    const delegate = this.emuDelegate
+    if (delegate) delegate.chunkCount = 0
+    pausePoll()
+    try {
+      const promise = fn()
+      await new Promise(r => setTimeout(r, 30))
+      const numChunks = delegate?.chunkCount || 1
+      for (let i = 0; i < numChunks - 1; i++) emuPollOnce()
+      prewriteConfirmations(confirmCount)
+      emuPollOnce()
+      resumePoll()
+      const result = await promise
+      flushRingBuffers()
+      saveEmulatorState()
+      return result
+    } finally {
+      resumePoll()
+    }
+  }
+
+  /**
+   * Connect the engine to the running emulator.
+   * Creates an hdwallet adapter backed by FFI emuRead/emuWrite,
+   * pairs it, and runs syncState to derive the UI phase (needs_init, ready, etc.).
+   */
+  async connectEmulator(): Promise<void> {
+    console.log('[Engine] Connecting to emulator...')
+
+    // Disconnect any existing physical device first
+    this.clearWallet()
+
+    try {
+      const adapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+      const device = await adapter.getDevice()
+      const wallet = await adapter.pairRawDevice(device, true /* tryDebugLink */)
+
+      if (!wallet) {
+        throw new Error('pairRawDevice returned falsy')
+      }
+
+      this.wallet = wallet as any
+      this.activeTransport = 'emulator'
+      this.attachTransportListeners()
+      this.lastError = null
+
+      // Initialize — sends Initialize → Features (works for both fresh and configured devices)
+      console.log('[Engine] Initializing emulator device...')
+      this.cachedFeatures = await withTimeout(
+        wallet.initialize(),
+        PAIR_TIMEOUT_MS,
+        'emulator initialize'
+      )
+
+      console.log('[Engine] Emulator features:', JSON.stringify({
+        deviceId: this.cachedFeatures?.deviceId || '(empty)',
+        initialized: this.cachedFeatures?.initialized ?? '(undefined)',
+        firmwareVersion: this.extractVersion(this.cachedFeatures),
+        label: this.cachedFeatures?.label || '(none)',
+        pinProtection: this.cachedFeatures?.pinProtection,
+        pinCached: this.cachedFeatures?.pinCached,
+        passphraseProtection: this.cachedFeatures?.passphraseProtection,
+        passphraseCached: this.cachedFeatures?.passphraseCached,
+      }))
+
+      const derivedState = this.deriveState(this.cachedFeatures)
+
+      // Smoke-test: if state looks 'ready', verify the firmware can actually
+      // derive keys.  After kkemu_init() with existing flash, the firmware may
+      // need extra poll cycles before key derivation works.  The test harness
+      // gets these naturally (loadSeed → drain → reconnect), but the app goes
+      // straight from Initialize to key ops.
+      //
+      // Recovery: flush ring buffers, reconnect transport, re-initialize, retry.
+      if (derivedState === 'ready') {
+        const probeXpub = async () => {
+          await withTimeout(
+            (this.wallet as any).getPublicKeys([{
+              addressNList: [0x80000000 + 44, 0x80000000 + 0, 0x80000000 + 0],
+              coin: 'Bitcoin',
+              scriptType: 'p2pkh',
+              showDisplay: false,
+            }]),
+            10_000,
+            'emulator smoke-test'
+          )
+        }
+
+        try {
+          await probeXpub()
+          console.log('[Engine] Emulator smoke-test passed (key derivation OK)')
+        } catch (probeErr: any) {
+          console.warn('[Engine] Emulator smoke-test failed, flushing + reconnecting...', probeErr?.message || probeErr)
+          // Flush stale ring-buffer data and let firmware settle
+          const { flushRingBuffers } = await import('./emulator')
+          flushRingBuffers()
+
+          // Reconnect transport (same pattern as test harness after loadSeed)
+          const freshAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+          const freshDevice = await freshAdapter.getDevice()
+          const freshWallet = await freshAdapter.pairRawDevice(freshDevice, true)
+          if (freshWallet) {
+            this.wallet = freshWallet as any
+            this.attachTransportListeners()
+            this.cachedFeatures = await withTimeout(
+              freshWallet.initialize(),
+              PAIR_TIMEOUT_MS,
+              'emulator re-initialize'
+            )
+          }
+
+          // Retry
+          try {
+            await probeXpub()
+            console.log('[Engine] Emulator smoke-test passed after reconnect')
+          } catch (retryErr: any) {
+            // Storage key persistence is broken — the firmware can't decrypt
+            // its own stored seed after a restart.  Auto-wipe the flash and
+            // reload the saved mnemonic from Keychain if available.
+            console.warn('[Engine] Emulator storage key stale — auto-wiping flash')
+            const { stopEmulator, initEmulator, getActiveFlashName } = await import('./emulator')
+            const { deleteFlash, loadMnemonic } = await import('./emulator-keychain')
+            const flashName = getActiveFlashName()
+            const savedMnemonic = loadMnemonic(flashName)
+            stopEmulator()
+            deleteFlash(flashName)
+            const status = initEmulator(flashName)
+            if (status.state !== 'running') {
+              this.lastError = `Emulator restart failed: ${status.error}`
+              this.updateState('error')
+              return
+            }
+            // Reconnect to the fresh (uninitialized) emulator
+            const cleanAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+            const cleanDevice = await cleanAdapter.getDevice()
+            const cleanWallet = await cleanAdapter.pairRawDevice(cleanDevice, true)
+            if (!cleanWallet) {
+              this.lastError = 'Emulator reconnect failed after wipe'
+              this.updateState('error')
+              return
+            }
+            this.wallet = cleanWallet as any
+            this.activeTransport = 'emulator'
+            this.attachTransportListeners()
+            this.cachedFeatures = await withTimeout(
+              cleanWallet.initialize(),
+              PAIR_TIMEOUT_MS,
+              'emulator fresh-init'
+            )
+
+            // Auto-reload saved mnemonic if available
+            if (savedMnemonic) {
+              console.log('[Engine] Auto-reloading saved mnemonic from Keychain...')
+              await this.emuConfirmOp(() => (this.wallet as any).loadDevice({
+                mnemonic: savedMnemonic, pin: false, passphrase: false, skipChecksum: false,
+              }), 2)
+              console.log('[Engine] Mnemonic auto-loaded successfully')
+
+              // Flush + reconnect for clean state
+              const { flushRingBuffers } = await import('./emulator')
+              flushRingBuffers()
+              const reAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+              const reDevice = await reAdapter.getDevice()
+              const reWallet = await reAdapter.pairRawDevice(reDevice, true)
+              if (reWallet) {
+                this.wallet = reWallet as any
+                this.attachTransportListeners()
+                this.cachedFeatures = await withTimeout(
+                  reWallet.initialize(),
+                  PAIR_TIMEOUT_MS,
+                  'emulator post-reload'
+                )
+              }
+
+              // Verify auto-reload actually took effect
+              const verifyMnemonic = await this.getEmulatorMnemonic()
+              if (!verifyMnemonic) {
+                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
+              } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
+                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
+                console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
+                console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
+              } else {
+                console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
+              }
+
+              this.updateState(this.deriveState(this.cachedFeatures))
+            } else {
+              console.log('[Engine] No saved mnemonic — showing setup wizard')
+              this.updateState(this.deriveState(this.cachedFeatures))
+            }
+            return
+          }
+        }
+      }
+
+      this.updateState(derivedState)
+    } catch (err: any) {
+      console.error('[Engine] Emulator connection failed:', err?.message || err)
+      this.clearWallet()
+      this.lastError = `Emulator: ${err?.message || err}`
+      this.updateState('error')
+      throw err
+    }
+  }
+
+  /**
+   * Disconnect the emulator from the engine (called when emulator stops).
+   */
+  disconnectEmulator(): void {
+    if (this.activeTransport !== 'emulator') return
+    console.log('[Engine] Disconnecting emulator')
+    this.clearWallet()
+    this.lastError = null
+    this.updateState('disconnected')
   }
 
   // ── State Derivation ───────────────────────────────────────────────────
@@ -701,6 +965,36 @@ export class EngineController extends EventEmitter {
       firmwareVerified: hashes.firmwareVerified,
       bootloaderVerified: hashes.bootloaderVerified,
       error: this.lastError,
+      isEmulator: this.activeTransport === 'emulator',
+    }
+  }
+
+  // ── Emulator Debug Link ───────────────────────────────────────────────
+
+  /**
+   * Read the mnemonic from the emulator via DebugLinkGetState.
+   * Only works when connected to the emulator with debug link enabled.
+   */
+  async getEmulatorMnemonic(): Promise<string | null> {
+    if (this.activeTransport !== 'emulator' || !this.wallet) {
+      return null
+    }
+    try {
+      const Messages = require('@keepkey/device-protocol/lib/messages_pb')
+      const msg = new Messages.DebugLinkGetState()
+      const response = await (this.wallet as any).transport.call(
+        Messages.MessageType.MESSAGETYPE_DEBUGLINKGETSTATE,
+        msg,
+        { debugLink: true, msgTimeout: 5000 }
+      )
+      const mnemonic = response?.proto?.getMnemonic?.() || null
+      if (mnemonic) {
+        console.log('[Engine] Emulator mnemonic retrieved via DebugLink')
+      }
+      return mnemonic
+    } catch (err: any) {
+      console.warn('[Engine] Failed to read emulator mnemonic:', err?.message)
+      return null
     }
   }
 
@@ -969,7 +1263,7 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async loadDevice(opts: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }) {
+  async loadDevice(opts: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string; skipRefresh?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
     await (this.wallet as any).loadDevice({
       mnemonic: opts.mnemonic,
@@ -977,21 +1271,29 @@ export class EngineController extends EventEmitter {
       passphrase: opts.passphrase ?? false,
       label: opts.label || 'KeepKey',
     })
+    // Emulator: skip getFeatures — the transport's auto-ButtonAck leaves a stale
+    // message in rb_main_in that causes "Unexpected message". The caller should
+    // reconnect via connectEmulator() which drains ring buffers and re-initializes.
+    if (opts.skipRefresh) return
     this.cachedFeatures = await this.wallet.getFeatures()
     this.updateState(this.deriveState(this.cachedFeatures))
   }
 
-  async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number }) {
+  async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number; skipRefresh?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
     const settings: any = {}
     if (opts.label !== undefined) settings.label = opts.label
     if (opts.usePassphrase !== undefined) {
       settings.usePassphrase = opts.usePassphrase
-      // Toggling passphrase changes the effective seed — clear fingerprint
+      // Toggling passphrase changes the effective seed — clear fingerprint + seed ID
       this.cachedFingerprint = null
+      this.seedEthAddress = null
     }
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
+    // Emulator: skip getFeatures — stale ButtonAck in rb_main_in causes failure.
+    // Caller should reconnect via connectEmulator() for clean state.
+    if (opts.skipRefresh) return
     this.cachedFeatures = await this.wallet.getFeatures()
     // Route through updateState so needs_passphrase triggers promptPin() →
     // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
@@ -1071,8 +1373,9 @@ export class EngineController extends EventEmitter {
 
   async sendPassphrase(passphrase: string) {
     if (!this.wallet) throw new Error('No device connected')
-    // Passphrase changes the effective seed — clear fingerprint so it's re-derived
+    // Passphrase changes the effective seed — clear fingerprint + seed ID so they're re-derived
     this.cachedFingerprint = null
+    this.seedEthAddress = null
     await this.wallet.sendPassphrase(passphrase)
     // Don't call getFeatures if promptPin's getPublicKeys is still pending —
     // it owns the transport and will refresh features when it completes.
@@ -1229,6 +1532,16 @@ export class EngineController extends EventEmitter {
 
   private cachedFingerprint: string | null = null
 
+  /**
+   * True when the current session is using a passphrase-derived wallet.
+   * Passphrase wallets MUST NOT have any data persisted to disk (addresses,
+   * balances, snapshots, seed identity) — doing so leaks the existence and
+   * contents of the hidden wallet.
+   */
+  get isPassphraseWallet(): boolean {
+    return !!(this.cachedFeatures?.passphraseProtection && this.cachedFeatures?.passphraseCached)
+  }
+
   async getWalletFingerprint(): Promise<string> {
     if (this.cachedFingerprint) return this.cachedFingerprint
     if (!this.wallet) throw new Error('No device connected')
@@ -1243,6 +1556,56 @@ export class EngineController extends EventEmitter {
     if (!address) throw new Error('Failed to derive fingerprint address')
     this.cachedFingerprint = address
     return address
+  }
+
+  // ── Seed Change Detection ────────────────────────────────────────────
+  //
+  // The hardware deviceId (from Features) doesn't change when the seed
+  // changes. On state → ready, derive ETH m/44'/60'/0'/0/0 and compare
+  // against the last known address. If different, emit 'seed-changed'
+  // so the app can reset in-memory caches and let fresh Pioneer data
+  // overwrite the stale DB entries.
+
+  private seedEthAddress: string | null = null
+
+  /** The primary ETH address for the current seed (available after ready). */
+  get currentSeedEthAddress(): string | null { return this.seedEthAddress }
+
+  /**
+   * Derive ETH primary address and check if the seed changed since last session.
+   * Emits 'seed-changed' if the address differs from what's stored in settings DB.
+   */
+  async checkSeedIdentity(): Promise<void> {
+    if (!this.wallet) return
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (!addr) {
+        console.warn('[Engine] checkSeedIdentity: could not derive ETH address')
+        return
+      }
+      this.seedEthAddress = addr
+
+      const deviceId = this.cachedFeatures?.deviceId || 'unknown'
+      const { getSetting, setSetting } = await import('./db')
+      const key = `seed_eth_${deviceId}`
+      const stored = getSetting(key)?.toLowerCase() || null
+
+      if (stored && stored !== addr) {
+        console.warn(`[Engine] SEED CHANGED on ${deviceId}: ${stored.slice(0, 10)}... → ${addr.slice(0, 10)}...`)
+        this.emit('seed-changed', { deviceId, oldAddress: stored, newAddress: addr })
+      } else if (!stored) {
+        console.log(`[Engine] First seed identity for ${deviceId}: ${addr.slice(0, 10)}...`)
+      } else {
+        console.log(`[Engine] Seed identity OK: ${addr.slice(0, 10)}...`)
+      }
+      setSetting(key, addr)
+    } catch (err: any) {
+      console.warn('[Engine] checkSeedIdentity failed:', err?.message)
+    }
   }
 
   // ── BIP-85 Derived Seeds ────────────────────────────────────────────────

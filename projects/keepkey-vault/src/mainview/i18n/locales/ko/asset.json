@@ -10,7 +10,7 @@
 	"showFiltered_other": "필터링된 토큰 {{count}}개 표시",
 	"hideFiltered_one": "필터링된 토큰 {{count}}개 숨기기",
 	"hideFiltered_other": "필터링된 토큰 {{count}}개 숨기기",
-	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "스팸 의심 ({{count}})",
 	"markAsSafe": "안전으로 표시",
 	"hideToken": "토큰 숨기기",

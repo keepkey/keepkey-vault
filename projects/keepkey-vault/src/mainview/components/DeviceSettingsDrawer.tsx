@@ -6,6 +6,7 @@ import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
+import { versionCompare } from "../../shared/firmware-versions"
 
 interface DevicePolicy {
 	policyName?: string
@@ -34,6 +35,7 @@ interface DeviceSettingsDrawerProps {
 	appVersion?: { version: string; channel: string } | null
 	onOpenAuditLog?: () => void
 	onOpenPairedApps?: () => void
+	onOpenMobilePairing?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
 	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
@@ -138,7 +140,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -157,8 +159,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
+	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
@@ -272,6 +275,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { console.error("setRestApiEnabled:", e) }
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
+
+	const toggleWalletConnect = useCallback(async (enabled: boolean) => {
+		setTogglingWalletConnect(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setWalletConnectEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setWalletConnectEnabled:", e) }
+		setTogglingWalletConnect(false)
+	}, [])
 
 	const toggleSwaps = useCallback(async (enabled: boolean) => {
 		setTogglingSwaps(true)
@@ -595,6 +607,67 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{pingResult && <Text fontSize="sm" color="kk.success">{pingResult}</Text>}
 						</Flex>
 					</Section>
+
+					{/* ── Emulator ────────────────────────────────────── */}
+					{deviceState.isEmulator && (
+						<Section title="Emulator" defaultOpen={true}>
+							<VStack gap="2" align="stretch">
+								<Box bg="rgba(255,152,0,0.08)" border="1px solid" borderColor="rgba(255,152,0,0.3)" borderRadius="md" px="3" py="2">
+									<Text fontSize="xs" color="orange.300" fontWeight="600">For Development Purposes Only</Text>
+								</Box>
+								<InfoRow label="Mode" value="In-Process (dylib FFI)" />
+								<InfoRow label="Transport" value="Ring Buffer" />
+								<InfoRow label="Flash" value={deviceState.deviceId?.split(":")[0]?.slice(0, 12) + "..." || "—"} />
+								<InfoRow label="Seed ID" value={deviceState.deviceId?.includes(":") ? deviceState.deviceId.split(":")[1] : "—"} />
+							</VStack>
+
+							<Flex gap="3" mt="4" wrap="wrap">
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "orange.400", color: "orange.400" }}
+									onClick={async () => {
+										try {
+											setWiping(true)
+											await rpcRequest("wipeDevice", undefined, 30000)
+										} catch (e: any) {
+											console.error("Emulator wipe failed:", e?.message)
+										} finally { setWiping(false) }
+									}}
+									disabled={wiping}
+								>
+									{wiping ? "Wiping..." : "Wipe Emulator"}
+								</Button>
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "kk.error", color: "kk.error" }}
+									onClick={async () => {
+										try {
+											await rpcRequest("emulatorStop", undefined, 10000)
+										} catch (e: any) {
+											console.error("Emulator stop failed:", e?.message)
+										}
+									}}
+								>
+									Stop Emulator
+								</Button>
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "kk.error", color: "kk.error" }}
+									onClick={async () => {
+										if (!confirm("Delete flash and stop? This erases the emulator seed.")) return
+										try {
+											await rpcRequest("emulatorStop", undefined, 10000)
+											await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
+										} catch (e: any) {
+											console.error("Flash delete failed:", e?.message)
+										}
+									}}
+								>
+									Delete Flash
+								</Button>
+							</Flex>
+						</Section>
+					)}
 
 					{/* ── Security ────────────────────────────────────── */}
 					<Section title={t("security")}>
@@ -961,6 +1034,37 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)}
 							</Box>
 
+							{/* ── Mobile Pairing ────── */}
+							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+								<Flex justify="space-between" align="center">
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">
+											{t("mobilePairing.title")}
+										</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
+											{t("mobilePairing.securityNote")}
+										</Text>
+									</Box>
+									<Box
+										as="button"
+										px="3"
+										py="1.5"
+										borderRadius="full"
+										bg="rgba(192,168,96,0.12)"
+										color="kk.gold"
+										fontSize="xs"
+										fontWeight="500"
+										cursor={deviceState.state !== "ready" ? "not-allowed" : "pointer"}
+										opacity={deviceState.state !== "ready" ? 0.4 : 1}
+										_hover={deviceState.state === "ready" ? { bg: "rgba(192,168,96,0.22)" } : {}}
+										transition="all 0.15s"
+										onClick={() => { if (deviceState.state === "ready") onOpenMobilePairing?.() }}
+									>
+										{t("mobilePairing.button")}
+									</Box>
+								</Flex>
+							</Box>
+
 							{/* ── App Version + Update Check ────── */}
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
 								<Flex justify="space-between" align="center">
@@ -1069,6 +1173,30 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={t("featureFlags")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
+							{/* WalletConnect toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(59,153,252,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3B99FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M6.5 9.5c3-3 8-3 11 0" />
+											<path d="M4 7c4.5-4.5 11.5-4.5 16 0" />
+											<circle cx="12" cy="15" r="1.5" fill="#3B99FC" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("walletConnectFeature")}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("walletConnectFeatureDescription")}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.walletConnectEnabled}
+									onChange={toggleWalletConnect}
+									disabled={togglingWalletConnect}
+								/>
+							</Flex>
+
 							{/* Swaps toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
@@ -1094,50 +1222,60 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* BIP-85 Derived Seeds toggle */}
-							<Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-										</svg>
+							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.14.0 */}
+							{(() => {
+								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.14.0') >= 0
+								return (
+									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
+												<Text fontSize="sm" color={bip85FwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
+													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.14.0 or later"}
+												</Text>
+											</Box>
+										</Flex>
+										<Toggle
+											checked={bip85FwOk && appSettings.bip85Enabled}
+											onChange={toggleBip85}
+											disabled={!bip85FwOk || togglingBip85}
+										/>
 									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("bip85FeatureDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={appSettings.bip85Enabled}
-									onChange={toggleBip85}
-									disabled={togglingBip85}
-								/>
-							</Flex>
+								)
+							})()}
 
-							{/* Zcash Shielded Privacy toggle */}
-							<Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-										</svg>
+							{/* Zcash Shielded Privacy toggle — requires firmware >= 7.15.0 */}
+							{(() => {
+								const zcashFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
+								return (
+									<Flex justify="space-between" align="center" opacity={zcashFwOk ? 1 : 0.45}>
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
+												<Text fontSize="sm" color={zcashFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
+													{zcashFwOk ? t("zcashPrivacyFeatureDescription") : "Requires firmware 7.15.0 or later"}
+												</Text>
+											</Box>
+										</Flex>
+										<Toggle
+											checked={zcashFwOk && appSettings.zcashPrivacyEnabled}
+											onChange={toggleZcashPrivacy}
+											disabled={!zcashFwOk || togglingZcashPrivacy}
+										/>
 									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("zcashPrivacyFeatureDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={appSettings.zcashPrivacyEnabled}
-									onChange={toggleZcashPrivacy}
-									disabled={togglingZcashPrivacy}
-								/>
-							</Flex>
+								)
+							})()}
 						</VStack>
 					</Section>
 

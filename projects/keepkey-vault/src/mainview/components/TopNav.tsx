@@ -23,11 +23,15 @@ interface TopNavProps {
 	firmwareVerified?: boolean
 	needsFirmwareUpdate?: boolean
 	latestFirmware?: string
+	isEmulator?: boolean
 	onSettingsToggle: () => void
+	onMobileToggle?: () => void
 	settingsOpen?: boolean
+	mobileOpen?: boolean
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
+	onExitToDeviceSelect?: () => void
 	passphraseActive?: boolean
 }
 
@@ -83,9 +87,11 @@ export function SplashNav() {
 				<Image
 					src={kkIcon}
 					alt="KeepKey"
-					w="24px"
-					h="24px"
-					borderRadius="4px"
+					w="29px"
+					h="29px"
+					borderRadius="6px"
+					border="1.5px solid"
+					borderColor="kk.gold"
 				/>
 				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
 					KeepKey Vault
@@ -95,7 +101,7 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, onSettingsToggle, settingsOpen, activeTab, onTabChange, watchOnly, passphraseActive }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, isEmulator, onSettingsToggle, onMobileToggle, settingsOpen, mobileOpen, activeTab, onTabChange, watchOnly, onExitToDeviceSelect, passphraseActive }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -136,13 +142,21 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 		>
 			{/* Left: device icon + label */}
 			<Flex align="center" gap="2" flex="1">
-				<Box position="relative">
+				<Box
+					position="relative"
+					cursor="pointer"
+					onClick={onExitToDeviceSelect || (() => rpcRequest("openUrl", { url: "https://keepkey.com" }).catch(() => {}))}
+					className="electrobun-webkit-app-region-no-drag"
+					title={onExitToDeviceSelect ? "Back to device select" : "KeepKey"}
+				>
 					<Image
 						src={kkIcon}
 						alt="KeepKey"
-						w="24px"
-						h="24px"
-						borderRadius="4px"
+						w="29px"
+						h="29px"
+						borderRadius="6px"
+						border="1.5px solid"
+						borderColor="kk.gold"
 					/>
 					<Box
 						position="absolute"
@@ -160,11 +174,35 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 					{label || "KeepKey"}
 				</Text>
 				{watchOnly ? (
-					<Text fontSize="10px" color="kk.gold" fontWeight="500" bg="rgba(255,215,0,0.12)" px="1.5" py="0.5" borderRadius="sm">
-						{t("watchOnly")}
-					</Text>
+					<Flex align="center" gap="1.5">
+						<Text fontSize="10px" color="kk.gold" fontWeight="500" bg="rgba(255,215,0,0.12)" px="1.5" py="0.5" borderRadius="sm">
+							{t("watchOnly")}
+						</Text>
+						{onExitToDeviceSelect && (
+							<Box as="button" fontSize="10px" color="gray.400" fontWeight="500" px="1.5" py="0.5" borderRadius="sm"
+								bg="rgba(255,255,255,0.06)" cursor="pointer" _hover={{ color: "gray.200", bg: "rgba(255,255,255,0.1)" }}
+								transition="all 0.15s" onClick={onExitToDeviceSelect} className="electrobun-webkit-app-region-no-drag">
+								Exit
+							</Box>
+						)}
+					</Flex>
 				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
+						{isEmulator && (
+							<Flex align="center" gap="1">
+								<Text fontSize="9px" color="orange.300" fontWeight="700" bg="rgba(251,146,60,0.15)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="wider">
+									EMU
+								</Text>
+								{onExitToDeviceSelect && (
+									<Box as="button" w="16px" h="16px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+										fontSize="10px" fontWeight="700" color="#FB923C" bg="rgba(251,146,60,0.12)" border="1px solid rgba(251,146,60,0.3)"
+										cursor="pointer" _hover={{ bg: "rgba(251,146,60,0.3)" }} transition="all 0.15s"
+										onClick={onExitToDeviceSelect} className="electrobun-webkit-app-region-no-drag" title="Back to device select">
+										&times;
+									</Box>
+								)}
+							</Flex>
+						)}
 						{firmwareVerified === false ? (
 							<>
 								<ConstructionIcon />
@@ -236,8 +274,23 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 				})}
 			</HStack>
 
-			{/* Right: settings gear */}
-			<Flex flex="1" justify="flex-end" align="center">
+			{/* Right: mobile + settings gear */}
+			<Flex flex="1" justify="flex-end" align="center" gap="0.5">
+				{onMobileToggle && (
+					<IconButton
+						aria-label={t("mobileApp", { defaultValue: "Mobile App" })}
+						onClick={onMobileToggle}
+						size="sm"
+						variant="ghost"
+						color={mobileOpen ? "kk.gold" : "kk.textSecondary"}
+						_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+					>
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+							<line x1="12" y1="18" x2="12.01" y2="18" />
+						</svg>
+					</IconButton>
+				)}
 				<IconButton
 					aria-label={t("deviceSettings")}
 					onClick={onSettingsToggle}

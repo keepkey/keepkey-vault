@@ -8,7 +8,8 @@ import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../.
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
 import { SendForm } from "./SendForm"
 
@@ -18,6 +19,7 @@ const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.Swa
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
 
+import { SweepDialog } from "./SweepDialog"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
@@ -48,12 +50,17 @@ interface AssetPageProps {
 
 export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPageProps) {
 	const { t } = useTranslation("asset")
+	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
+
+	// BTC multi-account support (declared early — handleRefresh depends on isBtc + refreshBtcAccounts)
+	const isBtc = chain.id === 'bitcoin'
+	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading } = useBtcAccounts()
 
 	// Single-chain refresh
 	const [refreshing, setRefreshing] = useState(false)
@@ -63,12 +70,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 		try {
 			const updated = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id })
 			setRefreshedBalance(updated)
+			// BTC: re-fetch per-xpub balances so the selector pills update
+			if (isBtc) await refreshBtcAccounts()
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
 		} finally {
 			setRefreshing(false)
 		}
-	}, [chain.id])
+	}, [chain.id, isBtc, refreshBtcAccounts])
 
 	// Use refreshed balance if available, otherwise prop
 	const activeBalance = refreshedBalance || balance
@@ -102,10 +111,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	useEffect(() => {
 		if (view === "privacy" && !zcashPrivacyEnabled) setView("receive")
 	}, [view, zcashPrivacyEnabled])
-
-	// BTC multi-account support
-	const isBtc = chain.id === 'bitcoin'
-	const { btcAccounts, selectXpub, addAccount, loading: btcLoading } = useBtcAccounts()
 
 	// EVM multi-address support
 	const isEvm = chain.chainFamily === 'evm'
@@ -164,13 +169,35 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable])
 
 	// Re-derive address when BTC xpub selection or change/index changes
+	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
 	useEffect(() => {
-		if (isBtc && btcSelected) {
-			deriveAddress(btcSelected.fullPath)
-		}
+		if (!isBtc || !btcSelected) return
+		let cancelled = false
+		const path = btcSelected.fullPath
+		;(async () => {
+			setLoading(true)
+			setDeriveError(null)
+			try {
+				const params: any = { addressNList: path, showDisplay: false, coin: chain.coin }
+				if (btcSelected.scriptType) params.scriptType = btcSelected.scriptType
+				const result = await rpcRequest(chain.rpcMethod, params, 60000)
+				if (cancelled) return
+				const addr = typeof result === 'string' ? result : result?.address || String(result)
+				setAddress(addr)
+				setCurrentPath(path)
+			} catch (e: any) {
+				if (cancelled) return
+				console.error(`${chain.coin} address:`, e)
+				setDeriveError(e.message || 'Address derivation failed')
+				setAddress(null)
+			}
+			setLoading(false)
+		})()
+		return () => { cancelled = true }
 	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Fetch next unused address indices from Pioneer API when xpub selection changes
+	// Cancellation guard prevents stale responses from snapping to wrong index (Finding 4)
 	const prevScriptRef = useMemo(() => btcAccounts.selectedXpub?.scriptType, [btcAccounts.selectedXpub?.scriptType])
 	const prevAcctRef = useMemo(() => btcAccounts.selectedXpub?.accountIndex, [btcAccounts.selectedXpub?.accountIndex])
 	useEffect(() => {
@@ -182,14 +209,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			.find(a => a.accountIndex === (btcAccounts.selectedXpub?.accountIndex ?? 0))
 			?.xpubs.find(x => x.scriptType === (btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh'))
 			?.xpub
-		if (xpub) {
-			rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
-				.then((indices) => {
-					setPioneerIndices(indices)
-					setBtcAddressIndex(indices.receiveIndex)
-				})
-				.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
-		}
+		if (!xpub) return
+		let cancelled = false
+		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
+			.then((indices) => {
+				if (cancelled) return
+				setPioneerIndices(indices)
+				setBtcAddressIndex(indices.receiveIndex)
+			})
+			.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
+		return () => { cancelled = true }
 	}, [prevScriptRef, prevAcctRef]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// When toggling Receive/Change, set index to the cached Pioneer value
@@ -214,8 +243,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
 	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
+	// BTC is excluded — it has its own cancellation-guarded effect (line 170) that uses
+	// the selected account/script path instead of the default path.
 	const isUtxo = chain.chainFamily === 'utxo'
 	useEffect(() => {
+		if (isBtc) return // BTC address derived by account-aware effect above
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -271,6 +303,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	const [showAddToken, setShowAddToken] = useState(false)
 	const [showSwapDialog, setShowSwapDialog] = useState(false)
+	const [showSweep, setShowSweep] = useState(false)
 	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
 	const isEvmChain = chain.chainFamily === 'evm'
 
@@ -381,7 +414,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							</Text>
 							{tok.balanceUsd > 0 && (
 								<Text fontSize="11px" color="kk.textMuted" lineHeight="1.2">
-									${formatUsd(tok.balanceUsd)}
+									{fmtCompact(tok.balanceUsd)}
 								</Text>
 							)}
 						</Box>
@@ -476,7 +509,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								{activeBalance.balance} {chain.symbol}
 							</Text>
 							{cleanBalanceUsd > 0 && (
-								<AnimatedUsd value={cleanBalanceUsd} prefix="($" suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
+								<AnimatedUsd value={cleanBalanceUsd} prefix="(" suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
 							)}
 							<Box
 								as="button"
@@ -587,16 +620,28 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 				{/* Content */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }} minH="280px">
 					{view === "send" ? (
+						isBtc && !btcSelected?.xpubData ? (
+							<Flex align="center" justify="center" minH="200px">
+								<Spinner size="sm" color="kk.gold" mr="2" />
+								<Text color="kk.textMuted" fontSize="sm">Loading BTC accounts...</Text>
+							</Flex>
+						) : (
 						<SendForm
 							chain={chain}
 							address={address}
-							balance={activeBalance}
+							balance={isBtc && btcSelected?.xpubData ? {
+								...activeBalance!,
+								balance: btcSelected.xpubData.balance,
+								balanceUsd: btcSelected.xpubData.balanceUsd,
+								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+							} : activeBalance}
 							token={selectedToken}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
+						)
 					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab />
@@ -651,7 +696,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 									</Text>
 								)}
 								{tokenTotalUsd > 0 && (
-									<Text fontSize="xs" color="kk.gold" fontWeight="500">${formatUsd(tokenTotalUsd)}</Text>
+									<Text fontSize="xs" color="kk.gold" fontWeight="500">{fmtCompact(tokenTotalUsd)}</Text>
 								)}
 								{isEvmChain && (
 									<IconButton
@@ -694,7 +739,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 										{zeroValueTokens.length > 0 && (
 											<>
 												<Text fontSize="10px" color="kk.textMuted" w="100%" px="1" mt="1">
-													{t("zeroValueTokens", { count: zeroValueTokens.length })}
+													{t("zeroValueTokens", { count: zeroValueTokens.length, zeroValue: fmtCompact(0) || `${fiatSymbol}0` })}
 												</Text>
 												{zeroValueTokens.map((tok) => renderTokenRow(tok))}
 											</>
@@ -728,11 +773,63 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							open={showSwapDialog}
 							onClose={() => setShowSwapDialog(false)}
 							chain={chain}
-							balance={activeBalance}
+							balance={isBtc && btcSelected?.xpubData ? {
+								...activeBalance!,
+								balance: btcSelected.xpubData.balance,
+								balanceUsd: btcSelected.xpubData.balanceUsd,
+								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+							} : activeBalance}
 							address={address}
 						/>
 					</Suspense>
 				</SwapErrorBoundary>
+			)}
+
+			{/* BTC Sweep broom — bottom left on receive tab */}
+			{isBtc && view === 'receive' && (
+				<Box
+					as="button"
+					position="fixed"
+					bottom="24px"
+					left="24px"
+					w="40px"
+					h="40px"
+					borderRadius="full"
+					bg="rgba(74,222,128,0.08)"
+					border="1px solid"
+					borderColor="rgba(74,222,128,0.15)"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					cursor="pointer"
+					transition="all 0.2s"
+					opacity={0.6}
+					_hover={{
+						opacity: 1,
+						bg: "rgba(74,222,128,0.18)",
+						borderColor: "rgba(74,222,128,0.4)",
+						transform: "scale(1.08)",
+					}}
+					_active={{ transform: "scale(0.95)" }}
+					onClick={() => setShowSweep(true)}
+					zIndex={10}
+					title="Sweep Scanner — find BTC on non-standard paths & higher accounts"
+				>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<path d="M3 21h4l-1-3-3 3z" />
+						<path d="M6 18L18 6" />
+						<path d="M14 6h4v4" />
+						<path d="M18 2l4 4-4 4" />
+					</svg>
+				</Box>
+			)}
+
+			{showSweep && (
+				<SweepDialog
+					onClose={() => setShowSweep(false)}
+					currentMaxAccountHint={btcAccounts.accounts.length > 0 ? Math.max(...btcAccounts.accounts.map(a => a.accountIndex)) : 0}
+					refreshAccounts={refreshBtcAccounts}
+				/>
 			)}
 		</Flex>
 	)

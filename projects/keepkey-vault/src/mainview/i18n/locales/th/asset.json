@@ -11,7 +11,7 @@
 	"showFiltered_other": "แสดง {{count}} โทเค็นที่ถูกกรอง",
 	"hideFiltered_one": "ซ่อน {{count}} โทเค็นที่ถูกกรอง",
 	"hideFiltered_other": "ซ่อน {{count}} โทเค็นที่ถูกกรอง",
-	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "สงสัยว่าเป็นสแปม ({{count}})",
 	"markAsSafe": "ทำเครื่องหมายว่าปลอดภัย",
 	"hideToken": "ซ่อนโทเค็น",

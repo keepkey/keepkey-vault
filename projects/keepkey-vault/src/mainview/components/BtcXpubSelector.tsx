@@ -2,7 +2,8 @@ import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import { BTC_SCRIPT_TYPES } from "../../shared/chains"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { AnimatedUsd } from "./AnimatedUsd"
 import type { BtcAccountSet, BtcScriptType } from "../../shared/types"
 
 interface BtcXpubSelectorProps {
@@ -62,7 +63,7 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
         {BTC_SCRIPT_TYPES.map(st => {
           const xpubData = activeAccount.xpubs.find(x => x.scriptType === st.scriptType)
           const isSelected = selAcct === activeAccount.accountIndex && selScript === st.scriptType
-          const hasBalance = (xpubData?.balanceUsd ?? 0) > 0
+          const hasBtcBalance = xpubData ? parseFloat(xpubData.balance || '0') > 0 : false
 
           return (
             <Box
@@ -88,15 +89,13 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
                 <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" lineHeight="1.2">
                   {st.addressPrefix}...
                 </Text>
-                {xpubData && hasBalance && (
-                  <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" lineHeight="1.2">
+                {xpubData && (
+                  <Text fontSize="10px" fontFamily="mono" color={hasBtcBalance ? "white" : "kk.textMuted"} fontWeight="500" lineHeight="1.2">
                     {formatBalance(xpubData.balance)} BTC
                   </Text>
                 )}
-                {xpubData && xpubData.balanceUsd > 0 && (
-                  <Text fontSize="9px" color="kk.textMuted" lineHeight="1.2">
-                    ${formatUsd(xpubData.balanceUsd)}
-                  </Text>
+                {xpubData && (
+                  <AnimatedUsd value={xpubData.balanceUsd || 0} fontSize="9px" fontWeight="500" lineHeight="1.2" />
                 )}
               </Flex>
             </Box>

@@ -10,7 +10,7 @@
 	"showFiltered_other": "显示 {{count}} 个已过滤代币",
 	"hideFiltered_one": "隐藏 {{count}} 个已过滤代币",
 	"hideFiltered_other": "隐藏 {{count}} 个已过滤代币",
-	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "疑似垃圾 ({{count}})",
 	"markAsSafe": "标记为安全",
 	"hideToken": "隐藏代币",

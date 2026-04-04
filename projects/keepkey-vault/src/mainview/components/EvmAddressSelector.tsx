@@ -1,6 +1,6 @@
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus, FaTimes } from "react-icons/fa"
-import { formatUsd } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import type { EvmAddressSet } from "../../shared/types"
 
 interface EvmAddressSelectorProps {
@@ -12,6 +12,7 @@ interface EvmAddressSelectorProps {
 }
 
 export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, onRemoveIndex, adding }: EvmAddressSelectorProps) {
+  const { fmtCompact } = useFiat()
   const { addresses, selectedIndex } = evmAddresses
 
   // Don't render if only one address tracked
@@ -56,7 +57,7 @@ export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, on
                 </Text>
                 {addr.balanceUsd > 0 && (
                   <Text fontSize="9px" color="kk.textMuted" lineHeight="1.2">
-                    ${formatUsd(addr.balanceUsd)}
+                    {fmtCompact(addr.balanceUsd)}
                   </Text>
                 )}
               </Flex>

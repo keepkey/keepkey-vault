@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify publish release upload-dmg submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli build-intel build-signed-intel
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -28,7 +28,9 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init
+	@git submodule update --init --recursive
+	@# Fetch all remotes (recursive) so upstream-behind checks see latest commits
+	@git submodule foreach --recursive --quiet 'git fetch --all --prune 2>/dev/null || true'
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
@@ -104,47 +106,100 @@ ifdef ELECTROBUN_DEVELOPER_ID
 endif
 	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
 
-# --- Intel Mac Build ---
-# Build the full app targeting Intel (x86_64) Macs from an Apple Silicon machine.
-# Requires: rustup target add x86_64-apple-darwin (one-time setup)
-# The Zcash CLI is cross-compiled, native node addons use prebuilt x64 binaries,
-# and Electrobun + Bun handle the rest.
+# --- Architecture Verification ---
+# Verify that the binaries in the tar.zst match the expected architecture.
+# Prevents mislabeled DMGs (e.g. ARM64 binaries in an x86_64-named DMG).
+# Usage: make verify-arch                    (auto-detects from uname -m)
+#        make verify-arch EXPECTED_ARCH=x86_64  (explicit override)
+EXPECTED_ARCH ?= $(ARCH)
 
-INTEL_DMG_NAME := KeepKey-Vault-$(VERSION)-x86_64.dmg
-
-build-intel: install build-zcash-cli-intel
-	@echo "=== Building Vault for Intel Mac (x86_64) ==="
-	@# Copy the cross-compiled zcash-cli into the expected location
-	@mkdir -p $(PROJECT_DIR)/zcash-cli/target/release
-	cp $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli \
-		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
-	@# Run the build under Rosetta so Bun + Electrobun produce x86_64 output
-	arch -x86_64 /bin/bash -c "cd $(PROJECT_DIR) && bun run build:stable"
-	@echo "=== Intel build complete ==="
-
-build-signed-intel: sign-check build-intel audit prune-bundle
-	@echo "Creating Intel Mac DMG..."
+verify-arch:
+	@echo "Verifying artifact architecture (expecting $(EXPECTED_ARCH))..."
 	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
 	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
-	STAGING=$$(mktemp -d); \
-	trap 'rm -rf "$$STAGING"' EXIT; \
-	zstd -d "$$TAR_ZST" -o "$$STAGING/app.tar" --force; \
-	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
-	rm "$$STAGING/app.tar"; \
-	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
-	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign failed"; exit 1); \
-	ln -s /Applications "$$STAGING/Applications"; \
-	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(INTEL_DMG_NAME)"; \
-	rm -f "$$DMG_OUT"; \
-	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
-	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
-	echo "Notarizing Intel DMG..."; \
-	ZIP_TMP=$$(mktemp).zip; \
-	(cd "$$(dirname "$$DMG_OUT")" && zip -q "$$ZIP_TMP" "$$(basename "$$DMG_OUT")"); \
-	xcrun notarytool submit --apple-id "$$ELECTROBUN_APPLEID" --password "$$ELECTROBUN_APPLEIDPASS" --team-id "$$ELECTROBUN_TEAMID" --wait "$$ZIP_TMP"; \
-	rm -f "$$ZIP_TMP"; \
-	xcrun stapler staple "$$DMG_OUT"; \
-	echo "Intel DMG ready: $$DMG_OUT"
+	TMPDIR=$$(mktemp -d); \
+	trap 'rm -rf "$$TMPDIR"' EXIT; \
+	zstd -d "$$TAR_ZST" -o "$$TMPDIR/app.tar" --force 2>/dev/null; \
+	LAUNCHER=$$(tar tf "$$TMPDIR/app.tar" | grep "MacOS/launcher$$" | head -1); \
+	BUN_BIN=$$(tar tf "$$TMPDIR/app.tar" | grep "MacOS/bun$$" | head -1); \
+	if [ -z "$$LAUNCHER" ]; then echo "ERROR: No launcher binary found in archive"; exit 1; fi; \
+	tar xf "$$TMPDIR/app.tar" -C "$$TMPDIR/" "$$LAUNCHER"; \
+	if [ -n "$$BUN_BIN" ]; then tar xf "$$TMPDIR/app.tar" -C "$$TMPDIR/" "$$BUN_BIN"; fi; \
+	FAIL=0; \
+	for BIN in "$$TMPDIR/$$LAUNCHER" "$$TMPDIR/$$BUN_BIN"; do \
+		[ -f "$$BIN" ] || continue; \
+		ACTUAL=$$(lipo -archs "$$BIN" 2>/dev/null); \
+		NAME=$$(basename "$$BIN"); \
+		echo "  $$NAME: $$ACTUAL"; \
+		if [ "$$ACTUAL" != "$(EXPECTED_ARCH)" ]; then \
+			echo ""; \
+			echo "ERROR: Architecture mismatch! $$NAME is $$ACTUAL but expected $(EXPECTED_ARCH)"; \
+			FAIL=1; \
+		fi; \
+	done; \
+	if [ "$$FAIL" = "1" ]; then \
+		echo ""; \
+		echo "The artifact contains binaries for the wrong architecture."; \
+		echo "Use CI macOS runners for correct architecture builds:"; \
+		echo "  macos-13 → x86_64 (Intel)"; \
+		echo "  macos-14 → arm64  (Apple Silicon)"; \
+		echo ""; \
+		echo "To sign CI-built artifacts locally: make sign-release"; \
+		exit 1; \
+	fi; \
+	echo "Architecture verified: $(EXPECTED_ARCH)"
+
+# --- Intel Mac Build (DEPRECATED) ---
+# WARNING: arch -x86_64 does NOT make Bun/Electrobun produce x86_64 output.
+# Bun is ARM64-only — the resulting binary will STILL be ARM64 regardless.
+# Use CI (macos-13 runner) for real Intel builds, then sign locally with:
+#   make sign-release
+INTEL_DMG_NAME := KeepKey-Vault-$(VERSION)-x86_64.dmg
+
+build-intel:
+	@echo ""
+	@echo "ERROR: build-intel is DEPRECATED and does NOT produce x86_64 binaries."
+	@echo ""
+	@echo "Bun and Electrobun are ARM64-only on Apple Silicon. The arch -x86_64"
+	@echo "wrapper has no effect — the output is still ARM64, just mislabeled."
+	@echo ""
+	@echo "For real Intel Mac builds:"
+	@echo "  1. Push to a release/* branch or v* tag (CI creates draft release)"
+	@echo "     Or trigger manually:  gh workflow run build.yml"
+	@echo "  2. Sign the CI artifacts locally:  make sign-release"
+	@echo ""
+	@exit 1
+
+build-signed-intel:
+	@echo ""
+	@echo "ERROR: build-signed-intel is DEPRECATED. See 'make build-intel' for details."
+	@echo "Use:  make sign-release"
+	@echo ""
+	@exit 1
+
+# --- Electrobun x64 Core (macOS 12 support) ---
+# Cross-compiles Electrobun core binaries for Intel Mac from ARM64.
+# Produces: artifacts/electrobun-core-darwin-x64.tar.gz
+# Prerequisites: run `cd modules/electrobun/package && bun install && bun build.ts` once to vendor deps.
+
+ELECTROBUN_FORK_REPO ?= BitHighlander/electrobun
+ELECTROBUN_FORK_TAG ?= v1.16.1-keepkey.1
+
+build-electrobun-x64-core:
+	@echo "Cross-compiling Electrobun x64 core from fork..."
+	./scripts/build-electrobun-x64-core.sh
+
+publish-electrobun-x64-core: build-electrobun-x64-core
+	@test -f artifacts/electrobun-core-darwin-x64.tar.gz || (echo "ERROR: tarball not found"; exit 1)
+	@echo "Publishing Electrobun x64 core to $(ELECTROBUN_FORK_REPO)..."
+	@gh release view $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) >/dev/null 2>&1 && \
+		gh release upload $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) --clobber \
+			artifacts/electrobun-core-darwin-x64.tar.gz || \
+		gh release create $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) \
+			--title "Electrobun Core x64 (macOS 12 support)" \
+			--notes "Cross-compiled Electrobun core for macOS 12+ Intel. Built from keepkey/macos-12-support branch. Bun 1.1.20 (last macOS 12 compatible). No resign-swizzle (fixes crash on app deactivation)." \
+			artifacts/electrobun-core-darwin-x64.tar.gz
+	@echo "Published: https://github.com/$(ELECTROBUN_FORK_REPO)/releases/tag/$(ELECTROBUN_FORK_TAG)"
 
 # --- Vault ---
 
@@ -188,7 +243,7 @@ build-signed: sign-check
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME)
 
 # Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
-dmg:
+dmg: verify-arch
 	@echo "Creating DMG from tar.zst artifact..."
 	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
 	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
@@ -229,6 +284,31 @@ test-integration: test-rest
 
 test-rest:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-api.test.ts
+
+test-emu:
+	cd $(PROJECT_DIR) && bun test tests/emulator/
+
+# Run python-keepkey consistency tests against the kkemu binary (UDP).
+# Launches kkemu, runs pytest, then kills kkemu.
+test-emu-python:
+	@echo "Starting kkemu (UDP 11044/11045)..."
+	@./firmware/emulators/7.10.0-alpha/kkemu & KKPID=$$!; \
+	sleep 1; \
+	echo "Running python-keepkey tests..."; \
+	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
+	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python \
+	python3 -m pytest \
+		test_basic.py \
+		test_msg_getaddress.py \
+		test_msg_ethereum_getaddress.py \
+		test_msg_ethereum_signtx_xfer.py \
+		test_msg_ethereum_erc20_approve.py \
+		test_msg_cosmos_getaddress.py \
+		test_msg_ethereum_message.py \
+		-v 2>&1; \
+	EXIT=$$?; \
+	kill $$KKPID 2>/dev/null; \
+	exit $$EXIT
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -305,6 +385,175 @@ release: sign-check build-signed
 		$$UPDATE_JSON $$TAR_ZST
 	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
 
+# Sign CI-built macOS artifacts and upload to draft release.
+# Downloads both arm64 and x64 tar.zst from CI, signs all binaries,
+# re-packs signed tar.zst (auto-update), creates DMGs, notarizes, and uploads.
+# Requires: draft release v$(VERSION) created by CI (push to release/* or v* tag).
+# Usage: make sign-release
+sign-release: sign-check
+	@echo "=== Signing macOS release v$(VERSION) ==="
+	@# Verify draft release exists before doing any work
+	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
+		(echo "ERROR: No release v$(VERSION) found." && \
+		 echo "Create one by pushing to a release/* branch or v* tag, or run:" && \
+		 echo "  gh workflow run build.yml --repo $(GITHUB_REPO)" && exit 1)
+	@# Clean stale artifacts from previous runs to prevent uploading old files
+	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg
+	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst
+	@mkdir -p $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
+	@echo "Downloading CI-built macOS artifacts..."
+	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
+		--pattern "stable-macos-arm64-keepkey-vault.app.tar.zst" \
+		--dir $(PROJECT_DIR)/artifacts/ci-arm64 --clobber 2>/dev/null && \
+		echo "  Downloaded arm64 artifact" || echo "  No arm64 artifact found"
+	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
+		--pattern "stable-macos-x64-keepkey-vault.app.tar.zst" \
+		--dir $(PROJECT_DIR)/artifacts/ci-x64 --clobber 2>/dev/null && \
+		echo "  Downloaded x64 artifact" || echo "  No x64 artifact found"
+	@# Fail if neither artifact was found
+	@if [ ! -f $(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst ] && \
+	    [ ! -f $(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst ]; then \
+		echo ""; \
+		echo "ERROR: No CI macOS artifacts found on release v$(VERSION)."; \
+		echo "Ensure CI has completed and uploaded artifacts before running sign-release."; \
+		rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64; \
+		exit 1; \
+	fi
+	@echo ""
+	@# Process arm64
+	@if [ -f $(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst ]; then \
+		echo "--- Signing arm64 artifact ---"; \
+		$(MAKE) _sign-one-dmg \
+			_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst" \
+			_DMG_ARCH=arm64; \
+	fi
+	@# Process x64
+	@if [ -f $(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst ]; then \
+		echo "--- Signing x86_64 artifact ---"; \
+		$(MAKE) _sign-one-dmg \
+			_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst" \
+			_DMG_ARCH=x86_64; \
+	fi
+	@echo ""
+	@# Verify at least one DMG was produced in this run
+	@PRODUCED=0; \
+	for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
+		[ -f "$$DMG" ] && PRODUCED=1; \
+	done; \
+	if [ "$$PRODUCED" = "0" ]; then \
+		echo "ERROR: No DMGs were produced — signing may have failed."; \
+		rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64; \
+		exit 1; \
+	fi
+	@echo "=== Uploading signed artifacts ==="
+	@for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
+		[ -f "$$DMG" ] || continue; \
+		echo "  Uploading $$(basename $$DMG)..."; \
+		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$DMG"; \
+	done
+	@for TAR in $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst; do \
+		[ -f "$$TAR" ] || continue; \
+		echo "  Uploading $$(basename $$TAR) (signed auto-update payload)..."; \
+		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$TAR"; \
+	done
+	@echo ""
+	@echo "=== Release v$(VERSION) signed and uploaded ==="
+	@echo "https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
+	@# Cleanup CI temp dirs
+	@rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
+
+# Internal: sign a single tar.zst, produce a signed tar.zst (auto-update) and DMG
+# Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
+_sign-one-dmg:
+	@test -f "$(_SRC_TAR)" || (echo "ERROR: $(_SRC_TAR) not found"; exit 1)
+	@STAGING=$$(mktemp -d); \
+	trap 'rm -rf "$$STAGING"' EXIT; \
+	echo "  Extracting..."; \
+	zstd -d "$(_SRC_TAR)" -o "$$STAGING/app.tar" --force; \
+	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
+	rm "$$STAGING/app.tar"; \
+	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
+	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
+	echo "  Verifying architecture ($(_DMG_ARCH))..."; \
+	ACTUAL=$$(lipo -archs "$$APP/Contents/MacOS/launcher" 2>/dev/null); \
+	if [ "$$ACTUAL" != "$(_DMG_ARCH)" ]; then \
+		echo "ERROR: Binary is $$ACTUAL but expected $(_DMG_ARCH)"; exit 1; \
+	fi; \
+	./scripts/sign-macos-app.sh "$$APP" "$(PROJECT_DIR)/entitlements.plist"; \
+	echo "  Re-packing signed app into tar.zst for auto-update..."; \
+	SIGNED_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/$$(basename $(_SRC_TAR))"; \
+	(cd "$$STAGING" && tar cf - "$$(basename $$APP)") | zstd -o "$$SIGNED_TAR" --force; \
+	echo "  Signed tar.zst: $$SIGNED_TAR"; \
+	ln -s /Applications "$$STAGING/Applications"; \
+	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-$(_DMG_ARCH).dmg"; \
+	rm -f "$$DMG_OUT"; \
+	echo "  Creating DMG..."; \
+	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	echo "  Signing DMG..."; \
+	codesign --force --timestamp \
+		--sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" \
+		"$$DMG_OUT"; \
+	echo "  Notarizing DMG..."; \
+	ZIP_TMP=$$(mktemp).zip; \
+	(cd "$$(dirname "$$DMG_OUT")" && zip -q "$$ZIP_TMP" "$$(basename "$$DMG_OUT")"); \
+	xcrun notarytool submit --apple-id "$$ELECTROBUN_APPLEID" --password "$$ELECTROBUN_APPLEIDPASS" \
+		--team-id "$$ELECTROBUN_TEAMID" --wait "$$ZIP_TMP"; \
+	rm -f "$$ZIP_TMP"; \
+	echo "  Stapling notarization ticket..."; \
+	xcrun stapler staple "$$DMG_OUT"; \
+	echo "  Done: $$DMG_OUT"
+
+# Verify that all MacOS/ binaries have required entitlements (allow-jit).
+# Use after signing to confirm bun won't crash with SIGTRAP.
+verify-entitlements:
+	@echo "Verifying entitlements on signed artifacts..."
+	@FOUND=0; \
+	for TAR_ZST in $(PROJECT_DIR)/artifacts/*-keepkey-vault.app.tar.zst; do \
+		[ -f "$$TAR_ZST" ] || continue; \
+		FOUND=1; \
+		LABEL=$$(basename "$$TAR_ZST" .app.tar.zst); \
+		echo "--- $$LABEL ---"; \
+		TMPDIR=$$(mktemp -d); \
+		trap 'rm -rf "$$TMPDIR"' EXIT; \
+		zstd -d "$$TAR_ZST" -o "$$TMPDIR/app.tar" --force 2>/dev/null; \
+		tar xf "$$TMPDIR/app.tar" -C "$$TMPDIR/"; \
+		rm "$$TMPDIR/app.tar"; \
+		APP=$$(find "$$TMPDIR" -name "*.app" -maxdepth 1 | head -1); \
+		if [ -z "$$APP" ]; then echo "  ERROR: No .app found"; continue; fi; \
+		FAIL=0; \
+		for BIN in "$$APP/Contents/MacOS/"*; do \
+			[ -f "$$BIN" ] || continue; \
+			NAME=$$(basename "$$BIN"); \
+			file -b "$$BIN" 2>/dev/null | grep -q "Mach-O" || continue; \
+			if codesign -d --entitlements :- "$$BIN" 2>/dev/null | grep -q "allow-jit"; then \
+				echo "  PASS: $$NAME has allow-jit"; \
+			else \
+				echo "  FAIL: $$NAME missing allow-jit"; FAIL=1; \
+			fi; \
+		done; \
+		rm -rf "$$TMPDIR"; \
+		if [ "$$FAIL" = "1" ]; then \
+			echo "  ENTITLEMENT CHECK FAILED — bun will crash with SIGTRAP"; \
+			exit 1; \
+		fi; \
+	done; \
+	if [ "$$FOUND" = "0" ]; then echo "No tar.zst artifacts found in $(PROJECT_DIR)/artifacts/"; exit 1; fi; \
+	echo ""; \
+	echo "All MacOS/ binaries have required entitlements."
+
+# Upload all signed DMGs to the draft release
+upload-all-dmgs: sign-check
+	@echo "Uploading all signed DMGs for v$(VERSION)..."
+	@FOUND=0; \
+	for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
+		[ -f "$$DMG" ] || continue; \
+		FOUND=1; \
+		echo "  Uploading $$(basename $$DMG)..."; \
+		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$DMG"; \
+	done; \
+	if [ "$$FOUND" = "0" ]; then echo "ERROR: No DMGs found. Run 'make build-signed' or 'make sign-release' first."; exit 1; fi
+	@echo "DMGs uploaded to https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
+
 help:
 	@echo "KeepKey Vault v11 - Electrobun Desktop App"
 	@echo ""
@@ -319,9 +568,13 @@ help:
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
-	@echo "  make build-intel    - Build for Intel Mac (x86_64) from Apple Silicon"
-	@echo "  make build-signed-intel - Full Intel Mac pipeline: build → DMG → sign → notarize"
+	@echo "  make verify-arch    - Verify build artifact matches expected architecture"
+	@echo "  make verify-entitlements - Verify MacOS/ binaries have allow-jit entitlement"
+	@echo "  make sign-release   - Download CI artifacts, sign + repack, upload DMGs + auto-update tar.zst"
+	@echo "  make upload-all-dmgs - Upload all signed DMGs to draft release"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
+	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 12)"
+	@echo "  make publish-electrobun-x64-core - Build + publish x64 core to fork releases"
 	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
@@ -334,3 +587,65 @@ help:
 	@echo "  make test           - Run all tests"
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
+	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
+
+# --- Pre-release Validation ---
+preflight: submodules
+	@echo "╔══════════════════════════════════════════╗"
+	@echo "║   PRE-RELEASE VALIDATION                 ║"
+	@echo "╚══════════════════════════════════════════╝"
+	@echo ""
+	@echo "1. SUBMODULE PINS"
+	@fail=0; \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do \
+		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
+		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
+		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
+		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
+	done; \
+	echo ""; \
+	echo "2. FIRMWARE NESTED SUBMODULES"; \
+	drift=$$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+' || true); \
+	if [ -n "$$drift" ]; then echo "   ❌ DRIFT:"; echo "$$drift"; fail=1; \
+	else echo "   ✅ All clean"; fi; \
+	echo ""; \
+	echo "3. UPSTREAM BEHIND"; \
+	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/keepkey-firmware|origin/master" "modules/electrobun|origin/keepkey/macos-12-support"; do \
+		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
+		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
+		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
+		else echo "   ⚠️  $$mod: $$behind behind $$ref"; fi; \
+	done; \
+	echo ""; \
+	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware|BitHighlander/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun|BitHighlander/electrobun"; do \
+		mod=$$(echo "$$pair" | cut -d'|' -f1); \
+		repo=$$(echo "$$pair" | cut -d'|' -f2); \
+		fork=$$(echo "$$pair" | cut -d'|' -f3); \
+		sha=$$(cd "$$mod" && git rev-parse HEAD); \
+		total=$$(gh api "repos/$$repo/commits/$$sha/check-runs" --jq '.total_count' 2>/dev/null || echo "0"); \
+		if [ "$$total" = "0" ] && [ "$$repo" != "$$fork" ]; then \
+			total=$$(gh api "repos/$$fork/commits/$$sha/check-runs" --jq '.total_count' 2>/dev/null || echo "0"); \
+			repo="$$fork"; \
+		fi; \
+		if [ "$$total" = "0" ]; then echo "   ⚠️  $$mod: no CI"; \
+		else \
+			failed=$$(gh api "repos/$$repo/commits/$$sha/check-runs" --jq '[.check_runs[] | select(.conclusion == "failure")] | length' 2>/dev/null || echo "0"); \
+			if [ "$$failed" = "0" ]; then echo "   ✅ $$mod: $$total/$$total green"; \
+			else echo "   ❌ $$mod: $$failed/$$total FAILED"; fail=1; fi; \
+		fi; \
+	done; \
+	echo ""; \
+	echo "5. LOCAL BUILD ARTIFACTS"; \
+	test -f modules/hdwallet/packages/hdwallet-keepkey/dist/typeRegistry.js && echo "   ✅ hdwallet dist/" || { echo "   ❌ hdwallet dist/ — run: make modules-build"; fail=1; }; \
+	test -f modules/proto-tx-builder/dist/index.js && echo "   ✅ proto-tx-builder dist/" || { echo "   ❌ proto-tx-builder dist/ — run: make modules-build"; fail=1; }; \
+	test -f modules/device-protocol/lib/messages_pb.js && echo "   ✅ device-protocol lib/" || { echo "   ❌ device-protocol lib/ — run: cd modules/device-protocol && npm run build"; fail=1; }; \
+	echo ""; \
+	echo "6. VAULT TYPECHECK"; \
+	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
+	if [ "$$errs" = "0" ]; then echo "   ✅ clean"; \
+	else echo "   ❌ $$errs type errors"; fail=1; fi; \
+	echo ""; \
+	echo "════════════════════════════════════════════"; \
+	if [ "$$fail" = "0" ]; then echo "✅ ALL GATES PASSED — ready to cut release"; \
+	else echo "❌ ISSUES FOUND — fix before release"; exit 1; fi

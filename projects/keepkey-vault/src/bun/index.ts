@@ -22,7 +22,7 @@ console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...ar
 logStream.write(`\n=== New session: ${_ts()} ===\n`)
 console.log(`[Boot] Log file: ${LOG_FILE}`)
 
-import { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import pkg from "../../package.json"
 
 // ── Global error handlers (MUST be first — prevents silent crashes) ──
@@ -46,13 +46,13 @@ import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
+import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
-import { generateReport, reportToPdfBuffer } from "./reports"
+import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import { startCamera, stopCamera } from "./camera"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
@@ -235,6 +235,7 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 const auth = new AuthStore()
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
+let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
@@ -242,6 +243,7 @@ let preReleaseUpdates = false
 
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
+	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	swapsEnabled = getSetting('swaps_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
@@ -249,6 +251,40 @@ function loadSettings() {
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
+// WalletConnect manager — lazily initialized when user pairs
+let wcManager: WalletConnectManager | null = null
+function getOrCreateWcManager(): WalletConnectManager {
+	if (wcManager) return wcManager
+	wcManager = new WalletConnectManager({
+		getEvmAddressInfo: () => {
+			const sel = evmAddresses.getSelectedAddress()
+			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
+		},
+		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
+		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
+		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
+		requestSigningApproval: async (info) => {
+			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
+			try {
+				mainWindow.setAlwaysOnTop(true)
+				mainWindow.focus()
+			} catch { /* window not ready */ }
+			try {
+				return await auth.requestSigningApproval(info.id)
+			} finally {
+				try { mainWindow.setAlwaysOnTop(false) } catch {}
+			}
+		},
+		dismissSigning: (id) => {
+			try { rpc.send['signing-dismissed']({ id }) } catch {}
+		},
+		log: (msg) => console.log(msg),
+		onSessionsChanged: (sessions) => {
+			try { rpc.send['wc-sessions'](sessions) } catch {}
+		},
+	})
+	return wcManager
+}
 
 function getAppSettings() {
 	const servers = getPioneerServers()
@@ -262,6 +298,7 @@ function getAppSettings() {
 		activePioneerServer,
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
+		walletConnectEnabled,
 		swapsEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
@@ -306,13 +343,35 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['pair-dismissed']({}) } catch { /* webview not ready */ }
 	},
 	getVersion: () => appVersionCache,
+	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
+}
+
+/** Check if a port is already in use by trying to connect to it */
+async function isPortInUse(port: number): Promise<boolean> {
+	try {
+		const resp = await fetch(`http://localhost:${port}/api/v1/health/fast`, { signal: AbortSignal.timeout(2000) })
+		return resp.ok
+	} catch {
+		return false
+	}
 }
 
 /** Start or stop the REST API server based on the persisted setting */
-function applyRestApiState() {
+async function applyRestApiState() {
 	if (restApiEnabled && !restServer) {
-		restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
-		console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+		// Check if another instance is already bound to the port
+		const inUse = await isPortInUse(REST_API_PORT)
+		if (inUse) {
+			console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance. Exiting.`)
+			process.exit(1)
+		}
+		try {
+			restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
+			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
+		} catch (err) {
+			console.error(`[Vault] FATAL: failed to bind REST API on port ${REST_API_PORT}:`, err)
+			process.exit(1)
+		}
 	} else if (!restApiEnabled && restServer) {
 		restServer.stop()
 		restServer = null
@@ -325,6 +384,72 @@ function applyRestApiState() {
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
 import type { SwapQuote } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
+
+// ── Emulator confirm helper ──────────────────────────────────────────
+// Wraps any operation that triggers firmware confirm_helper() (blocking C loop).
+//
+// The key challenge: multi-chunk messages (e.g. LoadDevice with a real mnemonic)
+// span 2+ HID packets. If BA+DLD are pre-written to rb_main_in before all chunks
+// are consumed, usb_rx_helper treats BA as a continuation chunk → corruption.
+//
+// Solution (proven in test harness — 17/17 pass):
+// 1. Pause poll, start the operation (transport writes N chunks)
+// 2. Poll (N-1) times to consume all chunks except the last
+// 3. Write BA+DLD to ring buffers
+// 4. Poll once — firmware reads last chunk, assembles, dispatches,
+//    enters confirm_helper, finds BA+DLD → exits immediately
+// 5. Resume poll for transport to read the response
+async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
+	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
+	const { prewriteConfirmations } = await import('./emulator-transport')
+
+	// Get the transport delegate for chunk counting
+	const delegate = engine.emuDelegate
+	if (delegate) delegate.chunkCount = 0
+
+	pausePoll()
+
+	try {
+		const promise = fn()
+		await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
+
+		const numChunks = delegate?.chunkCount || 1
+		console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
+
+		// Consume all chunks except the last
+		for (let i = 0; i < numChunks - 1; i++) {
+			emuPollOnce()
+		}
+
+		// Pre-write all confirmations then poll once. Both BA+DLD go to iface 1
+		// (same FIFO) so confirm_helper reads them in order without starvation.
+		prewriteConfirmations(confirmCount)
+		emuPollOnce()
+
+		// Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
+		// to deliver the firmware response.
+		resumePoll()
+
+		const result = await promise
+		flushRingBuffers() // drain any unused pre-written confirmations
+		saveEmulatorState()
+		return result
+	} finally {
+		resumePoll() // idempotent — ensures poll is always restored
+	}
+}
+
+// ── Emulator interactive signing helper ─────────────────────────────
+// Wraps signing/address-display operations that need user confirmation
+// on the emulator window. Setup ops (loadDevice, wipe) keep using
+// emuConfirmOp for auto-confirm.
+async function emuSigningOp(
+	fn: () => Promise<any>,
+	details: { operation: string; chain?: string; to?: string; value?: string; memo?: string },
+): Promise<any> {
+	const { emuInteractiveConfirm } = await import('./emulator-window')
+	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
+}
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
@@ -350,9 +475,105 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			resetDevice: async (params) => { await engine.resetDevice(params) },
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
-			loadDevice: async (params) => { await engine.loadDevice(params) },
+			loadDevice: async (params) => {
+				if (engine.isEmulator) {
+					// Save mnemonic FIRST — connectEmulator's auto-reload (stale
+					// storage key recovery) will pick up the NEW seed instead of
+					// the previously saved one.
+					if (params.mnemonic) {
+						const { saveMnemonic } = await import('./emulator-keychain')
+						const { getActiveFlashName } = await import('./emulator')
+						console.log('[Vault] Saving new mnemonic before load (flash=%s)', getActiveFlashName())
+						saveMnemonic(getActiveFlashName(), params.mnemonic)
+					}
+
+					// Firmware rejects loadDevice on an already-initialized device.
+					// Wipe first so the new mnemonic actually takes effect.
+					if (engine.cachedFeatures?.initialized) {
+						console.log('[Vault] Emulator already initialized — wiping before loadDevice')
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						const { flushRingBuffers } = await import('./emulator')
+						flushRingBuffers()
+						// connectEmulator may auto-reload our just-saved mnemonic
+						// via the stale-storage-key recovery path.
+						await engine.connectEmulator()
+					}
+
+					// If auto-reload already initialized the device with the new
+					// seed, skip the manual loadDevice — firmware would reject it.
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
+					} else {
+						console.log('[Vault] Device already initialized after reconnect — skipping manual loadDevice')
+					}
+
+					// Drain stale ButtonAck + reconnect for clean transport
+					const { flushRingBuffers: flush } = await import('./emulator')
+					flush()
+					await engine.connectEmulator()
+
+					// Verify the firmware actually holds the mnemonic we loaded
+					if (params.mnemonic) {
+						const actual = await engine.getEmulatorMnemonic()
+						if (!actual) {
+							console.error('[Vault] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+						} else if (actual.trim() !== params.mnemonic.trim()) {
+							console.error('[Vault] SEED VERIFY FAIL — firmware mnemonic does NOT match loaded seed')
+							console.error('[Vault]   expected first word: %s', params.mnemonic.trim().split(/\s+/)[0])
+							console.error('[Vault]   actual first word:   %s', actual.trim().split(/\s+/)[0])
+						} else {
+							console.log('[Vault] SEED VERIFY OK — firmware mnemonic matches loaded seed')
+						}
+					}
+					return
+				}
+				await engine.loadDevice(params)
+			},
 			verifySeed: async (params) => { return await engine.verifySeed(params) },
-			applySettings: async (params) => { await engine.applySettings(params) },
+			verifySeedChallenge: async () => {
+				if (!engine.isEmulator) throw new Error('Challenge-based verify is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const mnemonic = loadMnemonic(getActiveFlashName())
+				if (!mnemonic) throw new Error('No saved mnemonic found for this emulator')
+				const words = mnemonic.trim().split(/\s+/)
+				const wordCount = words.length
+				// Pick 3 random unique positions (1-indexed)
+				const all = Array.from({ length: wordCount }, (_, i) => i + 1)
+				for (let i = all.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[all[i], all[j]] = [all[j], all[i]]
+				}
+				const positions = all.slice(0, 3).sort((a, b) => a - b)
+				return { positions, wordCount }
+			},
+			verifySeedSubmit: async (params) => {
+				if (!engine.isEmulator) throw new Error('Challenge-based verify is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const mnemonic = loadMnemonic(getActiveFlashName())
+				if (!mnemonic) return { success: false, message: 'No saved mnemonic — cannot verify' }
+				const words = mnemonic.trim().split(/\s+/)
+				for (const { position, word } of params.answers) {
+					if (position < 1 || position > words.length) {
+						return { success: false, message: `Invalid word position: ${position}` }
+					}
+					if (word.trim().toLowerCase() !== words[position - 1].toLowerCase()) {
+						return { success: false, message: `Word #${position} is incorrect` }
+					}
+				}
+				return { success: true, message: 'Seed verified successfully' }
+			},
+			applySettings: async (params) => {
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.applySettings({ ...params, skipRefresh: true }))
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+					return
+				}
+				await engine.applySettings(params)
+			},
 			changePin: async () => { await engine.changePin() },
 			removePin: async () => { await engine.removePin() },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
@@ -441,8 +662,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// the transport lock is held while waiting for PIN input,
 				// so wipe() would deadlock without this.
 				await engine.wallet.cancel().catch(() => {})
-				await engine.wallet.wipe()
-				await engine.syncState()
+				if (engine.isEmulator) {
+					await emuConfirmOp(() => engine.wallet!.wipe())
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+				} else {
+					await engine.wallet.wipe()
+					await engine.syncState()
+				}
 				return { success: true }
 			},
 			getPublicKeys: async (params) => {
@@ -453,63 +681,81 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Address derivation ────────────────────────────────────
 			btcGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.btcGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.btcGetAddress(params), { operation: 'btcGetAddress', chain: 'Bitcoin' })
+					: await engine.wallet.btcGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('bitcoin', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			ethGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.ethGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.ethGetAddress(params), { operation: 'ethGetAddress', chain: 'Ethereum' })
+					: await engine.wallet.ethGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('ethereum', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			cosmosGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.cosmosGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.cosmosGetAddress(params), { operation: 'cosmosGetAddress', chain: 'Cosmos' })
+					: await engine.wallet.cosmosGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('cosmos', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			thorchainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.thorchainGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.thorchainGetAddress(params), { operation: 'thorchainGetAddress', chain: 'THORChain' })
+					: await engine.wallet.thorchainGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('thorchain', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			mayachainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.mayachainGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.mayachainGetAddress(params), { operation: 'mayachainGetAddress', chain: 'Maya' })
+					: await engine.wallet.mayachainGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('mayachain', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			osmosisGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.osmosisGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.osmosisGetAddress(params), { operation: 'osmosisGetAddress', chain: 'Osmosis' })
+					: await engine.wallet.osmosisGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('osmosis', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			xrpGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.rippleGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.rippleGetAddress(params), { operation: 'xrpGetAddress', chain: 'XRP' })
+					: await engine.wallet.rippleGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('ripple', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			solanaGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.solanaGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.solanaGetAddress(params), { operation: 'solanaGetAddress', chain: 'Solana' })
+					: await engine.wallet.solanaGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			tronGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.tronGetAddress(params)
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.tronGetAddress(params), { operation: 'tronGetAddress', chain: 'Tron' })
+					: await engine.wallet.tronGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr)
 				return result
@@ -518,7 +764,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				// Default to non-bounceable (UQ) — bounceable (EQ) bounces funds if wallet is uninitialized
 				const bounceable = params.bounceable ?? false
-				const result = await engine.wallet.tonGetAddress({ ...params, bounceable })
+				const addrParams = { ...params, bounceable }
+				const result = (engine.isEmulator && params.showDisplay)
+					? await emuSigningOp(() => engine.wallet!.tonGetAddress(addrParams), { operation: 'tonGetAddress', chain: 'TON' })
+					: await engine.wallet.tonGetAddress(addrParams)
 				const addr = typeof result === 'string' ? result : result?.address
 				if (addr) cacheAddress('ton', JSON.stringify(params.addressNList || []), addr)
 				return result
@@ -527,18 +776,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.btcSignTx(params),
+					{ operation: 'btcSignTx', chain: 'Bitcoin', to: params.outputs?.[0]?.address, value: params.outputs?.[0]?.amount },
+				)
 				return await engine.wallet.btcSignTx(params)
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.ethSignTx(params),
+					{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value },
+				)
 				return await engine.wallet.ethSignTx(params)
 			},
 			ethSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.ethSignMessage(params),
+					{ operation: 'ethSignMessage', chain: 'Ethereum', memo: params.message?.toString()?.slice(0, 64) },
+				)
 				return await engine.wallet.ethSignMessage(params)
 			},
 			ethSignTypedData: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.ethSignTypedData(params),
+					{ operation: 'ethSignTypedData', chain: 'Ethereum' },
+				)
 				return await engine.wallet.ethSignTypedData(params)
 			},
 			ethVerifyMessage: async (params) => {
@@ -547,22 +812,42 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			cosmosSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.cosmosSignTx(params),
+					{ operation: 'cosmosSignTx', chain: 'Cosmos' },
+				)
 				return await engine.wallet.cosmosSignTx(params)
 			},
 			thorchainSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.thorchainSignTx(params),
+					{ operation: 'thorchainSignTx', chain: 'THORChain' },
+				)
 				return await engine.wallet.thorchainSignTx(params)
 			},
 			mayachainSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.mayachainSignTx(params),
+					{ operation: 'mayachainSignTx', chain: 'Maya' },
+				)
 				return await engine.wallet.mayachainSignTx(params)
 			},
 			osmosisSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.osmosisSignTx(params),
+					{ operation: 'osmosisSignTx', chain: 'Osmosis' },
+				)
 				return await engine.wallet.osmosisSignTx(params)
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.isEmulator) return emuSigningOp(
+					() => engine.wallet!.rippleSignTx(params),
+					{ operation: 'xrpSignTx', chain: 'XRP' },
+				)
 				return await engine.wallet.rippleSignTx(params)
 			},
 			solanaSignTx: async (params) => {
@@ -603,7 +888,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				console.debug(`[solanaSignTx] Calling hdwallet.solanaSignTx`)
-				const result = await engine.wallet.solanaSignTx(deviceParams)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.solanaSignTx(deviceParams), { operation: 'solanaSignTx', chain: 'Solana' })
+					: await engine.wallet.solanaSignTx(deviceParams)
 
 				console.debug(`[solanaSignTx] hdwallet result: hasSig=${!!result?.signature} sigLen=${result?.signature?.length || 0}`)
 
@@ -631,7 +918,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.solanaSignMessage(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.solanaSignMessage(params), { operation: 'solanaSignMessage', chain: 'Solana' })
+					: await engine.wallet.solanaSignMessage(params)
 				if (!result) throw new Error('solanaSignMessage returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -644,7 +933,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			tronSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.tronSignTx(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tronSignTx(params), { operation: 'tronSignTx', chain: 'Tron' })
+					: await engine.wallet.tronSignTx(params)
 				if (!result) throw new Error('tronSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -659,7 +950,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			tonSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await engine.wallet.tonSignTx(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tonSignTx(params), { operation: 'tonSignTx', chain: 'TON' })
+					: await engine.wallet.tonSignTx(params)
 				if (!result) throw new Error('tonSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -694,8 +987,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Filter chains by firmware version — don't derive addresses for unsupported chains
+				// Zcash (transparent + shielded) gated behind feature flag
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const allChains = getAllChains().filter(c => isChainSupported(c, fwVersion))
+				const allChains = getAllChains().filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					return true
+				})
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
@@ -742,8 +1040,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId })
 				}
 
-				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.)
+				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
 				for (const chain of nonEvmChains) {
+					if (chain.hidden) continue
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 						if (chain.scriptType) addrParams.scriptType = chain.scriptType
@@ -791,7 +1090,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Build networkId → chainId lookup for token grouping (lowercase keys — Pioneer may return different casing)
 				const networkToChain = new Map<string, string>()
 				for (const chain of allChains) {
-					if (chain.networkId) networkToChain.set(chain.networkId.toLowerCase(), chain.id)
+					if (!chain.networkId) continue
+					// Non-hidden chains take priority (zcash vs zcash-shielded share the same networkId)
+					if (chain.hidden && networkToChain.has(chain.networkId.toLowerCase())) continue
+					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
 				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
@@ -928,11 +1230,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					let btcTotalBalance = 0
 					let btcTotalUsd = 0
-					let btcAddress = ''
+					let btcSelectedAddress = '' // address from the user's selected script type
+					let btcFallbackAddress = '' // first address from any xpub (fallback)
 
 					// Aggregate EVM entries per-chain (sum across address indices)
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
+					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
 					for (const entry of pubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
@@ -943,9 +1247,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const usd = Number(match?.valueUsd ?? 0)
 							btcTotalBalance += bal
 							btcTotalUsd += usd
-							if (!btcAddress && match?.address) btcAddress = match.address
-							// Update per-xpub balance in BtcAccountManager
-							btcAccounts.updateXpubBalance(entry.pubkey, String(match?.balance ?? '0'), usd)
+							// Prefer address from user's selected xpub type for display + swaps
+							if (match?.address) {
+								if (!btcFallbackAddress) btcFallbackAddress = match.address
+								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
+							}
+							// Update per-xpub balance in BtcAccountManager + persist to cache
+							const xpubBal = String(match?.balance ?? '0')
+							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
+							try {
+								const devId = engine.getDeviceState().deviceId
+								if (devId) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+							} catch { /* non-fatal */ }
 							continue
 						}
 
@@ -988,6 +1301,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							chainId: entry.chainId, symbol: entry.symbol,
 							balance: String(match?.balance ?? '0'),
 							balanceUsd: nativeUsd + tokenUsdTotal,
+							nativeBalanceUsd: nativeUsd,
 							address: match?.address || entry.pubkey,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
 						})
@@ -1002,19 +1316,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
 							balanceUsd: agg.usd + tokenUsdTotal,
+							nativeBalanceUsd: agg.usd,
 							address: agg.address,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
 						})
 					}
 
-					// Push one aggregated BTC entry
+					// Push one aggregated BTC entry — use selected xpub's address so swaps/display match user's chosen script type
 					if (btcPubkeyEntries.length > 0) {
-						const selectedXpub = btcAccounts.getSelectedXpub()
+						const btcAddress = btcSelectedAddress || btcFallbackAddress
 						results.push({
 							chainId: 'bitcoin', symbol: 'BTC',
 							balance: btcTotalBalance > 0 ? btcTotalBalance.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') : '0',
 							balanceUsd: btcTotalUsd,
-							address: btcAddress || selectedXpub?.xpub || btcPubkeyEntries[0]?.pubkey || '',
+							nativeBalanceUsd: btcTotalUsd,
+							address: btcAddress || btcAccounts.getSelectedXpub()?.xpub || btcPubkeyEntries[0]?.pubkey || '',
 						})
 					}
 
@@ -1070,59 +1386,204 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 				const wallet = engine.wallet as any
 
-				// Derive pubkey (xpub for UTXO, address for others)
-				let pubkey: string
-				if (chain.chainFamily === 'utxo') {
+				// Build pubkey list — EVM chains send ALL multi-address entries, others send one
+				const pubkeys: Array<{ caip: string; pubkey: string }> = []
+				let displayAddress = '' // address shown in UI / used for swaps
+
+				if (chain.id === 'bitcoin') {
+					// BTC multi-account: send ALL xpubs (mirrors getBalances lines 1065-1086)
+					if (!btcAccounts.isInitialized) {
+						try { await btcAccounts.initialize(wallet) } catch (e: any) {
+							console.warn(`[getBalance] BTC accounts init failed:`, e.message)
+						}
+					}
+					let btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(chain.caip)
+					// Fallback: if btcAccounts empty, try cached pubkeys from DB (mirrors getBalances line 1069-1080)
+					if (btcPubkeyEntries.length === 0) {
+						const devId = engine.getDeviceState().deviceId
+						if (devId) {
+							const cachedPks = getCachedPubkeys(devId)
+							const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
+							if (btcPks.length > 0) {
+								btcPubkeyEntries = btcPks.map(p => ({ caip: chain.caip, pubkey: p.xpub }))
+								console.log(`[getBalance] BTC xpubs from cached_pubkeys DB fallback: ${btcPubkeyEntries.length}`)
+							}
+						}
+					}
+					// Last resort: derive single default xpub from device
+					if (btcPubkeyEntries.length === 0) {
+						const result = await wallet.getPublicKeys([{
+							addressNList: chain.defaultPath.slice(0, 3),
+							coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
+						}])
+						const xpub = result?.[0]?.xpub || ''
+						if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
+						btcPubkeyEntries = [{ caip: chain.caip, pubkey: xpub }]
+					}
+					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+					// displayAddress left empty — UTXO: frontend auto-derives from device
+				} else if (chain.chainFamily === 'utxo') {
+					// Non-BTC UTXO chains (LTC, DOGE, etc.) — single xpub
 					const result = await wallet.getPublicKeys([{
 						addressNList: chain.defaultPath.slice(0, 3),
 						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
 					}])
-					pubkey = result?.[0]?.xpub || ''
-					if (!pubkey) throw new Error(`Could not derive xpub for ${chain.coin}`)
+					const xpub = result?.[0]?.xpub || ''
+					if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
+					pubkeys.push({ caip: chain.caip, pubkey: xpub })
+				} else if (chain.chainFamily === 'evm') {
+					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
+					if (!evmAddresses.isInitialized) {
+						try { await evmAddresses.initialize(wallet) } catch (e: any) {
+							console.warn(`[getBalance] EVM addresses init failed:`, e.message)
+						}
+					}
+					const evmEntries = evmAddresses.getAllPubkeyEntries([chain])
+					if (evmEntries.length > 0) {
+						for (const entry of evmEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+						const selectedAddr = evmAddresses.getSelectedAddress()
+						displayAddress = selectedAddr?.address || evmEntries[0].pubkey
+					} else {
+						// Fallback: derive single address if multi-address manager not ready
+						const result = await wallet.ethGetAddress({ addressNList: chain.defaultPath, showDisplay: false, coin: 'Ethereum' })
+						const addr = typeof result === 'string' ? result : result?.address || ''
+						if (!addr) throw new Error(`Could not derive address for ${chain.coin}`)
+						pubkeys.push({ caip: chain.caip, pubkey: addr })
+						displayAddress = addr
+					}
 				} else {
-					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin }
+					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 					if (chain.scriptType) addrParams.scriptType = chain.scriptType
 					if (chain.chainFamily === 'ton') addrParams.bounceable = false
 					const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 					const result = await wallet[method](addrParams)
-					pubkey = typeof result === 'string' ? result : result?.address || ''
-					if (!pubkey) throw new Error(`Could not derive address for ${chain.coin}`)
+					const addr = typeof result === 'string' ? result : result?.address || ''
+					if (!addr) throw new Error(`Could not derive address for ${chain.coin}`)
+					pubkeys.push({ caip: chain.caip, pubkey: addr })
+					displayAddress = addr
 				}
 
-				// Single portfolio call — classify natives vs tokens (same logic as getBalances)
-				// For UTXO chains pubkey is an xpub, not a receive address.
-				// Leave address empty so the frontend auto-derives from the device.
-				let balance = '0', balanceUsd = 0, address = chain.chainFamily === 'utxo' ? '' : pubkey
+				// Single portfolio call with all pubkeys for this chain
+				const isBtc = chain.id === 'bitcoin'
+				const isEvm = chain.chainFamily === 'evm'
+				const isUtxo = chain.chainFamily === 'utxo'
+				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
+				let cachedAddress = ''
 				try {
-					const resp = await withTimeout(pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey }] }, { forceRefresh: true }), PIONEER_TIMEOUT_MS, 'GetPortfolioBalances')
+					const devId = engine.getDeviceState().deviceId
+					if (devId) {
+						const cached = getCachedBalances(devId)
+						cachedAddress = cached?.balances.find(b => b.chainId === chain.id)?.address || ''
+					}
+				} catch { /* cache lookup failed, non-fatal */ }
+
+				// Reset per-address balances for this refresh (mirrors getBalances line 991)
+				if (isEvm) evmAddresses.resetBalances()
+
+				try {
+					const resp = await withTimeout(
+						pioneer.GetPortfolioBalances(
+							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{ forceRefresh: true }
+						),
+						PIONEER_TIMEOUT_MS,
+						'GetPortfolioBalances'
+					)
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 
-					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer`)
+					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
-					// Classify entries into natives vs tokens
-					let nativeMatch: any = null
+					// Pioneer may return cross-chain data with forceRefresh — filter to THIS chain
+					// AND to the pubkeys we actually requested (prevents same-network contamination).
+					const chainNetworkId = (chain.networkId || '').toLowerCase()
+					const chainCaipPrefix = (chain.caip || '').split('/')[0].toLowerCase() // e.g. "eip155:1"
+					const pubkeySet = new Set(pubkeys.map(p => p.pubkey.toLowerCase()))
+
+					// Classify entries: filter by chain, separate natives vs tokens
+					const pureNatives: any[] = []
 					const tokenEntries: any[] = []
+					let skippedCrossChain = 0
+
 					for (const entry of allEntries) {
+						// Gate 1: entry must belong to THIS chain (networkId or CAIP prefix)
+						const entryNetworkId = (entry.networkId || '').toLowerCase()
+						const entryCaipPrefix = ((entry.caip || '').split('/')[0]).toLowerCase()
+						const belongsToChain = entryNetworkId === chainNetworkId
+							|| entryCaipPrefix === chainCaipPrefix
+						if (!belongsToChain) { skippedCrossChain++; continue }
+
 						const caip = entry.caip || ''
 						const caipPath = caip.split('/')[1] || ''
 						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
 						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
+
 						if (isTokenByCaip || isTokenByType) {
+							// Gate 2 (tokens): owner address must be one we requested
+							const ownerAddr = (entry.address || entry.pubkey || '').toLowerCase()
+							if (ownerAddr && !pubkeySet.has(ownerAddr)) continue
 							tokenEntries.push(entry)
-						} else if (!nativeMatch) {
-							nativeMatch = entry
+						} else {
+							pureNatives.push(entry)
 						}
 					}
 
-					if (nativeMatch) {
-						balance = String(nativeMatch.balance ?? '0')
-						balanceUsd = Number(nativeMatch.valueUsd ?? 0)
-						if (nativeMatch.address) address = nativeMatch.address
+					if (skippedCrossChain > 0) {
+						console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain entries`)
 					}
 
-					// Process tokens
+					// Aggregate natives: iterate REQUESTED pubkeys, match at most one response per
+					// pubkey, zero missing entries explicitly. Mirrors getBalances BTC/EVM aggregation.
+					let nativeTotalBalance = 0
+					let nativeTotalUsd = 0
+					// Address tracking for UTXO chains (BTC + LTC/DOGE/etc.)
+					const selectedXpubStr = isBtc ? btcAccounts.getSelectedXpub()?.xpub : undefined
+					let selectedPkAddress = ''  // address from selected xpub (BTC) or sole xpub (other UTXO)
+					let fallbackPkAddress = ''  // first Pioneer-returned address from any xpub
+
+					for (const pk of pubkeys) {
+						// Find ONE matching native entry for this requested pubkey (no double-counting)
+						const match = pureNatives.find((d: any) => d.pubkey === pk.pubkey)
+							|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
+							|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
+						const bal = parseFloat(String(match?.balance ?? '0'))
+						const usd = Number(match?.valueUsd ?? 0)
+						nativeTotalBalance += bal
+						nativeTotalUsd += usd
+
+						// Capture Pioneer-returned address for this pubkey
+						if (match?.address) {
+							if (!fallbackPkAddress) fallbackPkAddress = match.address
+							// BTC: prefer selected xpub's address; non-BTC UTXO: first (only) xpub
+							if (isBtc && selectedXpubStr && pk.pubkey === selectedXpubStr) selectedPkAddress = match.address
+							if (!isBtc && isUtxo) selectedPkAddress = match.address
+						}
+
+						if (isBtc) {
+							const xpubBal = String(match?.balance ?? '0')
+							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							try {
+								const devId = engine.getDeviceState().deviceId
+								if (devId) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
+							} catch { /* non-fatal */ }
+						} else if (isEvm && usd > 0) {
+							evmAddresses.updateAddressBalance(pk.pubkey, usd)
+						}
+					}
+
+					if (nativeTotalBalance > 0 || nativeTotalUsd > 0) {
+						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
+						balanceUsd = nativeTotalUsd
+					}
+					// UTXO chains: set address from Pioneer response (selected xpub preferred)
+					if (isBtc || isUtxo) {
+						const pioneerAddr = selectedPkAddress || fallbackPkAddress
+						if (pioneerAddr) address = pioneerAddr
+					}
+
+					// Process tokens — already filtered to this chain + our pubkeys
 					if (tokenEntries.length > 0) {
 						const parsedTokens: TokenBalance[] = []
 						for (const tok of tokenEntries) {
@@ -1161,7 +1622,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 						if (parsedTokens.length > 0) {
 							tokens = parsedTokens
-							// Include token USD in chain total
 							const tokenUsdTotal = parsedTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
 							balanceUsd += tokenUsdTotal
 						}
@@ -1170,7 +1630,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
 				}
-				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, address, tokens }
+				// If Pioneer failed or returned no address, preserve the cached address
+				// so we don't wipe a previously good address from the shared cache (Finding 3)
+				if (!address && cachedAddress) address = cachedAddress
+				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
+				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync
 				try {
@@ -1178,6 +1642,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
+				// Push updated EVM per-address balances so address selector stays current
+				if (isEvm) {
+					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+				}
+				// Push updated BTC per-xpub balances — only if manager is hydrated (Finding 2)
+				if (isBtc && btcAccounts.isInitialized && btcAccounts.getAllPubkeyEntries(chain.caip).length > 0) {
+					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+				}
 
 				return result
 			},
@@ -1220,16 +1692,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
 					console.debug(`[buildTx] Derived ${chain.coin} address OK`)
 				} else if (chain.id === 'bitcoin') {
-					// BTC multi-account: use override or selected xpub + scriptType
-					const selectedBtcXpub = btcAccounts.getSelectedXpub()
-					xpub = params.xpubOverride || selectedBtcXpub?.xpub
-					// Ensure scriptTypeOverride is set when using a selected xpub
-					if (!params.scriptTypeOverride && selectedBtcXpub?.scriptType) {
-						params = { ...params, scriptTypeOverride: selectedBtcXpub.scriptType }
+					// BTC multi-account: resolve xpub, scriptType, and accountPath from the
+					// override string itself (not from getSelectedXpub(), which can drift
+					// between render and RPC handling). Finding 5 fix.
+					const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
+					xpub = resolvedXpub
+					// Look up the BtcXpub entry that owns this xpub string for scriptType + path
+					let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
+					if (resolvedXpub) {
+						for (const account of btcAccounts.toAccountSet().accounts) {
+							for (const xp of account.xpubs) {
+								if (xp.xpub === resolvedXpub) {
+									matchedXpubEntry = { scriptType: xp.scriptType, path: xp.path }
+									break
+								}
+							}
+							if (matchedXpubEntry) break
+						}
 					}
-					// Pass account-level path so UTXO builder can correct blockbook's always-account-0 paths
-					if (selectedBtcXpub?.path) {
-						params = { ...params, accountPath: selectedBtcXpub.path }
+					if (matchedXpubEntry) {
+						if (!params.scriptTypeOverride) params = { ...params, scriptTypeOverride: matchedXpubEntry.scriptType }
+						params = { ...params, accountPath: matchedXpubEntry.path }
 					}
 					if (!xpub) {
 						// Fallback: derive from default path
@@ -1304,10 +1787,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
+				// BTC sends always use the selected xpub — user chose which account to send from.
+				// Multi-xpub aggregation is only for swaps (which show aggregate balance).
+				const allXpubs = undefined
+
 				const result = await buildTx(pioneer, chain, {
 					...params,
 					fromAddress,
 					xpub,
+					allXpubs: allXpubs?.length ? allXpubs : undefined,
 					rpcUrl,
 					evmAddressIndex: evmIdx,
 					publicKeyHex,
@@ -1462,6 +1950,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (!btcAccounts.isInitialized) {
 					await btcAccounts.initialize(engine.wallet as any)
+				}
+				// Hydrate per-xpub balances from DB cache (so pills show values on first load)
+				const devId = engine.getDeviceState().deviceId
+				if (devId) {
+					const cachedPks = getCachedPubkeys(devId).filter(p => p.chainId === 'bitcoin' && p.xpub)
+					for (const pk of cachedPks) {
+						if (pk.balance !== '0' || pk.balanceUsd > 0) {
+							btcAccounts.updateXpubBalance(pk.xpub, pk.balance, pk.balanceUsd)
+						}
+					}
 				}
 				return btcAccounts.toAccountSet()
 			},
@@ -1707,6 +2205,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return result
 			},
 
+			zcashDeshieldZec: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
+				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const result = await deshieldZec(engine.wallet as any, {
+					recipient: params.recipient,
+					amount: params.amount,
+					account: params.account,
+				})
+				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				return result
+			},
+
 			zcashGetTransactions: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const { getZcashTransactions } = await import("./zcash-sidecar")
@@ -1722,17 +2234,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const { diagnoseAnchor } = await import("./zcash-sidecar")
 				return await diagnoseAnchor(params?.shardIndex)
-			},
-
-			// ── Camera / QR scanning ─────────────────────────────────
-			startQrScan: async () => {
-				startCamera(
-					(base64) => { try { rpc.send['camera-frame'](base64) } catch { /* webview not ready */ } },
-					(message) => { try { rpc.send['camera-error'](message) } catch { /* webview not ready */ } },
-				)
-			},
-			stopQrScan: async () => {
-				stopCamera()
 			},
 
 			// ── Pairing & Signing approval ───────────────────────────
@@ -1760,6 +2261,179 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				auth.revoke(params.apiKey)
 			},
 
+			// ── Mobile pairing (relay via vault.keepkey.com) ─────────
+			generateMobilePairing: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const wallet = engine.wallet as any
+
+				// Get device info
+				const features = await wallet.getFeatures()
+				const deviceId = features?.deviceId || features?.device_id || engine.getDeviceState().deviceId || 'keepkey-device'
+				const deviceLabel = features?.label || engine.getDeviceState().label || 'My KeepKey'
+				const context = `keepkey:${deviceLabel}.json`
+
+				// Helper: convert hardened BIP44 path array to string
+				const pathToString = (p: number[]) => 'm/' + p.map((n: number) => n >= 0x80000000 ? `${n - 0x80000000}'` : String(n)).join('/')
+				// Helper: account-level path (first 3 elements)
+				const accountPath = (p: number[]) => p.slice(0, 3)
+
+				// Only use built-in CHAINS (not custom chains — those may lack rpc methods)
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const builtinChains = CHAINS.filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					// Zcash: gated by feature flag, not by hidden (hidden keeps it off Dashboard grid)
+					if (c.id === 'zcash' || c.id === 'zcash-shielded') return zcashPrivacyEnabled
+					if (c.hidden) return false
+					return true
+				})
+
+				const pubkeys: any[] = []
+
+				// ── BTC: all 3 script types ──
+				const btcScripts = [
+					{ scriptType: 'p2pkh', purpose: 44, type: 'xpub', note: 'Bitcoin Legacy' },
+					{ scriptType: 'p2sh-p2wpkh', purpose: 49, type: 'ypub', note: 'Bitcoin SegWit' },
+					{ scriptType: 'p2wpkh', purpose: 84, type: 'zpub', note: 'Bitcoin Native SegWit' },
+				]
+				const btcChain = builtinChains.find(c => c.id === 'bitcoin')
+				const btcNetwork = btcChain?.networkId || 'bip122:000000000019d6689c085ae165831e93'
+				for (const s of btcScripts) {
+					try {
+						const addressNList = [s.purpose + 0x80000000, 0x80000000, 0x80000000]
+						const addressNListMaster = [...addressNList, 0, 0]
+						const result = await wallet.getPublicKeys([{
+							addressNList, coin: 'Bitcoin', scriptType: s.scriptType, curve: 'secp256k1',
+						}])
+						const xpub = result?.[0]?.xpub
+						if (xpub && typeof xpub === 'string') {
+							pubkeys.push({
+								type: s.type, pubkey: xpub, master: xpub,
+								address: xpub, // SDK expects address field
+								path: pathToString(addressNList),
+								pathMaster: pathToString(addressNListMaster),
+								scriptType: s.scriptType,
+								available_scripts_types: ['p2pkh', 'p2sh', 'p2wpkh', 'p2sh-p2wpkh'],
+								note: s.note, context,
+								networks: [btcNetwork],
+								addressNList, addressNListMaster,
+							})
+						}
+					} catch (e: any) { console.warn(`[mobilePairing] BTC ${s.scriptType} failed:`, e.message) }
+				}
+
+				// ── Non-BTC UTXO chains: batch xpub derivation ──
+				const utxoChains = builtinChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
+				if (utxoChains.length > 0) {
+					try {
+						const xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
+							addressNList: accountPath(c.defaultPath), coin: c.coin,
+							scriptType: c.scriptType, curve: 'secp256k1',
+						}))) || []
+						for (let i = 0; i < utxoChains.length; i++) {
+							const xpub = xpubResults?.[i]?.xpub
+							if (xpub && typeof xpub === 'string') {
+								const chain = utxoChains[i]
+								const addressNList = accountPath(chain.defaultPath)
+								const addressNListMaster = [...addressNList, 0, 0]
+								pubkeys.push({
+									type: 'xpub', pubkey: xpub, master: xpub,
+									address: xpub,
+									path: pathToString(addressNList),
+									pathMaster: pathToString(addressNListMaster),
+									scriptType: chain.scriptType,
+									available_scripts_types: [chain.scriptType || 'p2pkh'],
+									note: `${chain.symbol} Default path`, context,
+									networks: [chain.networkId],
+									addressNList, addressNListMaster,
+								})
+							}
+						}
+					} catch (e: any) { console.warn('[mobilePairing] UTXO xpub batch failed:', e.message) }
+				}
+
+				// ── EVM chains: derive ONCE, emit with all EVM networkIds + wildcard ──
+				const evmChains = builtinChains.filter(c => c.chainFamily === 'evm')
+				if (evmChains.length > 0) {
+					try {
+						const addressNList = [0x8000002C, 0x8000003C, 0x80000000]
+						const addressNListMaster = [0x8000002C, 0x8000003C, 0x80000000, 0, 0]
+						const result = await wallet.ethGetAddress({ addressNList: addressNListMaster, showDisplay: false, coin: 'Ethereum' })
+						const address = typeof result === 'string' ? result : result?.address
+						if (address && typeof address === 'string') {
+							const evmNetworks = [...evmChains.map(c => c.networkId), 'eip155:*']
+							pubkeys.push({
+								type: 'address', pubkey: address, master: address, address,
+								path: pathToString(addressNList),
+								pathMaster: pathToString(addressNListMaster),
+								note: 'ETH primary (default)', context,
+								networks: evmNetworks,
+								addressNList, addressNListMaster,
+							})
+						}
+					} catch (e: any) { console.warn('[mobilePairing] EVM address failed:', e.message) }
+				}
+
+				// ── Non-EVM, non-UTXO chains: individual address derivation ──
+				const otherChains = builtinChains.filter(c =>
+					c.chainFamily !== 'utxo' && c.chainFamily !== 'evm' && c.chainFamily !== 'zcash-shielded'
+				)
+				for (const chain of otherChains) {
+					try {
+						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
+						if (chain.scriptType) addrParams.scriptType = chain.scriptType
+						if (chain.chainFamily === 'ton') addrParams.bounceable = false
+						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+						if (typeof wallet[method] !== 'function') {
+							console.warn(`[mobilePairing] ${chain.coin}: wallet.${method} not found, skipping`)
+							continue
+						}
+						const result = await wallet[method](addrParams)
+						const address = typeof result === 'string' ? result : result?.address
+						if (address && typeof address === 'string') {
+							pubkeys.push({
+								type: 'address', pubkey: address, master: address, address,
+								path: pathToString(chain.defaultPath),
+								pathMaster: pathToString(chain.defaultPath),
+								scriptType: chain.scriptType || chain.chainFamily,
+								note: `Default ${chain.symbol} path`, context,
+								networks: [chain.networkId],
+								addressNList: chain.defaultPath,
+								addressNListMaster: chain.defaultPath,
+							})
+						}
+					} catch (e: any) { console.warn(`[mobilePairing] ${chain.coin} address failed:`, e.message) }
+				}
+
+				// Final safety: strip any entry with missing required fields
+				const validPubkeys = pubkeys.filter(p =>
+					p.pubkey && typeof p.pubkey === 'string' &&
+					p.pathMaster && typeof p.pathMaster === 'string' &&
+					Array.isArray(p.networks) && p.networks.length > 0
+				)
+
+				if (validPubkeys.length === 0) throw new Error('No pubkeys could be derived from device')
+				console.log(`[mobilePairing] ${validPubkeys.length} valid pubkeys (${pubkeys.length - validPubkeys.length} dropped)`)
+
+				// POST to vault.keepkey.com relay
+				const RELAY_URL = 'https://vault.keepkey.com/api/pairing'
+				const resp = await fetch(RELAY_URL, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ deviceId, label: deviceLabel, pubkeys: validPubkeys }),
+				})
+				if (!resp.ok) {
+					const body = await resp.text().catch(() => '')
+					throw new Error(`Pairing relay returned ${resp.status}: ${body}`)
+				}
+				const data = await resp.json() as { success: boolean; code: string; expiresAt: number; expiresIn: number }
+				if (!data.success || !data.code) throw new Error('Invalid response from pairing relay')
+
+				const qrPayload = JSON.stringify({ code: data.code, url: 'https://vault.keepkey.com' })
+				console.log(`[mobilePairing] Code ${data.code} — ${validPubkeys.length} pubkeys sent to relay`)
+
+				return { code: data.code, expiresAt: data.expiresAt, expiresIn: data.expiresIn, qrPayload }
+			},
+
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
 				return getAppSettings()
@@ -1767,7 +2441,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setRestApiEnabled: async (params) => {
 				restApiEnabled = params.enabled
 				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
-				applyRestApiState()
+				await applyRestApiState()
 				return getAppSettings()
 			},
 			setPioneerApiBase: async (params) => {
@@ -1790,6 +2464,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setNumberLocale: async (params) => {
 				setSetting('number_locale', params.locale || 'en-US')
 				console.log('[settings] Number locale set to:', params.locale)
+				return getAppSettings()
+			},
+			setWalletConnectEnabled: async (params) => {
+				walletConnectEnabled = params.enabled
+				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] WalletConnect enabled:', params.enabled)
 				return getAppSettings()
 			},
 			setSwapsEnabled: async (params) => {
@@ -1815,12 +2495,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setBip85Enabled: async (params) => {
+				// BIP-85 requires firmware >= 7.14.0
+				const fwVer = engine.getDeviceState().firmwareVersion
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
+					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+					return getAppSettings()
+				}
 				bip85Enabled = params.enabled
 				setSetting('bip85_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] BIP-85 enabled:', params.enabled)
 				return getAppSettings()
 			},
 			setZcashPrivacyEnabled: async (params) => {
+				// Zcash shielded requires firmware >= 7.14.0
+				const fwVer = engine.getDeviceState().firmwareVersion
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
+					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+					return getAppSettings()
+				}
 				zcashPrivacyEnabled = params.enabled
 				setSetting('zcash_privacy_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] Zcash privacy enabled:', params.enabled)
@@ -2052,17 +2744,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[reports] saveReportFile: format=${params.format}, id=${params.id}`)
 
 				let filePath: string
-				if (params.format === 'cointracker') {
+				if (params.format === 'csv') {
+					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
+					filePath = path.join(downloadsDir, `keepkey-report-${dateSuffix}-${shortId}.csv`)
+					await Bun.write(filePath, reportToCsv(report.data))
+					console.log(`[reports] Full CSV written: ${report.data.sections.length} sections`)
+				} else if (params.format === 'cointracker') {
 					filePath = path.join(downloadsDir, `keepkey_cointracker_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
-					const serializableTxs = txs.filter(tx => !!tx.timestamp)
-					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
+					console.log(`[reports] CoinTracker: ${txs.length} transactions extracted`)
 					await Bun.write(filePath, toCoinTrackerCsv(txs))
 				} else if (params.format === 'zenledger') {
 					filePath = path.join(downloadsDir, `keepkey_zenledger_${year}.csv`)
 					const txs = extractTransactionsFromReport(report.data)
-					const serializableTxs = txs.filter(tx => !!tx.timestamp)
-					if (serializableTxs.length === 0) throw new Error('No transactions with confirmed dates found in report. Generate a new report to fetch transaction history from the network.')
+					console.log(`[reports] ZenLedger: ${txs.length} transactions extracted`)
 					await Bun.write(filePath, toZenLedgerCsv(txs))
 				} else if (params.format === 'pdf') {
 					const shortId = params.id.slice(-6).replace(/[^a-zA-Z0-9]/g, '')
@@ -2126,7 +2821,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// Use selected BTC account path/scriptType when available
 							const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
 								? btcAccounts.getSelectedXpub() : undefined
-							const addressNList = selected?.path || chainDef.defaultPath
+							// selected.path is account-level (3 elements: m/purpose'/0'/account')
+							// btcGetAddress needs full 5-element path — append /0/0 (first receive address)
+							const acctPath = selected?.path || chainDef.defaultPath
+							const addressNList = acctPath.length === 3 ? [...acctPath, 0, 0] : acctPath
 							const scriptType = selected?.scriptType || chainDef.scriptType
 							const result = await engine.wallet.btcGetAddress({
 								addressNList,
@@ -2175,7 +2873,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
 				const { executeSwap } = await import('./swap')
-				const { trackSwap } = await import('./swap-tracker')
+				const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
+				// Ensure tracker is initialized before tracking (guards against race/init failure)
+				if (!isTrackerInitialized()) {
+					await initSwapTracker((msg: string, data: any) => {
+						try {
+							if (msg === 'swap-update') rpc.send['swap-update'](data)
+							else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+						} catch (e: any) {
+							console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+						}
+					})
+				}
 				const result = await executeSwap(params, {
 					wallet: engine.wallet,
 					getAllChains,
@@ -2183,10 +2892,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					getBtcXpub: () => {
 						if (btcAccounts.isInitialized) {
 							const selected = btcAccounts.getSelectedXpub()
-							if (selected) return selected.xpub
+							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
 						}
 						return undefined
 					},
+					getAllBtcXpubs: () => {
+						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+						return []
+					},
+					wrapSign: engine.isEmulator
+						? (fn, details) => emuSigningOp(fn, details)
+						: (fn) => fn(),
 				})
 				// Look up cached quote for real tracker data
 				// Match by asset pair + amount + inboundAddress to avoid collisions between
@@ -2317,9 +3033,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
 
 				const resp = await withTimeout(
-					pioneer.GetTxHistory({ queries: [{ pubkey, caip: chain.caip }] }),
+					pioneer.GetTransactionHistory({ queries: [{ pubkey, caip: chain.caip }] }),
 					PIONEER_TIMEOUT_MS,
-					`GetTxHistory(${chain.symbol})`
+					`GetTransactionHistory(${chain.symbol})`
 				)
 				const data = resp?.data || resp
 				const histories = data?.histories || data?.data?.histories || []
@@ -2383,10 +3099,42 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
-				if (!deviceId) return null
+				if (!deviceId) { console.log('[cache-health] No deviceId — skipping'); return null }
 				const result = getCachedBalances(deviceId)
-				if (!result) return null
-				return { balances: result.balances, updatedAt: result.updatedAt }
+				if (!result) { console.log('[cache-health] No cached balances for device', deviceId); return null }
+
+				// Detect incomplete/stale cache — frontend can auto-refresh when staleReasons is non-empty
+				const staleReasons: string[] = []
+
+				// Incomplete: fewer cached chains than supported (e.g. app update added new chains)
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const supportedChains = getAllChains().filter(c => !c.hidden && isChainSupported(c, fwVersion))
+				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
+				const missingChains = supportedChains.filter(c => !cachedChainIds.has(c.id))
+				if (missingChains.length > 0) {
+					staleReasons.push(`missing_chains:${missingChains.map(c => c.id).join(',')}`)
+				}
+				console.log(`[cache-health] ${result.balances.length} cached chains, ${supportedChains.length} supported, ${missingChains.length} missing`)
+
+				// Missing BTC xpub balances: BTC has a cached aggregate but no per-xpub breakdown
+				const btcCached = result.balances.find(b => b.chainId === 'bitcoin')
+				if (btcCached && parseFloat(btcCached.balance || '0') > 0) {
+					const allBtcPks = getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin')
+					const withXpub = allBtcPks.filter(p => p.xpub)
+					const withBalance = withXpub.filter(p => p.balance !== '0' || p.balanceUsd > 0)
+					console.log(`[cache-health] BTC: aggregate=${btcCached.balance}, cached_pubkeys=${allBtcPks.length} total, ${withXpub.length} with xpub, ${withBalance.length} with balance`)
+					if (withBalance.length === 0) {
+						staleReasons.push('btc_xpub_balances_missing')
+					}
+				}
+
+				if (staleReasons.length > 0) {
+					console.log(`[cache-health] STALE: ${staleReasons.join(', ')}`)
+				} else {
+					console.log('[cache-health] Cache OK — no staleness detected')
+				}
+
+				return { balances: result.balances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
@@ -2395,18 +3143,365 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!snap) return { available: false }
 				return { available: true, deviceLabel: snap.label || undefined, lastSynced: snap.updatedAt }
 			},
-			getWatchOnlyBalances: async () => {
-				const snap = getLatestDeviceSnapshot()
+			getWatchOnlyBalances: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
 				if (!snap) return null
 				const result = getCachedBalances(snap.deviceId)
 				return result?.balances ?? null
 			},
-			getWatchOnlyPubkeys: async () => {
-				const snap = getLatestDeviceSnapshot()
+			getWatchOnlyPubkeys: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
 				if (!snap) return []
 				return getCachedPubkeys(snap.deviceId)
 			},
 
+			// ── Registered devices (device history) ─────────────────
+			getRegisteredDevices: async () => {
+				const { getAllDeviceSnapshots } = await import('./db')
+				return getAllDeviceSnapshots()
+			},
+			forgetDevice: async (params) => {
+				const { deleteDeviceSnapshot } = await import('./db')
+				deleteDeviceSnapshot(params.deviceId)
+			},
+
+			// ── Sweep (non-standard BTC path recovery) ──────────────
+			sweepScan: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const { startScan } = await import('./sweep-engine')
+				const scanId = await startScan(engine.wallet, {
+					accountRange: params.accountRange,
+					mismatchAccounts: params.mismatchAccounts,
+					currentMaxAccount: params.currentMaxAccount,
+					higherAccountScanLimit: params.higherAccountScanLimit,
+				})
+				return { scanId }
+			},
+			sweepGetStatus: async (params) => {
+				const { getScan } = await import('./sweep-engine')
+				const scan = getScan(params.scanId)
+				if (!scan) throw new Error('Scan not found')
+				return {
+					id: scan.id,
+					status: scan.status,
+					progress: scan.progress,
+					startedAt: scan.startedAt,
+					completedAt: scan.completedAt,
+					totalFoundSats: scan.totalFoundSats,
+					results: scan.results.map(r => ({
+						path: r.pathStr,
+						scriptType: r.scriptType,
+						address: r.address,
+						category: r.category,
+						accountIndex: r.accountIndex,
+						balanceSats: r.balanceSats,
+						utxoCount: r.utxos.length,
+					})),
+					error: scan.error,
+				}
+			},
+			sweepExecute: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const { getScan, buildSweepTx } = await import('./sweep-engine')
+				const scan = getScan(params.scanId)
+				if (!scan) throw new Error('Scan not found')
+				if (scan.status !== 'complete') throw new Error(`Scan status is '${scan.status}', must be 'complete'`)
+				if (scan.totalFoundSats === 0) throw new Error('No funds found to sweep')
+
+				let destination = params.destinationAddress
+				if (!destination) {
+					const result = await engine.wallet.btcGetAddress({
+						addressNList: [0x80000054, 0x80000000, 0x80000000, 0, 0],
+						coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+					})
+					destination = typeof result === 'string' ? result : result?.address
+					if (!destination) throw new Error('Could not derive standard BTC receive address')
+				}
+
+				const sweepResult = await buildSweepTx(scan, destination)
+
+				if (params.dryRun) {
+					return { dryRun: true, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee, unsignedTx: sweepResult.unsignedTx }
+				}
+
+				const signedTx = await engine.wallet.btcSignTx(sweepResult.unsignedTx)
+				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
+				if (!serializedTx) throw new Error('Device signing failed')
+
+				const { getPioneer } = await import('./pioneer')
+				const pioneer = await getPioneer()
+				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
+				const bdata = broadcastResp?.data || broadcastResp
+				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
+				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+
+				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+			},
+
+			// ── Emulator (macOS only) ────────────────────────────────
+			emulatorPair: async () => {
+				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
+				pairEmulator()
+				return getEmulatorStatus()
+			},
+			emulatorInit: async (params) => {
+				const { initEmulator } = await import('./emulator')
+				const status = initEmulator(params?.flashName)
+				if (status.state === 'running') {
+					// Open the emulator device window
+					const { openEmulatorWindow } = await import('./emulator-window')
+					openEmulatorWindow()
+					// Bridge emulator to engine so UI transitions through onboarding
+					await engine.connectEmulator()
+				}
+				return status
+			},
+			emulatorStop: async () => {
+				const { closeEmulatorWindow } = await import('./emulator-window')
+				closeEmulatorWindow()
+				const { stopEmulator } = await import('./emulator')
+				engine.disconnectEmulator()
+				return stopEmulator()
+			},
+			emulatorSave: async () => {
+				const { saveEmulatorState } = await import('./emulator')
+				saveEmulatorState()
+			},
+			emulatorStatus: async () => {
+				const { getEmulatorStatus } = await import('./emulator')
+				return getEmulatorStatus()
+			},
+			emulatorDeleteFlash: async (params) => {
+				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
+				const { deleteMnemonic } = await import('./emulator-keychain')
+
+				// If deleting the active wallet, stop it first so shutdown
+				// doesn't re-save the flash we're about to delete
+				if (getEmulatorStatus().state === 'running' && getActiveFlashName() === params.name) {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				deleteFlash(params.name)
+				deleteMnemonic(params.name)
+				return getEmulatorStatus()
+			},
+			emulatorListWallets: async () => {
+				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
+				const status = getEmulatorStatus()
+				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
+				return listFlashImages().map(name => ({
+					name,
+					hasMnemonic: hasMnemonic(name),
+					isActive: name === activeFlash,
+				}))
+			},
+			emulatorImportWallet: async (params) => {
+				// Sanitize wallet name — prevent path traversal and invisible names
+				const name = params.name.trim()
+				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
+				if (/[\/\\]/.test(name)) throw new Error('Wallet name cannot contain path separators')
+				if (name.includes('..')) throw new Error('Wallet name cannot contain ".."')
+				if (name.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
+				if (name.includes('.mnemonic.')) throw new Error('Wallet name cannot contain ".mnemonic."')
+				params = { ...params, name }
+
+				const { stopEmulator, initEmulator, getEmulatorStatus, flushRingBuffers, getActiveFlashName } = await import('./emulator')
+				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
+				const { deleteFlash } = await import('./emulator')
+
+				// Remember previous state for rollback
+				const prevStatus = getEmulatorStatus()
+				const prevFlashName = prevStatus.state === 'running' ? getActiveFlashName() : null
+
+				// Stop current emulator if running
+				if (prevStatus.state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Init with the new flash name (creates flash file on disk)
+				const status = initEmulator(params.name)
+				if (status.state !== 'running') return status
+
+				try {
+					// Open window + connect engine
+					const { openEmulatorWindow } = await import('./emulator-window')
+					openEmulatorWindow()
+					await engine.connectEmulator()
+
+					// Wipe if already initialized
+					if (engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						flushRingBuffers()
+						await engine.connectEmulator()
+					}
+
+					// Load the seed onto the emulator device
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+							mnemonic: params.mnemonic, pin: false, passphrase: false, skipChecksum: false,
+						}))
+					}
+
+					// Set label if provided
+					const label = params.label || params.name
+					try {
+						await emuConfirmOp(() => engine.applySettings({ label, skipRefresh: true }))
+					} catch {}
+
+					flushRingBuffers()
+					await engine.connectEmulator()
+
+					// Verify the firmware holds the mnemonic via DebugLink
+					const actualMnemonic = await engine.getEmulatorMnemonic()
+					if (!actualMnemonic || actualMnemonic.trim() !== params.mnemonic.trim()) {
+						throw new Error('Seed verification failed — firmware mnemonic does not match imported seed')
+					}
+
+					// Only persist mnemonic AFTER seed is verified on device
+					saveMnemonic(params.name, params.mnemonic)
+					return getEmulatorStatus()
+				} catch (err) {
+					// Rollback: stop the failed emulator and clean up the orphaned flash
+					console.error('[Emulator] Import failed, rolling back:', (err as Error).message)
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+					deleteFlash(params.name)
+					deleteMnemonic(params.name)
+
+					// Restore previous emulator if one was running
+					if (prevFlashName) {
+						const restored = initEmulator(prevFlashName)
+						if (restored.state === 'running') {
+							const { openEmulatorWindow } = await import('./emulator-window')
+							openEmulatorWindow()
+							await engine.connectEmulator()
+						}
+					}
+					throw err
+				}
+			},
+			emulatorSwitchWallet: async (params) => {
+				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
+
+				// Stop current emulator if running
+				if (getEmulatorStatus().state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Init with the requested flash name
+				const status = initEmulator(params.name)
+				if (status.state !== 'running') return status
+
+				// Open window + connect engine (auto-reloads saved mnemonic)
+				const { openEmulatorWindow } = await import('./emulator-window')
+				openEmulatorWindow()
+				await engine.connectEmulator()
+				return getEmulatorStatus()
+			},
+			emulatorGetMnemonic: async () => {
+				return await engine.getEmulatorMnemonic()
+			},
+			emulatorCreateWallet: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+
+				const bip39 = require('bip39')
+				const wc = params?.wordCount || 12
+				const strength = wc === 24 ? 256 : wc === 18 ? 192 : 128
+				const mnemonic = bip39.generateMnemonic(strength)
+				console.log(`[Emulator] Generated ${wc}-word mnemonic`)
+
+				// Save mnemonic FIRST — connectEmulator's auto-reload uses it
+				const { saveMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				saveMnemonic(getActiveFlashName(), mnemonic)
+
+				// Wipe first if already initialized — firmware rejects loadDevice otherwise
+				if (engine.cachedFeatures?.initialized) {
+					console.log('[Emulator] Already initialized — wiping before create')
+					await emuConfirmOp(() => engine.wallet!.wipe())
+					const { flushRingBuffers } = await import('./emulator')
+					flushRingBuffers()
+					await engine.connectEmulator()
+				}
+
+				// If auto-reload already initialized with the new seed, skip manual load
+				if (!engine.cachedFeatures?.initialized) {
+					await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+						mnemonic, pin: false, passphrase: false, skipChecksum: false,
+					}))
+					console.log('[Emulator] loadDevice complete')
+				} else {
+					console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
+				}
+
+				// Auto-set label with EMU prefix
+				try {
+					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
+					console.log('[Emulator] Label set')
+				} catch (e: any) {
+					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
+				}
+
+				// Drain stale data + reconnect for clean transport
+				const { flushRingBuffers } = await import('./emulator')
+				flushRingBuffers()
+				await engine.connectEmulator()
+
+				// Verify the firmware actually holds the mnemonic we generated
+				const actualMnemonic = await engine.getEmulatorMnemonic()
+				if (!actualMnemonic) {
+					console.error('[Emulator] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+				} else if (actualMnemonic.trim() !== mnemonic.trim()) {
+					console.error('[Emulator] SEED VERIFY FAIL — firmware mnemonic does NOT match generated seed')
+					console.error('[Emulator]   expected first word: %s', mnemonic.trim().split(/\s+/)[0])
+					console.error('[Emulator]   actual first word:   %s', actualMnemonic.trim().split(/\s+/)[0])
+				} else {
+					console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
+				}
+
+				// Show seed words on emulator device window (NOT the main UI)
+				const { displaySeedWords, isEmulatorWindowOpen } = await import('./emulator-window')
+				if (isEmulatorWindowOpen()) {
+					await displaySeedWords(mnemonic)
+				}
+
+				// Return success flag only — mnemonic stays on the "device"
+				return { seedDisplayed: true }
+			},
+
+			// ── WalletConnect (native v2) ────────────────────────────
+			wcPair: async (params) => {
+				if (!walletConnectEnabled) throw new Error('WalletConnect is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const wc = getOrCreateWcManager()
+				await wc.pair(params.uri)
+			},
+			wcGetSessions: async () => {
+				if (!wcManager) return []
+				return wcManager.getSessions()
+			},
+			wcDisconnectSession: async (params) => {
+				if (!wcManager) return
+				await wcManager.disconnectSession(params.topic)
+			},
 
 			// ── Utility ──────────────────────────────────────────────
 			openUrl: async (params) => {
@@ -2424,6 +3519,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch {
 					throw new Error('Invalid URL')
 				}
+			},
+			getPendingDeepLink: async () => {
+				// Return but don't consume — frontend will clear via consumePendingDeepLink
+				// so the user can retry if processing fails
+				return pendingDeepLinkUri
+			},
+			consumePendingDeepLink: async () => {
+				pendingDeepLinkUri = null
 			},
 
 			// ── App Updates ──────────────────────────────────────────
@@ -2534,6 +3637,22 @@ if (swapsEnabled) {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Auto-disable 7.14.0+ features if firmware doesn't support them
+	if (state.state === 'ready') {
+		const fw = state.firmwareVersion
+		const fwTooOld = !fw || versionCompare(fw, '7.14.0') < 0
+		if (fwTooOld && bip85Enabled) {
+			bip85Enabled = false
+			setSetting('bip85_enabled', '0')
+			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+		}
+		if (fwTooOld && zcashPrivacyEnabled) {
+			zcashPrivacyEnabled = false
+			setSetting('zcash_privacy_enabled', '0')
+			stopSidecar()
+			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+		}
+	}
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
@@ -2548,6 +3667,23 @@ engine.on('state-change', (state) => {
 		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
 	}
 })
+// Seed changed — different mnemonic loaded on the same hardware.
+// Reset in-memory address managers so they re-derive from the new seed.
+// Don't wipe DB — let the fresh Pioneer fetch naturally overwrite stale entries.
+engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
+	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
+	btcAccounts.reset()
+	evmAddresses.reset()
+	// Clear stale DB caches — old seed's pubkeys and balances are wrong for the new seed
+	if (deviceId) {
+		clearCachedPubkeys(deviceId)
+		clearBalances(deviceId)
+		console.log('[Vault] Seed changed: cleared cached pubkeys + balances for', deviceId)
+	}
+	// Push fresh state to frontend so it re-renders
+	try { rpc.send['device-state'](engine.getDeviceState()) } catch {}
+})
+
 engine.on('firmware-progress', (progress) => {
 	try { rpc.send['firmware-progress'](progress) } catch { /* webview not ready yet */ }
 })
@@ -2750,7 +3886,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
-applyRestApiState()
+await applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
 await engine.start()
@@ -2807,7 +3943,29 @@ Updater.localInfo.channel().then(ch => {
 	}
 })
 
+// ── Force keepkey:// protocol registration (override old keepkey-desktop) ──
+if (process.platform === 'darwin') {
+	// Re-register this app as the handler for keepkey:// via Launch Services.
+	// When both keepkey-desktop (Electron) and keepkey-vault (Electrobun) are
+	// installed, the last one to register wins. We force it on every launch.
+	try {
+		const appPath = path.resolve(import.meta.dir, '..', '..', '..')
+		const lsregister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister'
+		// -f forces re-registration of the app's URL schemes from its Info.plist,
+		// ensuring keepkey:// points to this vault instead of the old Electron desktop app.
+		Bun.spawn([lsregister, '-f', appPath], {
+			stdout: 'ignore',
+			stderr: 'ignore',
+		})
+		console.log('[Vault] Re-registered keepkey:// protocol handler for:', appPath)
+	} catch (e: any) {
+		console.warn('[Vault] Failed to re-register protocol:', e.message)
+	}
+}
+
 // ── keepkey:// Protocol Handler ────────────────────────────────────────
+let pendingDeepLinkUri: string | null = null
+
 function getWalletConnectUri(inputUri: string): string | undefined {
 	const uri = inputUri
 		.replace('keepkey://launch/wc?uri=', '')
@@ -2816,14 +3974,41 @@ function getWalletConnectUri(inputUri: string): string | undefined {
 	return decodeURIComponent(uri.replace('wc/?uri=', '').replace('wc?uri=', ''))
 }
 
-mainWindow.on("open-url", (e: any) => {
-	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
-	if (url.startsWith('keepkey://')) {
-		const wcUri = getWalletConnectUri(url)
-		if (wcUri) {
-			try { rpc.send['walletconnect-uri'](wcUri) } catch { /* webview not ready */ }
+function handleKeepKeyUrl(url: string) {
+	console.log('[Vault] keepkey:// URL:', url)
+	const wcUri = getWalletConnectUri(url)
+	if (wcUri) {
+		if (walletConnectEnabled && engine.wallet) {
+			// Native WC v2 — pair directly in the backend
+			const wc = getOrCreateWcManager()
+			wc.pair(wcUri).catch(e => {
+				console.error('[WC] Pair failed:', e.message)
+				// Store for retry via getPendingDeepLink when device becomes ready
+				pendingDeepLinkUri = wcUri
+			})
+		} else if (walletConnectEnabled && !engine.wallet) {
+			// Device not ready — queue for later
+			pendingDeepLinkUri = wcUri
+			console.log('[Vault] Device not ready, queued WC URI for later')
+		} else {
+			// WC disabled — notify frontend to show "not supported" dialog
+			try {
+				rpc.send['walletconnect-uri'](wcUri)
+				pendingDeepLinkUri = null
+			} catch {
+				pendingDeepLinkUri = wcUri
+			}
 		}
 	}
+	// Bring window to front
+	try { mainWindow.focus() } catch {}
+}
+
+// Use global Electrobun event emitter — BrowserWindow.on() scopes to window-{id},
+// but open-url is an APPLICATION-level event fired by the native URL handler.
+Electrobun.events.on("open-url", (e: any) => {
+	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
+	if (url.startsWith('keepkey://')) handleKeepKeyUrl(url)
 })
 
 // Cleanup and quit helper — shared between window close and app quit
@@ -2831,7 +4016,30 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
-	stopCamera()
+
+	// Stop heartbeat — watchdog will SIGKILL us if cleanup takes >15s
+	stopHeartbeatWatchdog()
+
+	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway
+	setTimeout(() => {
+		console.error('[cleanup] Force-exiting after 5s timeout')
+		process.exit(1)
+	}, 5000).unref?.()
+
+	// Close emulator window + persist flash before exit
+	try {
+		const { closeEmulatorWindow } = require('./emulator-window')
+		closeEmulatorWindow()
+	} catch {}
+	try {
+		const { stopEmulator, getEmulatorStatus } = require('./emulator')
+		if (getEmulatorStatus().state === 'running') {
+			stopEmulator()
+		}
+	} catch {}
+	// Disconnect WalletConnect sessions so dApps aren't left in stale state.
+	// Fire-and-forget — relay WebSocket close is best-effort within the 5s force-exit.
+	try { wcManager?.destroy().catch((e: any) => console.warn('[cleanup] WC destroy:', e.message)) } catch {}
 	stopSidecar()
 	engine.stop()
 	restServer?.stop()
@@ -2846,6 +4054,46 @@ if (typeof process !== 'undefined') {
 	process.on('SIGTERM', cleanupAndQuit)
 	process.on('SIGINT', cleanupAndQuit)
 }
+
+// ── FFI watchdog ──────────────────────────────────────────────────────
+// When kkemu_poll() blocks inside confirm_helper (C busy-loop), the JS event
+// loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
+// This watchdog subprocess monitors liveness via a heartbeat file.
+// If the heartbeat stops for >15s, it sends SIGKILL to this process.
+const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+function startHeartbeatWatchdog() {
+	// Write heartbeat every 5s — proves the event loop is alive
+	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
+	heartbeatTimer = setInterval(() => {
+		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
+	}, 5000)
+
+	// Spawn a tiny watchdog that kills us if heartbeat goes stale
+	const watchdog = Bun.spawn(['bash', '-c', `
+		while true; do
+			sleep 5
+			if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
+			last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+			now=$(date +%s)
+			age=$(( now - last / 1000 ))
+			if [ "$age" -gt 15 ]; then
+				kill -9 ${process.pid} 2>/dev/null
+				rm -f "${HEARTBEAT_FILE}"
+				exit 0
+			fi
+		done
+	`], { stdout: 'ignore', stderr: 'ignore' })
+	watchdog.unref()
+}
+
+function stopHeartbeatWatchdog() {
+	if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+	try { fs.unlinkSync(HEARTBEAT_FILE) } catch {}
+}
+
+startHeartbeatWatchdog()
 
 // ── Start Zcash sidecar only if feature flag is ON ──────────────────
 if (zcashPrivacyEnabled) {

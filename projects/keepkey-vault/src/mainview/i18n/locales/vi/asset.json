@@ -11,7 +11,7 @@
 	"showFiltered_other": "Hiện {{count}} token đã lọc",
 	"hideFiltered_one": "Ẩn {{count}} token đã lọc",
 	"hideFiltered_other": "Ẩn {{count}} token đã lọc",
-	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Nghi ngờ spam ({{count}})",
 	"markAsSafe": "Đánh dấu an toàn",
 	"hideToken": "Ẩn token",

@@ -111,6 +111,14 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://basescan.org/address/{{address}}',
   },
   {
+    id: 'gnosis', chain: 'GNO' as any, coin: 'Gnosis', symbol: 'xDAI',
+    chainFamily: 'evm', color: '#04795B',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '100',
+    explorerTxUrl: 'https://gnosisscan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://gnosisscan.io/address/{{address}}',
+  },
+  {
     id: 'monad', chain: Chain.Monad, coin: 'Monad', symbol: 'MON',
     chainFamily: 'evm', color: '#1F70FF',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
@@ -195,7 +203,8 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#ECB244',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
-    minFirmware: '7.14.0',
+    hidden: true, // Shown only when zcashPrivacyEnabled feature flag is ON
+    minFirmware: '7.15.0',
   },
   {
     id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
@@ -203,7 +212,7 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
     defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
     hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
-    minFirmware: '7.14.0',
+    minFirmware: '7.15.0',
   },
   {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
@@ -252,14 +261,17 @@ const CONFIGS: ChainConfig[] = [
 
 // Fallbacks for chains not fully covered by pioneer-caip
 const CAIP_FALLBACKS: Record<string, string> = {
+  GNO: 'eip155:100/slip44:60',
   TRX: 'tron:27Lqcw/slip44:195',
   TON: 'ton:-239/slip44:607',
 }
 const NETWORKID_FALLBACKS: Record<string, string> = {
+  GNO: 'eip155:100',
   TRX: 'tron:27Lqcw',
   TON: 'ton:-239',
 }
 const DECIMAL_FALLBACKS: Record<string, number> = {
+  GNO: 18,
   TRX: 6,
   TON: 9,
 }
@@ -276,7 +288,11 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
 export function getExplorerTxUrl(chainId: string, txid: string): string | null {
   const chain = CHAINS.find(c => c.id === chainId)
   if (!chain?.explorerTxUrl) return null
-  return chain.explorerTxUrl.replace('{{txid}}', txid)
+  // EVM explorers expect 0x prefix; all others (Mintscan, Runescan, Blockchair, etc.) do not
+  const normalizedTxid = chain.chainFamily === 'evm'
+    ? (txid.startsWith('0x') ? txid : '0x' + txid)
+    : txid.replace(/^0x/i, '')
+  return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 
 /** Check if a chain is supported by the given firmware version. Chains without minFirmware are always supported. */

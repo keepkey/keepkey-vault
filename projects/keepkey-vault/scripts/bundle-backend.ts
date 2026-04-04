@@ -35,12 +35,23 @@ console.log(`[bundle-backend] Resolved ${aliases.size} file: linked packages`)
 // - google-protobuf: uses `this || window` global pattern that breaks when inlined by Bun
 //   (causes "jspb.Message.getBooleanField is not a function" at runtime)
 // - proto-tx-builder: depends on osmosis-frontend git submodule for Cosmos proto codegen
+// - swagger-client: transitive @swagger-api/apidom-reference does `export * from 'node:buffer'`
+//   which Bun's bundler fails to resolve (node_buffer undefined → crash on Linux)
 const FORCE_EXTERNAL = new Set([
   'node-hid',
   'usb',
   'electrobun',
   'google-protobuf',
   '@keepkey/proto-tx-builder',
+  'swagger-client',
+  // WalletConnect: ESM/CJS dual-package resolution breaks in Bun bundler
+  // (auth-client imports isBrowser/TYPE_1 from utils — not in CJS exports).
+  // Runtime Bun resolves them correctly.
+  '@walletconnect/web3wallet',
+  '@walletconnect/core',
+  '@walletconnect/types',
+  '@walletconnect/utils',
+  '@walletconnect/jsonrpc-utils',
 ])
 
 // Pre-flight: device-protocol lib/ must be built (submodule has lib/ in .gitignore).

@@ -10,7 +10,7 @@
 	"showFiltered_other": "{{count}} 件のフィルタ済みトークンを表示",
 	"hideFiltered_one": "{{count}} 件のフィルタ済みトークンを非表示",
 	"hideFiltered_other": "{{count}} 件のフィルタ済みトークンを非表示",
-	"zeroValueTokens": "$0.00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "スパムの疑い ({{count}})",
 	"markAsSafe": "安全としてマーク",
 	"hideToken": "トークンを非表示",

@@ -12,7 +12,7 @@
  */
 
 import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
-import { getLatestDeviceSnapshot, getCachedPubkeys } from './db'
+import { getLatestDeviceSnapshot, getCachedPubkeys, getSetting } from './db'
 import { getPioneer } from './pioneer'
 
 /** Section title prefixes — shared with tax-export.ts for reliable extraction. */
@@ -48,22 +48,48 @@ async function fetchPubkeyInfo(xpub: string): Promise<any> {
 
 async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
 	const pioneer = await getPioneer()
-	const resp = await pioneer.GetTxHistory({ queries: [{ pubkey: xpub, caip }] })
-	const data = resp?.data || resp
-	if (typeof data !== 'object' || data === null) {
-		console.warn('[Report] fetchTxHistory: unexpected response shape:', typeof data)
-		return []
+
+	// Pioneer's tx history is async: first call triggers a background worker and
+	// returns { transactions: [], loading: true }. We poll up to 3 times (5s apart)
+	// to wait for the worker to finish fetching from Blockbook.
+	const MAX_RETRIES = 3
+	const RETRY_DELAY = 5000
+
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		const resp = await pioneer.GetTransactionHistory({ queries: [{ pubkey: xpub, caip }] })
+		const data = resp?.data || resp
+		if (typeof data !== 'object' || data === null) {
+			console.warn('[Report] fetchTxHistory: unexpected response shape:', typeof data)
+			return []
+		}
+
+		const histories = data.histories || data?.data?.histories || []
+		const hist = histories[0]
+		const candidate = hist?.transactions
+			|| data.transactions
+			|| data?.data?.transactions
+		const txs = Array.isArray(candidate) ? candidate : []
+
+		// If we got transactions, return them
+		if (txs.length > 0) {
+			console.log(`[Report] fetchTxHistory: ${txs.length} txs for xpub=${xpub.substring(0, 20)}... (attempt ${attempt + 1})`)
+			return txs
+		}
+
+		// If Pioneer says it's still loading, wait and retry
+		const isLoading = hist?.loading || hist?.cached === false
+		if (isLoading && attempt < MAX_RETRIES) {
+			console.log(`[Report] fetchTxHistory: loading (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY / 1000}s...`)
+			await new Promise(r => setTimeout(r, RETRY_DELAY))
+			continue
+		}
+
+		// Not loading, just no transactions
+		console.warn(`[Report] fetchTxHistory: 0 transactions for xpub=${xpub.substring(0, 20)}... cached=${hist?.cached} loading=${hist?.loading}`)
+		return txs
 	}
-	// Pioneer may nest transactions in various response shapes
-	const histories = data.histories || data?.data?.histories || []
-	const candidate = histories[0]?.transactions
-		|| data.transactions
-		|| data?.data?.transactions
-	const txs = Array.isArray(candidate) ? candidate : []
-	if (txs.length === 0) {
-		console.warn(`[Report] fetchTxHistory: 0 transactions for xpub=${xpub.substring(0, 20)}... Response keys: ${Object.keys(data).join(', ')}`)
-	}
-	return txs
+
+	return []
 }
 
 // ── Section Builders ─────────────────────────────────────────────────
@@ -741,6 +767,9 @@ function sanitize(text: string): string {
 
 export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib')
+	const reportLocale = getSetting('number_locale') || 'en-US'
+	// Stored values are always USD — use USD currency label with user's number locale for separators
+	const reportCurrency = 'USD'
 
 	console.log('[reports] Starting PDF generation...')
 
@@ -871,7 +900,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	y -= 30
 
 	// ── Total Portfolio Value (big number) ──
-	const totalStr = `$${totalPortfolioUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+	const totalStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalPortfolioUsd)
 	const totalLabel = 'Total Portfolio Value'
 	const totalLabelW = font.widthOfTextAtSize(totalLabel, 11)
 	const totalValW = bold.widthOfTextAtSize(totalStr, 28)
@@ -932,7 +961,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 		for (const slice of slices.slice(0, 12)) {
 			const pct = ((slice.usd / totalPortfolioUsd) * 100).toFixed(1)
-			const usdStr = `$${slice.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+			const usdStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(slice.usd)
 
 			// Color swatch
 			page.drawRectangle({

@@ -36,9 +36,28 @@ export interface FirmwareVersionInfo {
  */
 export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
+    version: '7.15.0',
+    headline: 'Zcash privacy and EVM transaction insight',
+    features: [
+      {
+        title: 'Zcash Support',
+        description: 'Transparent and shielded Zcash transactions with on-device signing.',
+        chains: ['zcash'],
+        color: '#ECB244',
+        icon: 'chain',
+      },
+      {
+        title: 'Transaction Insight',
+        description: 'Human-readable transaction details shown on-device before signing — know exactly what you\'re approving.',
+        color: '#805AD5',
+        icon: 'feature',
+      },
+    ],
+  },
+  {
     version: '7.14.0',
     date: '2026-03',
-    headline: 'New chains, BIP-85, and transaction insight',
+    headline: 'New chains and BIP-85',
     features: [
       {
         title: 'Solana Support',
@@ -62,24 +81,10 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         icon: 'chain',
       },
       {
-        title: 'Zcash Support',
-        description: 'Transparent Zcash transactions with on-device signing.',
-        chains: ['zcash'],
-        color: '#ECB244',
-        icon: 'chain',
-      },
-      {
         title: 'BIP-85 Deterministic Entropy',
         description: 'Derive child mnemonics from your master seed — create isolated wallets without extra backups.',
         color: '#48BB78',
         icon: 'security',
-      },
-      {
-        title: 'Transaction Insight',
-        description: 'Human-readable transaction details shown on-device before signing — know exactly what you\'re approving.',
-        color: '#805AD5',
-        icon: 'feature',
-        comingSoon: true,
       },
     ],
   },

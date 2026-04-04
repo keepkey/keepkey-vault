@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Spinner, Image } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 import type { ReportMeta } from "../../shared/types"
 
@@ -8,12 +9,13 @@ import keepkeyLogo from "../assets/icon.png"
 import coinTrackerLogo from "../assets/logo/cointracker.png"
 import zenLedgerLogo from "../assets/logo/zenledger.png"
 
-type ExportFormat = "pdf" | "cointracker" | "zenledger"
+type ExportFormat = "pdf" | "csv" | "cointracker" | "zenledger"
 
 const EXPORT_OPTIONS: { key: ExportFormat; label: string; sub: string; logo: string; bg: string }[] = [
 	{ key: "pdf", label: "KeepKey PDF", sub: "Full portfolio report", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
-	{ key: "cointracker", label: "CoinTracker", sub: "Tax CSV export", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
-	{ key: "zenledger", label: "ZenLedger", sub: "Tax CSV export", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
+	{ key: "csv", label: "KeepKey CSV", sub: "Full portfolio data", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
+	{ key: "cointracker", label: "CoinTracker", sub: "Tax transactions", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
+	{ key: "zenledger", label: "ZenLedger", sub: "Tax transactions", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
 ]
 
 interface ReportDialogProps {
@@ -21,6 +23,7 @@ interface ReportDialogProps {
 }
 
 export function ReportDialog({ onClose }: ReportDialogProps) {
+	const { locale: fiatLocale, fmtCompact } = useFiat()
 	const [generating, setGenerating] = useState(false)
 	const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
 	const [reports, setReports] = useState<ReportMeta[]>([])
@@ -81,8 +84,11 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 	const handleDownload = useCallback(async (id: string, format: ExportFormat) => {
 		try {
 			setSaving(`${id}-${format}`)
+			setError(null)
 			await rpcRequest<{ filePath: string }>("saveReportFile", { id, format }, 30000)
-		} catch {} finally {
+		} catch (e: any) {
+			setError(e.message || `Failed to export ${format}`)
+		} finally {
 			setSaving(null)
 		}
 	}, [])
@@ -246,11 +252,11 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 												Full Detail Report
 											</Text>
 											<Text fontSize="10px" color={r.status === "error" ? "#DC3545" : "kk.textMuted"}>
-												{r.status === "error" ? "Failed" : `$${r.totalUsd.toFixed(2)}`}
+												{r.status === "error" ? "Failed" : fmtCompact(r.totalUsd)}
 											</Text>
 										</Flex>
 										<Text fontSize="10px" color="kk.textMuted" mb="3">
-											{new Date(r.createdAt).toLocaleString()}
+											{new Date(r.createdAt).toLocaleString(fiatLocale)}
 										</Text>
 										{r.error && (
 											<Text fontSize="10px" color="#DC3545" mb="3">{r.error}</Text>
