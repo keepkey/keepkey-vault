@@ -3143,6 +3143,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getCachedPubkeys(snap.deviceId)
 			},
 
+			// ── Registered devices (device history) ─────────────────
+			getRegisteredDevices: async () => {
+				const { getAllDeviceSnapshots } = await import('./db')
+				return getAllDeviceSnapshots()
+			},
+			forgetDevice: async (params) => {
+				const { deleteDeviceSnapshot } = await import('./db')
+				deleteDeviceSnapshot(params.deviceId)
+			},
 
 			// ── Sweep (non-standard BTC path recovery) ──────────────
 			sweepScan: async (params) => {

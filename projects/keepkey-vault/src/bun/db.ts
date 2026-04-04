@@ -848,6 +848,30 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
   }
 }
 
+export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number }> {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      'SELECT device_id, label, firmware_ver, updated_at FROM device_snapshot ORDER BY updated_at DESC'
+    ).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number }>
+    return rows.map(r => ({ deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at }))
+  } catch (e: any) {
+    console.warn('[db] getAllDeviceSnapshots failed:', e.message)
+    return []
+  }
+}
+
+export function deleteDeviceSnapshot(deviceId: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM device_snapshot WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM balances WHERE device_id = ?', [deviceId])
+  } catch (e: any) {
+    console.warn('[db] deleteDeviceSnapshot failed:', e.message)
+  }
+}
+
 // ── Cached Pubkeys (watch-only address cache) ───────────────────────
 
 export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string, balance?: string, balanceUsd?: number) {

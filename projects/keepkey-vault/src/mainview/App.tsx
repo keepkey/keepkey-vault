@@ -13,8 +13,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
-import { EmulatorManager } from "./components/EmulatorManager"
-import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
+import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
@@ -637,16 +636,8 @@ function App() {
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 				>
-					{watchOnlyAvailable && deviceState.state === "disconnected" && (
-						<WatchOnlyPrompt
-							deviceLabel={watchOnlyLabel}
-							lastSynced={watchOnlyLastSynced}
-							onViewPortfolio={handleViewPortfolio}
-							onConnectWallet={handleConnectWallet}
-						/>
-					)}
-					{/* Emulator manager — macOS only, bottom-right corner */}
-					<EmulatorManager />
+					{/* Unified device grid — registered devices + emulator wallets */}
+					<DeviceGrid onViewPortfolio={() => setWatchOnlyMode(true)} />
 				</SplashScreen>
 			</>
 		)

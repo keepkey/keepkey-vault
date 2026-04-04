@@ -388,9 +388,17 @@ export interface EmulatorStatus {
 
 /** Info about a single emulator wallet profile (flash image + optional seed). */
 export interface EmulatorWalletInfo {
-  name: string           // flash image name (user-chosen identifier)
-  hasMnemonic: boolean   // whether a saved mnemonic exists for auto-reload
-  isActive: boolean      // currently the running emulator instance
+  name: string
+  hasMnemonic: boolean
+  isActive: boolean
+}
+
+/** Persisted device snapshot — one per device_id, stored in SQLite. */
+export interface RegisteredDevice {
+  deviceId: string
+  label: string
+  firmwareVer: string
+  updatedAt: number
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
