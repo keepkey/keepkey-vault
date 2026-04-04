@@ -189,6 +189,18 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 					const color = deviceIdToColor(d.deviceId)
 					return (
 					<DeviceCard key={d.deviceId} accentColor={color}>
+						{/* Forget X — top right */}
+						{confirmForget === d.deviceId ? (
+							<Flex justify="flex-end" gap="1" mb="1">
+								<Text fontSize="9px" color="#EF4444" alignSelf="center" mr="1">Forget?</Text>
+								<SmallCircleBtn color="#EF4444" label="Y" onClick={() => handleForgetDevice(d.deviceId)} loading={loading === d.deviceId} />
+								<SmallCircleBtn color="#666" label="N" onClick={() => setConfirmForget(null)} />
+							</Flex>
+						) : (
+							<Flex justify="flex-end" mb="1">
+								<SmallCircleBtn color="#EF4444" label="&times;" onClick={() => setConfirmForget(d.deviceId)} />
+							</Flex>
+						)}
 						<Flex align="center" gap="2" mb="1">
 							<WatchOnlyIcon color={color} />
 							<Box flex="1" minW="0">
@@ -205,17 +217,7 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 								{showValues ? `$${formatUsd(d.totalUsd)}` : "$ ****"}
 							</Text>
 						)}
-						<Flex gap="1.5">
-							<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
-							{confirmForget === d.deviceId ? (
-								<>
-									<CardBtn label="Yes" color="#EF4444" onClick={() => handleForgetDevice(d.deviceId)} loading={loading === d.deviceId} />
-									<CardBtn label="No" color="#666" onClick={() => setConfirmForget(null)} />
-								</>
-							) : (
-								<CardBtn label="Forget" color="#666" onClick={() => setConfirmForget(d.deviceId)} />
-							)}
-						</Flex>
+						<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
 					</DeviceCard>
 				)})}
 
@@ -424,6 +426,20 @@ function DeviceCard({ children, active, accentColor }: { children: React.ReactNo
 		>
 			{children}
 		</Box>
+	)
+}
+
+function SmallCircleBtn({ color, label, onClick, loading }: { color: string; label: string; onClick: () => void; loading?: boolean }) {
+	const rgb = color === "#EF4444" ? "239,68,68" : "102,102,102"
+	return (
+		<Box
+			as="button" w="16px" h="16px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+			fontSize="10px" fontWeight="700" lineHeight="1" color={color}
+			bg={`rgba(${rgb},0.15)`} border="1px solid" borderColor={`rgba(${rgb},0.4)`}
+			cursor={loading ? "wait" : "pointer"} opacity={loading ? 0.5 : 1}
+			_hover={{ bg: `rgba(${rgb},0.35)` }} transition="all 0.15s"
+			onClick={onClick} dangerouslySetInnerHTML={{ __html: label }}
+		/>
 	)
 }
 
