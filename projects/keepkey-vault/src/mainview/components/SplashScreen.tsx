@@ -27,13 +27,13 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
   const [showRetry, setShowRetry] = useState(false)
 
-  // Show "Tap to retry" hint after 10s of searching/connecting (not when grid is ready)
+  // Show "Tap to retry" hint after 10s — only when there's a click handler and grid isn't ready
   useEffect(() => {
-    if (childrenReady) { setShowRetry(false); return }
+    if (childrenReady || !onLogoClick) { setShowRetry(false); return }
     setShowRetry(false)
     const timer = setTimeout(() => setShowRetry(true), RETRY_HINT_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [childrenReady, variant])
+  }, [childrenReady, variant, onLogoClick])
 
   return (
     <Box height="100vh" width="100vw" bg="transparent" position="relative">

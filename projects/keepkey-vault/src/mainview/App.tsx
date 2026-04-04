@@ -639,7 +639,7 @@ function App() {
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 					childrenReady={gridReady}
-					onLogoClick={() => { rpcRequest("retryConnect").catch(() => {}) }}
+					onLogoClick={needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
 				>
 					{/* Unified device grid — registered devices + emulator wallets */}
 					<DeviceGrid
