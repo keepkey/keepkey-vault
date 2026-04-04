@@ -3380,8 +3380,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					stopEmulator()
 				}
 
-				// Init with the new flash name (creates flash file on disk)
-				const status = initEmulator(params.name)
+				// Init with the new flash name + channel (creates flash file on disk)
+				const status = initEmulator(params.name, undefined, params.channel)
 				if (status.state !== 'running') return status
 
 				try {
@@ -3432,7 +3432,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					deleteFlash(params.name)
 					deleteMnemonic(params.name)
 
-					// Restore previous emulator if one was running
+					// Restore previous emulator if one was running (channel preserved by selectedChannel)
 					if (prevFlashName) {
 						const restored = initEmulator(prevFlashName)
 						if (restored.state === 'running') {
@@ -3455,8 +3455,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					stopEmulator()
 				}
 
-				// Init with the requested flash name
-				const status = initEmulator(params.name)
+				// Init with the requested flash name + channel
+				const status = initEmulator(params.name, undefined, params.channel)
 				if (status.state !== 'running') return status
 
 				// Open window + connect engine (auto-reloads saved mnemonic)

@@ -64,9 +64,9 @@ export function EmulatorManager() {
 		setLoading(name)
 		setError(null)
 		try {
-			// If another is running, switch; otherwise init with selected channel
+			// If another is running, switch; otherwise init — always pass selected channel
 			if (status?.state === 'running') {
-				const s = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+				const s = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name, channel: selectedChannel }, 20000)
 				setStatus(s)
 			} else {
 				const s = await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name, channel: selectedChannel }, 20000)
@@ -116,6 +116,7 @@ export function EmulatorManager() {
 				name,
 				mnemonic,
 				label: newLabel.trim() || undefined,
+				channel: selectedChannel,
 			}, 30000)
 			setStatus(s)
 			setShowAdd(false)
@@ -127,7 +128,7 @@ export function EmulatorManager() {
 			setError(e?.message || String(e))
 		}
 		setLoading(null)
-	}, [newName, newMnemonic, newLabel, refresh])
+	}, [newName, newMnemonic, newLabel, selectedChannel, refresh])
 
 	const handlePair = useCallback(async () => {
 		setLoading("__pair")

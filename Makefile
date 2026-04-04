@@ -328,13 +328,19 @@ test-emu-python:
 EMU_FW_DIR := modules/keepkey-firmware
 EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
 BETA_PIN_SHA := 9f52bb69f2e32a71f08b31b0c7df788129a0578e
+EMU_UPSTREAM_URL := https://github.com/keepkey/keepkey-firmware.git
 
 # Common cmake emulator build (called by channel-specific targets)
-# _EMU_REF can be a branch (origin/release/7.14.0) or a commit SHA.
+# _EMU_REF can be a branch (origin/release/7.14.0), a remote/branch, or a commit SHA.
 _build-emu:
 	@echo "=== Building emulator for $(_EMU_CHANNEL) channel ==="
 	@echo "    Source: $(_EMU_REF)"
 	@echo "    Output: firmware/emulators/$(_EMU_VERSION)/"
+	@# Ensure the upstream (keepkey) remote exists — .gitmodules points to the fork,
+	@# so fresh clones only have origin. The release channel needs keepkey/master.
+	@cd $(EMU_FW_DIR) && git remote get-url keepkey >/dev/null 2>&1 || \
+		(echo "    Adding keepkey remote ($(EMU_UPSTREAM_URL))..." && \
+		 cd $(EMU_FW_DIR) && git remote add keepkey $(EMU_UPSTREAM_URL))
 	cd $(EMU_FW_DIR) && git fetch --all --prune 2>/dev/null
 	cd $(EMU_FW_DIR) && git checkout $(_EMU_REF)
 	@# Verify we landed on the expected ref (catches typos in SHA)
