@@ -216,11 +216,13 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 							</Box>
 						</Flex>
 						{d.totalUsd > 0 && (
-							<Text fontSize="sm" fontWeight="700" color={showValues ? color : "gray.600"} mb="1.5">
+							<Text fontSize="sm" fontWeight="700" color={showValues ? color : "gray.600"} mb="1">
 								{showValues ? `$${formatUsd(d.totalUsd)}` : "$ ****"}
 							</Text>
 						)}
-						<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
+						<Box mt="auto">
+							<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
+						</Box>
 					</DeviceCard>
 				)})}
 
@@ -230,7 +232,7 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 					const isDeleting = confirmDeleteEmu === w.name
 					return (
 						<DeviceCard key={`emu:${w.name}`} active={active}>
-							<Flex align="center" gap="2" mb="1.5">
+							<Flex align="center" gap="2" mb="1">
 								<EmulatorIcon active={active} />
 								<Box flex="1" minW="0">
 									<Text fontSize="xs" fontWeight="600" color={active ? "#22C55E" : "gray.200"} truncate>
@@ -245,24 +247,24 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 								</Box>
 							</Flex>
 							{isDeleting ? (
-								<Box mb="1.5">
+								<Box mt="auto">
 									<Text fontSize="10px" color="#EF4444" mb="1.5" lineHeight="1.4">
-										This will delete the encrypted flash from disk. You will need the recovery phrase to re-load this wallet.
+										Delete from disk? Recovery phrase needed to re-load.
 									</Text>
 									<Flex gap="1.5">
-										<CardBtn label="Delete" color="#EF4444" onClick={() => handleDeleteEmu(w.name)} loading={loading === `emu:${w.name}`} />
-										<CardBtn label="Cancel" color="#666" onClick={() => setConfirmDeleteEmu(null)} />
+										<SmallCircleBtn color="#EF4444" label="Y" onClick={() => handleDeleteEmu(w.name)} loading={loading === `emu:${w.name}`} />
+										<SmallCircleBtn color="#666" label="N" onClick={() => setConfirmDeleteEmu(null)} />
 									</Flex>
 								</Box>
 							) : (
-								<Flex gap="1.5">
+								<Flex mt="auto" justify="space-between" align="center">
 									{active ? (
 										<CardBtn label="Stop" color="#EF4444" onClick={handleStopEmu} loading={loading === "emu:__stop"} />
 									) : (
 										<CardBtn label="Start" color="#C0A860" onClick={() => handleStartEmu(w.name)} loading={loading === `emu:${w.name}`} />
 									)}
 									{!active && (
-										<CardBtn label="Delete" color="#666" onClick={() => setConfirmDeleteEmu(w.name)} />
+										<SmallCircleBtn color="#EF4444" label="&times;" onClick={() => setConfirmDeleteEmu(w.name)} />
 									)}
 								</Flex>
 							)}
@@ -386,8 +388,10 @@ function hexToRgb(hsl: string): string {
 function DeviceCard({ children, active, accentColor }: { children: React.ReactNode; active?: boolean; accentColor?: string }) {
 	const rgb = accentColor ? hexToRgb(accentColor) : null
 	return (
-		<Box
+		<Flex
+			direction="column"
 			w="180px"
+			minH="130px"
 			bg={active ? "rgba(34,197,94,0.08)" : rgb ? `rgba(${rgb},0.06)` : "rgba(255,255,255,0.05)"}
 			border="1.5px solid"
 			borderColor={active ? "rgba(34,197,94,0.5)" : rgb ? `rgba(${rgb},0.4)` : "rgba(255,255,255,0.2)"}
@@ -397,7 +401,7 @@ function DeviceCard({ children, active, accentColor }: { children: React.ReactNo
 			_hover={{ bg: active ? "rgba(34,197,94,0.12)" : rgb ? `rgba(${rgb},0.1)` : "rgba(255,255,255,0.08)" }}
 		>
 			{children}
-		</Box>
+		</Flex>
 	)
 }
 
