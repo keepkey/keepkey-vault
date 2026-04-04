@@ -13,7 +13,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
-import { EmulatorButton } from "./components/EmulatorButton"
+import { EmulatorManager } from "./components/EmulatorManager"
 import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
@@ -645,8 +645,8 @@ function App() {
 							onConnectWallet={handleConnectWallet}
 						/>
 					)}
-					{/* Emulator button — macOS only, bottom-right corner */}
-					<EmulatorButton />
+					{/* Emulator manager — macOS only, bottom-right corner */}
+					<EmulatorManager />
 				</SplashScreen>
 			</>
 		)

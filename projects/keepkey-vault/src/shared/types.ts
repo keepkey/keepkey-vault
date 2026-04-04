@@ -386,6 +386,13 @@ export interface EmulatorStatus {
   storagePath: string             // ~/.keepkey/emulator/
 }
 
+/** Info about a single emulator wallet profile (flash image + optional seed). */
+export interface EmulatorWalletInfo {
+  name: string           // flash image name (user-chosen identifier)
+  hasMnemonic: boolean   // whether a saved mnemonic exists for auto-reload
+  isActive: boolean      // currently the running emulator instance
+}
+
 // ── BIP-85 types ────────────────────────────────────────────────────────
 
 export interface Bip85DeriveParams {

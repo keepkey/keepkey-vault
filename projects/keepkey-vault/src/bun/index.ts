@@ -3254,6 +3254,86 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				deleteMnemonic(params.name)
 				return getEmulatorStatus()
 			},
+			emulatorListWallets: async () => {
+				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
+				const status = getEmulatorStatus()
+				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
+				return listFlashImages().map(name => ({
+					name,
+					hasMnemonic: hasMnemonic(name),
+					isActive: name === activeFlash,
+				}))
+			},
+			emulatorImportWallet: async (params) => {
+				const { stopEmulator, initEmulator, getEmulatorStatus, flushRingBuffers } = await import('./emulator')
+				const { saveMnemonic } = await import('./emulator-keychain')
+
+				// Stop current emulator if running
+				if (getEmulatorStatus().state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Init with the new flash name
+				const status = initEmulator(params.name)
+				if (status.state !== 'running') return status
+
+				// Open window + connect engine
+				const { openEmulatorWindow } = await import('./emulator-window')
+				openEmulatorWindow()
+				await engine.connectEmulator()
+
+				// Save mnemonic for auto-reload on future starts
+				saveMnemonic(params.name, params.mnemonic)
+
+				// Wipe if already initialized
+				if (engine.cachedFeatures?.initialized) {
+					await emuConfirmOp(() => engine.wallet!.wipe())
+					flushRingBuffers()
+					await engine.connectEmulator()
+				}
+
+				// Load the seed onto the emulator device
+				if (!engine.cachedFeatures?.initialized) {
+					await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+						mnemonic: params.mnemonic, pin: false, passphrase: false, skipChecksum: false,
+					}))
+				}
+
+				// Set label if provided
+				const label = params.label || params.name
+				try {
+					await emuConfirmOp(() => engine.applySettings({ label, skipRefresh: true }))
+				} catch {}
+
+				flushRingBuffers()
+				await engine.connectEmulator()
+				return getEmulatorStatus()
+			},
+			emulatorSwitchWallet: async (params) => {
+				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
+
+				// Stop current emulator if running
+				if (getEmulatorStatus().state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Init with the requested flash name
+				const status = initEmulator(params.name)
+				if (status.state !== 'running') return status
+
+				// Open window + connect engine (auto-reloads saved mnemonic)
+				const { openEmulatorWindow } = await import('./emulator-window')
+				openEmulatorWindow()
+				await engine.connectEmulator()
+				return getEmulatorStatus()
+			},
 			emulatorGetMnemonic: async () => {
 				return await engine.getEmulatorMnemonic()
 			},
