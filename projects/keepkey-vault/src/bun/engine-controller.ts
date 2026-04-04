@@ -1849,10 +1849,12 @@ export class EngineController extends EventEmitter {
    * wallet. This probe derives the ETH primary address and compares it against
    * the stored seed identity for this device.
    *
-   * - Match → standard wallet (reclassify, re-emit, save snapshot)
-   * - Mismatch → confirmed hidden wallet
-   * - No stored identity → derive and store it (first-run standard wallet),
-   *   then reclassify as standard
+   * - Match      → standard wallet (reclassify, re-emit, save snapshot)
+   * - Mismatch   → confirmed hidden wallet (stay conservative)
+   * - No stored  → bootstrap: store current address as identity, reclassify
+   *                as standard. If this is actually a hidden wallet, the next
+   *                proper connect (sendPassphrase → checkSeedIdentity) will
+   *                detect the mismatch and emit 'seed-changed'.
    *
    * Session-safe: captures wallet ref + deviceId before the async call and
    * verifies both still match afterward to avoid stale-probe mutations.
@@ -1862,16 +1864,10 @@ export class EngineController extends EventEmitter {
     const probeDeviceId = this.cachedFeatures?.deviceId
     if (!probeWallet || !probeDeviceId) return
 
-    const { getSetting } = await import('./db')
+    const { getSetting, setSetting } = await import('./db')
     const stored = getSetting(`seed_eth_${probeDeviceId}`)?.toLowerCase() || null
-    if (!stored) {
-      // No stored identity — could be first-time Vault launch with a device
-      // already in a hidden wallet from another app. Can't distinguish, so
-      // stay conservative. Self-heals on next normal connect via sendPassphrase().
-      console.log('[Engine] No stored seed identity — staying conservative (hidden wallet)')
-      return
-    }
 
+    // Derive ETH primary address — needed for both "compare" and "bootstrap" paths.
     let addr: string | undefined
     try {
       const result = await (probeWallet as any).ethGetAddress({
@@ -1888,6 +1884,31 @@ export class EngineController extends EventEmitter {
     // Session guard: if wallet or deviceId changed during the await, discard
     if (this.wallet !== probeWallet || this.cachedFeatures?.deviceId !== probeDeviceId) {
       console.log('[Engine] Reconnect probe: session changed during probe — discarding result')
+      return
+    }
+
+    if (!stored) {
+      // No stored identity (fresh DB / reset). Bootstrap: store the current
+      // address as the seed identity and reclassify as standard wallet.
+      //
+      // Rationale: the most common reconnect scenario is an empty-passphrase
+      // (standard) wallet. Staying conservative here permanently disables
+      // caching, reports, and chain history with no recovery path for users
+      // who never explicitly call sendPassphrase("").
+      //
+      // If this is actually a hidden wallet, the identity stored here will
+      // mismatch on the next proper connect (sendPassphrase("") → checkSeedIdentity),
+      // which emits 'seed-changed' and re-derives correctly.
+      console.log('[Engine] No stored seed identity — bootstrapping from current address and reclassifying as standard wallet')
+      setSetting(`seed_eth_${probeDeviceId}`, addr)
+      this.hiddenWalletActive = false
+      this.seedEthAddress = addr
+      this.emit('state-change', this.getDeviceState())
+      try {
+        const label = this.cachedFeatures?.label || ''
+        const fwVer = this.extractVersion(this.cachedFeatures)
+        saveDeviceSnapshot(probeDeviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+      } catch { /* never block on cache failure */ }
       return
     }
 
