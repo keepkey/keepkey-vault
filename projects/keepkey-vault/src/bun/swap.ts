@@ -457,7 +457,18 @@ async function buildRelaySwapTx(
   getRpcUrl: (chain: ChainDef) => string | undefined,
 ): Promise<{ unsignedTx: any }> {
   const relay = params.relayTx!
-  const chainId = relay.chainId
+
+  // Guard: relay chainId MUST match the locally-resolved source chain to prevent
+  // signing a tx for chain A with a nonce fetched from chain B.
+  const expectedChainId = parseInt(fromChain.chainId || '0', 10)
+  if (relay.chainId !== expectedChainId) {
+    throw new Error(
+      `Relay chainId mismatch: quote says ${relay.chainId} but source chain ${fromChain.id} is ${expectedChainId}. ` +
+      `Aborting — stale or mismatched quote.`
+    )
+  }
+
+  const chainId = expectedChainId
   const rpcUrl = getRpcUrl(fromChain)
 
   // Fetch nonce (relay tx doesn't include it)
@@ -480,23 +491,43 @@ async function buildRelaySwapTx(
     throw new Error(`Failed to fetch nonce for ${fromAddress} on ${fromChain.id} — cannot build relay tx`)
   }
 
-  // Use gas params from relay quote, with sane fallbacks
+  // Use gas params from relay quote, with sane fallbacks.
+  // Mirror the normal EVM path: try quote fields → RPC → Pioneer → chain-specific floor.
   const gasLimit = relay.gasLimit || '300000'
+  const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
+  const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
   let gasPrice: string | undefined
   let maxFeePerGas: string | undefined
   let maxPriorityFeePerGas: string | undefined
 
   if (relay.maxFeePerGas) {
-    // EIP-1559 tx
+    // EIP-1559 tx — use quote values
     maxFeePerGas = relay.maxFeePerGas
     maxPriorityFeePerGas = relay.maxPriorityFeePerGas || '1000000' // 0.001 gwei fallback
-  } else if (rpcUrl) {
-    // Legacy gas price
-    try {
-      const gp = await getEvmGasPrice(rpcUrl)
-      gasPrice = toHex(gp)
-    } catch {
-      gasPrice = toHex(BigInt(25e9)) // 25 gwei fallback for AVAX
+  } else {
+    // Legacy gas price — try RPC, then Pioneer, then chain-specific floor
+    if (rpcUrl) {
+      try {
+        const gp = await getEvmGasPrice(rpcUrl)
+        gasPrice = toHex(gp < fallbackGasPrice ? fallbackGasPrice : gp)
+      } catch {
+        console.warn(`${TAG} RPC gas price failed for relay tx, trying Pioneer...`)
+      }
+    }
+    if (!gasPrice) {
+      try {
+        const pioneer = await getPioneer()
+        const gp = await pioneer.GetGasPriceByNetwork({ networkId: fromChain.networkId })
+        const gpData = gp?.data
+        const gpGwei = typeof gpData === 'object'
+          ? parseFloat(gpData.average || gpData.fast || String(fallbackGwei))
+          : parseFloat(gpData || String(fallbackGwei))
+        const gpWei = BigInt(Math.round((isNaN(gpGwei) ? fallbackGwei : gpGwei) * 1e9))
+        gasPrice = toHex(gpWei < fallbackGasPrice ? fallbackGasPrice : gpWei)
+      } catch (e: any) {
+        console.warn(`${TAG} Pioneer gas price failed for relay tx, using ${fallbackGwei} gwei floor: ${e.message}`)
+        gasPrice = toHex(fallbackGasPrice)
+      }
     }
   }
 
@@ -519,7 +550,7 @@ async function buildRelaySwapTx(
     unsignedTx.gasPrice = gasPrice
   }
 
-  console.log(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, to=${relay.to}, value=${relay.value}`)
+  console.log(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
   return { unsignedTx }
 }
 
