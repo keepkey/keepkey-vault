@@ -168,13 +168,35 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable])
 
 	// Re-derive address when BTC xpub selection or change/index changes
+	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
 	useEffect(() => {
-		if (isBtc && btcSelected) {
-			deriveAddress(btcSelected.fullPath)
-		}
+		if (!isBtc || !btcSelected) return
+		let cancelled = false
+		const path = btcSelected.fullPath
+		;(async () => {
+			setLoading(true)
+			setDeriveError(null)
+			try {
+				const params: any = { addressNList: path, showDisplay: false, coin: chain.coin }
+				if (btcSelected.scriptType) params.scriptType = btcSelected.scriptType
+				const result = await rpcRequest(chain.rpcMethod, params, 60000)
+				if (cancelled) return
+				const addr = typeof result === 'string' ? result : result?.address || String(result)
+				setAddress(addr)
+				setCurrentPath(path)
+			} catch (e: any) {
+				if (cancelled) return
+				console.error(`${chain.coin} address:`, e)
+				setDeriveError(e.message || 'Address derivation failed')
+				setAddress(null)
+			}
+			setLoading(false)
+		})()
+		return () => { cancelled = true }
 	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Fetch next unused address indices from Pioneer API when xpub selection changes
+	// Cancellation guard prevents stale responses from snapping to wrong index (Finding 4)
 	const prevScriptRef = useMemo(() => btcAccounts.selectedXpub?.scriptType, [btcAccounts.selectedXpub?.scriptType])
 	const prevAcctRef = useMemo(() => btcAccounts.selectedXpub?.accountIndex, [btcAccounts.selectedXpub?.accountIndex])
 	useEffect(() => {
@@ -186,14 +208,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			.find(a => a.accountIndex === (btcAccounts.selectedXpub?.accountIndex ?? 0))
 			?.xpubs.find(x => x.scriptType === (btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh'))
 			?.xpub
-		if (xpub) {
-			rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
-				.then((indices) => {
-					setPioneerIndices(indices)
-					setBtcAddressIndex(indices.receiveIndex)
-				})
-				.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
-		}
+		if (!xpub) return
+		let cancelled = false
+		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
+			.then((indices) => {
+				if (cancelled) return
+				setPioneerIndices(indices)
+				setBtcAddressIndex(indices.receiveIndex)
+			})
+			.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
+		return () => { cancelled = true }
 	}, [prevScriptRef, prevAcctRef]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// When toggling Receive/Change, set index to the cached Pioneer value
@@ -218,8 +242,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
 	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
+	// BTC is excluded — it has its own cancellation-guarded effect (line 170) that uses
+	// the selected account/script path instead of the default path.
 	const isUtxo = chain.chainFamily === 'utxo'
 	useEffect(() => {
+		if (isBtc) return // BTC address derived by account-aware effect above
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -591,16 +618,28 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 				{/* Content */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }} minH="280px">
 					{view === "send" ? (
+						isBtc && !btcSelected?.xpubData ? (
+							<Flex align="center" justify="center" minH="200px">
+								<Spinner size="sm" color="kk.gold" mr="2" />
+								<Text color="kk.textMuted" fontSize="sm">Loading BTC accounts...</Text>
+							</Flex>
+						) : (
 						<SendForm
 							chain={chain}
 							address={address}
-							balance={activeBalance}
+							balance={isBtc && btcSelected?.xpubData ? {
+								...activeBalance!,
+								balance: btcSelected.xpubData.balance,
+								balanceUsd: btcSelected.xpubData.balanceUsd,
+								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+							} : activeBalance}
 							token={selectedToken}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
+						)
 					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab />
@@ -732,7 +771,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							open={showSwapDialog}
 							onClose={() => setShowSwapDialog(false)}
 							chain={chain}
-							balance={activeBalance}
+							balance={isBtc && btcSelected?.xpubData ? {
+								...activeBalance!,
+								balance: btcSelected.xpubData.balance,
+								balanceUsd: btcSelected.xpubData.balanceUsd,
+								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+							} : activeBalance}
 							address={address}
 						/>
 					</Suspense>

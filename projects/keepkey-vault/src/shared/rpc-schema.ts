@@ -179,7 +179,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       clearRecentActivity: { params: void; response: void }
 
       // ── Balance cache (instant portfolio) ─────────────────────────────
-      getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number } | null }
+      getCachedBalances: { params: void; response: { balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null }
 
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }

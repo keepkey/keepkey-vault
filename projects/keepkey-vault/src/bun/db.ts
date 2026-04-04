@@ -152,10 +152,19 @@ export function initDb() {
         xpub        TEXT NOT NULL DEFAULT '',
         address     TEXT NOT NULL DEFAULT '',
         script_type TEXT NOT NULL DEFAULT '',
+        balance     TEXT NOT NULL DEFAULT '0',
+        balance_usd REAL NOT NULL DEFAULT 0,
         updated_at  INTEGER NOT NULL,
         PRIMARY KEY (device_id, chain_id, path)
       )
     `)
+    // Migration: add balance columns if missing (existing installs)
+    try {
+      db.exec(`ALTER TABLE cached_pubkeys ADD COLUMN balance TEXT NOT NULL DEFAULT '0'`)
+    } catch { /* column already exists */ }
+    try {
+      db.exec(`ALTER TABLE cached_pubkeys ADD COLUMN balance_usd REAL NOT NULL DEFAULT 0`)
+    } catch { /* column already exists */ }
 
 
     db.exec(`
@@ -841,25 +850,25 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
 
 // ── Cached Pubkeys (watch-only address cache) ───────────────────────
 
-export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string) {
+export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string, balance?: string, balanceUsd?: number) {
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', Date.now()]
+      `INSERT OR REPLACE INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', balance || '0', balanceUsd ?? 0, Date.now()]
     )
   } catch (e: any) {
     console.warn('[db] saveCachedPubkey failed:', e.message)
   }
 }
 
-export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; path: string; xpub: string; address: string; scriptType: string }> {
+export function getCachedPubkeys(deviceId: string): Array<{ chainId: string; path: string; xpub: string; address: string; scriptType: string; balance: string; balanceUsd: number }> {
   try {
     if (!db) return []
     const rows = db.query(
-      'SELECT chain_id, path, xpub, address, script_type FROM cached_pubkeys WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; path: string; xpub: string; address: string; script_type: string }>
-    return rows.map(r => ({ chainId: r.chain_id, path: r.path, xpub: r.xpub, address: r.address, scriptType: r.script_type }))
+      'SELECT chain_id, path, xpub, address, script_type, balance, balance_usd FROM cached_pubkeys WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; path: string; xpub: string; address: string; script_type: string; balance: string; balance_usd: number }>
+    return rows.map(r => ({ chainId: r.chain_id, path: r.path, xpub: r.xpub, address: r.address, scriptType: r.script_type, balance: r.balance || '0', balanceUsd: r.balance_usd || 0 }))
   } catch (e: any) {
     console.warn('[db] getCachedPubkeys failed:', e.message)
     return []

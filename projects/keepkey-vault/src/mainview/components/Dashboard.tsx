@@ -179,8 +179,9 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 		let cancelled = false
 
 		async function loadCached() {
+			let needsAutoRefresh = false
+
 			if (watchOnly) {
-				// Watch-only still auto-fetches from cache
 				try {
 					const result = await rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', undefined, 5000)
 					if (!cancelled && result && result.length > 0) {
@@ -189,23 +190,24 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 						setBalances(map)
 					}
 				} catch { /* watch-only cache unavailable */ }
-				if (!cancelled) {
-					setInitialLoaded(true)
-					onLoaded?.()
-				}
+				if (!cancelled) { setInitialLoaded(true); onLoaded?.() }
 				return
 			}
 
 			// New seed: cache belongs to the old seed — skip it
 			if (!forceRefresh) {
 				try {
-					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 3000)
+					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null>('getCachedBalances', undefined, 3000)
 					if (!cancelled && cached && cached.balances.length > 0) {
 						const map = new Map<string, ChainBalance>()
 						for (const b of cached.balances) map.set(b.chainId, b)
 						setBalances(map)
 						setCacheUpdatedAt(cached.updatedAt)
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
+						if (cached.staleReasons && cached.staleReasons.length > 0) {
+							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
+							needsAutoRefresh = true
+						}
 					}
 				} catch { /* cache unavailable */ }
 			} else {
@@ -215,6 +217,8 @@ export function Dashboard({ onLoaded, watchOnly, onOpenSettings, firmwareVersion
 			if (!cancelled) {
 				setInitialLoaded(true)
 				onLoaded?.()
+				// Auto-refresh in background when cache is incomplete
+				if (needsAutoRefresh) refreshBalances()
 			}
 		}
 

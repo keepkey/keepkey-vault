@@ -1252,8 +1252,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
 								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
 							}
-							// Update per-xpub balance in BtcAccountManager
-							btcAccounts.updateXpubBalance(entry.pubkey, String(match?.balance ?? '0'), usd)
+							// Update per-xpub balance in BtcAccountManager + persist to cache
+							const xpubBal = String(match?.balance ?? '0')
+							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
+							try {
+								const devId = engine.getDeviceState().deviceId
+								if (devId) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+							} catch { /* non-fatal */ }
 							continue
 						}
 
@@ -1385,7 +1390,40 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pubkeys: Array<{ caip: string; pubkey: string }> = []
 				let displayAddress = '' // address shown in UI / used for swaps
 
-				if (chain.chainFamily === 'utxo') {
+				if (chain.id === 'bitcoin') {
+					// BTC multi-account: send ALL xpubs (mirrors getBalances lines 1065-1086)
+					if (!btcAccounts.isInitialized) {
+						try { await btcAccounts.initialize(wallet) } catch (e: any) {
+							console.warn(`[getBalance] BTC accounts init failed:`, e.message)
+						}
+					}
+					let btcPubkeyEntries = btcAccounts.getAllPubkeyEntries(chain.caip)
+					// Fallback: if btcAccounts empty, try cached pubkeys from DB (mirrors getBalances line 1069-1080)
+					if (btcPubkeyEntries.length === 0) {
+						const devId = engine.getDeviceState().deviceId
+						if (devId) {
+							const cachedPks = getCachedPubkeys(devId)
+							const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
+							if (btcPks.length > 0) {
+								btcPubkeyEntries = btcPks.map(p => ({ caip: chain.caip, pubkey: p.xpub }))
+								console.log(`[getBalance] BTC xpubs from cached_pubkeys DB fallback: ${btcPubkeyEntries.length}`)
+							}
+						}
+					}
+					// Last resort: derive single default xpub from device
+					if (btcPubkeyEntries.length === 0) {
+						const result = await wallet.getPublicKeys([{
+							addressNList: chain.defaultPath.slice(0, 3),
+							coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
+						}])
+						const xpub = result?.[0]?.xpub || ''
+						if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
+						btcPubkeyEntries = [{ caip: chain.caip, pubkey: xpub }]
+					}
+					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+					// displayAddress left empty — UTXO: frontend auto-derives from device
+				} else if (chain.chainFamily === 'utxo') {
+					// Non-BTC UTXO chains (LTC, DOGE, etc.) — single xpub
 					const result = await wallet.getPublicKeys([{
 						addressNList: chain.defaultPath.slice(0, 3),
 						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
@@ -1393,7 +1431,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const xpub = result?.[0]?.xpub || ''
 					if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
 					pubkeys.push({ caip: chain.caip, pubkey: xpub })
-					// UTXO: leave displayAddress empty so frontend auto-derives from device
 				} else if (chain.chainFamily === 'evm') {
 					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
 					if (!evmAddresses.isInitialized) {
@@ -1427,9 +1464,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Single portfolio call with all pubkeys for this chain
+				const isBtc = chain.id === 'bitcoin'
 				const isEvm = chain.chainFamily === 'evm'
+				const isUtxo = chain.chainFamily === 'utxo'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
+				let cachedAddress = ''
+				try {
+					const devId = engine.getDeviceState().deviceId
+					if (devId) {
+						const cached = getCachedBalances(devId)
+						cachedAddress = cached?.balances.find(b => b.chainId === chain.id)?.address || ''
+					}
+				} catch { /* cache lookup failed, non-fatal */ }
 
 				// Reset per-address balances for this refresh (mirrors getBalances line 991)
 				if (isEvm) evmAddresses.resetBalances()
@@ -1454,12 +1502,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const chainCaipPrefix = (chain.caip || '').split('/')[0].toLowerCase() // e.g. "eip155:1"
 					const pubkeySet = new Set(pubkeys.map(p => p.pubkey.toLowerCase()))
 
-					// Classify entries, requiring both chain-match AND pubkey-ownership
-					let nativeTotalBalance = 0
-					let nativeTotalUsd = 0
+					// Classify entries: filter by chain, separate natives vs tokens
+					const pureNatives: any[] = []
 					const tokenEntries: any[] = []
 					let skippedCrossChain = 0
-					let skippedForeignPubkey = 0
 
 					for (const entry of allEntries) {
 						// Gate 1: entry must belong to THIS chain (networkId or CAIP prefix)
@@ -1477,35 +1523,64 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (isTokenByCaip || isTokenByType) {
 							// Gate 2 (tokens): owner address must be one we requested
 							const ownerAddr = (entry.address || entry.pubkey || '').toLowerCase()
-							if (ownerAddr && !pubkeySet.has(ownerAddr)) { skippedForeignPubkey++; continue }
+							if (ownerAddr && !pubkeySet.has(ownerAddr)) continue
 							tokenEntries.push(entry)
 						} else {
-							// Gate 2 (natives): match against our pubkeys explicitly
-							// (mirrors getBalances EVM logic at line 1219-1236)
-							const entryPubkey = (entry.pubkey || '').toLowerCase()
-							const entryAddr = (entry.address || '').toLowerCase()
-							if (!pubkeySet.has(entryPubkey) && !pubkeySet.has(entryAddr)) {
-								skippedForeignPubkey++; continue
-							}
-							const bal = parseFloat(String(entry.balance ?? '0'))
-							const usd = Number(entry.valueUsd ?? 0)
-							nativeTotalBalance += bal
-							nativeTotalUsd += usd
-							// Update per-address USD in EvmAddressManager (mirrors getBalances line 1224)
-							if (isEvm && usd > 0) {
-								evmAddresses.updateAddressBalance(entryAddr || entryPubkey, usd)
-							}
+							pureNatives.push(entry)
 						}
 					}
 
-					if (skippedCrossChain > 0 || skippedForeignPubkey > 0) {
-						console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain, ${skippedForeignPubkey} foreign-pubkey entries`)
+					if (skippedCrossChain > 0) {
+						console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain entries`)
+					}
+
+					// Aggregate natives: iterate REQUESTED pubkeys, match at most one response per
+					// pubkey, zero missing entries explicitly. Mirrors getBalances BTC/EVM aggregation.
+					let nativeTotalBalance = 0
+					let nativeTotalUsd = 0
+					// Address tracking for UTXO chains (BTC + LTC/DOGE/etc.)
+					const selectedXpubStr = isBtc ? btcAccounts.getSelectedXpub()?.xpub : undefined
+					let selectedPkAddress = ''  // address from selected xpub (BTC) or sole xpub (other UTXO)
+					let fallbackPkAddress = ''  // first Pioneer-returned address from any xpub
+
+					for (const pk of pubkeys) {
+						// Find ONE matching native entry for this requested pubkey (no double-counting)
+						const match = pureNatives.find((d: any) => d.pubkey === pk.pubkey)
+							|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
+							|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
+						const bal = parseFloat(String(match?.balance ?? '0'))
+						const usd = Number(match?.valueUsd ?? 0)
+						nativeTotalBalance += bal
+						nativeTotalUsd += usd
+
+						// Capture Pioneer-returned address for this pubkey
+						if (match?.address) {
+							if (!fallbackPkAddress) fallbackPkAddress = match.address
+							// BTC: prefer selected xpub's address; non-BTC UTXO: first (only) xpub
+							if (isBtc && selectedXpubStr && pk.pubkey === selectedXpubStr) selectedPkAddress = match.address
+							if (!isBtc && isUtxo) selectedPkAddress = match.address
+						}
+
+						if (isBtc) {
+							const xpubBal = String(match?.balance ?? '0')
+							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							try {
+								const devId = engine.getDeviceState().deviceId
+								if (devId) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
+							} catch { /* non-fatal */ }
+						} else if (isEvm && usd > 0) {
+							evmAddresses.updateAddressBalance(pk.pubkey, usd)
+						}
 					}
 
 					if (nativeTotalBalance > 0 || nativeTotalUsd > 0) {
 						balance = nativeTotalBalance > 0 ? nativeTotalBalance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0'
 						balanceUsd = nativeTotalUsd
-						// Keep displayAddress (selected EVM address) — don't overwrite from Pioneer
+					}
+					// UTXO chains: set address from Pioneer response (selected xpub preferred)
+					if (isBtc || isUtxo) {
+						const pioneerAddr = selectedPkAddress || fallbackPkAddress
+						if (pioneerAddr) address = pioneerAddr
 					}
 
 					// Process tokens — already filtered to this chain + our pubkeys
@@ -1555,6 +1630,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
 				}
+				// If Pioneer failed or returned no address, preserve the cached address
+				// so we don't wipe a previously good address from the shared cache (Finding 3)
+				if (!address && cachedAddress) address = cachedAddress
 				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
@@ -1567,6 +1645,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Push updated EVM per-address balances so address selector stays current
 				if (isEvm) {
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+				}
+				// Push updated BTC per-xpub balances — only if manager is hydrated (Finding 2)
+				if (isBtc && btcAccounts.isInitialized && btcAccounts.getAllPubkeyEntries(chain.caip).length > 0) {
+					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
 				}
 
 				return result
@@ -1610,16 +1692,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
 					console.debug(`[buildTx] Derived ${chain.coin} address OK`)
 				} else if (chain.id === 'bitcoin') {
-					// BTC multi-account: use override or selected xpub + scriptType
-					const selectedBtcXpub = btcAccounts.getSelectedXpub()
-					xpub = params.xpubOverride || selectedBtcXpub?.xpub
-					// Ensure scriptTypeOverride is set when using a selected xpub
-					if (!params.scriptTypeOverride && selectedBtcXpub?.scriptType) {
-						params = { ...params, scriptTypeOverride: selectedBtcXpub.scriptType }
+					// BTC multi-account: resolve xpub, scriptType, and accountPath from the
+					// override string itself (not from getSelectedXpub(), which can drift
+					// between render and RPC handling). Finding 5 fix.
+					const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
+					xpub = resolvedXpub
+					// Look up the BtcXpub entry that owns this xpub string for scriptType + path
+					let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
+					if (resolvedXpub) {
+						for (const account of btcAccounts.toAccountSet().accounts) {
+							for (const xp of account.xpubs) {
+								if (xp.xpub === resolvedXpub) {
+									matchedXpubEntry = { scriptType: xp.scriptType, path: xp.path }
+									break
+								}
+							}
+							if (matchedXpubEntry) break
+						}
 					}
-					// Pass account-level path so UTXO builder can correct blockbook's always-account-0 paths
-					if (selectedBtcXpub?.path) {
-						params = { ...params, accountPath: selectedBtcXpub.path }
+					if (matchedXpubEntry) {
+						if (!params.scriptTypeOverride) params = { ...params, scriptTypeOverride: matchedXpubEntry.scriptType }
+						params = { ...params, accountPath: matchedXpubEntry.path }
 					}
 					if (!xpub) {
 						// Fallback: derive from default path
@@ -1852,6 +1945,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (!btcAccounts.isInitialized) {
 					await btcAccounts.initialize(engine.wallet as any)
+				}
+				// Hydrate per-xpub balances from DB cache (so pills show values on first load)
+				const devId = engine.getDeviceState().deviceId
+				if (devId) {
+					const cachedPks = getCachedPubkeys(devId).filter(p => p.chainId === 'bitcoin' && p.xpub)
+					for (const pk of cachedPks) {
+						if (pk.balance !== '0' || pk.balanceUsd > 0) {
+							btcAccounts.updateXpubBalance(pk.xpub, pk.balance, pk.balanceUsd)
+						}
+					}
 				}
 				return btcAccounts.toAccountSet()
 			},
@@ -2784,7 +2887,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					getBtcXpub: () => {
 						if (btcAccounts.isInitialized) {
 							const selected = btcAccounts.getSelectedXpub()
-							if (selected) return selected.xpub
+							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
 						}
 						return undefined
 					},
@@ -2984,10 +3087,42 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
 				const deviceId = engine.getDeviceState().deviceId
-				if (!deviceId) return null
+				if (!deviceId) { console.log('[cache-health] No deviceId — skipping'); return null }
 				const result = getCachedBalances(deviceId)
-				if (!result) return null
-				return { balances: result.balances, updatedAt: result.updatedAt }
+				if (!result) { console.log('[cache-health] No cached balances for device', deviceId); return null }
+
+				// Detect incomplete/stale cache — frontend can auto-refresh when staleReasons is non-empty
+				const staleReasons: string[] = []
+
+				// Incomplete: fewer cached chains than supported (e.g. app update added new chains)
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const supportedChains = getAllChains().filter(c => !c.hidden && isChainSupported(c, fwVersion))
+				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
+				const missingChains = supportedChains.filter(c => !cachedChainIds.has(c.id))
+				if (missingChains.length > 0) {
+					staleReasons.push(`missing_chains:${missingChains.map(c => c.id).join(',')}`)
+				}
+				console.log(`[cache-health] ${result.balances.length} cached chains, ${supportedChains.length} supported, ${missingChains.length} missing`)
+
+				// Missing BTC xpub balances: BTC has a cached aggregate but no per-xpub breakdown
+				const btcCached = result.balances.find(b => b.chainId === 'bitcoin')
+				if (btcCached && parseFloat(btcCached.balance || '0') > 0) {
+					const allBtcPks = getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin')
+					const withXpub = allBtcPks.filter(p => p.xpub)
+					const withBalance = withXpub.filter(p => p.balance !== '0' || p.balanceUsd > 0)
+					console.log(`[cache-health] BTC: aggregate=${btcCached.balance}, cached_pubkeys=${allBtcPks.length} total, ${withXpub.length} with xpub, ${withBalance.length} with balance`)
+					if (withBalance.length === 0) {
+						staleReasons.push('btc_xpub_balances_missing')
+					}
+				}
+
+				if (staleReasons.length > 0) {
+					console.log(`[cache-health] STALE: ${staleReasons.join(', ')}`)
+				} else {
+					console.log('[cache-health] Cache OK — no staleness detected')
+				}
+
+				return { balances: result.balances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
