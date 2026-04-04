@@ -14,7 +14,7 @@
  * Manifest at: firmware/emulators/manifest.json
  */
 import { dlopen, FFIType, ptr, toBuffer } from 'bun:ffi'
-import { resolve, join } from 'path'
+import { resolve, join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import {
   isMacOS, getOrCreateKey, getPairingStatus,
@@ -55,8 +55,25 @@ interface EmulatorManifest {
 export type EmulatorChannel = 'alpha' | 'beta' | 'release'
 
 function getEmulatorsDir(): string {
-  // From projects/keepkey-vault/src/bun/ → firmware/emulators/
-  return resolve(__dirname, '../../../../firmware/emulators')
+  // firmware/emulators/ lives at the vault-v11 project root.
+  // Try multiple resolution strategies (bundled app vs source vs cwd):
+  const candidates = [
+    // 1. Relative to import.meta.dir (works in bundled Bun — app/bun/ → ../../firmware/emulators)
+    resolve(import.meta.dir, '..', '..', 'firmware', 'emulators'),
+    // 2. From Electrobun app root (Resources/app/ → ../../firmware/emulators)
+    resolve(import.meta.dir, '..', '..', '..', 'firmware', 'emulators'),
+    // 3. From source tree (src/bun/ → ../../../../firmware/emulators)
+    resolve(import.meta.dir, '..', '..', '..', '..', 'firmware', 'emulators'),
+    // 4. cwd-relative (if cwd is project root)
+    resolve(process.cwd(), 'firmware', 'emulators'),
+    // 5. cwd relative for vault-v11 root
+    resolve(process.cwd(), '..', '..', 'firmware', 'emulators'),
+  ]
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'manifest.json'))) return dir
+  }
+  // Fallback to source-tree path (will fail with clear error)
+  return candidates[2]
 }
 
 function loadManifest(): EmulatorManifest | null {
