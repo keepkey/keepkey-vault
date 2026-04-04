@@ -21,10 +21,6 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
 	const [emuPaired, setEmuPaired] = useState(false)
 	const [loading, setLoading] = useState<string | null>(null)
-	const [showAdd, setShowAdd] = useState(false)
-	const [newName, setNewName] = useState("")
-	const [newMnemonic, setNewMnemonic] = useState("")
-	const [newLabel, setNewLabel] = useState("")
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
 	const [confirmDeleteEmu, setConfirmDeleteEmu] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -104,6 +100,22 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 		setConfirmDeleteEmu(null)
 	}, [refresh])
 
+	const handleAddEmu = useCallback(async () => {
+		// Generate a unique name like emu-1, emu-2, ...
+		const existing = new Set(emuWallets.map(w => w.name))
+		let idx = 1
+		while (existing.has(`emu-${idx}`)) idx++
+		const name = `emu-${idx}`
+		setLoading("emu:__add")
+		setError(null)
+		try {
+			// Start a fresh emulator — it boots uninitialized, onboarding flow handles setup
+			await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+			await refresh()
+		} catch (e: any) { setError(e?.message || String(e)) }
+		setLoading(null)
+	}, [emuWallets, refresh])
+
 	const handlePairEmu = useCallback(async () => {
 		setLoading("emu:__pair")
 		try {
@@ -115,25 +127,6 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 		setLoading(null)
 	}, [refresh])
 
-	const handleImportEmu = useCallback(async () => {
-		const name = newName.trim()
-		const mnemonic = newMnemonic.trim()
-		if (!name || !mnemonic) return
-		if (name.length > 64 || /[\/\\]/.test(name) || name.includes('..') || name.includes('.mnemonic.')) {
-			setError('Invalid name: avoid path characters (/ \\ ..), max 64 chars'); return
-		}
-		setLoading("emu:__import")
-		setError(null)
-		try {
-			await rpcRequest<EmulatorStatus>("emulatorImportWallet", {
-				name, mnemonic, label: newLabel.trim() || undefined,
-			}, 30000)
-			setShowAdd(false)
-			setNewName(""); setNewMnemonic(""); setNewLabel("")
-			await refresh()
-		} catch (e: any) { setError(e?.message || String(e)) }
-		setLoading(null)
-	}, [newName, newMnemonic, newLabel, refresh])
 
 	// ── Helpers ──────────────────────────────────────────────────────
 
@@ -269,7 +262,7 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 				})}
 
 				{/* ── Add Emulator card ─────────────────────────────── */}
-				{emuPaired && !showAdd && (
+				{emuPaired && (
 					<Box
 						as="button"
 						w="180px"
@@ -282,13 +275,13 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 						alignItems="center"
 						justifyContent="center"
 						gap="1"
-						cursor="pointer"
+						cursor={loading === "emu:__add" ? "wait" : "pointer"}
 						transition="all 0.2s"
 						_hover={{ bg: "rgba(192,168,96,0.06)", borderColor: "rgba(192,168,96,0.5)" }}
-						onClick={() => setShowAdd(true)}
+						onClick={handleAddEmu}
 					>
 						<Text fontSize="lg" color="rgba(192,168,96,0.6)">+</Text>
-						<Text fontSize="10px" color="gray.500">Add Emulator</Text>
+						<Text fontSize="10px" color="gray.500">{loading === "emu:__add" ? "Starting..." : "Add Emulator"}</Text>
 					</Box>
 				)}
 
@@ -319,37 +312,6 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 				)}
 			</Flex>
 
-			{/* ── Import form (inline below grid) ────────────────────── */}
-			{showAdd && (
-				<Box
-					mt="3"
-					mx="auto"
-					maxW="340px"
-					bg="rgba(0,0,0,0.85)"
-					border="1px solid rgba(192,168,96,0.3)"
-					borderRadius="xl"
-					px="4" py="3"
-				>
-					<Text fontSize="xs" fontWeight="600" color="#C0A860" mb="2">Import Emulator Wallet</Text>
-					<InputField placeholder="Wallet name" value={newName} onChange={setNewName} />
-					<Box
-						as="textarea"
-						w="100%" px="3" py="1.5" mb="2" fontSize="xs"
-						bg="rgba(255,255,255,0.05)" border="1px solid rgba(255,255,255,0.1)"
-						borderRadius="md" color="gray.200" rows={3} resize="none"
-						placeholder="Seed phrase (12 or 24 words)"
-						_placeholder={{ color: "gray.600" }}
-						_focus={{ borderColor: "rgba(192,168,96,0.5)", outline: "none" }}
-						value={newMnemonic}
-						onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewMnemonic(e.target.value)}
-					/>
-					<InputField placeholder="Label (optional)" value={newLabel} onChange={setNewLabel} />
-					<Flex gap="2" mt="1">
-						<CardBtn label={loading === "emu:__import" ? "Importing..." : "Import & Start"} color="#C0A860" onClick={handleImportEmu} loading={loading === "emu:__import"} />
-						<CardBtn label="Cancel" color="#666" onClick={() => { setShowAdd(false); setNewName(""); setNewMnemonic(""); setNewLabel("") }} />
-					</Flex>
-				</Box>
-			)}
 			{/* Grand total + eyeball toggle */}
 			{grandTotal > 0 && (
 				<Flex justify="center" align="center" gap="2" mt="4">
@@ -417,13 +379,13 @@ function DeviceCard({ children, active, accentColor }: { children: React.ReactNo
 	return (
 		<Box
 			w="180px"
-			bg={active ? "rgba(34,197,94,0.04)" : rgb ? `rgba(${rgb},0.03)` : "rgba(255,255,255,0.02)"}
+			bg={active ? "rgba(34,197,94,0.08)" : rgb ? `rgba(${rgb},0.06)` : "rgba(255,255,255,0.05)"}
 			border="1.5px solid"
-			borderColor={active ? "rgba(34,197,94,0.3)" : rgb ? `rgba(${rgb},0.22)` : "rgba(255,255,255,0.1)"}
+			borderColor={active ? "rgba(34,197,94,0.5)" : rgb ? `rgba(${rgb},0.4)` : "rgba(255,255,255,0.2)"}
 			borderRadius="xl"
 			px="3" py="2.5"
 			transition="all 0.2s"
-			_hover={{ bg: active ? "rgba(34,197,94,0.06)" : rgb ? `rgba(${rgb},0.06)` : "rgba(255,255,255,0.04)" }}
+			_hover={{ bg: active ? "rgba(34,197,94,0.12)" : rgb ? `rgba(${rgb},0.1)` : "rgba(255,255,255,0.08)" }}
 		>
 			{children}
 		</Box>
@@ -464,19 +426,6 @@ function CardBtn({ label, color, onClick, loading, small }: {
 	)
 }
 
-function InputField({ placeholder, value, onChange }: { placeholder: string; value: string; onChange: (v: string) => void }) {
-	return (
-		<Box
-			as="input" w="100%" px="3" py="1.5" mb="2" fontSize="xs"
-			bg="rgba(255,255,255,0.05)" border="1px solid rgba(255,255,255,0.1)"
-			borderRadius="md" color="gray.200" placeholder={placeholder}
-			_placeholder={{ color: "gray.600" }}
-			_focus={{ borderColor: "rgba(192,168,96,0.5)", outline: "none" }}
-			value={value}
-			onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-		/>
-	)
-}
 
 
 /** Chip icon — emulator device */
