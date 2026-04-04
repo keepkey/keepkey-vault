@@ -38,14 +38,22 @@ if [ -f "$EBUN_CLI" ]; then
   fi
 fi
 
-# Patch electrobun CLI bootstrap to use --force-local with tar on Windows.
+# Patch electrobun CLI bootstrap to use --force-local with tar on Windows only.
 # Without this, tar interprets the "C:" in Windows paths as a remote host.
+# macOS tar does NOT support --force-local — applying it breaks CI macOS builds.
 EBUN_CJS="node_modules/electrobun/bin/electrobun.cjs"
 if [ -f "$EBUN_CJS" ]; then
-  if grep -q 'tar --force-local' "$EBUN_CJS"; then
-    echo "[patch-electrobun] tar --force-local already patched"
-  elif grep -q 'tar -xzf' "$EBUN_CJS"; then
-    sed -i '' 's/tar -xzf/tar --force-local -xzf/g' "$EBUN_CJS"
-    echo "[patch-electrobun] Patched tar --force-local (Windows path fix)"
-  fi
+  case "$OSTYPE" in
+    msys*|cygwin*|win*)
+      if grep -q 'tar --force-local' "$EBUN_CJS"; then
+        echo "[patch-electrobun] tar --force-local already patched"
+      elif grep -q 'tar -xzf' "$EBUN_CJS"; then
+        sed -i 's/tar -xzf/tar --force-local -xzf/g' "$EBUN_CJS"
+        echo "[patch-electrobun] Patched tar --force-local (Windows path fix)"
+      fi
+      ;;
+    *)
+      echo "[patch-electrobun] Skipping tar --force-local (not Windows)"
+      ;;
+  esac
 fi
