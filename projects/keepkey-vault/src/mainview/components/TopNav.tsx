@@ -31,6 +31,7 @@ interface TopNavProps {
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
+	onExitToDeviceSelect?: () => void
 	passphraseActive?: boolean
 }
 
@@ -100,7 +101,7 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, isEmulator, onSettingsToggle, onMobileToggle, settingsOpen, mobileOpen, activeTab, onTabChange, watchOnly, passphraseActive }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, isEmulator, onSettingsToggle, onMobileToggle, settingsOpen, mobileOpen, activeTab, onTabChange, watchOnly, onExitToDeviceSelect, passphraseActive }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -144,8 +145,9 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 				<Box
 					position="relative"
 					cursor="pointer"
-					onClick={() => rpcRequest("openUrl", { url: "https://keepkey.com" }).catch(() => {})}
+					onClick={onExitToDeviceSelect || (() => rpcRequest("openUrl", { url: "https://keepkey.com" }).catch(() => {}))}
 					className="electrobun-webkit-app-region-no-drag"
+					title={onExitToDeviceSelect ? "Back to device select" : "KeepKey"}
 				>
 					<Image
 						src={kkIcon}
@@ -172,9 +174,18 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 					{label || "KeepKey"}
 				</Text>
 				{watchOnly ? (
-					<Text fontSize="10px" color="kk.gold" fontWeight="500" bg="rgba(255,215,0,0.12)" px="1.5" py="0.5" borderRadius="sm">
-						{t("watchOnly")}
-					</Text>
+					<Flex align="center" gap="1.5">
+						<Text fontSize="10px" color="kk.gold" fontWeight="500" bg="rgba(255,215,0,0.12)" px="1.5" py="0.5" borderRadius="sm">
+							{t("watchOnly")}
+						</Text>
+						{onExitToDeviceSelect && (
+							<Box as="button" fontSize="10px" color="gray.400" fontWeight="500" px="1.5" py="0.5" borderRadius="sm"
+								bg="rgba(255,255,255,0.06)" cursor="pointer" _hover={{ color: "gray.200", bg: "rgba(255,255,255,0.1)" }}
+								transition="all 0.15s" onClick={onExitToDeviceSelect} className="electrobun-webkit-app-region-no-drag">
+								Exit
+							</Box>
+						)}
+					</Flex>
 				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
 						{isEmulator && (

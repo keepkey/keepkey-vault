@@ -589,6 +589,7 @@ function App() {
 						activeTab="vault"
 						onTabChange={() => {}}
 						watchOnly
+						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
 						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
