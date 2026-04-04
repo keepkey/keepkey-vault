@@ -1,53 +1,21 @@
 {
   "emulators": [
     {
-      "version": "7.14.0-alpha",
-      "firmwareVersion": "7.14.0",
+      "version": "7.10.0-alpha",
+      "firmwareVersion": "7.10.0",
       "channel": "alpha",
       "arch": "arm64",
       "platform": "darwin",
-      "dylib": "7.14.0-alpha/libkkemu.dylib",
-      "binary": "7.14.0-alpha/kkemu",
+      "dylib": "7.10.0-alpha/libkkemu.dylib",
+      "binary": "7.10.0-alpha/kkemu",
       "debugLink": true,
-      "description": "Alpha — BitHighlander fork release/7.14.0 branch tip (moves with new commits)",
+      "description": "Alpha — 7.10.0 emulator build (arm64 macOS)",
       "source": {
         "repo": "BitHighlander/keepkey-firmware",
-        "ref": "release/7.14.0",
-        "type": "branch"
-      }
-    },
-    {
-      "version": "7.14.0-beta",
-      "firmwareVersion": "7.14.0",
-      "channel": "beta",
-      "arch": "arm64",
-      "platform": "darwin",
-      "dylib": "7.14.0-beta/libkkemu.dylib",
-      "binary": "7.14.0-beta/kkemu",
-      "debugLink": true,
-      "description": "Beta — pinned to 9f52bb69 (2026-04-04, TRON+TON+Solana)",
-      "source": {
-        "repo": "BitHighlander/keepkey-firmware",
-        "ref": "9f52bb69f2e32a71f08b31b0c7df788129a0578e",
-        "type": "commit"
-      }
-    },
-    {
-      "version": "7.14.0-release",
-      "firmwareVersion": "7.14.0",
-      "channel": "release",
-      "arch": "arm64",
-      "platform": "darwin",
-      "dylib": "7.14.0-release/libkkemu.dylib",
-      "binary": "7.14.0-release/kkemu",
-      "debugLink": true,
-      "description": "Release — keepkey/keepkey-firmware master (stable upstream)",
-      "source": {
-        "repo": "keepkey/keepkey-firmware",
-        "ref": "master",
+        "ref": "release/7.10.0",
         "type": "branch"
       }
     }
   ],
-  "default": "7.14.0-alpha"
+  "default": "7.10.0-alpha"
 }
