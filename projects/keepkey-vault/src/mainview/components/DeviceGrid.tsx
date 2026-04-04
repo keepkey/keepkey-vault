@@ -173,10 +173,12 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 			<Flex wrap="wrap" gap="3" justify="center">
 
 				{/* ── Physical device cards ─────────────────────────── */}
-				{devices.map((d) => (
-					<DeviceCard key={d.deviceId}>
+				{devices.map((d) => {
+					const color = deviceIdToColor(d.deviceId)
+					return (
+					<DeviceCard key={d.deviceId} accentColor={color}>
 						<Flex align="center" gap="2" mb="1.5">
-							<HardwareIcon />
+							<WatchOnlyIcon color={color} />
 							<Box flex="1" minW="0">
 								<Text fontSize="xs" fontWeight="600" color="gray.200" truncate>
 									{d.label || "KeepKey"}
@@ -198,7 +200,7 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 							)}
 						</Flex>
 					</DeviceCard>
-				))}
+				)})}
 
 				{/* ── Emulator wallet cards ─────────────────────────── */}
 				{emuWallets.map((w) => {
@@ -338,19 +340,45 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	)
 }
 
+// ── Color from deviceId ─────────────────────────────────────────────────
+// Deterministic HSL color derived from a simple string hash so each device
+// always gets the same accent color.
+function deviceIdToColor(id: string): string {
+	let hash = 0
+	for (let i = 0; i < id.length; i++) {
+		hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0
+	}
+	const hue = ((hash % 360) + 360) % 360
+	return `hsl(${hue}, 55%, 55%)`
+}
+
+function hexToRgb(hsl: string): string {
+	// Parse hsl and convert to approximate rgb for rgba usage
+	const m = hsl.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/)
+	if (!m) return '192,168,96'
+	const [, h, s, l] = m.map(Number)
+	const a = (s / 100) * Math.min(l / 100, 1 - l / 100)
+	const f = (n: number) => {
+		const k = (n + h / 30) % 12
+		return Math.round((l / 100 - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)) * 255)
+	}
+	return `${f(0)},${f(8)},${f(4)}`
+}
+
 // ── Reusable sub-components ─────────────────────────────────────────────
 
-function DeviceCard({ children, active }: { children: React.ReactNode; active?: boolean }) {
+function DeviceCard({ children, active, accentColor }: { children: React.ReactNode; active?: boolean; accentColor?: string }) {
+	const rgb = accentColor ? hexToRgb(accentColor) : null
 	return (
 		<Box
 			w="180px"
-			bg={active ? "rgba(34,197,94,0.05)" : "rgba(255,255,255,0.03)"}
-			border="1px solid"
-			borderColor={active ? "rgba(34,197,94,0.25)" : "rgba(255,255,255,0.08)"}
+			bg={active ? "rgba(34,197,94,0.05)" : rgb ? `rgba(${rgb},0.04)` : "rgba(255,255,255,0.03)"}
+			border="1.5px solid"
+			borderColor={active ? "rgba(34,197,94,0.4)" : rgb ? `rgba(${rgb},0.3)` : "rgba(255,255,255,0.15)"}
 			borderRadius="xl"
 			px="3" py="2.5"
 			transition="all 0.2s"
-			_hover={{ bg: active ? "rgba(34,197,94,0.08)" : "rgba(255,255,255,0.05)" }}
+			_hover={{ bg: active ? "rgba(34,197,94,0.08)" : rgb ? `rgba(${rgb},0.08)` : "rgba(255,255,255,0.06)" }}
 		>
 			{children}
 		</Box>
@@ -391,24 +419,26 @@ function InputField({ placeholder, value, onChange }: { placeholder: string; val
 	)
 }
 
-function HardwareIcon() {
+/** Eye icon — physical device in watch-only mode */
+function WatchOnlyIcon({ color }: { color: string }) {
+	const rgb = hexToRgb(color)
 	return (
 		<Box w="28px" h="28px" flexShrink={0} display="flex" alignItems="center" justifyContent="center"
-			bg="rgba(192,168,96,0.1)" borderRadius="lg">
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-				<rect x="2" y="6" width="20" height="12" rx="2" />
-				<line x1="6" y1="10" x2="6" y2="14" />
-				<line x1="18" y1="10" x2="18" y2="14" />
+			bg={`rgba(${rgb},0.12)`} borderRadius="lg">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+				<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+				<circle cx="12" cy="12" r="3" />
 			</svg>
 		</Box>
 	)
 }
 
+/** Chip icon — emulator device */
 function EmulatorIcon({ active }: { active: boolean }) {
 	const c = active ? "#22C55E" : "#C0A860"
 	return (
 		<Box w="28px" h="28px" flexShrink={0} display="flex" alignItems="center" justifyContent="center"
-			bg={active ? "rgba(34,197,94,0.1)" : "rgba(192,168,96,0.1)"} borderRadius="lg">
+			bg={active ? "rgba(34,197,94,0.12)" : "rgba(192,168,96,0.12)"} borderRadius="lg">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 				<rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" />
 				<line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
