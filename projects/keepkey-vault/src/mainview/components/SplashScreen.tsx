@@ -20,20 +20,15 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
 
   return (
-    <Box
+    <Flex
       height="100vh"
       width="100vw"
       bg="transparent"
-      position="relative"
+      direction="column"
+      alignItems="center"
     >
-      <Flex
-        height="100%"
-        width="100%"
-        direction="column"
-        alignItems="center"
-        justifyContent="center"
-        gap="6"
-      >
+      {/* Logo — top area with breathing room */}
+      <Flex flex="0 0 auto" pt="15vh" pb="6" justifyContent="center">
         <Logo
           width="100px"
           style={{
@@ -42,40 +37,43 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
           }}
         />
       </Flex>
+
+      {/* Children (DeviceGrid etc.) — fills middle, scrollable */}
+      <Flex flex="1" direction="column" alignItems="center" overflow="auto" w="100%" px="4">
+        {children}
+      </Flex>
+
+      {/* Status bar — pinned to bottom */}
       <Box
-        position="absolute"
-        bottom="40px"
-        left="50%"
-        transform="translateX(-50%)"
+        flex="0 0 auto"
+        pb="40px"
+        pt="3"
         textAlign="center"
-        width="auto"
         px={3}
-        py={1}
-        borderRadius="md"
-        bg="rgba(0, 0, 0, 0.5)"
       >
-        <Flex gap="2" justifyContent="center" alignItems="center">
-          <Box w="8px" h="8px" borderRadius="full" bg={dotColor} flexShrink={0}
-            style={{ animation: (variant === 'searching' || variant === 'connecting') ? 'pulse 1.5s infinite' : undefined }}
-          />
-          <Text fontSize="xs" color="gray.300">
-            {statusText}
-          </Text>
-          {(variant === 'searching' || variant === 'connecting') && <EllipsisDots interval={300} />}
-        </Flex>
+        <Box display="inline-flex" px={3} py={1} borderRadius="md" bg="rgba(0, 0, 0, 0.5)">
+          <Flex gap="2" justifyContent="center" alignItems="center">
+            <Box w="8px" h="8px" borderRadius="full" bg={dotColor} flexShrink={0}
+              style={{ animation: (variant === 'searching' || variant === 'connecting') ? 'pulse 1.5s infinite' : undefined }}
+            />
+            <Text fontSize="xs" color="gray.300">
+              {statusText}
+            </Text>
+            {(variant === 'searching' || variant === 'connecting') && <EllipsisDots interval={300} />}
+          </Flex>
+        </Box>
         {hintText && (
-          <Text fontSize="xs" color="gray.500" mt={2} maxW="340px" textAlign="center">
+          <Text fontSize="xs" color="gray.500" mt={2} maxW="340px" textAlign="center" mx="auto">
             {hintText}
           </Text>
         )}
       </Box>
-      {children}
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
         }
       `}</style>
-    </Box>
+    </Flex>
   )
 }

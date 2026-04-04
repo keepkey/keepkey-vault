@@ -12,6 +12,8 @@ interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
 }
 
+const REVEAL_DELAY_MS = 2500 // wait before showing grid so USB scan can find a device first
+
 export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
@@ -25,6 +27,13 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
 	const [confirmDeleteEmu, setConfirmDeleteEmu] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
+	const [revealed, setRevealed] = useState(false)
+
+	// Delay reveal so the splash "Searching for KeepKey..." has time to find a device
+	useEffect(() => {
+		const timer = setTimeout(() => setRevealed(true), REVEAL_DELAY_MS)
+		return () => clearTimeout(timer)
+	}, [])
 
 	const refresh = useCallback(async () => {
 		try {
@@ -142,18 +151,16 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	// system responded at all (so "Pair Emulator" card is reachable on clean install)
 	const hasContent = devices.length > 0 || emuWallets.length > 0 || emuPaired || emuStatus !== null
 
-	if (!hasContent) return null
+	// Wait for reveal delay + content before rendering
+	if (!revealed || !hasContent) return null
 
 	// ── Render ───────────────────────────────────────────────────────
 	return (
 		<Box
-			position="absolute"
-			top="50%"
-			left="50%"
-			transform="translate(-50%, -50%)"
-			mt="30px"
-			w="90vw"
+			w="100%"
 			maxW="640px"
+			opacity={1}
+			style={{ animation: 'fadeIn 0.4s ease' }}
 		>
 			{/* Error banner */}
 			{error && (
@@ -321,6 +328,12 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 					</Flex>
 				</Box>
 			)}
+			<style>{`
+				@keyframes fadeIn {
+					from { opacity: 0; transform: translateY(8px); }
+					to { opacity: 1; transform: translateY(0); }
+				}
+			`}</style>
 		</Box>
 	)
 }
