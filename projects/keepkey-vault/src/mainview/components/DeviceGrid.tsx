@@ -4,7 +4,8 @@
  * Each card: label, type badge, last seen, View Portfolio / Start / Forget.
  */
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex, Text } from "@chakra-ui/react"
+import { Box, Flex, Text, Image } from "@chakra-ui/react"
+import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 
@@ -202,7 +203,7 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 							</Flex>
 						)}
 						<Flex align="center" gap="2" mb="1">
-							<WatchOnlyIcon color={color} />
+							<Image src={kkIcon} alt="KeepKey" w="28px" h="28px" borderRadius="lg" border="1.5px solid" borderColor={color} flexShrink={0} />
 							<Box flex="1" minW="0">
 								<Text fontSize="xs" fontWeight="600" color="gray.200" truncate>
 									{d.label || "KeepKey"}
@@ -477,19 +478,6 @@ function InputField({ placeholder, value, onChange }: { placeholder: string; val
 	)
 }
 
-/** Eye icon — physical device in watch-only mode */
-function WatchOnlyIcon({ color }: { color: string }) {
-	const rgb = hexToRgb(color)
-	return (
-		<Box w="28px" h="28px" flexShrink={0} display="flex" alignItems="center" justifyContent="center"
-			bg={`rgba(${rgb},0.12)`} borderRadius="lg">
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-				<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-				<circle cx="12" cy="12" r="3" />
-			</svg>
-		</Box>
-	)
-}
 
 /** Chip icon — emulator device */
 function EmulatorIcon({ active }: { active: boolean }) {
