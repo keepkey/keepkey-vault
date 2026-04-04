@@ -204,7 +204,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
-      emulatorGetChannels: { params: void; response: Array<{ channel: string; version: string; description: string; installed: boolean; source: { repo: string; branch: string } }> }
+      emulatorGetChannels: { params: void; response: Array<{ channel: string; version: string; description: string; installed: boolean; source: { repo: string; ref: string; type: string } }> }
       emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
       emulatorListWallets: { params: void; response: EmulatorWalletInfo[] }
       emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string }; response: EmulatorStatus }

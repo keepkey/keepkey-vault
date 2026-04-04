@@ -30,7 +30,8 @@ const FLASH_SIZE = 1048576  // 1 MB
 
 interface EmulatorSource {
   repo: string
-  branch: string
+  ref: string
+  type: 'branch' | 'commit'
 }
 
 interface EmulatorEntry {
@@ -46,17 +47,9 @@ interface EmulatorEntry {
   source: EmulatorSource
 }
 
-interface ChannelInfo {
-  description: string
-  repo: string
-  branch: string
-  autoUpdate: boolean
-}
-
 interface EmulatorManifest {
   emulators: EmulatorEntry[]
   default: string
-  channels: Record<string, ChannelInfo>
 }
 
 export type EmulatorChannel = 'alpha' | 'beta' | 'release'
@@ -151,6 +144,12 @@ let activeFlash: EmulatorFlash | null = null
 let activeFlashName: string = 'default'
 let activeVersion: string | null = null
 let activeChannel: EmulatorChannel | null = null
+/**
+ * The user's selected channel — persists across stop/start cycles.
+ * Set when the user explicitly picks a channel via emulatorInit(channel).
+ * Re-used by import/switch/restore flows that restart without an explicit channel.
+ */
+let selectedChannel: EmulatorChannel | null = null
 let emuState: EmulatorProcessState = 'stopped'
 let emuError: string | undefined
 
@@ -220,20 +219,22 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
       saveFlash(activeFlash)
     }
 
-    // 2. Load dylib — channel takes priority over raw version
+    // 2. Load dylib — resolve channel: explicit arg > sticky selection > version > manifest default
+    const resolvedChannel = channel ?? selectedChannel
     let dylibPath: string | null
-    if (channel) {
-      dylibPath = getDylibPathByChannel(channel)
+    if (resolvedChannel) {
+      dylibPath = getDylibPathByChannel(resolvedChannel)
       if (!dylibPath) {
-        const entry = getEntryByChannel(channel)
+        const entry = getEntryByChannel(resolvedChannel)
         throw new Error(
           entry
-            ? `Emulator dylib not installed for channel "${channel}". Run: make download-emulator-${channel}`
-            : `Unknown emulator channel "${channel}". Available: alpha, beta, release`
+            ? `Emulator dylib not installed for channel "${resolvedChannel}". Run: make download-emulator-${resolvedChannel}`
+            : `Unknown emulator channel "${resolvedChannel}". Available: alpha, beta, release`
         )
       }
-      activeChannel = channel
-      const entry = getEntryByChannel(channel)!
+      activeChannel = resolvedChannel
+      if (channel) selectedChannel = channel  // explicit pick updates sticky selection
+      const entry = getEntryByChannel(resolvedChannel)!
       activeVersion = entry.version
     } else {
       dylibPath = getDylibPath(version)
@@ -443,4 +444,4 @@ export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number
 // ── Exports ─────────────────────────────────────────────────────────────
 
 export { listFlashImages, deleteFlash }
-export type { EmulatorEntry, EmulatorManifest, ChannelInfo }
+export type { EmulatorEntry, EmulatorManifest }

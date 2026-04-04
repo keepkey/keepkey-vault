@@ -15,7 +15,7 @@ interface ChannelEntry {
 	version: string
 	description: string
 	installed: boolean
-	source: { repo: string; branch: string }
+	source: { repo: string; ref: string; type: string }
 }
 
 export function EmulatorManager() {

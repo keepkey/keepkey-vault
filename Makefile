@@ -319,21 +319,29 @@ test-emu-python:
 # --- Emulator Channels (alpha/beta/release) ---
 # Build native macOS emulator (libkkemu.dylib + kkemu) from the firmware submodule.
 # Each channel gets its own directory under firmware/emulators/<version>/.
-# Alpha and Beta build from BitHighlander/keepkey-firmware release/7.14.0.
-# Release builds from keepkey/keepkey-firmware master.
+#   alpha   — tracks BitHighlander fork branch tip (moves with new commits)
+#   beta    — pinned to a specific commit SHA (manually promoted)
+#   release — tracks upstream keepkey/keepkey-firmware master
+#
+# To promote a new beta, update BETA_PIN_SHA here AND in manifest.json.
 
 EMU_FW_DIR := modules/keepkey-firmware
 EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
+BETA_PIN_SHA := 9f52bb69f2e32a71f08b31b0c7df788129a0578e
 
 # Common cmake emulator build (called by channel-specific targets)
-# Usage: $(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.14.0-alpha _EMU_REF=origin/release/7.14.0
+# _EMU_REF can be a branch (origin/release/7.14.0) or a commit SHA.
 _build-emu:
 	@echo "=== Building emulator for $(_EMU_CHANNEL) channel ==="
 	@echo "    Source: $(_EMU_REF)"
 	@echo "    Output: firmware/emulators/$(_EMU_VERSION)/"
 	cd $(EMU_FW_DIR) && git fetch --all --prune 2>/dev/null
 	cd $(EMU_FW_DIR) && git checkout $(_EMU_REF)
+	@# Verify we landed on the expected ref (catches typos in SHA)
+	@ACTUAL=$$(cd $(EMU_FW_DIR) && git rev-parse HEAD); \
+	echo "    Checked out: $$ACTUAL"
 	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	rm -rf $(EMU_BUILD_DIR)
 	mkdir -p $(EMU_BUILD_DIR)
 	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
@@ -348,13 +356,15 @@ _build-emu:
 		echo "    Dylib:  firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib"; \
 	fi
 	chmod +x firmware/emulators/$(_EMU_VERSION)/kkemu
+	@# Record which commit was actually built
+	@cd $(EMU_FW_DIR) && git rev-parse HEAD > ../../firmware/emulators/$(_EMU_VERSION)/.build-sha
 	@echo "=== $(_EMU_CHANNEL) emulator ready ==="
 
 build-emulator-alpha:
 	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.14.0-alpha _EMU_REF=origin/release/7.14.0
 
 build-emulator-beta:
-	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=origin/release/7.14.0
+	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=$(BETA_PIN_SHA)
 
 build-emulator-release:
 	$(MAKE) _build-emu _EMU_CHANNEL=release _EMU_VERSION=7.14.0-release _EMU_REF=keepkey/master

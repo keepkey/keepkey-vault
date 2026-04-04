@@ -2,9 +2,10 @@
 /**
  * Download KeepKey emulator binaries for each channel.
  *
- * Emulator dylibs are built from the keepkey-firmware repo via CMake.
- * This script manages downloading pre-built emulator binaries from
- * GitHub release assets, or triggering local builds from the submodule.
+ * Each channel's manifest entry declares a source { repo, ref, type }.
+ * This script resolves the exact commit SHA for the declared ref, then
+ * looks for CI artifacts or release assets built from THAT specific commit.
+ * If no matching artifact is found, it suggests a local build.
  *
  * Usage:
  *   bun firmware/download-emulators.ts                    # Download all channels
@@ -24,7 +25,8 @@ const MANIFEST_PATH = join(EMULATORS_DIR, 'manifest.json')
 
 interface EmulatorSource {
   repo: string
-  branch: string
+  ref: string
+  type: 'branch' | 'commit'
 }
 
 interface EmulatorEntry {
@@ -40,17 +42,9 @@ interface EmulatorEntry {
   source: EmulatorSource
 }
 
-interface ChannelInfo {
-  description: string
-  repo: string
-  branch: string
-  autoUpdate: boolean
-}
-
 interface EmulatorManifest {
   emulators: EmulatorEntry[]
   default: string
-  channels: Record<string, ChannelInfo>
 }
 
 function loadManifest(): EmulatorManifest {
@@ -60,9 +54,36 @@ function loadManifest(): EmulatorManifest {
   return JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'))
 }
 
+/** Resolve the declared source ref to a full SHA. */
+function resolveSourceSha(source: EmulatorSource): string {
+  if (source.type === 'commit') {
+    // Already a SHA — verify it exists
+    try {
+      const full = execSync(
+        `gh api repos/${source.repo}/commits/${source.ref} --jq '.sha' 2>/dev/null`,
+        { encoding: 'utf-8' }
+      ).trim()
+      return full
+    } catch {
+      throw new Error(`Commit ${source.ref.slice(0, 12)} not found in ${source.repo}`)
+    }
+  }
+
+  // Branch ref — resolve to HEAD SHA
+  try {
+    return execSync(
+      `gh api repos/${source.repo}/commits/${source.ref} --jq '.sha' 2>/dev/null`,
+      { encoding: 'utf-8' }
+    ).trim()
+  } catch {
+    throw new Error(`Branch ${source.ref} not found in ${source.repo}`)
+  }
+}
+
 function getInstalledStatus(manifest: EmulatorManifest): void {
   console.log('\n=== Emulator Channel Status ===\n')
   for (const entry of manifest.emulators) {
+    const channelDir = join(EMULATORS_DIR, entry.version)
     const dylibPath = join(EMULATORS_DIR, entry.dylib)
     const binaryPath = join(EMULATORS_DIR, entry.binary)
     const hasDylib = existsSync(dylibPath)
@@ -72,12 +93,16 @@ function getInstalledStatus(manifest: EmulatorManifest): void {
 
     console.log(`  ${icon} ${entry.channel.toUpperCase()} (${entry.version})`)
     console.log(`     ${entry.description}`)
-    console.log(`     Source: ${entry.source.repo} @ ${entry.source.branch}`)
+    console.log(`     Source: ${entry.source.repo} @ ${entry.source.ref} (${entry.source.type})`)
     if (installed) {
       const stat = statSync(dylibPath)
-      console.log(`     dylib: ${(stat.size / 1024 / 1024).toFixed(1)} MB, modified ${stat.mtime.toISOString().slice(0, 10)}`)
+      const buildShaPath = join(channelDir, '.build-sha')
+      const buildSha = existsSync(buildShaPath)
+        ? readFileSync(buildShaPath, 'utf-8').trim().slice(0, 12)
+        : 'unknown'
+      console.log(`     dylib: ${(stat.size / 1024 / 1024).toFixed(1)} MB, built from ${buildSha}, modified ${stat.mtime.toISOString().slice(0, 10)}`)
     } else {
-      console.log(`     NOT INSTALLED — run: make download-emulator-${entry.channel}`)
+      console.log(`     NOT INSTALLED — run: make build-emulator-${entry.channel}`)
     }
     console.log()
   }
@@ -85,8 +110,13 @@ function getInstalledStatus(manifest: EmulatorManifest): void {
 }
 
 /**
- * Try to download emulator binaries from GitHub release assets.
- * Falls back to suggesting a local build if no release assets exist.
+ * Download emulator binaries for a channel.
+ *
+ * Strategy:
+ * 1. Resolve the declared source ref to a commit SHA
+ * 2. Check GitHub release assets tagged for that version
+ * 3. Check CI workflow artifacts, filtered by the resolved SHA
+ * 4. Fall back to local build suggestion
  */
 async function downloadChannel(entry: EmulatorEntry, fresh: boolean): Promise<boolean> {
   const channelDir = join(EMULATORS_DIR, entry.version)
@@ -100,84 +130,103 @@ async function downloadChannel(entry: EmulatorEntry, fresh: boolean): Promise<bo
 
   mkdirSync(channelDir, { recursive: true })
 
-  // Try downloading from GitHub release assets
-  const { repo, branch } = entry.source
-  console.log(`  🔍 ${entry.channel}: checking ${repo} @ ${branch} for release assets...`)
+  const { repo } = entry.source
+  const platform = process.platform === 'darwin' ? 'macos' : 'linux'
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+  const assetPattern = `emulator-${platform}-${arch}`
 
   try {
-    // Get the latest commit SHA on the branch
-    const sha = execSync(
-      `gh api repos/${repo}/commits/${branch} --jq '.sha' 2>/dev/null`,
-      { encoding: 'utf-8' }
-    ).trim().slice(0, 8)
+    // Step 1: Resolve source to exact SHA
+    console.log(`  🔍 ${entry.channel}: resolving ${entry.source.type} ref ${entry.source.ref.slice(0, 12)}...`)
+    const targetSha = resolveSourceSha(entry.source)
+    console.log(`     Target SHA: ${targetSha.slice(0, 12)}`)
 
-    // Look for emulator release assets matching this platform/arch
-    const platform = process.platform === 'darwin' ? 'macos' : 'linux'
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
-
-    // Check for a release tagged with this firmware version
+    // Step 2: Check release assets (tagged releases)
     const tag = `v${entry.firmwareVersion}`
-    const assetPattern = `emulator-${platform}-${arch}`
-
     try {
-      const assets = execSync(
-        `gh release view ${tag} --repo ${repo} --json assets --jq '.assets[].name' 2>/dev/null`,
+      const releaseJson = execSync(
+        `gh api repos/${repo}/releases/tags/${tag} --jq '{tag_name, target_commitish, assets: [.assets[] | {name, id}]}' 2>/dev/null`,
         { encoding: 'utf-8' }
       ).trim()
 
-      if (assets.includes(assetPattern)) {
-        console.log(`  📦 ${entry.channel}: downloading from release ${tag}...`)
-        execSync(
-          `gh release download ${tag} --repo ${repo} --pattern "${assetPattern}*" --dir "${channelDir}" --clobber`,
-          { stdio: 'inherit' }
-        )
-        // Extract if it's a tarball
-        const tarball = join(channelDir, `${assetPattern}.tar.gz`)
-        if (existsSync(tarball)) {
-          execSync(`tar xzf "${tarball}" -C "${channelDir}"`)
-          execSync(`rm -f "${tarball}"`)
-        }
-        if (existsSync(dylibPath) && existsSync(binaryPath)) {
-          execSync(`chmod +x "${binaryPath}"`)
-          console.log(`  ✅ ${entry.channel}: installed from release`)
-          return true
-        }
-      }
-    } catch {
-      // No release found, that's ok
-    }
+      if (releaseJson) {
+        const release = JSON.parse(releaseJson)
+        const matchingAsset = release.assets.find((a: any) => a.name.includes(assetPattern))
+        if (matchingAsset) {
+          // Verify the release was built from our target commit
+          const releaseCommit = execSync(
+            `gh api repos/${repo}/commits/${release.target_commitish} --jq '.sha' 2>/dev/null`,
+            { encoding: 'utf-8' }
+          ).trim()
 
-    // No release assets — check for CI workflow artifacts
-    console.log(`  🔍 ${entry.channel}: no release assets, checking CI artifacts...`)
-    try {
-      const artifactJson = execSync(
-        `gh api "repos/${repo}/actions/artifacts?name=emulator-${platform}-${arch}&per_page=5" --jq '.artifacts[0] | {id, name, expired}' 2>/dev/null`,
-        { encoding: 'utf-8' }
-      ).trim()
-
-      if (artifactJson && !artifactJson.includes('null')) {
-        const artifact = JSON.parse(artifactJson)
-        if (!artifact.expired) {
-          console.log(`  📦 ${entry.channel}: downloading CI artifact ${artifact.name}...`)
-          execSync(
-            `gh api "repos/${repo}/actions/artifacts/${artifact.id}/zip" > "${channelDir}/artifact.zip" 2>/dev/null`
-          )
-          execSync(`cd "${channelDir}" && unzip -o artifact.zip && rm artifact.zip`)
-          if (existsSync(dylibPath) && existsSync(binaryPath)) {
-            execSync(`chmod +x "${binaryPath}"`)
-            console.log(`  ✅ ${entry.channel}: installed from CI artifact`)
-            return true
+          if (releaseCommit === targetSha) {
+            console.log(`  📦 ${entry.channel}: downloading from release ${tag} (SHA match: ${targetSha.slice(0, 12)})...`)
+            execSync(
+              `gh release download ${tag} --repo ${repo} --pattern "${assetPattern}*" --dir "${channelDir}" --clobber`,
+              { stdio: 'inherit' }
+            )
+            const tarball = join(channelDir, `${assetPattern}.tar.gz`)
+            if (existsSync(tarball)) {
+              execSync(`tar xzf "${tarball}" -C "${channelDir}"`)
+              execSync(`rm -f "${tarball}"`)
+            }
+            if (existsSync(dylibPath) && existsSync(binaryPath)) {
+              execSync(`chmod +x "${binaryPath}"`)
+              writeFileSync(join(channelDir, '.build-sha'), targetSha + '\n')
+              console.log(`  ✅ ${entry.channel}: installed from release (${targetSha.slice(0, 12)})`)
+              return true
+            }
+          } else {
+            console.log(`     Release ${tag} SHA mismatch: release=${releaseCommit.slice(0, 12)}, want=${targetSha.slice(0, 12)} — skipping`)
           }
         }
       }
     } catch {
-      // No CI artifacts, that's ok
+      // No release found
     }
 
-    // Final fallback — prompt for local build
-    console.log(`  ⚠️  ${entry.channel}: no pre-built binaries available`)
+    // Step 3: Check CI artifacts, filtered by the target SHA
+    console.log(`  🔍 ${entry.channel}: checking CI artifacts for SHA ${targetSha.slice(0, 12)}...`)
+    try {
+      // Find workflow artifacts that match our target SHA
+      const artifactsJson = execSync(
+        `gh api "repos/${repo}/actions/artifacts?name=${assetPattern}&per_page=20" --jq '[.artifacts[] | select(.expired == false) | {id, name, workflow_run: {head_sha: .workflow_run.head_sha, head_branch: .workflow_run.head_branch}}]' 2>/dev/null`,
+        { encoding: 'utf-8' }
+      ).trim()
+
+      if (artifactsJson) {
+        const artifacts = JSON.parse(artifactsJson)
+        // Find an artifact whose workflow run was triggered by our target SHA
+        const matching = artifacts.find((a: any) => a.workflow_run.head_sha === targetSha)
+
+        if (matching) {
+          console.log(`  📦 ${entry.channel}: downloading CI artifact (SHA: ${targetSha.slice(0, 12)}, branch: ${matching.workflow_run.head_branch})...`)
+          execSync(
+            `gh api "repos/${repo}/actions/artifacts/${matching.id}/zip" > "${channelDir}/artifact.zip" 2>/dev/null`
+          )
+          execSync(`cd "${channelDir}" && unzip -o artifact.zip && rm artifact.zip`)
+          if (existsSync(dylibPath) && existsSync(binaryPath)) {
+            execSync(`chmod +x "${binaryPath}"`)
+            writeFileSync(join(channelDir, '.build-sha'), targetSha + '\n')
+            console.log(`  ✅ ${entry.channel}: installed from CI artifact (${targetSha.slice(0, 12)})`)
+            return true
+          }
+          console.log(`     Artifact extracted but expected binaries not found (${entry.dylib})`)
+        } else {
+          const shas = artifacts.map((a: any) => a.workflow_run.head_sha.slice(0, 12))
+          console.log(`     No CI artifact matches SHA ${targetSha.slice(0, 12)}`)
+          if (shas.length > 0) {
+            console.log(`     Available artifact SHAs: ${shas.join(', ')}`)
+          }
+        }
+      }
+    } catch {
+      // No CI artifacts
+    }
+
+    // Step 4: Fall back to local build
+    console.log(`  ⚠️  ${entry.channel}: no pre-built binaries found for SHA ${targetSha.slice(0, 12)}`)
     console.log(`     Build locally with: make build-emulator-${entry.channel}`)
-    console.log(`     This requires CMake + the firmware submodule`)
     return false
 
   } catch (err: any) {

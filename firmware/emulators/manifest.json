@@ -9,10 +9,11 @@
       "dylib": "7.14.0-alpha/libkkemu.dylib",
       "binary": "7.14.0-alpha/kkemu",
       "debugLink": true,
-      "description": "Alpha — BitHighlander/keepkey-firmware release/7.14.0 (latest dev)",
+      "description": "Alpha — BitHighlander fork release/7.14.0 branch tip (moves with new commits)",
       "source": {
         "repo": "BitHighlander/keepkey-firmware",
-        "branch": "release/7.14.0"
+        "ref": "release/7.14.0",
+        "type": "branch"
       }
     },
     {
@@ -24,10 +25,11 @@
       "dylib": "7.14.0-beta/libkkemu.dylib",
       "binary": "7.14.0-beta/kkemu",
       "debugLink": true,
-      "description": "Beta — BitHighlander/keepkey-firmware release/7.14.0 (pre-release)",
+      "description": "Beta — pinned to 9f52bb69 (2026-04-04, TRON+TON+Solana)",
       "source": {
         "repo": "BitHighlander/keepkey-firmware",
-        "branch": "release/7.14.0"
+        "ref": "9f52bb69f2e32a71f08b31b0c7df788129a0578e",
+        "type": "commit"
       }
     },
     {
@@ -42,29 +44,10 @@
       "description": "Release — keepkey/keepkey-firmware master (stable upstream)",
       "source": {
         "repo": "keepkey/keepkey-firmware",
-        "branch": "master"
+        "ref": "master",
+        "type": "branch"
       }
     }
   ],
-  "default": "7.14.0-alpha",
-  "channels": {
-    "alpha": {
-      "description": "Latest development builds from BitHighlander fork",
-      "repo": "BitHighlander/keepkey-firmware",
-      "branch": "release/7.14.0",
-      "autoUpdate": true
-    },
-    "beta": {
-      "description": "Pre-release builds for testing before upstream merge",
-      "repo": "BitHighlander/keepkey-firmware",
-      "branch": "release/7.14.0",
-      "autoUpdate": false
-    },
-    "release": {
-      "description": "Stable upstream builds from keepkey/keepkey-firmware master",
-      "repo": "keepkey/keepkey-firmware",
-      "branch": "master",
-      "autoUpdate": false
-    }
-  }
+  "default": "7.14.0-alpha"
 }

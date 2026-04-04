@@ -4,13 +4,17 @@ KeepKey Vault bundles three emulator channels, each tracking a different firmwar
 
 ## Channel Definitions
 
-| Channel | Source Repo | Branch | Purpose |
-|---------|-------------|--------|---------|
-| **alpha** | `BitHighlander/keepkey-firmware` | `release/7.14.0` | Latest development builds — may include untested features |
-| **beta** | `BitHighlander/keepkey-firmware` | `release/7.14.0` | Pre-release testing — same source as alpha, pinned manually |
-| **release** | `keepkey/keepkey-firmware` | `master` | Stable upstream builds — matches what ships on real devices |
+| Channel | Source Repo | Ref Type | Ref | Purpose |
+|---------|-------------|----------|-----|---------|
+| **alpha** | `BitHighlander/keepkey-firmware` | branch | `release/7.14.0` | Latest dev — tracks branch tip, moves with new commits |
+| **beta** | `BitHighlander/keepkey-firmware` | commit | `9f52bb69...` | Pre-release candidate — pinned to a specific tested commit |
+| **release** | `keepkey/keepkey-firmware` | branch | `master` | Stable upstream — matches what ships on real devices |
 
-Alpha and beta currently point to the same fork branch. The distinction is operational: alpha auto-updates on every build, while beta is pinned manually when a candidate is deemed ready for wider testing.
+**Alpha** always builds from the branch tip — every `make build-emulator-alpha` picks up new commits.
+
+**Beta** is pinned to a specific commit SHA. It does NOT move with the branch. To promote a new beta candidate, update `BETA_PIN_SHA` in the Makefile AND `source.ref` in `manifest.json`, then rebuild.
+
+**Release** tracks upstream master — it's the closest thing to production firmware.
 
 ## Directory Layout
 
@@ -129,20 +133,30 @@ The `manifest.json` defines each emulator entry with source tracking:
       "channel": "alpha",
       "source": {
         "repo": "BitHighlander/keepkey-firmware",
-        "branch": "release/7.14.0"
+        "ref": "release/7.14.0",
+        "type": "branch"
+      }
+    },
+    {
+      "version": "7.14.0-beta",
+      "channel": "beta",
+      "source": {
+        "repo": "BitHighlander/keepkey-firmware",
+        "ref": "9f52bb69f2e32a71f08b31b0c7df788129a0578e",
+        "type": "commit"
       }
     }
-  ],
-  "channels": {
-    "alpha": {
-      "description": "Latest development builds",
-      "repo": "BitHighlander/keepkey-firmware",
-      "branch": "release/7.14.0",
-      "autoUpdate": true
-    }
-  }
+  ]
 }
 ```
+
+### Promoting a new beta
+
+1. Identify the commit SHA to pin (test it on alpha first)
+2. Update `BETA_PIN_SHA` in the Makefile
+3. Update `source.ref` in `manifest.json` for the beta entry
+4. Update the beta `description` to note the date and what's included
+5. Rebuild: `make build-emulator-beta`
 
 ## Troubleshooting
 
