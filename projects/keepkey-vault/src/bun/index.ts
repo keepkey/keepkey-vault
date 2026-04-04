@@ -1665,6 +1665,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const wallet = engine.wallet as any
 				let fromAddress: string | undefined
 				let xpub: string | undefined
+				let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
 				if (chain.chainFamily === 'evm') {
 					// EVM multi-address: use evmAddressIndex or selected index
@@ -1811,10 +1812,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn(`[buildTx] TON public key derivation failed:`, e.message)
 					}
 				}
-
-				// Multi-xpub aggregation: BTC uses the selected xpub only (user chose account);
-				// non-BTC UTXO chains derive all script-type xpubs below.
-				let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
 				const result = await buildTx(pioneer, chain, {
 					...params,
