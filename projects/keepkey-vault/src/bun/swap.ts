@@ -211,11 +211,12 @@ export interface SwapContext {
   getAllChains: () => ChainDef[]
   getRpcUrl: (chain: ChainDef) => string | undefined
   getBtcXpub: () => { xpub: string; accountPath?: number[] } | undefined  // selected BTC xpub + account path
+  getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
 }
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub } = ctx
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs } = ctx
 
   // Resolve source chain
   const allChains = getAllChains()
@@ -300,17 +301,28 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── UTXO chains: send to vault, memo in OP_RETURN ──
   } else if (fromChain.chainFamily === 'utxo') {
-    // Only use BTC multi-account xpub for Bitcoin — other UTXO chains (DOGE, LTC, etc.)
-    // have their own xpub formats and must derive their own
     let xpub: string | undefined
     let accountPath: number[] | undefined
+    let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+
     if (fromChain.id === 'bitcoin') {
+      // BTC: aggregate UTXOs from ALL funded xpubs (p2pkh + p2sh-p2wpkh + p2wpkh)
       try {
-        const btcInfo = getBtcXpub()
-        if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+        allXpubs = getAllBtcXpubs()
+        if (allXpubs.length > 0) {
+          console.log(`${TAG} BTC multi-xpub: ${allXpubs.length} funded xpubs`)
+          // Primary xpub for change address = selected, or first funded
+          const btcInfo = getBtcXpub()
+          xpub = btcInfo?.xpub || allXpubs[0].xpub
+          accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
+        }
       } catch { /* BTC account manager not ready */ }
       if (!xpub) {
-        console.warn(`${TAG} BTC multi-account xpub unavailable — falling back to default account 0`)
+        // Fallback: single selected xpub
+        try {
+          const btcInfo = getBtcXpub()
+          if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+        } catch {}
       }
     }
     if (!xpub) {
@@ -336,6 +348,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       isMax: params.isMax,
       fromAddress,
       xpub,
+      allXpubs,
       accountPath,
     })
     unsignedTx = buildResult.unsignedTx

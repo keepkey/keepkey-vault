@@ -131,15 +131,46 @@ function getScriptTypeFromPath(path: string): string | undefined {
   return PURPOSE_TO_SCRIPT[parseInt(match[1], 10)]
 }
 
+export interface XpubInfo {
+  xpub: string
+  scriptType: string
+  accountPath: number[]
+}
+
 export interface BuildUtxoParams {
   to: string
   amount: string   // human-readable (e.g. "0.001")
   memo?: string
   feeLevel?: number // 1=slow, 3=avg, 5=fast (default 5)
   isMax?: boolean
-  xpub?: string    // xpub for UTXO lookup (derived by backend)
+  xpub?: string    // primary xpub for UTXO lookup (single-xpub chains or change address)
+  allXpubs?: XpubInfo[]  // BTC multi-xpub: aggregate UTXOs from all funded xpubs
   scriptTypeOverride?: string // BTC multi-account: override chain default scriptType
   accountPath?: number[] // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
+}
+
+/** Unwrap Pioneer ListUnspent response (handles Swagger/Axios double-wrapping) */
+function unwrapUtxoResponse(resp: any): any[] {
+  return Array.isArray(resp) ? resp
+    : Array.isArray(resp?.data) ? resp.data
+    : Array.isArray(resp?.data?.data) ? resp.data.data
+    : Array.isArray(resp?.utxos) ? resp.utxos
+    : []
+}
+
+/** Fetch UTXOs for a single xpub, tag each with its scriptType */
+async function fetchUtxosForXpub(
+  pioneer: any, network: string, xpub: string, defaultScriptType: string,
+): Promise<any[]> {
+  console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
+  const resp = await pioneer.ListUnspent({ network, xpub })
+  const utxos = unwrapUtxoResponse(resp)
+  for (const u of utxos) {
+    u.value = Number(u.value)
+    u.scriptType = u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType
+  }
+  console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs, ${utxos.reduce((s: number, u: any) => s + u.value, 0) / 1e8}`)
+  return utxos
 }
 
 export async function buildUtxoTx(
@@ -147,47 +178,42 @@ export async function buildUtxoTx(
   chain: ChainDef,
   params: BuildUtxoParams,
 ) {
-  const { to, memo, feeLevel = 5, isMax = false, xpub, scriptTypeOverride, accountPath } = params
+  const { to, memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath } = params
 
-  if (!xpub) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
+  if (!xpub && (!allXpubs || !allXpubs.length)) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
 
   // scriptType resolution: explicit override > xpub prefix > chain default > p2pkh
-  const scriptType = scriptTypeOverride || getScriptTypeFromXpub(xpub) || chain.scriptType || 'p2pkh'
-  console.log(`${TAG} scriptType=${scriptType} (override=${scriptTypeOverride}, xpub-prefix=${getScriptTypeFromXpub(xpub)}, chain-default=${chain.scriptType})`)
+  const primaryXpub = xpub || allXpubs![0].xpub
+  const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+  console.log(`${TAG} scriptType=${scriptType} (override=${scriptTypeOverride}, xpub-prefix=${getScriptTypeFromXpub(primaryXpub)}, chain-default=${chain.scriptType})`)
   const coinType = COIN_TYPE[chain.id] ?? 0
   const purpose = PURPOSE[scriptType] ?? 84
 
   // Account index: extract from accountPath if provided (for BTC multi-account)
-  // accountPath is [purpose+H, coinType+H, account+H] — account index is element[2] minus hardened flag
   const accountIndex = accountPath ? (accountPath[2] - 0x80000000) : 0
   if (accountPath) {
     console.log(`${TAG} Using accountPath=[${accountPath.join(',')}] → accountIndex=${accountIndex}`)
   }
 
-  // 1. Fetch UTXOs — Pioneer API 'network' param expects Chain enum (BTC, LTC, etc.), not CAIP-2 networkId
-  console.log(`${TAG} Fetching UTXOs: network=${chain.chain}, xpub=${xpub?.slice(0, 20)}...`)
-  const utxosResp = await pioneer.ListUnspent({ network: chain.chain, xpub })
-  console.log(`${TAG} ListUnspent raw type=${typeof utxosResp}, isArray=${Array.isArray(utxosResp)}, keys=${utxosResp && typeof utxosResp === 'object' && !Array.isArray(utxosResp) ? Object.keys(utxosResp).join(',') : 'N/A'}`)
-  const utxos: any[] = Array.isArray(utxosResp) ? utxosResp
-    : Array.isArray(utxosResp?.data) ? utxosResp.data
-    : Array.isArray(utxosResp?.utxos) ? utxosResp.utxos
-    : []
+  // 1. Fetch UTXOs — aggregate from all xpubs if provided, otherwise single xpub
+  let utxos: any[]
+  if (allXpubs && allXpubs.length > 0) {
+    console.log(`${TAG} Multi-xpub aggregation: ${allXpubs.length} xpubs`)
+    const results = await Promise.all(
+      allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.chain, x.xpub, x.scriptType))
+    )
+    utxos = results.flat()
+  } else {
+    utxos = await fetchUtxosForXpub(pioneer, chain.chain, primaryXpub, scriptType)
+  }
   if (!utxos.length) throw new Error(`No UTXOs found for ${chain.coin}`)
 
-  for (const u of utxos) {
-    u.value = Number(u.value)
-    // Per-UTXO scriptType: prefer UTXO's own → derive from path → global default
-    u.scriptType = u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || scriptType
-  }
-
-  // Diagnostic: dump raw UTXO[0] to see exactly what Pioneer returns
+  // Diagnostic: dump raw UTXO[0]
   if (utxos.length > 0) {
-    console.log(`${TAG} UTXO[0] keys: ${Object.keys(utxos[0]).join(', ')}`)
-    // Dump non-tx fields (tx is huge) to see what blockbook returns
     const { tx, hex, ...utxoMeta } = utxos[0]
     console.log(`${TAG} UTXO[0] meta: ${JSON.stringify(utxoMeta)}`)
   }
-  console.log(`${TAG} Found ${utxos.length} UTXOs, total: ${utxos.reduce((s: number, u: any) => s + u.value, 0) / 1e8} ${chain.symbol}`)
+  console.log(`${TAG} Found ${utxos.length} UTXOs total, ${utxos.reduce((s: number, u: any) => s + u.value, 0) / 1e8} ${chain.symbol}`)
   for (const u of utxos) {
     console.log(`${TAG}   UTXO ${u.txid?.slice(0, 12)}...:${u.vout} value=${u.value} scriptType=${u.scriptType} path=${u.path || 'NONE'} addr=${u.address || 'NONE'} hasHex=${!!u.hex || !!u.txHex}`)
   }
@@ -306,36 +332,36 @@ export async function buildUtxoTx(
   }
 
   // 4. Get pubkey info — used for both address→path lookup AND change address index
+  //    Aggregate across all xpubs when multi-xpub mode
   let changeAddressIndex = 0
   const addressToPath = new Map<string, string>()
-  try {
-    const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.chain, xpub }))?.data
-    if (pubkeyInfo?.tokens) {
-      let maxUsed = -1
-      for (const token of pubkeyInfo.tokens) {
-        // Build address→path lookup for UTXO path enrichment
-        if (token.path && token.name) {
-          addressToPath.set(token.name, token.path)
-        }
-        // Also index by 'address' field if present (some API versions use different field names)
-        if (token.path && token.address && token.address !== token.name) {
-          addressToPath.set(token.address, token.path)
-        }
-        // Change address index calculation (only change paths: .../1/N)
-        if (token.path && token.transfers > 0) {
-          const parts = token.path.split('/')
-          if (parts.length === 6 && parts[4] === '1') {
-            const idx = parseInt(parts[5], 10)
-            if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
+  const xpubsToQuery = allXpubs?.map(x => x.xpub) || [primaryXpub]
+  for (const qXpub of xpubsToQuery) {
+    try {
+      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.chain, xpub: qXpub }))?.data
+      if (pubkeyInfo?.tokens) {
+        let maxUsed = -1
+        for (const token of pubkeyInfo.tokens) {
+          if (token.path && token.name) addressToPath.set(token.name, token.path)
+          if (token.path && token.address && token.address !== token.name) {
+            addressToPath.set(token.address, token.path)
+          }
+          // Change address index — only from primary xpub's change paths
+          if (qXpub === primaryXpub && token.path && token.transfers > 0) {
+            const parts = token.path.split('/')
+            if (parts.length === 6 && parts[4] === '1') {
+              const idx = parseInt(parts[5], 10)
+              if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
+            }
           }
         }
+        if (qXpub === primaryXpub) changeAddressIndex = maxUsed + 1
       }
-      changeAddressIndex = maxUsed + 1
+    } catch {
+      console.warn(`${TAG} GetPubkeyInfo failed for ${qXpub.slice(0, 12)}...`)
     }
-    console.log(`${TAG} Built address→path lookup: ${addressToPath.size} entries`)
-  } catch {
-    console.warn(`${TAG} GetPubkeyInfo failed, using change index 0 and no address→path lookup`)
   }
+  console.log(`${TAG} Built address→path lookup: ${addressToPath.size} entries (from ${xpubsToQuery.length} xpubs)`)
 
   // Enrich UTXOs that lack path by matching against GetPubkeyInfo
   // Strategy 1: direct address match

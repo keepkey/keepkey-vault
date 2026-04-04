@@ -3,7 +3,7 @@
  */
 import type { ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
-import { buildUtxoTx, type BuildUtxoParams } from './utxo'
+import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
@@ -20,7 +20,7 @@ export type { BuildTxParams }
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
@@ -31,6 +31,7 @@ export async function buildTx(
         feeLevel: params.feeLevel,
         isMax: params.isMax,
         xpub: params.xpub,
+        allXpubs: params.allXpubs,
         scriptTypeOverride: params.scriptTypeOverride,
         accountPath: params.accountPath,
       })

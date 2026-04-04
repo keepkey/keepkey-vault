@@ -108,6 +108,19 @@ export class BtcAccountManager extends EventEmitter {
     return account?.xpubs.find(x => x.scriptType === this.selectedXpub.scriptType)
   }
 
+  /** Get ALL xpubs with non-zero balance (for UTXO aggregation in sends/swaps). */
+  getFundedXpubs(): Array<{ xpub: string; scriptType: string; accountPath: number[] }> {
+    const result: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+    for (const account of this.accounts) {
+      for (const xp of account.xpubs) {
+        if (xp.xpub && parseFloat(xp.balance) > 0) {
+          result.push({ xpub: xp.xpub, scriptType: xp.scriptType, accountPath: xp.path })
+        }
+      }
+    }
+    return result
+  }
+
   /** Change the selected xpub. */
   setSelectedXpub(accountIndex: number, scriptType: BtcScriptType): void {
     this.selectedXpub = { accountIndex, scriptType }
