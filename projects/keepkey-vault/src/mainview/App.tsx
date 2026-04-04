@@ -13,8 +13,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
-import { EmulatorButton } from "./components/EmulatorButton"
-import { WatchOnlyPrompt } from "./components/WatchOnlyPrompt"
+import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
@@ -64,6 +63,7 @@ function App() {
 	// ── Watch-only mode ──────────────────────────────────────────
 	const [watchOnlyAvailable, setWatchOnlyAvailable] = useState(false)
 	const [watchOnlyMode, setWatchOnlyMode] = useState(false)
+	const [watchOnlyDeviceId, setWatchOnlyDeviceId] = useState<string | undefined>(undefined)
 	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
 
@@ -591,7 +591,7 @@ function App() {
 						watchOnly
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
-						<Dashboard watchOnly onLoaded={() => {}} />
+						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
 				<DeviceSettingsDrawer
@@ -637,16 +637,8 @@ function App() {
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 				>
-					{watchOnlyAvailable && deviceState.state === "disconnected" && (
-						<WatchOnlyPrompt
-							deviceLabel={watchOnlyLabel}
-							lastSynced={watchOnlyLastSynced}
-							onViewPortfolio={handleViewPortfolio}
-							onConnectWallet={handleConnectWallet}
-						/>
-					)}
-					{/* Emulator button — macOS only, bottom-right corner */}
-					<EmulatorButton />
+					{/* Unified device grid — registered devices + emulator wallets */}
+					<DeviceGrid onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }} />
 				</SplashScreen>
 			</>
 		)

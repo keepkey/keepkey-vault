@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, WcSessionInfo } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -183,8 +183,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
-      getWatchOnlyBalances: { params: void; response: ChainBalance[] | null }
-      getWatchOnlyPubkeys: { params: void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+      getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
+      getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
+
+      // ── Registered devices (device history) ──────────────────────────
+      getRegisteredDevices: { params: void; response: RegisteredDevice[] }
+      forgetDevice: { params: { deviceId: string }; response: void }
 
       // ── Factory Reset ──────────────────────────────────────────────────
       factoryReset: { params: void; response: void }

@@ -283,6 +283,13 @@ export function loadMnemonic(flashName: string): string | null {
 }
 
 /**
+ * Check if a saved mnemonic exists for a flash image (no decryption — file existence only).
+ */
+export function hasMnemonic(flashName: string): boolean {
+  return existsSync(getMnemonicPath(flashName))
+}
+
+/**
  * Delete a saved mnemonic.
  */
 export function deleteMnemonic(flashName: string): boolean {

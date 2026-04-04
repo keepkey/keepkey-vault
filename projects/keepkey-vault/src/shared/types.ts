@@ -386,6 +386,21 @@ export interface EmulatorStatus {
   storagePath: string             // ~/.keepkey/emulator/
 }
 
+/** Info about a single emulator wallet profile (flash image + optional seed). */
+export interface EmulatorWalletInfo {
+  name: string
+  hasMnemonic: boolean
+  isActive: boolean
+}
+
+/** Persisted device snapshot — one per device_id, stored in SQLite. */
+export interface RegisteredDevice {
+  deviceId: string
+  label: string
+  firmwareVer: string
+  updatedAt: number
+}
+
 // ── BIP-85 types ────────────────────────────────────────────────────────
 
 export interface Bip85DeriveParams {

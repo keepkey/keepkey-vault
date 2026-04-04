@@ -3131,18 +3131,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!snap) return { available: false }
 				return { available: true, deviceLabel: snap.label || undefined, lastSynced: snap.updatedAt }
 			},
-			getWatchOnlyBalances: async () => {
-				const snap = getLatestDeviceSnapshot()
+			getWatchOnlyBalances: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
 				if (!snap) return null
 				const result = getCachedBalances(snap.deviceId)
 				return result?.balances ?? null
 			},
-			getWatchOnlyPubkeys: async () => {
-				const snap = getLatestDeviceSnapshot()
+			getWatchOnlyPubkeys: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
 				if (!snap) return []
 				return getCachedPubkeys(snap.deviceId)
 			},
 
+			// ── Registered devices (device history) ─────────────────
+			getRegisteredDevices: async () => {
+				const { getAllDeviceSnapshots } = await import('./db')
+				return getAllDeviceSnapshots()
+			},
+			forgetDevice: async (params) => {
+				const { deleteDeviceSnapshot } = await import('./db')
+				deleteDeviceSnapshot(params.deviceId)
+			},
 
 			// ── Sweep (non-standard BTC path recovery) ──────────────
 			sweepScan: async (params) => {
@@ -3251,10 +3266,142 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorDeleteFlash: async (params) => {
-				const { deleteFlash, getEmulatorStatus } = await import('./emulator')
+				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
+
+				// If deleting the active wallet, stop it first so shutdown
+				// doesn't re-save the flash we're about to delete
+				if (getEmulatorStatus().state === 'running' && getActiveFlashName() === params.name) {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
 				deleteFlash(params.name)
 				deleteMnemonic(params.name)
+				return getEmulatorStatus()
+			},
+			emulatorListWallets: async () => {
+				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
+				const status = getEmulatorStatus()
+				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
+				return listFlashImages().map(name => ({
+					name,
+					hasMnemonic: hasMnemonic(name),
+					isActive: name === activeFlash,
+				}))
+			},
+			emulatorImportWallet: async (params) => {
+				// Sanitize wallet name — prevent path traversal and invisible names
+				const name = params.name.trim()
+				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
+				if (/[\/\\]/.test(name)) throw new Error('Wallet name cannot contain path separators')
+				if (name.includes('..')) throw new Error('Wallet name cannot contain ".."')
+				if (name.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
+				if (name.includes('.mnemonic.')) throw new Error('Wallet name cannot contain ".mnemonic."')
+				params = { ...params, name }
+
+				const { stopEmulator, initEmulator, getEmulatorStatus, flushRingBuffers, getActiveFlashName } = await import('./emulator')
+				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
+				const { deleteFlash } = await import('./emulator')
+
+				// Remember previous state for rollback
+				const prevStatus = getEmulatorStatus()
+				const prevFlashName = prevStatus.state === 'running' ? getActiveFlashName() : null
+
+				// Stop current emulator if running
+				if (prevStatus.state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Init with the new flash name (creates flash file on disk)
+				const status = initEmulator(params.name)
+				if (status.state !== 'running') return status
+
+				try {
+					// Open window + connect engine
+					const { openEmulatorWindow } = await import('./emulator-window')
+					openEmulatorWindow()
+					await engine.connectEmulator()
+
+					// Wipe if already initialized
+					if (engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						flushRingBuffers()
+						await engine.connectEmulator()
+					}
+
+					// Load the seed onto the emulator device
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+							mnemonic: params.mnemonic, pin: false, passphrase: false, skipChecksum: false,
+						}))
+					}
+
+					// Set label if provided
+					const label = params.label || params.name
+					try {
+						await emuConfirmOp(() => engine.applySettings({ label, skipRefresh: true }))
+					} catch {}
+
+					flushRingBuffers()
+					await engine.connectEmulator()
+
+					// Verify the firmware holds the mnemonic via DebugLink
+					const actualMnemonic = await engine.getEmulatorMnemonic()
+					if (!actualMnemonic || actualMnemonic.trim() !== params.mnemonic.trim()) {
+						throw new Error('Seed verification failed — firmware mnemonic does not match imported seed')
+					}
+
+					// Only persist mnemonic AFTER seed is verified on device
+					saveMnemonic(params.name, params.mnemonic)
+					return getEmulatorStatus()
+				} catch (err) {
+					// Rollback: stop the failed emulator and clean up the orphaned flash
+					console.error('[Emulator] Import failed, rolling back:', (err as Error).message)
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+					deleteFlash(params.name)
+					deleteMnemonic(params.name)
+
+					// Restore previous emulator if one was running
+					if (prevFlashName) {
+						const restored = initEmulator(prevFlashName)
+						if (restored.state === 'running') {
+							const { openEmulatorWindow } = await import('./emulator-window')
+							openEmulatorWindow()
+							await engine.connectEmulator()
+						}
+					}
+					throw err
+				}
+			},
+			emulatorSwitchWallet: async (params) => {
+				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
+
+				// Stop current emulator if running
+				if (getEmulatorStatus().state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Init with the requested flash name
+				const status = initEmulator(params.name)
+				if (status.state !== 'running') return status
+
+				// Open window + connect engine (auto-reloads saved mnemonic)
+				const { openEmulatorWindow } = await import('./emulator-window')
+				openEmulatorWindow()
+				await engine.connectEmulator()
 				return getEmulatorStatus()
 			},
 			emulatorGetMnemonic: async () => {
