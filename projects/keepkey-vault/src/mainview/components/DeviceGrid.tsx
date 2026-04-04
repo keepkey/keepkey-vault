@@ -9,7 +9,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 
 interface DeviceGridProps {
-	onViewPortfolio: (deviceId: string) => void
+	onViewPortfolio: (deviceId: string, label: string) => void
 }
 
 export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
@@ -180,7 +180,7 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 							</Box>
 						</Flex>
 						<Flex gap="1.5">
-							<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId)} />
+							<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
 							{confirmForget === d.deviceId ? (
 								<>
 									<CardBtn label="Yes" color="#EF4444" onClick={() => handleForgetDevice(d.deviceId)} loading={loading === d.deviceId} />

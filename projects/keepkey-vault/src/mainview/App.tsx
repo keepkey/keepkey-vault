@@ -638,7 +638,7 @@ function App() {
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 				>
 					{/* Unified device grid — registered devices + emulator wallets */}
-					<DeviceGrid onViewPortfolio={(id) => { setWatchOnlyDeviceId(id); setWatchOnlyMode(true) }} />
+					<DeviceGrid onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }} />
 				</SplashScreen>
 			</>
 		)
