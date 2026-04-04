@@ -65,12 +65,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 		try {
 			const updated = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id })
 			setRefreshedBalance(updated)
+			// BTC: re-fetch per-xpub balances so the selector pills update
+			if (isBtc) await refreshBtcAccounts()
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
 		} finally {
 			setRefreshing(false)
 		}
-	}, [chain.id])
+	}, [chain.id, isBtc, refreshBtcAccounts])
 
 	// Use refreshed balance if available, otherwise prop
 	const activeBalance = refreshedBalance || balance
@@ -107,7 +109,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
-	const { btcAccounts, selectXpub, addAccount, loading: btcLoading } = useBtcAccounts()
+	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading } = useBtcAccounts()
 
 	// EVM multi-address support
 	const isEvm = chain.chainFamily === 'evm'

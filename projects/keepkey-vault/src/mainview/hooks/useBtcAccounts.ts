@@ -42,5 +42,13 @@ export function useBtcAccounts() {
     }
   }, [])
 
-  return { btcAccounts, addAccount, selectXpub, loading }
+  /** Re-fetch BTC accounts from backend (picks up freshly-updated per-xpub balances). */
+  const refresh = useCallback(async () => {
+    try {
+      const set = await rpcRequest<BtcAccountSet>('getBtcAccounts')
+      setBtcAccounts(set)
+    } catch { /* device may not be connected */ }
+  }, [])
+
+  return { btcAccounts, addAccount, selectXpub, refresh, loading }
 }
