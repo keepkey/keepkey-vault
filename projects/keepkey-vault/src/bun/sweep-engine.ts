@@ -30,7 +30,8 @@ export interface SweepAddress {
   pathStr: string
   scriptType: string
   address: string
-  category: 'account-key' | 'mismatch'
+  category: 'account-key' | 'mismatch' | 'higher-account'
+  accountIndex?: number
   balanceSats: number
   utxos: SweepUtxo[]
 }
@@ -56,6 +57,8 @@ export interface SweepScan {
 export interface SweepScanConfig {
   accountRange?: [number, number] // default [0, 4]
   mismatchAccounts?: number       // default 1
+  currentMaxAccount?: number      // user's highest configured account index (default 0)
+  higherAccountScanLimit?: number // scan standard combos up to this account index (default 9)
 }
 
 // ── Scan store (in-memory) ─────────────────────────────────────────
@@ -72,7 +75,8 @@ interface PathEntry {
   path: number[]
   pathStr: string
   scriptType: string
-  category: 'account-key' | 'mismatch'
+  category: 'account-key' | 'mismatch' | 'higher-account'
+  accountIndex?: number
 }
 
 function pathToString(path: number[]): string {
@@ -117,6 +121,23 @@ function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
         const changePath = [...btcAccountPath(st.purpose, acct), 1, 0]
         entries.push({ path: changePath, pathStr: pathToString(changePath), scriptType: encodeAs, category: 'mismatch' })
       }
+    }
+  }
+
+  // Category C: Standard combos at higher account indices (beyond user's tracked accounts)
+  const currentMax = config.currentMaxAccount ?? 0
+  const higherLimit = config.higherAccountScanLimit ?? 9
+  for (let acct = currentMax + 1; acct <= higherLimit; acct++) {
+    for (const st of BTC_SCRIPT_TYPES) {
+      // Standard combo: purpose matches scriptType, receive index 0 only
+      const path = [...btcAccountPath(st.purpose, acct), 0, 0]
+      entries.push({
+        path,
+        pathStr: pathToString(path),
+        scriptType: st.scriptType,
+        category: 'higher-account',
+        accountIndex: acct,
+      })
     }
   }
 
@@ -255,7 +276,7 @@ async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Pr
 
     for (const r of results) {
       if (r.balanceSats > 0) {
-        console.log(`${TAG} FOUND: ${r.address} (${r.pathStr} as ${r.scriptType}) = ${r.balanceSats} sats`)
+        console.log(`${TAG} FOUND: ${r.address} (${r.pathStr} as ${r.scriptType}) [${r.category}] = ${r.balanceSats} sats`)
         const utxos = await fetchUtxos(r.address)
         scan.results.push({
           path: r.path,
@@ -263,6 +284,7 @@ async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Pr
           scriptType: r.scriptType,
           address: r.address,
           category: r.category,
+          accountIndex: r.accountIndex,
           balanceSats: r.balanceSats,
           utxos,
         })
@@ -292,7 +314,8 @@ export async function buildSweepTx(
   scan: SweepScan,
   destinationAddress: string,
 ): Promise<SweepTxResult> {
-  const funded = scan.results.filter(r => r.utxos.length > 0)
+  // Only sweep mismatch/account-key entries — higher-account funds are recovered by adding the account
+  const funded = scan.results.filter(r => r.utxos.length > 0 && r.category !== 'higher-account')
   if (funded.length === 0) throw new Error('No UTXOs found to sweep')
 
   // Fetch fee rate

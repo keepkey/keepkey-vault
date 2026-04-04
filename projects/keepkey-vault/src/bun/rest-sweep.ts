@@ -48,6 +48,8 @@ export async function handleSweepRoute(
       const scanId = await startScan(wallet, {
         accountRange: body.accountRange,
         mismatchAccounts: body.mismatchAccounts,
+        currentMaxAccount: body.currentMaxAccount,
+        higherAccountScanLimit: body.higherAccountScanLimit,
       })
 
       return json({ scanId }, 202)
@@ -74,6 +76,7 @@ export async function handleSweepRoute(
           scriptType: r.scriptType,
           address: r.address,
           category: r.category,
+          accountIndex: r.accountIndex,
           balanceSats: r.balanceSats,
           utxoCount: r.utxos.length,
         })),

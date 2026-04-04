@@ -367,6 +367,8 @@ export const SwapQuoteRequest = z.object({
 export const SweepScanRequest = z.object({
   accountRange: z.tuple([z.number().int().min(0), z.number().int().max(9)]).optional(),
   mismatchAccounts: z.number().int().min(0).max(5).optional(),
+  currentMaxAccount: z.number().int().min(0).max(19).optional(),
+  higherAccountScanLimit: z.number().int().min(0).max(19).optional(),
 }).passthrough()
 
 export const SweepExecuteRequest = z.object({
