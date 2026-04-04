@@ -229,25 +229,35 @@ export class EngineController extends EventEmitter {
     console.log(`[Engine] State → ${state}`)
     this.emit('state-change', this.getDeviceState())
 
-    // Persist device snapshot for watch-only mode (fire-and-forget)
+    // Persist device snapshot for watch-only mode (fire-and-forget).
+    // PRIVACY: Skip ALL persistent caching for passphrase wallets — writing
+    // addresses, snapshots, or seed identity to disk leaks the hidden wallet.
     if (state === 'ready' && this.cachedFeatures) {
-      try {
-        const deviceId = this.cachedFeatures.deviceId || 'unknown'
-        const label = this.cachedFeatures.label || ''
-        const fwVer = this.extractVersion(this.cachedFeatures)
-        saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
-      } catch { /* never block on cache failure */ }
+      if (this.isPassphraseWallet) {
+        console.log('[Engine] Passphrase wallet active — skipping device snapshot, seed identity, and fingerprint cache (privacy)')
+      } else if (this.isEmulator) {
+        console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
+      } else {
+        try {
+          const deviceId = this.cachedFeatures.deviceId || 'unknown'
+          const label = this.cachedFeatures.label || ''
+          const fwVer = this.extractVersion(this.cachedFeatures)
+          saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+        } catch { /* never block on cache failure */ }
 
-      // Check if the seed changed since last session — emits 'seed-changed'
-      // if the ETH primary address differs from what's stored.
-      this.checkSeedIdentity()
-        .catch(err => console.warn('[Engine] Seed identity check failed:', err?.message))
+        // Check if the seed changed since last session — emits 'seed-changed'
+        // if the ETH primary address differs from what's stored.
+        this.checkSeedIdentity()
+          .catch(err => console.warn('[Engine] Seed identity check failed:', err?.message))
+      }
 
       // Pre-cache wallet fingerprint so BIP-85 and other ops don't need
       // a separate btcGetAddress call (which can trigger BUTTON_REQUEST).
       // Skip for emulator — the first address call may fail with code 11
       // on stale/incompatible flash, and the fire-and-forget error can
       // leave the transport in a bad state for subsequent REST calls.
+      // Note: fingerprint is in-memory only (not persisted), so it's safe
+      // for passphrase wallets — it's cleared on disconnect/passphrase change.
       if (!this.cachedFingerprint && this.activeTransport !== 'emulator') {
         this.getWalletFingerprint()
           .then(fp => console.log('[Engine] Fingerprint pre-cached:', fp.slice(0, 12) + '...'))
@@ -1513,6 +1523,16 @@ export class EngineController extends EventEmitter {
   // ── Wallet Fingerprint (0th BTC address — identifies seed+passphrase) ───
 
   private cachedFingerprint: string | null = null
+
+  /**
+   * True when the current session is using a passphrase-derived wallet.
+   * Passphrase wallets MUST NOT have any data persisted to disk (addresses,
+   * balances, snapshots, seed identity) — doing so leaks the existence and
+   * contents of the hidden wallet.
+   */
+  get isPassphraseWallet(): boolean {
+    return !!(this.cachedFeatures?.passphraseProtection && this.cachedFeatures?.passphraseCached)
+  }
 
   async getWalletFingerprint(): Promise<string> {
     if (this.cachedFingerprint) return this.cachedFingerprint
