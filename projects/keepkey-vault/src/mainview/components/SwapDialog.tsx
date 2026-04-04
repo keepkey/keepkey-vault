@@ -723,18 +723,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (!fromAsset) return null
     // Check cached balances first (most up-to-date from getCachedBalances RPC)
     const cb = balances.find(b => b.chainId === fromAsset.chainId)
-    if (fromAsset.contractAddress && cb?.tokens) {
-      const token = cb.tokens.find(t =>
-        t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
-      )
-      if (token) return token.balance
+    if (cb) {
+      if (fromAsset.contractAddress && cb.tokens) {
+        const token = cb.tokens.find(t =>
+          t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
+        )
+        if (token) return token.balance
+      }
+      if (!fromAsset.contractAddress) return cb.balance
     }
-    if (cb && parseFloat(cb.balance) > 0) return cb.balance
-    // Fall back to prop balance (from AssetPage) for the current chain's native asset
+    // Fall back to prop balance only when cache has no entry for this chain
     if (balance && chain && fromAsset.chainId === chain.id && !fromAsset.contractAddress) {
       return balance.balance
     }
-    return cb?.balance ?? null
+    return null
   }, [fromAsset, balance, chain, balances])
 
   // Derive per-unit USD price for from/to assets from cached balances

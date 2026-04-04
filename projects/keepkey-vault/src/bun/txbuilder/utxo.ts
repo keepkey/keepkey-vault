@@ -335,7 +335,10 @@ export async function buildUtxoTx(
   //    Aggregate across all xpubs when multi-xpub mode
   let changeAddressIndex = 0
   const addressToPath = new Map<string, string>()
-  const xpubsToQuery = allXpubs?.map(x => x.xpub) || [primaryXpub]
+  // Always query primaryXpub for change-address discovery, plus all funded xpubs for path enrichment
+  const xpubsToQuery = allXpubs?.length
+    ? [...new Set([primaryXpub, ...allXpubs.map(x => x.xpub)])]
+    : [primaryXpub]
   for (const qXpub of xpubsToQuery) {
     try {
       const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.chain, xpub: qXpub }))?.data
@@ -437,9 +440,13 @@ export async function buildUtxoTx(
     let addressNList: number[]
     if (input.path) {
       const rawNList = bip32ToAddressNList(input.path)
-      if (accountPath && rawNList.length === 5) {
-        // Blockbook always returns account 0 in paths — replace first 3 segments
-        // with the correct account-level path (which has the real account index)
+      if (allXpubs && allXpubs.length > 0) {
+        // Multi-xpub mode: use the raw path as-is — each UTXO carries its own
+        // purpose/account from its source xpub (p2pkh=44, p2sh-p2wpkh=49, p2wpkh=84)
+        addressNList = rawNList
+      } else if (accountPath && rawNList.length === 5) {
+        // Single-xpub mode: Blockbook returns account 0 in paths — replace first 3
+        // segments with the correct account-level path (for multi-account support)
         addressNList = [...accountPath, rawNList[3], rawNList[4]]
       } else {
         addressNList = rawNList
