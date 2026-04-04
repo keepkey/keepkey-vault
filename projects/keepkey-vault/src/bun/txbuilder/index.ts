@@ -447,6 +447,60 @@ export async function broadcastTx(
     serializedTx = '0x' + serializedTx
   }
 
+  // THORChain / MayaChain: broadcast directly to chain nodes.
+  // Pioneer's relay has issues with these chains ("empty hash" errors).
+  // Try LCD API first (/cosmos/tx/v1beta1/txs), then Tendermint RPC as fallback.
+  const DIRECT_BROADCAST_URLS: Record<string, { lcd: string; rpc: string }> = {
+    mayachain: { lcd: 'https://mayanode.mayachain.info', rpc: 'https://tendermint.mayachain.info' },
+    thorchain: { lcd: 'https://thornode.ninerealms.com', rpc: 'https://rpc.ninerealms.com' },
+  }
+  const directUrls = DIRECT_BROADCAST_URLS[chain.id]
+  if (directUrls && chain.chainFamily === 'cosmos') {
+    // Attempt 1: LCD REST API (base64 protobuf)
+    try {
+      console.log(`[broadcast] Direct LCD broadcast for ${chain.id}: ${directUrls.lcd}/cosmos/tx/v1beta1/txs`)
+      const lcdResp = await fetch(`${directUrls.lcd}/cosmos/tx/v1beta1/txs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tx_bytes: serializedTx, mode: 'BROADCAST_MODE_SYNC' }),
+      })
+      const lcdData = await lcdResp.json() as any
+      console.log(`[broadcast] LCD response: ${JSON.stringify(lcdData).slice(0, 500)}`)
+
+      const txResp = lcdData.tx_response
+      if (txResp) {
+        if (typeof txResp.code === 'number' && txResp.code !== 0) {
+          throw new Error(`Broadcast rejected: ${txResp.raw_log || `code ${txResp.code}`}`)
+        }
+        if (txResp.txhash) return { txid: txResp.txhash }
+      }
+    } catch (e: any) {
+      if (e.message.startsWith('Broadcast rejected:')) throw e
+      console.warn(`[broadcast] LCD broadcast failed for ${chain.id} (${e.message}), trying Tendermint RPC...`)
+    }
+
+    // Attempt 2: Tendermint RPC (hex-encoded protobuf) — confirmed working for MayaChain
+    try {
+      const txHex = Buffer.from(serializedTx, 'base64').toString('hex')
+      console.log(`[broadcast] Tendermint RPC broadcast for ${chain.id}: ${directUrls.rpc}/broadcast_tx_sync`)
+      const rpcResp = await fetch(`${directUrls.rpc}/broadcast_tx_sync?tx=0x${txHex}`)
+      const rpcData = await rpcResp.json() as any
+      console.log(`[broadcast] Tendermint RPC response: ${JSON.stringify(rpcData).slice(0, 500)}`)
+
+      const rpcResult = rpcData.result || rpcData
+      if (rpcResult.code && rpcResult.code !== 0) {
+        throw new Error(`Broadcast rejected: ${rpcResult.log || `code ${rpcResult.code}`}`)
+      }
+      if (rpcResult.hash) return { txid: rpcResult.hash }
+
+      throw new Error(`Tendermint RPC returned no hash: ${JSON.stringify(rpcData).slice(0, 200)}`)
+    } catch (e: any) {
+      if (e.message.startsWith('Broadcast rejected:')) throw e
+      // Both direct methods failed — fall through to Pioneer as last resort
+      console.warn(`[broadcast] Direct ${chain.id} broadcast failed (${e.message}), falling back to Pioneer...`)
+    }
+  }
+
   console.log(`[broadcast] Sending to Pioneer: networkId=${chain.networkId}, format=${chain.chainFamily === 'cosmos' ? 'base64' : 'hex'}, len=${serializedTx.length}`)
   const result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
   const data = result?.data
