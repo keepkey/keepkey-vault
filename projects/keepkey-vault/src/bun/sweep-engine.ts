@@ -125,15 +125,27 @@ function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   }
 
   // Category C: Standard combos at higher account indices (beyond user's tracked accounts)
+  // Default scan limit: currentMax + 10, capped by schema max (19)
   const currentMax = config.currentMaxAccount ?? 0
-  const higherLimit = config.higherAccountScanLimit ?? 9
+  const higherLimit = config.higherAccountScanLimit ?? Math.min(currentMax + 10, 19)
   for (let acct = currentMax + 1; acct <= higherLimit; acct++) {
     for (const st of BTC_SCRIPT_TYPES) {
-      // Standard combo: purpose matches scriptType, receive index 0 only
-      const path = [...btcAccountPath(st.purpose, acct), 0, 0]
+      // Standard combo: purpose matches scriptType
+      // Probe receive indices 0-2 + change index 0 to catch funds beyond first address
+      for (let idx = 0; idx < 3; idx++) {
+        const path = [...btcAccountPath(st.purpose, acct), 0, idx]
+        entries.push({
+          path,
+          pathStr: pathToString(path),
+          scriptType: st.scriptType,
+          category: 'higher-account',
+          accountIndex: acct,
+        })
+      }
+      const changePath = [...btcAccountPath(st.purpose, acct), 1, 0]
       entries.push({
-        path,
-        pathStr: pathToString(path),
+        path: changePath,
+        pathStr: pathToString(changePath),
         scriptType: st.scriptType,
         category: 'higher-account',
         accountIndex: acct,

@@ -57,8 +57,13 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
   const [accountsTarget, setAccountsTarget] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollingRef = useRef(false) // guards against overlapping poll RPCs
   // Authoritative max account index, fetched fresh from backend before scan
   const [backendMaxAccount, setBackendMaxAccount] = useState<number>(currentMaxAccountHint)
+
+  // Block dismiss during active work (scanning/adding/sweeping)
+  const busy = phase === 'scanning' || phase === 'adding' || phase === 'sweeping'
+  const handleClose = useCallback(() => { if (!busy) onClose() }, [busy, onClose])
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
@@ -73,6 +78,12 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
   const maxDiscoveredAccount = discoveredAccountIndices.length > 0 ? Math.max(...discoveredAccountIndices) : 0
 
   const startScan = useCallback(async () => {
+    // Reset all previous state so retries start clean
+    setScanId(null)
+    setScanStatus(null)
+    setSweepResult(null)
+    setAccountsAdded(0)
+    setAccountsTarget(0)
     setPhase('scanning')
     setError(null)
     try {
@@ -87,11 +98,14 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         accountRange: [0, Math.max(authMaxAccount, 2)],
         mismatchAccounts: 1,
         currentMaxAccount: authMaxAccount,
-        higherAccountScanLimit: 9,
+        // Let backend default to currentMax + 10 (capped at 19)
       }, 0)
       setScanId(id)
 
+      // Poll with overlap guard — skip if previous poll RPC still in flight
       pollRef.current = setInterval(async () => {
+        if (pollingRef.current) return
+        pollingRef.current = true
         try {
           const status = await rpcRequest<ScanStatus>('sweepGetStatus', { scanId: id })
           setScanStatus(status)
@@ -103,6 +117,8 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
           }
         } catch (e: any) {
           console.warn('[sweep] Poll error:', e.message)
+        } finally {
+          pollingRef.current = false
         }
       }, 2000)
     } catch (e: any) {
@@ -161,7 +177,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
       position="fixed" inset="0" zIndex={Z.dialog || 1500}
       display="flex" alignItems="center" justifyContent="center"
     >
-      <Box position="absolute" inset="0" bg="blackAlpha.700" onClick={onClose} />
+      <Box position="absolute" inset="0" bg="blackAlpha.700" onClick={handleClose} />
 
       <Box
         position="relative" w="440px" maxH="80vh" overflow="auto"
@@ -179,7 +195,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             </svg>
             <Text fontSize="lg" fontWeight="600" color="#4ade80">BTC Sweep Scanner</Text>
           </Flex>
-          <Box as="button" onClick={onClose} color="kk.textMuted" _hover={{ color: "white" }} p="1">
+          <Box as="button" onClick={handleClose} color="kk.textMuted" _hover={{ color: "white" }} p="1" opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
@@ -251,7 +267,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                   </svg>
                   <Text fontSize="sm" color="#4ade80" fontWeight="500">All clear — no funds on non-standard paths or higher accounts</Text>
                 </Flex>
-                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={onClose}>Close</Button>
+                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
               </>
             )}
 
@@ -403,7 +419,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                       <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">{sweepResult.txid}</Text>
                     </VStack>
                   </Box>
-                  <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={onClose}>Close</Button>
+                  <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
                 </>
               )
             ) : (
@@ -422,7 +438,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                   Your wallet now tracks accounts up to #{maxDiscoveredAccount}.
                   Balances will appear after the next refresh.
                 </Text>
-                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={onClose}>Close</Button>
+                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
               </>
             )}
           </VStack>
@@ -433,7 +449,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
           <VStack gap="3" align="stretch">
             <Text fontSize="sm" color="red.400">{error || 'An error occurred'}</Text>
             <Flex gap="2">
-              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={onClose}>Close</Button>
+              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
               <Button flex="1" size="sm" variant="outline" borderColor="kk.border" color="#4ade80" onClick={startScan}>Retry</Button>
             </Flex>
           </VStack>
