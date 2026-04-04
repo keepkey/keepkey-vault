@@ -794,6 +794,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					const hasBalance = balNum > 0 || usdNum > 0
 					const tokenCount = clean?.cleanTokenCount || 0
 
+					// Low-gas warning: EVM chain with < $1 native but > $1 in tokens
+					const nativeUsd = bal?.nativeBalanceUsd ?? 0
+					const tokenUsd = usdNum - nativeUsd
+					const lowGas = chain.chainFamily === 'evm' && nativeUsd < 1 && tokenUsd > 1
+
 					return (
 						<Box
 							key={chain.id}
@@ -840,7 +845,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										flexShrink={0}
 										bg={chain.color}
 									/>
-									<Box overflow="hidden">
+									<Box overflow="hidden" flex="1">
 										<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2" truncate>
 											{chain.coin}
 										</Text>
@@ -848,6 +853,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											{chain.symbol}
 										</Text>
 									</Box>
+									{lowGas && (
+										<Box
+											title={`Low ${chain.symbol} for gas \u2014 you need ${chain.symbol} to send tokens on ${chain.coin}`}
+											flexShrink={0}
+											cursor="help"
+											onClick={(e) => e.stopPropagation()}
+										>
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
+												<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
+											</svg>
+										</Box>
+									)}
 								</Flex>
 
 								{bal ? (
