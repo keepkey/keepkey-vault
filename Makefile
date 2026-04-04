@@ -617,15 +617,21 @@ preflight: submodules
 		else echo "   ⚠️  $$mod: $$behind behind $$ref"; fi; \
 	done; \
 	echo ""; \
-	echo "4. CI STATUS"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun"; do \
-		mod="$${pair%%|*}"; repo="$${pair##*|}"; \
+	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware|BitHighlander/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun|BitHighlander/electrobun"; do \
+		mod=$$(echo "$$pair" | cut -d'|' -f1); \
+		repo=$$(echo "$$pair" | cut -d'|' -f2); \
+		fork=$$(echo "$$pair" | cut -d'|' -f3); \
 		sha=$$(cd "$$mod" && git rev-parse HEAD); \
 		total=$$(gh api "repos/$$repo/commits/$$sha/check-runs" --jq '.total_count' 2>/dev/null || echo "0"); \
+		if [ "$$total" = "0" ] && [ "$$repo" != "$$fork" ]; then \
+			total=$$(gh api "repos/$$fork/commits/$$sha/check-runs" --jq '.total_count' 2>/dev/null || echo "0"); \
+			repo="$$fork"; \
+		fi; \
 		if [ "$$total" = "0" ]; then echo "   ⚠️  $$mod: no CI"; \
 		else \
 			failed=$$(gh api "repos/$$repo/commits/$$sha/check-runs" --jq '[.check_runs[] | select(.conclusion == "failure")] | length' 2>/dev/null || echo "0"); \
-			if [ "$$failed" = "0" ]; then echo "   ✅ $$mod: $$total checks passed"; \
+			if [ "$$failed" = "0" ]; then echo "   ✅ $$mod: $$total/$$total green"; \
 			else echo "   ❌ $$mod: $$failed/$$total FAILED"; fail=1; fi; \
 		fi; \
 	done; \
