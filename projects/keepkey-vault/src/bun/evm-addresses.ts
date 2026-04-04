@@ -22,6 +22,13 @@ export class EvmAddressManager extends EventEmitter {
   private selectedIndex: number = 0
   private initPromise: Promise<EvmAddressSet> | null = null
 
+  /**
+   * Optional gate: when set, persistIndices() is a no-op if this returns false.
+   * Used to prevent passphrase-wallet sessions from writing hidden-wallet
+   * address indices to disk.
+   */
+  canPersist: (() => boolean) | null = null
+
   /** Initialize with persisted indices. Concurrent calls coalesce. */
   async initialize(wallet: any): Promise<EvmAddressSet> {
     if (this.initPromise) return this.initPromise
@@ -205,13 +212,6 @@ export class EvmAddressManager extends EventEmitter {
     this.initPromise = null
   }
 
-  /** Clear persisted EVM address indices from settings DB.
-   *  Called on passphrase mode entry to prevent leaking which indices
-   *  were tracked under a hidden wallet. */
-  clearPersistedIndices(): void {
-    setSetting(SETTINGS_KEY, JSON.stringify([0]))
-  }
-
   get isInitialized(): boolean {
     return this.addresses.length > 0
   }
@@ -247,6 +247,9 @@ export class EvmAddressManager extends EventEmitter {
   }
 
   private persistIndices(): void {
+    // PRIVACY: If a gate is set and returns false (passphrase wallet session),
+    // skip writing indices to disk — they belong to the hidden wallet.
+    if (this.canPersist && !this.canPersist()) return
     const indices = this.addresses.map(a => a.addressIndex)
     setSetting(SETTINGS_KEY, JSON.stringify(indices))
   }

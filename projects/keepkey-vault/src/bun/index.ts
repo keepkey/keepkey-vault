@@ -202,6 +202,10 @@ const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
 
+// PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
+// from being written to disk during passphrase sessions.
+evmAddresses.canPersist = () => !engine.isPassphraseWallet
+
 // ── Deferred: DB + chains loaded AFTER window is created ─────────────
 let customChainDefs: ChainDef[] = []
 let dbReady = false
@@ -3652,13 +3656,16 @@ engine.on('state-change', (state) => {
 	if (state.state === 'needs_passphrase') {
 		btcAccounts.reset()
 		evmAddresses.reset()
-		evmAddresses.clearPersistedIndices()
+		// Note: We do NOT clear persisted EVM indices here — needs_passphrase fires
+		// before the user enters the passphrase, so we don't know if this is a hidden
+		// wallet yet. The canPersist gate on EvmAddressManager prevents hidden-wallet
+		// indices from being written during the session instead.
 		const deviceId = state.deviceId
 		if (deviceId) {
 			clearCachedPubkeys(deviceId)
 			clearBalances(deviceId)
 		}
-		console.log('[Vault] Passphrase mode: cleared address + balance + EVM index caches — different passphrase = different wallet')
+		console.log('[Vault] Passphrase mode: cleared in-memory address + balance caches — will re-derive after passphrase entry')
 	}
 })
 // Seed changed — different mnemonic loaded on the same hardware.
