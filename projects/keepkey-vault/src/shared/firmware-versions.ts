@@ -57,7 +57,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
     version: '7.14.0',
     date: '2026-03',
-    headline: 'New chains and BIP-85',
+    headline: 'New chains',
     features: [
       {
         title: 'Solana Support',
@@ -80,6 +80,13 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         color: '#0088CC',
         icon: 'chain',
       },
+    ],
+  },
+  {
+    version: '7.15.0',
+    date: '2026-04',
+    headline: 'BIP-85 Deterministic Entropy',
+    features: [
       {
         title: 'BIP-85 Deterministic Entropy',
         description: 'Derive child mnemonics from your master seed — create isolated wallets without extra backups.',

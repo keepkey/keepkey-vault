@@ -2541,10 +2541,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setBip85Enabled: async (params) => {
-				// BIP-85 requires firmware >= 7.14.0
+				// BIP-85 requires firmware >= 7.15.0
 				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
-					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
+					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
 					return getAppSettings()
 				}
 				bip85Enabled = params.enabled
@@ -3687,16 +3687,15 @@ if (swapsEnabled) {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
-	// Auto-disable 7.14.0+ features if firmware doesn't support them
+	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		const fwTooOld = !fw || versionCompare(fw, '7.14.0') < 0
-		if (fwTooOld && bip85Enabled) {
+		if (bip85Enabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
 			bip85Enabled = false
 			setSetting('bip85_enabled', '0')
-			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
-		if (fwTooOld && zcashPrivacyEnabled) {
+		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.14.0') < 0)) {
 			zcashPrivacyEnabled = false
 			setSetting('zcash_privacy_enabled', '0')
 			stopSidecar()

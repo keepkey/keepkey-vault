@@ -1222,9 +1222,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.14.0 */}
+							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.15.0 */}
 							{(() => {
-								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.14.0') >= 0
+								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
 								return (
 									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
 										<Flex align="center" gap="3">
@@ -1237,7 +1237,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											<Box>
 												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
 												<Text fontSize="sm" color={bip85FwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.14.0 or later"}
+													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.15.0 or later"}
 												</Text>
 											</Box>
 										</Flex>
