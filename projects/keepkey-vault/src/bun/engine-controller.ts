@@ -213,7 +213,11 @@ export class EngineController extends EventEmitter {
 
     await this.fetchFirmwareManifest()
 
-    // Device may already be plugged in
+    // Device may already be plugged in — give libusb/hidapi the same stabilisation
+    // window as the hot-plug path before touching the native USB stack.  Without
+    // this delay, pairRawDevice() can SIGTRAP on macOS when the device is already
+    // connected at launch (the native addon isn't fully ready yet).
+    await new Promise(r => setTimeout(r, ATTACH_DELAY_MS))
     await this.syncState()
   }
 
