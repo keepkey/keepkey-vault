@@ -149,6 +149,7 @@ export class EngineController extends EventEmitter {
     this.cachedFeatures = null
     this.cachedFingerprint = null
     this.seedEthAddress = null
+    this.hiddenWalletActive = false
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -1570,6 +1571,9 @@ export class EngineController extends EventEmitter {
 
   async sendPassphrase(passphrase: string) {
     if (!this.wallet) throw new Error('No device connected')
+    // Track whether this is a hidden wallet (non-empty passphrase).
+    // Empty passphrase selects the standard wallet — safe to cache.
+    this.hiddenWalletActive = passphrase.length > 0
     // Passphrase changes the effective seed — clear fingerprint + seed ID so they're re-derived
     this.cachedFingerprint = null
     this.seedEthAddress = null
@@ -1729,14 +1733,22 @@ export class EngineController extends EventEmitter {
 
   private cachedFingerprint: string | null = null
 
+  // Tracks whether the user entered a non-empty passphrase this session.
+  // An empty passphrase selects the standard wallet (safe to cache);
+  // a non-empty one selects a hidden wallet (must not cache).
+  private hiddenWalletActive = false
+
   /**
-   * True when the current session is using a passphrase-derived wallet.
-   * Passphrase wallets MUST NOT have any data persisted to disk (addresses,
+   * True when the current session is using a hidden (non-empty passphrase) wallet.
+   * Hidden wallets MUST NOT have any data persisted to disk (addresses,
    * balances, snapshots, seed identity) — doing so leaks the existence and
    * contents of the hidden wallet.
+   *
+   * Note: an empty passphrase ("") selects the standard wallet and returns false,
+   * even though the firmware still sets passphraseCached=true.
    */
   get isPassphraseWallet(): boolean {
-    return !!(this.cachedFeatures?.passphraseProtection && this.cachedFeatures?.passphraseCached)
+    return this.hiddenWalletActive
   }
 
   async getWalletFingerprint(): Promise<string> {

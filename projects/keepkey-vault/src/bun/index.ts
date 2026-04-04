@@ -1279,12 +1279,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
 								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
 							}
-							// Update per-xpub balance in BtcAccountManager + persist to cache
+							// Update per-xpub balance in BtcAccountManager + persist to cache.
+							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							const xpubBal = String(match?.balance ?? '0')
 							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 							continue
 						}
@@ -1599,9 +1600,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (isBtc) {
 							const xpubBal = String(match?.balance ?? '0')
 							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 						} else if (isEvm && usd > 0) {
 							evmAddresses.updateAddressBalance(pk.pubkey, usd)
