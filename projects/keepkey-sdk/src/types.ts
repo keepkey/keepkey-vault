@@ -280,6 +280,8 @@ export interface SwapQuoteParams {
 export interface SweepScanParams {
   accountRange?: [number, number]
   mismatchAccounts?: number
+  currentMaxAccount?: number
+  higherAccountScanLimit?: number
 }
 
 export interface SweepScanStatus {
@@ -297,7 +299,8 @@ export interface SweepResult {
   path: string
   scriptType: string
   address: string
-  category: 'account-key' | 'mismatch'
+  category: 'account-key' | 'mismatch' | 'higher-account'
+  accountIndex?: number
   balanceSats: number
   utxoCount: number
 }
