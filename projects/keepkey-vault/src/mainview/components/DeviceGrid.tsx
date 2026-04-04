@@ -231,16 +231,16 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 					const active = w.isActive && emuRunning
 					const isDeleting = confirmDeleteEmu === w.name
 					return (
-						<DeviceCard key={`emu:${w.name}`} active={active}>
+						<DeviceCard key={`emu:${w.name}`} active={active} accentColor={active ? undefined : "#C0A860"}>
 							<Flex align="center" gap="2" mb="1">
 								<EmulatorIcon active={active} />
 								<Box flex="1" minW="0">
 									<Text fontSize="xs" fontWeight="600" color={active ? "#22C55E" : "gray.200"} truncate>
 										{w.name}
 									</Text>
-									<Flex gap="1.5" mt="0.5">
-										<Text fontSize="9px" color={active ? "#22C55E" : "gray.500"}>
-											{active ? "running" : "emulator"}
+									<Flex gap="1.5" mt="0.5" align="center">
+										<Text fontSize="9px" fontWeight="700" color={active ? "#22C55E" : "#3B82F6"} bg={active ? "rgba(34,197,94,0.12)" : "rgba(59,130,246,0.15)"} px="1.5" py="0.5" borderRadius="sm">
+											{active ? "running" : "EMULATOR"}
 										</Text>
 										{w.hasMnemonic && <Text fontSize="9px" color="gray.600">seed saved</Text>}
 									</Flex>
