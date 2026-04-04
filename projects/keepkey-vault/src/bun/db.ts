@@ -862,13 +862,18 @@ export function getDeviceSnapshotById(deviceId: string): { deviceId: string; lab
   }
 }
 
-export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number }> {
+export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
   try {
     if (!db) return []
-    const rows = db.query(
-      'SELECT device_id, label, firmware_ver, updated_at FROM device_snapshot ORDER BY updated_at DESC'
-    ).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number }>
-    return rows.map(r => ({ deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at }))
+    const rows = db.query(`
+      SELECT s.device_id, s.label, s.firmware_ver, s.updated_at,
+             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+      FROM device_snapshot s
+      LEFT JOIN balances b ON b.device_id = s.device_id
+      GROUP BY s.device_id
+      ORDER BY s.updated_at DESC
+    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number }>
+    return rows.map(r => ({ deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd }))
   } catch (e: any) {
     console.warn('[db] getAllDeviceSnapshots failed:', e.message)
     return []

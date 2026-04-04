@@ -399,6 +399,7 @@ export interface RegisteredDevice {
   label: string
   firmwareVer: string
   updatedAt: number
+  totalUsd: number       // sum of cached balance_usd across all chains
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────

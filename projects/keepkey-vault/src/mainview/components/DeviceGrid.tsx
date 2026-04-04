@@ -135,6 +135,12 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 
 	// ── Helpers ──────────────────────────────────────────────────────
 
+	function formatUsd(n: number): string {
+		return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+	}
+
+	const grandTotal = devices.reduce((sum, d) => sum + (d.totalUsd || 0), 0)
+
 	function timeAgo(ts: number): string {
 		const diff = Date.now() - ts
 		const mins = Math.floor(diff / 60_000)
@@ -169,6 +175,11 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 				</Box>
 			)}
 
+			{/* Section label */}
+			<Text fontSize="xs" fontWeight="600" color="gray.500" mb="3" textAlign="center" letterSpacing="0.05em" textTransform="uppercase">
+				Registered Devices
+			</Text>
+
 			{/* Grid of cards */}
 			<Flex wrap="wrap" gap="3" justify="center">
 
@@ -177,7 +188,7 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 					const color = deviceIdToColor(d.deviceId)
 					return (
 					<DeviceCard key={d.deviceId} accentColor={color}>
-						<Flex align="center" gap="2" mb="1.5">
+						<Flex align="center" gap="2" mb="1">
 							<WatchOnlyIcon color={color} />
 							<Box flex="1" minW="0">
 								<Text fontSize="xs" fontWeight="600" color="gray.200" truncate>
@@ -188,6 +199,11 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 								</Text>
 							</Box>
 						</Flex>
+						{d.totalUsd > 0 && (
+							<Text fontSize="sm" fontWeight="700" color={color} mb="1.5">
+								${formatUsd(d.totalUsd)}
+							</Text>
+						)}
 						<Flex gap="1.5">
 							<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
 							{confirmForget === d.deviceId ? (
@@ -330,6 +346,13 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 					</Flex>
 				</Box>
 			)}
+			{/* Grand total */}
+			{grandTotal > 0 && (
+				<Text fontSize="xs" color="gray.500" textAlign="center" mt="4">
+					Total across all devices: <Text as="span" fontWeight="700" color="gray.300">${formatUsd(grandTotal)}</Text>
+				</Text>
+			)}
+
 			<style>{`
 				@keyframes fadeIn {
 					from { opacity: 0; transform: translateY(8px); }
