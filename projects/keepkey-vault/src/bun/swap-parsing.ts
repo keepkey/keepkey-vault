@@ -5,7 +5,7 @@
  * (no Pioneer client, no DB, no server imports).
  */
 import { CHAINS } from '../shared/chains'
-import type { SwapAsset, SwapQuote } from '../shared/types'
+import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 
 const TAG = '[swap]'
 
@@ -48,6 +48,10 @@ export const THOR_TO_CHAIN: Record<string, string> = {
 /**
  * Parse a raw Pioneer Quote SDK response into our SwapQuote type.
  * Pure function — no network calls, no side effects.
+ *
+ * Supports two integration styles:
+ *   1. THORChain/ChainFlip/etc. — memo-based: send to vault with routing memo
+ *   2. Relay — pre-built tx: calldata encodes the swap, no memo needed
  */
 export function parseQuoteResponse(
   quoteResp: any,
@@ -64,6 +68,7 @@ export function parseQuoteResponse(
 
   // Select first (best) quote
   const best = quotes[0]
+  const integration = best.integration || 'thorchain'
   const quote = best.quote || best
   // Pioneer wraps THORNode data in quote.raw and tx details in quote.txs[]
   const raw = quote.raw || {}
@@ -74,7 +79,25 @@ export function parseQuoteResponse(
   if (!expectedOutput) throw new Error('Quote response missing output amount')
   const expectedOutputStr = String(expectedOutput)
 
+  // ── Relay integration: pre-built tx with calldata, no memo ──
+  const isRelay = integration === 'relay'
+  let relayTx: RelayTxParams | undefined
+
+  if (isRelay && txParams.data) {
+    relayTx = {
+      to: txParams.to,
+      data: txParams.data,
+      value: String(txParams.value || '0'),
+      gasLimit: String(txParams.gasLimit || txParams.gas || '300000'),
+      maxFeePerGas: txParams.maxFeePerGas ? String(txParams.maxFeePerGas) : undefined,
+      maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? String(txParams.maxPriorityFeePerGas) : undefined,
+      chainId: txParams.chainId,
+    }
+    console.log(`${TAG} Relay integration — pre-built tx extracted (to=${relayTx.to}, chainId=${relayTx.chainId})`)
+  }
+
   // Memo lives in txParams (Pioneer constructs it), fallback to raw
+  // Relay quotes don't use memos — the calldata IS the swap instruction
   const memo = txParams.memo || quote.memo || raw.memo || ''
   // Router: raw.router or txParams.recipientAddress (Pioneer sets recipient = router for EVM)
   const router = raw.router || quote.router || txParams.recipientAddress
@@ -98,7 +121,7 @@ export function parseQuoteResponse(
   // Native THORChain/Maya swaps (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
 
-  if (!inboundAddress && !isNativeDeposit) {
+  if (!inboundAddress && !isNativeDeposit && !isRelay) {
     // Dump full response structure to help diagnose missing field
     console.error(`${TAG} MISSING inbound address — dumping response structure:`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
@@ -108,13 +131,15 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  if (!memo) console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
+  if (!memo && !isRelay) {
+    console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
+  }
 
-  // Extract fees from raw THORNode response
+  // Extract fees — relay uses a different fee structure
   const fees = raw.fees || quote.fees || {}
-  const totalBps = fees.total_bps || fees.totalBps || 0
-  const outboundFee = fees.outbound || fees.outboundFee || '0'
-  const affiliateFee = fees.affiliate || fees.affiliateFee || '0'
+  let totalBps = fees.total_bps || fees.totalBps || 0
+  let outboundFee = fees.outbound || fees.outboundFee || '0'
+  let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
   const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 300)
 
   // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc
@@ -133,7 +158,7 @@ export function parseQuoteResponse(
   return {
     expectedOutput: expectedOutputStr,
     minimumOutput: minOutStr,
-    inboundAddress,
+    inboundAddress: inboundAddress || '',
     router,
     memo,
     expiry: Number(expiry),
@@ -147,7 +172,8 @@ export function parseQuoteResponse(
     slippageBps: Number(actualSlippageBps),
     fromAsset: params.fromAsset,
     toAsset: params.toAsset,
-    integration: best.integration || 'thorchain',
+    integration,
+    relayTx,
   }
 }
 
