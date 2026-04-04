@@ -194,7 +194,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       factoryReset: { params: void; response: void }
 
       // ── Sweep (non-standard BTC path recovery) ──────────────────────
-      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number }; response: { scanId: string } }
+      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number; currentMaxAccount?: number; higherAccountScanLimit?: number }; response: { scanId: string } }
       sweepGetStatus: { params: { scanId: string }; response: any }
       sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
 

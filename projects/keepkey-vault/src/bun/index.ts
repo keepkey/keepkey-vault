@@ -3166,6 +3166,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const scanId = await startScan(engine.wallet, {
 					accountRange: params.accountRange,
 					mismatchAccounts: params.mismatchAccounts,
+					currentMaxAccount: params.currentMaxAccount,
+					higherAccountScanLimit: params.higherAccountScanLimit,
 				})
 				return { scanId }
 			},
@@ -3185,6 +3187,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						scriptType: r.scriptType,
 						address: r.address,
 						category: r.category,
+						accountIndex: r.accountIndex,
 						balanceSats: r.balanceSats,
 						utxoCount: r.utxos.length,
 					})),

@@ -19,6 +19,7 @@ const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.Swa
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
 
+import { SweepDialog } from "./SweepDialog"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
@@ -302,6 +303,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	const [showAddToken, setShowAddToken] = useState(false)
 	const [showSwapDialog, setShowSwapDialog] = useState(false)
+	const [showSweep, setShowSweep] = useState(false)
 	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
 	const isEvmChain = chain.chainFamily === 'evm'
 
@@ -781,6 +783,53 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						/>
 					</Suspense>
 				</SwapErrorBoundary>
+			)}
+
+			{/* BTC Sweep broom — bottom left on receive tab */}
+			{isBtc && view === 'receive' && (
+				<Box
+					as="button"
+					position="fixed"
+					bottom="24px"
+					left="24px"
+					w="40px"
+					h="40px"
+					borderRadius="full"
+					bg="rgba(74,222,128,0.08)"
+					border="1px solid"
+					borderColor="rgba(74,222,128,0.15)"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					cursor="pointer"
+					transition="all 0.2s"
+					opacity={0.6}
+					_hover={{
+						opacity: 1,
+						bg: "rgba(74,222,128,0.18)",
+						borderColor: "rgba(74,222,128,0.4)",
+						transform: "scale(1.08)",
+					}}
+					_active={{ transform: "scale(0.95)" }}
+					onClick={() => setShowSweep(true)}
+					zIndex={10}
+					title="Sweep Scanner — find BTC on non-standard paths & higher accounts"
+				>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<path d="M3 21h4l-1-3-3 3z" />
+						<path d="M6 18L18 6" />
+						<path d="M14 6h4v4" />
+						<path d="M18 2l4 4-4 4" />
+					</svg>
+				</Box>
+			)}
+
+			{showSweep && (
+				<SweepDialog
+					onClose={() => setShowSweep(false)}
+					currentMaxAccountHint={btcAccounts.accounts.length > 0 ? Math.max(...btcAccounts.accounts.map(a => a.accountIndex)) : 0}
+					refreshAccounts={refreshBtcAccounts}
+				/>
 			)}
 		</Flex>
 	)
