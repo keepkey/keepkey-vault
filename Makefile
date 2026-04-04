@@ -28,7 +28,9 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init
+	@git submodule update --init --recursive
+	@# Fetch all remotes so upstream-behind checks see latest commits
+	@git submodule foreach --quiet 'git fetch --all --prune 2>/dev/null || true'
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
