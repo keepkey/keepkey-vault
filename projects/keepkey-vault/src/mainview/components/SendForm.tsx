@@ -316,14 +316,27 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				</Flex>
 			</Flex>
 			{/* Gas balance hint for token sends */}
-			{isTokenSend && balance && (
-				<Flex justify="space-between" align="center" px="3">
-					<Text fontSize="10px" color="kk.textMuted">{t("gas")} ({chain.symbol})</Text>
-					<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
-						{formatBalance(balance.balance)} {chain.symbol}
-					</Text>
-				</Flex>
-			)}
+			{isTokenSend && balance && (() => {
+				const nativeUsd = balance.nativeBalanceUsd ?? 0
+				const isLow = nativeUsd < 1
+				return (
+					<Flex justify="space-between" align="center" px="3">
+						<Flex align="center" gap="1">
+							{isLow && (
+								<svg width="12" height="12" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
+									<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
+								</svg>
+							)}
+							<Text fontSize="10px" color={isLow ? "#E53E3E" : "kk.textMuted"}>
+								{t("gas")} ({chain.symbol}){isLow ? " \u2014 low!" : ""}
+							</Text>
+						</Flex>
+						<Text fontSize="10px" fontFamily="mono" color={isLow ? "#E53E3E" : "kk.textMuted"}>
+							{formatBalance(balance.balance)} {chain.symbol}
+						</Text>
+					</Flex>
+				)
+			})()}
 
 			{/* Phase: Input */}
 			{phase === 'input' && (
