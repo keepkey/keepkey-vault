@@ -204,7 +204,7 @@ export async function buildUtxoTx(
     console.log(`${TAG} Multi-xpub aggregation: ${allXpubs.length} xpubs`)
     // Finding 5: tolerate individual xpub failures — use allSettled
     const settled = await Promise.allSettled(
-      allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.chain, x.xpub, x.scriptType, x.accountPath))
+      allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.networkId, x.xpub, x.scriptType, x.accountPath))
     )
     utxos = []
     for (let i = 0; i < settled.length; i++) {
@@ -215,7 +215,7 @@ export async function buildUtxoTx(
       }
     }
   } else {
-    utxos = await fetchUtxosForXpub(pioneer, chain.chain, primaryXpub, scriptType, accountPath || undefined)
+    utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
   }
   if (!utxos.length) throw new Error(`No UTXOs found for ${chain.coin}`)
 
