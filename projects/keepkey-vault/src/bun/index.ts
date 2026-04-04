@@ -320,7 +320,10 @@ function getAppSettings() {
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
 		try { rpc.send['api-log'](entry) } catch { /* webview not ready */ }
-		try { insertApiLog(entry) } catch { /* db not ready */ }
+		// PRIVACY: Don't persist API activity from passphrase wallets to disk.
+		if (!engine.isPassphraseWallet) {
+			try { insertApiLog(entry) } catch { /* db not ready */ }
+		}
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
@@ -598,8 +601,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getBip85Mnemonic: async (params) => {
 				const result = await engine.getBip85Mnemonic(params)
 
-				// Save metadata when label is provided
-				if (params.label !== undefined) {
+				// Save metadata when label is provided.
+				// PRIVACY: Don't persist BIP-85 derivation metadata for passphrase wallets —
+				// it links the device fingerprint to derivation operations under the hidden wallet.
+				if (params.label !== undefined && !engine.isPassphraseWallet) {
 					try {
 						const fp = await engine.getWalletFingerprint()
 						const meta: Bip85SeedMeta = {
@@ -634,6 +639,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			// DB write — requires device for fingerprint (cannot save without wallet identity)
 			saveBip85SeedMeta: async (params) => {
+				// PRIVACY: Don't persist BIP-85 metadata for passphrase wallets.
+				if (engine.isPassphraseWallet) {
+					throw new Error('BIP-85 seed metadata cannot be saved for passphrase-protected wallets (privacy).')
+				}
 				const fp = await engine.getWalletFingerprint()
 				const meta: Bip85SeedMeta = {
 					walletFingerprint: fp,
@@ -1883,9 +1892,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
 
-				// Track broadcast in api_log + notify frontend
+				// Track broadcast in api_log + notify frontend.
+				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const logEntry: ApiLogEntry = { method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
-				insertApiLog(logEntry)
+				if (!engine.isPassphraseWallet) insertApiLog(logEntry)
 				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
 				return result
@@ -3009,13 +3019,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						fromAsset: params.fromAsset,
 						toAsset: params.toAsset,
 						integration: cachedQuote?.integration || 'thorchain',
-					})
+					}, { skipPersist: engine.isPassphraseWallet })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
 				}
-				// Track swap in api_log
-				const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-				insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
+				if (!engine.isPassphraseWallet) {
+					const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+					insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				}
 				return result
 			},
 			getPendingSwaps: async () => {
@@ -3145,6 +3157,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					// Tx metadata stored in response_body
 					const meta = { confirmations, blockHeight, value, fee, direction }
+
+					// PRIVACY: Skip DB writes for passphrase wallets (defense in depth —
+					// the RPC handler already throws before reaching here).
+					if (engine.isPassphraseWallet) continue
 
 					if (apiLogTxidExists(txid)) {
 						// Update confirmation count on existing entry
