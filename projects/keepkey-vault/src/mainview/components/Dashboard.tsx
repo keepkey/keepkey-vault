@@ -209,8 +209,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
 							needsAutoRefresh = true
 						}
+					} else {
+						// Empty cache — passphrase wallets intentionally skip DB writes,
+						// and first-run devices also have no cache. Auto-refresh live.
+						console.log('[Dashboard] Cache empty — will auto-refresh live balances')
+						needsAutoRefresh = true
 					}
-				} catch { /* cache unavailable */ }
+				} catch {
+					// Cache unavailable — still trigger a live fetch
+					needsAutoRefresh = true
+				}
 			} else {
 				console.log('[Dashboard] forceRefresh: skipping stale cache (new seed detected)')
 			}
@@ -218,7 +226,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			if (!cancelled) {
 				setInitialLoaded(true)
 				onLoaded?.()
-				// Auto-refresh in background when cache is incomplete
+				// Auto-refresh in background when cache is empty or incomplete
 				if (needsAutoRefresh) refreshBalances()
 			}
 		}

@@ -178,8 +178,11 @@ function browseChains(query: string, page: number, pageSize: number): { chains: 
 	}
 }
 
-/** Fire-and-forget: cache a derived address for watch-only mode */
+/** Fire-and-forget: cache a derived address for watch-only mode.
+ *  PRIVACY: Never persist addresses from a passphrase wallet — doing so
+ *  leaks the existence and contents of the hidden wallet to disk. */
 function cacheAddress(chainId: string, path: string, address: string) {
+	if (engine.isPassphraseWallet) return
 	try {
 		const deviceId = engine.getDeviceState().deviceId || 'unknown'
 		saveCachedPubkey(deviceId, chainId, path, '', address, '')
@@ -198,6 +201,10 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
+
+// PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
+// from being read/written to disk during passphrase sessions.
+evmAddresses.canPersist = () => !engine.isPassphraseWallet
 
 // ── Deferred: DB + chains loaded AFTER window is created ─────────────
 let customChainDefs: ChainDef[] = []
@@ -1370,10 +1377,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}).catch(() => {})
 					}
 
-					// Cache balances (fire-and-forget) — only on successful Pioneer response
+					// Cache balances (fire-and-forget) — only on successful Pioneer response.
+					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					console.warn('[getBalances] Portfolio API failed:', e.message)
@@ -1663,10 +1671,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
-				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				// Update single-chain cache + push to frontend so Dashboard stays in sync.
+				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					updateCachedBalance(deviceId, result)
+					if (!engine.isPassphraseWallet) updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
 				// Push updated EVM per-address balances so address selector stays current
@@ -2681,6 +2690,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 
+				// PRIVACY: Reports read from DB cache, which is intentionally empty
+				// for passphrase wallets. Generating a report would either fail or
+				// create a persistent record of the hidden wallet.
+				if (engine.isPassphraseWallet) {
+					throw new Error('Reports are not available for passphrase-protected wallets. Hidden wallet data is not stored for privacy.')
+				}
+
 				const reportId = `rpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 				// Get cached balances for report data
@@ -3077,6 +3093,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// PRIVACY: Chain history reads from DB cache + writes to api_log,
+				// both of which are bypassed/risky for passphrase wallets.
+				if (engine.isPassphraseWallet) {
+					throw new Error('Chain history scanning is not available for passphrase-protected wallets (privacy).')
+				}
 
 				// Get the address/xpub for this chain from cached balances
 				// UTXO chains store xpub, account-based chains store address
@@ -3718,14 +3740,17 @@ engine.on('state-change', (state) => {
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
 	if (state.state === 'needs_passphrase') {
+		// Reset in-memory managers so they re-derive after passphrase entry.
 		btcAccounts.reset()
 		evmAddresses.reset()
-		const deviceId = state.deviceId
-		if (deviceId) {
-			clearCachedPubkeys(deviceId)
-			clearBalances(deviceId)
-		}
-		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
+		// NOTE: We do NOT clear DB caches (clearCachedPubkeys, clearBalances) here.
+		// needs_passphrase fires when the device *requests* a passphrase — before the
+		// user enters it. We don't know yet if this is the standard wallet (empty
+		// passphrase) or a hidden wallet. Clearing DB prematurely destroys the standard
+		// wallet's cache for every passphrase-protected unlock. Instead, the write-time
+		// guards (isPassphraseWallet checks) prevent hidden wallet data from ever
+		// reaching the DB during the session.
+		console.log('[Vault] Passphrase mode: reset in-memory address managers — will re-derive after passphrase entry')
 	}
 })
 // Seed changed — different mnemonic loaded on the same hardware.
