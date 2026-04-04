@@ -458,6 +458,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
+			retryConnect: async () => { await engine.retryConnect() },
 			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
 			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
 			flashFirmware: async () => { await engine.flashFirmware() },
