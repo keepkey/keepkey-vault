@@ -57,6 +57,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
 
+	// BTC multi-account support (declared early — handleRefresh depends on isBtc + refreshBtcAccounts)
+	const isBtc = chain.id === 'bitcoin'
+	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading } = useBtcAccounts()
+
 	// Single-chain refresh
 	const [refreshing, setRefreshing] = useState(false)
 	const [refreshedBalance, setRefreshedBalance] = useState<ChainBalance | null>(null)
@@ -106,10 +110,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	useEffect(() => {
 		if (view === "privacy" && !zcashPrivacyEnabled) setView("receive")
 	}, [view, zcashPrivacyEnabled])
-
-	// BTC multi-account support
-	const isBtc = chain.id === 'bitcoin'
-	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading } = useBtcAccounts()
 
 	// EVM multi-address support
 	const isEvm = chain.chainFamily === 'evm'
