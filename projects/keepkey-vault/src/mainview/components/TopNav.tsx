@@ -189,9 +189,19 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 				) : firmwareVersion ? (
 					<Flex align="center" gap="1">
 						{isEmulator && (
-							<Text fontSize="9px" color="orange.300" fontWeight="700" bg="rgba(251,146,60,0.15)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="wider">
-								EMU
-							</Text>
+							<Flex align="center" gap="1">
+								<Text fontSize="9px" color="orange.300" fontWeight="700" bg="rgba(251,146,60,0.15)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="wider">
+									EMU
+								</Text>
+								{onExitToDeviceSelect && (
+									<Box as="button" w="16px" h="16px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
+										fontSize="10px" fontWeight="700" color="#FB923C" bg="rgba(251,146,60,0.12)" border="1px solid rgba(251,146,60,0.3)"
+										cursor="pointer" _hover={{ bg: "rgba(251,146,60,0.3)" }} transition="all 0.15s"
+										onClick={onExitToDeviceSelect} className="electrobun-webkit-app-region-no-drag" title="Back to device select">
+										&times;
+									</Box>
+								)}
+							</Flex>
 						)}
 						{firmwareVerified === false ? (
 							<>
