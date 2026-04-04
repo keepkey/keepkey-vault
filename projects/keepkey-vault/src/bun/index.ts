@@ -2900,6 +2900,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
 						return []
 					},
+					wrapSign: engine.isEmulator
+						? (fn, details) => emuSigningOp(fn, details)
+						: (fn) => fn(),
 				})
 				// Look up cached quote for real tracker data
 				// Match by asset pair + amount + inboundAddress to avoid collisions between

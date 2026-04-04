@@ -212,11 +212,13 @@ export interface SwapContext {
   getRpcUrl: (chain: ChainDef) => string | undefined
   getBtcXpub: () => { xpub: string; accountPath?: number[] } | undefined  // selected BTC xpub + account path
   getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
+  /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
+  wrapSign: (fn: () => Promise<any>, details: { operation: string; chain?: string; to?: string; value?: string; memo?: string }) => Promise<any>
 }
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs } = ctx
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign } = ctx
 
   // Resolve source chain
   const allChains = getAllChains()
@@ -373,7 +375,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   console.log(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
   let signedTx: any
   try {
-    signedTx = await txb.signTx(wallet, fromChain, unsignedTx)
+    signedTx = await wrapSign(
+      () => txb.signTx(wallet, fromChain, unsignedTx),
+      { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
+    )
   } catch (e: any) {
     console.error(`${TAG} SIGN FAILED: ${e.message}`)
     console.error(`${TAG}   chain=${fromChain.id}, method=${fromChain.signMethod}`)
