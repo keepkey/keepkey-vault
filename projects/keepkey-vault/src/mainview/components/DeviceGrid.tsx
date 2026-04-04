@@ -417,13 +417,13 @@ function DeviceCard({ children, active, accentColor }: { children: React.ReactNo
 	return (
 		<Box
 			w="180px"
-			bg={active ? "rgba(34,197,94,0.05)" : rgb ? `rgba(${rgb},0.04)` : "rgba(255,255,255,0.03)"}
+			bg={active ? "rgba(34,197,94,0.04)" : rgb ? `rgba(${rgb},0.03)` : "rgba(255,255,255,0.02)"}
 			border="1.5px solid"
-			borderColor={active ? "rgba(34,197,94,0.4)" : rgb ? `rgba(${rgb},0.3)` : "rgba(255,255,255,0.15)"}
+			borderColor={active ? "rgba(34,197,94,0.3)" : rgb ? `rgba(${rgb},0.22)` : "rgba(255,255,255,0.1)"}
 			borderRadius="xl"
 			px="3" py="2.5"
 			transition="all 0.2s"
-			_hover={{ bg: active ? "rgba(34,197,94,0.08)" : rgb ? `rgba(${rgb},0.08)` : "rgba(255,255,255,0.06)" }}
+			_hover={{ bg: active ? "rgba(34,197,94,0.06)" : rgb ? `rgba(${rgb},0.06)` : "rgba(255,255,255,0.04)" }}
 		>
 			{children}
 		</Box>
