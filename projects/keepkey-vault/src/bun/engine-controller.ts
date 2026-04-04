@@ -213,11 +213,15 @@ export class EngineController extends EventEmitter {
 
     await this.fetchFirmwareManifest()
 
-    // Device may already be plugged in — give libusb/hidapi the same stabilisation
-    // window as the hot-plug path before touching the native USB stack.  Without
-    // this delay, pairRawDevice() can SIGTRAP on macOS when the device is already
-    // connected at launch (the native addon isn't fully ready yet).
-    await new Promise(r => setTimeout(r, ATTACH_DELAY_MS))
+    // Device may already be plugged in.  If a KeepKey is present, give
+    // libusb the same stabilisation window as the hot-plug attach handler
+    // before calling pairRawDevice() — without it, the native addon can
+    // SIGTRAP on macOS when the device is connected at launch.
+    const alreadyConnected = usb.getDeviceList()
+      .some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    if (alreadyConnected) {
+      await new Promise(r => setTimeout(r, ATTACH_DELAY_MS))
+    }
     await this.syncState()
   }
 
