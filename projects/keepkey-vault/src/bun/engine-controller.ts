@@ -270,18 +270,29 @@ export class EngineController extends EventEmitter {
   private updateState(state: DeviceState) {
     this.lastState = state
     console.log(`[Engine] State → ${state}`)
+
+    // Reconnect detection: if the device reaches ready with a cached passphrase
+    // but we didn't call sendPassphrase() this session, conservatively assume
+    // hidden wallet BEFORE emitting state-change so getDeviceState() is accurate.
+    // An async probe (probeReconnectPassphraseState) will reclassify to standard
+    // wallet if the derived ETH address matches the stored seed identity.
+    if (state === 'ready' && this.cachedFeatures?.passphraseProtection && this.cachedFeatures?.passphraseCached && !this.passphraseSetThisSession) {
+      this.hiddenWalletActive = true
+      console.log('[Engine] Reconnect with pre-cached passphrase — conservatively assuming hidden wallet (privacy)')
+    }
+
     this.emit('state-change', this.getDeviceState())
 
     // Persist device snapshot for watch-only mode (fire-and-forget).
     // PRIVACY: Skip ALL persistent caching for passphrase wallets — writing
     // addresses, snapshots, or seed identity to disk leaks the hidden wallet.
     if (state === 'ready' && this.cachedFeatures) {
-      // Reconnect detection: if the device has a cached passphrase but we didn't
-      // call sendPassphrase() this session, conservatively assume hidden wallet.
-      // We can't distinguish empty from non-empty after the fact.
-      if (this.cachedFeatures.passphraseProtection && this.cachedFeatures.passphraseCached && !this.passphraseSetThisSession) {
-        this.hiddenWalletActive = true
-        console.log('[Engine] Reconnect with pre-cached passphrase — conservatively assuming hidden wallet (privacy)')
+      // If we detected a reconnect with cached passphrase, probe to see if this
+      // is actually the standard wallet (empty passphrase) by comparing the
+      // derived ETH address against the stored seed identity.
+      if (this.isPassphraseWallet && !this.passphraseSetThisSession) {
+        this.probeReconnectPassphraseState()
+          .catch(err => console.warn('[Engine] Passphrase probe failed (staying conservative):', err?.message))
       }
 
       if (this.isPassphraseWallet) {
@@ -1830,6 +1841,52 @@ export class EngineController extends EventEmitter {
       setSetting(key, addr)
     } catch (err: any) {
       console.warn('[Engine] checkSeedIdentity failed:', err?.message)
+    }
+  }
+
+  /**
+   * On reconnect with a pre-cached passphrase, we conservatively assume hidden
+   * wallet. This probe derives the ETH primary address and compares it against
+   * the stored seed identity for this device. If it matches, the cached
+   * passphrase was empty (standard wallet) and we reclassify + re-emit.
+   * If no stored identity exists or it differs, stays conservative (hidden).
+   * No side effects — does not write to DB or emit seed-changed.
+   */
+  private async probeReconnectPassphraseState(): Promise<void> {
+    if (!this.wallet) return
+    const deviceId = this.cachedFeatures?.deviceId || 'unknown'
+    const { getSetting } = await import('./db')
+    const stored = getSetting(`seed_eth_${deviceId}`)?.toLowerCase() || null
+    if (!stored) {
+      console.log('[Engine] No stored seed identity — staying conservative (hidden wallet)')
+      return
+    }
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (!addr) return
+
+      if (addr === stored) {
+        // ETH address matches stored standard-wallet identity — safe to cache
+        console.log(`[Engine] Reconnect probe: ETH address matches stored identity — reclassifying as standard wallet`)
+        this.hiddenWalletActive = false
+        this.seedEthAddress = addr
+        this.emit('state-change', this.getDeviceState())
+        // Now safe to run deferred standard-wallet operations
+        try {
+          const label = this.cachedFeatures?.label || ''
+          const fwVer = this.extractVersion(this.cachedFeatures)
+          saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+        } catch { /* never block on cache failure */ }
+      } else {
+        console.log(`[Engine] Reconnect probe: ETH address differs from stored — confirmed hidden wallet`)
+        this.seedEthAddress = addr
+      }
+    } catch (err: any) {
+      console.warn('[Engine] Reconnect probe failed — staying conservative:', err?.message)
     }
   }
 
