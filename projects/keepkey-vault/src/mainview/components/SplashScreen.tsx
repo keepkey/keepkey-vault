@@ -7,6 +7,8 @@ interface SplashScreenProps {
   hintText?: string
   children?: React.ReactNode
   variant?: 'searching' | 'connecting' | 'error' | 'claimed'
+  /** When true, logo moves to top and children are visible. When false, logo stays centered. */
+  childrenReady?: boolean
 }
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -16,9 +18,11 @@ const STATUS_DOT_COLORS: Record<string, string> = {
   claimed: '#3B82F6',
 }
 
-export function SplashScreen({ statusText, hintText, children, variant = 'searching' }: SplashScreenProps) {
+export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
 
+  // When children aren't ready: logo centered, full-screen loading feel
+  // When children are ready: logo slides to top, children fill middle
   return (
     <Flex
       height="100vh"
@@ -26,22 +30,33 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
       bg="transparent"
       direction="column"
       alignItems="center"
+      justifyContent={childrenReady ? "flex-start" : "center"}
+      transition="all 0.5s ease"
     >
-      {/* Logo — top area with breathing room */}
-      <Flex flex="0 0 auto" pt="15vh" pb="6" justifyContent="center">
+      {/* Logo — centered when loading, top when grid is visible */}
+      <Flex
+        flex="0 0 auto"
+        pt={childrenReady ? "8vh" : "0"}
+        pb={childrenReady ? "4" : "6"}
+        justifyContent="center"
+        transition="all 0.5s ease"
+      >
         <Logo
-          width="100px"
+          width={childrenReady ? "60px" : "100px"}
           style={{
             filter: 'brightness(1.3)',
-            transition: 'filter 0.2s ease'
+            transition: 'all 0.5s ease',
           }}
         />
       </Flex>
 
-      {/* Children (DeviceGrid etc.) — fills middle, scrollable */}
-      <Flex flex="1" direction="column" alignItems="center" overflow="auto" w="100%" px="4">
-        {children}
-      </Flex>
+      {/* Children (DeviceGrid etc.) — only rendered when ready */}
+      {childrenReady && (
+        <Flex flex="1" direction="column" alignItems="center" overflow="auto" w="100%" px="4"
+          style={{ animation: 'fadeIn 0.4s ease' }}>
+          {children}
+        </Flex>
+      )}
 
       {/* Status bar — pinned to bottom */}
       <Box
@@ -50,6 +65,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         pt="3"
         textAlign="center"
         px={3}
+        mt={childrenReady ? "0" : "auto"}
       >
         <Box display="inline-flex" px={3} py={1} borderRadius="md" bg="rgba(0, 0, 0, 0.5)">
           <Flex gap="2" justifyContent="center" alignItems="center">
@@ -72,6 +88,10 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </Flex>

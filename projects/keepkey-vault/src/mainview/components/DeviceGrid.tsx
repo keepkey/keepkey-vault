@@ -11,11 +11,13 @@ import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../..
 
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
+	onReady?: () => void
 }
 
-const REVEAL_DELAY_MS = 2500 // wait before showing grid so USB scan can find a device first
+const REVEAL_DELAY_MS = 2500
+let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
-export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
+export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
@@ -25,11 +27,13 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	const [confirmDeleteEmu, setConfirmDeleteEmu] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [showValues, setShowValues] = useState(false)
-	const [revealed, setRevealed] = useState(false)
+	const [revealed, setRevealed] = useState(hasRevealedOnce)
 
-	// Delay reveal so the splash "Searching for KeepKey..." has time to find a device
+	// Delay reveal only on first app launch so animated logo shows during USB scan.
+	// On re-entry (pressing X from emu/watch-only), tiles show immediately.
 	useEffect(() => {
-		const timer = setTimeout(() => setRevealed(true), REVEAL_DELAY_MS)
+		if (hasRevealedOnce) { setRevealed(true); return }
+		const timer = setTimeout(() => { setRevealed(true); hasRevealedOnce = true }, REVEAL_DELAY_MS)
 		return () => clearTimeout(timer)
 	}, [])
 
@@ -151,6 +155,11 @@ export function DeviceGrid({ onViewPortfolio }: DeviceGridProps) {
 	// Show grid if there are devices, emulator wallets, OR if the emulator
 	// system responded at all (so "Pair Emulator" card is reachable on clean install)
 	const hasContent = devices.length > 0 || emuWallets.length > 0 || emuPaired || emuStatus !== null
+
+	// Notify parent when grid is ready to display
+	useEffect(() => {
+		if (revealed && hasContent) onReady?.()
+	}, [revealed, hasContent, onReady])
 
 	// Wait for reveal delay + content before rendering
 	if (!revealed || !hasContent) return null
