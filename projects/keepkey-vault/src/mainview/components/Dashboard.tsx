@@ -91,6 +91,8 @@ interface DashboardProps {
 	forceRefresh?: boolean
 	/** Called after forceRefresh has been consumed (one-shot) — parent should clear the flag */
 	onForceRefreshConsumed?: () => void
+	/** True when using a hidden wallet — reports and some features are unavailable */
+	isHiddenWallet?: boolean
 }
 
 /** Format a timestamp as a relative "time ago" string (i18n-aware) */
@@ -105,7 +107,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -667,7 +669,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			{/* Refresh + Reports buttons — below chart */}
 			{!watchOnly && (
 				<Flex justify="center" gap="3" mb="4">
-					<Box
+					{!isHiddenWallet && <Box
 						as="button"
 						px="3"
 						py="1"
@@ -691,7 +693,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</svg>
 							{t("reports")}
 						</Flex>
-					</Box>
+					</Box>}
 					<Box
 						as="button"
 						px="3"

@@ -150,6 +150,7 @@ export class EngineController extends EventEmitter {
     this.cachedFingerprint = null
     this.seedEthAddress = null
     this.hiddenWalletActive = false
+    this.passphraseSetThisSession = false
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -275,8 +276,16 @@ export class EngineController extends EventEmitter {
     // PRIVACY: Skip ALL persistent caching for passphrase wallets — writing
     // addresses, snapshots, or seed identity to disk leaks the hidden wallet.
     if (state === 'ready' && this.cachedFeatures) {
+      // Reconnect detection: if the device has a cached passphrase but we didn't
+      // call sendPassphrase() this session, conservatively assume hidden wallet.
+      // We can't distinguish empty from non-empty after the fact.
+      if (this.cachedFeatures.passphraseProtection && this.cachedFeatures.passphraseCached && !this.passphraseSetThisSession) {
+        this.hiddenWalletActive = true
+        console.log('[Engine] Reconnect with pre-cached passphrase — conservatively assuming hidden wallet (privacy)')
+      }
+
       if (this.isPassphraseWallet) {
-        console.log('[Engine] Passphrase wallet active — skipping device snapshot, seed identity, and fingerprint cache (privacy)')
+        console.log('[Engine] Hidden wallet active — skipping device snapshot, seed identity (privacy)')
       } else if (this.isEmulator) {
         console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
       } else {
@@ -1170,6 +1179,7 @@ export class EngineController extends EventEmitter {
       bootloaderVerified: hashes.bootloaderVerified,
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
+      isHiddenWallet: this.hiddenWalletActive,
     }
   }
 
@@ -1571,13 +1581,14 @@ export class EngineController extends EventEmitter {
 
   async sendPassphrase(passphrase: string) {
     if (!this.wallet) throw new Error('No device connected')
-    // Track whether this is a hidden wallet (non-empty passphrase).
-    // Empty passphrase selects the standard wallet — safe to cache.
-    this.hiddenWalletActive = passphrase.length > 0
     // Passphrase changes the effective seed — clear fingerprint + seed ID so they're re-derived
     this.cachedFingerprint = null
     this.seedEthAddress = null
     await this.wallet.sendPassphrase(passphrase)
+    // Only set flags AFTER device accepted the passphrase — if the user
+    // rejects on-device, the await throws and we don't misclassify the session.
+    this.passphraseSetThisSession = true
+    this.hiddenWalletActive = passphrase.length > 0
     // Don't call getFeatures if promptPin's getPublicKeys is still pending —
     // it owns the transport and will refresh features when it completes.
     if (!this.promptPinActive) {
@@ -1737,6 +1748,8 @@ export class EngineController extends EventEmitter {
   // An empty passphrase selects the standard wallet (safe to cache);
   // a non-empty one selects a hidden wallet (must not cache).
   private hiddenWalletActive = false
+  // True if sendPassphrase() was called this session (vs reconnect with pre-cached passphrase)
+  private passphraseSetThisSession = false
 
   /**
    * True when the current session is using a hidden (non-empty passphrase) wallet.
@@ -1746,6 +1759,9 @@ export class EngineController extends EventEmitter {
    *
    * Note: an empty passphrase ("") selects the standard wallet and returns false,
    * even though the firmware still sets passphraseCached=true.
+   *
+   * On reconnect to a device with a pre-cached passphrase (not entered this
+   * session), we conservatively assume hidden wallet since we can't distinguish.
    */
   get isPassphraseWallet(): boolean {
     return this.hiddenWalletActive
