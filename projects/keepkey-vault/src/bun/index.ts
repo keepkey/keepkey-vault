@@ -3297,7 +3297,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorInit: async (params) => {
 				const { initEmulator } = await import('./emulator')
-				const status = initEmulator(params?.flashName)
+				const status = initEmulator(params?.flashName, undefined, params?.channel)
 				if (status.state === 'running') {
 					// Open the emulator device window
 					const { openEmulatorWindow } = await import('./emulator-window')
@@ -3321,6 +3321,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorStatus: async () => {
 				const { getEmulatorStatus } = await import('./emulator')
 				return getEmulatorStatus()
+			},
+			emulatorGetChannels: async () => {
+				const { getEmulatorChannels } = await import('./emulator')
+				return getEmulatorChannels()
 			},
 			emulatorDeleteFlash: async (params) => {
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')

@@ -8,9 +8,21 @@ import { Box, Flex, Text } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 
+type EmulatorChannel = 'alpha' | 'beta' | 'release'
+
+interface ChannelEntry {
+	channel: string
+	version: string
+	description: string
+	installed: boolean
+	source: { repo: string; branch: string }
+}
+
 export function EmulatorManager() {
 	const [wallets, setWallets] = useState<EmulatorWalletInfo[]>([])
-	const [status, setStatus] = useState<EmulatorStatus | null>(null)
+	const [status, setStatus] = useState<(EmulatorStatus & { channel?: EmulatorChannel }) | null>(null)
+	const [channels, setChannels] = useState<ChannelEntry[]>([])
+	const [selectedChannel, setSelectedChannel] = useState<EmulatorChannel>('alpha')
 	const [loading, setLoading] = useState<string | null>(null)
 	const [expanded, setExpanded] = useState(false)
 	const [showAdd, setShowAdd] = useState(false)
@@ -21,12 +33,15 @@ export function EmulatorManager() {
 
 	const refresh = useCallback(async () => {
 		try {
-			const [s, w] = await Promise.all([
-				rpcRequest<EmulatorStatus>("emulatorStatus", undefined, 5000),
+			const [s, w, ch] = await Promise.all([
+				rpcRequest<EmulatorStatus & { channel?: EmulatorChannel }>("emulatorStatus", undefined, 5000),
 				rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 5000),
+				rpcRequest<ChannelEntry[]>("emulatorGetChannels", undefined, 5000),
 			])
 			setStatus(s)
 			setWallets(w)
+			setChannels(ch)
+			if (s.channel) setSelectedChannel(s.channel)
 			setError(null)
 		} catch (e: any) {
 			setError(e?.message || String(e))
@@ -49,15 +64,20 @@ export function EmulatorManager() {
 		setLoading(name)
 		setError(null)
 		try {
-			// If another is running, switch; otherwise init
-			const s = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
-			setStatus(s)
+			// If another is running, switch; otherwise init with selected channel
+			if (status?.state === 'running') {
+				const s = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+				setStatus(s)
+			} else {
+				const s = await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name, channel: selectedChannel }, 20000)
+				setStatus(s)
+			}
 			await refresh()
 		} catch (e: any) {
 			setError(e?.message || String(e))
 		}
 		setLoading(null)
-	}, [refresh])
+	}, [refresh, status?.state, selectedChannel])
 
 	const handleStop = useCallback(async () => {
 		setLoading("__stop")
@@ -249,6 +269,58 @@ export function EmulatorManager() {
 					>
 						{loading === "__pair" ? "Pairing..." : "Pair Emulator"}
 					</Box>
+				</Box>
+			)}
+
+			{/* Channel selector */}
+			{isPaired && channels.length > 0 && (
+				<Box px="4" py="3" borderBottom="1px solid rgba(255,255,255,0.06)">
+					<Text fontSize="10px" fontWeight="600" color="gray.400" mb="2">FIRMWARE CHANNEL</Text>
+					<Flex gap="2">
+						{channels.map(ch => {
+							const active = selectedChannel === ch.channel
+							const isActive = isRunning && status?.channel === ch.channel
+							const channelColors: Record<string, string> = {
+								alpha: '#F59E0B',
+								beta: '#3B82F6',
+								release: '#22C55E',
+							}
+							const color = channelColors[ch.channel] || '#C0A860'
+							return (
+								<Box
+									key={ch.channel}
+									as="button"
+									flex="1"
+									py="6px"
+									px="2"
+									borderRadius="md"
+									fontSize="10px"
+									fontWeight="600"
+									textAlign="center"
+									cursor={isRunning ? "not-allowed" : "pointer"}
+									opacity={!ch.installed ? 0.4 : 1}
+									bg={active ? `rgba(${color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : '34,197,94'},0.15)` : 'rgba(255,255,255,0.03)'}
+									color={active ? color : 'gray.400'}
+									border="1px solid"
+									borderColor={active ? `rgba(${color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : '34,197,94'},0.5)` : 'rgba(255,255,255,0.08)'}
+									_hover={!isRunning ? { bg: `rgba(${color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : '34,197,94'},0.1)` } : undefined}
+									onClick={() => {
+										if (!isRunning && ch.installed) setSelectedChannel(ch.channel as EmulatorChannel)
+									}}
+									title={ch.description + (ch.installed ? '' : '\n(Not installed)')}
+								>
+									{ch.channel.toUpperCase()}
+									{isActive && <Text as="span" fontSize="8px" ml="1">(active)</Text>}
+									{!ch.installed && <Text as="span" fontSize="8px" ml="1" color="red.300">!</Text>}
+								</Box>
+							)
+						})}
+					</Flex>
+					{channels.find(c => c.channel === selectedChannel) && (
+						<Text fontSize="9px" color="gray.500" mt="1">
+							{channels.find(c => c.channel === selectedChannel)?.description}
+						</Text>
+					)}
 				</Box>
 			)}
 

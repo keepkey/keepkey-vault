@@ -1,16 +1,70 @@
 {
   "emulators": [
     {
-      "version": "7.10.0-alpha",
-      "firmwareVersion": "7.10.0",
+      "version": "7.14.0-alpha",
+      "firmwareVersion": "7.14.0",
       "channel": "alpha",
       "arch": "arm64",
       "platform": "darwin",
-      "dylib": "7.10.0-alpha/libkkemu.dylib",
-      "binary": "7.10.0-alpha/kkemu",
+      "dylib": "7.14.0-alpha/libkkemu.dylib",
+      "binary": "7.14.0-alpha/kkemu",
       "debugLink": true,
-      "description": "Alpha emulator with DebugLink — for development and testing"
+      "description": "Alpha — BitHighlander/keepkey-firmware release/7.14.0 (latest dev)",
+      "source": {
+        "repo": "BitHighlander/keepkey-firmware",
+        "branch": "release/7.14.0"
+      }
+    },
+    {
+      "version": "7.14.0-beta",
+      "firmwareVersion": "7.14.0",
+      "channel": "beta",
+      "arch": "arm64",
+      "platform": "darwin",
+      "dylib": "7.14.0-beta/libkkemu.dylib",
+      "binary": "7.14.0-beta/kkemu",
+      "debugLink": true,
+      "description": "Beta — BitHighlander/keepkey-firmware release/7.14.0 (pre-release)",
+      "source": {
+        "repo": "BitHighlander/keepkey-firmware",
+        "branch": "release/7.14.0"
+      }
+    },
+    {
+      "version": "7.14.0-release",
+      "firmwareVersion": "7.14.0",
+      "channel": "release",
+      "arch": "arm64",
+      "platform": "darwin",
+      "dylib": "7.14.0-release/libkkemu.dylib",
+      "binary": "7.14.0-release/kkemu",
+      "debugLink": true,
+      "description": "Release — keepkey/keepkey-firmware master (stable upstream)",
+      "source": {
+        "repo": "keepkey/keepkey-firmware",
+        "branch": "master"
+      }
     }
   ],
-  "default": "7.10.0-alpha"
+  "default": "7.14.0-alpha",
+  "channels": {
+    "alpha": {
+      "description": "Latest development builds from BitHighlander fork",
+      "repo": "BitHighlander/keepkey-firmware",
+      "branch": "release/7.14.0",
+      "autoUpdate": true
+    },
+    "beta": {
+      "description": "Pre-release builds for testing before upstream merge",
+      "repo": "BitHighlander/keepkey-firmware",
+      "branch": "release/7.14.0",
+      "autoUpdate": false
+    },
+    "release": {
+      "description": "Stable upstream builds from keepkey/keepkey-firmware master",
+      "repo": "keepkey/keepkey-firmware",
+      "branch": "master",
+      "autoUpdate": false
+    }
+  }
 }

@@ -31,6 +31,14 @@ projects/keepkey-vault/_build/
 # Unsigned firmware binaries
 firmware/unsigned/
 
+# Emulator binaries (built locally per channel — not committed)
+firmware/emulators/7.14.0-*/
+# Keep the legacy alpha for backward compat
+!firmware/emulators/7.10.0-alpha/
+
+# Emulator build directory
+modules/keepkey-firmware/build-emu/
+
 # Release artifacts (belong in GitHub Releases, not the repo)
 release-windows/
 

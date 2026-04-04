@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulators build-emulator-alpha build-emulator-beta build-emulator-release download-emulators download-emulator-alpha download-emulator-beta download-emulator-release emulator-status clean-emulators
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -290,9 +290,15 @@ test-emu:
 
 # Run python-keepkey consistency tests against the kkemu binary (UDP).
 # Launches kkemu, runs pytest, then kills kkemu.
+# Uses alpha channel by default; override with: make test-emu-python EMU_CHANNEL=release
+EMU_CHANNEL ?= alpha
+EMU_VERSION := 7.14.0-$(EMU_CHANNEL)
+
 test-emu-python:
-	@echo "Starting kkemu (UDP 11044/11045)..."
-	@./firmware/emulators/7.10.0-alpha/kkemu & KKPID=$$!; \
+	@test -x ./firmware/emulators/$(EMU_VERSION)/kkemu || \
+		(echo "ERROR: kkemu not found for $(EMU_CHANNEL) channel. Run: make build-emulator-$(EMU_CHANNEL)"; exit 1)
+	@echo "Starting kkemu ($(EMU_CHANNEL) channel, UDP 11044/11045)..."
+	@./firmware/emulators/$(EMU_VERSION)/kkemu & KKPID=$$!; \
 	sleep 1; \
 	echo "Running python-keepkey tests..."; \
 	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
@@ -309,6 +315,71 @@ test-emu-python:
 	EXIT=$$?; \
 	kill $$KKPID 2>/dev/null; \
 	exit $$EXIT
+
+# --- Emulator Channels (alpha/beta/release) ---
+# Build native macOS emulator (libkkemu.dylib + kkemu) from the firmware submodule.
+# Each channel gets its own directory under firmware/emulators/<version>/.
+# Alpha and Beta build from BitHighlander/keepkey-firmware release/7.14.0.
+# Release builds from keepkey/keepkey-firmware master.
+
+EMU_FW_DIR := modules/keepkey-firmware
+EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
+
+# Common cmake emulator build (called by channel-specific targets)
+# Usage: $(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.14.0-alpha _EMU_REF=origin/release/7.14.0
+_build-emu:
+	@echo "=== Building emulator for $(_EMU_CHANNEL) channel ==="
+	@echo "    Source: $(_EMU_REF)"
+	@echo "    Output: firmware/emulators/$(_EMU_VERSION)/"
+	cd $(EMU_FW_DIR) && git fetch --all --prune 2>/dev/null
+	cd $(EMU_FW_DIR) && git checkout $(_EMU_REF)
+	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	mkdir -p $(EMU_BUILD_DIR)
+	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
+		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
+	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu
+	mkdir -p firmware/emulators/$(_EMU_VERSION)
+	cp $(EMU_BUILD_DIR)/bin/kkemu firmware/emulators/$(_EMU_VERSION)/kkemu
+	@echo "    Binary: firmware/emulators/$(_EMU_VERSION)/kkemu"
+	@# Check if a shared lib was also built (optional — depends on CMake config)
+	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
+		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib; \
+		echo "    Dylib:  firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib"; \
+	fi
+	chmod +x firmware/emulators/$(_EMU_VERSION)/kkemu
+	@echo "=== $(_EMU_CHANNEL) emulator ready ==="
+
+build-emulator-alpha:
+	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.14.0-alpha _EMU_REF=origin/release/7.14.0
+
+build-emulator-beta:
+	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=origin/release/7.14.0
+
+build-emulator-release:
+	$(MAKE) _build-emu _EMU_CHANNEL=release _EMU_VERSION=7.14.0-release _EMU_REF=keepkey/master
+
+build-emulators: build-emulator-alpha build-emulator-beta build-emulator-release
+
+# Download pre-built emulators (if published as release assets)
+download-emulators:
+	bun firmware/download-emulators.ts
+
+download-emulator-alpha:
+	bun firmware/download-emulators.ts --channel alpha
+
+download-emulator-beta:
+	bun firmware/download-emulators.ts --channel beta
+
+download-emulator-release:
+	bun firmware/download-emulators.ts --channel release
+
+emulator-status:
+	bun firmware/download-emulators.ts --status
+
+clean-emulators:
+	rm -rf firmware/emulators/7.14.0-alpha firmware/emulators/7.14.0-beta firmware/emulators/7.14.0-release
+	rm -rf $(EMU_BUILD_DIR)
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -588,6 +659,15 @@ help:
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
+	@echo ""
+	@echo "Emulator Channels:"
+	@echo "  make build-emulators       - Build all 3 emulator channels from firmware submodule"
+	@echo "  make build-emulator-alpha  - Build alpha (BitHighlander fork, release/7.14.0)"
+	@echo "  make build-emulator-beta   - Build beta (BitHighlander fork, release/7.14.0)"
+	@echo "  make build-emulator-release - Build release (upstream keepkey/keepkey-firmware master)"
+	@echo "  make download-emulators    - Download pre-built emulator binaries"
+	@echo "  make emulator-status       - Show installed emulator channels"
+	@echo "  make clean-emulators       - Remove all built emulator binaries"
 
 # --- Pre-release Validation ---
 preflight: submodules
