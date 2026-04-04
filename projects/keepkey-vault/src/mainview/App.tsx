@@ -44,6 +44,7 @@ function App() {
 	const oobEnteredRef = useRef(false)
 	const oobClaimStuckSince = useRef<number | null>(null)
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
+	const [gridReady, setGridReady] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [updateDismissed, setUpdateDismissed] = useState(false)
@@ -637,9 +638,13 @@ function App() {
 					}
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
+					childrenReady={gridReady}
 				>
 					{/* Unified device grid — registered devices + emulator wallets */}
-					<DeviceGrid onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }} />
+					<DeviceGrid
+						onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
+						onReady={() => setGridReady(true)}
+					/>
 				</SplashScreen>
 			</>
 		)
