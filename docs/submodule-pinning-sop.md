@@ -24,10 +24,10 @@ Run this BEFORE creating a `release/X.Y.Z` branch:
 ```bash
 cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
 
-# 1. Fetch all remotes
-git submodule foreach 'git fetch --all --prune 2>&1 | tail -1'
+# 1. Fetch all remotes (top-level + nested)
+git submodule foreach --recursive 'git fetch --all --prune 2>/dev/null || true'
 
-# 2. Check each submodule
+# 2. Check top-level submodules
 for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do
   pinned=$(git ls-tree HEAD "$mod" | awk '{print substr($3,1,12)}')
   actual=$(cd "$mod" && git rev-parse --short=12 HEAD)
@@ -36,9 +36,64 @@ for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware mo
   match="OK"; [ "$pinned" != "$actual" ] && match="DRIFT"
   echo "$mod: [$match] pinned=$pinned actual=$actual branch=$branch dirty=$dirty"
 done
+
+# 3. Check firmware nested submodules (deep tree — device-protocol, python-keepkey, trezor-firmware)
+echo ""
+echo "=== Firmware nested submodules ==="
+drifted=$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+')
+if [ -n "$drifted" ]; then
+  echo "⚠️  DRIFTED nested submodules:"
+  echo "$drifted"
+  echo "Fix: cd modules/keepkey-firmware && git submodule update --init --recursive"
+else
+  echo "✅ All firmware nested submodules match pins"
+fi
 ```
 
-**All modules must show `[OK]` and `dirty=0` before cutting a release branch.**
+**All modules must show `[OK]` and `dirty=0`, and firmware nested submodules
+must have no `+` prefix, before cutting a release branch.**
+
+```bash
+# 4. Verify CI is green on every pinned commit
+echo ""
+echo "=== CI Status on Pinned Commits ==="
+declare -A REPOS=(
+  ["modules/hdwallet"]="keepkey/hdwallet"
+  ["modules/proto-tx-builder"]="BitHighlander/proto-tx-builder"
+  ["modules/device-protocol"]="keepkey/device-protocol"
+  ["modules/keepkey-firmware"]="keepkey/keepkey-firmware"
+  ["modules/electrobun"]="BitHighlander/electrobun"
+)
+for mod in "${!REPOS[@]}"; do
+  repo="${REPOS[$mod]}"
+  sha=$(cd "$mod" && git rev-parse HEAD)
+  # Check GitHub check-runs on the pinned commit
+  result=$(gh api "repos/$repo/commits/$sha/check-runs" --jq '
+    if .total_count == 0 then "⚠️  NO CI"
+    elif ([.check_runs[] | select(.conclusion == "failure")] | length) > 0 then "❌ FAILED: " + ([.check_runs[] | select(.conclusion == "failure") | .name] | join(", "))
+    elif ([.check_runs[] | select(.conclusion == "success")] | length) == .total_count then "✅ ALL GREEN"
+    else "⏳ PENDING: " + ([.check_runs[] | select(.conclusion != "success") | "\(.name):\(.status)"] | join(", "))
+    end' 2>/dev/null || echo "⚠️  API error")
+  echo "$mod ($repo): $result"
+done
+```
+
+**CI gate rules:**
+- ✅ ALL GREEN: proceed
+- ⏳ PENDING: wait for completion
+- ❌ FAILED: STOP — do not release with failing CI on any submodule
+- ⚠️ NO CI: acceptable for repos without workflows (device-protocol), but
+  flag it in release notes
+
+**Current CI coverage:**
+
+| Repo | Workflows | Notes |
+|------|-----------|-------|
+| keepkey/hdwallet | CI (build matrix) | Must pass |
+| keepkey/keepkey-firmware | CI + Zoo Report | CI must pass; Zoo is informational |
+| BitHighlander/proto-tx-builder | Build & Test | Must pass |
+| keepkey/device-protocol | **None** | No CI — validate manually (lib/ build) |
+| BitHighlander/electrobun | Build and Release + CEF Check | Build must pass; CEF is informational |
 
 ## Per-Module Rules
 
@@ -68,8 +123,11 @@ done
 
 - Pin to `master` HEAD for general development
 - Pin to a `release/X.Y.Z` tag/branch when the vault targets a specific firmware
-- The `deps/python-keepkey` nested submodule often drifts — check for dirty state
-- Verify: `cd modules/keepkey-firmware && git status --porcelain` (should be empty)
+- **Has 7 nested submodules** (device-protocol, trezor-firmware, python-keepkey,
+  googletest, code-signing-keys, QR-Code-generator, SecAESSTM32)
+- python-keepkey itself has 2 nested submodules (device-protocol, ethereum-lists)
+- After any firmware pin change, run `cd modules/keepkey-firmware && git submodule update --init --recursive`
+- Verify: `cd modules/keepkey-firmware && git submodule status --recursive | grep '^+'` (should be empty — `+` means drift)
 
 ### electrobun (`keepkey/macos-12-support`)
 
