@@ -1862,8 +1862,15 @@ export class EngineController extends EventEmitter {
     const probeDeviceId = this.cachedFeatures?.deviceId
     if (!probeWallet || !probeDeviceId) return
 
-    const { getSetting, setSetting } = await import('./db')
+    const { getSetting } = await import('./db')
     const stored = getSetting(`seed_eth_${probeDeviceId}`)?.toLowerCase() || null
+    if (!stored) {
+      // No stored identity — could be first-time Vault launch with a device
+      // already in a hidden wallet from another app. Can't distinguish, so
+      // stay conservative. Self-heals on next normal connect via sendPassphrase().
+      console.log('[Engine] No stored seed identity — staying conservative (hidden wallet)')
+      return
+    }
 
     let addr: string | undefined
     try {
@@ -1884,12 +1891,10 @@ export class EngineController extends EventEmitter {
       return
     }
 
-    const isStandardWallet = stored ? addr === stored : true // no stored = first run = standard
-    if (isStandardWallet) {
-      console.log(`[Engine] Reconnect probe: ${stored ? 'ETH address matches stored identity' : 'no stored identity (first run)'} — reclassifying as standard wallet`)
+    if (addr === stored) {
+      console.log('[Engine] Reconnect probe: ETH address matches stored identity — reclassifying as standard wallet')
       this.hiddenWalletActive = false
       this.seedEthAddress = addr
-      if (!stored) setSetting(`seed_eth_${probeDeviceId}`, addr)
       this.emit('state-change', this.getDeviceState())
       // Now safe to run deferred standard-wallet operations
       try {
