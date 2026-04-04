@@ -21,25 +21,18 @@ const STATUS_DOT_COLORS: Record<string, string> = {
 export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
 
-  // When children aren't ready: logo centered, full-screen loading feel
-  // When children are ready: logo slides to top, children fill middle
   return (
-    <Flex
-      height="100vh"
-      width="100vw"
-      bg="transparent"
-      direction="column"
-      alignItems="center"
-      justifyContent={childrenReady ? "flex-start" : "center"}
-      transition="all 0.5s ease"
-    >
-      {/* Logo — centered when loading, top when grid is visible */}
+    <Box height="100vh" width="100vw" bg="transparent" position="relative">
+
+      {/* Logo — centered when loading, slides to top when grid appears */}
       <Flex
-        flex="0 0 auto"
-        pt={childrenReady ? "8vh" : "0"}
-        pb={childrenReady ? "4" : "6"}
+        position="absolute"
+        left="0" right="0"
+        top={childrenReady ? "6vh" : "35vh"}
         justifyContent="center"
-        transition="all 0.5s ease"
+        transition="top 0.5s ease"
+        zIndex={1}
+        pointerEvents="none"
       >
         <Logo
           width={childrenReady ? "60px" : "100px"}
@@ -50,22 +43,30 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         />
       </Flex>
 
-      {/* Children (DeviceGrid etc.) — only rendered when ready */}
-      {childrenReady && (
-        <Flex flex="1" direction="column" alignItems="center" overflow="auto" w="100%" px="4"
-          style={{ animation: 'fadeIn 0.4s ease' }}>
-          {children}
-        </Flex>
-      )}
+      {/* Children (always mounted so DeviceGrid can fire onReady, hidden until ready) */}
+      <Flex
+        position="absolute"
+        left="0" right="0"
+        top={childrenReady ? "16vh" : "0"}
+        bottom="80px"
+        direction="column"
+        alignItems="center"
+        overflow="auto"
+        px="4"
+        opacity={childrenReady ? 1 : 0}
+        pointerEvents={childrenReady ? "auto" : "none"}
+        transition="opacity 0.4s ease"
+      >
+        {children}
+      </Flex>
 
       {/* Status bar — pinned to bottom */}
       <Box
-        flex="0 0 auto"
-        pb="40px"
-        pt="3"
+        position="absolute"
+        bottom="30px"
+        left="0" right="0"
         textAlign="center"
         px={3}
-        mt={childrenReady ? "0" : "auto"}
       >
         <Box display="inline-flex" px={3} py={1} borderRadius="md" bg="rgba(0, 0, 0, 0.5)">
           <Flex gap="2" justifyContent="center" alignItems="center">
@@ -89,11 +90,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
       `}</style>
-    </Flex>
+    </Box>
   )
 }
