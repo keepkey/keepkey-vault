@@ -30,6 +30,7 @@
     "@walletconnect/types": "^2.23.9",
     "@walletconnect/utils": "^2.23.9",
     "@walletconnect/web3wallet": "^1.16.1",
+    "bip39": "^3.1.0",
     "coinselect": "^3.1.13",
     "electrobun": "1.13.1",
     "ethers": "5",
