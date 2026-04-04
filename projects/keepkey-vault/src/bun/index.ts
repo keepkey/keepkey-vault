@@ -1787,10 +1787,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
+				// BTC sends always use the selected xpub — user chose which account to send from.
+				// Multi-xpub aggregation is only for swaps (which show aggregate balance).
+				const allXpubs = undefined
+
 				const result = await buildTx(pioneer, chain, {
 					...params,
 					fromAddress,
 					xpub,
+					allXpubs: allXpubs?.length ? allXpubs : undefined,
 					rpcUrl,
 					evmAddressIndex: evmIdx,
 					publicKeyHex,
@@ -2890,6 +2895,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
 						}
 						return undefined
+					},
+					getAllBtcXpubs: () => {
+						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+						return []
 					},
 				})
 				// Look up cached quote for real tracker data
