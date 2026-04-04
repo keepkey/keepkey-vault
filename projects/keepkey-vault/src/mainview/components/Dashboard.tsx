@@ -854,7 +854,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										</Text>
 									</Box>
 									{lowGas && (
-										<Box
+										<Flex
+											direction="column"
+											align="center"
 											title={`Low ${chain.symbol} for gas \u2014 you need ${chain.symbol} to send tokens on ${chain.coin}`}
 											flexShrink={0}
 											cursor="help"
@@ -863,7 +865,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											<svg width="16" height="16" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
 												<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
 											</svg>
-										</Box>
+											<Text fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1" mt="1">LOW GAS</Text>
+										</Flex>
 									)}
 								</Flex>
 
