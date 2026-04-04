@@ -4,11 +4,15 @@
  * Two recovery modes:
  *   1. Higher accounts: funds on standard paths at accounts the user hasn't added yet → add those accounts
  *   2. Non-standard paths: mismatched scriptTypes or account-level keys → sweep to standard address
+ *
+ * Fetches authoritative account state from the backend before scanning —
+ * never relies on a potentially-stale frontend snapshot.
  */
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Box, Flex, Text, Button, VStack, Spinner } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import type { BtcAccountSet } from "../../shared/types"
 
 type Phase = 'idle' | 'scanning' | 'results' | 'adding' | 'sweeping' | 'done' | 'error'
 
@@ -38,19 +42,23 @@ function formatSats(sats: number): string {
 
 interface SweepDialogProps {
   onClose: () => void
-  currentMaxAccount: number
-  addAccount: () => Promise<any>
+  /** Hint for the idle-screen display — the actual scan fetches fresh state from the backend. */
+  currentMaxAccountHint: number
+  /** Called after accounts are added so the parent hook state refreshes. */
   refreshAccounts?: () => Promise<void>
 }
 
-export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAccounts }: SweepDialogProps) {
+export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }: SweepDialogProps) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [scanId, setScanId] = useState<string | null>(null)
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null)
   const [sweepResult, setSweepResult] = useState<any>(null)
   const [accountsAdded, setAccountsAdded] = useState(0)
+  const [accountsTarget, setAccountsTarget] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Authoritative max account index, fetched fresh from backend before scan
+  const [backendMaxAccount, setBackendMaxAccount] = useState<number>(currentMaxAccountHint)
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
@@ -68,10 +76,17 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
     setPhase('scanning')
     setError(null)
     try {
+      // Fetch authoritative account state from backend before scanning
+      const freshAccounts = await rpcRequest<BtcAccountSet>('getBtcAccounts')
+      const authMaxAccount = freshAccounts.accounts.length > 0
+        ? Math.max(...freshAccounts.accounts.map(a => a.accountIndex))
+        : 0
+      setBackendMaxAccount(authMaxAccount)
+
       const { scanId: id } = await rpcRequest<{ scanId: string }>('sweepScan', {
-        accountRange: [0, Math.max(currentMaxAccount, 2)],
+        accountRange: [0, Math.max(authMaxAccount, 2)],
         mismatchAccounts: 1,
-        currentMaxAccount,
+        currentMaxAccount: authMaxAccount,
         higherAccountScanLimit: 9,
       }, 0)
       setScanId(id)
@@ -94,18 +109,21 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
       setError(e.message)
       setPhase('error')
     }
-  }, [currentMaxAccount])
+  }, [])
 
   const handleAddAccounts = useCallback(async () => {
     setPhase('adding')
     setError(null)
+    setAccountsAdded(0)
+    const needed = maxDiscoveredAccount - backendMaxAccount
+    setAccountsTarget(needed)
     try {
-      // Add accounts sequentially up to the highest discovered index
-      const accountsNeeded = maxDiscoveredAccount - currentMaxAccount
-      for (let i = 0; i < accountsNeeded; i++) {
-        await addAccount()
+      // Call the RPC directly (not the hook) so failures throw properly
+      for (let i = 0; i < needed; i++) {
+        await rpcRequest<BtcAccountSet>('addBtcAccount', undefined, 60000)
         setAccountsAdded(i + 1)
       }
+      // Sync the hook state in the parent
       if (refreshAccounts) await refreshAccounts()
 
       // If there's also non-standard funds to sweep, go to results so user can sweep
@@ -115,10 +133,10 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
         setPhase('done')
       }
     } catch (e: any) {
-      setError(e.message)
+      setError(`Failed adding account: ${e.message}`)
       setPhase('error')
     }
-  }, [maxDiscoveredAccount, currentMaxAccount, addAccount, refreshAccounts, nonStandardSats])
+  }, [maxDiscoveredAccount, backendMaxAccount, refreshAccounts, nonStandardSats])
 
   const executeSweep = useCallback(async (dryRun: boolean) => {
     if (!scanId) return
@@ -135,8 +153,6 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
   }, [scanId])
 
   const nothingFound = scanStatus && scanStatus.results.length === 0
-  const onlyHigherAccounts = higherAccounts.length > 0 && nonStandard.length === 0
-  const onlyNonStandard = nonStandard.length > 0 && higherAccounts.length === 0
   // Once accounts have been added, hide that section
   const showHigherSection = higherAccounts.length > 0 && accountsAdded === 0
 
@@ -181,7 +197,7 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
               No funds will be moved without your confirmation.
             </Text>
             <Text fontSize="xs" color="kk.textMuted">
-              Currently tracking accounts 0{currentMaxAccount > 0 ? `–${currentMaxAccount}` : ''}.
+              Currently tracking accounts 0{currentMaxAccountHint > 0 ? `–${currentMaxAccountHint}` : ''}.
             </Text>
             <Button
               size="md" bg="#4ade80" color="black" fontWeight="600"
@@ -288,7 +304,7 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
                     {formatSats(nonStandardSats)} on {nonStandard.length} non-standard path{nonStandard.length > 1 ? 's' : ''}
                   </Text>
                   <Text fontSize="xs" color="kk.textMuted" mt="1">
-                    Mismatched script types or account-level keys �� will sweep to your standard address
+                    Mismatched script types or account-level keys — will sweep to your standard address
                   </Text>
                 </Box>
 
@@ -329,17 +345,17 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
           </VStack>
         )}
 
-        {/* ── Adding accounts ──────────��───────────────────────── */}
+        {/* ── Adding accounts ──────────────────────────────────── */}
         {phase === 'adding' && (
           <Flex align="center" gap="3" py="4">
             <Spinner size="sm" color="#4ade80" />
             <Text fontSize="sm" color="kk.textSecondary">
-              Adding account {accountsAdded + 1} of {maxDiscoveredAccount - currentMaxAccount}...
+              Adding account {accountsAdded + 1} of {accountsTarget}...
             </Text>
           </Flex>
         )}
 
-        {/* ── Sweeping ───────────────────────────��──────────────── */}
+        {/* ── Sweeping ─────────────────────────────────────────── */}
         {phase === 'sweeping' && (
           <Flex align="center" gap="3" py="4">
             <Spinner size="sm" color="kk.gold" />
@@ -347,7 +363,7 @@ export function SweepDialog({ onClose, currentMaxAccount, addAccount, refreshAcc
           </Flex>
         )}
 
-        {/* ── Done ───────────────────────────────���──────────────── */}
+        {/* ── Done ─────────────────────────────────────────────── */}
         {phase === 'done' && (
           <VStack gap="3" align="stretch">
             {sweepResult ? (

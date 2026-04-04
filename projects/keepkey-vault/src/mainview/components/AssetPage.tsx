@@ -827,8 +827,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			{showSweep && (
 				<SweepDialog
 					onClose={() => setShowSweep(false)}
-					currentMaxAccount={btcAccounts.accounts.length > 0 ? Math.max(...btcAccounts.accounts.map(a => a.accountIndex)) : 0}
-					addAccount={addAccount}
+					currentMaxAccountHint={btcAccounts.accounts.length > 0 ? Math.max(...btcAccounts.accounts.map(a => a.accountIndex)) : 0}
 					refreshAccounts={refreshBtcAccounts}
 				/>
 			)}
