@@ -1847,46 +1847,59 @@ export class EngineController extends EventEmitter {
   /**
    * On reconnect with a pre-cached passphrase, we conservatively assume hidden
    * wallet. This probe derives the ETH primary address and compares it against
-   * the stored seed identity for this device. If it matches, the cached
-   * passphrase was empty (standard wallet) and we reclassify + re-emit.
-   * If no stored identity exists or it differs, stays conservative (hidden).
-   * No side effects — does not write to DB or emit seed-changed.
+   * the stored seed identity for this device.
+   *
+   * - Match → standard wallet (reclassify, re-emit, save snapshot)
+   * - Mismatch → confirmed hidden wallet
+   * - No stored identity → derive and store it (first-run standard wallet),
+   *   then reclassify as standard
+   *
+   * Session-safe: captures wallet ref + deviceId before the async call and
+   * verifies both still match afterward to avoid stale-probe mutations.
    */
   private async probeReconnectPassphraseState(): Promise<void> {
-    if (!this.wallet) return
-    const deviceId = this.cachedFeatures?.deviceId || 'unknown'
-    const { getSetting } = await import('./db')
-    const stored = getSetting(`seed_eth_${deviceId}`)?.toLowerCase() || null
-    if (!stored) {
-      console.log('[Engine] No stored seed identity — staying conservative (hidden wallet)')
-      return
-    }
+    const probeWallet = this.wallet
+    const probeDeviceId = this.cachedFeatures?.deviceId
+    if (!probeWallet || !probeDeviceId) return
+
+    const { getSetting, setSetting } = await import('./db')
+    const stored = getSetting(`seed_eth_${probeDeviceId}`)?.toLowerCase() || null
+
+    let addr: string | undefined
     try {
-      const result = await (this.wallet as any).ethGetAddress({
+      const result = await (probeWallet as any).ethGetAddress({
         addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
         showDisplay: false,
       })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
-      if (!addr) return
-
-      if (addr === stored) {
-        // ETH address matches stored standard-wallet identity — safe to cache
-        console.log(`[Engine] Reconnect probe: ETH address matches stored identity — reclassifying as standard wallet`)
-        this.hiddenWalletActive = false
-        this.seedEthAddress = addr
-        this.emit('state-change', this.getDeviceState())
-        // Now safe to run deferred standard-wallet operations
-        try {
-          const label = this.cachedFeatures?.label || ''
-          const fwVer = this.extractVersion(this.cachedFeatures)
-          saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
-        } catch { /* never block on cache failure */ }
-      } else {
-        console.log(`[Engine] Reconnect probe: ETH address differs from stored — confirmed hidden wallet`)
-        this.seedEthAddress = addr
-      }
+      addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
     } catch (err: any) {
       console.warn('[Engine] Reconnect probe failed — staying conservative:', err?.message)
+      return
+    }
+    if (!addr) return
+
+    // Session guard: if wallet or deviceId changed during the await, discard
+    if (this.wallet !== probeWallet || this.cachedFeatures?.deviceId !== probeDeviceId) {
+      console.log('[Engine] Reconnect probe: session changed during probe — discarding result')
+      return
+    }
+
+    const isStandardWallet = stored ? addr === stored : true // no stored = first run = standard
+    if (isStandardWallet) {
+      console.log(`[Engine] Reconnect probe: ${stored ? 'ETH address matches stored identity' : 'no stored identity (first run)'} — reclassifying as standard wallet`)
+      this.hiddenWalletActive = false
+      this.seedEthAddress = addr
+      if (!stored) setSetting(`seed_eth_${probeDeviceId}`, addr)
+      this.emit('state-change', this.getDeviceState())
+      // Now safe to run deferred standard-wallet operations
+      try {
+        const label = this.cachedFeatures?.label || ''
+        const fwVer = this.extractVersion(this.cachedFeatures)
+        saveDeviceSnapshot(probeDeviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+      } catch { /* never block on cache failure */ }
+    } else {
+      console.log(`[Engine] Reconnect probe: ETH address differs from stored — confirmed hidden wallet`)
+      this.seedEthAddress = addr
     }
   }
 
