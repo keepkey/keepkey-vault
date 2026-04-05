@@ -159,13 +159,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false, alphaFirmware: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
+	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
 	const [newServerUrl, setNewServerUrl] = useState("")
@@ -319,6 +320,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setPreReleaseUpdates:", e) }
 		setTogglingPreRelease(false)
+	}, [])
+
+	const toggleAlphaFirmware = useCallback(async (enabled: boolean) => {
+		setTogglingAlphaFirmware(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setAlphaFirmware", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setAlphaFirmware:", e) }
+		setTogglingAlphaFirmware(false)
 	}, [])
 
 	const openSwagger = useCallback(async () => {
@@ -1162,6 +1172,40 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										position="absolute"
 										top="3px"
 										left={appSettings.preReleaseUpdates ? "23px" : "3px"}
+										transition="all 0.2s"
+									/>
+								</Box>
+							</Flex>
+
+							{/* Alpha firmware toggle */}
+							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
+								<Flex align="center" gap="3">
+									<Box w="8" h="8" borderRadius="lg" bg="rgba(236,72,153,0.15)" display="flex" alignItems="center" justifyContent="center">
+										<Text fontSize="sm">🚧</Text>
+									</Box>
+									<VStack gap="0" align="start">
+										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("alphaFirmware", { defaultValue: "Alpha Firmware" })}</Text>
+										<Text fontSize="2xs" color="kk.textMuted">{t("alphaFirmwareDesc", { defaultValue: "Opt in to early firmware releases from the beta channel" })}</Text>
+									</VStack>
+								</Flex>
+								<Box
+									as="button"
+									w="44px" h="24px"
+									borderRadius="full"
+									bg={appSettings.alphaFirmware ? "rgba(236,72,153,0.5)" : "rgba(255,255,255,0.1)"}
+									position="relative"
+									transition="all 0.2s"
+									cursor={togglingAlphaFirmware ? "not-allowed" : "pointer"}
+									opacity={togglingAlphaFirmware ? 0.5 : 1}
+									onClick={() => !togglingAlphaFirmware && toggleAlphaFirmware(!appSettings.alphaFirmware)}
+								>
+									<Box
+										w="18px" h="18px"
+										borderRadius="full"
+										bg={appSettings.alphaFirmware ? "#EC4899" : "rgba(255,255,255,0.3)"}
+										position="absolute"
+										top="3px"
+										left={appSettings.alphaFirmware ? "23px" : "3px"}
 										transition="all 0.2s"
 									/>
 								</Box>

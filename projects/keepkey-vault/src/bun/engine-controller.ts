@@ -78,6 +78,7 @@ export class EngineController extends EventEmitter {
   private latestFirmware = FALLBACK_FIRMWARE
   private latestBootloader = FALLBACK_BOOTLOADER
   private manifest: FirmwareManifest | null = null
+  private alphaFirmware = false
   private syncing = false
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -335,12 +336,34 @@ export class EngineController extends EventEmitter {
       const res = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       this.manifest = await res.json() as FirmwareManifest
-      this.latestFirmware = this.manifest.latest.firmware.version.replace(/^v/, '')
-      this.latestBootloader = this.manifest.latest.bootloader.version.replace(/^v/, '')
-      console.log(`[Engine] Firmware manifest: fw=${this.latestFirmware} bl=${this.latestBootloader}`)
+      this.applyChannel()
     } catch (err) {
       console.warn('[Engine] Failed to fetch firmware manifest, using fallbacks:', err)
     }
+  }
+
+  /** Return the active channel entry (beta when alpha opt-in, else latest). */
+  private getChannelEntry(): FirmwareManifest['latest'] | null {
+    if (!this.manifest) return null
+    if (this.alphaFirmware && this.manifest.beta) return this.manifest.beta
+    return this.manifest.latest
+  }
+
+  /** Recompute latestFirmware/latestBootloader from the manifest + current channel. */
+  private applyChannel() {
+    const channel = this.getChannelEntry()
+    if (!channel) return
+    this.latestFirmware = channel.firmware.version.replace(/^v/, '')
+    this.latestBootloader = channel.bootloader.version.replace(/^v/, '')
+    const channelName = this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest'
+    console.log(`[Engine] Firmware manifest (${channelName}): fw=${this.latestFirmware} bl=${this.latestBootloader}`)
+  }
+
+  /** Toggle alpha firmware channel. Caller should invoke syncState() to refresh device state. */
+  setAlphaFirmware(enabled: boolean) {
+    if (this.alphaFirmware === enabled) return
+    this.alphaFirmware = enabled
+    this.applyChannel()
   }
 
   /**
@@ -1033,8 +1056,9 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Starting bootloader update...' })
 
     try {
-      const blUrl = this.manifest
-        ? new URL(this.manifest.latest.bootloader.url, MANIFEST_URL.replace('releases.json', '')).toString()
+      const channel = this.getChannelEntry()
+      const blUrl = channel
+        ? new URL(channel.bootloader.url, MANIFEST_URL.replace('releases.json', '')).toString()
         : `https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`
 
       this.emit('firmware-progress', { percent: 10, message: 'Downloading bootloader...' })
@@ -1043,10 +1067,10 @@ export class EngineController extends EventEmitter {
       const firmware = Buffer.from(await response.arrayBuffer())
 
       // Binary integrity check — compare downloaded file hash against manifest
-      if (this.manifest?.latest?.bootloader?.hash) {
+      if (channel?.bootloader?.hash) {
         const downloadedHash = sha256Hex(firmware)
-        if (downloadedHash !== this.manifest.latest.bootloader.hash) {
-          throw new Error(`Bootloader binary integrity check failed: expected ${this.manifest.latest.bootloader.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== channel.bootloader.hash) {
+          throw new Error(`Bootloader binary integrity check failed: expected ${channel.bootloader.hash}, got ${downloadedHash}`)
         }
         console.log('[Engine] Bootloader binary integrity verified')
       }
@@ -1077,8 +1101,9 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
-      const fwUrl = this.manifest
-        ? new URL(this.manifest.latest.firmware.url, MANIFEST_URL.replace('releases.json', '')).toString()
+      const channel = this.getChannelEntry()
+      const fwUrl = channel
+        ? new URL(channel.firmware.url, MANIFEST_URL.replace('releases.json', '')).toString()
         : `https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`
 
       this.emit('firmware-progress', { percent: 10, message: 'Downloading firmware...' })
@@ -1089,14 +1114,14 @@ export class EngineController extends EventEmitter {
       // Binary integrity check — compare downloaded file hash against manifest.
       // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
       // header before hashing — the manifest hash covers only the payload.
-      if (this.manifest?.latest?.firmware?.hash) {
+      if (channel?.firmware?.hash) {
         const hasKpkyHeader = firmware.length >= 256
           && firmware[0] === 0x4B && firmware[1] === 0x50
           && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
         const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
         const downloadedHash = sha256Hex(hashPayload)
-        if (downloadedHash !== this.manifest.latest.firmware.hash) {
-          throw new Error(`Firmware binary integrity check failed: expected ${this.manifest.latest.firmware.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== channel.firmware.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }

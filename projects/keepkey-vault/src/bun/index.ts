@@ -240,6 +240,7 @@ let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let preReleaseUpdates = false
+let alphaFirmware = false
 
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
@@ -248,6 +249,7 @@ function loadSettings() {
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
+	alphaFirmware = getSetting('alpha_firmware') === '1'
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -303,6 +305,7 @@ function getAppSettings() {
 		bip85Enabled,
 		zcashPrivacyEnabled,
 		preReleaseUpdates,
+		alphaFirmware,
 	}
 }
 
@@ -2581,6 +2584,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] Pre-release updates:', params.enabled)
 				return getAppSettings()
 			},
+			setAlphaFirmware: async (params) => {
+				alphaFirmware = params.enabled
+				setSetting('alpha_firmware', params.enabled ? '1' : '0')
+				console.log('[settings] Alpha firmware channel:', params.enabled)
+				engine.setAlphaFirmware(params.enabled)
+				// Re-derive device state so needs_firmware_update reflects the new channel
+				engine.syncState().catch(e => console.warn('[settings] syncState after alpha toggle failed:', e))
+				return getAppSettings()
+			},
 			// ── Factory Reset ─────────────────────────────────────────
 			factoryReset: async () => {
 				console.log('[factory-reset] Starting full app reset...')
@@ -3938,6 +3950,7 @@ loadSettings()
 await applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
+engine.setAlphaFirmware(alphaFirmware)
 await engine.start()
 
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
