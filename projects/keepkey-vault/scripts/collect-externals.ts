@@ -25,6 +25,10 @@ const EXTERNALS = [
   '@walletconnect/types',
   '@walletconnect/utils',
   '@walletconnect/jsonrpc-utils',
+  // Transitive deps of version-differing nested WC packages (not hoisted to top level)
+  '@stablelib/ed25519',
+  'fast-redact',
+  'duplexify',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
