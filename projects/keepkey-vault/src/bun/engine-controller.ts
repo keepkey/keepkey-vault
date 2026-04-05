@@ -12,9 +12,34 @@ import { EmulatorKeepKeyAdapter } from './emulator-transport'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
-// Bundled firmware dir — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
-// Resolves to .../Resources/app/firmware-bundle in packaged app; works via relative path in dev.
-const BUNDLED_FIRMWARE_DIR = path.resolve(import.meta.dir, '..', 'firmware-bundle')
+
+/**
+ * Locate firmware-bundle/ — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
+ * firmware-bundle/ lives inside the app bundle at Resources/app/firmware-bundle/ for packaged apps,
+ * or at projects/keepkey-vault/firmware-bundle/ for source-tree dev runs. Walk up from
+ * import.meta.dir checking multiple depths, pick the first that contains releases.json.
+ * Caches the resolved path so we only walk once.
+ */
+let _bundledFirmwareDirCache: string | null = null
+function getBundledFirmwareDir(): string {
+  if (_bundledFirmwareDirCache) return _bundledFirmwareDirCache
+  const candidates: string[] = []
+  for (let depth = 1; depth <= 12; depth++) {
+    candidates.push(path.resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware-bundle'))
+  }
+  candidates.push(path.resolve(process.cwd(), 'firmware-bundle'))
+  candidates.push(path.resolve(process.cwd(), 'projects', 'keepkey-vault', 'firmware-bundle'))
+  for (const dir of candidates) {
+    if (existsSync(path.join(dir, 'releases.json'))) {
+      _bundledFirmwareDirCache = dir
+      console.log(`[Engine] Bundled firmware dir resolved: ${dir}`)
+      return dir
+    }
+  }
+  // Fallback — caller will handle the missing file gracefully
+  console.warn(`[Engine] Could not locate firmware-bundle (tried ${candidates.length} paths from import.meta.dir=${import.meta.dir})`)
+  return candidates[0]
+}
 
 const FALLBACK_FIRMWARE = '7.10.0'
 const FALLBACK_BOOTLOADER = '2.1.4'
@@ -344,7 +369,11 @@ export class EngineController extends EventEmitter {
     try {
       const res = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      remote = await res.json() as FirmwareManifest
+      const parsed = await res.json()
+      if (!this.isValidManifest(parsed)) {
+        throw new Error('remote manifest failed schema validation')
+      }
+      remote = parsed
     } catch (err: any) {
       console.warn('[Engine] Remote manifest fetch failed, using bundled only:', err.message)
     }
@@ -353,17 +382,36 @@ export class EngineController extends EventEmitter {
     this.applyChannel()
   }
 
-  /** Read the bundled manifest from disk. Returns null if missing (shouldn't happen in packaged builds). */
+  /**
+   * Validate a manifest has the minimum required shape. Returns true if valid,
+   * false otherwise. Prevents garbage input from causing downstream crashes.
+   */
+  private isValidManifest(m: any): m is FirmwareManifest {
+    const isEntry = (e: any) => e
+      && typeof e.firmware?.version === 'string'
+      && typeof e.firmware?.url === 'string'
+      && typeof e.firmware?.hash === 'string'
+      && typeof e.bootloader?.version === 'string'
+      && typeof e.bootloader?.url === 'string'
+      && typeof e.bootloader?.hash === 'string'
+    return !!(m && isEntry(m.latest))
+  }
+
+  /** Read the bundled manifest from disk. Returns null if missing or malformed. */
   private loadBundledManifest(): FirmwareManifest | null {
     try {
-      const manifestPath = path.join(BUNDLED_FIRMWARE_DIR, 'releases.json')
+      const manifestPath = path.join(getBundledFirmwareDir(), 'releases.json')
       if (!existsSync(manifestPath)) {
         console.warn(`[Engine] No bundled manifest at ${manifestPath}`)
         return null
       }
       const raw = readFileSync(manifestPath, 'utf8')
-      const parsed = JSON.parse(raw) as FirmwareManifest
-      console.log(`[Engine] Loaded bundled manifest: latest=${parsed.latest?.firmware?.version} beta=${parsed.beta?.firmware?.version}`)
+      const parsed = JSON.parse(raw)
+      if (!this.isValidManifest(parsed)) {
+        console.warn('[Engine] Bundled manifest failed schema validation — ignoring')
+        return null
+      }
+      console.log(`[Engine] Loaded bundled manifest: latest=${parsed.latest?.firmware?.version} beta=${parsed.beta?.firmware?.version ?? '(none)'}`)
       return parsed
     } catch (err: any) {
       console.warn('[Engine] Failed to load bundled manifest:', err.message)
@@ -418,7 +466,7 @@ export class EngineController extends EventEmitter {
    */
   private resolveBinarySource(relativeUrl: string): { kind: 'file'; path: string } | { kind: 'http'; url: string } {
     // Bundled URLs are always relative paths like "v7.14.0/firmware.keepkey.bin"
-    const bundledPath = path.join(BUNDLED_FIRMWARE_DIR, relativeUrl)
+    const bundledPath = path.join(getBundledFirmwareDir(), relativeUrl)
     if (existsSync(bundledPath)) {
       return { kind: 'file', path: bundledPath }
     }
@@ -447,6 +495,14 @@ export class EngineController extends EventEmitter {
     this.latestBootloader = channel.bootloader.version.replace(/^v/, '')
     const channelName = this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest'
     console.log(`[Engine] Firmware manifest (${channelName}): fw=${this.latestFirmware} bl=${this.latestBootloader}`)
+    // If alpha is on but beta == latest (or beta missing), the toggle has no effect.
+    if (this.alphaFirmware && this.manifest) {
+      const betaFw = this.manifest.beta?.firmware?.version
+      const latestFw = this.manifest.latest?.firmware?.version
+      if (!betaFw || betaFw === latestFw) {
+        console.warn(`[Engine] Alpha firmware ON but beta channel == latest (${latestFw}) — toggle has no effect until beta publishes newer version`)
+      }
+    }
   }
 
   /** Toggle alpha firmware channel. Caller should invoke syncState() to refresh device state. */
