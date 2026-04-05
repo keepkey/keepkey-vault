@@ -18,6 +18,13 @@ const EXTERNALS = [
   'google-protobuf',
   '@keepkey/proto-tx-builder',
   'swagger-client',
+  // WalletConnect: marked external in bundle-backend.ts (ESM/CJS dual-package
+  // resolution breaks in Bun bundler). Must be present at runtime.
+  '@walletconnect/web3wallet',
+  '@walletconnect/core',
+  '@walletconnect/types',
+  '@walletconnect/utils',
+  '@walletconnect/jsonrpc-utils',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
