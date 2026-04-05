@@ -1036,10 +1036,28 @@ export class EngineController extends EventEmitter {
     // during the featureless gap between detach and re-pair, skipping straight to
     // "Create New Wallet" instead of waiting for bootloader/firmware steps.
     const initialized = features ? (features.initialized ?? false) : true
-    // In bootloader mode, fwVersion is actually the BL version (from extractVersion).
-    // Firmware always needs flashing when device is in bootloader mode.
+
+    // Compute hashes + resolved firmware version up front — needed by both
+    // the state summary and the needsFirmwareUpdate check in bootloader mode.
+    const hashes = features ? this.verifyHashes(features) : {}
+    // In bootloader mode, resolve installed firmware version from on-device hash.
+    // Known official hashes → version string; unknown hash → custom firmware.
+    const resolvedFwVersion = bootloaderMode
+      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
+      : undefined
+    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
+    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
+
+    // In bootloader mode, fwVersion (from extractVersion) is actually the BL version.
+    // Use the hash-resolved firmware version to decide if an update is needed:
+    //   - known hash + version >= latest → already current, no update
+    //   - known hash + version <  latest → update available
+    //   - unknown hash (custom firmware)  → offer update (safe default)
+    //   - no firmware present              → offer update
     const needsFw = bootloaderMode
-      ? true
+      ? (resolvedFwVersion && firmwarePresent
+          ? this.versionLessThan(resolvedFwVersion.replace(/^v/, ''), this.latestFirmware)
+          : true)
       : fwVersion
         ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
         : false
@@ -1067,16 +1085,6 @@ export class EngineController extends EventEmitter {
     const needsBl = effectiveBlVersion
       ? this.versionLessThan(effectiveBlVersion, this.latestBootloader)
       : bootloaderMode
-
-    const hashes = features ? this.verifyHashes(features) : {}
-
-    // In bootloader mode, resolve installed firmware version from on-device hash.
-    // Known official hashes → version string; unknown hash → custom firmware.
-    const resolvedFwVersion = bootloaderMode
-      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
-      : undefined
-    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
-    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
 
     return {
       state: this.lastState,
