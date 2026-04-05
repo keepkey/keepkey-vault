@@ -91,6 +91,8 @@ interface DashboardProps {
 	forceRefresh?: boolean
 	/** Called after forceRefresh has been consumed (one-shot) — parent should clear the flag */
 	onForceRefreshConsumed?: () => void
+	/** True when using a hidden wallet — reports and some features are unavailable */
+	isHiddenWallet?: boolean
 }
 
 /** Format a timestamp as a relative "time ago" string (i18n-aware) */
@@ -105,7 +107,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -209,8 +211,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
 							needsAutoRefresh = true
 						}
+					} else {
+						// Empty cache — passphrase wallets intentionally skip DB writes,
+						// and first-run devices also have no cache. Auto-refresh live.
+						console.log('[Dashboard] Cache empty — will auto-refresh live balances')
+						needsAutoRefresh = true
 					}
-				} catch { /* cache unavailable */ }
+				} catch {
+					// Cache unavailable — still trigger a live fetch
+					needsAutoRefresh = true
+				}
 			} else {
 				console.log('[Dashboard] forceRefresh: skipping stale cache (new seed detected)')
 			}
@@ -218,7 +228,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			if (!cancelled) {
 				setInitialLoaded(true)
 				onLoaded?.()
-				// Auto-refresh in background when cache is incomplete
+				// Auto-refresh in background when cache is empty or incomplete
 				if (needsAutoRefresh) refreshBalances()
 			}
 		}
@@ -659,7 +669,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			{/* Refresh + Reports buttons — below chart */}
 			{!watchOnly && (
 				<Flex justify="center" gap="3" mb="4">
-					<Box
+					{!isHiddenWallet && <Box
 						as="button"
 						px="3"
 						py="1"
@@ -683,7 +693,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</svg>
 							{t("reports")}
 						</Flex>
-					</Box>
+					</Box>}
 					<Box
 						as="button"
 						px="3"

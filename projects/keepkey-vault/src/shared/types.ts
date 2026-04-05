@@ -38,6 +38,9 @@ export interface DeviceStateInfo {
   bootloaderVerified?: boolean
   error?: string | null
   isEmulator: boolean
+  /** True when using a hidden wallet (non-empty passphrase). Reports and chain
+   *  history are unavailable; no data is persisted to disk for privacy. */
+  isHiddenWallet: boolean
 }
 
 export interface FirmwareProgress {

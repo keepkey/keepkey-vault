@@ -178,8 +178,11 @@ function browseChains(query: string, page: number, pageSize: number): { chains: 
 	}
 }
 
-/** Fire-and-forget: cache a derived address for watch-only mode */
+/** Fire-and-forget: cache a derived address for watch-only mode.
+ *  PRIVACY: Never persist addresses from a passphrase wallet — doing so
+ *  leaks the existence and contents of the hidden wallet to disk. */
 function cacheAddress(chainId: string, path: string, address: string) {
+	if (engine.isPassphraseWallet) return
 	try {
 		const deviceId = engine.getDeviceState().deviceId || 'unknown'
 		saveCachedPubkey(deviceId, chainId, path, '', address, '')
@@ -198,6 +201,10 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
+
+// PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
+// from being read/written to disk during passphrase sessions.
+evmAddresses.canPersist = () => !engine.isPassphraseWallet
 
 // ── Deferred: DB + chains loaded AFTER window is created ─────────────
 let customChainDefs: ChainDef[] = []
@@ -313,7 +320,10 @@ function getAppSettings() {
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
 		try { rpc.send['api-log'](entry) } catch { /* webview not ready */ }
-		try { insertApiLog(entry) } catch { /* db not ready */ }
+		// PRIVACY: Don't persist API activity from passphrase wallets to disk.
+		if (!engine.isPassphraseWallet) {
+			try { insertApiLog(entry) } catch { /* db not ready */ }
+		}
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
@@ -591,8 +601,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getBip85Mnemonic: async (params) => {
 				const result = await engine.getBip85Mnemonic(params)
 
-				// Save metadata when label is provided
-				if (params.label !== undefined) {
+				// Save metadata when label is provided.
+				// PRIVACY: Don't persist BIP-85 derivation metadata for passphrase wallets —
+				// it links the device fingerprint to derivation operations under the hidden wallet.
+				if (params.label !== undefined && !engine.isPassphraseWallet) {
 					try {
 						const fp = await engine.getWalletFingerprint()
 						const meta: Bip85SeedMeta = {
@@ -619,6 +631,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			// DB read — uses fingerprint to isolate per-wallet when device is available
 			listBip85Seeds: async () => {
+				// PRIVACY: Don't expose standard-wallet BIP-85 metadata during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				let fp: string | undefined
 				try { fp = await engine.getWalletFingerprint() } catch { /* device not connected */ }
 				const seeds = getBip85Seeds(fp)
@@ -627,6 +641,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			// DB write — requires device for fingerprint (cannot save without wallet identity)
 			saveBip85SeedMeta: async (params) => {
+				// PRIVACY: Don't persist BIP-85 metadata for passphrase wallets.
+				if (engine.isPassphraseWallet) {
+					throw new Error('BIP-85 seed metadata cannot be saved for passphrase-protected wallets (privacy).')
+				}
 				const fp = await engine.getWalletFingerprint()
 				const meta: Bip85SeedMeta = {
 					walletFingerprint: fp,
@@ -1272,12 +1290,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
 								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
 							}
-							// Update per-xpub balance in BtcAccountManager + persist to cache
+							// Update per-xpub balance in BtcAccountManager + persist to cache.
+							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							const xpubBal = String(match?.balance ?? '0')
 							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 							continue
 						}
@@ -1370,10 +1389,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}).catch(() => {})
 					}
 
-					// Cache balances (fire-and-forget) — only on successful Pioneer response
+					// Cache balances (fire-and-forget) — only on successful Pioneer response.
+					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					console.warn('[getBalances] Portfolio API failed:', e.message)
@@ -1591,9 +1611,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (isBtc) {
 							const xpubBal = String(match?.balance ?? '0')
 							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 						} else if (isEvm && usd > 0) {
 							evmAddresses.updateAddressBalance(pk.pubkey, usd)
@@ -1663,10 +1684,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
-				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				// Update single-chain cache + push to frontend so Dashboard stays in sync.
+				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					updateCachedBalance(deviceId, result)
+					if (!engine.isPassphraseWallet) updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
 				// Push updated EVM per-address balances so address selector stays current
@@ -1872,9 +1894,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
 
-				// Track broadcast in api_log + notify frontend
+				// Track broadcast in api_log + notify frontend.
+				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const logEntry: ApiLogEntry = { method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
-				insertApiLog(logEntry)
+				if (!engine.isPassphraseWallet) insertApiLog(logEntry)
 				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
 				return result
@@ -2670,6 +2693,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── API Audit Log ────────────────────────────────────────
 			getApiLogs: async (params) => {
+				// PRIVACY: Don't expose standard-wallet activity logs during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0)
 			},
 			clearApiLogs: async () => {
@@ -2680,6 +2705,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			generateReport: async () => {
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
+
+				// PRIVACY: Reports read from DB cache, which is intentionally empty
+				// for passphrase wallets. Generating a report would either fail or
+				// create a persistent record of the hidden wallet.
+				if (engine.isPassphraseWallet) {
+					throw new Error('Reports are not available for passphrase-protected wallets. Hidden wallet data is not stored for privacy.')
+				}
 
 				const reportId = `rpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -2771,6 +2803,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			listReports: async () => {
+				// PRIVACY: Don't expose standard-wallet reports during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return []
 				return getReportsList(deviceId)
@@ -2778,18 +2812,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// H1: Scope getReport/deleteReport to the current device
 			getReport: async (params) => {
+				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				return getReportById(params.id, deviceId)
 			},
 
 			deleteReport: async (params) => {
+				if (engine.isPassphraseWallet) return
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				deleteReport(params.id, deviceId)
 			},
 
 			saveReportFile: async (params) => {
+				if (engine.isPassphraseWallet) throw new Error('Reports are not available for passphrase-protected wallets (privacy).')
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				const report = getReportById(params.id, deviceId)
@@ -2991,17 +3028,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						fromAsset: params.fromAsset,
 						toAsset: params.toAsset,
 						integration: cachedQuote?.integration || 'thorchain',
-					})
+					}, { skipPersist: engine.isPassphraseWallet })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
 				}
-				// Track swap in api_log
-				const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-				insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
+				if (!engine.isPassphraseWallet) {
+					const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+					insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				}
 				return result
 			},
 			getPendingSwaps: async () => {
 				if (!swapsEnabled) return []
+				if (engine.isPassphraseWallet) return []
 				const { getPendingSwaps } = await import('./swap-tracker')
 				return getPendingSwaps()
 			},
@@ -3012,6 +3052,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Swap History (SQLite-persisted) ─────────────────────
 			getSwapByTxid: async (params) => {
+				// PRIVACY: Don't expose standard-wallet swap records during hidden sessions.
+				if (engine.isPassphraseWallet) return null
 				const record = getSwapHistoryByTxid(params.txid)
 				if (!record) return null
 				const { inferConfirmationsFromStatus } = await import('./swap-tracker')
@@ -3038,12 +3080,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			getSwapHistory: async (params) => {
+				if (engine.isPassphraseWallet) return []
 				return getSwapHistory(params || undefined)
 			},
 			getSwapHistoryStats: async () => {
+				if (engine.isPassphraseWallet) return { total: 0, completed: 0, failed: 0, pending: 0, totalVolumeUsd: 0 }
 				return getSwapHistoryStats()
 			},
 			exportSwapReport: async (params) => {
+				if (engine.isPassphraseWallet) throw new Error('Swap reports are not available for passphrase-protected wallets (privacy).')
 				const records = getSwapHistory({
 					fromDate: params.fromDate,
 					toDate: params.toDate,
@@ -3072,11 +3117,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
+				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				return getRecentActivityFromLog(params?.limit || 50, params?.chainId)
 			},
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// PRIVACY: Chain history reads from DB cache + writes to api_log,
+				// both of which are bypassed/risky for passphrase wallets.
+				if (engine.isPassphraseWallet) {
+					throw new Error('Chain history scanning is not available for passphrase-protected wallets (privacy).')
+				}
 
 				// Get the address/xpub for this chain from cached balances
 				// UTXO chains store xpub, account-based chains store address
@@ -3122,6 +3175,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Tx metadata stored in response_body
 					const meta = { confirmations, blockHeight, value, fee, direction }
 
+					// PRIVACY: Skip DB writes for passphrase wallets (defense in depth —
+					// the RPC handler already throws before reaching here).
+					if (engine.isPassphraseWallet) continue
+
 					if (apiLogTxidExists(txid)) {
 						// Update confirmation count on existing entry
 						updateApiLogTxMeta(txid, meta)
@@ -3156,6 +3213,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
+				// PRIVACY: Hidden wallet sessions must not see standard-wallet cached data.
+				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) { console.log('[cache-health] No deviceId — skipping'); return null }
 				const result = getCachedBalances(deviceId)
@@ -3718,14 +3777,17 @@ engine.on('state-change', (state) => {
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
 	if (state.state === 'needs_passphrase') {
+		// Reset in-memory managers so they re-derive after passphrase entry.
 		btcAccounts.reset()
 		evmAddresses.reset()
-		const deviceId = state.deviceId
-		if (deviceId) {
-			clearCachedPubkeys(deviceId)
-			clearBalances(deviceId)
-		}
-		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
+		// NOTE: We do NOT clear DB caches (clearCachedPubkeys, clearBalances) here.
+		// needs_passphrase fires when the device *requests* a passphrase — before the
+		// user enters it. We don't know yet if this is the standard wallet (empty
+		// passphrase) or a hidden wallet. Clearing DB prematurely destroys the standard
+		// wallet's cache for every passphrase-protected unlock. Instead, the write-time
+		// guards (isPassphraseWallet checks) prevent hidden wallet data from ever
+		// reaching the DB during the session.
+		console.log('[Vault] Passphrase mode: reset in-memory address managers — will re-derive after passphrase entry')
 	}
 })
 // Seed changed — different mnemonic loaded on the same hardware.
