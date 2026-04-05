@@ -239,7 +239,8 @@ jobs:
           echo "=== Creating x86_64 variant from ARM64 build ==="
 
           # Download x64 Electrobun core from KeepKey fork (macOS 12 support, no resign-swizzle, bun 1.1.20)
-          FORK_TAG="v1.16.1-keepkey.1"
+          # Tag must point to a commit matching our electrobun submodule pin with adhoc-signed binaries.
+          FORK_TAG="v1.16.1-keepkey.2"
           echo "Downloading Electrobun x64 core from BitHighlander/electrobun @ $FORK_TAG..."
           curl -fsSL "https://github.com/BitHighlander/electrobun/releases/download/${FORK_TAG}/electrobun-core-darwin-x64.tar.gz" \
             -o /tmp/electrobun-core-x64.tar.gz

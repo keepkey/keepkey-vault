@@ -156,6 +156,18 @@ for TOOL in zig-zstd bsdiff bspatch; do
   fi
 done
 
+# Ad-hoc sign x64 binaries — matches arm64 behavior where linker auto-adds adhoc signature.
+# Without this, sign-release-intel cannot Developer-ID-sign them
+# ("code object is not signed at all" → notarization fails).
+echo ""
+echo "=== Ad-hoc signing x64 binaries ==="
+for BIN in launcher extractor libNativeWrapper.dylib libasar.dylib bun; do
+  if [ -f "$STAGING/core/$BIN" ]; then
+    codesign --force --sign - "$STAGING/core/$BIN"
+    echo "  $BIN: adhoc-signed"
+  fi
+done
+
 # Verify all core binaries are x86_64
 echo ""
 echo "=== Verifying all binaries ==="
@@ -167,9 +179,14 @@ for BIN in launcher bun libNativeWrapper.dylib libasar.dylib; do
     echo "  ERROR: Expected x86_64, got $ACTUAL"
     FAIL=1
   fi
+  # Also verify signature is present (adhoc at minimum)
+  if ! codesign -dvv "$STAGING/core/$BIN" 2>&1 | grep -q "Signature"; then
+    echo "  ERROR: $BIN is not signed — sign-release-intel will fail"
+    FAIL=1
+  fi
 done
 if [ "$FAIL" = "1" ]; then
-  echo "ERROR: Architecture verification failed"
+  echo "ERROR: Architecture/signature verification failed"
   exit 1
 fi
 
