@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulators build-emulator-alpha build-emulator-beta build-emulator-release download-emulators download-emulator-alpha download-emulator-beta download-emulator-release emulator-status clean-emulators
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulators build-emulator-alpha build-emulator-beta build-emulator-release download-emulators download-emulator-alpha download-emulator-beta download-emulator-release emulator-status clean-emulators
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -477,6 +477,10 @@ release: sign-check build-signed
 # re-packs signed tar.zst (auto-update), creates DMGs, notarizes, and uploads.
 # Requires: draft release v$(VERSION) created by CI (push to release/* or v* tag).
 # Usage: make sign-release
+#
+# NOTE: For arm64, prefer `make build-signed` (builds from source locally).
+# CI-built arm64 artifacts may fail notarization because the binaries were
+# built on a different machine. Use `make sign-release-intel` for x64 only.
 sign-release: sign-check
 	@echo "=== Signing macOS release v$(VERSION) ==="
 	@# Verify draft release exists before doing any work
@@ -548,6 +552,36 @@ sign-release: sign-check
 	@echo "https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
 	@# Cleanup CI temp dirs
 	@rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
+
+# Sign Intel (x86_64) macOS release artifact from CI.
+# For arm64, use `make build-signed` instead — local builds notarize reliably.
+# Usage: make sign-release-intel
+sign-release-intel: sign-check
+	@echo "=== Signing macOS Intel release v$(VERSION) ==="
+	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
+		(echo "ERROR: No release v$(VERSION) found." && exit 1)
+	@# Clean stale x64 artifacts only (preserve arm64 from local build-signed)
+	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
+	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+	@mkdir -p $(PROJECT_DIR)/artifacts/ci-x64
+	@echo "Downloading CI-built x64 artifact..."
+	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
+		--pattern "stable-macos-x64-keepkey-vault.app.tar.zst" \
+		--dir $(PROJECT_DIR)/artifacts/ci-x64 --clobber
+	@echo ""
+	@echo "--- Signing x86_64 artifact ---"
+	@$(MAKE) _sign-one-dmg \
+		_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst" \
+		_DMG_ARCH=x86_64
+	@echo ""
+	@echo "=== Uploading Intel signed artifacts ==="
+	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
+		$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
+	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
+		$(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+	@echo ""
+	@echo "=== Intel release v$(VERSION) signed and uploaded ==="
+	@rm -rf $(PROJECT_DIR)/artifacts/ci-x64
 
 # Internal: sign a single tar.zst, produce a signed tar.zst (auto-update) and DMG
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
