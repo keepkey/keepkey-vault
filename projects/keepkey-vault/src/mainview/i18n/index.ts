@@ -41,7 +41,10 @@ i18n
 		resourcesToBackend((language: string, namespace: string) => {
 			// English is bundled synchronously above – skip dynamic import
 			if (language === "en") return undefined
-			return import(`./locales/${language}/${namespace}.json`)
+			// Swallow missing-file errors so one absent namespace (e.g. swap.json
+			// for staking-only locales) doesn't abort the whole changeLanguage().
+			// i18next will fall back to English for the missing namespace.
+			return import(`./locales/${language}/${namespace}.json`).catch(() => ({ default: {} }))
 		}),
 	)
 	.init({
