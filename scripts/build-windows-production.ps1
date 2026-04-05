@@ -561,6 +561,18 @@ if (-not (Test-Path $WebView2Bootstrapper)) {
 # Build Installer EXE with Inno Setup
 # ============================================================================
 
+Write-Step "Preparing short-path staging for Inno Setup (MAX_PATH workaround)"
+# Inno Setup silently skips files whose FULL SOURCE PATH exceeds 260 chars.
+# The build tree path is ~88 chars before any file, leaving only ~172 chars for
+# nested node_modules paths (e.g. @walletconnect has 4+ levels of nesting).
+# Fix: copy build output to a short temp path (C:\tmp\kk) before running ISCC.
+$ShortStage = "C:\tmp\kk"
+if (Test-Path $ShortStage) { Remove-Item -Recurse -Force $ShortStage }
+Write-Host "    Copying build to $ShortStage ..."
+Copy-Item -Recurse -Force $BuildDir $ShortStage
+$StagedFiles = (Get-ChildItem -Recurse -File $ShortStage | Measure-Object).Count
+Write-Host "    Staged $StagedFiles files (source path: $($ShortStage.Length) chars)"
+
 Write-Step "Building installer EXE with Inno Setup"
 
 $IssFile = Join-Path $ScriptDir "installer.iss"
@@ -570,13 +582,16 @@ if (-not (Test-Path $IssFile)) {
 
 $isccArgs = @(
     "/DMyAppVersion=$Version",
-    "/DMySourceDir=$BuildDir",
+    "/DMySourceDir=$ShortStage",
     "/DMyOutputDir=$ArtifactsDir",
     "/DMyScriptDir=$ScriptDir",
     $IssFile
 )
 
 & $ISCC @isccArgs
+
+# Clean up staging
+Remove-Item -Recurse -Force $ShortStage -ErrorAction SilentlyContinue
 
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
