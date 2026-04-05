@@ -205,32 +205,9 @@ jobs:
 
           echo "Architecture verified: $EXPECTED"
 
-      - name: Create unsigned DMG (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cd projects/keepkey-vault/artifacts
-          TAR_ZST=$(ls *.app.tar.zst 2>/dev/null | head -1)
-          if [ -z "$TAR_ZST" ]; then echo "No .app.tar.zst found, skipping DMG"; exit 0; fi
-
-          VERSION=$(grep '"version"' ../package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
-          ARCH=$(uname -m)
-          DMG_NAME="KeepKey-Vault-${VERSION}-${ARCH}.dmg"
-          echo "Creating unsigned DMG: $DMG_NAME"
-
-          STAGING=$(mktemp -d)
-          trap 'rm -rf "$STAGING"' EXIT
-
-          zstd -d "$TAR_ZST" -o "$STAGING/app.tar" --force
-          tar xf "$STAGING/app.tar" -C "$STAGING/"
-          rm "$STAGING/app.tar"
-
-          APP=$(find "$STAGING" -name "*.app" -maxdepth 1 | head -1)
-          if [ -z "$APP" ]; then echo "No .app found after extraction"; exit 1; fi
-
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create -volname "KeepKey Vault" -srcfolder "$STAGING" -ov -format UDZO "$DMG_NAME"
-          echo "Created: $DMG_NAME (unsigned — sign locally with 'make sign-release')"
+      # Note: we intentionally do NOT create an arm64 DMG in CI. arm64 builds
+      # are produced locally via `make build-signed` (signed + notarized).
+      # CI only ships the Intel x86_64 DMG (we have no Intel Mac for local builds).
 
       - name: Create x86_64 variant (macOS)
         if: runner.os == 'macOS'
@@ -320,31 +297,28 @@ jobs:
           # Cleanup
           rm -rf "$WORK" /tmp/electrobun-x64 /tmp/electrobun-core-x64.tar.gz
 
-      - name: Create unsigned x86_64 DMG (macOS)
+      # Note: we intentionally do NOT create an unsigned x86_64 DMG in CI.
+      # sign-release-intel downloads the x64 tar.zst, signs it, and builds
+      # the DMG from the signed tar.zst. Shipping an unsigned DMG just
+      # risks clobbering the signed DMG on a CI re-run.
+
+      - name: Remove arm64 macOS artifacts (CI ships x64 only)
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          # arm64 macOS is built+signed locally via `make build-signed`.
+          # Delete all arm64 artifacts so CI doesn't upload them to the release
+          # and clobber the locally-signed versions.
           cd projects/keepkey-vault/artifacts
-          TAR_ZST="stable-macos-x64-keepkey-vault.app.tar.zst"
-          if [ ! -f "$TAR_ZST" ]; then echo "No x64 tar.zst, skipping DMG"; exit 0; fi
-
-          VERSION=$(grep '"version"' ../package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
-          DMG_NAME="KeepKey-Vault-${VERSION}-x86_64.dmg"
-          echo "Creating unsigned x86_64 DMG: $DMG_NAME"
-
-          STAGING=$(mktemp -d)
-          trap 'rm -rf "$STAGING"' EXIT
-
-          zstd -d "$TAR_ZST" -o "$STAGING/app.tar" --force
-          tar xf "$STAGING/app.tar" -C "$STAGING/"
-          rm "$STAGING/app.tar"
-
-          APP=$(find "$STAGING" -name "*.app" -maxdepth 1 | head -1)
-          if [ -z "$APP" ]; then echo "No .app found after extraction"; exit 1; fi
-
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create -volname "KeepKey Vault" -srcfolder "$STAGING" -ov -format UDZO "$DMG_NAME"
-          echo "Created: $DMG_NAME (unsigned — sign locally with 'make sign-release')"
+          echo "=== Before cleanup ==="
+          ls -la
+          rm -f KeepKey-Vault-*-arm64.dmg
+          rm -f stable-macos-arm64-keepkey-vault.app.tar.zst
+          rm -f stable-macos-arm64-keepkey-vault.dmg
+          rm -f stable-macos-arm64-update.json
+          rm -f stable-macos-arm64-*.patch
+          echo "=== After cleanup ==="
+          ls -la
 
       - name: Package AppImage (Linux)
         if: runner.os == 'Linux'
