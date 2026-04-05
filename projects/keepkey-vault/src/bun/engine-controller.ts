@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events'
+import { existsSync, readFileSync } from 'fs'
+import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
@@ -10,6 +12,34 @@ import { EmulatorKeepKeyAdapter } from './emulator-transport'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
+
+/**
+ * Locate firmware-bundle/ — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
+ * firmware-bundle/ lives inside the app bundle at Resources/app/firmware-bundle/ for packaged apps,
+ * or at projects/keepkey-vault/firmware-bundle/ for source-tree dev runs. Walk up from
+ * import.meta.dir checking multiple depths, pick the first that contains releases.json.
+ * Caches the resolved path so we only walk once.
+ */
+let _bundledFirmwareDirCache: string | null = null
+function getBundledFirmwareDir(): string {
+  if (_bundledFirmwareDirCache) return _bundledFirmwareDirCache
+  const candidates: string[] = []
+  for (let depth = 1; depth <= 12; depth++) {
+    candidates.push(path.resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware-bundle'))
+  }
+  candidates.push(path.resolve(process.cwd(), 'firmware-bundle'))
+  candidates.push(path.resolve(process.cwd(), 'projects', 'keepkey-vault', 'firmware-bundle'))
+  for (const dir of candidates) {
+    if (existsSync(path.join(dir, 'releases.json'))) {
+      _bundledFirmwareDirCache = dir
+      console.log(`[Engine] Bundled firmware dir resolved: ${dir}`)
+      return dir
+    }
+  }
+  // Fallback — caller will handle the missing file gracefully
+  console.warn(`[Engine] Could not locate firmware-bundle (tried ${candidates.length} paths from import.meta.dir=${import.meta.dir})`)
+  return candidates[0]
+}
 
 const FALLBACK_FIRMWARE = '7.10.0'
 const FALLBACK_BOOTLOADER = '2.1.4'
@@ -78,6 +108,7 @@ export class EngineController extends EventEmitter {
   private latestFirmware = FALLBACK_FIRMWARE
   private latestBootloader = FALLBACK_BOOTLOADER
   private manifest: FirmwareManifest | null = null
+  private alphaFirmware = false
   private syncing = false
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -331,16 +362,154 @@ export class EngineController extends EventEmitter {
   // ── Firmware Manifest ──────────────────────────────────────────────────
 
   private async fetchFirmwareManifest() {
+    // Always load bundled manifest first — guaranteed to exist, ships inside signed DMG.
+    const bundled = this.loadBundledManifest()
+    // Try remote — newer versions may exist between vault releases.
+    let remote: FirmwareManifest | null = null
     try {
       const res = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      this.manifest = await res.json() as FirmwareManifest
-      this.latestFirmware = this.manifest.latest.firmware.version.replace(/^v/, '')
-      this.latestBootloader = this.manifest.latest.bootloader.version.replace(/^v/, '')
-      console.log(`[Engine] Firmware manifest: fw=${this.latestFirmware} bl=${this.latestBootloader}`)
-    } catch (err) {
-      console.warn('[Engine] Failed to fetch firmware manifest, using fallbacks:', err)
+      const parsed = await res.json()
+      if (!this.isValidManifest(parsed)) {
+        throw new Error('remote manifest failed schema validation')
+      }
+      remote = parsed
+    } catch (err: any) {
+      console.warn('[Engine] Remote manifest fetch failed, using bundled only:', err.message)
     }
+
+    this.manifest = this.mergeManifests(bundled, remote)
+    this.applyChannel()
+  }
+
+  /**
+   * Validate a manifest has the minimum required shape. Returns true if valid,
+   * false otherwise. Prevents garbage input from causing downstream crashes.
+   */
+  private isValidManifest(m: any): m is FirmwareManifest {
+    const isEntry = (e: any) => e
+      && typeof e.firmware?.version === 'string'
+      && typeof e.firmware?.url === 'string'
+      && typeof e.firmware?.hash === 'string'
+      && typeof e.bootloader?.version === 'string'
+      && typeof e.bootloader?.url === 'string'
+      && typeof e.bootloader?.hash === 'string'
+    return !!(m && isEntry(m.latest))
+  }
+
+  /** Read the bundled manifest from disk. Returns null if missing or malformed. */
+  private loadBundledManifest(): FirmwareManifest | null {
+    try {
+      const manifestPath = path.join(getBundledFirmwareDir(), 'releases.json')
+      if (!existsSync(manifestPath)) {
+        console.warn(`[Engine] No bundled manifest at ${manifestPath}`)
+        return null
+      }
+      const raw = readFileSync(manifestPath, 'utf8')
+      const parsed = JSON.parse(raw)
+      if (!this.isValidManifest(parsed)) {
+        console.warn('[Engine] Bundled manifest failed schema validation — ignoring')
+        return null
+      }
+      console.log(`[Engine] Loaded bundled manifest: latest=${parsed.latest?.firmware?.version} beta=${parsed.beta?.firmware?.version ?? '(none)'}`)
+      return parsed
+    } catch (err: any) {
+      console.warn('[Engine] Failed to load bundled manifest:', err.message)
+      return null
+    }
+  }
+
+  /**
+   * Merge bundled + remote manifests. For each channel (latest, beta), pick the
+   * entry with the higher version. Hashes are preserved from whichever entry
+   * won — so when we download the binary, it verifies against the matching hash.
+   *
+   * Trust rule: if remote has a strictly newer version, trust the remote hash
+   * for that new binary (we'll verify on download). If bundled has >= version,
+   * trust bundled (it's inside the Apple-signed DMG).
+   */
+  private mergeManifests(bundled: FirmwareManifest | null, remote: FirmwareManifest | null): FirmwareManifest | null {
+    if (!bundled && !remote) return null
+    if (!bundled) return remote
+    if (!remote) return bundled
+
+    const pickNewer = (b: FirmwareManifest['latest'], r: FirmwareManifest['latest']): FirmwareManifest['latest'] => {
+      const bFw = b.firmware.version.replace(/^v/, '')
+      const rFw = r.firmware.version.replace(/^v/, '')
+      return this.versionLessThan(bFw, rFw) ? r : b
+    }
+
+    const merged: FirmwareManifest = {
+      latest: pickNewer(bundled.latest, remote.latest),
+      beta: pickNewer(bundled.beta ?? bundled.latest, remote.beta ?? remote.latest),
+      hashes: {
+        bootloader: { ...(bundled.hashes?.bootloader ?? {}), ...(remote.hashes?.bootloader ?? {}) },
+        firmware: { ...(bundled.hashes?.firmware ?? {}), ...(remote.hashes?.firmware ?? {}) },
+      },
+    }
+
+    console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta.firmware.version}`)
+    return merged
+  }
+
+  /** Return the active channel entry (beta when alpha opt-in, else latest). */
+  private getChannelEntry(): FirmwareManifest['latest'] | null {
+    if (!this.manifest) return null
+    if (this.alphaFirmware && this.manifest.beta) return this.manifest.beta
+    return this.manifest.latest
+  }
+
+  /**
+   * Resolve a manifest URL (relative path) to either a local bundled file or
+   * an HTTPS URL. Bundled files preferred when present (offline + pre-verified
+   * via DMG signature).
+   */
+  private resolveBinarySource(relativeUrl: string): { kind: 'file'; path: string } | { kind: 'http'; url: string } {
+    // Bundled URLs are always relative paths like "v7.14.0/firmware.keepkey.bin"
+    const bundledPath = path.join(getBundledFirmwareDir(), relativeUrl)
+    if (existsSync(bundledPath)) {
+      return { kind: 'file', path: bundledPath }
+    }
+    const httpUrl = new URL(relativeUrl, MANIFEST_URL.replace('releases.json', '')).toString()
+    return { kind: 'http', url: httpUrl }
+  }
+
+  /** Read a binary from bundled file or fetch over HTTPS. */
+  private async loadBinary(relativeUrl: string): Promise<Buffer> {
+    const source = this.resolveBinarySource(relativeUrl)
+    if (source.kind === 'file') {
+      console.log(`[Engine] Loading firmware from bundle: ${relativeUrl}`)
+      return Buffer.from(readFileSync(source.path))
+    }
+    console.log(`[Engine] Downloading firmware: ${source.url}`)
+    const response = await fetch(source.url)
+    if (!response.ok) throw new Error(`Failed to download ${relativeUrl}: ${response.status}`)
+    return Buffer.from(await response.arrayBuffer())
+  }
+
+  /** Recompute latestFirmware/latestBootloader from the manifest + current channel. */
+  private applyChannel() {
+    const channel = this.getChannelEntry()
+    if (!channel) return
+    this.latestFirmware = channel.firmware.version.replace(/^v/, '')
+    this.latestBootloader = channel.bootloader.version.replace(/^v/, '')
+    const channelName = this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest'
+    console.log(`[Engine] Firmware manifest (${channelName}): fw=${this.latestFirmware} bl=${this.latestBootloader}`)
+    // If alpha is on but beta == latest (or beta missing), the toggle has no effect.
+    if (this.alphaFirmware && this.manifest) {
+      const betaFw = this.manifest.beta?.firmware?.version
+      const latestFw = this.manifest.latest?.firmware?.version
+      if (!betaFw || betaFw === latestFw) {
+        console.warn(`[Engine] Alpha firmware ON but beta channel == latest (${latestFw}) — toggle has no effect until beta publishes newer version`)
+      }
+    }
+  }
+
+  /** Toggle alpha firmware channel. Caller should invoke syncState() to refresh device state. */
+  setAlphaFirmware(enabled: boolean) {
+    if (this.alphaFirmware === enabled) return
+    this.alphaFirmware = enabled
+    this.applyChannel()
   }
 
   /**
@@ -923,10 +1092,28 @@ export class EngineController extends EventEmitter {
     // during the featureless gap between detach and re-pair, skipping straight to
     // "Create New Wallet" instead of waiting for bootloader/firmware steps.
     const initialized = features ? (features.initialized ?? false) : true
-    // In bootloader mode, fwVersion is actually the BL version (from extractVersion).
-    // Firmware always needs flashing when device is in bootloader mode.
+
+    // Compute hashes + resolved firmware version up front — needed by both
+    // the state summary and the needsFirmwareUpdate check in bootloader mode.
+    const hashes = features ? this.verifyHashes(features) : {}
+    // In bootloader mode, resolve installed firmware version from on-device hash.
+    // Known official hashes → version string; unknown hash → custom firmware.
+    const resolvedFwVersion = bootloaderMode
+      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
+      : undefined
+    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
+    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
+
+    // In bootloader mode, fwVersion (from extractVersion) is actually the BL version.
+    // Use the hash-resolved firmware version to decide if an update is needed:
+    //   - known hash + version >= latest → already current, no update
+    //   - known hash + version <  latest → update available
+    //   - unknown hash (custom firmware)  → offer update (safe default)
+    //   - no firmware present              → offer update
     const needsFw = bootloaderMode
-      ? true
+      ? (resolvedFwVersion && firmwarePresent
+          ? this.versionLessThan(resolvedFwVersion.replace(/^v/, ''), this.latestFirmware)
+          : true)
       : fwVersion
         ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
         : false
@@ -954,16 +1141,6 @@ export class EngineController extends EventEmitter {
     const needsBl = effectiveBlVersion
       ? this.versionLessThan(effectiveBlVersion, this.latestBootloader)
       : bootloaderMode
-
-    const hashes = features ? this.verifyHashes(features) : {}
-
-    // In bootloader mode, resolve installed firmware version from on-device hash.
-    // Known official hashes → version string; unknown hash → custom firmware.
-    const resolvedFwVersion = bootloaderMode
-      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
-      : undefined
-    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
-    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
 
     return {
       state: this.lastState,
@@ -1033,20 +1210,17 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Starting bootloader update...' })
 
     try {
-      const blUrl = this.manifest
-        ? new URL(this.manifest.latest.bootloader.url, MANIFEST_URL.replace('releases.json', '')).toString()
-        : `https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`
+      const channel = this.getChannelEntry()
+      this.emit('firmware-progress', { percent: 10, message: 'Loading bootloader...' })
+      const firmware = channel
+        ? await this.loadBinary(channel.bootloader.url)
+        : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`)).arrayBuffer())
 
-      this.emit('firmware-progress', { percent: 10, message: 'Downloading bootloader...' })
-      const response = await fetch(blUrl)
-      if (!response.ok) throw new Error(`Failed to download bootloader: ${response.status}`)
-      const firmware = Buffer.from(await response.arrayBuffer())
-
-      // Binary integrity check — compare downloaded file hash against manifest
-      if (this.manifest?.latest?.bootloader?.hash) {
+      // Binary integrity check — compare file hash against manifest
+      if (channel?.bootloader?.hash) {
         const downloadedHash = sha256Hex(firmware)
-        if (downloadedHash !== this.manifest.latest.bootloader.hash) {
-          throw new Error(`Bootloader binary integrity check failed: expected ${this.manifest.latest.bootloader.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== channel.bootloader.hash) {
+          throw new Error(`Bootloader binary integrity check failed: expected ${channel.bootloader.hash}, got ${downloadedHash}`)
         }
         console.log('[Engine] Bootloader binary integrity verified')
       }
@@ -1077,26 +1251,23 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
-      const fwUrl = this.manifest
-        ? new URL(this.manifest.latest.firmware.url, MANIFEST_URL.replace('releases.json', '')).toString()
-        : `https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`
+      const channel = this.getChannelEntry()
+      this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
+      const firmware = channel
+        ? await this.loadBinary(channel.firmware.url)
+        : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`)).arrayBuffer())
 
-      this.emit('firmware-progress', { percent: 10, message: 'Downloading firmware...' })
-      const response = await fetch(fwUrl)
-      if (!response.ok) throw new Error(`Failed to download firmware: ${response.status}`)
-      const firmware = Buffer.from(await response.arrayBuffer())
-
-      // Binary integrity check — compare downloaded file hash against manifest.
+      // Binary integrity check — compare file hash against manifest.
       // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
       // header before hashing — the manifest hash covers only the payload.
-      if (this.manifest?.latest?.firmware?.hash) {
+      if (channel?.firmware?.hash) {
         const hasKpkyHeader = firmware.length >= 256
           && firmware[0] === 0x4B && firmware[1] === 0x50
           && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
         const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
         const downloadedHash = sha256Hex(hashPayload)
-        if (downloadedHash !== this.manifest.latest.firmware.hash) {
-          throw new Error(`Firmware binary integrity check failed: expected ${this.manifest.latest.firmware.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== channel.firmware.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }

@@ -360,6 +360,7 @@ export interface AppSettings {
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+  alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
 }
 
 // ── WalletConnect types ─────────────────────────────────────────────────

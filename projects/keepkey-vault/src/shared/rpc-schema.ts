@@ -149,6 +149,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
+      setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
       addPioneerServer: { params: { url: string; label: string }; response: AppSettings }
       removePioneerServer: { params: { url: string }; response: AppSettings }
       setActivePioneerServer: { params: { url: string }; response: AppSettings }
