@@ -177,29 +177,38 @@ build-signed-intel:
 	@echo ""
 	@exit 1
 
-# --- Electrobun x64 Core (macOS 12 support) ---
+# --- Electrobun x64 Core (macOS 13+, upstream) ---
 # Cross-compiles Electrobun core binaries for Intel Mac from ARM64.
+# Uses upstream blackboardsh/electrobun (no fork). Targets macOS 13.0+.
 # Produces: artifacts/electrobun-core-darwin-x64.tar.gz
 # Prerequisites: run `cd modules/electrobun/package && bun install && bun build.ts` once to vendor deps.
+#
+# IMPORTANT: After bumping the electrobun submodule, rebuild + republish:
+#   make publish-electrobun-x64-core
+# Then update X64_CORE_TAG in .github/workflows/build.yml to match.
 
-ELECTROBUN_FORK_REPO ?= BitHighlander/electrobun
-ELECTROBUN_FORK_TAG ?= v1.16.1-keepkey.1
+ELECTROBUN_X64_REPO ?= keepkey/keepkey-vault
+# Tag format: electrobun-x64-core-vN — increment N when rebuilding
+ELECTROBUN_X64_TAG ?= electrobun-x64-core-v1
 
 build-electrobun-x64-core:
-	@echo "Cross-compiling Electrobun x64 core from fork..."
+	@echo "Cross-compiling Electrobun x64 core from upstream..."
 	./scripts/build-electrobun-x64-core.sh
 
 publish-electrobun-x64-core: build-electrobun-x64-core
 	@test -f artifacts/electrobun-core-darwin-x64.tar.gz || (echo "ERROR: tarball not found"; exit 1)
-	@echo "Publishing Electrobun x64 core to $(ELECTROBUN_FORK_REPO)..."
-	@gh release view $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) >/dev/null 2>&1 && \
-		gh release upload $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) --clobber \
+	@SUBMOD_VER=$$(cd modules/electrobun && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD); \
+	echo "Publishing Electrobun x64 core to $(ELECTROBUN_X64_REPO) (submodule: $$SUBMOD_VER)..."; \
+	gh release view $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) >/dev/null 2>&1 && \
+		gh release upload $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) --clobber \
 			artifacts/electrobun-core-darwin-x64.tar.gz || \
-		gh release create $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) \
-			--title "Electrobun Core x64 (macOS 12 support)" \
-			--notes "Cross-compiled Electrobun core for macOS 12+ Intel. Built from keepkey/macos-12-support branch. Bun 1.1.20 (last macOS 12 compatible). No resign-swizzle (fixes crash on app deactivation)." \
-			artifacts/electrobun-core-darwin-x64.tar.gz
-	@echo "Published: https://github.com/$(ELECTROBUN_FORK_REPO)/releases/tag/$(ELECTROBUN_FORK_TAG)"
+		gh release create $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) \
+			--title "Electrobun x64 Core (macOS 13.0+, upstream $$SUBMOD_VER)" \
+			--notes "Cross-compiled Electrobun core for macOS 13.0+ Intel. Built from upstream blackboardsh/electrobun $$SUBMOD_VER. Bun 1.3.9. Adhoc-signed." \
+			artifacts/electrobun-core-darwin-x64.tar.gz; \
+	echo "Published: https://github.com/$(ELECTROBUN_X64_REPO)/releases/tag/$(ELECTROBUN_X64_TAG)"; \
+	echo ""; \
+	echo "NEXT: Update .github/workflows/build.yml X64_CORE_TAG to $(ELECTROBUN_X64_TAG)"
 
 # --- Vault ---
 
