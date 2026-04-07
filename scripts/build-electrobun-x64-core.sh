@@ -200,7 +200,7 @@ echo ""
 echo "=== Verifying no resign-swizzle symbols ==="
 if nm "$STAGING/core/libNativeWrapper.dylib" 2>/dev/null | grep -q "resignKeyWindow"; then
   echo "ERROR: libNativeWrapper.dylib contains resignKeyWindow symbols!"
-  echo "This binary was NOT built from the fork source."
+  echo "This binary contains resign-swizzle — was it built from upstream?"
   nm "$STAGING/core/libNativeWrapper.dylib" | grep resignKeyWindow
   exit 1
 fi
@@ -218,7 +218,5 @@ tar tzf "$TARBALL"
 echo ""
 echo "=== Done ==="
 echo "Next steps:"
-echo "  1. Publish to fork:  make publish-electrobun-x64-core"
-echo "  2. Or manually:      gh release create v1.16.1-keepkey.1 --repo BitHighlander/electrobun \\"
-echo "                          --title 'Electrobun Core x64 (macOS 12 support)' \\"
-echo "                          $TARBALL"
+echo "  1. Publish:  make publish-electrobun-x64-core"
+echo "  2. Update .github/workflows/build.yml X64_CORE_TAG if you changed ELECTROBUN_X64_TAG"
