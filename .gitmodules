@@ -13,5 +13,5 @@
 	url = https://github.com/keepkey/device-protocol
 [submodule "modules/electrobun"]
 	path = modules/electrobun
-	url = https://github.com/BitHighlander/electrobun.git
-	branch = keepkey/macos-12-support
+	url = https://github.com/blackboardsh/electrobun.git
+	branch = main

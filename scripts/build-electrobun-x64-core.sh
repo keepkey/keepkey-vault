@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Cross-compile Electrobun core binaries for macOS x86_64 (Intel) from ARM64.
 # Produces: electrobun-core-darwin-x64.tar.gz containing:
-#   launcher, bun (1.1.20), libNativeWrapper.dylib, libasar.dylib
+#   launcher, bun, libNativeWrapper.dylib, libasar.dylib
+#
+# Targets macOS 13.0+ (Ventura). No fork needed — uses upstream blackboardsh/electrobun.
 #
 # Prerequisites (on ARM64 Mac):
 #   - Zig 0.13.0 vendored in modules/electrobun/package/vendors/zig/
@@ -18,11 +20,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ELECTROBUN_PKG="$REPO_ROOT/modules/electrobun/package"
 ZIG="$ELECTROBUN_PKG/vendors/zig/zig"
-BUN_X64_VERSION="1.1.20"
+BUN_X64_VERSION="1.3.9"
+MACOS_TARGET="13.0"
 OUTPUT_DIR="$REPO_ROOT/artifacts"
 TARBALL="$OUTPUT_DIR/electrobun-core-darwin-x64.tar.gz"
 
-echo "=== Building Electrobun x64 core from fork ==="
+echo "=== Building Electrobun x64 core (upstream, macOS $MACOS_TARGET+) ==="
 
 # Verify prerequisites
 for F in "$ZIG" \
@@ -61,27 +64,27 @@ trap 'rm -rf "$STAGING"' EXIT
 mkdir -p "$STAGING/core"
 
 # 1. Build launcher for x86_64
-echo "--- Building launcher (x86_64-macos.12.0) ---"
+echo "--- Building launcher (x86_64-macos.${MACOS_TARGET}) ---"
 (cd "$ELECTROBUN_PKG/src/launcher" && \
   rm -rf zig-out .zig-cache && \
   "../../vendors/zig/zig" build \
-    -Dtarget=x86_64-macos.12.0 \
+    -Dtarget=x86_64-macos.${MACOS_TARGET} \
     -Doptimize=ReleaseSmall)
 cp "$ELECTROBUN_PKG/src/launcher/zig-out/bin/launcher" "$STAGING/core/launcher"
 echo "  launcher: $(lipo -archs "$STAGING/core/launcher")"
 
 # 2. Build extractor for x86_64 (needed for self-extracting archives)
-echo "--- Building extractor (x86_64-macos.12.0) ---"
+echo "--- Building extractor (x86_64-macos.${MACOS_TARGET}) ---"
 (cd "$ELECTROBUN_PKG/src/extractor" && \
   rm -rf zig-out .zig-cache && \
   "../../vendors/zig/zig" build \
-    -Dtarget=x86_64-macos.12.0 \
+    -Dtarget=x86_64-macos.${MACOS_TARGET} \
     -Doptimize=ReleaseSmall)
 cp "$ELECTROBUN_PKG/src/extractor/zig-out/bin/extractor" "$STAGING/core/extractor"
 echo "  extractor: $(lipo -archs "$STAGING/core/extractor")"
 
 # 3. Cross-compile libNativeWrapper.dylib for x86_64
-echo "--- Building libNativeWrapper.dylib (x86_64, macOS 12.0) ---"
+echo "--- Building libNativeWrapper.dylib (x86_64, macOS ${MACOS_TARGET}) ---"
 OBJ_DIR="$ELECTROBUN_PKG/src/native/macos/build-x64"
 mkdir -p "$OBJ_DIR"
 
@@ -96,7 +99,7 @@ fi
 # Compile ObjC++ source for x86_64
 clang++ \
   -arch x86_64 \
-  -mmacosx-version-min=12.0 \
+  -mmacosx-version-min=${MACOS_TARGET} \
   -c "$ELECTROBUN_PKG/src/native/macos/nativeWrapper.mm" \
   -o "$OBJ_DIR/nativeWrapper.o" \
   -fobjc-arc \
@@ -108,7 +111,7 @@ clang++ \
 # Link into dylib using x64 libasar and x64 CEF wrapper
 clang++ \
   -arch x86_64 \
-  -mmacosx-version-min=12.0 \
+  -mmacosx-version-min=${MACOS_TARGET} \
   -o "$STAGING/core/libNativeWrapper.dylib" \
   "$OBJ_DIR/nativeWrapper.o" \
   "$ELECTROBUN_PKG/vendors/zig-asar/libasar-x64.dylib" \
@@ -133,7 +136,7 @@ echo "  libNativeWrapper.dylib: $(lipo -archs "$STAGING/core/libNativeWrapper.dy
 cp "$ELECTROBUN_PKG/vendors/zig-asar/libasar-x64.dylib" "$STAGING/core/libasar.dylib"
 echo "  libasar.dylib: $(lipo -archs "$STAGING/core/libasar.dylib")"
 
-# 5. Download bun 1.1.20 for darwin-x64 (last version supporting macOS 12)
+# 5. Download bun 1.1.20 for darwin-x64 (matches arm64 Electrobun build)
 echo "--- Downloading bun $BUN_X64_VERSION for darwin-x64 ---"
 BUN_ZIP="$STAGING/bun.zip"
 curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_X64_VERSION}/bun-darwin-x64.zip" \
@@ -180,8 +183,10 @@ for BIN in launcher bun libNativeWrapper.dylib libasar.dylib; do
     FAIL=1
   fi
   # Also verify signature is present (adhoc at minimum)
-  if ! codesign -dvv "$STAGING/core/$BIN" 2>&1 | grep -q "Signature"; then
+  SIG_OUT=$(codesign -dvv "$STAGING/core/$BIN" 2>&1)
+  if ! echo "$SIG_OUT" | grep -q "Signature"; then
     echo "  ERROR: $BIN is not signed — sign-release-intel will fail"
+    echo "  codesign output: $SIG_OUT"
     FAIL=1
   fi
 done
