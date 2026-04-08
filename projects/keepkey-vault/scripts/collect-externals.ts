@@ -7,6 +7,7 @@
  */
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
+import semver from 'semver'
 
 // Only packages left external by scripts/bundle-backend.ts.
 // Everything else (ethers, pioneer, swagger, cosmjs, protobuf, @keepkey/*)
@@ -527,6 +528,24 @@ function getPackageVersion(pkgDir: string): string | null {
   } catch { return null }
 }
 
+// Read parent package's declared range for a dep (dependencies + optionalDependencies + peerDependencies).
+function getParentDeclaredRange(parentDir: string, depName: string): string | null {
+  try {
+    const pj = JSON.parse(readFileSync(join(parentDir, 'package.json'), 'utf8'))
+    return pj.dependencies?.[depName] || pj.optionalDependencies?.[depName] || pj.peerDependencies?.[depName] || null
+  } catch { return null }
+}
+
+// Decide if a nested copy should be stripped. Strip when:
+//   (a) versions match exactly, OR
+//   (b) parent declares a range and the top-level version satisfies it (nested is a stale leftover).
+function shouldStripNested(parentDir: string, depName: string, nestedVer: string, topVer: string): boolean {
+  if (nestedVer === topVer) return true
+  const range = getParentDeclaredRange(parentDir, depName)
+  if (range && semver.validRange(range) && semver.satisfies(topVer, range)) return true
+  return false
+}
+
 function stripDuplicateNestedNodeModules(dirPath: string) {
   try {
     const entries = readdirSync(dirPath, { withFileTypes: true })
@@ -534,6 +553,8 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
       if (!entry.isDirectory()) continue
       const fullPath = join(dirPath, entry.name)
       if (entry.name === 'node_modules') {
+        // dirPath is the parent package directory (contains the node_modules)
+        const parentDir = dirPath
         // Check each package inside this nested node_modules
         try {
           const nestedPkgs = readdirSync(fullPath, { withFileTypes: true })
@@ -549,9 +570,12 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
                 const scopedName = `${pkg.name}/${scoped.name}`
                 const nestedVer = getPackageVersion(scopedPath)
                 const topVer = getPackageVersion(join(nmDest, scopedName))
-                if (nestedVer && topVer && nestedVer === topVer) {
+                if (nestedVer && topVer && shouldStripNested(parentDir, scopedName, nestedVer, topVer)) {
                   rmSync(scopedPath, { recursive: true })
-                } else if (nestedVer && topVer && nestedVer !== topVer) {
+                  if (nestedVer !== topVer) {
+                    console.log(`  Stripped stale nested: ${scopedName}@${nestedVer} (top-level ${topVer} satisfies parent range)`)
+                  }
+                } else if (nestedVer && topVer) {
                   console.log(`  Keeping nested: ${scopedName}@${nestedVer} (top-level: ${topVer})`)
                 }
               }
@@ -562,9 +586,12 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
             } else {
               const nestedVer = getPackageVersion(nestedPkgPath)
               const topVer = getPackageVersion(join(nmDest, pkg.name))
-              if (nestedVer && topVer && nestedVer === topVer) {
+              if (nestedVer && topVer && shouldStripNested(parentDir, pkg.name, nestedVer, topVer)) {
                 rmSync(nestedPkgPath, { recursive: true })
-              } else if (nestedVer && topVer && nestedVer !== topVer) {
+                if (nestedVer !== topVer) {
+                  console.log(`  Stripped stale nested: ${pkg.name}@${nestedVer} (top-level ${topVer} satisfies parent range)`)
+                }
+              } else if (nestedVer && topVer) {
                 console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
               }
             }

@@ -129,12 +129,30 @@ function getPackageVersion(pkgDir: string): string | null {
 // 1. Remove nested node_modules that DUPLICATE top-level packages at the same version.
 //    KEEP nested packages where the version differs — these are required by the parent
 //    package (e.g. ethereum-cryptography needs @noble/hashes@1.4.0, top-level has @1.8.0).
+function getParentDeclaredRange(parentDir: string, depName: string): string | null {
+  try {
+    const pj = JSON.parse(readFileSync(join(parentDir, 'package.json'), 'utf8'))
+    return pj.dependencies?.[depName] || pj.optionalDependencies?.[depName] || pj.peerDependencies?.[depName] || null
+  } catch { return null }
+}
+function shouldStripNested(parentDir: string, depName: string, nestedVer: string, topVer: string): boolean {
+  if (nestedVer === topVer) return true
+  const range = getParentDeclaredRange(parentDir, depName)
+  if (!range) return false
+  try {
+    const semver = require('semver')
+    if (semver.validRange(range) && semver.satisfies(topVer, range)) return true
+  } catch {}
+  return false
+}
+
 function stripDuplicateNestedNodeModules(dir: string) {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const fullPath = join(dir, entry.name)
       if (entry.name === 'node_modules') {
+        const parentDir = dir
         // Check each package inside this nested node_modules
         try {
           const nestedPkgs = readdirSync(fullPath, { withFileTypes: true })
@@ -151,11 +169,14 @@ function stripDuplicateNestedNodeModules(dir: string) {
                   const scopedName = `${pkg.name}/${scoped.name}`
                   const nestedVer = getPackageVersion(scopedPath)
                   const topVer = getPackageVersion(join(nmDir, scopedName))
-                  if (nestedVer && topVer && nestedVer === topVer) {
+                  if (nestedVer && topVer && shouldStripNested(parentDir, scopedName, nestedVer, topVer)) {
                     rmSync(scopedPath, { recursive: true })
                     prunedDirs++
+                    if (nestedVer !== topVer) {
+                      console.log(`[prune-bundle] Stripped stale nested ${scopedName}@${nestedVer} (top-level ${topVer} satisfies parent range)`)
+                    }
                   }
-                  // else: version differs or missing top-level → keep it
+                  // else: version differs and parent needs it → keep
                 }
                 // Remove the scope dir if empty
                 try {
@@ -165,11 +186,14 @@ function stripDuplicateNestedNodeModules(dir: string) {
             } else {
               const nestedVer = getPackageVersion(nestedPkgPath)
               const topVer = getPackageVersion(join(nmDir, pkg.name))
-              if (nestedVer && topVer && nestedVer === topVer) {
+              if (nestedVer && topVer && shouldStripNested(parentDir, pkg.name, nestedVer, topVer)) {
                 rmSync(nestedPkgPath, { recursive: true })
                 prunedDirs++
+                if (nestedVer !== topVer) {
+                  console.log(`[prune-bundle] Stripped stale nested ${pkg.name}@${nestedVer} (top-level ${topVer} satisfies parent range)`)
+                }
               }
-              // else: version differs or missing top-level → keep it
+              // else: version differs and parent needs it → keep
             }
           }
           // Remove the node_modules dir if empty
