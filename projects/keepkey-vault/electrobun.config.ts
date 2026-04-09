@@ -1,4 +1,5 @@
 import type { ElectrobunConfig } from "electrobun";
+import pkg from "./package.json";
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -9,7 +10,7 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.2.11",
+		version: pkg.version,
 		urlSchemes: ["keepkey"],
 	},
 	build: {
