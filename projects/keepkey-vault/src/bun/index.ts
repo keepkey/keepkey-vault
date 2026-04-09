@@ -5,6 +5,15 @@
 // modules is the build-time check in collect-externals.ts which fails hard
 // if device-protocol/lib/messages_pb.js is absent. This logger is for
 // diagnosing runtime issues (uncaught exceptions, startup hangs, etc.).
+//
+// CRITICAL: Writes are synchronous and fsync'd. The previous implementation
+// used createWriteStream(...).write() which is buffered — when the process
+// crashed in native code (libusb segfault, etc.) the last several log lines
+// never reached disk, causing entire days of investigation to be misled by a
+// log that "ended" several function calls before the actual death point.
+// Synchronous appendFileSync + fsync makes the log a faithful record of
+// what code executed, at the cost of a per-call sync. The throughput hit is
+// negligible for our log volume (~10–100 lines/sec at peak boot).
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -12,15 +21,54 @@ import * as path from "path"
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
 try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
-const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' })
+
+// Synchronous append-per-call. appendFileSync opens, writes, and closes the
+// file on every call — slower than a held fd, but immune to fd-state weirdness
+// in worker contexts and easier to reason about. Throughput is fine for our
+// log volume (~10–100 lines/sec at peak boot).
+//
+// NOTE: an earlier attempt used fs.openSync + held fd + fs.writeSync, but the
+// bundled context silently null'd the fd (still investigating root cause —
+// possibly a Bun bundler interaction with the destructured fs namespace) and
+// every log call became a no-op. appendFileSync is the boring reliable path.
+function _writeLogSync(line: string): void {
+  try {
+    fs.appendFileSync(LOG_FILE, line)
+  } catch {
+    // If write fails (disk full, etc.), don't crash the app — drop the line.
+  }
+}
+
 const _ts = () => new Date().toISOString()
 const _fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
 const _origLog = console.log, _origWarn = console.warn, _origError = console.error
-console.log = (...args: any[]) => { const line = `[${_ts()}] ${_fmt(...args)}\n`; logStream.write(line); _origLog(...args) }
-console.warn = (...args: any[]) => { const line = `[${_ts()}] WARN: ${_fmt(...args)}\n`; logStream.write(line); _origWarn(...args) }
-console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...args)}\n`; logStream.write(line); _origError(...args) }
-logStream.write(`\n=== New session: ${_ts()} ===\n`)
+console.log = (...args: any[]) => { _writeLogSync(`[${_ts()}] ${_fmt(...args)}\n`); _origLog(...args) }
+console.warn = (...args: any[]) => { _writeLogSync(`[${_ts()}] WARN: ${_fmt(...args)}\n`); _origWarn(...args) }
+console.error = (...args: any[]) => { _writeLogSync(`[${_ts()}] ERR: ${_fmt(...args)}\n`); _origError(...args) }
+_writeLogSync(`\n=== New session: ${_ts()} ===\n`)
 console.log(`[Boot] Log file: ${LOG_FILE}`)
+
+// ── Boot environment dump ────────────────────────────────────────────────
+// Capture the launch context so post-mortem analysis can distinguish between
+// shell-launched (terminal, has TTY), Explorer-launched (no TTY, parent =
+// explorer.exe), installer-launched (parent = setup .tmp), and dev launches
+// (parent = bun/node). The "dies at Merged manifest only when launched from
+// Explorer" class of bug is invisible without this.
+try {
+  const stdinTty = !!(process.stdin && (process.stdin as any).isTTY)
+  const stdoutTty = !!(process.stdout && (process.stdout as any).isTTY)
+  const stderrTty = !!(process.stderr && (process.stderr as any).isTTY)
+  console.log(`[Boot] platform=${process.platform} arch=${process.arch} pid=${process.pid} ppid=${(process as any).ppid ?? 'unknown'}`)
+  console.log(`[Boot] cwd=${process.cwd()}`)
+  console.log(`[Boot] argv=${JSON.stringify(process.argv)}`)
+  console.log(`[Boot] stdio: stdin.isTTY=${stdinTty} stdout.isTTY=${stdoutTty} stderr.isTTY=${stderrTty}`)
+  console.log(`[Boot] env: PATH.length=${(process.env.PATH || '').length} LANG=${process.env.LANG || ''} LC_ALL=${process.env.LC_ALL || ''}`)
+  if (process.platform === 'win32') {
+    console.log(`[Boot] win: USERNAME=${process.env.USERNAME || ''} SESSIONNAME=${process.env.SESSIONNAME || ''} APPDATA=${process.env.APPDATA || ''} LOCALAPPDATA=${process.env.LOCALAPPDATA || ''}`)
+  }
+} catch (err: any) {
+  console.warn(`[Boot] Failed to dump boot environment: ${err?.message || err}`)
+}
 
 import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import pkg from "../../package.json"
@@ -4184,32 +4232,62 @@ if (typeof process !== 'undefined') {
 // loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
 // This watchdog subprocess monitors liveness via a heartbeat file.
 // If the heartbeat stops for >15s, it sends SIGKILL to this process.
+//
+// PLATFORM: POSIX only. The script uses bash, sleep, cat, date, kill -9, all
+// of which are POSIX shell builtins / coreutils. On Windows the watchdog
+// CANNOT FUNCTION even if a bash binary is available (Git Bash, MSYS, etc.):
+// - kill -9 against a Windows PID is a no-op (no SIGKILL semantics)
+// - the heartbeat staleness math relies on `date +%s` epoch time
+// - process.pid in Bun on Windows is the bun.exe PID, not the parent
+//
+// Worse: when launched from Explorer on Windows, the process inherits an
+// EMPTY PATH, so `Bun.spawn(['bash', ...])` fails with libuv ENOENT (-4058)
+// asynchronously. The error becomes an uncaught exception in the worker
+// thread and kills the entire app right around device pair time, leaving
+// the user staring at a hung splash screen with no diagnostic. This was
+// the root cause of the 1.2.14 Win10 "splash hangs after install" bug —
+// the watchdog spawn was not gated by platform, so every cold launch from
+// the desktop icon crashed before reaching the PIN entry UI.
+//
+// Skip the watchdog entirely on win32. The FFI freeze it guards against
+// is also POSIX-only (kkemu confirm_helper is built only on macOS/Linux).
 const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 
 function startHeartbeatWatchdog() {
+	if (process.platform === 'win32') {
+		console.log('[Vault] Heartbeat watchdog skipped on Windows (POSIX-only — uses bash/kill -9/date)')
+		return
+	}
+
 	// Write heartbeat every 5s — proves the event loop is alive
 	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
 	heartbeatTimer = setInterval(() => {
 		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
 	}, 5000)
 
-	// Spawn a tiny watchdog that kills us if heartbeat goes stale
-	const watchdog = Bun.spawn(['bash', '-c', `
-		while true; do
-			sleep 5
-			if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
-			last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
-			now=$(date +%s)
-			age=$(( now - last / 1000 ))
-			if [ "$age" -gt 15 ]; then
-				kill -9 ${process.pid} 2>/dev/null
-				rm -f "${HEARTBEAT_FILE}"
-				exit 0
-			fi
-		done
-	`], { stdout: 'ignore', stderr: 'ignore' })
-	watchdog.unref()
+	// Spawn a tiny watchdog that kills us if heartbeat goes stale.
+	// Wrap in try/catch as defense-in-depth — if bash is somehow missing on a
+	// non-Windows host, log and continue rather than crashing the whole app.
+	try {
+		const watchdog = Bun.spawn(['bash', '-c', `
+			while true; do
+				sleep 5
+				if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
+				last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+				now=$(date +%s)
+				age=$(( now - last / 1000 ))
+				if [ "$age" -gt 15 ]; then
+					kill -9 ${process.pid} 2>/dev/null
+					rm -f "${HEARTBEAT_FILE}"
+					exit 0
+				fi
+			done
+		`], { stdout: 'ignore', stderr: 'ignore' })
+		watchdog.unref()
+	} catch (err: any) {
+		console.warn(`[Vault] Heartbeat watchdog spawn failed (continuing without it): ${err?.message || err}`)
+	}
 }
 
 function stopHeartbeatWatchdog() {

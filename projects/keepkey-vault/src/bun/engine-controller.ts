@@ -218,46 +218,73 @@ export class EngineController extends EventEmitter {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   async start() {
+    // OBSERVABILITY: log every JS↔native transition. The previous version of
+    // this method had no log lines between fetchFirmwareManifest() and
+    // syncState(), which meant a native crash anywhere in that window
+    // (libusb segfault on getDeviceList, attach/detach handler registration
+    // failure, etc.) was invisible — the synchronous log writer makes these
+    // boundaries the actual ground truth for post-mortem.
+    console.log('[Engine] start() begin — registering USB listeners')
+
     // Register USB listeners BEFORE any await — if fetchFirmwareManifest() hangs
     // or takes time, device attach/detach events during that window would be lost.
-    usb.on('attach', (device) => {
-      if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
-      console.log('[Engine] KeepKey USB attached')
-      // During recovery/verify, the device is already paired and the transport
-      // is locked by the cipher session — don't touch state or trigger syncState.
-      if (this.setupInProgress || this.verifyInProgress) return
-      this.updateState('connected_unpaired')
-      setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
-    })
+    try {
+      usb.on('attach', (device) => {
+        if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
+        console.log('[Engine] KeepKey USB attached')
+        // During recovery/verify, the device is already paired and the transport
+        // is locked by the cipher session — don't touch state or trigger syncState.
+        if (this.setupInProgress || this.verifyInProgress) return
+        this.updateState('connected_unpaired')
+        setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
+      })
 
-    usb.on('detach', (device) => {
-      if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
-      console.log('[Engine] KeepKey USB detached')
-      this.clearRetry()
-      // M1 fix: During firmware reboot, device disconnects/reconnects — don't
-      // clear wallet state or emit disconnected (reboot poll handles reconnection)
-      if (this.updatePhase === 'rebooting') {
-        console.log('[Engine] Detach during reboot phase — ignoring (reboot poll active)')
+      usb.on('detach', (device) => {
+        if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
+        console.log('[Engine] KeepKey USB detached')
+        this.clearRetry()
+        // M1 fix: During firmware reboot, device disconnects/reconnects — don't
+        // clear wallet state or emit disconnected (reboot poll handles reconnection)
+        if (this.updatePhase === 'rebooting') {
+          console.log('[Engine] Detach during reboot phase — ignoring (reboot poll active)')
+          this.clearWallet()
+          return
+        }
         this.clearWallet()
-        return
-      }
-      this.clearWallet()
-      this.lastError = null
-      this.updateState('disconnected')
-    })
+        this.lastError = null
+        this.updateState('disconnected')
+      })
+      console.log('[Engine] USB listeners registered')
+    } catch (err: any) {
+      console.error('[Engine] FATAL: failed to register USB listeners:', err?.message || err)
+      throw err
+    }
 
+    console.log('[Engine] calling fetchFirmwareManifest()')
     await this.fetchFirmwareManifest()
+    console.log('[Engine] fetchFirmwareManifest() returned')
 
     // Device may already be plugged in.  If a KeepKey is present, give
     // libusb the same stabilisation window as the hot-plug attach handler
     // before calling pairRawDevice() — without it, the native addon can
     // SIGTRAP on macOS when the device is connected at launch.
-    const alreadyConnected = usb.getDeviceList()
-      .some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    console.log('[Engine] calling usb.getDeviceList() (native)')
+    let alreadyConnected = false
+    try {
+      const list = usb.getDeviceList()
+      console.log(`[Engine] usb.getDeviceList() returned ${list.length} device(s)`)
+      alreadyConnected = list.some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    } catch (err: any) {
+      console.error('[Engine] FATAL: usb.getDeviceList() threw:', err?.message || err)
+      throw err
+    }
+    console.log(`[Engine] alreadyConnected=${alreadyConnected}`)
     if (alreadyConnected) {
       await new Promise(r => setTimeout(r, ATTACH_DELAY_MS))
     }
+    console.log('[Engine] calling syncState()')
     await this.syncState()
+    console.log('[Engine] start() complete')
   }
 
   stop() {
@@ -399,8 +426,11 @@ export class EngineController extends EventEmitter {
       console.warn('[Engine] Remote manifest fetch failed, using bundled only:', err.message)
     }
 
+    console.log('[Engine] fetchFirmwareManifest: calling mergeManifests')
     this.manifest = this.mergeManifests(bundled, remote)
+    console.log('[Engine] fetchFirmwareManifest: mergeManifests returned, calling applyChannel')
     this.applyChannel()
+    console.log('[Engine] fetchFirmwareManifest: applyChannel returned, fetchFirmwareManifest complete')
   }
 
   /**
@@ -510,8 +540,14 @@ export class EngineController extends EventEmitter {
 
   /** Recompute latestFirmware/latestBootloader from the manifest + current channel. */
   private applyChannel() {
+    console.log('[Engine] applyChannel: enter')
     const channel = this.getChannelEntry()
-    if (!channel) return
+    console.log(`[Engine] applyChannel: getChannelEntry returned ${channel ? 'channel' : 'null'}`)
+    if (!channel) {
+      console.warn('[Engine] applyChannel: no channel entry — manifest may be missing latest/beta. Returning early.')
+      return
+    }
+    console.log(`[Engine] applyChannel: channel.firmware.version=${channel.firmware?.version} channel.bootloader.version=${channel.bootloader?.version}`)
     this.latestFirmware = channel.firmware.version.replace(/^v/, '')
     this.latestBootloader = channel.bootloader.version.replace(/^v/, '')
     const channelName = this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest'
