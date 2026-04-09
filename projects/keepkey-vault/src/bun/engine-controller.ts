@@ -51,6 +51,30 @@ const PAIR_TIMEOUT_MS = 10000
 // Retry interval when device is claimed by another app
 const CLAIMED_RETRY_MS = 5000
 
+/**
+ * Race a promise against a KeepKey USB detach event.
+ * If the device is unplugged before the promise settles, reject immediately
+ * instead of letting the native USB addon crash with a segfault on the
+ * now-disconnected device. The detach listener is cleaned up after settlement.
+ */
+function raceWithDetach<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const onDetach = (device: any) => {
+      if (device.deviceDescriptor?.idVendor !== KEEPKEY_VENDOR_ID) return
+      if (settled) return
+      settled = true
+      usb.removeListener('detach', onDetach)
+      reject(new Error('Device disconnected during USB operation'))
+    }
+    usb.on('detach', onDetach)
+    promise.then(
+      (val) => { if (!settled) { settled = true; usb.removeListener('detach', onDetach); resolve(val) } },
+      (err) => { if (!settled) { settled = true; usb.removeListener('detach', onDetach); reject(err) } },
+    )
+  })
+}
+
 const WORD_COUNT_TO_ENTROPY: Record<number, 128 | 192 | 256> = {
   12: 128, 18: 192, 24: 256,
 }
@@ -777,10 +801,15 @@ export class EngineController extends EventEmitter {
         }
         console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
         try {
-          const wallet = await withTimeout(
-            this.webUsbAdapter.pairRawDevice(webUsbDevice),
-            PAIR_TIMEOUT_MS,
-            'WebUSB pairRawDevice'
+          // Race the pair against USB detach — if the device is unplugged mid-write,
+          // the native usb addon can segfault (libusb "bad write"). By racing against
+          // a detach listener we abort cleanly before the native crash.
+          const wallet = await raceWithDetach(
+            withTimeout(
+              this.webUsbAdapter.pairRawDevice(webUsbDevice),
+              PAIR_TIMEOUT_MS,
+              'WebUSB pairRawDevice'
+            )
           )
           if (wallet) {
             this.activeTransport = 'webusb'
