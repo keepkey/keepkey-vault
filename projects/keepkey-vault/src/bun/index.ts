@@ -3927,6 +3927,22 @@ if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 	},
 ])
 
+// ── Single-instance guard: check port BEFORE creating window ──────────
+// If REST API is enabled and port 1646 is already bound, another Vault
+// instance is running. Exit immediately — before the splash appears —
+// so the user doesn't see an unresponsive window they must force-kill.
+perf('pre-window port probe')
+deferredInit()   // need DB for settings
+const earlyRestEnabled = getSetting('rest_api_enabled') === '1'
+if (earlyRestEnabled) {
+	const portBusy = await isPortInUse(REST_API_PORT)
+	if (portBusy) {
+		console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance. Exiting.`)
+		process.exit(1)
+	}
+}
+perf('port probe done')
+
 perf('creating BrowserWindow')
 let _mainWindow: BrowserWindow | null = null
 const mainWindow = new BrowserWindow({
@@ -4003,10 +4019,9 @@ if (process.platform === 'win32') {
 	}
 }
 
-// ── Deferred startup: DB → settings → REST API → engine ──────────────
-// Window is already created above — now initialize backend services.
-perf('window created, starting deferred init')
-deferredInit()
+// ── Deferred startup: settings → REST API → engine ──────────────────
+// DB already initialized in pre-window port probe above.
+perf('window created, loading settings')
 auth.reloadPairings()
 loadSettings()
 await applyRestApiState()
