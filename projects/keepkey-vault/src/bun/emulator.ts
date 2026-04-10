@@ -14,7 +14,7 @@
  * Manifest at: firmware/emulators/manifest.json
  */
 import { dlopen, FFIType, ptr, toBuffer } from 'bun:ffi'
-import { resolve, join } from 'path'
+import { resolve, join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import {
   isMacOS, getOrCreateKey, getPairingStatus,
@@ -28,6 +28,12 @@ const FLASH_SIZE = 1048576  // 1 MB
 
 // ── Emulator manifest ───────────────────────────────────────────────────
 
+interface EmulatorSource {
+  repo: string
+  ref: string
+  type: 'branch' | 'commit'
+}
+
 interface EmulatorEntry {
   version: string
   firmwareVersion: string
@@ -38,6 +44,7 @@ interface EmulatorEntry {
   binary: string
   debugLink: boolean
   description: string
+  source: EmulatorSource
 }
 
 interface EmulatorManifest {
@@ -45,9 +52,33 @@ interface EmulatorManifest {
   default: string
 }
 
+export type EmulatorChannel = 'alpha' | 'beta' | 'release'
+
+let _emuDirCache: string | null = null
 function getEmulatorsDir(): string {
-  // From projects/keepkey-vault/src/bun/ → firmware/emulators/
-  return resolve(__dirname, '../../../../firmware/emulators')
+  if (_emuDirCache) return _emuDirCache
+  // firmware/emulators/ lives at the vault-v11 project root, which is
+  // outside the Electrobun .app bundle. Walk up from import.meta.dir
+  // (app/bun/) through the .app structure to find it.
+  const candidates: string[] = []
+  // Walk 2..12 levels up from import.meta.dir — covers source tree,
+  // dev .app bundle, and production .app bundle depths.
+  for (let depth = 2; depth <= 12; depth++) {
+    candidates.push(resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware', 'emulators'))
+  }
+  // Also try cwd-relative
+  candidates.push(resolve(process.cwd(), 'firmware', 'emulators'))
+  candidates.push(resolve(process.cwd(), '..', '..', 'firmware', 'emulators'))
+
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'manifest.json'))) {
+      _emuDirCache = dir
+      console.log(`${TAG} Emulators dir resolved: ${dir}`)
+      return dir
+    }
+  }
+  console.error(`${TAG} Could not find firmware/emulators/manifest.json (tried ${candidates.length} paths from import.meta.dir=${import.meta.dir})`)
+  return candidates[0]
 }
 
 function loadManifest(): EmulatorManifest | null {
@@ -64,11 +95,49 @@ export function getAvailableEmulators(): EmulatorEntry[] {
   return manifest.emulators.filter(e => e.platform === process.platform && e.arch === process.arch)
 }
 
+/** Get available channels with their installation status. */
+export function getEmulatorChannels(): Array<{
+  channel: EmulatorChannel
+  version: string
+  description: string
+  installed: boolean
+  source: EmulatorSource
+}> {
+  const manifest = loadManifest()
+  if (!manifest) return []
+  return manifest.emulators
+    .filter(e => e.platform === process.platform && e.arch === process.arch)
+    .map(e => ({
+      channel: e.channel as EmulatorChannel,
+      version: e.version,
+      description: e.description,
+      installed: existsSync(join(getEmulatorsDir(), e.dylib)),
+      source: e.source,
+    }))
+}
+
+/** Find the emulator entry for a given channel. */
+function getEntryByChannel(channel: EmulatorChannel): EmulatorEntry | null {
+  const manifest = loadManifest()
+  if (!manifest) return null
+  return manifest.emulators.find(
+    e => e.channel === channel && e.platform === process.platform && e.arch === process.arch
+  ) || null
+}
+
 function getDylibPath(version?: string): string | null {
   const manifest = loadManifest()
   if (!manifest) return null
   const ver = version || manifest.default
   const entry = manifest.emulators.find(e => e.version === ver)
+  if (!entry) return null
+  const fullPath = join(getEmulatorsDir(), entry.dylib)
+  return existsSync(fullPath) ? fullPath : null
+}
+
+/** Resolve dylib path from a channel name. */
+function getDylibPathByChannel(channel: EmulatorChannel): string | null {
+  const entry = getEntryByChannel(channel)
   if (!entry) return null
   const fullPath = join(getEmulatorsDir(), entry.dylib)
   return existsSync(fullPath) ? fullPath : null
@@ -96,6 +165,13 @@ function loadDylib(path: string) {
 let activeFlash: EmulatorFlash | null = null
 let activeFlashName: string = 'default'
 let activeVersion: string | null = null
+let activeChannel: EmulatorChannel | null = null
+/**
+ * The user's selected channel — persists across stop/start cycles.
+ * Set when the user explicitly picks a channel via emulatorInit(channel).
+ * Re-used by import/switch/restore flows that restart without an explicit channel.
+ */
+let selectedChannel: EmulatorChannel | null = null
 let emuState: EmulatorProcessState = 'stopped'
 let emuError: string | undefined
 
@@ -104,13 +180,14 @@ export function getActiveFlashName(): string { return activeFlashName }
 
 // ── Status ──────────────────────────────────────────────────────────────
 
-export function getEmulatorStatus(): EmulatorStatus {
+export function getEmulatorStatus(): EmulatorStatus & { channel?: EmulatorChannel } {
   const pairing = getPairingStatus()
   return {
     state: emuState,
     bridgeReady: emuState === 'running' && ffi !== null,
     host: activeVersion ? `libkkemu (${activeVersion})` : 'not loaded',
     error: emuError,
+    channel: activeChannel ?? undefined,
     ...pairing,
   }
 }
@@ -131,18 +208,23 @@ export function pairEmulator(): EmulatorPairingStatus {
 /**
  * Initialize the emulator:
  * 1. Decrypt flash into memory (or create fresh)
- * 2. Load libkkemu.dylib for the selected firmware version
+ * 2. Load libkkemu.dylib for the selected firmware version/channel
  * 3. Pass flash buffer to kkemu_init() via FFI
  * 4. Start poll timer
+ *
+ * @param flashName - Name of the flash image to use (default: 'default')
+ * @param version   - Specific version string (e.g. '7.14.0-alpha')
+ * @param channel   - Channel shorthand: 'alpha' | 'beta' | 'release'
+ *                    If channel is provided, it overrides version.
  */
-export function initEmulator(flashName = 'default', version?: string): EmulatorStatus {
+export function initEmulator(flashName = 'default', version?: string, channel?: EmulatorChannel): EmulatorStatus {
   if (!isMacOS()) {
     emuError = 'Emulator requires macOS'
     return getEmulatorStatus()
   }
 
   if (activeFlash && ffi) {
-    console.log(`${TAG} Emulator already running (${activeVersion})`)
+    console.log(`${TAG} Emulator already running (${activeVersion}, channel=${activeChannel})`)
     return getEmulatorStatus()
   }
 
@@ -159,15 +241,37 @@ export function initEmulator(flashName = 'default', version?: string): EmulatorS
       saveFlash(activeFlash)
     }
 
-    // 2. Load dylib
-    const dylibPath = getDylibPath(version)
-    if (!dylibPath) {
-      throw new Error(`No emulator dylib found for version ${version || 'default'}. Check firmware/emulators/`)
+    // 2. Load dylib — resolve channel: explicit arg > sticky selection > version > manifest default
+    const resolvedChannel = channel ?? selectedChannel
+    let dylibPath: string | null
+    if (resolvedChannel) {
+      dylibPath = getDylibPathByChannel(resolvedChannel)
+      if (!dylibPath) {
+        const entry = getEntryByChannel(resolvedChannel)
+        throw new Error(
+          entry
+            ? `Emulator dylib not installed for channel "${resolvedChannel}". Run: make download-emulator-${resolvedChannel}`
+            : `Unknown emulator channel "${resolvedChannel}". Available: alpha, beta, release`
+        )
+      }
+      activeChannel = resolvedChannel
+      if (channel) selectedChannel = channel  // explicit pick updates sticky selection
+      const entry = getEntryByChannel(resolvedChannel)!
+      activeVersion = entry.version
+    } else {
+      dylibPath = getDylibPath(version)
+      if (!dylibPath) {
+        throw new Error(`No emulator dylib found for version ${version || 'default'}. Check firmware/emulators/`)
+      }
+      activeVersion = version || loadManifest()?.default || 'unknown'
+      // Infer channel from version
+      const manifest = loadManifest()
+      const entry = manifest?.emulators.find(e => e.version === activeVersion)
+      activeChannel = (entry?.channel as EmulatorChannel) ?? null
     }
 
-    console.log(`${TAG} Loading dylib: ${dylibPath}`)
+    console.log(`${TAG} Loading dylib: ${dylibPath} (channel=${activeChannel})`)
     ffi = loadDylib(dylibPath)
-    activeVersion = version || loadManifest()?.default || 'unknown'
 
     // 3. Pass flash buffer to firmware
     const rc = ffi.symbols.kkemu_init(ptr(activeFlash.buffer), FLASH_SIZE)
@@ -181,7 +285,7 @@ export function initEmulator(flashName = 'default', version?: string): EmulatorS
     }, 16)
 
     emuState = 'running'
-    console.log(`${TAG} Emulator running — firmware ${activeVersion}, flash "${flashName}"`)
+    console.log(`${TAG} Emulator running — firmware ${activeVersion}, channel=${activeChannel}, flash "${flashName}"`)
     return getEmulatorStatus()
   } catch (err: any) {
     emuState = 'error'
@@ -191,6 +295,7 @@ export function initEmulator(flashName = 'default', version?: string): EmulatorS
     // Cleanup partial init
     if (ffi) { try { ffi.close() } catch {} ; ffi = null }
     if (activeFlash) { zeroFlash(activeFlash); activeFlash = null }
+    activeChannel = null
 
     return getEmulatorStatus()
   }
@@ -241,6 +346,7 @@ export function stopEmulator(): EmulatorStatus {
     }
 
     activeVersion = null
+    activeChannel = null
     emuState = 'stopped'
     emuError = undefined
     console.log(`${TAG} Emulator stopped, flash encrypted + memory zeroed`)
@@ -360,3 +466,4 @@ export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number
 // ── Exports ─────────────────────────────────────────────────────────────
 
 export { listFlashImages, deleteFlash }
+export type { EmulatorEntry, EmulatorManifest }

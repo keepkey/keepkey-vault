@@ -1,4 +1,5 @@
 import type { ElectrobunConfig } from "electrobun";
+import pkg from "./package.json";
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -9,7 +10,7 @@ export default {
 	app: {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
-		version: "1.2.11",
+		version: pkg.version,
 		urlSchemes: ["keepkey"],
 	},
 	build: {
@@ -38,6 +39,10 @@ export default {
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
 			"_build/_ext_modules": "node_modules",
+			// Bundled firmware + bootloader — ships inside the signed/notarized DMG
+			// so tampering with any binary breaks Apple's signature. Provides an offline
+			// floor when the remote manifest is unreachable. See firmware-bundle/README.md.
+			"firmware-bundle": "firmware-bundle",
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},

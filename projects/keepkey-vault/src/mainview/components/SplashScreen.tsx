@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react"
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
@@ -9,6 +10,8 @@ interface SplashScreenProps {
   variant?: 'searching' | 'connecting' | 'error' | 'claimed'
   /** When true, logo moves to top and children are visible. When false, logo stays centered. */
   childrenReady?: boolean
+  /** Called when the logo is clicked (e.g. to retry connection) */
+  onLogoClick?: () => void
 }
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -18,8 +21,19 @@ const STATUS_DOT_COLORS: Record<string, string> = {
   claimed: '#3B82F6',
 }
 
-export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false }: SplashScreenProps) {
+const RETRY_HINT_DELAY_MS = 10_000
+
+export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false, onLogoClick }: SplashScreenProps) {
   const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
+  const [showRetry, setShowRetry] = useState(false)
+
+  // Show "Tap to retry" hint after 10s — only when there's a click handler and grid isn't ready
+  useEffect(() => {
+    if (childrenReady || !onLogoClick) { setShowRetry(false); return }
+    setShowRetry(false)
+    const timer = setTimeout(() => setShowRetry(true), RETRY_HINT_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [childrenReady, variant, onLogoClick])
 
   return (
     <Box height="100vh" width="100vw" bg="transparent" position="relative">
@@ -30,17 +44,44 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         left="0" right="0"
         top={childrenReady ? "6vh" : "35vh"}
         justifyContent="center"
+        direction="column"
+        alignItems="center"
         transition="top 0.5s ease"
         zIndex={1}
-        pointerEvents="none"
+        pointerEvents={onLogoClick ? "auto" : "none"}
       >
-        <Logo
-          width={childrenReady ? "60px" : "100px"}
-          style={{
-            filter: 'brightness(1.3)',
-            transition: 'all 0.5s ease',
-          }}
-        />
+        <Box
+          as="button"
+          onClick={onLogoClick}
+          cursor={onLogoClick ? "pointer" : "default"}
+          bg="transparent"
+          border="none"
+          p="0"
+          _hover={onLogoClick ? { transform: "scale(1.05)" } : undefined}
+          _active={onLogoClick ? { transform: "scale(0.95)" } : undefined}
+          transition="transform 0.15s ease"
+        >
+          <Logo
+            width={childrenReady ? "60px" : "100px"}
+            style={{
+              filter: 'brightness(1.3)',
+              transition: 'all 0.5s ease',
+            }}
+          />
+        </Box>
+        {showRetry && !childrenReady && (
+          <Text
+            fontSize="xs"
+            color="gray.500"
+            mt="3"
+            style={{ animation: 'fadeIn 0.4s ease' }}
+            cursor={onLogoClick ? "pointer" : "default"}
+            onClick={onLogoClick}
+            _hover={onLogoClick ? { color: "gray.300" } : undefined}
+          >
+            Tap to retry
+          </Text>
+        )}
       </Flex>
 
       {/* Children (always mounted so DeviceGrid can fire onReady, hidden until ready) */}
@@ -89,6 +130,10 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </Box>

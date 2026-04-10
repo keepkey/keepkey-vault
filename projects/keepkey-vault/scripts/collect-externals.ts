@@ -18,6 +18,17 @@ const EXTERNALS = [
   'google-protobuf',
   '@keepkey/proto-tx-builder',
   'swagger-client',
+  // WalletConnect: marked external in bundle-backend.ts (ESM/CJS dual-package
+  // resolution breaks in Bun bundler). Must be present at runtime.
+  '@walletconnect/web3wallet',
+  '@walletconnect/core',
+  '@walletconnect/types',
+  '@walletconnect/utils',
+  '@walletconnect/jsonrpc-utils',
+  // Transitive deps of version-differing nested WC packages (not hoisted to top level)
+  '@stablelib/ed25519',
+  'fast-redact',
+  'duplexify',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
@@ -126,6 +137,8 @@ const DEV_BLOCKLIST = new Set([
 
 // Read deps from a nested package dir and add them to allDeps (so they get collected at top level).
 // Uses DEV_BLOCKLIST to prevent pulling in dev-time packages.
+// Recursively walks the nested package's OWN nested node_modules to find deps
+// (e.g. @walletconnect/logger/node_modules/pino needs its own fast-redact).
 function addNestedDeps(nestedPkgDir: string) {
   try {
     const pjPath = join(nestedPkgDir, 'package.json')
@@ -135,6 +148,22 @@ function addNestedDeps(nestedPkgDir: string) {
       if (!allDeps.has(dep) && !DEV_BLOCKLIST.has(dep)) {
         allDeps.add(dep)
         addDeps(dep)
+      }
+    }
+    // Also recurse into THIS nested package's own node_modules —
+    // e.g. @walletconnect/logger/node_modules/pino has its own deps.
+    const innerNm = join(nestedPkgDir, 'node_modules')
+    if (existsSync(innerNm)) {
+      for (const entry of readdirSync(innerNm, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const innerPkgDir = join(innerNm, entry.name)
+        if (entry.name.startsWith('@')) {
+          for (const sub of readdirSync(innerPkgDir, { withFileTypes: true })) {
+            if (sub.isDirectory()) addNestedDeps(join(innerPkgDir, sub.name))
+          }
+        } else {
+          addNestedDeps(innerPkgDir)
+        }
       }
     }
   } catch {}

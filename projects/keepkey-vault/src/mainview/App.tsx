@@ -639,6 +639,7 @@ function App() {
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
 					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 					childrenReady={gridReady}
+					onLogoClick={needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
 				>
 					{/* Unified device grid — registered devices + emulator wallets */}
 					<DeviceGrid
@@ -684,12 +685,12 @@ function App() {
 					mobileOpen={mobilePanelOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
-					passphraseActive={deviceState.passphraseProtection}
+					passphraseActive={deviceState.isHiddenWallet}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} />}
+					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
 					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
 				</Flex>
 			</Flex>

@@ -41,7 +41,21 @@ i18n
 		resourcesToBackend((language: string, namespace: string) => {
 			// English is bundled synchronously above – skip dynamic import
 			if (language === "en") return undefined
-			return import(`./locales/${language}/${namespace}.json`)
+			return import(`./locales/${language}/${namespace}.json`).catch((err: unknown) => {
+				// Vite's dynamic-import helper throws "Unknown variable dynamic import: <path>"
+				// when the requested file isn't in the generated map (i.e. the translation
+				// file doesn't exist for this locale). Suppress that one case so a single
+				// missing namespace (e.g. swap.json for staking-only locales) doesn't abort
+				// the whole changeLanguage(); i18next falls back to English via fallbackLng.
+				// Any other failure (chunk-load, network, malformed JSON) is rethrown so it
+				// surfaces as a real error.
+				const msg = err instanceof Error ? err.message : String(err)
+				if (msg.includes("Unknown variable dynamic import")) {
+					console.warn(`[i18n] Missing translation file: ${language}/${namespace}.json — falling back to English`)
+					return { default: {} }
+				}
+				throw err
+			})
 		}),
 	)
 	.init({

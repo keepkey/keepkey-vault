@@ -36,6 +36,8 @@ export function inferConfirmationsFromStatus(status: SwapTrackingStatus): number
 
 const pendingSwaps = new Map<string, PendingSwap>()
 const dismissedSwaps = new Set<string>() // prevents race between dismiss and poll
+// PRIVACY: txids that must not be persisted to DB (passphrase wallet swaps)
+const noPersistSwaps = new Set<string>()
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
@@ -138,11 +140,13 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
   }
 }
 
-/** Register a newly broadcast swap for tracking */
+/** Register a newly broadcast swap for tracking.
+ *  @param opts.skipPersist - When true, skip DB writes (PRIVACY: passphrase wallets). */
 export function trackSwap(
   result: SwapResult,
   params: ExecuteSwapParams,
   quote: SwapQuote,
+  opts?: { skipPersist?: boolean },
 ): void {
   const now = Date.now()
   const swap: PendingSwap = {
@@ -195,7 +199,12 @@ export function trackSwap(
     estimatedTimeSeconds: quote.estimatedTime || 0,
     approvalTxid: result.approvalTxid,
   }
-  insertSwapHistory(historyRecord)
+  // PRIVACY: Skip DB write for passphrase wallets — swap still tracked in-memory for UI.
+  if (opts?.skipPersist) {
+    noPersistSwaps.add(result.txid)
+  } else {
+    insertSwapHistory(historyRecord)
+  }
 
   // Push immediate update to frontend FIRST (user sees "pending" instantly)
   pushUpdate(swap)
@@ -366,10 +375,10 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
 
     console.log(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
 
-    // Persist status change to SQLite
+    // Persist status change to SQLite (skip for passphrase wallet swaps)
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
     const now = Date.now()
-    updateSwapHistoryStatus(swap.txid, newStatus, {
+    if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, newStatus, {
       outboundTxid: outboundTxid || undefined,
       error: errorMsg || undefined,
       receivedOutput,
@@ -396,7 +405,7 @@ async function pollAllSwaps(): Promise<void> {
         swap.status = 'failed'
         swap.error = 'Tracking timed out after 1 hour. Use refresh to check status manually.'
         swap.updatedAt = now
-        updateSwapHistoryStatus(txid, 'failed', { error: swap.error })
+        if (!noPersistSwaps.has(txid)) updateSwapHistoryStatus(txid, 'failed', { error: swap.error })
         pushUpdate(swap)
       }
     }

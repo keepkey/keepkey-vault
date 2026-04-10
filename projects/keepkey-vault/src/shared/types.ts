@@ -38,6 +38,9 @@ export interface DeviceStateInfo {
   bootloaderVerified?: boolean
   error?: string | null
   isEmulator: boolean
+  /** True when using a hidden wallet (non-empty passphrase). Reports and chain
+   *  history are unavailable; no data is persisted to disk for privacy. */
+  isHiddenWallet: boolean
 }
 
 export interface FirmwareProgress {
@@ -360,6 +363,7 @@ export interface AppSettings {
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+  alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
 }
 
 // ── WalletConnect types ─────────────────────────────────────────────────
@@ -540,6 +544,17 @@ export interface SwapAsset {
   contractAddress?: string // for ERC-20 tokens
 }
 
+/** Pre-built EVM transaction from relay/bridge integrations (no memo needed) */
+export interface RelayTxParams {
+  to: string
+  data: string
+  value: string              // wei as decimal string
+  gasLimit: string
+  maxFeePerGas?: string
+  maxPriorityFeePerGas?: string
+  chainId: number
+}
+
 /** Quote response from Pioneer (aggregated across DEXes) */
 export interface SwapQuote {
   expectedOutput: string     // human-readable amount out
@@ -558,7 +573,8 @@ export interface SwapQuote {
   slippageBps: number        // actual slippage in bps
   fromAsset: string          // THORChain asset identifier
   toAsset: string            // THORChain asset identifier
-  integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", etc.
+  integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
+  relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
 }
 
 /** Parameters for getSwapQuote RPC */
@@ -587,6 +603,8 @@ export interface ExecuteSwapParams {
   feeLevel?: number
   fromAddressOverride?: string  // pre-resolved sender address (skips defaultPath derivation)
   toAddressOverride?: string    // pre-resolved destination address (skips defaultPath derivation)
+  integration?: string      // DEX source (relay quotes skip memo+router flow)
+  relayTx?: RelayTxParams   // pre-built tx for relay/bridge integrations
 }
 
 /** Result of executeSwap RPC */

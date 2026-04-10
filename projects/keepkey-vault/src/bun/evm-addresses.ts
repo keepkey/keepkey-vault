@@ -22,6 +22,14 @@ export class EvmAddressManager extends EventEmitter {
   private selectedIndex: number = 0
   private initPromise: Promise<EvmAddressSet> | null = null
 
+  /**
+   * Optional gate: when set, persistIndices() is a no-op if this returns false,
+   * and _doInitialize ignores stored indices (uses default [0]).
+   * Prevents passphrase-wallet sessions from reading/writing hidden-wallet
+   * address indices to/from disk.
+   */
+  canPersist: (() => boolean) | null = null
+
   /** Initialize with persisted indices. Concurrent calls coalesce. */
   async initialize(wallet: any): Promise<EvmAddressSet> {
     if (this.initPromise) return this.initPromise
@@ -36,14 +44,19 @@ export class EvmAddressManager extends EventEmitter {
   private async _doInitialize(wallet: any): Promise<EvmAddressSet> {
     this.addresses = []
 
-    // Load persisted indices (default to [0])
-    const stored = getSetting(SETTINGS_KEY)
-    let indices: number[]
-    try {
-      indices = stored ? JSON.parse(stored) : [0]
-      if (!Array.isArray(indices) || indices.length === 0) indices = [0]
-    } catch {
-      indices = [0]
+    // Load persisted indices (default to [0]).
+    // PRIVACY: When canPersist gate returns false (passphrase wallet), ignore
+    // stored indices — they belong to the standard wallet and would leak which
+    // indices it tracks into the hidden wallet's address list.
+    let indices: number[] = [0]
+    if (!this.canPersist || this.canPersist()) {
+      const stored = getSetting(SETTINGS_KEY)
+      try {
+        indices = stored ? JSON.parse(stored) : [0]
+        if (!Array.isArray(indices) || indices.length === 0) indices = [0]
+      } catch {
+        indices = [0]
+      }
     }
 
     // Derive each index
@@ -240,6 +253,9 @@ export class EvmAddressManager extends EventEmitter {
   }
 
   private persistIndices(): void {
+    // PRIVACY: If a gate is set and returns false (passphrase wallet session),
+    // skip writing indices to disk — they belong to the hidden wallet.
+    if (this.canPersist && !this.canPersist()) return
     const indices = this.addresses.map(a => a.addressIndex)
     setSetting(SETTINGS_KEY, JSON.stringify(indices))
   }

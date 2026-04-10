@@ -6,16 +6,18 @@ import { Z } from "../lib/z-index"
 import type { ReportMeta } from "../../shared/types"
 
 import keepkeyLogo from "../assets/icon.png"
-import coinTrackerLogo from "../assets/logo/cointracker.png"
-import zenLedgerLogo from "../assets/logo/zenledger.png"
+// TODO: CoinTracker and ZenLedger exports hidden until report data is populated
+// import coinTrackerLogo from "../assets/logo/cointracker.png"
+// import zenLedgerLogo from "../assets/logo/zenledger.png"
 
 type ExportFormat = "pdf" | "csv" | "cointracker" | "zenledger"
 
 const EXPORT_OPTIONS: { key: ExportFormat; label: string; sub: string; logo: string; bg: string }[] = [
 	{ key: "pdf", label: "KeepKey PDF", sub: "Full portfolio report", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
 	{ key: "csv", label: "KeepKey CSV", sub: "Full portfolio data", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
-	{ key: "cointracker", label: "CoinTracker", sub: "Tax transactions", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
-	{ key: "zenledger", label: "ZenLedger", sub: "Tax transactions", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
+	// TODO: Re-enable when tax report data is populated
+	// { key: "cointracker", label: "CoinTracker", sub: "Tax transactions", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
+	// { key: "zenledger", label: "ZenLedger", sub: "Tax transactions", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
 ]
 
 interface ReportDialogProps {
@@ -161,8 +163,8 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 						borderRadius="lg"
 					>
 						<Text fontSize="10px" color="kk.gold" lineHeight="1.5">
-							Generate a report then export as KeepKey branded PDF, CoinTracker CSV,
-							or ZenLedger CSV for tax filing. Reports include device info, chain balances,
+							Generate a report then export as KeepKey branded PDF or CSV.
+							Reports include device info, chain balances,
 							BTC transaction history, and address flow analysis.
 							Store securely and never share with untrusted parties.
 						</Text>

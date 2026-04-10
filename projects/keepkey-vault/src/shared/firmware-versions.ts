@@ -57,7 +57,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
     version: '7.14.0',
     date: '2026-03',
-    headline: 'New chains and BIP-85',
+    headline: 'New chains',
     features: [
       {
         title: 'Solana Support',
@@ -80,6 +80,13 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         color: '#0088CC',
         icon: 'chain',
       },
+    ],
+  },
+  {
+    version: '7.15.0',
+    date: '2026-04',
+    headline: 'BIP-85 Deterministic Entropy',
+    features: [
       {
         title: 'BIP-85 Deterministic Entropy',
         description: 'Derive child mnemonics from your master seed — create isolated wallets without extra backups.',
@@ -168,6 +175,7 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   'fc13cb3a405fdee342ebd0d945403b334f0c43ba19771fdabd0e81caf85a63f7': 'v7.9.1',
   '24cca93ef5e7907dc6d8405b8ab9800d4e072dd9259138cf7679107985b88137': 'v7.9.3',
   '518ad41643ee8a0aa6a6422f8534ac94f56cd65bc637aea4db7f3fdbb53255c3': 'v7.10.0',
+  '446fd7ac54e0ba2d54ed1d98ef9455b01f6b9be50de7db817a50e9a3cf0c6e3d': 'v7.14.0',
   // v7.14.0 unsigned builds (custom firmware)
   '75dc509a90f70a1f0025a9c5451532f407c4f78df5ef7d1d7b9b2ef9b9740e19': 'v7.14.0-solana',
   '02def01217709269ff39c2c4745179e45c9c6892b19299de6cdd2f2becfddc87': 'v7.14.0-bip85',

@@ -14,6 +14,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
     requests: {
       // ── Device lifecycle ──────────────────────────────────────────
       getDeviceState: { params: void; response: DeviceStateInfo }
+      retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
       startFirmwareUpdate: { params: void; response: void }
       flashFirmware: { params: void; response: void }
@@ -148,6 +149,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
+      setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
       addPioneerServer: { params: { url: string; label: string }; response: AppSettings }
       removePioneerServer: { params: { url: string }; response: AppSettings }
       setActivePioneerServer: { params: { url: string }; response: AppSettings }
@@ -200,14 +202,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
       emulatorPair: { params: void; response: EmulatorStatus }
-      emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
+      emulatorInit: { params: { flashName?: string; channel?: 'alpha' | 'beta' | 'release' } | void; response: EmulatorStatus }
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
+      emulatorGetChannels: { params: void; response: Array<{ channel: string; version: string; description: string; installed: boolean; source: { repo: string; ref: string; type: string } }> }
       emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
       emulatorListWallets: { params: void; response: EmulatorWalletInfo[] }
-      emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string }; response: EmulatorStatus }
-      emulatorSwitchWallet: { params: { name: string }; response: EmulatorStatus }
+      emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string; channel?: 'alpha' | 'beta' | 'release' }; response: EmulatorStatus }
+      emulatorSwitchWallet: { params: { name: string; channel?: 'alpha' | 'beta' | 'release' }; response: EmulatorStatus }
 
       // ── WalletConnect (native v2) ────────────────────────────────────
       wcPair: { params: { uri: string }; response: void }

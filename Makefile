@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulators build-emulator-alpha build-emulator-beta build-emulator-release download-emulators download-emulator-alpha download-emulator-beta download-emulator-release emulator-status clean-emulators
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -177,29 +177,38 @@ build-signed-intel:
 	@echo ""
 	@exit 1
 
-# --- Electrobun x64 Core (macOS 12 support) ---
+# --- Electrobun x64 Core (macOS 13+, upstream) ---
 # Cross-compiles Electrobun core binaries for Intel Mac from ARM64.
+# Uses upstream blackboardsh/electrobun (no fork). Targets macOS 13.0+.
 # Produces: artifacts/electrobun-core-darwin-x64.tar.gz
 # Prerequisites: run `cd modules/electrobun/package && bun install && bun build.ts` once to vendor deps.
+#
+# IMPORTANT: After bumping the electrobun submodule, rebuild + republish:
+#   make publish-electrobun-x64-core
+# Then update X64_CORE_TAG in .github/workflows/build.yml to match.
 
-ELECTROBUN_FORK_REPO ?= BitHighlander/electrobun
-ELECTROBUN_FORK_TAG ?= v1.16.1-keepkey.1
+ELECTROBUN_X64_REPO ?= keepkey/keepkey-vault
+# Tag format: electrobun-x64-core-vN — increment N when rebuilding
+ELECTROBUN_X64_TAG ?= electrobun-x64-core-v1
 
 build-electrobun-x64-core:
-	@echo "Cross-compiling Electrobun x64 core from fork..."
+	@echo "Cross-compiling Electrobun x64 core from upstream..."
 	./scripts/build-electrobun-x64-core.sh
 
 publish-electrobun-x64-core: build-electrobun-x64-core
 	@test -f artifacts/electrobun-core-darwin-x64.tar.gz || (echo "ERROR: tarball not found"; exit 1)
-	@echo "Publishing Electrobun x64 core to $(ELECTROBUN_FORK_REPO)..."
-	@gh release view $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) >/dev/null 2>&1 && \
-		gh release upload $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) --clobber \
+	@SUBMOD_VER=$$(cd modules/electrobun && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD); \
+	echo "Publishing Electrobun x64 core to $(ELECTROBUN_X64_REPO) (submodule: $$SUBMOD_VER)..."; \
+	gh release view $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) >/dev/null 2>&1 && \
+		gh release upload $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) --clobber \
 			artifacts/electrobun-core-darwin-x64.tar.gz || \
-		gh release create $(ELECTROBUN_FORK_TAG) --repo $(ELECTROBUN_FORK_REPO) \
-			--title "Electrobun Core x64 (macOS 12 support)" \
-			--notes "Cross-compiled Electrobun core for macOS 12+ Intel. Built from keepkey/macos-12-support branch. Bun 1.1.20 (last macOS 12 compatible). No resign-swizzle (fixes crash on app deactivation)." \
-			artifacts/electrobun-core-darwin-x64.tar.gz
-	@echo "Published: https://github.com/$(ELECTROBUN_FORK_REPO)/releases/tag/$(ELECTROBUN_FORK_TAG)"
+		gh release create $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) \
+			--title "Electrobun x64 Core (macOS 13.0+, upstream $$SUBMOD_VER)" \
+			--notes "Cross-compiled Electrobun core for macOS 13.0+ Intel. Built from upstream blackboardsh/electrobun $$SUBMOD_VER. Bun 1.3.9. Adhoc-signed." \
+			artifacts/electrobun-core-darwin-x64.tar.gz; \
+	echo "Published: https://github.com/$(ELECTROBUN_X64_REPO)/releases/tag/$(ELECTROBUN_X64_TAG)"; \
+	echo ""; \
+	echo "NEXT: Update .github/workflows/build.yml X64_CORE_TAG to $(ELECTROBUN_X64_TAG)"
 
 # --- Vault ---
 
@@ -290,9 +299,15 @@ test-emu:
 
 # Run python-keepkey consistency tests against the kkemu binary (UDP).
 # Launches kkemu, runs pytest, then kills kkemu.
+# Uses alpha channel by default; override with: make test-emu-python EMU_CHANNEL=release
+EMU_CHANNEL ?= alpha
+EMU_VERSION := 7.14.0-$(EMU_CHANNEL)
+
 test-emu-python:
-	@echo "Starting kkemu (UDP 11044/11045)..."
-	@./firmware/emulators/7.10.0-alpha/kkemu & KKPID=$$!; \
+	@test -x ./firmware/emulators/$(EMU_VERSION)/kkemu || \
+		(echo "ERROR: kkemu not found for $(EMU_CHANNEL) channel. Run: make build-emulator-$(EMU_CHANNEL)"; exit 1)
+	@echo "Starting kkemu ($(EMU_CHANNEL) channel, UDP 11044/11045)..."
+	@./firmware/emulators/$(EMU_VERSION)/kkemu & KKPID=$$!; \
 	sleep 1; \
 	echo "Running python-keepkey tests..."; \
 	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
@@ -309,6 +324,87 @@ test-emu-python:
 	EXIT=$$?; \
 	kill $$KKPID 2>/dev/null; \
 	exit $$EXIT
+
+# --- Emulator Channels (alpha/beta/release) ---
+# Build native macOS emulator (libkkemu.dylib + kkemu) from the firmware submodule.
+# Each channel gets its own directory under firmware/emulators/<version>/.
+#   alpha   — tracks BitHighlander fork branch tip (moves with new commits)
+#   beta    — pinned to a specific commit SHA (manually promoted)
+#   release — tracks upstream keepkey/keepkey-firmware master
+#
+# To promote a new beta, update BETA_PIN_SHA here AND in manifest.json.
+
+EMU_FW_DIR := modules/keepkey-firmware
+EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
+BETA_PIN_SHA := 9f52bb69f2e32a71f08b31b0c7df788129a0578e
+EMU_UPSTREAM_URL := https://github.com/keepkey/keepkey-firmware.git
+
+# Common cmake emulator build (called by channel-specific targets)
+# _EMU_REF can be a branch (origin/release/7.14.0), a remote/branch, or a commit SHA.
+_build-emu:
+	@echo "=== Building emulator for $(_EMU_CHANNEL) channel ==="
+	@echo "    Source: $(_EMU_REF)"
+	@echo "    Output: firmware/emulators/$(_EMU_VERSION)/"
+	@# Ensure the upstream (keepkey) remote exists — .gitmodules points to the fork,
+	@# so fresh clones only have origin. The release channel needs keepkey/master.
+	@cd $(EMU_FW_DIR) && git remote get-url keepkey >/dev/null 2>&1 || \
+		(echo "    Adding keepkey remote ($(EMU_UPSTREAM_URL))..." && \
+		 cd $(EMU_FW_DIR) && git remote add keepkey $(EMU_UPSTREAM_URL))
+	cd $(EMU_FW_DIR) && git fetch --all --prune 2>/dev/null
+	cd $(EMU_FW_DIR) && git checkout $(_EMU_REF)
+	@# Verify we landed on the expected ref (catches typos in SHA)
+	@ACTUAL=$$(cd $(EMU_FW_DIR) && git rev-parse HEAD); \
+	echo "    Checked out: $$ACTUAL"
+	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	rm -rf $(EMU_BUILD_DIR)
+	mkdir -p $(EMU_BUILD_DIR)
+	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
+		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
+	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu
+	mkdir -p firmware/emulators/$(_EMU_VERSION)
+	cp $(EMU_BUILD_DIR)/bin/kkemu firmware/emulators/$(_EMU_VERSION)/kkemu
+	@echo "    Binary: firmware/emulators/$(_EMU_VERSION)/kkemu"
+	@# Check if a shared lib was also built (optional — depends on CMake config)
+	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
+		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib; \
+		echo "    Dylib:  firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib"; \
+	fi
+	chmod +x firmware/emulators/$(_EMU_VERSION)/kkemu
+	@# Record which commit was actually built
+	@cd $(EMU_FW_DIR) && git rev-parse HEAD > ../../firmware/emulators/$(_EMU_VERSION)/.build-sha
+	@echo "=== $(_EMU_CHANNEL) emulator ready ==="
+
+build-emulator-alpha:
+	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.14.0-alpha _EMU_REF=origin/release/7.14.0
+
+build-emulator-beta:
+	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=$(BETA_PIN_SHA)
+
+build-emulator-release:
+	$(MAKE) _build-emu _EMU_CHANNEL=release _EMU_VERSION=7.14.0-release _EMU_REF=keepkey/master
+
+build-emulators: build-emulator-alpha build-emulator-beta build-emulator-release
+
+# Download pre-built emulators (if published as release assets)
+download-emulators:
+	bun firmware/download-emulators.ts
+
+download-emulator-alpha:
+	bun firmware/download-emulators.ts --channel alpha
+
+download-emulator-beta:
+	bun firmware/download-emulators.ts --channel beta
+
+download-emulator-release:
+	bun firmware/download-emulators.ts --channel release
+
+emulator-status:
+	bun firmware/download-emulators.ts --status
+
+clean-emulators:
+	rm -rf firmware/emulators/7.14.0-alpha firmware/emulators/7.14.0-beta firmware/emulators/7.14.0-release
+	rm -rf $(EMU_BUILD_DIR)
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -390,6 +486,10 @@ release: sign-check build-signed
 # re-packs signed tar.zst (auto-update), creates DMGs, notarizes, and uploads.
 # Requires: draft release v$(VERSION) created by CI (push to release/* or v* tag).
 # Usage: make sign-release
+#
+# NOTE: For arm64, prefer `make build-signed` (builds from source locally).
+# CI-built arm64 artifacts may fail notarization because the binaries were
+# built on a different machine. Use `make sign-release-intel` for x64 only.
 sign-release: sign-check
 	@echo "=== Signing macOS release v$(VERSION) ==="
 	@# Verify draft release exists before doing any work
@@ -461,6 +561,36 @@ sign-release: sign-check
 	@echo "https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
 	@# Cleanup CI temp dirs
 	@rm -rf $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
+
+# Sign Intel (x86_64) macOS release artifact from CI.
+# For arm64, use `make build-signed` instead — local builds notarize reliably.
+# Usage: make sign-release-intel
+sign-release-intel: sign-check
+	@echo "=== Signing macOS Intel release v$(VERSION) ==="
+	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
+		(echo "ERROR: No release v$(VERSION) found." && exit 1)
+	@# Clean stale x64 artifacts only (preserve arm64 from local build-signed)
+	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
+	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+	@mkdir -p $(PROJECT_DIR)/artifacts/ci-x64
+	@echo "Downloading CI-built x64 artifact..."
+	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
+		--pattern "stable-macos-x64-keepkey-vault.app.tar.zst" \
+		--dir $(PROJECT_DIR)/artifacts/ci-x64 --clobber
+	@echo ""
+	@echo "--- Signing x86_64 artifact ---"
+	@$(MAKE) _sign-one-dmg \
+		_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst" \
+		_DMG_ARCH=x86_64
+	@echo ""
+	@echo "=== Uploading Intel signed artifacts ==="
+	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
+		$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
+	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
+		$(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+	@echo ""
+	@echo "=== Intel release v$(VERSION) signed and uploaded ==="
+	@rm -rf $(PROJECT_DIR)/artifacts/ci-x64
 
 # Internal: sign a single tar.zst, produce a signed tar.zst (auto-update) and DMG
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
@@ -588,6 +718,15 @@ help:
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
+	@echo ""
+	@echo "Emulator Channels:"
+	@echo "  make build-emulators       - Build all 3 emulator channels from firmware submodule"
+	@echo "  make build-emulator-alpha  - Build alpha (BitHighlander fork, release/7.14.0)"
+	@echo "  make build-emulator-beta   - Build beta (BitHighlander fork, release/7.14.0)"
+	@echo "  make build-emulator-release - Build release (upstream keepkey/keepkey-firmware master)"
+	@echo "  make download-emulators    - Download pre-built emulator binaries"
+	@echo "  make emulator-status       - Show installed emulator channels"
+	@echo "  make clean-emulators       - Remove all built emulator binaries"
 
 # --- Pre-release Validation ---
 preflight: submodules

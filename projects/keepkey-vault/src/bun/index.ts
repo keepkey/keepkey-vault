@@ -5,6 +5,15 @@
 // modules is the build-time check in collect-externals.ts which fails hard
 // if device-protocol/lib/messages_pb.js is absent. This logger is for
 // diagnosing runtime issues (uncaught exceptions, startup hangs, etc.).
+//
+// CRITICAL: Writes are synchronous and fsync'd. The previous implementation
+// used createWriteStream(...).write() which is buffered — when the process
+// crashed in native code (libusb segfault, etc.) the last several log lines
+// never reached disk, causing entire days of investigation to be misled by a
+// log that "ended" several function calls before the actual death point.
+// Synchronous appendFileSync + fsync makes the log a faithful record of
+// what code executed, at the cost of a per-call sync. The throughput hit is
+// negligible for our log volume (~10–100 lines/sec at peak boot).
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -12,15 +21,54 @@ import * as path from "path"
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
 try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
-const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' })
+
+// Synchronous append-per-call. appendFileSync opens, writes, and closes the
+// file on every call — slower than a held fd, but immune to fd-state weirdness
+// in worker contexts and easier to reason about. Throughput is fine for our
+// log volume (~10–100 lines/sec at peak boot).
+//
+// NOTE: an earlier attempt used fs.openSync + held fd + fs.writeSync, but the
+// bundled context silently null'd the fd (still investigating root cause —
+// possibly a Bun bundler interaction with the destructured fs namespace) and
+// every log call became a no-op. appendFileSync is the boring reliable path.
+function _writeLogSync(line: string): void {
+  try {
+    fs.appendFileSync(LOG_FILE, line)
+  } catch {
+    // If write fails (disk full, etc.), don't crash the app — drop the line.
+  }
+}
+
 const _ts = () => new Date().toISOString()
 const _fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
 const _origLog = console.log, _origWarn = console.warn, _origError = console.error
-console.log = (...args: any[]) => { const line = `[${_ts()}] ${_fmt(...args)}\n`; logStream.write(line); _origLog(...args) }
-console.warn = (...args: any[]) => { const line = `[${_ts()}] WARN: ${_fmt(...args)}\n`; logStream.write(line); _origWarn(...args) }
-console.error = (...args: any[]) => { const line = `[${_ts()}] ERR: ${_fmt(...args)}\n`; logStream.write(line); _origError(...args) }
-logStream.write(`\n=== New session: ${_ts()} ===\n`)
+console.log = (...args: any[]) => { _writeLogSync(`[${_ts()}] ${_fmt(...args)}\n`); _origLog(...args) }
+console.warn = (...args: any[]) => { _writeLogSync(`[${_ts()}] WARN: ${_fmt(...args)}\n`); _origWarn(...args) }
+console.error = (...args: any[]) => { _writeLogSync(`[${_ts()}] ERR: ${_fmt(...args)}\n`); _origError(...args) }
+_writeLogSync(`\n=== New session: ${_ts()} ===\n`)
 console.log(`[Boot] Log file: ${LOG_FILE}`)
+
+// ── Boot environment dump ────────────────────────────────────────────────
+// Capture the launch context so post-mortem analysis can distinguish between
+// shell-launched (terminal, has TTY), Explorer-launched (no TTY, parent =
+// explorer.exe), installer-launched (parent = setup .tmp), and dev launches
+// (parent = bun/node). The "dies at Merged manifest only when launched from
+// Explorer" class of bug is invisible without this.
+try {
+  const stdinTty = !!(process.stdin && (process.stdin as any).isTTY)
+  const stdoutTty = !!(process.stdout && (process.stdout as any).isTTY)
+  const stderrTty = !!(process.stderr && (process.stderr as any).isTTY)
+  console.log(`[Boot] platform=${process.platform} arch=${process.arch} pid=${process.pid} ppid=${(process as any).ppid ?? 'unknown'}`)
+  console.log(`[Boot] cwd=${process.cwd()}`)
+  console.log(`[Boot] argv=${JSON.stringify(process.argv)}`)
+  console.log(`[Boot] stdio: stdin.isTTY=${stdinTty} stdout.isTTY=${stdoutTty} stderr.isTTY=${stderrTty}`)
+  console.log(`[Boot] env: PATH.length=${(process.env.PATH || '').length} LANG=${process.env.LANG || ''} LC_ALL=${process.env.LC_ALL || ''}`)
+  if (process.platform === 'win32') {
+    console.log(`[Boot] win: USERNAME=${process.env.USERNAME || ''} SESSIONNAME=${process.env.SESSIONNAME || ''} APPDATA=${process.env.APPDATA || ''} LOCALAPPDATA=${process.env.LOCALAPPDATA || ''}`)
+  }
+} catch (err: any) {
+  console.warn(`[Boot] Failed to dump boot environment: ${err?.message || err}`)
+}
 
 import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
 import pkg from "../../package.json"
@@ -178,8 +226,11 @@ function browseChains(query: string, page: number, pageSize: number): { chains: 
 	}
 }
 
-/** Fire-and-forget: cache a derived address for watch-only mode */
+/** Fire-and-forget: cache a derived address for watch-only mode.
+ *  PRIVACY: Never persist addresses from a passphrase wallet — doing so
+ *  leaks the existence and contents of the hidden wallet to disk. */
 function cacheAddress(chainId: string, path: string, address: string) {
+	if (engine.isPassphraseWallet) return
 	try {
 		const deviceId = engine.getDeviceState().deviceId || 'unknown'
 		saveCachedPubkey(deviceId, chainId, path, '', address, '')
@@ -198,6 +249,10 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
+
+// PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
+// from being read/written to disk during passphrase sessions.
+evmAddresses.canPersist = () => !engine.isPassphraseWallet
 
 // ── Deferred: DB + chains loaded AFTER window is created ─────────────
 let customChainDefs: ChainDef[] = []
@@ -240,6 +295,7 @@ let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let preReleaseUpdates = false
+let alphaFirmware = false
 
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
@@ -248,6 +304,7 @@ function loadSettings() {
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
+	alphaFirmware = getSetting('alpha_firmware') === '1'
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -303,6 +360,7 @@ function getAppSettings() {
 		bip85Enabled,
 		zcashPrivacyEnabled,
 		preReleaseUpdates,
+		alphaFirmware,
 	}
 }
 
@@ -310,7 +368,10 @@ function getAppSettings() {
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
 		try { rpc.send['api-log'](entry) } catch { /* webview not ready */ }
-		try { insertApiLog(entry) } catch { /* db not ready */ }
+		// PRIVACY: Don't persist API activity from passphrase wallets to disk.
+		if (!engine.isPassphraseWallet) {
+			try { insertApiLog(entry) } catch { /* db not ready */ }
+		}
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
@@ -458,6 +519,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
+			retryConnect: async () => { await engine.retryConnect() },
 			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
 			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
 			flashFirmware: async () => { await engine.flashFirmware() },
@@ -587,8 +649,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getBip85Mnemonic: async (params) => {
 				const result = await engine.getBip85Mnemonic(params)
 
-				// Save metadata when label is provided
-				if (params.label !== undefined) {
+				// Save metadata when label is provided.
+				// PRIVACY: Don't persist BIP-85 derivation metadata for passphrase wallets —
+				// it links the device fingerprint to derivation operations under the hidden wallet.
+				if (params.label !== undefined && !engine.isPassphraseWallet) {
 					try {
 						const fp = await engine.getWalletFingerprint()
 						const meta: Bip85SeedMeta = {
@@ -615,6 +679,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			// DB read — uses fingerprint to isolate per-wallet when device is available
 			listBip85Seeds: async () => {
+				// PRIVACY: Don't expose standard-wallet BIP-85 metadata during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				let fp: string | undefined
 				try { fp = await engine.getWalletFingerprint() } catch { /* device not connected */ }
 				const seeds = getBip85Seeds(fp)
@@ -623,6 +689,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			// DB write — requires device for fingerprint (cannot save without wallet identity)
 			saveBip85SeedMeta: async (params) => {
+				// PRIVACY: Don't persist BIP-85 metadata for passphrase wallets.
+				if (engine.isPassphraseWallet) {
+					throw new Error('BIP-85 seed metadata cannot be saved for passphrase-protected wallets (privacy).')
+				}
 				const fp = await engine.getWalletFingerprint()
 				const meta: Bip85SeedMeta = {
 					walletFingerprint: fp,
@@ -997,14 +1067,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
-				// 1. Batch-fetch non-BTC UTXO xpubs in a single device call
+				// 1. Batch-fetch non-BTC UTXO xpubs in a single device call.
+				// LTC supports multiple script types (p2pkh, p2sh-p2wpkh, p2wpkh) — derive
+				// all so Pioneer reports balances from every address type.
+				const utxoPubKeyPaths: Array<{ chain: typeof utxoChains[0]; scriptType: string; path: number[] }> = []
+				for (const c of utxoChains) {
+					const scriptTypes = c.id === 'litecoin'
+						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+						: [{ scriptType: c.scriptType || 'p2pkh', purpose: 44 }]
+					for (const st of scriptTypes) {
+						utxoPubKeyPaths.push({
+							chain: c,
+							scriptType: st.scriptType,
+							path: [st.purpose + 0x80000000, c.defaultPath[1], 0x80000000],
+						})
+					}
+				}
 				let xpubResults: any[] = []
 				try {
-					if (utxoChains.length > 0) {
-						xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
-							addressNList: c.defaultPath.slice(0, 3),
-							coin: c.coin,
-							scriptType: c.scriptType,
+					if (utxoPubKeyPaths.length > 0) {
+						xpubResults = await wallet.getPublicKeys(utxoPubKeyPaths.map(p => ({
+							addressNList: p.path,
+							coin: p.chain.coin,
+							scriptType: p.scriptType,
 							curve: 'secp256k1',
 						}))) || []
 					}
@@ -1015,9 +1100,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// 2. Derive non-UTXO addresses (one device call per chain — unavoidable)
 				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
 
-				for (let i = 0; i < utxoChains.length; i++) {
+				for (let i = 0; i < utxoPubKeyPaths.length; i++) {
 					const xpub = xpubResults?.[i]?.xpub
-					if (xpub) pubkeys.push({ caip: utxoChains[i].caip, pubkey: xpub, chainId: utxoChains[i].id, symbol: utxoChains[i].symbol, networkId: utxoChains[i].networkId })
+					const c = utxoPubKeyPaths[i].chain
+					if (xpub) pubkeys.push({ caip: c.caip, pubkey: xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
 				}
 
 				// Initialize EVM multi-address manager
@@ -1252,12 +1338,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
 								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
 							}
-							// Update per-xpub balance in BtcAccountManager + persist to cache
+							// Update per-xpub balance in BtcAccountManager + persist to cache.
+							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							const xpubBal = String(match?.balance ?? '0')
 							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 							continue
 						}
@@ -1350,10 +1437,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}).catch(() => {})
 					}
 
-					// Cache balances (fire-and-forget) — only on successful Pioneer response
+					// Cache balances (fire-and-forget) — only on successful Pioneer response.
+					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					console.warn('[getBalances] Portfolio API failed:', e.message)
@@ -1423,14 +1511,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
 					// displayAddress left empty — UTXO: frontend auto-derives from device
 				} else if (chain.chainFamily === 'utxo') {
-					// Non-BTC UTXO chains (LTC, DOGE, etc.) — single xpub
-					const result = await wallet.getPublicKeys([{
-						addressNList: chain.defaultPath.slice(0, 3),
-						coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
-					}])
-					const xpub = result?.[0]?.xpub || ''
-					if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
-					pubkeys.push({ caip: chain.caip, pubkey: xpub })
+					// Non-BTC UTXO: derive all script-type xpubs (LTC has 3, others have 1)
+					const scriptTypes = chain.id === 'litecoin'
+						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+						: [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+					const paths = scriptTypes.map(st => ({
+						addressNList: [st.purpose + 0x80000000, chain.defaultPath[1], 0x80000000],
+						coin: chain.coin, scriptType: st.scriptType, curve: 'secp256k1',
+					}))
+					const results = await wallet.getPublicKeys(paths)
+					let anyXpub = false
+					for (let i = 0; i < scriptTypes.length; i++) {
+						const xpub = results?.[i]?.xpub
+						if (xpub) { pubkeys.push({ caip: chain.caip, pubkey: xpub }); anyXpub = true }
+					}
+					if (!anyXpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
 				} else if (chain.chainFamily === 'evm') {
 					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
 					if (!evmAddresses.isInitialized) {
@@ -1564,9 +1659,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (isBtc) {
 							const xpubBal = String(match?.balance ?? '0')
 							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
 						} else if (isEvm && usd > 0) {
 							evmAddresses.updateAddressBalance(pk.pubkey, usd)
@@ -1636,10 +1732,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
 				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
 
-				// Update single-chain cache + push to frontend so Dashboard stays in sync
+				// Update single-chain cache + push to frontend so Dashboard stays in sync.
+				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					updateCachedBalance(deviceId, result)
+					if (!engine.isPassphraseWallet) updateCachedBalance(deviceId, result)
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
 				// Push updated EVM per-address balances so address selector stays current
@@ -1665,6 +1762,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const wallet = engine.wallet as any
 				let fromAddress: string | undefined
 				let xpub: string | undefined
+				let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
 				if (chain.chainFamily === 'evm') {
 					// EVM multi-address: use evmAddressIndex or selected index
@@ -1723,13 +1821,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						xpub = xpubResult?.[0]?.xpub
 					}
 				} else {
-					const xpubResult = await wallet.getPublicKeys([{
-						addressNList: chain.defaultPath.slice(0, 3),
+					// Non-BTC UTXO: derive all applicable script-type xpubs so buildUtxoTx
+					// can aggregate UTXOs from any address type (mirrors BTC multi-xpub logic).
+					const scriptTypes = chain.id === 'litecoin'
+						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+						: [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+
+					const coinType = chain.defaultPath[1] // already hardened (0x80000000 + slip44)
+					const pubKeyPaths = scriptTypes.map(st => ({
+						addressNList: [st.purpose + 0x80000000, coinType, 0x80000000],
 						coin: chain.coin,
-						scriptType: chain.scriptType,
+						scriptType: st.scriptType,
 						curve: 'secp256k1',
-					}])
-					xpub = xpubResult?.[0]?.xpub
+					}))
+					const pubKeyResults = await wallet.getPublicKeys(pubKeyPaths)
+
+					const derivedXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+					for (let i = 0; i < scriptTypes.length; i++) {
+						const xp = pubKeyResults?.[i]?.xpub
+						if (xp) {
+							derivedXpubs.push({
+								xpub: xp,
+								scriptType: scriptTypes[i].scriptType,
+								accountPath: pubKeyPaths[i].addressNList,
+							})
+						}
+					}
+					if (derivedXpubs.length > 0) {
+						xpub = derivedXpubs[0].xpub
+						if (derivedXpubs.length > 1) {
+							allXpubs = derivedXpubs
+						}
+					}
 				}
 
 				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
@@ -1787,10 +1910,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				// BTC sends always use the selected xpub — user chose which account to send from.
-				// Multi-xpub aggregation is only for swaps (which show aggregate balance).
-				const allXpubs = undefined
-
 				const result = await buildTx(pioneer, chain, {
 					...params,
 					fromAddress,
@@ -1823,9 +1942,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
 
-				// Track broadcast in api_log + notify frontend
+				// Track broadcast in api_log + notify frontend.
+				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const logEntry: ApiLogEntry = { method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
-				insertApiLog(logEntry)
+				if (!engine.isPassphraseWallet) insertApiLog(logEntry)
 				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
 				return result
@@ -2495,10 +2615,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setBip85Enabled: async (params) => {
-				// BIP-85 requires firmware >= 7.14.0
+				// BIP-85 requires firmware >= 7.15.0
 				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
-					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
+					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
 					return getAppSettings()
 				}
 				bip85Enabled = params.enabled
@@ -2533,6 +2653,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				preReleaseUpdates = params.enabled
 				setSetting('pre_release_updates', params.enabled ? '1' : '0')
 				console.log('[settings] Pre-release updates:', params.enabled)
+				return getAppSettings()
+			},
+			setAlphaFirmware: async (params) => {
+				alphaFirmware = params.enabled
+				setSetting('alpha_firmware', params.enabled ? '1' : '0')
+				console.log('[settings] Alpha firmware channel:', params.enabled)
+				engine.setAlphaFirmware(params.enabled)
+				// Re-derive device state so needs_firmware_update reflects the new channel
+				engine.syncState().catch(e => console.warn('[settings] syncState after alpha toggle failed:', e))
 				return getAppSettings()
 			},
 			// ── Factory Reset ─────────────────────────────────────────
@@ -2612,6 +2741,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── API Audit Log ────────────────────────────────────────
 			getApiLogs: async (params) => {
+				// PRIVACY: Don't expose standard-wallet activity logs during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0)
 			},
 			clearApiLogs: async () => {
@@ -2622,6 +2753,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			generateReport: async () => {
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
+
+				// PRIVACY: Reports read from DB cache, which is intentionally empty
+				// for passphrase wallets. Generating a report would either fail or
+				// create a persistent record of the hidden wallet.
+				if (engine.isPassphraseWallet) {
+					throw new Error('Reports are not available for passphrase-protected wallets. Hidden wallet data is not stored for privacy.')
+				}
 
 				const reportId = `rpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -2713,6 +2851,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			listReports: async () => {
+				// PRIVACY: Don't expose standard-wallet reports during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return []
 				return getReportsList(deviceId)
@@ -2720,18 +2860,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// H1: Scope getReport/deleteReport to the current device
 			getReport: async (params) => {
+				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				return getReportById(params.id, deviceId)
 			},
 
 			deleteReport: async (params) => {
+				if (engine.isPassphraseWallet) return
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				deleteReport(params.id, deviceId)
 			},
 
 			saveReportFile: async (params) => {
+				if (engine.isPassphraseWallet) throw new Error('Reports are not available for passphrase-protected wallets (privacy).')
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
 				const report = getReportById(params.id, deviceId)
@@ -2933,17 +3076,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						fromAsset: params.fromAsset,
 						toAsset: params.toAsset,
 						integration: cachedQuote?.integration || 'thorchain',
-					})
+					}, { skipPersist: engine.isPassphraseWallet })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
 				}
-				// Track swap in api_log
-				const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-				insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
+				if (!engine.isPassphraseWallet) {
+					const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+					insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+				}
 				return result
 			},
 			getPendingSwaps: async () => {
 				if (!swapsEnabled) return []
+				if (engine.isPassphraseWallet) return []
 				const { getPendingSwaps } = await import('./swap-tracker')
 				return getPendingSwaps()
 			},
@@ -2954,6 +3100,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Swap History (SQLite-persisted) ─────────────────────
 			getSwapByTxid: async (params) => {
+				// PRIVACY: Don't expose standard-wallet swap records during hidden sessions.
+				if (engine.isPassphraseWallet) return null
 				const record = getSwapHistoryByTxid(params.txid)
 				if (!record) return null
 				const { inferConfirmationsFromStatus } = await import('./swap-tracker')
@@ -2980,12 +3128,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			getSwapHistory: async (params) => {
+				if (engine.isPassphraseWallet) return []
 				return getSwapHistory(params || undefined)
 			},
 			getSwapHistoryStats: async () => {
+				if (engine.isPassphraseWallet) return { total: 0, completed: 0, failed: 0, pending: 0, totalVolumeUsd: 0 }
 				return getSwapHistoryStats()
 			},
 			exportSwapReport: async (params) => {
+				if (engine.isPassphraseWallet) throw new Error('Swap reports are not available for passphrase-protected wallets (privacy).')
 				const records = getSwapHistory({
 					fromDate: params.fromDate,
 					toDate: params.toDate,
@@ -3014,11 +3165,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
+				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
+				if (engine.isPassphraseWallet) return []
 				return getRecentActivityFromLog(params?.limit || 50, params?.chainId)
 			},
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// PRIVACY: Chain history reads from DB cache + writes to api_log,
+				// both of which are bypassed/risky for passphrase wallets.
+				if (engine.isPassphraseWallet) {
+					throw new Error('Chain history scanning is not available for passphrase-protected wallets (privacy).')
+				}
 
 				// Get the address/xpub for this chain from cached balances
 				// UTXO chains store xpub, account-based chains store address
@@ -3064,6 +3223,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Tx metadata stored in response_body
 					const meta = { confirmations, blockHeight, value, fee, direction }
 
+					// PRIVACY: Skip DB writes for passphrase wallets (defense in depth —
+					// the RPC handler already throws before reaching here).
+					if (engine.isPassphraseWallet) continue
+
 					if (apiLogTxidExists(txid)) {
 						// Update confirmation count on existing entry
 						updateApiLogTxMeta(txid, meta)
@@ -3098,6 +3261,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Balance cache (instant portfolio) ────────────────────
 			getCachedBalances: async () => {
+				// PRIVACY: Hidden wallet sessions must not see standard-wallet cached data.
+				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) { console.log('[cache-health] No deviceId — skipping'); return null }
 				const result = getCachedBalances(deviceId)
@@ -3252,7 +3417,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorInit: async (params) => {
 				const { initEmulator } = await import('./emulator')
-				const status = initEmulator(params?.flashName)
+				const status = initEmulator(params?.flashName, undefined, params?.channel)
 				if (status.state === 'running') {
 					// Open the emulator device window
 					const { openEmulatorWindow } = await import('./emulator-window')
@@ -3276,6 +3441,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorStatus: async () => {
 				const { getEmulatorStatus } = await import('./emulator')
 				return getEmulatorStatus()
+			},
+			emulatorGetChannels: async () => {
+				const { getEmulatorChannels } = await import('./emulator')
+				return getEmulatorChannels()
 			},
 			emulatorDeleteFlash: async (params) => {
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
@@ -3331,8 +3500,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					stopEmulator()
 				}
 
-				// Init with the new flash name (creates flash file on disk)
-				const status = initEmulator(params.name)
+				// Init with the new flash name + channel (creates flash file on disk)
+				const status = initEmulator(params.name, undefined, params.channel)
 				if (status.state !== 'running') return status
 
 				try {
@@ -3383,7 +3552,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					deleteFlash(params.name)
 					deleteMnemonic(params.name)
 
-					// Restore previous emulator if one was running
+					// Restore previous emulator if one was running (channel preserved by selectedChannel)
 					if (prevFlashName) {
 						const restored = initEmulator(prevFlashName)
 						if (restored.state === 'running') {
@@ -3406,8 +3575,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					stopEmulator()
 				}
 
-				// Init with the requested flash name
-				const status = initEmulator(params.name)
+				// Init with the requested flash name + channel
+				const status = initEmulator(params.name, undefined, params.channel)
 				if (status.state !== 'running') return status
 
 				// Open window + connect engine (auto-reloads saved mnemonic)
@@ -3637,16 +3806,15 @@ if (swapsEnabled) {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
-	// Auto-disable 7.14.0+ features if firmware doesn't support them
+	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		const fwTooOld = !fw || versionCompare(fw, '7.14.0') < 0
-		if (fwTooOld && bip85Enabled) {
+		if (bip85Enabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
 			bip85Enabled = false
 			setSetting('bip85_enabled', '0')
-			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
-		if (fwTooOld && zcashPrivacyEnabled) {
+		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.14.0') < 0)) {
 			zcashPrivacyEnabled = false
 			setSetting('zcash_privacy_enabled', '0')
 			stopSidecar()
@@ -3657,14 +3825,17 @@ engine.on('state-change', (state) => {
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
 	if (state.state === 'needs_passphrase') {
+		// Reset in-memory managers so they re-derive after passphrase entry.
 		btcAccounts.reset()
 		evmAddresses.reset()
-		const deviceId = state.deviceId
-		if (deviceId) {
-			clearCachedPubkeys(deviceId)
-			clearBalances(deviceId)
-		}
-		console.log('[Vault] Passphrase mode: cleared address + balance caches — different passphrase = different wallet')
+		// NOTE: We do NOT clear DB caches (clearCachedPubkeys, clearBalances) here.
+		// needs_passphrase fires when the device *requests* a passphrase — before the
+		// user enters it. We don't know yet if this is the standard wallet (empty
+		// passphrase) or a hidden wallet. Clearing DB prematurely destroys the standard
+		// wallet's cache for every passphrase-protected unlock. Instead, the write-time
+		// guards (isPassphraseWallet checks) prevent hidden wallet data from ever
+		// reaching the DB during the session.
+		console.log('[Vault] Passphrase mode: reset in-memory address managers — will re-derive after passphrase entry')
 	}
 })
 // Seed changed — different mnemonic loaded on the same hardware.
@@ -3889,6 +4060,7 @@ loadSettings()
 await applyRestApiState()
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
+engine.setAlphaFirmware(alphaFirmware)
 await engine.start()
 
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
@@ -4060,32 +4232,62 @@ if (typeof process !== 'undefined') {
 // loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
 // This watchdog subprocess monitors liveness via a heartbeat file.
 // If the heartbeat stops for >15s, it sends SIGKILL to this process.
+//
+// PLATFORM: POSIX only. The script uses bash, sleep, cat, date, kill -9, all
+// of which are POSIX shell builtins / coreutils. On Windows the watchdog
+// CANNOT FUNCTION even if a bash binary is available (Git Bash, MSYS, etc.):
+// - kill -9 against a Windows PID is a no-op (no SIGKILL semantics)
+// - the heartbeat staleness math relies on `date +%s` epoch time
+// - process.pid in Bun on Windows is the bun.exe PID, not the parent
+//
+// Worse: when launched from Explorer on Windows, the process inherits an
+// EMPTY PATH, so `Bun.spawn(['bash', ...])` fails with libuv ENOENT (-4058)
+// asynchronously. The error becomes an uncaught exception in the worker
+// thread and kills the entire app right around device pair time, leaving
+// the user staring at a hung splash screen with no diagnostic. This was
+// the root cause of the 1.2.14 Win10 "splash hangs after install" bug —
+// the watchdog spawn was not gated by platform, so every cold launch from
+// the desktop icon crashed before reaching the PIN entry UI.
+//
+// Skip the watchdog entirely on win32. The FFI freeze it guards against
+// is also POSIX-only (kkemu confirm_helper is built only on macOS/Linux).
 const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 
 function startHeartbeatWatchdog() {
+	if (process.platform === 'win32') {
+		console.log('[Vault] Heartbeat watchdog skipped on Windows (POSIX-only — uses bash/kill -9/date)')
+		return
+	}
+
 	// Write heartbeat every 5s — proves the event loop is alive
 	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
 	heartbeatTimer = setInterval(() => {
 		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
 	}, 5000)
 
-	// Spawn a tiny watchdog that kills us if heartbeat goes stale
-	const watchdog = Bun.spawn(['bash', '-c', `
-		while true; do
-			sleep 5
-			if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
-			last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
-			now=$(date +%s)
-			age=$(( now - last / 1000 ))
-			if [ "$age" -gt 15 ]; then
-				kill -9 ${process.pid} 2>/dev/null
-				rm -f "${HEARTBEAT_FILE}"
-				exit 0
-			fi
-		done
-	`], { stdout: 'ignore', stderr: 'ignore' })
-	watchdog.unref()
+	// Spawn a tiny watchdog that kills us if heartbeat goes stale.
+	// Wrap in try/catch as defense-in-depth — if bash is somehow missing on a
+	// non-Windows host, log and continue rather than crashing the whole app.
+	try {
+		const watchdog = Bun.spawn(['bash', '-c', `
+			while true; do
+				sleep 5
+				if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
+				last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+				now=$(date +%s)
+				age=$(( now - last / 1000 ))
+				if [ "$age" -gt 15 ]; then
+					kill -9 ${process.pid} 2>/dev/null
+					rm -f "${HEARTBEAT_FILE}"
+					exit 0
+				fi
+			done
+		`], { stdout: 'ignore', stderr: 'ignore' })
+		watchdog.unref()
+	} catch (err: any) {
+		console.warn(`[Vault] Heartbeat watchdog spawn failed (continuing without it): ${err?.message || err}`)
+	}
 }
 
 function stopHeartbeatWatchdog() {

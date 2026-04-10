@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events'
+import { existsSync, readFileSync } from 'fs'
+import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
@@ -10,6 +12,34 @@ import { EmulatorKeepKeyAdapter } from './emulator-transport'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
+
+/**
+ * Locate firmware-bundle/ — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
+ * firmware-bundle/ lives inside the app bundle at Resources/app/firmware-bundle/ for packaged apps,
+ * or at projects/keepkey-vault/firmware-bundle/ for source-tree dev runs. Walk up from
+ * import.meta.dir checking multiple depths, pick the first that contains releases.json.
+ * Caches the resolved path so we only walk once.
+ */
+let _bundledFirmwareDirCache: string | null = null
+function getBundledFirmwareDir(): string {
+  if (_bundledFirmwareDirCache) return _bundledFirmwareDirCache
+  const candidates: string[] = []
+  for (let depth = 1; depth <= 12; depth++) {
+    candidates.push(path.resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware-bundle'))
+  }
+  candidates.push(path.resolve(process.cwd(), 'firmware-bundle'))
+  candidates.push(path.resolve(process.cwd(), 'projects', 'keepkey-vault', 'firmware-bundle'))
+  for (const dir of candidates) {
+    if (existsSync(path.join(dir, 'releases.json'))) {
+      _bundledFirmwareDirCache = dir
+      console.log(`[Engine] Bundled firmware dir resolved: ${dir}`)
+      return dir
+    }
+  }
+  // Fallback — caller will handle the missing file gracefully
+  console.warn(`[Engine] Could not locate firmware-bundle (tried ${candidates.length} paths from import.meta.dir=${import.meta.dir})`)
+  return candidates[0]
+}
 
 const FALLBACK_FIRMWARE = '7.10.0'
 const FALLBACK_BOOTLOADER = '2.1.4'
@@ -78,9 +108,12 @@ export class EngineController extends EventEmitter {
   private latestFirmware = FALLBACK_FIRMWARE
   private latestBootloader = FALLBACK_BOOTLOADER
   private manifest: FirmwareManifest | null = null
+  private alphaFirmware = false
   private syncing = false
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryCount = 0
+  private static readonly MAX_PAIR_RETRIES = 24 // ~2 minutes at 5s intervals
   private rebootPollTimer: ReturnType<typeof setInterval> | null = null
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
@@ -116,6 +149,8 @@ export class EngineController extends EventEmitter {
     this.cachedFeatures = null
     this.cachedFingerprint = null
     this.seedEthAddress = null
+    this.hiddenWalletActive = false
+    this.passphraseSetThisSession = false
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -183,46 +218,73 @@ export class EngineController extends EventEmitter {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   async start() {
+    // OBSERVABILITY: log every JS↔native transition. The previous version of
+    // this method had no log lines between fetchFirmwareManifest() and
+    // syncState(), which meant a native crash anywhere in that window
+    // (libusb segfault on getDeviceList, attach/detach handler registration
+    // failure, etc.) was invisible — the synchronous log writer makes these
+    // boundaries the actual ground truth for post-mortem.
+    console.log('[Engine] start() begin — registering USB listeners')
+
     // Register USB listeners BEFORE any await — if fetchFirmwareManifest() hangs
     // or takes time, device attach/detach events during that window would be lost.
-    usb.on('attach', (device) => {
-      if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
-      console.log('[Engine] KeepKey USB attached')
-      // During recovery/verify, the device is already paired and the transport
-      // is locked by the cipher session — don't touch state or trigger syncState.
-      if (this.setupInProgress || this.verifyInProgress) return
-      this.updateState('connected_unpaired')
-      setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
-    })
+    try {
+      usb.on('attach', (device) => {
+        if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
+        console.log('[Engine] KeepKey USB attached')
+        // During recovery/verify, the device is already paired and the transport
+        // is locked by the cipher session — don't touch state or trigger syncState.
+        if (this.setupInProgress || this.verifyInProgress) return
+        this.updateState('connected_unpaired')
+        setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
+      })
 
-    usb.on('detach', (device) => {
-      if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
-      console.log('[Engine] KeepKey USB detached')
-      this.clearRetry()
-      // M1 fix: During firmware reboot, device disconnects/reconnects — don't
-      // clear wallet state or emit disconnected (reboot poll handles reconnection)
-      if (this.updatePhase === 'rebooting') {
-        console.log('[Engine] Detach during reboot phase — ignoring (reboot poll active)')
+      usb.on('detach', (device) => {
+        if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
+        console.log('[Engine] KeepKey USB detached')
+        this.clearRetry()
+        // M1 fix: During firmware reboot, device disconnects/reconnects — don't
+        // clear wallet state or emit disconnected (reboot poll handles reconnection)
+        if (this.updatePhase === 'rebooting') {
+          console.log('[Engine] Detach during reboot phase — ignoring (reboot poll active)')
+          this.clearWallet()
+          return
+        }
         this.clearWallet()
-        return
-      }
-      this.clearWallet()
-      this.lastError = null
-      this.updateState('disconnected')
-    })
+        this.lastError = null
+        this.updateState('disconnected')
+      })
+      console.log('[Engine] USB listeners registered')
+    } catch (err: any) {
+      console.error('[Engine] FATAL: failed to register USB listeners:', err?.message || err)
+      throw err
+    }
 
+    console.log('[Engine] calling fetchFirmwareManifest()')
     await this.fetchFirmwareManifest()
+    console.log('[Engine] fetchFirmwareManifest() returned')
 
     // Device may already be plugged in.  If a KeepKey is present, give
     // libusb the same stabilisation window as the hot-plug attach handler
     // before calling pairRawDevice() — without it, the native addon can
     // SIGTRAP on macOS when the device is connected at launch.
-    const alreadyConnected = usb.getDeviceList()
-      .some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    console.log('[Engine] calling usb.getDeviceList() (native)')
+    let alreadyConnected = false
+    try {
+      const list = usb.getDeviceList()
+      console.log(`[Engine] usb.getDeviceList() returned ${list.length} device(s)`)
+      alreadyConnected = list.some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    } catch (err: any) {
+      console.error('[Engine] FATAL: usb.getDeviceList() threw:', err?.message || err)
+      throw err
+    }
+    console.log(`[Engine] alreadyConnected=${alreadyConnected}`)
     if (alreadyConnected) {
       await new Promise(r => setTimeout(r, ATTACH_DELAY_MS))
     }
+    console.log('[Engine] calling syncState()')
     await this.syncState()
+    console.log('[Engine] start() complete')
   }
 
   stop() {
@@ -235,14 +297,33 @@ export class EngineController extends EventEmitter {
   private updateState(state: DeviceState) {
     this.lastState = state
     console.log(`[Engine] State → ${state}`)
+
+    // Reconnect detection: if the device reaches ready with a cached passphrase
+    // but we didn't call sendPassphrase() this session, conservatively assume
+    // hidden wallet BEFORE emitting state-change so getDeviceState() is accurate.
+    // An async probe (probeReconnectPassphraseState) will reclassify to standard
+    // wallet if the derived ETH address matches the stored seed identity.
+    if (state === 'ready' && this.cachedFeatures?.passphraseProtection && this.cachedFeatures?.passphraseCached && !this.passphraseSetThisSession) {
+      this.hiddenWalletActive = true
+      console.log('[Engine] Reconnect with pre-cached passphrase — conservatively assuming hidden wallet (privacy)')
+    }
+
     this.emit('state-change', this.getDeviceState())
 
     // Persist device snapshot for watch-only mode (fire-and-forget).
     // PRIVACY: Skip ALL persistent caching for passphrase wallets — writing
     // addresses, snapshots, or seed identity to disk leaks the hidden wallet.
     if (state === 'ready' && this.cachedFeatures) {
+      // If we detected a reconnect with cached passphrase, probe to see if this
+      // is actually the standard wallet (empty passphrase) by comparing the
+      // derived ETH address against the stored seed identity.
+      if (this.isPassphraseWallet && !this.passphraseSetThisSession) {
+        this.probeReconnectPassphraseState()
+          .catch(err => console.warn('[Engine] Passphrase probe failed (staying conservative):', err?.message))
+      }
+
       if (this.isPassphraseWallet) {
-        console.log('[Engine] Passphrase wallet active — skipping device snapshot, seed identity, and fingerprint cache (privacy)')
+        console.log('[Engine] Hidden wallet active — skipping device snapshot, seed identity (privacy)')
       } else if (this.isEmulator) {
         console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
       } else {
@@ -329,16 +410,163 @@ export class EngineController extends EventEmitter {
   // ── Firmware Manifest ──────────────────────────────────────────────────
 
   private async fetchFirmwareManifest() {
+    // Always load bundled manifest first — guaranteed to exist, ships inside signed DMG.
+    const bundled = this.loadBundledManifest()
+    // Try remote — newer versions may exist between vault releases.
+    let remote: FirmwareManifest | null = null
     try {
       const res = await fetch(MANIFEST_URL, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      this.manifest = await res.json() as FirmwareManifest
-      this.latestFirmware = this.manifest.latest.firmware.version.replace(/^v/, '')
-      this.latestBootloader = this.manifest.latest.bootloader.version.replace(/^v/, '')
-      console.log(`[Engine] Firmware manifest: fw=${this.latestFirmware} bl=${this.latestBootloader}`)
-    } catch (err) {
-      console.warn('[Engine] Failed to fetch firmware manifest, using fallbacks:', err)
+      const parsed = await res.json()
+      if (!this.isValidManifest(parsed)) {
+        throw new Error('remote manifest failed schema validation')
+      }
+      remote = parsed
+    } catch (err: any) {
+      console.warn('[Engine] Remote manifest fetch failed, using bundled only:', err.message)
     }
+
+    console.log('[Engine] fetchFirmwareManifest: calling mergeManifests')
+    this.manifest = this.mergeManifests(bundled, remote)
+    console.log('[Engine] fetchFirmwareManifest: mergeManifests returned, calling applyChannel')
+    this.applyChannel()
+    console.log('[Engine] fetchFirmwareManifest: applyChannel returned, fetchFirmwareManifest complete')
+  }
+
+  /**
+   * Validate a manifest has the minimum required shape. Returns true if valid,
+   * false otherwise. Prevents garbage input from causing downstream crashes.
+   */
+  private isValidManifest(m: any): m is FirmwareManifest {
+    const isEntry = (e: any) => e
+      && typeof e.firmware?.version === 'string'
+      && typeof e.firmware?.url === 'string'
+      && typeof e.firmware?.hash === 'string'
+      && typeof e.bootloader?.version === 'string'
+      && typeof e.bootloader?.url === 'string'
+      && typeof e.bootloader?.hash === 'string'
+    return !!(m && isEntry(m.latest))
+  }
+
+  /** Read the bundled manifest from disk. Returns null if missing or malformed. */
+  private loadBundledManifest(): FirmwareManifest | null {
+    try {
+      const manifestPath = path.join(getBundledFirmwareDir(), 'releases.json')
+      if (!existsSync(manifestPath)) {
+        console.warn(`[Engine] No bundled manifest at ${manifestPath}`)
+        return null
+      }
+      const raw = readFileSync(manifestPath, 'utf8')
+      const parsed = JSON.parse(raw)
+      if (!this.isValidManifest(parsed)) {
+        console.warn('[Engine] Bundled manifest failed schema validation — ignoring')
+        return null
+      }
+      console.log(`[Engine] Loaded bundled manifest: latest=${parsed.latest?.firmware?.version} beta=${parsed.beta?.firmware?.version ?? '(none)'}`)
+      return parsed
+    } catch (err: any) {
+      console.warn('[Engine] Failed to load bundled manifest:', err.message)
+      return null
+    }
+  }
+
+  /**
+   * Merge bundled + remote manifests. For each channel (latest, beta), pick the
+   * entry with the higher version. Hashes are preserved from whichever entry
+   * won — so when we download the binary, it verifies against the matching hash.
+   *
+   * Trust rule: if remote has a strictly newer version, trust the remote hash
+   * for that new binary (we'll verify on download). If bundled has >= version,
+   * trust bundled (it's inside the Apple-signed DMG).
+   */
+  private mergeManifests(bundled: FirmwareManifest | null, remote: FirmwareManifest | null): FirmwareManifest | null {
+    if (!bundled && !remote) return null
+    if (!bundled) return remote
+    if (!remote) return bundled
+
+    const pickNewer = (b: FirmwareManifest['latest'], r: FirmwareManifest['latest']): FirmwareManifest['latest'] => {
+      const bFw = b.firmware.version.replace(/^v/, '')
+      const rFw = r.firmware.version.replace(/^v/, '')
+      return this.versionLessThan(bFw, rFw) ? r : b
+    }
+
+    const merged: FirmwareManifest = {
+      latest: pickNewer(bundled.latest, remote.latest),
+      beta: pickNewer(bundled.beta ?? bundled.latest, remote.beta ?? remote.latest),
+      hashes: {
+        bootloader: { ...(bundled.hashes?.bootloader ?? {}), ...(remote.hashes?.bootloader ?? {}) },
+        firmware: { ...(bundled.hashes?.firmware ?? {}), ...(remote.hashes?.firmware ?? {}) },
+      },
+    }
+
+    console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta.firmware.version}`)
+    return merged
+  }
+
+  /** Return the active channel entry (beta when alpha opt-in, else latest). */
+  private getChannelEntry(): FirmwareManifest['latest'] | null {
+    if (!this.manifest) return null
+    if (this.alphaFirmware && this.manifest.beta) return this.manifest.beta
+    return this.manifest.latest
+  }
+
+  /**
+   * Resolve a manifest URL (relative path) to either a local bundled file or
+   * an HTTPS URL. Bundled files preferred when present (offline + pre-verified
+   * via DMG signature).
+   */
+  private resolveBinarySource(relativeUrl: string): { kind: 'file'; path: string } | { kind: 'http'; url: string } {
+    // Bundled URLs are always relative paths like "v7.14.0/firmware.keepkey.bin"
+    const bundledPath = path.join(getBundledFirmwareDir(), relativeUrl)
+    if (existsSync(bundledPath)) {
+      return { kind: 'file', path: bundledPath }
+    }
+    const httpUrl = new URL(relativeUrl, MANIFEST_URL.replace('releases.json', '')).toString()
+    return { kind: 'http', url: httpUrl }
+  }
+
+  /** Read a binary from bundled file or fetch over HTTPS. */
+  private async loadBinary(relativeUrl: string): Promise<Buffer> {
+    const source = this.resolveBinarySource(relativeUrl)
+    if (source.kind === 'file') {
+      console.log(`[Engine] Loading firmware from bundle: ${relativeUrl}`)
+      return Buffer.from(readFileSync(source.path))
+    }
+    console.log(`[Engine] Downloading firmware: ${source.url}`)
+    const response = await fetch(source.url)
+    if (!response.ok) throw new Error(`Failed to download ${relativeUrl}: ${response.status}`)
+    return Buffer.from(await response.arrayBuffer())
+  }
+
+  /** Recompute latestFirmware/latestBootloader from the manifest + current channel. */
+  private applyChannel() {
+    console.log('[Engine] applyChannel: enter')
+    const channel = this.getChannelEntry()
+    console.log(`[Engine] applyChannel: getChannelEntry returned ${channel ? 'channel' : 'null'}`)
+    if (!channel) {
+      console.warn('[Engine] applyChannel: no channel entry — manifest may be missing latest/beta. Returning early.')
+      return
+    }
+    console.log(`[Engine] applyChannel: channel.firmware.version=${channel.firmware?.version} channel.bootloader.version=${channel.bootloader?.version}`)
+    this.latestFirmware = channel.firmware.version.replace(/^v/, '')
+    this.latestBootloader = channel.bootloader.version.replace(/^v/, '')
+    const channelName = this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest'
+    console.log(`[Engine] Firmware manifest (${channelName}): fw=${this.latestFirmware} bl=${this.latestBootloader}`)
+    // If alpha is on but beta == latest (or beta missing), the toggle has no effect.
+    if (this.alphaFirmware && this.manifest) {
+      const betaFw = this.manifest.beta?.firmware?.version
+      const latestFw = this.manifest.latest?.firmware?.version
+      if (!betaFw || betaFw === latestFw) {
+        console.warn(`[Engine] Alpha firmware ON but beta channel == latest (${latestFw}) — toggle has no effect until beta publishes newer version`)
+      }
+    }
+  }
+
+  /** Toggle alpha firmware channel. Caller should invoke syncState() to refresh device state. */
+  setAlphaFirmware(enabled: boolean) {
+    if (this.alphaFirmware === enabled) return
+    this.alphaFirmware = enabled
+    this.applyChannel()
   }
 
   /**
@@ -411,6 +639,7 @@ export class EngineController extends EventEmitter {
 
       if (result.wallet) {
         this.wallet = result.wallet
+        this.retryCount = 0
         this.attachTransportListeners()
         this.lastError = null
         try {
@@ -477,7 +706,14 @@ export class EngineController extends EventEmitter {
 
   private scheduleRetry() {
     this.clearRetry()
-    console.log(`[Engine] Will retry pairing in ${CLAIMED_RETRY_MS / 1000}s...`)
+    this.retryCount++
+    if (this.retryCount > EngineController.MAX_PAIR_RETRIES) {
+      console.error(`[Engine] Pairing failed after ${this.retryCount} retries (~2 min) — giving up`)
+      this.lastError = 'Could not connect to KeepKey after multiple attempts. Unplug and re-plug the device, or click the logo to retry.'
+      this.updateState('error')
+      return
+    }
+    console.log(`[Engine] Will retry pairing in ${CLAIMED_RETRY_MS / 1000}s... (attempt ${this.retryCount}/${EngineController.MAX_PAIR_RETRIES})`)
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
       this.syncState()
@@ -489,6 +725,19 @@ export class EngineController extends EventEmitter {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+  }
+
+  /** Force a fresh pairing attempt — clears stale state and resets retry counter. */
+  async retryConnect() {
+    console.log('[Engine] Manual retry requested — clearing state and reconnecting')
+    this.clearRetry()
+    this.retryCount = 0
+    this.clearWallet()
+    this.lastError = null
+    this.updateState('disconnected')
+    // Small delay to let USB settle after state reset
+    await new Promise(r => setTimeout(r, 500))
+    await this.syncState()
   }
 
   /**
@@ -578,6 +827,9 @@ export class EngineController extends EventEmitter {
         } catch (err: any) {
           lastError = err?.message || String(err)
           console.warn('[Engine] WebUSB pair failed:', lastError)
+          // Close the raw USB device so its `opened` flag resets — without this,
+          // the next retry sees opened=true and throws "already-connected".
+          try { await webUsbDevice.close() } catch (_) {}
           if (lastError.includes('LIBUSB_ERROR_ACCESS')) {
             console.warn('[Engine] Device claimed by another process, trying HID...')
           }
@@ -897,10 +1149,28 @@ export class EngineController extends EventEmitter {
     // during the featureless gap between detach and re-pair, skipping straight to
     // "Create New Wallet" instead of waiting for bootloader/firmware steps.
     const initialized = features ? (features.initialized ?? false) : true
-    // In bootloader mode, fwVersion is actually the BL version (from extractVersion).
-    // Firmware always needs flashing when device is in bootloader mode.
+
+    // Compute hashes + resolved firmware version up front — needed by both
+    // the state summary and the needsFirmwareUpdate check in bootloader mode.
+    const hashes = features ? this.verifyHashes(features) : {}
+    // In bootloader mode, resolve installed firmware version from on-device hash.
+    // Known official hashes → version string; unknown hash → custom firmware.
+    const resolvedFwVersion = bootloaderMode
+      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
+      : undefined
+    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
+    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
+
+    // In bootloader mode, fwVersion (from extractVersion) is actually the BL version.
+    // Use the hash-resolved firmware version to decide if an update is needed:
+    //   - known hash + version >= latest → already current, no update
+    //   - known hash + version <  latest → update available
+    //   - unknown hash (custom firmware)  → offer update (safe default)
+    //   - no firmware present              → offer update
     const needsFw = bootloaderMode
-      ? true
+      ? (resolvedFwVersion && firmwarePresent
+          ? this.versionLessThan(resolvedFwVersion.replace(/^v/, ''), this.latestFirmware)
+          : true)
       : fwVersion
         ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
         : false
@@ -929,16 +1199,6 @@ export class EngineController extends EventEmitter {
       ? this.versionLessThan(effectiveBlVersion, this.latestBootloader)
       : bootloaderMode
 
-    const hashes = features ? this.verifyHashes(features) : {}
-
-    // In bootloader mode, resolve installed firmware version from on-device hash.
-    // Known official hashes → version string; unknown hash → custom firmware.
-    const resolvedFwVersion = bootloaderMode
-      ? resolveOndeviceFirmwareVersion(hashes.firmwareHash) ?? undefined
-      : undefined
-    // Firmware is "present" if the on-device hash is non-empty (not all zeros)
-    const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
-
     return {
       state: this.lastState,
       activeTransport: this.activeTransport,
@@ -966,6 +1226,7 @@ export class EngineController extends EventEmitter {
       bootloaderVerified: hashes.bootloaderVerified,
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
+      isHiddenWallet: this.hiddenWalletActive,
     }
   }
 
@@ -1007,20 +1268,17 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Starting bootloader update...' })
 
     try {
-      const blUrl = this.manifest
-        ? new URL(this.manifest.latest.bootloader.url, MANIFEST_URL.replace('releases.json', '')).toString()
-        : `https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`
+      const channel = this.getChannelEntry()
+      this.emit('firmware-progress', { percent: 10, message: 'Loading bootloader...' })
+      const firmware = channel
+        ? await this.loadBinary(channel.bootloader.url)
+        : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`)).arrayBuffer())
 
-      this.emit('firmware-progress', { percent: 10, message: 'Downloading bootloader...' })
-      const response = await fetch(blUrl)
-      if (!response.ok) throw new Error(`Failed to download bootloader: ${response.status}`)
-      const firmware = Buffer.from(await response.arrayBuffer())
-
-      // Binary integrity check — compare downloaded file hash against manifest
-      if (this.manifest?.latest?.bootloader?.hash) {
+      // Binary integrity check — compare file hash against manifest
+      if (channel?.bootloader?.hash) {
         const downloadedHash = sha256Hex(firmware)
-        if (downloadedHash !== this.manifest.latest.bootloader.hash) {
-          throw new Error(`Bootloader binary integrity check failed: expected ${this.manifest.latest.bootloader.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== channel.bootloader.hash) {
+          throw new Error(`Bootloader binary integrity check failed: expected ${channel.bootloader.hash}, got ${downloadedHash}`)
         }
         console.log('[Engine] Bootloader binary integrity verified')
       }
@@ -1051,26 +1309,23 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
-      const fwUrl = this.manifest
-        ? new URL(this.manifest.latest.firmware.url, MANIFEST_URL.replace('releases.json', '')).toString()
-        : `https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`
+      const channel = this.getChannelEntry()
+      this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
+      const firmware = channel
+        ? await this.loadBinary(channel.firmware.url)
+        : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`)).arrayBuffer())
 
-      this.emit('firmware-progress', { percent: 10, message: 'Downloading firmware...' })
-      const response = await fetch(fwUrl)
-      if (!response.ok) throw new Error(`Failed to download firmware: ${response.status}`)
-      const firmware = Buffer.from(await response.arrayBuffer())
-
-      // Binary integrity check — compare downloaded file hash against manifest.
+      // Binary integrity check — compare file hash against manifest.
       // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
       // header before hashing — the manifest hash covers only the payload.
-      if (this.manifest?.latest?.firmware?.hash) {
+      if (channel?.firmware?.hash) {
         const hasKpkyHeader = firmware.length >= 256
           && firmware[0] === 0x4B && firmware[1] === 0x50
           && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
         const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
         const downloadedHash = sha256Hex(hashPayload)
-        if (downloadedHash !== this.manifest.latest.firmware.hash) {
-          throw new Error(`Firmware binary integrity check failed: expected ${this.manifest.latest.firmware.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== channel.firmware.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }
@@ -1377,6 +1632,10 @@ export class EngineController extends EventEmitter {
     this.cachedFingerprint = null
     this.seedEthAddress = null
     await this.wallet.sendPassphrase(passphrase)
+    // Only set flags AFTER device accepted the passphrase — if the user
+    // rejects on-device, the await throws and we don't misclassify the session.
+    this.passphraseSetThisSession = true
+    this.hiddenWalletActive = passphrase.length > 0
     // Don't call getFeatures if promptPin's getPublicKeys is still pending —
     // it owns the transport and will refresh features when it completes.
     if (!this.promptPinActive) {
@@ -1532,14 +1791,27 @@ export class EngineController extends EventEmitter {
 
   private cachedFingerprint: string | null = null
 
+  // Tracks whether the user entered a non-empty passphrase this session.
+  // An empty passphrase selects the standard wallet (safe to cache);
+  // a non-empty one selects a hidden wallet (must not cache).
+  private hiddenWalletActive = false
+  // True if sendPassphrase() was called this session (vs reconnect with pre-cached passphrase)
+  private passphraseSetThisSession = false
+
   /**
-   * True when the current session is using a passphrase-derived wallet.
-   * Passphrase wallets MUST NOT have any data persisted to disk (addresses,
+   * True when the current session is using a hidden (non-empty passphrase) wallet.
+   * Hidden wallets MUST NOT have any data persisted to disk (addresses,
    * balances, snapshots, seed identity) — doing so leaks the existence and
    * contents of the hidden wallet.
+   *
+   * Note: an empty passphrase ("") selects the standard wallet and returns false,
+   * even though the firmware still sets passphraseCached=true.
+   *
+   * On reconnect to a device with a pre-cached passphrase (not entered this
+   * session), we conservatively assume hidden wallet since we can't distinguish.
    */
   get isPassphraseWallet(): boolean {
-    return !!(this.cachedFeatures?.passphraseProtection && this.cachedFeatures?.passphraseCached)
+    return this.hiddenWalletActive
   }
 
   async getWalletFingerprint(): Promise<string> {
@@ -1605,6 +1877,76 @@ export class EngineController extends EventEmitter {
       setSetting(key, addr)
     } catch (err: any) {
       console.warn('[Engine] checkSeedIdentity failed:', err?.message)
+    }
+  }
+
+  /**
+   * On reconnect with a pre-cached passphrase, we conservatively assume hidden
+   * wallet. This probe derives the ETH primary address and compares it against
+   * the stored seed identity for this device.
+   *
+   * - Match      → standard wallet (reclassify, re-emit, save snapshot)
+   * - Mismatch   → confirmed hidden wallet (stay conservative)
+   * - No stored  → stay conservative. We CANNOT write anything to disk because
+   *                the device may be in a hidden wallet cached from another app.
+   *                Writing the address or a snapshot would break plausible
+   *                deniability. Recovery: user re-enters passphrase through Vault
+   *                (even empty), which calls sendPassphrase → checkSeedIdentity
+   *                and bootstraps the identity safely.
+   *
+   * Session-safe: captures wallet ref + deviceId before the async call and
+   * verifies both still match afterward to avoid stale-probe mutations.
+   */
+  private async probeReconnectPassphraseState(): Promise<void> {
+    const probeWallet = this.wallet
+    const probeDeviceId = this.cachedFeatures?.deviceId
+    if (!probeWallet || !probeDeviceId) return
+
+    const { getSetting } = await import('./db')
+    const stored = getSetting(`seed_eth_${probeDeviceId}`)?.toLowerCase() || null
+    if (!stored) {
+      // No stored identity — fresh DB or reset. Cannot distinguish empty
+      // passphrase (standard) from non-empty (hidden). Writing ANYTHING to
+      // disk risks breaking plausible deniability for a hidden wallet user
+      // under duress. Stay conservative; user must re-enter passphrase
+      // through Vault to establish identity.
+      console.log('[Engine] No stored seed identity — staying conservative (zero disk trace until passphrase re-entered through Vault)')
+      return
+    }
+
+    let addr: string | undefined
+    try {
+      const result = await (probeWallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+    } catch (err: any) {
+      console.warn('[Engine] Reconnect probe failed — staying conservative:', err?.message)
+      return
+    }
+    if (!addr) return
+
+    // Session guard: if wallet or deviceId changed during the await, discard
+    if (this.wallet !== probeWallet || this.cachedFeatures?.deviceId !== probeDeviceId) {
+      console.log('[Engine] Reconnect probe: session changed during probe — discarding result')
+      return
+    }
+
+    if (addr === stored) {
+      console.log('[Engine] Reconnect probe: ETH address matches stored identity — reclassifying as standard wallet')
+      this.hiddenWalletActive = false
+      this.seedEthAddress = addr
+      this.emit('state-change', this.getDeviceState())
+      // Now safe to run deferred standard-wallet operations
+      try {
+        const label = this.cachedFeatures?.label || ''
+        const fwVer = this.extractVersion(this.cachedFeatures)
+        saveDeviceSnapshot(probeDeviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+      } catch { /* never block on cache failure */ }
+    } else {
+      console.log(`[Engine] Reconnect probe: ETH address differs from stored — confirmed hidden wallet`)
+      this.seedEthAddress = addr
     }
   }
 

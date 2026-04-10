@@ -250,6 +250,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 						<Box
 							key={tab.id}
 							as="button"
+							className="electrobun-webkit-app-region-no-drag"
 							display="flex"
 							flexDirection="column"
 							alignItems="center"

@@ -9,7 +9,12 @@
       "dylib": "7.10.0-alpha/libkkemu.dylib",
       "binary": "7.10.0-alpha/kkemu",
       "debugLink": true,
-      "description": "Alpha emulator with DebugLink — for development and testing"
+      "description": "Alpha — 7.10.0 emulator build (arm64 macOS)",
+      "source": {
+        "repo": "BitHighlander/keepkey-firmware",
+        "ref": "release/7.10.0",
+        "type": "branch"
+      }
     }
   ],
   "default": "7.10.0-alpha"
