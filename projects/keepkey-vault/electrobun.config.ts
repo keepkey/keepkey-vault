@@ -11,7 +11,7 @@ export default {
 		name: "keepkey-vault",
 		identifier: "com.keepkey.vault",
 		version: pkg.version,
-		urlSchemes: ["keepkey"],
+		urlSchemes: ["keepkey", "keepkey-vault"],
 	},
 	build: {
 		buildFolder: "_build",

@@ -4135,19 +4135,21 @@ if (process.platform === 'darwin') {
 	}
 }
 
-// ── keepkey:// Protocol Handler ────────────────────────────────────────
+// ── keepkey:// and keepkey-vault:// Protocol Handler ──────────────────
 let pendingDeepLinkUri: string | null = null
 
 function getWalletConnectUri(inputUri: string): string | undefined {
 	const uri = inputUri
 		.replace('keepkey://launch/wc?uri=', '')
 		.replace('keepkey://wc?uri=', '')
+		.replace('keepkey-vault://launch/wc?uri=', '')
+		.replace('keepkey-vault://wc?uri=', '')
 	if (!uri.startsWith('wc')) return undefined
 	return decodeURIComponent(uri.replace('wc/?uri=', '').replace('wc?uri=', ''))
 }
 
 function handleKeepKeyUrl(url: string) {
-	console.log('[Vault] keepkey:// URL:', url)
+	console.log('[Vault] URL handler:', url)
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
 		if (walletConnectEnabled && engine.wallet) {
