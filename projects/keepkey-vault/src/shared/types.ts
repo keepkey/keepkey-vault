@@ -46,6 +46,16 @@ export interface DeviceStateInfo {
 export interface FirmwareProgress {
   percent: number
   message: string
+  /** Present when the update failed. UI should show retry UX; the app itself stays alive. */
+  error?: string
+}
+
+/** Emitted when the Bun side hits an uncaught error — the UI should show a recovery prompt
+ *  rather than silently staring at a frozen screen. */
+export interface FatalEvent {
+  source: 'uncaught-exception' | 'unhandled-rejection'
+  message: string
+  stack?: string
 }
 
 // Remote firmware manifest (from GitHub)

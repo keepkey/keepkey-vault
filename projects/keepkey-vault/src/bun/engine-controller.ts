@@ -50,6 +50,12 @@ const ATTACH_DELAY_MS = 1500
 const PAIR_TIMEOUT_MS = 10000
 // Retry interval when device is claimed by another app
 const CLAIMED_RETRY_MS = 5000
+// Per-op ceiling for firmwareErase / firmwareUpload. Old bootloaders (e.g.
+// v1.0.3) require a physical button press before accepting the op — the HID
+// read can block until the user confirms. 3 minutes is enough for a first-
+// time user to read the on-device prompt; past that we treat it as a true
+// hang and surface an error instead of letting the UI sit forever.
+const FIRMWARE_OP_TIMEOUT_MS = 180_000
 
 const WORD_COUNT_TO_ENTROPY: Record<number, 128 | 192 | 256> = {
   12: 128, 18: 192, 24: 256,
@@ -1283,11 +1289,11 @@ export class EngineController extends EventEmitter {
         console.log('[Engine] Bootloader binary integrity verified')
       }
 
-      this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })
-      await this.wallet.firmwareErase()
+      this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
+      await withTimeout(this.wallet.firmwareErase(), FIRMWARE_OP_TIMEOUT_MS, 'firmwareErase(bootloader)')
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading bootloader...' })
-      await this.wallet.firmwareUpload(firmware)
+      await withTimeout(this.wallet.firmwareUpload(firmware), FIRMWARE_OP_TIMEOUT_MS, 'firmwareUpload(bootloader)')
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
       this.updatePhase = 'rebooting'
@@ -1298,6 +1304,11 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', {
+        percent: 0,
+        message: 'Bootloader update failed',
+        error: extractErrorMessage(err),
+      })
       throw err
     }
   }
@@ -1330,11 +1341,11 @@ export class EngineController extends EventEmitter {
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }
 
-      this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })
-      await this.wallet.firmwareErase()
+      this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
+      await withTimeout(this.wallet.firmwareErase(), FIRMWARE_OP_TIMEOUT_MS, 'firmwareErase(firmware)')
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
-      await this.wallet.firmwareUpload(firmware)
+      await withTimeout(this.wallet.firmwareUpload(firmware), FIRMWARE_OP_TIMEOUT_MS, 'firmwareUpload(firmware)')
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
       this.updatePhase = 'rebooting'
@@ -1345,6 +1356,11 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', {
+        percent: 0,
+        message: 'Firmware update failed',
+        error: extractErrorMessage(err),
+      })
       throw err
     }
   }
@@ -1984,11 +2000,11 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })
 
     try {
-      this.emit('firmware-progress', { percent: 20, message: 'Erasing current firmware...' })
-      await this.wallet.firmwareErase()
+      this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
+      await withTimeout(this.wallet.firmwareErase(), FIRMWARE_OP_TIMEOUT_MS, 'firmwareErase(custom)')
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
-      await this.wallet.firmwareUpload(data)
+      await withTimeout(this.wallet.firmwareUpload(data), FIRMWARE_OP_TIMEOUT_MS, 'firmwareUpload(custom)')
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
       this.updatePhase = 'rebooting'
@@ -1999,6 +2015,11 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', {
+        percent: 0,
+        message: 'Custom firmware flash failed',
+        error: extractErrorMessage(err),
+      })
       throw err
     }
   }
