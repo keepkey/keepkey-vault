@@ -21,6 +21,7 @@ import * as path from 'path'
 
 const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-emu-heartbeat-${process.pid}`)
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let watchdogProc: ReturnType<typeof Bun.spawn> | null = null
 let started = false
 
 export function startEmulatorWatchdog(): void {
@@ -30,13 +31,11 @@ export function startEmulatorWatchdog(): void {
     return
   }
 
+  // Spawn the killer subprocess FIRST. If this throws, we bail before
+  // arming the heartbeat — otherwise a failed spawn leaves an orphaned
+  // setInterval writing to a file with no killer watching it.
   try {
-    fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
-    heartbeatTimer = setInterval(() => {
-      try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
-    }, 5000)
-
-    const watchdog = Bun.spawn(['bash', '-c', `
+    watchdogProc = Bun.spawn(['bash', '-c', `
       while true; do
         sleep 5
         if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
@@ -50,16 +49,44 @@ export function startEmulatorWatchdog(): void {
         fi
       done
     `], { stdout: 'ignore', stderr: 'ignore' })
-    watchdog.unref()
-    started = true
-    console.log('[EmuWatchdog] Started — will SIGKILL if emulator FFI freezes event loop >15s')
+    watchdogProc.unref()
   } catch (err: any) {
     console.warn(`[EmuWatchdog] Spawn failed (continuing without it): ${err?.message || err}`)
+    watchdogProc = null
+    return
   }
+
+  // Arm the heartbeat. If the initial write fails, tear down the
+  // subprocess we just spawned so we don't strand it.
+  try {
+    fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
+    heartbeatTimer = setInterval(() => {
+      try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
+    }, 5000)
+  } catch (err: any) {
+    console.warn(`[EmuWatchdog] Heartbeat arm failed: ${err?.message || err}`)
+    try { watchdogProc.kill('SIGKILL') } catch {}
+    watchdogProc = null
+    return
+  }
+
+  started = true
+  console.log('[EmuWatchdog] Started — will SIGKILL if emulator FFI freezes event loop >15s')
 }
 
 export function stopEmulatorWatchdog(): void {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+
+  // Kill the subprocess BEFORE unlinking the heartbeat file. Otherwise, in
+  // a rapid stop→start cycle, the old bash could wake from `sleep 5` after
+  // the new start has already recreated HEARTBEAT_FILE — two watchdogs
+  // racing on the same file. SIGKILL ensures the old one is gone before
+  // any new file exists.
+  if (watchdogProc) {
+    try { watchdogProc.kill('SIGKILL') } catch {}
+    watchdogProc = null
+  }
+
   try { fs.unlinkSync(HEARTBEAT_FILE) } catch {}
   started = false
 }

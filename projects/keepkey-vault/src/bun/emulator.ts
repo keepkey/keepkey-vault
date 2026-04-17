@@ -298,7 +298,10 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
     emuError = err.message
     console.error(`${TAG} Failed to init emulator:`, err.message)
 
-    // Cleanup partial init
+    // Cleanup partial init — watchdog first so a half-armed heartbeat
+    // doesn't outlive the init failure.
+    stopEmulatorWatchdog()
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
     if (ffi) { try { ffi.close() } catch {} ; ffi = null }
     if (activeFlash) { zeroFlash(activeFlash); activeFlash = null }
     activeChannel = null
