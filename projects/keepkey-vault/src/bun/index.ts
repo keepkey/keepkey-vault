@@ -4189,10 +4189,8 @@ function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
 
-	// Stop heartbeat — watchdog will SIGKILL us if cleanup takes >15s
-	stopHeartbeatWatchdog()
-
-	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway
+	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway.
+	// stopEmulator() below disarms the emulator-owned watchdog.
 	setTimeout(() => {
 		console.error('[cleanup] Force-exiting after 5s timeout')
 		process.exit(1)
@@ -4227,75 +4225,10 @@ if (typeof process !== 'undefined') {
 	process.on('SIGINT', cleanupAndQuit)
 }
 
-// ── FFI watchdog ──────────────────────────────────────────────────────
-// When kkemu_poll() blocks inside confirm_helper (C busy-loop), the JS event
-// loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
-// This watchdog subprocess monitors liveness via a heartbeat file.
-// If the heartbeat stops for >15s, it sends SIGKILL to this process.
-//
-// PLATFORM: POSIX only. The script uses bash, sleep, cat, date, kill -9, all
-// of which are POSIX shell builtins / coreutils. On Windows the watchdog
-// CANNOT FUNCTION even if a bash binary is available (Git Bash, MSYS, etc.):
-// - kill -9 against a Windows PID is a no-op (no SIGKILL semantics)
-// - the heartbeat staleness math relies on `date +%s` epoch time
-// - process.pid in Bun on Windows is the bun.exe PID, not the parent
-//
-// Worse: when launched from Explorer on Windows, the process inherits an
-// EMPTY PATH, so `Bun.spawn(['bash', ...])` fails with libuv ENOENT (-4058)
-// asynchronously. The error becomes an uncaught exception in the worker
-// thread and kills the entire app right around device pair time, leaving
-// the user staring at a hung splash screen with no diagnostic. This was
-// the root cause of the 1.2.14 Win10 "splash hangs after install" bug —
-// the watchdog spawn was not gated by platform, so every cold launch from
-// the desktop icon crashed before reaching the PIN entry UI.
-//
-// Skip the watchdog entirely on win32. The FFI freeze it guards against
-// is also POSIX-only (kkemu confirm_helper is built only on macOS/Linux).
-const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-
-function startHeartbeatWatchdog() {
-	if (process.platform === 'win32') {
-		console.log('[Vault] Heartbeat watchdog skipped on Windows (POSIX-only — uses bash/kill -9/date)')
-		return
-	}
-
-	// Write heartbeat every 5s — proves the event loop is alive
-	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
-	heartbeatTimer = setInterval(() => {
-		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
-	}, 5000)
-
-	// Spawn a tiny watchdog that kills us if heartbeat goes stale.
-	// Wrap in try/catch as defense-in-depth — if bash is somehow missing on a
-	// non-Windows host, log and continue rather than crashing the whole app.
-	try {
-		const watchdog = Bun.spawn(['bash', '-c', `
-			while true; do
-				sleep 5
-				if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
-				last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
-				now=$(date +%s)
-				age=$(( now - last / 1000 ))
-				if [ "$age" -gt 15 ]; then
-					kill -9 ${process.pid} 2>/dev/null
-					rm -f "${HEARTBEAT_FILE}"
-					exit 0
-				fi
-			done
-		`], { stdout: 'ignore', stderr: 'ignore' })
-		watchdog.unref()
-	} catch (err: any) {
-		console.warn(`[Vault] Heartbeat watchdog spawn failed (continuing without it): ${err?.message || err}`)
-	}
-}
-
-function stopHeartbeatWatchdog() {
-	if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
-	try { fs.unlinkSync(HEARTBEAT_FILE) } catch {}
-}
-
-startHeartbeatWatchdog()
+// Emulator FFI liveness watchdog has moved to ./emulator-watchdog.ts and is
+// now armed/disarmed by emulator.ts on init/stop. It no longer runs for
+// physical-device flows — a slow button press on an old bootloader is a
+// recoverable operation error, not a reason to SIGKILL the whole app.
 
 // ── Start Zcash sidecar only if feature flag is ON ──────────────────
 if (zcashPrivacyEnabled) {

@@ -21,6 +21,7 @@ import {
   loadFlash, saveFlash, zeroFlash, listFlashImages, deleteFlash,
   type EmulatorFlash, type EmulatorPairingStatus,
 } from './emulator-keychain'
+import { startEmulatorWatchdog, stopEmulatorWatchdog } from './emulator-watchdog'
 import type { EmulatorStatus, EmulatorProcessState } from '../shared/types'
 
 const TAG = '[emulator]'
@@ -284,6 +285,11 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
       try { ffi?.symbols.kkemu_poll() } catch {}
     }, 16)
 
+    // 5. Arm the FFI liveness watchdog — kkemu_poll can busy-loop inside
+    // confirm_helper and freeze the event loop. The watchdog is emulator-
+    // scoped; physical device flows stay alive even on slow button presses.
+    startEmulatorWatchdog()
+
     emuState = 'running'
     console.log(`${TAG} Emulator running — firmware ${activeVersion}, channel=${activeChannel}, flash "${flashName}"`)
     return getEmulatorStatus()
@@ -328,6 +334,9 @@ export function stopEmulator(): EmulatorStatus {
   try {
     // Stop poll timer
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+
+    // Disarm the FFI watchdog — no more kkemu_poll calls after this point.
+    stopEmulatorWatchdog()
 
     // Flush firmware storage to flash buffer
     if (ffi) {
