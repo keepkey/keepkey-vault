@@ -4182,7 +4182,7 @@ function handleKeepKeyUrl(url: string) {
 // but open-url is an APPLICATION-level event fired by the native URL handler.
 Electrobun.events.on("open-url", (e: any) => {
 	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
-	if (url.startsWith('keepkey://')) handleKeepKeyUrl(url)
+	if (url.startsWith('keepkey://') || url.startsWith('keepkey-vault://')) handleKeepKeyUrl(url)
 })
 
 // Cleanup and quit helper — shared between window close and app quit
