@@ -317,6 +317,17 @@ function loadSettings() {
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
+
+	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
+	// only work on darwin, and the Settings toggle is hidden on other platforms
+	// (IS_MAC gate in DeviceSettingsDrawer). A copied or migrated DB carrying
+	// emulator_enabled=1 would otherwise re-expose a broken surface on Linux /
+	// Windows with no in-app way for the user to turn it back off.
+	if (emulatorEnabled && process.platform !== 'darwin') {
+		console.warn(`[settings] Forcing emulator_enabled=0 on non-macOS platform (${process.platform})`)
+		emulatorEnabled = false
+		setSetting('emulator_enabled', '0')
+	}
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -2640,20 +2651,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setEmulatorEnabled: async (params) => {
+				// Non-macOS: refuse to enable. The kkemu dylibs + Keychain pairing
+				// are POSIX-only (really macOS-only), so exposing the surface
+				// anywhere else just shows a broken UI.
+				if (params.enabled && process.platform !== 'darwin') {
+					throw new Error('Emulator is only available on macOS')
+				}
 				// When turning the emulator off while it's running, stop it first
-				// so the user doesn't end up with an invisible running emulator and
-				// no UI to control it. Emulator code paths are POSIX-only anyway.
+				// and fail CLOSED — if shutdown doesn't complete, the flag stays
+				// on so the user keeps UI to retry. Hiding a live emulator with
+				// no way out is worse than surfacing a shutdown error.
 				if (!params.enabled && emulatorEnabled) {
-					try {
-						const { getEmulatorStatus, stopEmulator } = await import('./emulator')
-						if (getEmulatorStatus().state === 'running') {
-							const { closeEmulatorWindow } = await import('./emulator-window')
-							closeEmulatorWindow()
-							engine.disconnectEmulator()
-							stopEmulator()
+					const { getEmulatorStatus, stopEmulator } = await import('./emulator')
+					if (getEmulatorStatus().state === 'running') {
+						const { closeEmulatorWindow } = await import('./emulator-window')
+						closeEmulatorWindow()
+						engine.disconnectEmulator()
+						stopEmulator()
+						const after = getEmulatorStatus()
+						if (after.state !== 'stopped') {
+							throw new Error(`Emulator could not be stopped (state=${after.state}); flag unchanged`)
 						}
-					} catch (e: any) {
-						console.warn('[settings] Failed to stop emulator during disable:', e?.message || e)
 					}
 				}
 				emulatorEnabled = params.enabled
