@@ -116,6 +116,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
+  const [applyingLabel, setApplyingLabel] = useState(false)
   const [setupError, setSetupError] = useState<string | null>(null)
   // Seed verification state
   const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'quiz' | 'verifying' | 'success' | 'failed'>('idle')
@@ -661,10 +662,16 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
   const handleApplyLabel = async () => {
     if (deviceLabel.trim()) {
+      setApplyingLabel(true)
       try {
-        await rpcRequest('applySettings', { label: deviceLabel.trim() })
+        // applySettings requires a physical confirmation on the device. Without
+        // user feedback the spinner-less button makes the app look frozen.
+        await rpcRequest('applySettings', { label: deviceLabel.trim() }, 120_000)
       } catch {
-        // Label is optional
+        // Label is optional — proceed regardless so a stuck/declined confirm
+        // doesn't block the rest of onboarding.
+      } finally {
+        setApplyingLabel(false)
       }
     }
     // Offer seed verification for new wallets, skip straight to tips for recovered
@@ -2111,10 +2118,13 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   borderColor="gray.600"
                   color="white"
                   size="md"
+                  px="3"
+                  disabled={applyingLabel}
+                  _disabled={{ opacity: 0.6, cursor: 'not-allowed' }}
                   _hover={{ borderColor: 'gray.500' }}
                   _focus={{ borderColor: 'green.500', boxShadow: '0 0 0 1px green.500' }}
                   onKeyDown={(e: React.KeyboardEvent) => {
-                    if (e.key === 'Enter' && deviceLabel.trim()) {
+                    if (e.key === 'Enter' && deviceLabel.trim() && !applyingLabel) {
                       handleApplyLabel()
                     }
                   }}
@@ -2131,9 +2141,16 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     _active={{ transform: 'scale(0.98)' }}
                     transition="all 0.15s ease"
                     onClick={handleApplyLabel}
-                    disabled={!deviceLabel.trim()}
+                    disabled={!deviceLabel.trim() || applyingLabel}
                   >
-                    {t('initLabel.setDeviceName')}
+                    {applyingLabel ? (
+                      <HStack gap={2}>
+                        <Spinner size="sm" color="black" />
+                        <Text>{t('firmware.confirmOnDevice')}</Text>
+                      </HStack>
+                    ) : (
+                      t('initLabel.setDeviceName')
+                    )}
                   </Button>
                   <Button
                     w="100%"
@@ -2144,6 +2161,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
                     transition="all 0.15s ease"
                     onClick={handleApplyLabel}
+                    disabled={applyingLabel}
                   >
                     {t('initLabel.skipForNow')}
                   </Button>
