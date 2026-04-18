@@ -3,7 +3,13 @@ name: Build KeepKey Vault
 on:
   push:
     branches: [develop, 'release/*']
-    tags: ['v*']
+    # NOTE: deliberately NOT triggering on tag push. action-gh-release creates
+    # the v* tag when it creates the draft release, which used to trigger a
+    # SECOND CI run on the tag ref. That rerun rebuilt the unsigned macOS x64
+    # tar.zst (plus Linux artifacts and SHA256SUMS.txt) and uploaded them with
+    # clobber — destroying the signed tar.zst that sign-release-intel had just
+    # placed. v1.2.16 release hit this and had to be manually repaired.
+    # If you ever need to re-run CI on a tag, use workflow_dispatch.
   pull_request:
     branches: [develop, main]
   workflow_dispatch:
