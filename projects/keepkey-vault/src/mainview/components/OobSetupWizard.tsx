@@ -117,6 +117,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
   const [applyingLabel, setApplyingLabel] = useState(false)
+  // Synchronous in-flight guard. React state updates are async, so
+  // `applyingLabel` alone can't prevent a double-click or Enter+click
+  // within the same event turn from firing two applySettings RPCs.
+  const applyingLabelRef = useRef(false)
   const [setupError, setSetupError] = useState<string | null>(null)
   // Seed verification state
   const [verifyingPhase, setVerifyingPhase] = useState<'idle' | 'quiz' | 'verifying' | 'success' | 'failed'>('idle')
@@ -661,21 +665,30 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
   }
 
   const handleApplyLabel = async () => {
-    if (deviceLabel.trim()) {
-      setApplyingLabel(true)
-      try {
-        // applySettings requires a physical confirmation on the device. Without
-        // user feedback the spinner-less button makes the app look frozen.
-        await rpcRequest('applySettings', { label: deviceLabel.trim() }, 120_000)
-      } catch {
-        // Label is optional — proceed regardless so a stuck/declined confirm
-        // doesn't block the rest of onboarding.
-      } finally {
-        setApplyingLabel(false)
+    // Synchronous guard BEFORE touching state — beats the React async-setter race.
+    if (applyingLabelRef.current) return
+    applyingLabelRef.current = true
+    try {
+      if (deviceLabel.trim()) {
+        setApplyingLabel(true)
+        try {
+          // applySettings requires a physical confirmation on the device.
+          // Pass 0 for no-timeout — the RPC layer treats that as the
+          // device-interactive mode (see rpc.ts:170). A user reading the
+          // on-device prompt shouldn't be auto-skipped by a timer.
+          await rpcRequest('applySettings', { label: deviceLabel.trim() }, 0)
+        } catch {
+          // Label is optional — proceed regardless so a declined/cancelled
+          // confirm doesn't block the rest of onboarding.
+        } finally {
+          setApplyingLabel(false)
+        }
       }
+      // Offer seed verification for new wallets, skip straight to tips for recovered
+      setStep(setupType === 'create' ? 'verify-seed' : 'security-tips')
+    } finally {
+      applyingLabelRef.current = false
     }
-    // Offer seed verification for new wallets, skip straight to tips for recovered
-    setStep(setupType === 'create' ? 'verify-seed' : 'security-tips')
   }
 
   // ── Complete: auto-advance after 5s ────────────────────────────────────
