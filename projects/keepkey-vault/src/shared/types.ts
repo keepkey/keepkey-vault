@@ -372,6 +372,7 @@ export interface AppSettings {
   swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
+  emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
 }

@@ -52,6 +52,7 @@ function App() {
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
+	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
@@ -75,7 +76,7 @@ function App() {
 			.then(setAppVersion)
 			.catch(() => {})
 		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled) })
+			.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
 			.catch(() => {})
 	}, [])
 
@@ -645,6 +646,7 @@ function App() {
 					<DeviceGrid
 						onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
 						onReady={() => setGridReady(true)}
+						emulatorEnabled={emulatorEnabled}
 					/>
 				</SplashScreen>
 			</>
@@ -699,7 +701,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
