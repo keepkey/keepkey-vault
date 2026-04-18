@@ -74,11 +74,21 @@ import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu
 import pkg from "../../package.json"
 
 // ── Global error handlers (MUST be first — prevents silent crashes) ──
+// Register before any top-level-await-capable import can throw; early failures
+// would otherwise die silently. The RPC forwarder is installed later (after
+// defineRPC()) via sendFatal — until then, the UI only gets the console log.
+type FatalSource = 'uncaught-exception' | 'unhandled-rejection'
+let sendFatal: (source: FatalSource, err: unknown) => void = (source, err) => {
+	const msg = (err as any)?.message ?? String(err)
+	console.error(`[Vault] FATAL (${source}) [rpc not ready]: ${msg}`)
+}
 process.on('uncaughtException', (err) => {
 	console.error('[Vault] UNCAUGHT EXCEPTION:', err)
+	try { sendFatal('uncaught-exception', err) } catch {}
 })
 process.on('unhandledRejection', (reason) => {
 	console.error('[Vault] UNHANDLED REJECTION:', reason)
+	try { sendFatal('unhandled-rejection', reason) } catch {}
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
@@ -294,6 +304,7 @@ let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
+let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
 
@@ -303,8 +314,20 @@ function loadSettings() {
 	swapsEnabled = getSetting('swaps_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
+
+	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
+	// only work on darwin, and the Settings toggle is hidden on other platforms
+	// (IS_MAC gate in DeviceSettingsDrawer). A copied or migrated DB carrying
+	// emulator_enabled=1 would otherwise re-expose a broken surface on Linux /
+	// Windows with no in-app way for the user to turn it back off.
+	if (emulatorEnabled && process.platform !== 'darwin') {
+		console.warn(`[settings] Forcing emulator_enabled=0 on non-macOS platform (${process.platform})`)
+		emulatorEnabled = false
+		setSetting('emulator_enabled', '0')
+	}
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -359,6 +382,7 @@ function getAppSettings() {
 		swapsEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
+		emulatorEnabled,
 		preReleaseUpdates,
 		alphaFirmware,
 	}
@@ -2626,6 +2650,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] BIP-85 enabled:', params.enabled)
 				return getAppSettings()
 			},
+			setEmulatorEnabled: async (params) => {
+				// Non-macOS: refuse to enable. The kkemu dylibs + Keychain pairing
+				// are POSIX-only (really macOS-only), so exposing the surface
+				// anywhere else just shows a broken UI.
+				if (params.enabled && process.platform !== 'darwin') {
+					throw new Error('Emulator is only available on macOS')
+				}
+				// When turning the emulator off while it's running, stop it first
+				// and fail CLOSED — if shutdown doesn't complete, the flag stays
+				// on so the user keeps UI to retry. Hiding a live emulator with
+				// no way out is worse than surfacing a shutdown error.
+				if (!params.enabled && emulatorEnabled) {
+					const { getEmulatorStatus, stopEmulator } = await import('./emulator')
+					if (getEmulatorStatus().state === 'running') {
+						const { closeEmulatorWindow } = await import('./emulator-window')
+						closeEmulatorWindow()
+						engine.disconnectEmulator()
+						stopEmulator()
+						const after = getEmulatorStatus()
+						if (after.state !== 'stopped') {
+							throw new Error(`Emulator could not be stopped (state=${after.state}); flag unchanged`)
+						}
+					}
+				}
+				emulatorEnabled = params.enabled
+				setSetting('emulator_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Emulator enabled:', params.enabled)
+				return getAppSettings()
+			},
 			setZcashPrivacyEnabled: async (params) => {
 				// Zcash shielded requires firmware >= 7.14.0
 				const fwVer = engine.getDeviceState().firmwareVersion
@@ -3409,13 +3462,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
 
-			// ── Emulator (macOS only) ────────────────────────────────
+			// ── Emulator (macOS only, feature-flagged off by default) ────
+			// Writes throw when the flag is off so stray UI calls surface clearly.
+			// Reads return a safe stopped/empty state so any UI path that still
+			// polls (e.g. during a toggle transition) renders nothing rather than
+			// a toast-worthy error.
 			emulatorPair: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
 				pairEmulator()
 				return getEmulatorStatus()
 			},
 			emulatorInit: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { initEmulator } = await import('./emulator')
 				const status = initEmulator(params?.flashName, undefined, params?.channel)
 				if (status.state === 'running') {
@@ -3428,6 +3487,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return status
 			},
 			emulatorStop: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { closeEmulatorWindow } = await import('./emulator-window')
 				closeEmulatorWindow()
 				const { stopEmulator } = await import('./emulator')
@@ -3435,18 +3495,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return stopEmulator()
 			},
 			emulatorSave: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { saveEmulatorState } = await import('./emulator')
 				saveEmulatorState()
 			},
 			emulatorStatus: async () => {
+				if (!emulatorEnabled) {
+					return { state: 'stopped' as const, bridgeReady: false, host: 'not loaded', paired: false, platform: process.platform, flashImages: [], storagePath: '' }
+				}
 				const { getEmulatorStatus } = await import('./emulator')
 				return getEmulatorStatus()
 			},
 			emulatorGetChannels: async () => {
+				if (!emulatorEnabled) return []
 				const { getEmulatorChannels } = await import('./emulator')
 				return getEmulatorChannels()
 			},
 			emulatorDeleteFlash: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
 
@@ -3464,6 +3530,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorListWallets: async () => {
+				if (!emulatorEnabled) return []
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
 				const status = getEmulatorStatus()
@@ -3475,6 +3542,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}))
 			},
 			emulatorImportWallet: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				// Sanitize wallet name — prevent path traversal and invisible names
 				const name = params.name.trim()
 				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
@@ -3565,6 +3633,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			emulatorSwitchWallet: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
 
 				// Stop current emulator if running
@@ -3586,9 +3655,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorGetMnemonic: async () => {
+				if (!emulatorEnabled) return null
 				return await engine.getEmulatorMnemonic()
 			},
 			emulatorCreateWallet: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
 
 				const bip39 = require('bip39')
@@ -3783,6 +3854,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		messages: {},
 	},
 })
+
+// Replace the early `sendFatal` stub now that rpc is live. From here on, an
+// uncaught exception or unhandled rejection pushes a typed message to the UI.
+sendFatal = (source, err) => {
+	const e: any = err
+	const message = e?.message ?? String(err)
+	const stack = typeof e?.stack === 'string' ? e.stack : undefined
+	try { rpc.send['fatal']({ source, message, stack }) } catch { /* webview not ready */ }
+}
 
 // Initialize swap tracker with typed RPC message sender (only if swaps feature is ON)
 if (swapsEnabled) {
@@ -4135,19 +4215,21 @@ if (process.platform === 'darwin') {
 	}
 }
 
-// ── keepkey:// Protocol Handler ────────────────────────────────────────
+// ── keepkey:// and keepkey-vault:// Protocol Handler ──────────────────
 let pendingDeepLinkUri: string | null = null
 
 function getWalletConnectUri(inputUri: string): string | undefined {
 	const uri = inputUri
 		.replace('keepkey://launch/wc?uri=', '')
 		.replace('keepkey://wc?uri=', '')
+		.replace('keepkey-vault://launch/wc?uri=', '')
+		.replace('keepkey-vault://wc?uri=', '')
 	if (!uri.startsWith('wc')) return undefined
 	return decodeURIComponent(uri.replace('wc/?uri=', '').replace('wc?uri=', ''))
 }
 
 function handleKeepKeyUrl(url: string) {
-	console.log('[Vault] keepkey:// URL:', url)
+	console.log('[Vault] URL handler:', url)
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
 		if (walletConnectEnabled && engine.wallet) {
@@ -4180,7 +4262,7 @@ function handleKeepKeyUrl(url: string) {
 // but open-url is an APPLICATION-level event fired by the native URL handler.
 Electrobun.events.on("open-url", (e: any) => {
 	const url = typeof e === 'string' ? e : e?.data?.url || e?.url || ''
-	if (url.startsWith('keepkey://')) handleKeepKeyUrl(url)
+	if (url.startsWith('keepkey://') || url.startsWith('keepkey-vault://')) handleKeepKeyUrl(url)
 })
 
 // Cleanup and quit helper — shared between window close and app quit
@@ -4189,10 +4271,8 @@ function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
 
-	// Stop heartbeat — watchdog will SIGKILL us if cleanup takes >15s
-	stopHeartbeatWatchdog()
-
-	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway
+	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway.
+	// stopEmulator() below disarms the emulator-owned watchdog.
 	setTimeout(() => {
 		console.error('[cleanup] Force-exiting after 5s timeout')
 		process.exit(1)
@@ -4227,75 +4307,10 @@ if (typeof process !== 'undefined') {
 	process.on('SIGINT', cleanupAndQuit)
 }
 
-// ── FFI watchdog ──────────────────────────────────────────────────────
-// When kkemu_poll() blocks inside confirm_helper (C busy-loop), the JS event
-// loop is frozen: no setTimeout, no signal handlers, no cleanup can run.
-// This watchdog subprocess monitors liveness via a heartbeat file.
-// If the heartbeat stops for >15s, it sends SIGKILL to this process.
-//
-// PLATFORM: POSIX only. The script uses bash, sleep, cat, date, kill -9, all
-// of which are POSIX shell builtins / coreutils. On Windows the watchdog
-// CANNOT FUNCTION even if a bash binary is available (Git Bash, MSYS, etc.):
-// - kill -9 against a Windows PID is a no-op (no SIGKILL semantics)
-// - the heartbeat staleness math relies on `date +%s` epoch time
-// - process.pid in Bun on Windows is the bun.exe PID, not the parent
-//
-// Worse: when launched from Explorer on Windows, the process inherits an
-// EMPTY PATH, so `Bun.spawn(['bash', ...])` fails with libuv ENOENT (-4058)
-// asynchronously. The error becomes an uncaught exception in the worker
-// thread and kills the entire app right around device pair time, leaving
-// the user staring at a hung splash screen with no diagnostic. This was
-// the root cause of the 1.2.14 Win10 "splash hangs after install" bug —
-// the watchdog spawn was not gated by platform, so every cold launch from
-// the desktop icon crashed before reaching the PIN entry UI.
-//
-// Skip the watchdog entirely on win32. The FFI freeze it guards against
-// is also POSIX-only (kkemu confirm_helper is built only on macOS/Linux).
-const HEARTBEAT_FILE = path.join(os.tmpdir(), `keepkey-vault-heartbeat-${process.pid}`)
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-
-function startHeartbeatWatchdog() {
-	if (process.platform === 'win32') {
-		console.log('[Vault] Heartbeat watchdog skipped on Windows (POSIX-only — uses bash/kill -9/date)')
-		return
-	}
-
-	// Write heartbeat every 5s — proves the event loop is alive
-	fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()))
-	heartbeatTimer = setInterval(() => {
-		try { fs.writeFileSync(HEARTBEAT_FILE, String(Date.now())) } catch {}
-	}, 5000)
-
-	// Spawn a tiny watchdog that kills us if heartbeat goes stale.
-	// Wrap in try/catch as defense-in-depth — if bash is somehow missing on a
-	// non-Windows host, log and continue rather than crashing the whole app.
-	try {
-		const watchdog = Bun.spawn(['bash', '-c', `
-			while true; do
-				sleep 5
-				if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
-				last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
-				now=$(date +%s)
-				age=$(( now - last / 1000 ))
-				if [ "$age" -gt 15 ]; then
-					kill -9 ${process.pid} 2>/dev/null
-					rm -f "${HEARTBEAT_FILE}"
-					exit 0
-				fi
-			done
-		`], { stdout: 'ignore', stderr: 'ignore' })
-		watchdog.unref()
-	} catch (err: any) {
-		console.warn(`[Vault] Heartbeat watchdog spawn failed (continuing without it): ${err?.message || err}`)
-	}
-}
-
-function stopHeartbeatWatchdog() {
-	if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
-	try { fs.unlinkSync(HEARTBEAT_FILE) } catch {}
-}
-
-startHeartbeatWatchdog()
+// Emulator FFI liveness watchdog has moved to ./emulator-watchdog.ts and is
+// now armed/disarmed by emulator.ts on init/stop. It no longer runs for
+// physical-device flows — a slow button press on an old bootloader is a
+// recoverable operation error, not a reason to SIGKILL the whole app.
 
 // ── Start Zcash sidecar only if feature flag is ON ──────────────────
 if (zcashPrivacyEnabled) {

@@ -46,6 +46,16 @@ export interface DeviceStateInfo {
 export interface FirmwareProgress {
   percent: number
   message: string
+  /** Present when the update failed. UI should show retry UX; the app itself stays alive. */
+  error?: string
+}
+
+/** Emitted when the Bun side hits an uncaught error — the UI should show a recovery prompt
+ *  rather than silently staring at a frozen screen. */
+export interface FatalEvent {
+  source: 'uncaught-exception' | 'unhandled-rejection'
+  message: string
+  stack?: string
 }
 
 // Remote firmware manifest (from GitHub)
@@ -362,6 +372,7 @@ export interface AppSettings {
   swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
+  emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
 }

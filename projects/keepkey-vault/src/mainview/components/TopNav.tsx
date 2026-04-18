@@ -285,6 +285,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 						variant="ghost"
 						color={mobileOpen ? "kk.gold" : "kk.textSecondary"}
 						_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+						className="electrobun-webkit-app-region-no-drag"
 					>
 						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
@@ -299,6 +300,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 					variant="ghost"
 					color={settingsOpen ? "kk.gold" : "kk.textSecondary"}
 					_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+					className="electrobun-webkit-app-region-no-drag"
 				>
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<circle cx="12" cy="12" r="3" />
