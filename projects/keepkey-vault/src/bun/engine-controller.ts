@@ -50,12 +50,6 @@ const ATTACH_DELAY_MS = 1500
 const PAIR_TIMEOUT_MS = 10000
 // Retry interval when device is claimed by another app
 const CLAIMED_RETRY_MS = 5000
-// Per-op ceiling for firmwareErase / firmwareUpload. Old bootloaders (e.g.
-// v1.0.3) require a physical button press before accepting the op — the HID
-// read can block until the user confirms. 3 minutes is enough for a first-
-// time user to read the on-device prompt; past that we treat it as a true
-// hang and surface an error instead of letting the UI sit forever.
-const FIRMWARE_OP_TIMEOUT_MS = 180_000
 
 const WORD_COUNT_TO_ENTROPY: Record<number, 128 | 192 | 256> = {
   12: 128, 18: 192, 24: 256,
@@ -1289,11 +1283,18 @@ export class EngineController extends EventEmitter {
         console.log('[Engine] Bootloader binary integrity verified')
       }
 
+      // NOTE: we intentionally do NOT wrap firmwareErase/firmwareUpload in a
+      // JS-level timeout. hdwallet's node-hid transport uses readSync() which
+      // blocks the V8 thread; a setTimeout-based race would only fire if the
+      // event loop were running, and during a button-press stall it isn't.
+      // Real hang protection requires swapping readSync() for the async read
+      // API in hdwallet-keepkey-nodehid — tracked as follow-up. Until then,
+      // unrecoverable hangs are handled via user-initiated reconnect/retry.
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
-      await withTimeout(this.wallet.firmwareErase(), FIRMWARE_OP_TIMEOUT_MS, 'firmwareErase(bootloader)')
+      await this.wallet.firmwareErase()
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading bootloader...' })
-      await withTimeout(this.wallet.firmwareUpload(firmware), FIRMWARE_OP_TIMEOUT_MS, 'firmwareUpload(bootloader)')
+      await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
       this.updatePhase = 'rebooting'
@@ -1341,11 +1342,13 @@ export class EngineController extends EventEmitter {
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }
 
+      // See note in startBootloaderUpdate: no JS timeout can cover a readSync
+      // stall; real fix is async HID reads in hdwallet.
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
-      await withTimeout(this.wallet.firmwareErase(), FIRMWARE_OP_TIMEOUT_MS, 'firmwareErase(firmware)')
+      await this.wallet.firmwareErase()
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
-      await withTimeout(this.wallet.firmwareUpload(firmware), FIRMWARE_OP_TIMEOUT_MS, 'firmwareUpload(firmware)')
+      await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
       this.updatePhase = 'rebooting'
@@ -2000,11 +2003,13 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })
 
     try {
+      // See note in startBootloaderUpdate: no JS timeout can cover a readSync
+      // stall; real fix is async HID reads in hdwallet.
       this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
-      await withTimeout(this.wallet.firmwareErase(), FIRMWARE_OP_TIMEOUT_MS, 'firmwareErase(custom)')
+      await this.wallet.firmwareErase()
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
-      await withTimeout(this.wallet.firmwareUpload(data), FIRMWARE_OP_TIMEOUT_MS, 'firmwareUpload(custom)')
+      await this.wallet.firmwareUpload(data)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
       this.updatePhase = 'rebooting'
