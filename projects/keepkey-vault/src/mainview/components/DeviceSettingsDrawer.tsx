@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest } from "../lib/rpc"
+import { IS_MAC } from "../lib/platform"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
@@ -159,12 +160,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, preReleaseUpdates: false, alphaFirmware: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
+	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
@@ -311,6 +313,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setZcashPrivacyEnabled:", e) }
 		setTogglingZcashPrivacy(false)
+	}, [])
+
+	const toggleEmulator = useCallback(async (enabled: boolean) => {
+		setTogglingEmulator(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setEmulatorEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setEmulatorEnabled:", e) }
+		setTogglingEmulator(false)
 	}, [])
 
 	const togglePreRelease = useCallback(async (enabled: boolean) => {
@@ -1320,6 +1331,32 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Flex>
 								)
 							})()}
+
+							{/* Emulator toggle — macOS-only dev tool, default off */}
+							{IS_MAC && (
+								<Flex justify="space-between" align="center">
+									<Flex align="center" gap="3">
+										<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(168,85,247,0.1)">
+											<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+												<rect x="4" y="2" width="16" height="20" rx="2" />
+												<line x1="8" y1="6" x2="16" y2="6" />
+												<line x1="12" y1="18" x2="12.01" y2="18" />
+											</svg>
+										</Flex>
+										<Box>
+											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Emulator</Text>
+											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+												Run a KeepKey firmware emulator locally for development and testing. macOS only.
+											</Text>
+										</Box>
+									</Flex>
+									<Toggle
+										checked={appSettings.emulatorEnabled}
+										onChange={toggleEmulator}
+										disabled={togglingEmulator}
+									/>
+								</Flex>
+							)}
 						</VStack>
 					</Section>
 

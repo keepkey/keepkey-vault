@@ -304,6 +304,7 @@ let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
+let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
 
@@ -313,6 +314,7 @@ function loadSettings() {
 	swapsEnabled = getSetting('swaps_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
 }
@@ -369,6 +371,7 @@ function getAppSettings() {
 		swapsEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
+		emulatorEnabled,
 		preReleaseUpdates,
 		alphaFirmware,
 	}
@@ -2636,6 +2639,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] BIP-85 enabled:', params.enabled)
 				return getAppSettings()
 			},
+			setEmulatorEnabled: async (params) => {
+				// When turning the emulator off while it's running, stop it first
+				// so the user doesn't end up with an invisible running emulator and
+				// no UI to control it. Emulator code paths are POSIX-only anyway.
+				if (!params.enabled && emulatorEnabled) {
+					try {
+						const { getEmulatorStatus, stopEmulator } = await import('./emulator')
+						if (getEmulatorStatus().state === 'running') {
+							const { closeEmulatorWindow } = await import('./emulator-window')
+							closeEmulatorWindow()
+							engine.disconnectEmulator()
+							stopEmulator()
+						}
+					} catch (e: any) {
+						console.warn('[settings] Failed to stop emulator during disable:', e?.message || e)
+					}
+				}
+				emulatorEnabled = params.enabled
+				setSetting('emulator_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Emulator enabled:', params.enabled)
+				return getAppSettings()
+			},
 			setZcashPrivacyEnabled: async (params) => {
 				// Zcash shielded requires firmware >= 7.14.0
 				const fwVer = engine.getDeviceState().firmwareVersion
@@ -3419,13 +3444,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
 
-			// ── Emulator (macOS only) ────────────────────────────────
+			// ── Emulator (macOS only, feature-flagged off by default) ────
+			// Writes throw when the flag is off so stray UI calls surface clearly.
+			// Reads return a safe stopped/empty state so any UI path that still
+			// polls (e.g. during a toggle transition) renders nothing rather than
+			// a toast-worthy error.
 			emulatorPair: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
 				pairEmulator()
 				return getEmulatorStatus()
 			},
 			emulatorInit: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { initEmulator } = await import('./emulator')
 				const status = initEmulator(params?.flashName, undefined, params?.channel)
 				if (status.state === 'running') {
@@ -3438,6 +3469,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return status
 			},
 			emulatorStop: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { closeEmulatorWindow } = await import('./emulator-window')
 				closeEmulatorWindow()
 				const { stopEmulator } = await import('./emulator')
@@ -3445,18 +3477,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return stopEmulator()
 			},
 			emulatorSave: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { saveEmulatorState } = await import('./emulator')
 				saveEmulatorState()
 			},
 			emulatorStatus: async () => {
+				if (!emulatorEnabled) {
+					return { state: 'stopped' as const, bridgeReady: false, host: 'not loaded', paired: false, platform: process.platform, flashImages: [], storagePath: '' }
+				}
 				const { getEmulatorStatus } = await import('./emulator')
 				return getEmulatorStatus()
 			},
 			emulatorGetChannels: async () => {
+				if (!emulatorEnabled) return []
 				const { getEmulatorChannels } = await import('./emulator')
 				return getEmulatorChannels()
 			},
 			emulatorDeleteFlash: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
 
@@ -3474,6 +3512,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorListWallets: async () => {
+				if (!emulatorEnabled) return []
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
 				const status = getEmulatorStatus()
@@ -3485,6 +3524,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}))
 			},
 			emulatorImportWallet: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				// Sanitize wallet name — prevent path traversal and invisible names
 				const name = params.name.trim()
 				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
@@ -3575,6 +3615,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			emulatorSwitchWallet: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
 
 				// Stop current emulator if running
@@ -3596,9 +3637,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorGetMnemonic: async () => {
+				if (!emulatorEnabled) return null
 				return await engine.getEmulatorMnemonic()
 			},
 			emulatorCreateWallet: async (params) => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
 
 				const bip39 = require('bip39')

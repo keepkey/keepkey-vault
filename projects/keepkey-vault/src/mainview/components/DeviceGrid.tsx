@@ -12,6 +12,8 @@ import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../..
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
 	onReady?: () => void
+	/** When false, no emulator UI is fetched or rendered (feature flag, default off). */
+	emulatorEnabled?: boolean
 }
 
 const REVEAL_DELAY_MS = 2500
@@ -48,7 +50,7 @@ function ChannelPicker({ name, channels, onSelect, onCancel, loading }: {
 }
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
-export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
+export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }: DeviceGridProps) {
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
@@ -72,10 +74,16 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 
 	const refresh = useCallback(async () => {
 		try {
+			// Skip all emulator RPCs when the feature flag is off — keeps the
+			// rendered grid clean of Pair/Add cards and empty wallet tiles.
 			const [devs, status, wallets] = await Promise.all([
 				rpcRequest<RegisteredDevice[]>("getRegisteredDevices", undefined, 5000),
-				rpcRequest<EmulatorStatus>("emulatorStatus", undefined, 5000).catch(() => null),
-				rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 5000).catch(() => [] as EmulatorWalletInfo[]),
+				emulatorEnabled
+					? rpcRequest<EmulatorStatus>("emulatorStatus", undefined, 5000).catch(() => null)
+					: Promise.resolve(null),
+				emulatorEnabled
+					? rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 5000).catch(() => [] as EmulatorWalletInfo[])
+					: Promise.resolve([] as EmulatorWalletInfo[]),
 			])
 			setDevices(devs)
 			if (status) { setEmuStatus(status); setEmuPaired(status.paired) }
@@ -84,17 +92,31 @@ export function DeviceGrid({ onViewPortfolio, onReady }: DeviceGridProps) {
 		} catch (e: any) {
 			setError(e?.message || String(e))
 		}
-	}, [])
+	}, [emulatorEnabled])
 
 	useEffect(() => {
 		refresh()
+		if (!emulatorEnabled) return
 		const unsub = onRpcMessage("emulator-status", (s) => {
 			setEmuStatus(s as EmulatorStatus)
 			rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 5000)
 				.then(setEmuWallets).catch(() => {})
 		})
 		return unsub
-	}, [refresh])
+	}, [refresh, emulatorEnabled])
+
+	// When the flag is flipped off while the grid is mounted, clear any stale
+	// emulator state so the render-site conditionals (emuPaired, emuStatus,
+	// emuWallets.length) all short-circuit cleanly.
+	useEffect(() => {
+		if (!emulatorEnabled) {
+			setEmuStatus(null)
+			setEmuPaired(false)
+			setEmuWallets([])
+			setChannelPicker(null)
+			setConfirmDeleteEmu(null)
+		}
+	}, [emulatorEnabled])
 
 	// ── Handlers ────────────────────────────────────────────────────
 
