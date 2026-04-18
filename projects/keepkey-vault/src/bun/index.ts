@@ -74,11 +74,21 @@ import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu
 import pkg from "../../package.json"
 
 // ── Global error handlers (MUST be first — prevents silent crashes) ──
+// Register before any top-level-await-capable import can throw; early failures
+// would otherwise die silently. The RPC forwarder is installed later (after
+// defineRPC()) via sendFatal — until then, the UI only gets the console log.
+type FatalSource = 'uncaught-exception' | 'unhandled-rejection'
+let sendFatal: (source: FatalSource, err: unknown) => void = (source, err) => {
+	const msg = (err as any)?.message ?? String(err)
+	console.error(`[Vault] FATAL (${source}) [rpc not ready]: ${msg}`)
+}
 process.on('uncaughtException', (err) => {
 	console.error('[Vault] UNCAUGHT EXCEPTION:', err)
+	try { sendFatal('uncaught-exception', err) } catch {}
 })
 process.on('unhandledRejection', (reason) => {
 	console.error('[Vault] UNHANDLED REJECTION:', reason)
+	try { sendFatal('unhandled-rejection', reason) } catch {}
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
@@ -3783,6 +3793,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		messages: {},
 	},
 })
+
+// Replace the early `sendFatal` stub now that rpc is live. From here on, an
+// uncaught exception or unhandled rejection pushes a typed message to the UI.
+sendFatal = (source, err) => {
+	const e: any = err
+	const message = e?.message ?? String(err)
+	const stack = typeof e?.stack === 'string' ? e.stack : undefined
+	try { rpc.send['fatal']({ source, message, stack }) } catch { /* webview not ready */ }
+}
 
 // Initialize swap tracker with typed RPC message sender (only if swaps feature is ON)
 if (swapsEnabled) {

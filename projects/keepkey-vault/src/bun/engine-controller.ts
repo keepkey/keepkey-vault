@@ -1283,7 +1283,14 @@ export class EngineController extends EventEmitter {
         console.log('[Engine] Bootloader binary integrity verified')
       }
 
-      this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })
+      // NOTE: we intentionally do NOT wrap firmwareErase/firmwareUpload in a
+      // JS-level timeout. hdwallet's node-hid transport uses readSync() which
+      // blocks the V8 thread; a setTimeout-based race would only fire if the
+      // event loop were running, and during a button-press stall it isn't.
+      // Real hang protection requires swapping readSync() for the async read
+      // API in hdwallet-keepkey-nodehid — tracked as follow-up. Until then,
+      // unrecoverable hangs are handled via user-initiated reconnect/retry.
+      this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading bootloader...' })
@@ -1298,6 +1305,11 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', {
+        percent: 0,
+        message: 'Bootloader update failed',
+        error: extractErrorMessage(err),
+      })
       throw err
     }
   }
@@ -1330,7 +1342,9 @@ export class EngineController extends EventEmitter {
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
       }
 
-      this.emit('firmware-progress', { percent: 30, message: 'Erasing current firmware...' })
+      // See note in startBootloaderUpdate: no JS timeout can cover a readSync
+      // stall; real fix is async HID reads in hdwallet.
+      this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
@@ -1345,6 +1359,11 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', {
+        percent: 0,
+        message: 'Firmware update failed',
+        error: extractErrorMessage(err),
+      })
       throw err
     }
   }
@@ -1984,7 +2003,9 @@ export class EngineController extends EventEmitter {
     this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })
 
     try {
-      this.emit('firmware-progress', { percent: 20, message: 'Erasing current firmware...' })
+      // See note in startBootloaderUpdate: no JS timeout can cover a readSync
+      // stall; real fix is async HID reads in hdwallet.
+      this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
       this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
@@ -1999,6 +2020,11 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
+      this.emit('firmware-progress', {
+        percent: 0,
+        message: 'Custom firmware flash failed',
+        error: extractErrorMessage(err),
+      })
       throw err
     }
   }
