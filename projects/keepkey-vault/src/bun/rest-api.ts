@@ -18,6 +18,8 @@ import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
 import { getSetting } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
+import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1182,6 +1184,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // Tron: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address
               signingInfo.value = preview.amount
+            } else if (path === '/solana/sign-transaction') {
+              // Solana clear-signing: parse v0/legacy message, resolve ALTs,
+              // decode each instruction via the pioneer-discovery program
+              // registry. Best-effort — a parse/ALT-RPC failure surfaces a
+              // note in the UI rather than blocking the approval flow.
+              if (typeof preview.raw_tx === 'string') {
+                try {
+                  const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
+                  signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
+                    preview.raw_tx,
+                    createRpcAltFetcher(endpoint),
+                  )
+                } catch (e) {
+                  console.warn('[REST] Solana decode failed:', e)
+                }
+              }
             } else {
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to

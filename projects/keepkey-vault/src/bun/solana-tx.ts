@@ -107,3 +107,199 @@ export function solanaMessageSlice(fullTx: Uint8Array, parsed: ParsedSolanaTx): 
   return fullTx.subarray(parsed.messageStart)
 }
 
+// ── Structured message parsing ───────────────────────────────────────
+//
+// These types + `parseSolanaMessage` walk the message bytes produced by
+// `solanaMessageSlice`, turning them into the structured form that the
+// clear-signing decoder, UI, and (future) firmware Insight metadata path
+// all consume.
+//
+// Wire layouts are lifted from the Solana SDK's `Message`/`MessageV0`
+// serialization (see `solana-sdk/sdk/src/message`).
+//
+//     Legacy message = header(3) || accounts(compact-u16 + N*32) ||
+//                      recent_blockhash(32) ||
+//                      instructions(compact-u16 + N * Instruction)
+//
+//     V0 message     = 0x80 || header(3) || accounts(...) ||
+//                      recent_blockhash(32) || instructions(...) ||
+//                      alt_entries(compact-u16 + N * AltEntry)
+//
+//     Instruction = program_id_index(u8) ||
+//                   account_indices(compact-u16 + N * u8) ||
+//                   data(compact-u16 + N * u8)
+//
+//     AltEntry    = account_key(32) ||
+//                   writable_indices(compact-u16 + N * u8) ||
+//                   readonly_indices(compact-u16 + N * u8)
+
+export interface SolanaMessageHeader {
+  /** Total number of signers required by the tx. */
+  numRequiredSignatures: number
+  /** Of those signers, how many are readonly (cannot write state). */
+  numReadonlySignedAccounts: number
+  /** Of the non-signer accounts, how many are readonly. */
+  numReadonlyUnsignedAccounts: number
+}
+
+export interface SolanaInstruction {
+  /** Index into the expanded account list (static + ALT). */
+  programIdIndex: number
+  /** Per-instruction account indices; each indexes into the expanded account list. */
+  accountIndices: number[]
+  /** Raw instruction data bytes (caller decodes per program). */
+  data: Uint8Array
+}
+
+export interface SolanaAltEntry {
+  /** 32-byte Address Lookup Table account pubkey (raw bytes — caller base58-encodes for display). */
+  accountKey: Uint8Array
+  /** Indices into the ALT's address array that should be loaded as writable non-signers. */
+  writableIndices: number[]
+  /** Indices into the ALT's address array that should be loaded as readonly non-signers. */
+  readonlyIndices: number[]
+}
+
+export interface ParsedSolanaMessage {
+  /** Wire version — `legacy` (no prefix) or `v0` (0x80 prefix). */
+  version: 'legacy' | 'v0'
+  header: SolanaMessageHeader
+  /** Raw 32-byte pubkeys of the *static* accounts listed inline in the message. */
+  staticAccounts: Uint8Array[]
+  /** 32-byte recent blockhash. */
+  recentBlockhash: Uint8Array
+  instructions: SolanaInstruction[]
+  /** ALT entries (empty for legacy). */
+  altEntries: SolanaAltEntry[]
+}
+
+/**
+ * Read a Solana compact-u16 (LEB128-style) at `offset`. Returns `[value,
+ * nextOffset]`. Real messages almost always use 1 byte per count, but the
+ * spec allows up to 3 bytes — we handle all three.
+ */
+function readCompactU16(bytes: Uint8Array, offset: number): [number, number] {
+  const b0 = bytes[offset]
+  if (b0 === undefined) throw new SolanaTxParseError('Truncated compact-u16: expected byte 0')
+  if (b0 < 0x80) return [b0, offset + 1]
+  const b1 = bytes[offset + 1]
+  if (b1 === undefined) throw new SolanaTxParseError('Truncated compact-u16: expected byte 1')
+  if (b1 < 0x80) return [(b0 & 0x7f) | (b1 << 7), offset + 2]
+  const b2 = bytes[offset + 2]
+  if (b2 === undefined) throw new SolanaTxParseError('Truncated compact-u16: expected byte 2')
+  return [(b0 & 0x7f) | ((b1 & 0x7f) << 7) | (b2 << 14), offset + 3]
+}
+
+/**
+ * Parse a Solana message (the output of {@link solanaMessageSlice}, or any
+ * standalone message payload) into its structural pieces. Throws
+ * {@link SolanaTxParseError} on any layout inconsistency.
+ */
+export function parseSolanaMessage(bytes: Uint8Array): ParsedSolanaMessage {
+  if (bytes.length < 3) {
+    throw new SolanaTxParseError('Solana message too short for a header')
+  }
+
+  let offset = 0
+  let version: 'legacy' | 'v0' = 'legacy'
+  if ((bytes[0] & 0x80) !== 0) {
+    const ver = bytes[0] & 0x7f
+    if (ver !== 0) {
+      throw new SolanaTxParseError(`Unsupported Solana message version: ${ver}`)
+    }
+    version = 'v0'
+    offset = 1
+  }
+
+  if (bytes.length < offset + 3) {
+    throw new SolanaTxParseError('Solana message truncated before header')
+  }
+  const header: SolanaMessageHeader = {
+    numRequiredSignatures: bytes[offset],
+    numReadonlySignedAccounts: bytes[offset + 1],
+    numReadonlyUnsignedAccounts: bytes[offset + 2],
+  }
+  offset += 3
+
+  // Static accounts
+  let staticCount: number
+  ;[staticCount, offset] = readCompactU16(bytes, offset)
+  if (staticCount < 1 || staticCount > 256) {
+    // Solana's account_keys cap is 256 (accounts indexed by u8).
+    throw new SolanaTxParseError(`Unreasonable static account count: ${staticCount}`)
+  }
+  if (offset + staticCount * 32 > bytes.length) {
+    throw new SolanaTxParseError('Static accounts section exceeds message length')
+  }
+  const staticAccounts: Uint8Array[] = []
+  for (let i = 0; i < staticCount; i++) {
+    staticAccounts.push(bytes.subarray(offset, offset + 32))
+    offset += 32
+  }
+
+  // Recent blockhash (32 bytes)
+  if (offset + 32 > bytes.length) {
+    throw new SolanaTxParseError('Message truncated before recent blockhash')
+  }
+  const recentBlockhash = bytes.subarray(offset, offset + 32)
+  offset += 32
+
+  // Instructions
+  let ixCount: number
+  ;[ixCount, offset] = readCompactU16(bytes, offset)
+  if (ixCount > 64) {
+    throw new SolanaTxParseError(`Unreasonable instruction count: ${ixCount}`)
+  }
+  const instructions: SolanaInstruction[] = []
+  for (let i = 0; i < ixCount; i++) {
+    if (offset + 1 > bytes.length) throw new SolanaTxParseError(`Instruction ${i}: truncated before program_id_index`)
+    const programIdIndex = bytes[offset]
+    offset += 1
+    let acctCount: number
+    ;[acctCount, offset] = readCompactU16(bytes, offset)
+    if (offset + acctCount > bytes.length) throw new SolanaTxParseError(`Instruction ${i}: truncated account indices`)
+    const accountIndices = Array.from(bytes.subarray(offset, offset + acctCount))
+    offset += acctCount
+    let dataLen: number
+    ;[dataLen, offset] = readCompactU16(bytes, offset)
+    if (offset + dataLen > bytes.length) throw new SolanaTxParseError(`Instruction ${i}: truncated data`)
+    const data = bytes.subarray(offset, offset + dataLen)
+    offset += dataLen
+    instructions.push({ programIdIndex, accountIndices, data })
+  }
+
+  // ALT entries (v0 only)
+  const altEntries: SolanaAltEntry[] = []
+  if (version === 'v0') {
+    let altCount: number
+    ;[altCount, offset] = readCompactU16(bytes, offset)
+    if (altCount > 32) {
+      throw new SolanaTxParseError(`Unreasonable ALT count: ${altCount}`)
+    }
+    for (let i = 0; i < altCount; i++) {
+      if (offset + 32 > bytes.length) throw new SolanaTxParseError(`ALT ${i}: truncated account_key`)
+      const accountKey = bytes.subarray(offset, offset + 32)
+      offset += 32
+      let wCount: number
+      ;[wCount, offset] = readCompactU16(bytes, offset)
+      if (offset + wCount > bytes.length) throw new SolanaTxParseError(`ALT ${i}: truncated writable indices`)
+      const writableIndices = Array.from(bytes.subarray(offset, offset + wCount))
+      offset += wCount
+      let rCount: number
+      ;[rCount, offset] = readCompactU16(bytes, offset)
+      if (offset + rCount > bytes.length) throw new SolanaTxParseError(`ALT ${i}: truncated readonly indices`)
+      const readonlyIndices = Array.from(bytes.subarray(offset, offset + rCount))
+      offset += rCount
+      altEntries.push({ accountKey, writableIndices, readonlyIndices })
+    }
+  }
+
+  if (offset !== bytes.length) {
+    throw new SolanaTxParseError(
+      `Trailing ${bytes.length - offset} unparsed byte(s) in Solana message`,
+    )
+  }
+
+  return { version, header, staticAccounts, recentBlockhash, instructions, altEntries }
+}
+
