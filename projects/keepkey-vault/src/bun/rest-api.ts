@@ -17,6 +17,7 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
 import { getSetting } from './db'
+import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1764,33 +1765,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
 
           // Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
-          // Firmware expects just the message bytes. Extract message portion.
-          let deviceRawTx = body.raw_tx
+          // Firmware expects just the message bytes. See solana-tx.ts for the
+          // wire-format contract and malformed-input rejection rules.
           const fullTx = Buffer.from(body.raw_tx, 'base64')
-          let pos = 0, sigCount = 0
-          if (fullTx[0] < 0x80) { sigCount = fullTx[0]; pos = 1 }
-          else if (fullTx.length >= 2 && fullTx[1] < 0x80) {
-            sigCount = (fullTx[0] & 0x7f) | (fullTx[1] << 7); pos = 2
-          } else if (fullTx.length >= 3) {
-            sigCount = (fullTx[0] & 0x7f) | ((fullTx[1] & 0x7f) << 7) | (fullTx[2] << 14); pos = 3
+          let parsed
+          try {
+            parsed = parseSolanaTx(fullTx)
+          } catch (err) {
+            if (err instanceof SolanaTxParseError) throw new HttpError(400, err.message)
+            throw err
           }
-          const messageStart = pos + sigCount * 64
-          if (sigCount > 0 && messageStart < fullTx.length) {
-            deviceRawTx = Buffer.from(fullTx.subarray(messageStart)).toString('base64')
+          // KeepKey firmware currently supports legacy Solana messages only.
+          // Versioned (v0) messages need Address Lookup Table resolution to
+          // be downgraded to a fully-populated legacy message before signing;
+          // reject with a clear 501 so clients don't see firmware's generic
+          // "Malformed Solana transaction" for a capability gap.
+          if (parsed.isVersioned) {
+            throw new HttpError(501, 'Versioned (v0) Solana transactions are not yet supported — ALT resolution required')
           }
+          const deviceRawTx = Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64')
 
           const result = await emuWrap(() => wallet.solanaSignTx({
             addressNList,
             rawTx: deviceRawTx,
           }), { operation: 'solanaSignTx', chain: 'Solana' })
-          // Assemble signed tx: replace dummy 64-byte signature in full tx with real signature
-          if (result?.signature && body.raw_tx) {
+          // Assemble signed tx: write the real signature into the first sig
+          // slot (starts at `parsed.sigStart`, 64 bytes long).
+          if (result?.signature) {
             const rawBytes = Buffer.from(body.raw_tx, 'base64')
             const sigBytes = result.signature instanceof Uint8Array
               ? result.signature
               : Buffer.from(result.signature, 'base64')
-            if (rawBytes.length > 65 && sigBytes.length === 64) {
-              sigBytes.forEach((b: number, i: number) => { rawBytes[1 + i] = b })
+            if (sigBytes.length === 64 && rawBytes.length >= parsed.sigStart + 64) {
+              for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
               return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
             }
           }
