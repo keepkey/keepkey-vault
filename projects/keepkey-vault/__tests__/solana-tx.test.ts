@@ -12,7 +12,7 @@
  * Run: bun test __tests__/solana-tx.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { parseSolanaTx, SolanaTxParseError, MAX_SIGNATURES } from '../src/bun/solana-tx'
+import { parseSolanaTx, SolanaTxParseError, MAX_SIGNATURES, solanaMessageSlice } from '../src/bun/solana-tx'
 
 // ── Fixture builders ──────────────────────────────────────────────────
 
@@ -150,5 +150,68 @@ describe('parseSolanaTx — regression vs original inline parser', () => {
     // miles from the real parse failure. We now throw at the boundary.
     const tx = malformedPrefixFirstTx()
     expect(() => parseSolanaTx(tx)).toThrow(SolanaTxParseError)
+  })
+})
+
+// ── solanaMessageSlice — bytes handed to the signer ───────────────────
+
+describe('solanaMessageSlice', () => {
+  test('legacy: returns message starting with header (first byte is num_required_signatures)', () => {
+    const tx = legacyTx(1)
+    const parsed = parseSolanaTx(tx)
+    const slice = solanaMessageSlice(tx, parsed)
+    // First byte of legacy message is the header's num_required_signatures = 1.
+    expect(slice[0]).toBe(1)
+    // High bit must NOT be set (legacy has no version prefix).
+    expect(slice[0] & 0x80).toBe(0)
+  })
+
+  test('v0: returned slice starts with the 0x80 prefix', () => {
+    const tx = versionedV0Tx(1)
+    const parsed = parseSolanaTx(tx)
+    const slice = solanaMessageSlice(tx, parsed)
+    // The v0 prefix is THE thing that needs to be signed — Solana computes
+    // its signature over exactly these bytes, so dropping the prefix would
+    // produce a sig valid for the legacy-equivalent but NOT the v0 tx.
+    expect(slice[0]).toBe(0x80)
+  })
+
+  test('v0: slice length matches expected message size', () => {
+    const tx = versionedV0Tx(2)
+    const parsed = parseSolanaTx(tx)
+    const slice = solanaMessageSlice(tx, parsed)
+    // Full buffer = 1 (sigCount) + 2*64 (sigs) + N (message)
+    expect(slice.length).toBe(tx.length - parsed.messageStart)
+  })
+})
+
+// ── Regression: signing-path reassembly contract ──────────────────────
+
+describe('signing reassembly — sigStart contract', () => {
+  test('parsed.sigStart points at the first signature byte', () => {
+    const tx = legacyTx(1)
+    const parsed = parseSolanaTx(tx)
+    // Overwrite bytes at sigStart..sigStart+64 with a mock signature, then
+    // verify the first byte after sigStart changed and the tail is intact.
+    const sig = Buffer.alloc(64, 0xab)
+    const out = Buffer.from(tx)
+    for (let i = 0; i < 64; i++) out[parsed.sigStart + i] = sig[i]
+    // First byte after the compact-u16 header is now 0xab.
+    expect(out[parsed.sigStart]).toBe(0xab)
+    expect(out[parsed.sigStart + 63]).toBe(0xab)
+    // Message portion (at parsed.messageStart) is unchanged.
+    expect(out[parsed.messageStart]).toBe(tx[parsed.messageStart])
+  })
+
+  test('v0 tx: writing sig at sigStart preserves the 0x80 prefix in the message', () => {
+    const tx = versionedV0Tx(1)
+    const parsed = parseSolanaTx(tx)
+    const sig = Buffer.alloc(64, 0xcd)
+    const out = Buffer.from(tx)
+    for (let i = 0; i < 64; i++) out[parsed.sigStart + i] = sig[i]
+    // The v0 prefix lives at messageStart (= sigStart + sigCount*64), so
+    // even after signing the message's version byte must survive untouched.
+    expect(out[parsed.messageStart]).toBe(0x80)
+    expect(out[parsed.sigStart]).toBe(0xcd)
   })
 })

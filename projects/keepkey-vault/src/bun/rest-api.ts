@@ -17,7 +17,7 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
 import { getSetting } from './db'
-import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
+import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1775,33 +1775,53 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (err instanceof SolanaTxParseError) throw new HttpError(400, err.message)
             throw err
           }
-          // KeepKey firmware currently supports legacy Solana messages only.
-          // Versioned (v0) messages need Address Lookup Table resolution to
-          // be downgraded to a fully-populated legacy message before signing;
-          // reject with a clear 501 so clients don't see firmware's generic
-          // "Malformed Solana transaction" for a capability gap.
+          // KeepKey firmware message type 752 (SolanaSignTx) parses legacy
+          // messages only. For versioned (v0) messages we route the exact
+          // message bytes — including the 0x80 prefix — through type 754
+          // (SolanaSignMessage), which signs raw bytes with Ed25519 over the
+          // user's Solana key. The resulting 64-byte signature is valid for
+          // the original v0 tx because Solana computes signatures over the
+          // message payload (not the wrapper).
+          //
+          // Trade-off: the device displays a generic "sign message" prompt
+          // rather than a parsed-tx summary. Users must review the resolved
+          // accounts/amounts in the Vault approval dialog. Full on-device
+          // parsing of v0 + ALT display is a firmware-side follow-up.
+          let sigBytes: Uint8Array
           if (parsed.isVersioned) {
-            throw new HttpError(501, 'Versioned (v0) Solana transactions are not yet supported — ALT resolution required')
-          }
-          const deviceRawTx = Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64')
-
-          const result = await emuWrap(() => wallet.solanaSignTx({
-            addressNList,
-            rawTx: deviceRawTx,
-          }), { operation: 'solanaSignTx', chain: 'Solana' })
-          // Assemble signed tx: write the real signature into the first sig
-          // slot (starts at `parsed.sigStart`, 64 bytes long).
-          if (result?.signature) {
-            const rawBytes = Buffer.from(body.raw_tx, 'base64')
-            const sigBytes = result.signature instanceof Uint8Array
+            const messageBytes = solanaMessageSlice(fullTx, parsed)
+            const msgResult = await emuWrap(() => wallet.solanaSignMessage({
+              addressNList,
+              message: Buffer.from(messageBytes).toString('base64'),
+              showDisplay: body.show_display !== false,
+            }), { operation: 'solanaSignMessage', chain: 'Solana' })
+            const sig = msgResult?.signature
+            if (!sig) throw new HttpError(500, 'Solana v0 sign: device returned no signature')
+            sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+          } else {
+            const deviceRawTx = Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64')
+            const result = await emuWrap(() => wallet.solanaSignTx({
+              addressNList,
+              rawTx: deviceRawTx,
+            }), { operation: 'solanaSignTx', chain: 'Solana' })
+            if (!result?.signature) return json(result)
+            sigBytes = result.signature instanceof Uint8Array
               ? result.signature
               : Buffer.from(result.signature, 'base64')
-            if (sigBytes.length === 64 && rawBytes.length >= parsed.sigStart + 64) {
-              for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
-              return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
-            }
           }
-          return json(result)
+
+          // Assemble signed tx: write the real signature into the first sig
+          // slot (starts at `parsed.sigStart`, 64 bytes long). Same layout
+          // for legacy and v0 because the wrapper format is identical.
+          if (sigBytes.length !== 64) {
+            throw new HttpError(500, `Solana sign: unexpected signature length ${sigBytes.length}`)
+          }
+          const rawBytes = Buffer.from(body.raw_tx, 'base64')
+          if (rawBytes.length < parsed.sigStart + 64) {
+            throw new HttpError(500, 'Solana sign: raw tx too short to hold signature')
+          }
+          for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
+          return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
         }
 
         // ── SOLANA MESSAGE SIGNING (firmware type 754) ──────────────────

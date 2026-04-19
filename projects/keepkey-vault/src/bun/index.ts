@@ -93,7 +93,7 @@ process.on('unhandledRejection', (reason) => {
 
 import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, clearFeaturesCache, type RestApiCallbacks } from "./rest-api"
-import { parseSolanaTx, SolanaTxParseError } from "./solana-tx"
+import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
@@ -951,60 +951,67 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.debug(`[solanaSignTx] RPC call received`)
 
 				// Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
-				// Firmware expects just the message bytes for parsing and signing.
 				// See solana-tx.ts for the wire-format contract + malformed-input rejection rules.
-				let deviceParams = params
-				let parsed: ReturnType<typeof parseSolanaTx> | null = null
-				if (params.rawTx) {
-					const fullTx = Buffer.from(
-						typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
-						'base64',
-					)
-					try {
-						parsed = parseSolanaTx(fullTx)
-					} catch (err) {
-						if (err instanceof SolanaTxParseError) throw new Error(`[solanaSignTx] ${err.message}`)
-						throw err
-					}
-					// KeepKey firmware supports legacy Solana messages only. Versioned
-					// (v0) messages need Address Lookup Table resolution — reject
-					// upfront so callers see a clear capability error rather than
-					// firmware's generic "Malformed Solana transaction" (code 3).
-					if (parsed.isVersioned) {
-						throw new Error('[solanaSignTx] Versioned (v0) Solana transactions are not yet supported — ALT resolution required')
-					}
-					const messageBytes = fullTx.subarray(parsed.messageStart)
-					deviceParams = { ...params, rawTx: Buffer.from(messageBytes).toString('base64') }
-					console.debug(`[solanaSignTx] fullTx=${fullTx.length}B sigCount=${parsed.sigCount} messageStart=${parsed.messageStart} (stripped ${parsed.sigCount} dummy sigs, ${messageBytes.length}B msg)`)
+				if (!params.rawTx) {
+					throw new Error('[solanaSignTx] rawTx is required')
+				}
+				const fullTx = Buffer.from(
+					typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
+					'base64',
+				)
+				let parsed
+				try {
+					parsed = parseSolanaTx(fullTx)
+				} catch (err) {
+					if (err instanceof SolanaTxParseError) throw new Error(`[solanaSignTx] ${err.message}`)
+					throw err
 				}
 
-				console.debug(`[solanaSignTx] Calling hdwallet.solanaSignTx`)
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.solanaSignTx(deviceParams), { operation: 'solanaSignTx', chain: 'Solana' })
-					: await engine.wallet.solanaSignTx(deviceParams)
-
-				console.debug(`[solanaSignTx] hdwallet result: hasSig=${!!result?.signature} sigLen=${result?.signature?.length || 0}`)
-
-				// Assemble signed tx: write the real signature into the first sig
-				// slot (starts at `parsed.sigStart`, 64 bytes long).
-				if (result?.signature && params.rawTx && parsed) {
-					const rawBytes = Buffer.from(
-						typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
-						'base64',
-					)
-					const sigBytes = result.signature instanceof Uint8Array
+				// KeepKey firmware message type 752 (SolanaSignTx) parses legacy
+				// messages only. Versioned (v0) messages are signed via type
+				// 754 (SolanaSignMessage) over the exact message bytes — the
+				// 0x80 prefix and v0 payload are preserved, producing an
+				// Ed25519 signature valid for the original v0 transaction.
+				// The device shows a generic "sign message" prompt; users
+				// review the parsed tx in the Vault approval dialog.
+				let sigBytes: Uint8Array
+				if (parsed.isVersioned) {
+					const messageBytes = solanaMessageSlice(fullTx, parsed)
+					console.debug(`[solanaSignTx] v0 tx detected — routing through solanaSignMessage (${messageBytes.length}B message incl. 0x80 prefix)`)
+					const msgRes = engine.isEmulator
+						? await emuSigningOp(() => engine.wallet!.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true }), { operation: 'solanaSignMessage', chain: 'Solana' })
+						: await engine.wallet.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true })
+					const sig = msgRes?.signature
+					if (!sig) throw new Error('[solanaSignTx] v0: device returned no signature')
+					sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+				} else {
+					const deviceParams = {
+						...params,
+						rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
+					}
+					console.debug(`[solanaSignTx] legacy — fullTx=${fullTx.length}B sigCount=${parsed.sigCount} messageStart=${parsed.messageStart}`)
+					const result = engine.isEmulator
+						? await emuSigningOp(() => engine.wallet!.solanaSignTx(deviceParams), { operation: 'solanaSignTx', chain: 'Solana' })
+						: await engine.wallet.solanaSignTx(deviceParams)
+					if (!result?.signature) return result
+					sigBytes = result.signature instanceof Uint8Array
 						? result.signature
 						: Buffer.from(result.signature, 'base64')
-					if (sigBytes.length === 64 && rawBytes.length >= parsed.sigStart + 64) {
-						for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
-						const assembled = rawBytes.toString('base64')
-						console.debug(`[solanaSignTx] Assembled signed tx: ${rawBytes.length}B`)
-						return { signature: result.signature, serializedTx: assembled }
-					} else {
-						console.debug(`[solanaSignTx] Cannot assemble: rawBytes=${rawBytes.length}B sigBytes=${sigBytes.length}B sigStart=${parsed.sigStart}`)
-					}
 				}
-				return result
+
+				// Assemble signed tx: write sig into the first sig slot
+				// (starts at `parsed.sigStart`, 64 bytes).
+				if (sigBytes.length !== 64) {
+					throw new Error(`[solanaSignTx] Unexpected signature length ${sigBytes.length}`)
+				}
+				const rawBytes = Buffer.from(fullTx)
+				if (rawBytes.length < parsed.sigStart + 64) {
+					throw new Error('[solanaSignTx] Raw tx too short to hold signature')
+				}
+				for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
+				const assembled = rawBytes.toString('base64')
+				console.debug(`[solanaSignTx] Assembled signed tx: ${rawBytes.length}B (versioned=${parsed.isVersioned})`)
+				return { signature: sigBytes, serializedTx: assembled }
 			},
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
