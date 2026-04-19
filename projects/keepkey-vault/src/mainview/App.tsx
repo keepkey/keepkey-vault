@@ -80,6 +80,29 @@ function App() {
 			.catch(() => {})
 	}, [])
 
+	// ── REST API UI-active handshake ─────────────────────────────────
+	// The Bun process refuses to serve pubkeys/addresses on port 1646 unless
+	// the Vault UI signals it's open + heartbeats regularly. `viewDeviceId`
+	// scopes serving to the device the user currently has open, so a
+	// 3rd-party request can never get xpubs from a device the user isn't
+	// actively viewing (incl. watch-only mode which uses the cached device).
+	useEffect(() => {
+		const viewDeviceId = watchOnlyMode ? (watchOnlyDeviceId ?? null) : (deviceState.deviceId ?? null)
+		rpcRequest("uiSetActive", { active: true, viewDeviceId }).catch(() => {})
+		const heartbeat = setInterval(() => {
+			rpcRequest("uiHeartbeat", { viewDeviceId }).catch(() => {})
+		}, 15_000)
+		const beforeUnload = () => {
+			try { rpcRequest("uiSetActive", { active: false, viewDeviceId: null }).catch(() => {}) } catch { /* ignore */ }
+		}
+		window.addEventListener("beforeunload", beforeUnload)
+		return () => {
+			clearInterval(heartbeat)
+			window.removeEventListener("beforeunload", beforeUnload)
+			rpcRequest("uiSetActive", { active: false, viewDeviceId: null }).catch(() => {})
+		}
+	}, [deviceState.deviceId, watchOnlyMode, watchOnlyDeviceId])
+
 	// Reset dismiss when update phase transitions to available or ready
 	useEffect(() => {
 		if (update.phase === "available" || update.phase === "ready") {
