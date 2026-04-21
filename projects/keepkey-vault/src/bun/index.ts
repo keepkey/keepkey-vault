@@ -93,6 +93,7 @@ process.on('unhandledRejection', (reason) => {
 
 import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, clearFeaturesCache, type RestApiCallbacks } from "./rest-api"
+import { parseSolanaTx, SolanaTxParseError } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
@@ -951,34 +952,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
 				// Firmware expects just the message bytes for parsing and signing.
-				// Extract message portion before sending to device.
+				// See solana-tx.ts for the wire-format contract + malformed-input rejection rules.
 				let deviceParams = params
+				let parsed: ReturnType<typeof parseSolanaTx> | null = null
 				if (params.rawTx) {
 					const fullTx = Buffer.from(
 						typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
 						'base64',
 					)
-					// Read compact-u16 signature count
-					let pos = 0
-					let sigCount = 0
-					if (fullTx[0] < 0x80) {
-						sigCount = fullTx[0]; pos = 1
-					} else if (fullTx.length >= 2 && fullTx[1] < 0x80) {
-						sigCount = (fullTx[0] & 0x7f) | (fullTx[1] << 7); pos = 2
-					} else if (fullTx.length >= 3) {
-						sigCount = (fullTx[0] & 0x7f) | ((fullTx[1] & 0x7f) << 7) | (fullTx[2] << 14); pos = 3
+					try {
+						parsed = parseSolanaTx(fullTx)
+					} catch (err) {
+						if (err instanceof SolanaTxParseError) throw new Error(`[solanaSignTx] ${err.message}`)
+						throw err
 					}
-					// Solana transactions have at most ~20 signers; reject clearly malformed data
-					if (sigCount > 127) {
-						throw new Error(`[solanaSignTx] Unreasonable signature count (${sigCount}) — malformed transaction`)
+					// KeepKey firmware supports legacy Solana messages only. Versioned
+					// (v0) messages need Address Lookup Table resolution — reject
+					// upfront so callers see a clear capability error rather than
+					// firmware's generic "Malformed Solana transaction" (code 3).
+					if (parsed.isVersioned) {
+						throw new Error('[solanaSignTx] Versioned (v0) Solana transactions are not yet supported — ALT resolution required')
 					}
-					const messageStart = pos + sigCount * 64
-					console.debug(`[solanaSignTx] fullTx=${fullTx.length}B sigCount=${sigCount} messageStart=${messageStart}`)
-					if (sigCount > 0 && messageStart < fullTx.length) {
-						const messageBytes = fullTx.subarray(messageStart)
-						deviceParams = { ...params, rawTx: Buffer.from(messageBytes).toString('base64') }
-						console.debug(`[solanaSignTx] Extracted message: ${messageBytes.length}B (stripped ${sigCount} dummy sigs)`)
-					}
+					const messageBytes = fullTx.subarray(parsed.messageStart)
+					deviceParams = { ...params, rawTx: Buffer.from(messageBytes).toString('base64') }
+					console.debug(`[solanaSignTx] fullTx=${fullTx.length}B sigCount=${parsed.sigCount} messageStart=${parsed.messageStart} (stripped ${parsed.sigCount} dummy sigs, ${messageBytes.length}B msg)`)
 				}
 
 				console.debug(`[solanaSignTx] Calling hdwallet.solanaSignTx`)
@@ -988,8 +985,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				console.debug(`[solanaSignTx] hdwallet result: hasSig=${!!result?.signature} sigLen=${result?.signature?.length || 0}`)
 
-				// Assemble signed tx: replace the 64-byte dummy signature in rawTx with real signature
-				if (result?.signature && params.rawTx) {
+				// Assemble signed tx: write the real signature into the first sig
+				// slot (starts at `parsed.sigStart`, 64 bytes long).
+				if (result?.signature && params.rawTx && parsed) {
 					const rawBytes = Buffer.from(
 						typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
 						'base64',
@@ -997,15 +995,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const sigBytes = result.signature instanceof Uint8Array
 						? result.signature
 						: Buffer.from(result.signature, 'base64')
-					// Full tx format: [1 byte sig_count] [64 bytes dummy sig] [message...]
-					// Replace bytes 1-64 with real signature
-					if (rawBytes.length > 65 && sigBytes.length === 64) {
-						sigBytes.forEach((b: number, i: number) => { rawBytes[1 + i] = b })
+					if (sigBytes.length === 64 && rawBytes.length >= parsed.sigStart + 64) {
+						for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
 						const assembled = rawBytes.toString('base64')
 						console.debug(`[solanaSignTx] Assembled signed tx: ${rawBytes.length}B`)
 						return { signature: result.signature, serializedTx: assembled }
 					} else {
-						console.debug(`[solanaSignTx] Cannot assemble: rawBytes=${rawBytes.length}B sigBytes=${sigBytes.length}B`)
+						console.debug(`[solanaSignTx] Cannot assemble: rawBytes=${rawBytes.length}B sigBytes=${sigBytes.length}B sigStart=${parsed.sigStart}`)
 					}
 				}
 				return result
