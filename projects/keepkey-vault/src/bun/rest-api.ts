@@ -927,18 +927,26 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // leaking signatures, transaction data, or typed-data content to audit log.
         if (callbacks?.onApiLog) {
           const { appName, imageUrl } = resolveAppInfo()
-          const SENSITIVE_KEYS = new Set([
-            'signature', 'serialized', 'serializedTx', 'signedTx', 'signed',
-            'typedData', 'message', 'rawTx', 'hex', 'data', 'signedPayload',
-            'msgs', 'memo', 'tx', 'txBytes', 'signDoc', 'authInfoBytes', 'bodyBytes',
+          // Audit logs are stored locally (SQLite) on the user's own machine,
+          // so the signing *inputs* (message, typedData, calldata, etc.) must
+          // be preserved verbatim — they're the exact thing a user needs to
+          // replay when debugging "what did I just sign?". Redacting them
+          // would defeat the audit log's primary purpose.
+          //
+          // The signed *outputs* (signature blob, serialized tx) are already
+          // returned to the dApp in the response body and don't add debug
+          // value when duplicated in the log, so we still trim those to keep
+          // log rows compact.
+          const SENSITIVE_OUTPUT_KEYS = new Set([
+            'signature', 'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
           ])
-          const sanitize = (obj: any, depth = 0): any => {
+          const trimOutputs = (obj: any, depth = 0): any => {
             if (!obj || typeof obj !== 'object' || depth > 8) return obj
-            if (Array.isArray(obj)) return obj.map(v => sanitize(v, depth + 1))
+            if (Array.isArray(obj)) return obj.map(v => trimOutputs(v, depth + 1))
             const out: any = {}
             for (const [k, v] of Object.entries(obj)) {
-              if (SENSITIVE_KEYS.has(k)) { out[k] = '[REDACTED]'; continue }
-              out[k] = (v && typeof v === 'object') ? sanitize(v, depth + 1) : v
+              if (SENSITIVE_OUTPUT_KEYS.has(k)) { out[k] = '[trimmed]'; continue }
+              out[k] = (v && typeof v === 'object') ? trimOutputs(v, depth + 1) : v
             }
             return out
           }
@@ -947,8 +955,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             method, route: path, timestamp: requestStart,
             durationMs: Date.now() - requestStart,
             status, appName, imageUrl: imageUrl || undefined,
-            requestBody: isSigning ? sanitize(reqBody) : reqBody,
-            responseBody: isSigning ? sanitize(data) : data,
+            // Request body kept as-is so the user can see what they signed.
+            requestBody: reqBody,
+            // Response body trims large signature blobs but leaves everything else.
+            responseBody: isSigning ? trimOutputs(data) : data,
             ...resolvedActivity,
           })
         }
@@ -1156,6 +1166,54 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (method === 'POST' && SIGNING_ROUTES.has(path) && callbacks?.onSigningRequest) {
           auth.requireAuth(req)
+
+          // Pre-approval payload validation. Some clients (and our own
+          // discovery code) POST `{}` to signing endpoints to probe which
+          // methods the wallet supports. Without this short-circuit every
+          // probe pops an approval dialog with nothing to sign, which spams
+          // the user and hides the real request. Reject empties with 400
+          // before the approval flow runs.
+          //
+          // We look for *any* payload field that indicates this is a real
+          // signing attempt. The permissive "has any of these keys" check
+          // is intentional — the per-chain handlers below will run the
+          // full schema validation, we just need to avoid gating on empty.
+          let probeCheckBody: any
+          try {
+            probeCheckBody = await req.clone().json()
+          } catch {
+            probeCheckBody = null
+          }
+          const REQUIRED_ANY: Record<string, string[]> = {
+            '/solana/sign-transaction': ['raw_tx', 'rawTx'],
+            '/solana/sign-message':     ['message'],
+            '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
+            '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
+            '/eth/sign-transaction':    ['to', 'data', 'value', 'nonce'],
+            '/eth/sign-typed-data':     ['typedData'],
+            '/eth/sign':                ['message'],
+            '/utxo/sign-transaction':   ['inputs', 'outputs'],
+            '/xrp/sign-transaction':    ['tx', 'Destination', 'Amount'],
+            '/cosmos/sign-amino':       ['signDoc', 'tx'],
+            '/thorchain/sign-amino-transfer': ['signDoc', 'tx'],
+            '/thorchain/sign-amino-deposit':  ['signDoc', 'tx'],
+            '/mayachain/sign-amino-transfer': ['signDoc', 'tx'],
+            '/mayachain/sign-amino-deposit':  ['signDoc', 'tx'],
+            '/osmosis/sign-amino':      ['signDoc', 'tx'],
+          }
+          const requiredAny = REQUIRED_ANY[path]
+          if (requiredAny && (!probeCheckBody || typeof probeCheckBody !== 'object')) {
+            console.warn(`[REST] ${path} probe rejected: body is not an object`)
+            return json({ error: 'Empty or invalid signing payload' }, 400)
+          }
+          if (requiredAny && !requiredAny.some((k) => probeCheckBody[k] !== undefined)) {
+            console.warn(
+              `[REST] ${path} probe rejected: missing all of`, requiredAny,
+              'keys seen:', Object.keys(probeCheckBody || {}),
+            )
+            return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
+          }
+
           const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()
           const signingInfo: SigningRequestInfo = { id, method: path, appName }
@@ -1175,6 +1233,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.chainId = preview.typedData?.domain?.chainId ? Number(preview.typedData.domain.chainId) : undefined
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
+              }
+            } else if (path === '/eth/sign') {
+              // EIP-191 personal_sign: body is { address, addressNList, message }.
+              // Message arrives as a hex string per JSON-RPC spec; in practice it
+              // nearly always encodes UTF-8 text (SIWE, dApp login challenges).
+              // Decode to plaintext so the user sees what they're actually
+              // signing — raw hex alone is useless for consent.
+              signingInfo.from = preview.address
+              const raw = typeof preview.message === 'string' ? preview.message : ''
+              let text: string | undefined
+              let isUtf8Text = false
+              if (raw) {
+                const hexMatch = /^0x([0-9a-fA-F]*)$/.exec(raw)
+                if (hexMatch) {
+                  try {
+                    const buf = Buffer.from(hexMatch[1], 'hex')
+                    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+                    text = decoded
+                    isUtf8Text = true
+                  } catch {
+                    // Not valid UTF-8 — leave `text` undefined; UI will show hex.
+                  }
+                } else {
+                  // Already a plaintext string (non-spec clients).
+                  text = raw
+                  isUtf8Text = true
+                }
+              }
+              signingInfo.ethMessageDecoded = {
+                address: preview.address,
+                messageRaw: raw,
+                messageText: text,
+                isUtf8Text,
               }
             } else if (path === '/ton/sign-transaction') {
               // TON: field names differ from EVM (to_address, amount, raw_tx)
@@ -1198,9 +1289,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                     createRpcAltFetcher(endpoint),
                   )
                 } catch (e: any) {
-                  const msg = e?.message || String(e)
-                  console.warn('[REST] Solana decode failed:', e)
-                  signingInfo.solanaDecodeError = msg
+                  const errName = e?.name || 'Error'
+                  const errMsg = e?.message || String(e)
+                  // Surface error with type prefix so the UI banner shows a
+                  // useful diagnostic ("SolanaTxParseError: ..." vs "TypeError:
+                  // fetch failed") instead of a bare string.
+                  signingInfo.solanaDecodeError = `${errName}: ${errMsg}`
+                  // Full stack + raw tx goes to the vault log so we can
+                  // reproduce the failure locally — don't ship raw bytes to
+                  // the UI, but *do* leave a breadcrumb in the console.
+                  console.warn(
+                    '[REST] Solana decode failed:', errName, errMsg,
+                    '\n  raw_tx (base64):', preview.raw_tx,
+                    '\n  stack:', e?.stack,
+                  )
                 }
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
