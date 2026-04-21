@@ -16,6 +16,10 @@ import type {
   SolanaSignTxParams,
   TronSignTxParams,
   TonSignTxParams,
+  TonBuildTransferParams,
+  TonBuildTransferResult,
+  TonFinalizeTransferParams,
+  TonFinalizeTransferResult,
   GetPublicKeyRequest,
   BatchPubkeysPath,
   ApplySettingsParams,
@@ -472,6 +476,25 @@ export class KeepKeySdk {
     /** Sign a TON transaction. `raw_tx` must be the base64- or hex-encoded raw transaction. */
     tonSignTransaction: (params: TonSignTxParams): Promise<SignedTx> =>
       this.client.post('/ton/sign-transaction', params),
+
+    /**
+     * Build an unsigned TON v4R2 transfer. Fetches seqno and wallet
+     * state from TonCenter, constructs the body cell, and returns the
+     * 32-byte body hash the device should sign — the client never
+     * touches BOC/Cell internals. Echo the returned `build` object back
+     * to `tonFinalizeTransfer` after signing.
+     */
+    tonBuildTransfer: (params: TonBuildTransferParams): Promise<TonBuildTransferResult> =>
+      this.client.post('/ton/build-transfer', params),
+
+    /**
+     * Finalize a signed TON transfer: assembles the external message
+     * BOC from the prior `build` + the device's Ed25519 signature, then
+     * broadcasts via TonCenter. Pass `broadcast: false` to skip the
+     * broadcast and inspect/retry manually.
+     */
+    tonFinalizeTransfer: (params: TonFinalizeTransferParams): Promise<TonFinalizeTransferResult> =>
+      this.client.post('/ton/finalize-transfer', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════

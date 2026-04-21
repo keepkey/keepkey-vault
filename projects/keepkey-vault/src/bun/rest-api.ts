@@ -20,6 +20,14 @@ import { getSetting } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
+import {
+  buildTonTransfer,
+  assembleTonSignedBoc,
+  getTonSeqno,
+  getTonWalletState,
+  broadcastTonBoc,
+  type TonBuildResult,
+} from './txbuilder/ton'
 
 export interface EmuSigningDetails {
   operation: string
@@ -2034,6 +2042,124 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }), { operation: 'tonSignTx', chain: 'TON' })
           if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
           return json(result)
+        }
+
+        // ── TON BUILD + FINALIZE (2 endpoints) ────────────────────────
+        // Exposes the local v4R2 BOC builder so thin clients (browser
+        // extension, mobile) don't have to embed a TON lib + toncenter
+        // plumbing just to construct a transfer. The existing desktop
+        // flow in txbuilder/index.ts already uses the same helpers —
+        // these endpoints are a thin REST shell around them.
+        if (path === '/ton/build-transfer' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.TonBuildTransferRequest)
+
+          // Seqno + wallet-state fetch fails independently; run in parallel
+          // so the caller eats one RTT rather than two, and surface both
+          // errors via a single diagnostic when the network's down.
+          let seqno: number
+          let walletState: { initialized: boolean; balance: string }
+          try {
+            ;[seqno, walletState] = await Promise.all([
+              getTonSeqno(body.fromAddress),
+              getTonWalletState(body.fromAddress),
+            ])
+          } catch (e: any) {
+            throw Object.assign(
+              new Error(`TON network error — cannot determine wallet state: ${e.message}`),
+              { statusCode: 502 },
+            )
+          }
+
+          const needsDeploy = !walletState.initialized
+          if (needsDeploy && !body.publicKeyHex) {
+            // Firmware needs the pubkey to derive the v4R2 contract data
+            // cell for StateInit — without it, the first-ever tx from a
+            // fresh address can't be constructed. Make the failure loud
+            // rather than silently producing an un-broadcastable tx.
+            throw Object.assign(
+              new Error('TON wallet not initialized — publicKeyHex required for first-time deployment'),
+              { statusCode: 400 },
+            )
+          }
+
+          // 5-minute validity window. The hardware wallet confirmation UI
+          // can take 30s+ for a careful user, and the v4R2 wallet
+          // contract rejects messages past expireAt — anything tighter
+          // than ~2 min risks a "expired" failure after the user already
+          // confirmed on the device.
+          const expireAt = Math.floor(Date.now() / 1000) + 300
+
+          const build = buildTonTransfer({
+            fromAddress: body.fromAddress,
+            to: body.toAddress,
+            amountNano: body.amountNano,
+            memo: body.memo,
+            seqno,
+            expireAt,
+            needsDeploy,
+            publicKeyHex: body.publicKeyHex,
+          })
+
+          return json({
+            build,
+            // Convenience fields the client would otherwise have to pluck
+            // off `build` — flatten the ones most callers need.
+            bodyHash: build.bodyHash,
+            rawTx: build.rawTx,
+            seqno: build.seqno,
+            expireAt: build.expireAt,
+            needsDeploy: build.needsDeploy,
+            // Approximate fees for the UI. Clear-signing makes the exact
+            // figure visible on-device; this is just so the send screen
+            // can surface an estimate before the user commits.
+            feeEstimate: needsDeploy ? '0.01' : '0.005',
+          })
+        }
+
+        if (path === '/ton/finalize-transfer' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.TonFinalizeTransferRequest)
+
+          // Signature is 64 bytes Ed25519. Hex validation in the schema
+          // catches length mismatches before they bubble into the
+          // assembler as a cryptic BitWriter error.
+          const sigBuf = Buffer.from(body.signature, 'hex')
+          if (sigBuf.length !== 64) {
+            throw Object.assign(new Error('signature must decode to 64 bytes'), { statusCode: 400 })
+          }
+
+          const buildResult = body.build as unknown as TonBuildResult
+          if (!buildResult?._internal) {
+            throw Object.assign(
+              new Error('build._internal missing — pass the full object returned by /ton/build-transfer'),
+              { statusCode: 400 },
+            )
+          }
+
+          const { boc, extMsgHash } = assembleTonSignedBoc(buildResult, sigBuf)
+
+          // broadcast=false lets a caller handle the broadcast elsewhere
+          // (offline signing, pre-flight BOC inspection, etc.). Default
+          // true because the common path is build → sign → broadcast in
+          // one user action.
+          const broadcast = body.broadcast !== false
+          if (!broadcast) {
+            return json({ boc, txid: extMsgHash, broadcasted: false })
+          }
+
+          try {
+            await broadcastTonBoc(boc)
+          } catch (e: any) {
+            // Surface the BOC and the txid even on broadcast failure so
+            // the caller can retry broadcast without re-signing.
+            throw Object.assign(
+              new Error(`TON broadcast failed (boc preserved in error payload): ${e.message}`),
+              { statusCode: 502, details: { boc, txid: extMsgHash } },
+            )
+          }
+
+          return json({ boc, txid: extMsgHash, broadcasted: true })
         }
 
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────

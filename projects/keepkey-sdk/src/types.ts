@@ -158,6 +158,72 @@ export interface TonSignTxParams {
   raw_tx: string  // base64 or hex encoded raw transaction
 }
 
+// ── TON build/finalize helpers ─────────────────────────────────────
+// These wrap the vault's local v4R2 BOC builder so thin clients
+// (browser extension, mobile) can issue a TON transfer without
+// embedding a TON lib + toncenter plumbing. Build returns the
+// unsigned body hash the device signs; finalize reassembles the
+// signed BOC and (by default) broadcasts to TonCenter.
+
+export interface TonBuildTransferParams {
+  fromAddress: string
+  toAddress: string
+  /** Transfer amount in nanoTON, as a decimal string (BigInt-compatible). */
+  amountNano: string
+  memo?: string
+  /** Ed25519 public key hex — only needed for first-time activation. */
+  publicKeyHex?: string
+}
+
+/**
+ * Opaque internal state carried between /ton/build-transfer and
+ * /ton/finalize-transfer. Callers should echo this back verbatim;
+ * they don't need to inspect it.
+ */
+export interface TonBuildResult {
+  bodyHash: string
+  rawTx: string
+  seqno: number
+  expireAt: number
+  toAddress: string
+  amountNano: string
+  needsDeploy: boolean
+  publicKeyHex?: string
+  _internal: {
+    destWorkchain: number
+    destHash: string
+    fromWorkchain: number
+    fromHash: string
+    amountNano: string
+    bounce: boolean
+    memo?: string
+  }
+}
+
+export interface TonBuildTransferResult {
+  build: TonBuildResult
+  bodyHash: string
+  rawTx: string
+  seqno: number
+  expireAt: number
+  needsDeploy: boolean
+  feeEstimate: string
+}
+
+export interface TonFinalizeTransferParams {
+  build: TonBuildResult
+  /** 64-byte Ed25519 signature, hex-encoded (128 chars). */
+  signature: string
+  /** Default true. When false, vault returns the signed BOC without broadcasting. */
+  broadcast?: boolean
+}
+
+export interface TonFinalizeTransferResult {
+  boc: string
+  txid: string
+  broadcasted: boolean
+}
+
 // ── Public Key Types ────────────────────────────────────────────────
 export interface GetPublicKeyRequest {
   address_n: number[]
