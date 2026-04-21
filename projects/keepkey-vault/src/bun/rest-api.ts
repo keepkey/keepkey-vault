@@ -23,6 +23,7 @@ import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import {
   buildTonTransfer,
   assembleTonSignedBoc,
+  computeTonBodyHash,
   getTonSeqno,
   getTonWalletState,
   broadcastTonBoc,
@@ -2136,6 +2137,35 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               { statusCode: 400 },
             )
           }
+          if (typeof buildResult.bodyHash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(buildResult.bodyHash)) {
+            throw Object.assign(
+              new Error('build.bodyHash missing or not 32-byte hex'),
+              { statusCode: 400 },
+            )
+          }
+
+          // Detect a client that mutated _internal (amount, destination,
+          // memo, seqno, expireAt) after the device already signed the
+          // original bodyHash. Without this, broadcast=false would return
+          // a structurally-valid BOC that carries a signature over different
+          // bytes than what it now encodes — the caller can't tell the tx
+          // is doomed until TonCenter rejects it (or worse, with a collision,
+          // never).
+          let recomputedHash: string
+          try {
+            recomputedHash = computeTonBodyHash(buildResult)
+          } catch (e: any) {
+            throw Object.assign(
+              new Error(`build object malformed — cannot reconstruct unsigned body: ${e.message}`),
+              { statusCode: 400 },
+            )
+          }
+          if (recomputedHash !== buildResult.bodyHash.toLowerCase()) {
+            throw Object.assign(
+              new Error('build tampered — _internal state does not match bodyHash'),
+              { statusCode: 400 },
+            )
+          }
 
           const { boc, extMsgHash } = assembleTonSignedBoc(buildResult, sigBuf)
 
@@ -2634,8 +2664,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return json({ error: 'Not found', path }, 404)
 
       } catch (err: any) {
-        if (err.status) {
-          return json({ error: err.message }, err.status)
+        // Handlers can throw with either `status` or `statusCode` — accept both
+        // so the advertised 400/502 on typed endpoints (e.g. /ton/*) isn't
+        // silently flattened to 500. `details` carries structured recovery
+        // data (e.g. { boc, txid } on TON broadcast failure) that the client
+        // needs to retry without re-signing.
+        const httpStatus = typeof err?.status === 'number'
+          ? err.status
+          : typeof err?.statusCode === 'number'
+            ? err.statusCode
+            : undefined
+        if (httpStatus) {
+          const payload: Record<string, unknown> = { error: err.message }
+          if (err.details && typeof err.details === 'object') payload.details = err.details
+          return json(payload, httpStatus)
         }
         // Extract firmware Failure message if present (hdwallet wraps them)
         const fwMsg = err?.message?.message || err?.message || 'Internal error'

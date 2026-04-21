@@ -609,6 +609,42 @@ export function buildTonTransfer(params: {
   }
 }
 
+/**
+ * Recompute the unsigned body hash from a build result. Used by
+ * /ton/finalize-transfer to detect clients that mutated _internal (amount,
+ * destination, memo, seqno, expireAt) after the device already signed the
+ * original bodyHash. Without this check, a tampered build would assemble
+ * into a BOC with a valid-looking structure but an invalid signature — the
+ * caller gets back a "successful" response that silently fails at broadcast.
+ *
+ * Throws on malformed _internal (bad hex, out-of-range BigInt, etc.) so the
+ * caller can surface a 400 instead of a cryptic assembler error.
+ */
+export function computeTonBodyHash(build: TonBuildResult): string {
+  const int = build?._internal
+  if (!int) throw new Error('build._internal missing')
+  if (typeof int.destHash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(int.destHash)) {
+    throw new Error('build._internal.destHash must be 32-byte hex')
+  }
+  if (typeof int.amountNano !== 'string' || int.amountNano.length === 0) {
+    throw new Error('build._internal.amountNano must be a decimal string')
+  }
+  if (!Number.isInteger(int.destWorkchain)) {
+    throw new Error('build._internal.destWorkchain must be an integer')
+  }
+  if (!Number.isInteger(build.seqno) || build.seqno < 0) {
+    throw new Error('build.seqno must be a non-negative integer')
+  }
+  if (!Number.isInteger(build.expireAt) || build.expireAt < 0) {
+    throw new Error('build.expireAt must be a non-negative integer')
+  }
+  const destHash = Buffer.from(int.destHash, 'hex')
+  const amountNano = BigInt(int.amountNano) // throws on malformed
+  const internalMsg = buildInternalMessage(int.destWorkchain, destHash, amountNano, !!int.bounce, int.memo)
+  const unsignedBody = buildUnsignedBody(build.seqno, build.expireAt, internalMsg)
+  return cellHash(unsignedBody).toString('hex')
+}
+
 /** Assemble the signed BOC from build result + 64-byte Ed25519 signature → { boc, extMsgHash } */
 export function assembleTonSignedBoc(
   buildResult: TonBuildResult,
