@@ -3,7 +3,7 @@ import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
-import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo } from "../../../shared/types"
+import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo } from "../../../shared/types"
 import { versionCompare } from "../../../shared/firmware-versions"
 
 interface SigningApprovalProps {
@@ -342,6 +342,65 @@ function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t:
 	)
 }
 
+// ── EIP-191 personal_sign section ─────────────────────────────────────
+//
+// /eth/sign receives a hex-encoded message. The wire format is opaque —
+// showing raw hex alone means the user can't meaningfully consent to what
+// they're signing. This section renders the UTF-8 decoding prominently
+// (it's almost always a SIWE login challenge or similar text) and keeps
+// the raw hex as a collapsed fallback for hash verification.
+function EthMessageSection({ decoded, t }: {
+	decoded: EthMessageDecodedInfo; t: (k: string, f?: string) => string
+}) {
+	const [showHex, setShowHex] = useState(!decoded.isUtf8Text)
+	return (
+		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
+			<Flex gap="2" align="center">
+				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
+					{t("signing.ethPersonalSign", "Message to Sign")}
+				</Text>
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+					EIP-191
+				</Text>
+			</Flex>
+			<Row label="Signer" value={decoded.address} />
+			{decoded.isUtf8Text && decoded.messageText !== undefined ? (
+				<Box
+					bg="rgba(0,0,0,0.35)" borderRadius="lg"
+					p="2" maxH="240px" overflowY="auto"
+				>
+					<Text fontSize="xs" color="kk.textPrimary" whiteSpace="pre-wrap" wordBreak="break-word">
+						{decoded.messageText}
+					</Text>
+				</Box>
+			) : (
+				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
+					{t(
+						"signing.ethMessageNotUtf8",
+						"Message is not valid UTF-8 — shown below as raw hex. Verify byte-for-byte before approving.",
+					)}
+				</Text>
+			)}
+			<Flex
+				as="button" justify="space-between" align="center"
+				onClick={() => setShowHex((s) => !s)} cursor="pointer"
+				fontSize="2xs" color="kk.textMuted" py="1"
+				_hover={{ color: "kk.textSecondary" }}
+			>
+				<Text fontSize="2xs">{t("signing.ethMessageHex", "Raw hex")}</Text>
+				<Text fontSize="2xs">{showHex ? "▲" : "▼"}</Text>
+			</Flex>
+			{showHex && (
+				<Box bg="rgba(0,0,0,0.35)" borderRadius="lg" p="2" maxH="200px" overflowY="auto">
+					<Text fontSize="2xs" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
+						{decoded.messageRaw || "(empty)"}
+					</Text>
+				</Box>
+			)}
+		</VStack>
+	)
+}
+
 // ── Typed data section ────────────────────────────────────────────────
 
 function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: string, f?: string) => string }) {
@@ -406,7 +465,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		request.method === '/solana/sign-message' ||
 		request.chain === 'solana'
 	const isSimpleTransfer =
-		!hasCalldata && !request.typedDataDecoded && !isSolanaRequest
+		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !isSolanaRequest
 	const blindSigningWarning = fwSupportsBlindSignGate && request.needsBlindSigning && !advancedModeEnabled
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
@@ -529,7 +588,17 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						</Flex>
 					</Flex>
 					<Flex align="center" gap="2">
-						{!isSimpleTransfer && (
+						{/*
+						  The TrustBadge communicates contract-level trust (verified
+						  source, known selector, etc.). EIP-191 personal_sign has
+						  no contract to vouch for, so showing a "Verified Contract"
+						  / "Signed & Verified" badge there is misleading — the user
+						  might think the *message* has been audited when nothing of
+						  the sort has happened. Hide the badge for plain EIP-191
+						  requests; keep it for EIP-712 (typedData has a
+						  verifyingContract) and tx signing paths.
+						*/}
+						{!isSimpleTransfer && !request.ethMessageDecoded && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
@@ -553,20 +622,22 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
 				<Flex w="100%" gap="3" direction={{ base: "column", sm: "row" }}>
-					{/* Left: decoded calldata, typed data, or Solana tx */}
-					{(request.solanaDecoded || request.typedDataDecoded || (decoded && decoded.source !== 'none')) && (
+					{/* Left: decoded calldata, typed data, Solana tx, or EIP-191 message */}
+					{(request.solanaDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
 						<Box flex="1" minW="0">
 							{request.solanaDecoded
 								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} />
 								: request.typedDataDecoded
 									? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
-									: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} t={t} />
+									: request.ethMessageDecoded
+										? <EthMessageSection decoded={request.ethMessageDecoded} t={t} />
+										: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} t={t} />
 							}
 						</Box>
 					)}
 
 					{/* Right: transaction fields */}
-					{!request.typedDataDecoded && !request.solanaDecoded && (
+					{!request.typedDataDecoded && !request.solanaDecoded && !request.ethMessageDecoded && (
 						<Box flex="1" minW="0">
 							<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 								<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">

@@ -288,6 +288,27 @@ export interface EIP712DecodedInfo {
   isKnownType: boolean
 }
 
+/**
+ * Decoded form of an EIP-191 `personal_sign` payload for the approval UI.
+ *
+ * The `/eth/sign` REST endpoint accepts `message` as a hex string per the
+ * Ethereum JSON-RPC spec. In practice that hex almost always encodes UTF-8
+ * text (SIWE auth, dApp login challenges, etc.) — the user needs to see
+ * that text to know what they're signing. We surface both forms so the UI
+ * can show the decoded string prominently while still giving access to the
+ * raw bytes for hash comparison.
+ */
+export interface EthMessageDecodedInfo {
+  /** Signer address (from the request body) — shown so the user confirms which account. */
+  address: string
+  /** Raw message exactly as received on the wire (typically `0x`-prefixed hex). */
+  messageRaw: string
+  /** Message interpreted as UTF-8 text. Undefined when the bytes are not valid UTF-8. */
+  messageText?: string
+  /** True when `messageRaw` looked like hex and successfully round-tripped to UTF-8. */
+  isUtf8Text: boolean
+}
+
 // ── Calldata clear-signing types ─────────────────────────────────────────
 
 export interface CalldataDecodedField {
@@ -323,6 +344,8 @@ export interface SigningRequestInfo {
   chainId?: number
   typedDataDecoded?: EIP712DecodedInfo
   calldataDecoded?: CalldataDecodedInfo   // Clear-signing: decoded contract calldata
+  /** Clear-signing: decoded EIP-191 personal_sign message. Always set for /eth/sign requests. */
+  ethMessageDecoded?: EthMessageDecodedInfo
   /** Clear-signing: decoded Solana tx — per-instruction rows + resolved ALT accounts */
   solanaDecoded?: SolanaTxDecodedInfo
   /**
