@@ -395,8 +395,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 	// binary message that the user cannot meaningfully inspect without the
 	// clear-sign preview. Hiding the trust badge + warnings when
 	// solanaDecoded is missing would silently downgrade the approval UX.
+	//
+	// But only /solana/sign-transaction has a clear-sign preview — a plain
+	// /solana/sign-message is inherently an opaque signed message with no
+	// "tx decode" step. Showing a "Clear-Signing Unavailable" banner there
+	// would be a false-positive warning about a preview that never exists.
+	const isSolanaSignTx = request.method === '/solana/sign-transaction'
 	const isSolanaRequest =
-		request.method === '/solana/sign-transaction' ||
+		isSolanaSignTx ||
 		request.method === '/solana/sign-message' ||
 		request.chain === 'solana'
 	const isSimpleTransfer =
@@ -540,8 +546,8 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 					<BlindSigningBanner enabled={advancedModeEnabled} confirming={showAdvancedConfirm} onEnable={handleEnableAdvancedMode} onCancel={() => setShowAdvancedConfirm(false)} t={t} />
 				)}
 
-				{/* ── Solana clear-sign failure warning ── */}
-				{isSolanaRequest && !request.solanaDecoded && (
+				{/* ── Solana clear-sign failure warning (tx-only — sign-message has no preview by design) ── */}
+				{isSolanaSignTx && !request.solanaDecoded && (
 					<SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
 				)}
 
