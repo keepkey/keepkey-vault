@@ -3,7 +3,7 @@ import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
-import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo } from "../../../shared/types"
+import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo } from "../../../shared/types"
 import { versionCompare } from "../../../shared/firmware-versions"
 
 interface SigningApprovalProps {
@@ -160,6 +160,40 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t }: {
 	)
 }
 
+// ── Solana clear-sign failure warning ─────────────────────────────────
+//
+// Shown whenever a /solana/sign-transaction request arrives but the Vault
+// could not decode it (malformed wire layout, unsupported message version,
+// ALT RPC outage, etc.). The point is to never silently downgrade a Solana
+// approval to the generic "simple transfer" view — the user must see that
+// clear-signing failed and is knowingly approving an opaque payload.
+function SolanaDecodeFailureBanner({
+	error, t,
+}: { error?: string; t: (k: string, f?: string) => string }) {
+	return (
+		<Flex
+			direction="column" gap="1" w="100%"
+			bg="rgba(239,68,68,0.1)" border="1px solid rgba(239,68,68,0.4)"
+			borderRadius="lg" px="3" py="2"
+		>
+			<Text fontSize="2xs" fontWeight="600" color="#EF4444">
+				{t("signing.solanaDecodeFailedTitle", "Clear-Signing Unavailable")}
+			</Text>
+			<Text fontSize="2xs" color="kk.textSecondary">
+				{t(
+					"signing.solanaDecodeFailedDescription",
+					"The Vault could not decode this Solana transaction for preview. Approving will sign an opaque message — verify the details on your KeepKey screen before confirming.",
+				)}
+			</Text>
+			{error && (
+				<Text fontSize="2xs" color="kk.textMuted" fontFamily="mono">
+					{error}
+				</Text>
+			)}
+		</Flex>
+	)
+}
+
 // ── Collapsible raw payload viewer ────────────────────────────────────
 
 function RawPayload({ data, label }: { data: unknown; label: string }) {
@@ -215,6 +249,99 @@ function CalldataSection({ decoded, t }: { decoded: CalldataDecodedInfo; t: (k: 
 	)
 }
 
+// ── Solana decoded section ────────────────────────────────────────────
+
+function shortenPubkey(pk: string): string {
+	if (!pk || pk.length <= 12) return pk
+	return pk.slice(0, 4) + '…' + pk.slice(-4)
+}
+
+/** Render a decoded arg value with modest formatting for common types. */
+function formatArgValue(arg: { type: string; value: string }): string {
+	if (arg.type === 'pubkey') return shortenPubkey(arg.value)
+	if ((arg.type === 'string' || arg.type === 'bytes') && arg.value.length > 60) {
+		return arg.value.slice(0, 60) + '…'
+	}
+	return arg.value
+}
+
+function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t: (k: string, f?: string) => string }) {
+	return (
+		<VStack gap="2" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
+			<Flex gap="2" align="center" w="100%">
+				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
+					{t("signing.solanaTx", "Solana Transaction")}
+				</Text>
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+					{decoded.version}
+				</Text>
+				<Text fontSize="2xs" color="kk.textMuted">
+					{decoded.instructions.length} {decoded.instructions.length === 1 ? 'instruction' : 'instructions'}
+				</Text>
+			</Flex>
+
+			{decoded.hasUnknownProgram && (
+				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
+					⚠ {t("signing.solanaUnknownProgram", "Contains instructions from programs the Vault can't clear-sign.")}
+				</Text>
+			)}
+			{decoded.altResolutionIncomplete && (
+				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
+					⚠ {t("signing.solanaAltIncomplete", "Some address lookup tables couldn't be resolved — account names may be missing.")}
+				</Text>
+			)}
+
+			{decoded.instructions.map((ix, i) => (
+				<Box key={i} borderTop="1px solid" borderColor="rgba(255,255,255,0.08)" pt="2" _first={{ borderTop: 'none', pt: 0 }}>
+					<Flex gap="2" align="center" w="100%" mb="1">
+						<Text fontSize="2xs" fontWeight="600" color={ix.status === 'known' ? 'kk.gold' : 'kk.textSecondary'}>
+							#{i + 1} {ix.programName}
+						</Text>
+						{ix.instructionName && (
+							<Text fontSize="2xs" px="1.5" py="0.5" borderRadius="full" bg="rgba(255,255,255,0.08)" color="white">
+								{ix.instructionName}
+							</Text>
+						)}
+						{ix.programCategory && (
+							<Text fontSize="2xs" color="kk.textMuted">
+								{ix.programCategory}
+							</Text>
+						)}
+					</Flex>
+					{ix.args.length > 0 && ix.args.map((arg, ai) => (
+						<Row key={ai} label={arg.name} value={formatArgValue(arg)} />
+					))}
+					{ix.accounts.length > 0 && (
+						<Box pt="1">
+							{ix.accounts.map((acct, ai) => (
+								<Row
+									key={ai}
+									label={acct.label ?? `account[${ai}]`}
+									value={shortenPubkey(acct.pubkey)}
+								/>
+							))}
+						</Box>
+					)}
+					{ix.note && (
+						<Text fontSize="2xs" color="kk.textMuted" mt="1">⚠ {ix.note}</Text>
+					)}
+				</Box>
+			))}
+
+			{decoded.altPubkeys.length > 0 && (
+				<Box borderTop="1px solid" borderColor="rgba(255,255,255,0.08)" pt="2">
+					<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" mb="1">
+						{t("signing.solanaAlts", "Address Lookup Tables")}
+					</Text>
+					{decoded.altPubkeys.map((pk) => (
+						<Row key={pk} label="ALT" value={shortenPubkey(pk)} />
+					))}
+				</Box>
+			)}
+		</VStack>
+	)
+}
+
 // ── Typed data section ────────────────────────────────────────────────
 
 function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: string, f?: string) => string }) {
@@ -264,7 +391,22 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		trustLevel = request.typedDataDecoded.isKnownType ? 'verified' : 'known'
 	}
 
-	const isSimpleTransfer = !hasCalldata && !request.typedDataDecoded
+	// Solana is never a "simple transfer" — the signing payload is an opaque
+	// binary message that the user cannot meaningfully inspect without the
+	// clear-sign preview. Hiding the trust badge + warnings when
+	// solanaDecoded is missing would silently downgrade the approval UX.
+	//
+	// But only /solana/sign-transaction has a clear-sign preview — a plain
+	// /solana/sign-message is inherently an opaque signed message with no
+	// "tx decode" step. Showing a "Clear-Signing Unavailable" banner there
+	// would be a false-positive warning about a preview that never exists.
+	const isSolanaSignTx = request.method === '/solana/sign-transaction'
+	const isSolanaRequest =
+		isSolanaSignTx ||
+		request.method === '/solana/sign-message' ||
+		request.chain === 'solana'
+	const isSimpleTransfer =
+		!hasCalldata && !request.typedDataDecoded && !isSolanaRequest
 	const blindSigningWarning = fwSupportsBlindSignGate && request.needsBlindSigning && !advancedModeEnabled
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
@@ -404,20 +546,27 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 					<BlindSigningBanner enabled={advancedModeEnabled} confirming={showAdvancedConfirm} onEnable={handleEnableAdvancedMode} onCancel={() => setShowAdvancedConfirm(false)} t={t} />
 				)}
 
+				{/* ── Solana clear-sign failure warning (tx-only — sign-message has no preview by design) ── */}
+				{isSolanaSignTx && !request.solanaDecoded && (
+					<SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
+				)}
+
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
 				<Flex w="100%" gap="3" direction={{ base: "column", sm: "row" }}>
-					{/* Left: decoded calldata or typed data */}
-					{(request.typedDataDecoded || (decoded && decoded.source !== 'none')) && (
+					{/* Left: decoded calldata, typed data, or Solana tx */}
+					{(request.solanaDecoded || request.typedDataDecoded || (decoded && decoded.source !== 'none')) && (
 						<Box flex="1" minW="0">
-							{request.typedDataDecoded
-								? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
-								: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} t={t} />
+							{request.solanaDecoded
+								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} />
+								: request.typedDataDecoded
+									? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
+									: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} t={t} />
 							}
 						</Box>
 					)}
 
 					{/* Right: transaction fields */}
-					{!request.typedDataDecoded && (
+					{!request.typedDataDecoded && !request.solanaDecoded && (
 						<Box flex="1" minW="0">
 							<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 								<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">

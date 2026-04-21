@@ -323,6 +323,16 @@ export interface SigningRequestInfo {
   chainId?: number
   typedDataDecoded?: EIP712DecodedInfo
   calldataDecoded?: CalldataDecodedInfo   // Clear-signing: decoded contract calldata
+  /** Clear-signing: decoded Solana tx — per-instruction rows + resolved ALT accounts */
+  solanaDecoded?: SolanaTxDecodedInfo
+  /**
+   * Populated when a Solana transaction was received but clear-sign decoding
+   * failed (malformed wire layout, unsupported message version, RPC outage,
+   * etc.). The UI uses this to show an explicit "could not clear-sign"
+   * warning instead of silently downgrading the approval dialog to the
+   * generic simple-transfer view.
+   */
+  solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
   /** true when device AdvancedMode policy is currently enabled */
@@ -331,6 +341,43 @@ export interface SigningRequestInfo {
   firmwareVersion?: string
   /** Full raw request body from the REST API caller — shown in UI for debugging/transparency */
   rawRequestBody?: Record<string, unknown>
+}
+
+/**
+ * Clear-signing output for a Solana transaction. Produced by the
+ * Vault-side decoder (src/bun/solana-instruction-decoder.ts) and surfaced
+ * in SigningApproval so the user sees human-readable per-instruction rows
+ * instead of opaque program ids and raw hex. Mirrors the structure used
+ * by the future firmware Insight metadata path.
+ */
+export interface SolanaTxDecodedInstructionArg {
+  name: string
+  type: 'u8' | 'u16' | 'u32' | 'u64' | 'bool' | 'pubkey' | 'string' | 'bytes'
+  value: string
+}
+export interface SolanaTxDecodedInstructionAccount {
+  label?: string
+  pubkey: string
+}
+export interface SolanaTxDecodedInstruction {
+  status: 'known' | 'known-program-unknown-ix' | 'unknown-program'
+  programId: string
+  programName: string
+  programCategory?: string
+  instructionName?: string
+  args: SolanaTxDecodedInstructionArg[]
+  accounts: SolanaTxDecodedInstructionAccount[]
+  note?: string
+}
+export interface SolanaTxDecodedInfo {
+  version: 'legacy' | 'v0'
+  instructions: SolanaTxDecodedInstruction[]
+  /** base58 ALT pubkeys referenced by the tx. Empty for legacy. */
+  altPubkeys: string[]
+  /** True when at least one ALT couldn't be resolved — UI should warn. */
+  altResolutionIncomplete?: boolean
+  /** True when at least one instruction is from an unknown program. */
+  hasUnknownProgram?: boolean
 }
 
 export interface ApiLogEntry {
