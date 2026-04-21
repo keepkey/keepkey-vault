@@ -160,6 +160,40 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t }: {
 	)
 }
 
+// ── Solana clear-sign failure warning ─────────────────────────────────
+//
+// Shown whenever a /solana/sign-transaction request arrives but the Vault
+// could not decode it (malformed wire layout, unsupported message version,
+// ALT RPC outage, etc.). The point is to never silently downgrade a Solana
+// approval to the generic "simple transfer" view — the user must see that
+// clear-signing failed and is knowingly approving an opaque payload.
+function SolanaDecodeFailureBanner({
+	error, t,
+}: { error?: string; t: (k: string, f?: string) => string }) {
+	return (
+		<Flex
+			direction="column" gap="1" w="100%"
+			bg="rgba(239,68,68,0.1)" border="1px solid rgba(239,68,68,0.4)"
+			borderRadius="lg" px="3" py="2"
+		>
+			<Text fontSize="2xs" fontWeight="600" color="#EF4444">
+				{t("signing.solanaDecodeFailedTitle", "Clear-Signing Unavailable")}
+			</Text>
+			<Text fontSize="2xs" color="kk.textSecondary">
+				{t(
+					"signing.solanaDecodeFailedDescription",
+					"The Vault could not decode this Solana transaction for preview. Approving will sign an opaque message — verify the details on your KeepKey screen before confirming.",
+				)}
+			</Text>
+			{error && (
+				<Text fontSize="2xs" color="kk.textMuted" fontFamily="mono">
+					{error}
+				</Text>
+			)}
+		</Flex>
+	)
+}
+
 // ── Collapsible raw payload viewer ────────────────────────────────────
 
 function RawPayload({ data, label }: { data: unknown; label: string }) {
@@ -357,7 +391,16 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		trustLevel = request.typedDataDecoded.isKnownType ? 'verified' : 'known'
 	}
 
-	const isSimpleTransfer = !hasCalldata && !request.typedDataDecoded
+	// Solana is never a "simple transfer" — the signing payload is an opaque
+	// binary message that the user cannot meaningfully inspect without the
+	// clear-sign preview. Hiding the trust badge + warnings when
+	// solanaDecoded is missing would silently downgrade the approval UX.
+	const isSolanaRequest =
+		request.method === '/solana/sign-transaction' ||
+		request.method === '/solana/sign-message' ||
+		request.chain === 'solana'
+	const isSimpleTransfer =
+		!hasCalldata && !request.typedDataDecoded && !isSolanaRequest
 	const blindSigningWarning = fwSupportsBlindSignGate && request.needsBlindSigning && !advancedModeEnabled
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
@@ -495,6 +538,11 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 				{/* ── Blind signing warning (firmware 7.14.0+ only) ── */}
 				{fwSupportsBlindSignGate && request.needsBlindSigning && (
 					<BlindSigningBanner enabled={advancedModeEnabled} confirming={showAdvancedConfirm} onEnable={handleEnableAdvancedMode} onCancel={() => setShowAdvancedConfirm(false)} t={t} />
+				)}
+
+				{/* ── Solana clear-sign failure warning ── */}
+				{isSolanaRequest && !request.solanaDecoded && (
+					<SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
 				)}
 
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}

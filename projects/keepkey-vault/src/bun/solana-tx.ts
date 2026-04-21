@@ -247,8 +247,16 @@ export function parseSolanaMessage(bytes: Uint8Array): ParsedSolanaMessage {
   // Instructions
   let ixCount: number
   ;[ixCount, offset] = readCompactU16(bytes, offset)
-  if (ixCount > 64) {
-    throw new SolanaTxParseError(`Unreasonable instruction count: ${ixCount}`)
+  // A single instruction is at minimum 3 bytes (program_id_index(1) +
+  // accountIndices compact-u16 for 0 (1) + data-length compact-u16 for 0 (1)).
+  // Anything declaring more instructions than can possibly fit in the
+  // remaining buffer is malformed — the per-iteration bounds checks below
+  // would catch it too, but rejecting up-front avoids a pointless loop and
+  // gives a clearer error.
+  if (ixCount > (bytes.length - offset) / 3) {
+    throw new SolanaTxParseError(
+      `Instruction count ${ixCount} cannot fit in remaining ${bytes.length - offset} bytes`,
+    )
   }
   const instructions: SolanaInstruction[] = []
   for (let i = 0; i < ixCount; i++) {
@@ -273,8 +281,14 @@ export function parseSolanaMessage(bytes: Uint8Array): ParsedSolanaMessage {
   if (version === 'v0') {
     let altCount: number
     ;[altCount, offset] = readCompactU16(bytes, offset)
-    if (altCount > 32) {
-      throw new SolanaTxParseError(`Unreasonable ALT count: ${altCount}`)
+    // Each ALT entry is minimum 34 bytes: account_key(32) + writable
+    // compact-u16 for 0 (1) + readonly compact-u16 for 0 (1). Same rationale
+    // as the instruction-count check above: up-front rejection of counts
+    // that cannot possibly fit avoids a doomed loop.
+    if (altCount > (bytes.length - offset) / 34) {
+      throw new SolanaTxParseError(
+        `ALT count ${altCount} cannot fit in remaining ${bytes.length - offset} bytes`,
+      )
     }
     for (let i = 0; i < altCount; i++) {
       if (offset + 32 > bytes.length) throw new SolanaTxParseError(`ALT ${i}: truncated account_key`)

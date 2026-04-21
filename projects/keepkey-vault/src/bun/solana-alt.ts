@@ -10,7 +10,7 @@
  * ALT account layout (see
  * `solana-sdk/address-lookup-table/program/src/state.rs`):
  *
- *     discriminator      :  4 bytes  (program-enum tag, normally 1 for initialized)
+ *     discriminator      :  4 bytes  (program-enum tag, 1 = LookupTable, 0 = Uninitialized)
  *     deactivation_slot  :  8 bytes  (u64 LE — Slot)
  *     last_extended_slot :  8 bytes  (u64 LE)
  *     last_extended_slot_start_index : 1 byte
@@ -24,16 +24,32 @@
  * multiple of 32 — we enforce the same, because a non-multiple would mean the
  * ALT is corrupt or we're reading the wrong account type.
  *
- * We don't validate authority or deactivation_slot here — decoders are
- * information-only (what addresses does this ALT currently list?), and we
- * already gave the user a clear-signing preview backed by the same RPC they
- * trust for broadcast. If deactivation is a concern, a follow-up can surface
- * it in the UI.
+ * Ownership check: a valid ALT account is owned by the Address Lookup Table
+ * program. Without this check, any account that happens to have the right
+ * length (56 + 32N) would be accepted and the approval UI would render
+ * attacker-controlled bytes as "resolved accounts". So we fetch the owner
+ * alongside the data and reject anything not owned by {@link ALT_PROGRAM_ID}.
+ *
+ * We don't validate authority or deactivation_slot in the UI sense —
+ * decoders are information-only. If deactivation is a concern, a follow-up
+ * can surface it in the preview.
  */
 
 import bs58 from 'bs58'
 
 export const ALT_HEADER_LEN = 56
+
+/** Base58 pubkey of Solana's Address Lookup Table program. */
+export const ALT_PROGRAM_ID = 'AddressLookupTab1e1111111111111111111111111'
+
+/** Discriminator tag for the `LookupTable` variant of the ALT program state. */
+export const ALT_DISCRIMINATOR_LOOKUP_TABLE = 1
+
+/** A single account returned by the fetcher. Owner is base58-encoded. */
+export interface AltAccountData {
+  data: Uint8Array
+  owner: string
+}
 
 export class SolanaAltResolveError extends Error {
   constructor(message: string) {
@@ -45,7 +61,11 @@ export class SolanaAltResolveError extends Error {
 /**
  * Parse an ALT account's raw bytes into the list of base58-encoded pubkeys
  * it stores. Throws {@link SolanaAltResolveError} when the layout doesn't
- * match (not an ALT account, corrupt trailing bytes, etc.).
+ * match (wrong discriminator, impossible option tag, corrupt trailing
+ * bytes, etc.).
+ *
+ * The caller is responsible for verifying the account owner before calling
+ * this — see {@link resolveAlts}.
  */
 export function parseAltAccountData(bytes: Uint8Array): string[] {
   if (bytes.length < ALT_HEADER_LEN) {
@@ -59,6 +79,22 @@ export function parseAltAccountData(bytes: Uint8Array): string[] {
       `ALT account body length ${addrBytes}B is not a multiple of 32`,
     )
   }
+  // Discriminator is a u32 LE bincode enum tag. LookupTable = 1.
+  const discriminator =
+    bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)
+  if (discriminator !== ALT_DISCRIMINATOR_LOOKUP_TABLE) {
+    throw new SolanaAltResolveError(
+      `ALT discriminator ${discriminator} ≠ LookupTable (${ALT_DISCRIMINATOR_LOOKUP_TABLE})`,
+    )
+  }
+  // authority_option (bincode Option tag) must be 0 or 1 — any other value
+  // means we're reading the wrong account type.
+  const authorityOption = bytes[21]
+  if (authorityOption !== 0 && authorityOption !== 1) {
+    throw new SolanaAltResolveError(
+      `ALT authority_option byte ${authorityOption} is not a valid Option tag`,
+    )
+  }
   const addresses: string[] = []
   for (let off = ALT_HEADER_LEN; off < bytes.length; off += 32) {
     addresses.push(bs58.encode(bytes.subarray(off, off + 32)))
@@ -68,15 +104,17 @@ export function parseAltAccountData(bytes: Uint8Array): string[] {
 
 /**
  * Minimal fetcher abstraction so tests can inject a fake RPC responder
- * without network. Must return the account data as raw bytes for each ALT,
- * in the same order as the input, with `null` where the account wasn't
- * found.
+ * without network. Must return {@link AltAccountData} (including the owner
+ * pubkey) for each input, in the same order, with `null` where the account
+ * wasn't found.
  */
-export type AltAccountFetcher = (altPubkeysBase58: string[]) => Promise<(Uint8Array | null)[]>
+export type AltAccountFetcher = (altPubkeysBase58: string[]) => Promise<(AltAccountData | null)[]>
 
 /**
  * Build an `AltAccountFetcher` backed by a Solana JSON-RPC endpoint using
- * the standard `getMultipleAccounts` method with base64 encoding.
+ * the standard `getMultipleAccounts` method with base64 encoding. The
+ * response's `owner` field is returned alongside the data so
+ * {@link resolveAlts} can reject anything not owned by the ALT program.
  */
 export function createRpcAltFetcher(endpoint: string): AltAccountFetcher {
   return async (altPubkeysBase58: string[]) => {
@@ -94,7 +132,10 @@ export function createRpcAltFetcher(endpoint: string): AltAccountFetcher {
     if (!res.ok) {
       throw new SolanaAltResolveError(`Solana RPC ${endpoint} returned HTTP ${res.status}`)
     }
-    const body = await res.json() as { error?: { message: string }; result?: { value?: Array<{ data: [string, string] } | null> } }
+    const body = await res.json() as {
+      error?: { message: string }
+      result?: { value?: Array<{ data: [string, string]; owner: string } | null> }
+    }
     if (body.error) {
       throw new SolanaAltResolveError(`Solana RPC error: ${body.error.message}`)
     }
@@ -105,15 +146,23 @@ export function createRpcAltFetcher(endpoint: string): AltAccountFetcher {
       if (encoding !== 'base64') {
         throw new SolanaAltResolveError(`Unexpected ALT account encoding: ${encoding}`)
       }
-      return Uint8Array.from(Buffer.from(b64, 'base64'))
+      return {
+        data: Uint8Array.from(Buffer.from(b64, 'base64')),
+        owner: v.owner,
+      }
     })
   }
 }
 
 /**
  * Resolve a list of ALT pubkeys to their address arrays. Returns a Map
- * keyed by base58 ALT pubkey; missing or malformed ALTs are omitted (the
- * caller decides whether to error or fall back to a warning).
+ * keyed by base58 ALT pubkey; missing, non-ALT-owned, or malformed ALTs
+ * are omitted (the caller decides whether to error or surface a warning).
+ *
+ * Ownership verification is *required* for safety: without it, a v0
+ * transaction could point at any attacker-controlled account whose length
+ * happens to be 56 + 32N and the approval preview would render attacker
+ * bytes as "resolved accounts".
  */
 export async function resolveAlts(
   altPubkeysBase58: string[],
@@ -128,10 +177,11 @@ export async function resolveAlts(
     )
   }
   for (let i = 0; i < altPubkeysBase58.length; i++) {
-    const data = accounts[i]
-    if (!data) continue
+    const acct = accounts[i]
+    if (!acct) continue
+    if (acct.owner !== ALT_PROGRAM_ID) continue
     try {
-      out.set(altPubkeysBase58[i], parseAltAccountData(data))
+      out.set(altPubkeysBase58[i], parseAltAccountData(acct.data))
     } catch {
       // Skip malformed entries — caller decides whether a missing ALT is fatal.
     }

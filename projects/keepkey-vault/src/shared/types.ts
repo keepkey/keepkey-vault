@@ -325,6 +325,14 @@ export interface SigningRequestInfo {
   calldataDecoded?: CalldataDecodedInfo   // Clear-signing: decoded contract calldata
   /** Clear-signing: decoded Solana tx — per-instruction rows + resolved ALT accounts */
   solanaDecoded?: SolanaTxDecodedInfo
+  /**
+   * Populated when a Solana transaction was received but clear-sign decoding
+   * failed (malformed wire layout, unsupported message version, RPC outage,
+   * etc.). The UI uses this to show an explicit "could not clear-sign"
+   * warning instead of silently downgrading the approval dialog to the
+   * generic simple-transfer view.
+   */
+  solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
   /** true when device AdvancedMode policy is currently enabled */

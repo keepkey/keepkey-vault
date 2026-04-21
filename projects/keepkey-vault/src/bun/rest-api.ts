@@ -1187,8 +1187,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             } else if (path === '/solana/sign-transaction') {
               // Solana clear-signing: parse v0/legacy message, resolve ALTs,
               // decode each instruction via the pioneer-discovery program
-              // registry. Best-effort — a parse/ALT-RPC failure surfaces a
-              // note in the UI rather than blocking the approval flow.
+              // registry. Best-effort — a parse/ALT-RPC failure surfaces an
+              // explicit warning in the UI rather than silently falling
+              // back to an unflagged simple-transfer dialog.
               if (typeof preview.raw_tx === 'string') {
                 try {
                   const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
@@ -1196,9 +1197,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                     preview.raw_tx,
                     createRpcAltFetcher(endpoint),
                   )
-                } catch (e) {
+                } catch (e: any) {
+                  const msg = e?.message || String(e)
                   console.warn('[REST] Solana decode failed:', e)
+                  signingInfo.solanaDecodeError = msg
                 }
+              } else {
+                signingInfo.solanaDecodeError = 'missing raw_tx payload'
               }
             } else {
               signingInfo.from = preview.from || preview.signerAddress

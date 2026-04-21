@@ -129,3 +129,63 @@ describe('parseSolanaMessage — malformed', () => {
     expect(() => parseSolanaMessage(concat(header, accts, hash, ixs))).toThrow(/truncated data/)
   })
 })
+
+// ── Large but valid: relaxed heuristic limits ────────────────────────
+//
+// Earlier versions of the parser rejected any tx with more than 64
+// instructions or 32 ALT entries. Those caps were *heuristics* with no
+// basis in the Solana protocol: aggregator routes (Jupiter, Phoenix,
+// etc.) legitimately exceed them. The parser now only rejects counts
+// that cannot physically fit in the remaining buffer — valid large
+// txs are parsed successfully and invalid ones still throw.
+
+describe('parseSolanaMessage — relaxed count limits', () => {
+  /** Build a legacy message with `n` no-op instructions (3 bytes each). */
+  function buildManyInstructionMsg(n: number): Buffer {
+    const header = Buffer.from([1, 0, 0])
+    const accounts = concat(compactU16(1), Buffer.alloc(32))
+    const blockhash = Buffer.alloc(32)
+    // Each ix is program_id_index(0) + 0 accts + 0 data = 3 bytes.
+    const oneIx = concat(Buffer.from([0]), compactU16(0), compactU16(0))
+    const ixs = [compactU16(n)]
+    for (let i = 0; i < n; i++) ixs.push(oneIx)
+    return concat(header, accounts, blockhash, concat(...ixs))
+  }
+
+  test('accepts 128 instructions (well beyond the old 64-instruction heuristic cap)', () => {
+    const msg = buildManyInstructionMsg(128)
+    const parsed = parseSolanaMessage(msg)
+    expect(parsed.instructions).toHaveLength(128)
+  })
+
+  test('rejects an instruction count that cannot physically fit', () => {
+    // Declare 10_000 instructions in a ~15-byte instruction section.
+    const header = Buffer.from([1, 0, 0])
+    const accts = concat(compactU16(1), Buffer.alloc(32))
+    const hash = Buffer.alloc(32)
+    // compact-u16 for 10_000 = 3 bytes: 0x90, 0x4e, 0x00 — but use the helper
+    const ixs = concat(compactU16(10_000), Buffer.alloc(10))
+    expect(() => parseSolanaMessage(concat(header, accts, hash, ixs))).toThrow(/cannot fit/)
+  })
+
+  test('accepts v0 messages with 50 ALT entries (beyond the old 32-entry heuristic cap)', () => {
+    const prefix = Buffer.from([0x80])
+    const body = buildLegacyTransferMsg()
+    // One-per-key ALT with no writable/readonly indices: 32 + 1 + 1 = 34 bytes each.
+    const entry = concat(Buffer.alloc(32, 0x55), compactU16(0), compactU16(0))
+    const entries: Buffer[] = [compactU16(50)]
+    for (let i = 0; i < 50; i++) entries.push(entry)
+    const msg = concat(prefix, body, concat(...entries))
+    const parsed = parseSolanaMessage(msg)
+    expect(parsed.version).toBe('v0')
+    expect(parsed.altEntries).toHaveLength(50)
+  })
+
+  test('rejects an ALT count that cannot physically fit', () => {
+    const prefix = Buffer.from([0x80])
+    const body = buildLegacyTransferMsg()
+    // Declare 10_000 ALT entries with almost no bytes following.
+    const alts = concat(compactU16(10_000), Buffer.alloc(10))
+    expect(() => parseSolanaMessage(concat(prefix, body, alts))).toThrow(/cannot fit/)
+  })
+})
