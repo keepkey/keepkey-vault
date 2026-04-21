@@ -93,3 +93,17 @@ export function parseSolanaTx(fullTx: Uint8Array): ParsedSolanaTx {
 
   return { sigStart: pos, sigCount, messageStart, isVersioned }
 }
+
+/**
+ * Return the serialized message portion (bytes starting at `messageStart`).
+ * For legacy messages this is `[header | accounts | blockhash | instructions]`;
+ * for v0 messages the slice begins with the `0x80` prefix per Solana spec.
+ *
+ * These are the exact bytes a signer must sign — Ed25519 is computed over the
+ * message payload, not the full tx wrapper. The returned slice references the
+ * input buffer; copy if the caller needs an independent lifetime.
+ */
+export function solanaMessageSlice(fullTx: Uint8Array, parsed: ParsedSolanaTx): Uint8Array {
+  return fullTx.subarray(parsed.messageStart)
+}
+
