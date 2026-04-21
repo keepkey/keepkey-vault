@@ -867,6 +867,48 @@ const SIGNING_ROUTES = new Set([
   '/mayachain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
 ])
 
+/**
+ * Minimum-payload fingerprint per signing route.
+ *
+ * Empty-body probes (observed hitting /solana/sign-transaction etc. with
+ * `{}`) used to reach the approval dialog and spam the user with dialogs
+ * for requests that had nothing to sign. This function returns the list
+ * of top-level payload keys where *any* one being present indicates a
+ * real signing attempt. The approval gate short-circuits with 400 when
+ * the body contains none of them.
+ *
+ * Keys mirror the schemas in schemas.ts exactly; when a new sign route is
+ * added to SIGNING_ROUTES it must also be added here or it'll fall
+ * through as "no required fields known" → no probe gating (the handler's
+ * schema.parse will still reject the empty body, just one layer deeper).
+ *
+ * Route families that share a schema (all the Cosmos/Osmosis amino
+ * variants use CosmosAminoSignRequest — { signerAddress, signDoc }) are
+ * covered by a single prefix check so we don't have to enumerate every
+ * variant and risk missing one.
+ */
+function requiredSigningFields(path: string): string[] | null {
+  const exact: Record<string, string[]> = {
+    '/eth/sign-transaction':    ['to', 'data', 'value', 'nonce'],
+    '/eth/sign-typed-data':     ['typedData'],
+    '/eth/sign':                ['message'],
+    '/utxo/sign-transaction':   ['inputs', 'outputs'],
+    '/xrp/sign-transaction':    ['payment', 'sequence'],
+    '/solana/sign-transaction': ['raw_tx', 'rawTx'],
+    '/solana/sign-message':     ['message'],
+    '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
+    '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
+  }
+  if (exact[path]) return exact[path]
+  // All Cosmos-family amino sign endpoints (cosmos/osmosis/thorchain/
+  // mayachain delegates, swaps, LP ops, IBC transfers, etc.) use
+  // CosmosAminoSignRequest.
+  if (/^\/(cosmos|osmosis|thorchain|mayachain)\/sign-amino/.test(path)) {
+    return ['signerAddress', 'signDoc']
+  }
+  return null
+}
+
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
   // Invalidate features cache on device disconnect
   engine.on('state-change', (state) => {
@@ -1178,30 +1220,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // signing attempt. The permissive "has any of these keys" check
           // is intentional — the per-chain handlers below will run the
           // full schema validation, we just need to avoid gating on empty.
+          //
+          // Keys are taken from schemas.ts so the check mirrors the actual
+          // wire contract each handler parses. When a new sign route is
+          // added to SIGNING_ROUTES, add its required-any list here (or
+          // extend the prefix match for route families that share a schema).
           let probeCheckBody: any
           try {
             probeCheckBody = await req.clone().json()
           } catch {
             probeCheckBody = null
           }
-          const REQUIRED_ANY: Record<string, string[]> = {
-            '/solana/sign-transaction': ['raw_tx', 'rawTx'],
-            '/solana/sign-message':     ['message'],
-            '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
-            '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
-            '/eth/sign-transaction':    ['to', 'data', 'value', 'nonce'],
-            '/eth/sign-typed-data':     ['typedData'],
-            '/eth/sign':                ['message'],
-            '/utxo/sign-transaction':   ['inputs', 'outputs'],
-            '/xrp/sign-transaction':    ['tx', 'Destination', 'Amount'],
-            '/cosmos/sign-amino':       ['signDoc', 'tx'],
-            '/thorchain/sign-amino-transfer': ['signDoc', 'tx'],
-            '/thorchain/sign-amino-deposit':  ['signDoc', 'tx'],
-            '/mayachain/sign-amino-transfer': ['signDoc', 'tx'],
-            '/mayachain/sign-amino-deposit':  ['signDoc', 'tx'],
-            '/osmosis/sign-amino':      ['signDoc', 'tx'],
-          }
-          const requiredAny = REQUIRED_ANY[path]
+          const requiredAny = requiredSigningFields(path)
           if (requiredAny && (!probeCheckBody || typeof probeCheckBody !== 'object')) {
             console.warn(`[REST] ${path} probe rejected: body is not an object`)
             return json({ error: 'Empty or invalid signing payload' }, 400)

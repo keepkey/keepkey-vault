@@ -588,7 +588,17 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						</Flex>
 					</Flex>
 					<Flex align="center" gap="2">
-						{!isSimpleTransfer && (
+						{/*
+						  The TrustBadge communicates contract-level trust (verified
+						  source, known selector, etc.). EIP-191 personal_sign has
+						  no contract to vouch for, so showing a "Verified Contract"
+						  / "Signed & Verified" badge there is misleading — the user
+						  might think the *message* has been audited when nothing of
+						  the sort has happened. Hide the badge for plain EIP-191
+						  requests; keep it for EIP-712 (typedData has a
+						  verifyingContract) and tx signing paths.
+						*/}
+						{!isSimpleTransfer && !request.ethMessageDecoded && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
