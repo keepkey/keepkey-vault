@@ -86,8 +86,16 @@ function App() {
 	// scopes serving to the device the user currently has open, so a
 	// 3rd-party request can never get xpubs from a device the user isn't
 	// actively viewing (incl. watch-only mode which uses the cached device).
+	//
+	// Defer activation until we know which device the UI is bound to. On
+	// fresh mount `deviceState.deviceId` is null until the engine state
+	// machine reports `ready`; activating with viewDeviceId=null in that
+	// window would let a stale on-disk pubkey cache from a prior session
+	// be served against the wrong (or no) device, since requireUiActive
+	// only enforces device matching when uiState.viewDeviceId is truthy.
 	useEffect(() => {
 		const viewDeviceId = watchOnlyMode ? (watchOnlyDeviceId ?? null) : (deviceState.deviceId ?? null)
+		if (!viewDeviceId) return
 		rpcRequest("uiSetActive", { active: true, viewDeviceId }).catch(() => {})
 		const heartbeat = setInterval(() => {
 			rpcRequest("uiHeartbeat", { viewDeviceId }).catch(() => {})

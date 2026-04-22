@@ -208,8 +208,13 @@ export function setUiActive(active: boolean, viewDeviceId: string | null = null)
   }
 }
 
-/** Called from RPC handler on periodic heartbeat from the WebView. */
+/** Called from RPC handler on periodic heartbeat from the WebView.
+ *  No-op when the UI is not currently active — a stray heartbeat racing
+ *  with an explicit `setUiActive(false)` (e.g. window close) must not
+ *  re-open the gate; the WebView has to call `setUiActive(true)` to
+ *  reactivate. Heartbeats only refresh `lastHeartbeat` while active. */
 export function uiHeartbeat(viewDeviceId: string | null = null) {
+  if (!uiState.active) return
   uiState = { active: true, viewDeviceId, lastHeartbeat: Date.now() }
 }
 
