@@ -39,7 +39,7 @@ export const THOR_TO_CHAIN: Record<string, string> = {
   MATIC: 'polygon',
   XRP: 'ripple',
   SOL: 'solana',
-  TRX: 'tron',
+  TRON: 'tron',
   TON: 'ton',
 }
 
