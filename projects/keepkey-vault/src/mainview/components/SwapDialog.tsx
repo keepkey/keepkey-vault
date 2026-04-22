@@ -1658,11 +1658,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </VStack>
               </Box>
 
-              {/* Security badge */}
-              <Flex align="center" gap="2" bg="rgba(35,220,200,0.04)" px="3" py="2" borderRadius="lg" w="full">
-                <ShieldIcon />
-                <Text fontSize="11px" color="#23DCC8">{t("verifyOnDevice")}</Text>
-              </Flex>
+              {/* TRON blind-sign notice — firmware 7.14 cannot decode the swap
+                  contract call (TRC-20 transfer to THORChain vault), so the
+                  device prompt will be generic. The user must trust the swap
+                  details shown on this screen, not the device. Replaces the
+                  green "verify on device" badge to make the trust model
+                  explicit. */}
+              {fromAsset.chainFamily === 'tron' ? (
+                <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="2" borderRadius="lg" w="full">
+                  <Text fontSize="11px" color="#FB923C">
+                    {t("tronBlindSignWarning", "Your KeepKey will display a generic Tron transaction prompt — it cannot decode the THORChain swap. Verify the amounts, vault, and memo above before approving on device.")}
+                  </Text>
+                </Flex>
+              ) : (
+                <Flex align="center" gap="2" bg="rgba(35,220,200,0.04)" px="3" py="2" borderRadius="lg" w="full">
+                  <ShieldIcon />
+                  <Text fontSize="11px" color="#23DCC8">{t("verifyOnDevice")}</Text>
+                </Flex>
+              )}
 
               {/* Error */}
               {error && (

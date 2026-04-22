@@ -14,6 +14,61 @@ import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState,
 export type { BuildTxParams }
 
 /**
+ * Inject a memo into a TronGrid `triggersmartcontract` response so the
+ * THORChain swap memo lands in `Transaction.raw_data.data`. Returns a
+ * shallow-cloned `tronGridTx` with `raw_data_hex`, `raw_data.data`, and
+ * `txID` updated.
+ *
+ * Why protobuf splicing instead of a TronGrid parameter: `createtransaction`
+ * exposes `extra_data` which sets `raw_data.data` natively, but
+ * `triggersmartcontract` silently drops it. We have to inject the field
+ * ourselves, AND it must be in canonical tag-order position (field 10,
+ * before contract/11) — appending at the end produces a different sha256
+ * than what TronGrid computes after canonicalization, so the device's
+ * signature would not verify at broadcast time.
+ */
+export async function injectTronMemo(tronGridTx: any, memo: string): Promise<any> {
+  const protobuf = (await import('protobufjs/light')).default
+  const memoBytes = Buffer.from(memo, 'utf8')
+  const origBytes = Buffer.from(tronGridTx.raw_data_hex, 'hex')
+
+  // Walk top-level wire format to find where field >= 11 starts (canonical
+  // insertion point for field 10). All TRON Transaction.raw fields below 10
+  // must precede us; everything from contract(11) onwards must follow.
+  const reader = new protobuf.Reader(origBytes)
+  let insertAt: number | null = null
+  while (reader.pos < reader.len) {
+    const fieldStart = reader.pos
+    const tag = reader.uint32()
+    const fieldNum = tag >>> 3
+    if (fieldNum >= 11 && insertAt === null) {
+      insertAt = fieldStart
+      break
+    }
+    reader.skipType(tag & 7)
+  }
+  if (insertAt === null) insertAt = origBytes.length
+
+  const writer = new protobuf.Writer()
+  writer.uint32((10 << 3) | 2).bytes(memoBytes) // field 10, wire type 2 (length-delimited bytes)
+  const dataFieldBytes = Buffer.from(writer.finish())
+
+  const newBytes = Buffer.concat([
+    origBytes.subarray(0, insertAt),
+    dataFieldBytes,
+    origBytes.subarray(insertAt),
+  ])
+  const newTxID = Buffer.from(await crypto.subtle.digest('SHA-256', newBytes)).toString('hex')
+
+  return {
+    ...tronGridTx,
+    raw_data_hex: newBytes.toString('hex'),
+    raw_data: { ...tronGridTx.raw_data, data: memoBytes.toString('hex') },
+    txID: newTxID,
+  }
+}
+
+/**
  * Build an unsigned transaction for any supported chain.
  * Requires the from address + xpub (for UTXO chains) to be pre-resolved by the caller.
  */
@@ -177,9 +232,109 @@ export async function buildTx(
     }
 
     case 'tron': {
-      // Tron — TronGrid builds the raw protobuf tx (raw_data_hex), device signs
+      // Tron — TronGrid builds the raw protobuf tx (raw_data_hex), device signs.
+      // Two paths:
+      //   • TRC-20 token (caip contains `/token:Tx...`) — triggersmartcontract
+      //     calling `transfer(address,uint256)` on the token contract. Used for
+      //     USDT THORChain swaps.
+      //   • Native TRX — createtransaction (TransferContract).
+      // For both, an optional `params.memo` (THORChain swap memo) is written
+      // into `Transaction.raw_data.data` via TronGrid's `extra_data` field.
       if (!params.fromAddress) throw new Error('fromAddress required for Tron')
 
+      // TRC-20 detection: pioneer-router quote returns `txParams.token: "USDT-T..."`
+      // for tokens, and the upstream caip uses `tron:.../token:T...`. The caip
+      // is canonical — fall back to token-name parsing only if caip is absent.
+      const tokenContractFromCaip = (() => {
+        if (!params.caip) return null
+        const m = params.caip.match(/^tron:[^/]+\/token:(T[1-9A-HJ-NP-Za-km-z]{33})$/)
+        return m ? m[1] : null
+      })()
+      const isTrc20 = !!tokenContractFromCaip
+
+      // ── TRC-20 path (TriggerSmartContract → transfer(address,uint256)) ──
+      if (isTrc20) {
+        // USDT-on-TRON has 6 decimals. If we add other TRC-20s later, look the
+        // value up rather than hard-coding — but for the THORChain MVP, USDT is
+        // the only token in scope.
+        const tokenDecimals = params.tokenDecimals ?? 6
+        const tokenAmountBase = (() => {
+          const parts = params.amount.split('.')
+          const whole = parts[0] || '0'
+          const frac = (parts[1] || '').slice(0, tokenDecimals).padEnd(tokenDecimals, '0')
+          return BigInt(whole) * BigInt(10) ** BigInt(tokenDecimals) + BigInt(frac)
+        })()
+
+        // ABI-encode the `transfer(address,uint256)` parameter pair.
+        // TronGrid's `function_selector` field tells it to prepend the 4-byte
+        // selector (0xa9059cbb) automatically, so `parameter` is just the
+        // 64 hex chars of the address slot + 64 hex chars of the amount slot.
+        // TRON's base58check address: [0x41][20 bytes hash][4 byte checksum].
+        // Strip prefix + checksum to get the 20-byte EVM-style address slot.
+        const base58 = await import('bs58')
+        const toDecoded = base58.default.decode(params.to)
+        if (toDecoded.length !== 25 || toDecoded[0] !== 0x41) {
+          throw new Error(`Invalid TRON destination address: ${params.to}`)
+        }
+        const recipientHashHex = Buffer.from(toDecoded.slice(1, 21)).toString('hex')
+        const amountHex = tokenAmountBase.toString(16).padStart(64, '0')
+        const parameter = recipientHashHex.padStart(64, '0') + amountHex
+
+        // fee_limit caps the energy/TRX a smart contract call can burn — 30 TRX
+        // is generous for a USDT.transfer() (typical cost is ~14 TRX) and
+        // matches what TronLink defaults to for unknown contracts.
+        const FEE_LIMIT_SUN = 30_000_000
+
+        let tronGridTx: any
+        try {
+          console.debug(`[buildTx] TRON triggersmartcontract: USDT.transfer(${params.to}, ${tokenAmountBase.toString()}) at ${tokenContractFromCaip}`)
+          const resp = await fetch('https://api.trongrid.io/wallet/triggersmartcontract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              owner_address: params.fromAddress,
+              contract_address: tokenContractFromCaip,
+              function_selector: 'transfer(address,uint256)',
+              parameter,
+              fee_limit: FEE_LIMIT_SUN,
+              call_value: 0,
+              visible: true,
+            }),
+          })
+          const respJson = await resp.json() as any
+          if (respJson?.Error) throw new Error(respJson.Error)
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+          // triggersmartcontract returns { transaction: {...}, ... }
+          tronGridTx = respJson.transaction
+          if (!tronGridTx?.raw_data_hex) {
+            throw new Error('TronGrid triggersmartcontract did not return a transaction with raw_data_hex')
+          }
+        } catch (e: any) {
+          throw new Error(`Tron TRC-20 build failed: ${e.message}`)
+        }
+
+        // Inject memo into raw_data.data. TronGrid's `triggersmartcontract`
+        // endpoint silently ignores `extra_data` (unlike `createtransaction`),
+        // so we have to splice the protobuf ourselves. The memo MUST land in
+        // canonical tag-order position (field 10, before contract/11) — if we
+        // appended at the end, TronGrid would re-canonicalize and the txID it
+        // computes would not match the one the device signed, breaking
+        // signature verification.
+        if (params.memo) {
+          tronGridTx = await injectTronMemo(tronGridTx, params.memo)
+        }
+
+        const tronUnsignedTx = {
+          addressNList: chain.defaultPath,
+          rawTx: tronGridTx.raw_data_hex,
+          toAddress: params.to,
+          amount: tokenAmountBase.toString(),
+          tronGridTx,
+        }
+        return { unsignedTx: tronUnsignedTx, fee: String(FEE_LIMIT_SUN / 1_000_000) }
+      }
+
+      // ── Native TRX path (TransferContract) ──
       // Convert TRX amount to sun (6 decimals)
       const sunAmount = (() => {
         const parts = params.amount.split('.')
@@ -194,17 +349,21 @@ export async function buildTx(
       let tronGridTx: any
       try {
         // Use TronGrid's createtransaction — it returns raw_data_hex (serialized protobuf)
-        // which is exactly what the KeepKey firmware needs to sign.
-        console.debug(`[buildTx] TRON createtransaction: amount=${sunAmount} SUN`)
+        // which is exactly what the KeepKey firmware needs to sign. `extra_data`
+        // (when present) lands in `raw_data.data` verbatim — that's where THORChain's
+        // TRON observer reads the swap memo from.
+        console.debug(`[buildTx] TRON createtransaction: amount=${sunAmount} SUN${params.memo ? `, memo=${params.memo.length}b` : ''}`)
+        const body: any = {
+          owner_address: params.fromAddress,
+          to_address: params.to,
+          amount: sunAmount,
+          visible: true,
+        }
+        if (params.memo) body.extra_data = params.memo
         const resp = await fetch('https://api.trongrid.io/wallet/createtransaction', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            owner_address: params.fromAddress,
-            to_address: params.to,
-            amount: sunAmount,
-            visible: true,
-          }),
+          body: JSON.stringify(body),
         })
         tronGridTx = await resp.json() as any
         if (tronGridTx?.Error) {
