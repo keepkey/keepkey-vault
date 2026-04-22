@@ -146,6 +146,37 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
     }
   }
 
+  // Pioneer's /swap/available-assets currently omits TRON entirely even
+  // though /quote happily quotes TRON.TRX and TRON.USDT-TR7N... swaps via
+  // THORChain (both pools verified Available against thornode). Until
+  // pioneer-server starts listing them, add them locally so the swap pill
+  // renders on the TRON asset page and TRON shows up in the destination
+  // picker. Same shim pattern as the THOR.RUNE entry above.
+  if (!assets.find(a => a.asset === 'TRON.TRX')) {
+    const tronDef = CHAINS.find(c => c.id === 'tron')
+    if (tronDef) {
+      assets.push({
+        asset: 'TRON.TRX',
+        chainId: 'tron',
+        symbol: 'TRX',
+        name: 'Tron',
+        chainFamily: 'tron',
+        decimals: 6,
+        caip: tronDef.caip,
+      })
+      assets.push({
+        asset: 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T',
+        chainId: 'tron',
+        symbol: 'USDT',
+        name: 'Tether (TRON)',
+        chainFamily: 'tron',
+        decimals: 6,
+        contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        caip: 'tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+      })
+    }
+  }
+
   console.log(`${TAG} Loaded ${assets.length} swap assets from Pioneer`)
   assetCache = assets
   assetCacheTime = Date.now()
