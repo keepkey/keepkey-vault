@@ -2041,7 +2041,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             toAddress: body.to_address,
             amount: body.amount,
           }), { operation: 'tonSignTx', chain: 'TON' })
-          if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
+          if (!result) throw new HttpError(500, 'tonSignTx returned no result')
           return json(result)
         }
 
@@ -2055,6 +2055,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await parseRequest(req, S.TonBuildTransferRequest)
 
+          // Memo cap. Plain-text TON memos are encoded into a single cell
+          // alongside the 32-bit op code; ~120 bytes UTF-8 is a safe ceiling
+          // (1023-bit cell budget minus framing). Longer memos technically
+          // require a continuation cell ref, which buildInternalMessage
+          // doesn't emit — without this guard the user gets a cryptic
+          // BitWriter overflow deep in the assembler.
+          if (body.memo && Buffer.byteLength(body.memo, 'utf8') > 120) {
+            throw new HttpError(400, 'memo too large (max 120 bytes UTF-8)')
+          }
+
           // Seqno + wallet-state fetch fails independently; run in parallel
           // so the caller eats one RTT rather than two, and surface both
           // errors via a single diagnostic when the network's down.
@@ -2066,10 +2076,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               getTonWalletState(body.fromAddress),
             ])
           } catch (e: any) {
-            throw Object.assign(
-              new Error(`TON network error — cannot determine wallet state: ${e.message}`),
-              { statusCode: 502 },
-            )
+            throw new HttpError(502, `TON network error — cannot determine wallet state: ${e.message}`)
           }
 
           const needsDeploy = !walletState.initialized
@@ -2078,17 +2085,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // cell for StateInit — without it, the first-ever tx from a
             // fresh address can't be constructed. Make the failure loud
             // rather than silently producing an un-broadcastable tx.
-            throw Object.assign(
-              new Error('TON wallet not initialized — publicKeyHex required for first-time deployment'),
-              { statusCode: 400 },
-            )
+            throw new HttpError(400, 'TON wallet not initialized — publicKeyHex required for first-time deployment')
           }
 
           // 5-minute validity window. The hardware wallet confirmation UI
           // can take 30s+ for a careful user, and the v4R2 wallet
           // contract rejects messages past expireAt — anything tighter
           // than ~2 min risks a "expired" failure after the user already
-          // confirmed on the device.
+          // confirmed on the device. If the device-side flow (PIN +
+          // passphrase + multi-step confirm) takes longer than 5 min, the
+          // caller must call /ton/build-transfer again to refresh expireAt
+          // before signing — we have no way to extend it post-hoc without
+          // changing the bodyHash the device just signed.
           const expireAt = Math.floor(Date.now() / 1000) + 300
 
           const build = buildTonTransfer({
@@ -2127,21 +2135,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // assembler as a cryptic BitWriter error.
           const sigBuf = Buffer.from(body.signature, 'hex')
           if (sigBuf.length !== 64) {
-            throw Object.assign(new Error('signature must decode to 64 bytes'), { statusCode: 400 })
+            throw new HttpError(400, 'signature must decode to 64 bytes')
           }
 
           const buildResult = body.build as unknown as TonBuildResult
           if (!buildResult?._internal) {
-            throw Object.assign(
-              new Error('build._internal missing — pass the full object returned by /ton/build-transfer'),
-              { statusCode: 400 },
-            )
+            throw new HttpError(400, 'build._internal missing — pass the full object returned by /ton/build-transfer')
           }
           if (typeof buildResult.bodyHash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(buildResult.bodyHash)) {
-            throw Object.assign(
-              new Error('build.bodyHash missing or not 32-byte hex'),
-              { statusCode: 400 },
-            )
+            throw new HttpError(400, 'build.bodyHash missing or not 32-byte hex')
           }
 
           // Detect a client that mutated _internal (amount, destination,
@@ -2155,16 +2157,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           try {
             recomputedHash = computeTonBodyHash(buildResult)
           } catch (e: any) {
-            throw Object.assign(
-              new Error(`build object malformed — cannot reconstruct unsigned body: ${e.message}`),
-              { statusCode: 400 },
-            )
+            throw new HttpError(400, `build object malformed — cannot reconstruct unsigned body: ${e.message}`)
           }
           if (recomputedHash !== buildResult.bodyHash.toLowerCase()) {
-            throw Object.assign(
-              new Error('build tampered — _internal state does not match bodyHash'),
-              { statusCode: 400 },
-            )
+            throw new HttpError(400, 'build tampered — _internal state does not match bodyHash')
           }
 
           const { boc, extMsgHash } = assembleTonSignedBoc(buildResult, sigBuf)
@@ -2183,9 +2179,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           } catch (e: any) {
             // Surface the BOC and the txid even on broadcast failure so
             // the caller can retry broadcast without re-signing.
-            throw Object.assign(
-              new Error(`TON broadcast failed (boc preserved in error payload): ${e.message}`),
-              { statusCode: 502, details: { boc, txid: extMsgHash } },
+            throw new HttpError(
+              502,
+              `TON broadcast failed (boc preserved in error payload): ${e.message}`,
+              { boc, txid: extMsgHash },
             )
           }
 
@@ -2664,20 +2661,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return json({ error: 'Not found', path }, 404)
 
       } catch (err: any) {
-        // Handlers can throw with either `status` or `statusCode` — accept both
-        // so the advertised 400/502 on typed endpoints (e.g. /ton/*) isn't
-        // silently flattened to 500. `details` carries structured recovery
-        // data (e.g. { boc, txid } on TON broadcast failure) that the client
-        // needs to retry without re-signing.
-        const httpStatus = typeof err?.status === 'number'
-          ? err.status
-          : typeof err?.statusCode === 'number'
-            ? err.statusCode
-            : undefined
-        if (httpStatus) {
+        // HttpError carries a typed status + optional `details` (e.g.
+        // { boc, txid } on TON broadcast failure so a client can retry
+        // broadcast without re-signing). Anything without a status falls
+        // through to the firmware-failure extraction below as a 500.
+        if (typeof err?.status === 'number') {
           const payload: Record<string, unknown> = { error: err.message }
           if (err.details && typeof err.details === 'object') payload.details = err.details
-          return json(payload, httpStatus)
+          return json(payload, err.status)
         }
         // Extract firmware Failure message if present (hdwallet wraps them)
         const fwMsg = err?.message?.message || err?.message || 'Internal error'
