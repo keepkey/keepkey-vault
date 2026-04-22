@@ -3988,6 +3988,104 @@
         ]
       }
     },
+    "/ton/build-transfer": {
+      "post": {
+        "operationId": "ton_buildTransfer",
+        "summary": "Build an unsigned TON v4R2 transfer",
+        "description": "Fetches the sender's current seqno and wallet-initialization state from TonCenter, then constructs the unsigned body cell for a v4R2 wallet transfer. The returned `bodyHash` is the 32-byte hex string the KeepKey firmware signs via `/ton/sign-transaction`; pass the full `build` object back to `/ton/finalize-transfer` with the signature to assemble and broadcast the BOC. Clients never touch BOC/Cell internals.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fromAddress": { "type": "string", "description": "Sender TON address (bounceable, non-bounceable, or raw workchain:hex)" },
+                  "toAddress":   { "type": "string", "description": "Recipient TON address" },
+                  "amountNano":  { "type": "string", "description": "Transfer amount in nanoTON (decimal string — BigInt-compatible)" },
+                  "memo":        { "type": "string", "description": "Optional plain-text memo attached to the transfer" },
+                  "publicKeyHex":{ "type": "string", "description": "Sender ed25519 public key hex — required only for first-time activation (StateInit deploy)" }
+                },
+                "required": ["fromAddress", "toAddress", "amountNano"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "build":        { "type": "object", "description": "Opaque build object — echo back to /ton/finalize-transfer unchanged" },
+                    "bodyHash":     { "type": "string", "description": "32-byte hex body-cell hash — pass to /ton/sign-transaction as raw_tx" },
+                    "rawTx":        { "type": "string", "description": "Alias for bodyHash (matches hdwallet's rawTx field)" },
+                    "seqno":        { "type": "number" },
+                    "expireAt":     { "type": "number", "description": "Unix seconds — contract rejects the message past this" },
+                    "needsDeploy":  { "type": "boolean", "description": "True when the wallet has no code on-chain yet; first tx carries StateInit" },
+                    "feeEstimate":  { "type": "string", "description": "Approximate fee in TON (0.005 normal, 0.01 deploy)" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing publicKeyHex for uninitialized wallet / invalid params" },
+          "500": { "description": "Error processing request" },
+          "502": { "description": "Upstream TON network error" }
+        },
+        "security": [ { "apiKey": [] } ],
+        "tags": [ "TON" ]
+      }
+    },
+    "/ton/finalize-transfer": {
+      "post": {
+        "operationId": "ton_finalizeTransfer",
+        "summary": "Assemble signed BOC from /ton/build-transfer + device signature and broadcast",
+        "description": "Combines the earlier `build` response with the 64-byte Ed25519 signature returned by `/ton/sign-transaction`, serializes the external message as BOC, and (by default) broadcasts via TonCenter. Pass `broadcast: false` to return the BOC for offline inspection or custom broadcast.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "build":     { "type": "object", "description": "Exact object returned by /ton/build-transfer" },
+                  "signature": { "type": "string", "description": "64-byte Ed25519 signature as 128-char hex" },
+                  "broadcast": { "type": "boolean", "description": "Default true; set false to skip TonCenter and return the BOC" }
+                },
+                "required": ["build", "signature"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "boc":         { "type": "string", "description": "Base64-encoded signed external message BOC" },
+                    "txid":        { "type": "string", "description": "Hex external-message cell hash — TON's transaction id" },
+                    "broadcasted": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Malformed build object or signature" },
+          "500": { "description": "Error processing request" },
+          "502": { "description": "TonCenter broadcast failed (BOC + txid preserved in error payload so caller can retry without re-signing)" }
+        },
+        "security": [ { "apiKey": [] } ],
+        "tags": [ "TON" ]
+      }
+    },
     "/admin/wallets": {
       "get": {
         "operationId": "ListWallets",

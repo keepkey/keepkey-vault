@@ -158,6 +158,48 @@ export const TonSignRequest = z.object({
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
 }).strip()
 
+/**
+ * POST /ton/build-transfer — build an unsigned TON v4R2 transfer.
+ * Returns the 32-byte body hash (hex) the device should sign plus the
+ * internal state the vault needs to assemble the signed BOC after.
+ * Clients don't need BOC/Cell awareness — they just pipe the result's
+ * `bodyHash` into /ton/sign-transaction and the full build object into
+ * /ton/finalize-transfer.
+ *
+ * `amountNano` is a decimal string (BigInt-compatible) — floats drop
+ * precision past ~15 digits and a v4R2 transfer can easily exceed that.
+ * `publicKeyHex` is only needed when the wallet isn't activated yet;
+ * TON's first tx carries a StateInit that deploys the v4R2 contract.
+ */
+export const TonBuildTransferRequest = z.object({
+  fromAddress: z.string().min(1),
+  toAddress: z.string().min(1),
+  amountNano: z.string().min(1),
+  memo: z.string().optional(),
+  publicKeyHex: z.string().optional(),
+}).strip()
+
+/**
+ * POST /ton/finalize-transfer — assemble the signed BOC from a prior
+ * build + device signature and broadcast to TonCenter. Collapses the
+ * two-step "assemble then broadcast" flow into one call so clients don't
+ * have to re-serialize the build object twice over the wire.
+ *
+ * `signature` is 64 bytes of Ed25519 output, hex-encoded (matches what
+ * /ton/sign-transaction returns).
+ */
+export const TonFinalizeTransferRequest = z.object({
+  // tonBuildResult — shape mirrors TonBuildResult in txbuilder/ton.ts.
+  // We don't re-validate every internal field here because the client
+  // just echoes back what /ton/build-transfer produced; Zod's passthrough
+  // preserves _internal verbatim. Any tampering breaks the cellHash
+  // check implicitly during assembly, which is a safer failure mode than
+  // a schema diff drifting out of sync with the builder.
+  build: z.object({}).passthrough(),
+  signature: z.string().regex(/^[0-9a-fA-F]{128}$/, 'signature must be 64-byte hex'),
+  broadcast: z.boolean().optional(),
+}).strip()
+
 /** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
 export const SolanaSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
