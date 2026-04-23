@@ -559,11 +559,36 @@ export async function broadcastTx(
     })
     const data = await resp.json() as any
     if (data?.result === true && data?.txid) return { txid: data.txid }
-    // TronGrid returns error messages as hex-encoded strings
-    let errMsg = data?.code || 'Unknown error'
-    if (data?.message) {
-      try { errMsg = Buffer.from(data.message, 'hex').toString('utf8') } catch { errMsg = data.message }
-    }
+
+    // Diagnostic: TronGrid uses several error shapes:
+    //   { result: false, code: "CONTRACT_VALIDATE_ERROR", message: "<hex>" }
+    //   { result: false, message: "<hex or utf8>" }
+    //   { Error: "..." }                  (uppercase, validation failure)
+    //   { code: "...", message: "<hex>" }
+    //   { error: "..." }                   (generic HTTP-style)
+    // The hex-encoded `message` is the human-readable failure reason.
+    // Falling back to JSON.stringify so we never throw a bare "Unknown error".
+    const errMsgFromHexMessage = (() => {
+      const raw = data?.message
+      if (typeof raw !== 'string' || raw.length === 0) return null
+      // Hex string: even-length, all 0-9a-fA-F
+      if (/^[0-9a-fA-F]+$/.test(raw) && raw.length % 2 === 0) {
+        try {
+          const decoded = Buffer.from(raw, 'hex').toString('utf8')
+          if (decoded && /[\x20-\x7e]/.test(decoded)) return decoded
+        } catch { /* fall through */ }
+      }
+      return raw
+    })()
+    const errMsg =
+      errMsgFromHexMessage ||
+      data?.Error ||                                           // capitalized: validation
+      data?.error ||                                           // generic
+      data?.code ||                                            // category
+      (resp.status !== 200 ? `HTTP ${resp.status} ${resp.statusText}` : null) ||
+      `unparseable response: ${JSON.stringify(data).slice(0, 240)}`
+    console.error('[broadcast:tron] TronGrid rejected. body:', JSON.stringify(broadcastBody).slice(0, 400))
+    console.error('[broadcast:tron] TronGrid response:', JSON.stringify(data).slice(0, 400))
     throw new Error(`Tron broadcast failed: ${errMsg}`)
   }
 
