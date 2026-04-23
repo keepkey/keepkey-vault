@@ -146,15 +146,17 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
     }
   }
 
-  // Pioneer's /swap/available-assets currently omits TRON entirely even
-  // though /quote happily quotes TRON.TRX and TRON.USDT-TR7N... swaps via
-  // THORChain (both pools verified Available against thornode). Until
-  // pioneer-server starts listing them, add them locally so the swap pill
-  // renders on the TRON asset page and TRON shows up in the destination
-  // picker. Same shim pattern as the THOR.RUNE entry above.
-  if (!assets.find(a => a.asset === 'TRON.TRX')) {
-    const tronDef = CHAINS.find(c => c.id === 'tron')
-    if (tronDef) {
+  // Pioneer's /swap/available-assets historically omitted TRON entirely
+  // even though /quote happily quotes TRON.TRX and TRON.USDT-TR7N... via
+  // THORChain (both pools verified Available against thornode). Pioneer PR
+  // #37 fixed this for both, but if a future deploy re-includes only one
+  // (different whitelist policy, drift, etc.) the all-or-nothing shim
+  // below would silently drop the other. Check each asset independently
+  // so partial pioneer coverage doesn't regress us. Same posture as the
+  // THOR.RUNE entry above.
+  const tronDef = CHAINS.find(c => c.id === 'tron')
+  if (tronDef) {
+    if (!assets.find(a => a.asset === 'TRON.TRX')) {
       assets.push({
         asset: 'TRON.TRX',
         chainId: 'tron',
@@ -164,6 +166,8 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
         decimals: 6,
         caip: tronDef.caip,
       })
+    }
+    if (!assets.find(a => a.asset === 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T')) {
       assets.push({
         asset: 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T',
         chainId: 'tron',
@@ -429,6 +433,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── All other chains (Cosmos, XRP, Solana, Tron, TON): send to vault with memo ──
   } else {
+    // Resolve the canonical CAIP for the source asset and pull token decimals
+    // from the cached SwapAsset list. Without this, buildTx's TRC-20 detection
+    // (which keys off `params.caip` matching `tron:.../token:T...`) never
+    // triggers for a USDT-on-TRON source — buildTx falls through to the native
+    // TRX `createtransaction` path and would send `params.amount` as TRX to the
+    // THORChain inbound address instead of as a USDT.transfer() call. Same
+    // pattern would matter for any future SPL/non-EVM token sends.
+    const knownAssets = await getSwapAssets()
+    const fromAssetMeta = knownAssets.find(a => a.asset === params.fromAsset)
+    const sourceCaip = fromAssetMeta?.caip
+    const tokenDecimals = fromAssetMeta?.decimals
+
     const buildResult = await txb.buildTx(pioneer, fromChain, {
       chainId: fromChain.id,
       // MsgDeposit (RUNE/CACAO native swaps) ignores `to` — use sender as fallback
@@ -439,6 +455,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       isMax: params.isMax,
       isSwapDeposit: true, // C1 fix: explicit flag for MsgDeposit (not inferred from memo)
       fromAddress,
+      caip: sourceCaip,
+      tokenDecimals,
     })
     unsignedTx = buildResult.unsignedTx
   }
