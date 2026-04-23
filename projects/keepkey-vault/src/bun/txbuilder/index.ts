@@ -484,10 +484,21 @@ export async function signTx(
       console.debug(`[signTx:solana] result: hasSig=${!!solResult?.signature} hasSerializedTx=${!!solResult?.serializedTx}`)
       return solResult
     }
-    case 'tron':
-      return wallet.tronSignTx(unsignedTx)
-    case 'ton':
-      return wallet.tonSignTx(unsignedTx)
+    case 'tron': {
+      // hdwallet returns { signature, serializedTx, ... } but does NOT echo
+      // tronGridTx — and broadcastTx() reassembles the broadcast envelope by
+      // splicing the signature into tronGridTx. Without re-merging here, the
+      // swap orchestrator hits "Tron broadcast requires tronGridTx and
+      // signature" because tronGridTx was lost between build and broadcast.
+      const tronResult = await wallet.tronSignTx(unsignedTx)
+      return { ...tronResult, tronGridTx: unsignedTx.tronGridTx }
+    }
+    case 'ton': {
+      // Same pattern as Tron: preserve tonBuildResult through signing so the
+      // BOC-assembly step in broadcastTx has the build context it needs.
+      const tonResult = await wallet.tonSignTx(unsignedTx)
+      return { ...tonResult, tonBuildResult: unsignedTx.tonBuildResult }
+    }
     case 'zcash-shielded':
       // Shielded signing is handled by the zcash-shielded module (sidecar + device)
       // The full flow is orchestrated by sendShielded() — this should not be called directly
