@@ -324,11 +324,20 @@ export async function buildTx(
           tronGridTx = await injectTronMemo(tronGridTx, params.memo)
         }
 
+        // Intentionally do NOT pass `toAddress`/`amount` for TRC-20.
+        // Firmware 7.14's TRON FSM has only a TransferContract clear-sign
+        // path — given those fields it shows "Send <amount> TRX to
+        // <to_address>" regardless of the actual contract being called. For a
+        // TRC-20 transfer that means the device shows "Send 1 TRX to <USDT
+        // contract>" when the user is actually sending 1 USDT to a recipient
+        // — accurate to the bytes signed but a misleading interpretation. By
+        // omitting the hint fields the firmware falls back to the generic
+        // "Really sign this TRON transaction?" prompt, which matches the
+        // SwapDialog blind-sign warning text. Once firmware adds TRC-20
+        // clear-signing, populate proper hint fields here.
         const tronUnsignedTx = {
           addressNList: chain.defaultPath,
           rawTx: tronGridTx.raw_data_hex,
-          toAddress: params.to,
-          amount: tokenAmountBase.toString(),
           tronGridTx,
         }
         return { unsignedTx: tronUnsignedTx, fee: String(FEE_LIMIT_SUN / 1_000_000) }
