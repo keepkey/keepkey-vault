@@ -224,8 +224,25 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
   return assets
 }
 
-/** Convert our chain CAIP + asset info into the CAIP format Pioneer Quote expects */
-export function assetToCaip(thorAsset: string): string {
+/** Convert our chain CAIP + asset info into the CAIP format Pioneer Quote expects.
+ *
+ *  Prefer the canonical caip from the cached SwapAsset list (pioneer is the
+ *  source of truth — it knows that TRON tokens use `/token:T...` with the
+ *  case-sensitive base58 address, while EVM tokens use `/erc20:0x...`). The
+ *  reconstruct path only fires when we don't have a cached asset (e.g. the
+ *  legacy code path passing arbitrary thor-asset strings).
+ *
+ *  The bug this guards against: reconstructing always emitted `/erc20:` and
+ *  preserved THORChain's uppercase form of the contract address. For TRON
+ *  USDT, that produced `tron:.../erc20:TR7NHQJ...` instead of pioneer's
+ *  canonical `tron:.../token:TR7NHqj...`, and pioneer-router rejected the
+ *  quote with "No quotes available". */
+export function assetToCaip(thorAsset: string, knownAssets?: SwapAsset[]): string {
+  // Prefer the canonical caip pioneer gave us — it has the right namespace
+  // (/token: vs /erc20:) and the right case for chains where it matters.
+  const known = knownAssets?.find(a => a.asset === thorAsset)
+  if (known?.caip) return known.caip
+
   const parsed = parseThorAsset(thorAsset)
   const ourChainId = THOR_TO_CHAIN[parsed.chain]
   if (!ourChainId) throw new Error(`Unsupported THORChain chain: ${parsed.chain}`)
@@ -233,10 +250,15 @@ export function assetToCaip(thorAsset: string): string {
   const chainDef = CHAINS.find(c => c.id === ourChainId)
   if (!chainDef) throw new Error(`No chain def for: ${ourChainId}`)
 
-  // For ERC-20 tokens, build eip155:N/erc20:0x... CAIP
   if (parsed.contractAddress) {
-    const networkParts = chainDef.networkId // e.g. "eip155:1"
-    return `${networkParts}/erc20:${parsed.contractAddress}`
+    // Token namespace differs by chain family. Without a cached SwapAsset
+    // we can only pick the right namespace heuristically — and for TRON we
+    // can't recover the case-sensitive base58 address from THORChain's
+    // uppercased form, so the result may still be invalid. Callers that
+    // need TRON tokens should pass `knownAssets` so we hit the canonical
+    // path above.
+    const tokenNamespace = chainDef.chainFamily === 'tron' ? 'token' : 'erc20'
+    return `${chainDef.networkId}/${tokenNamespace}:${parsed.contractAddress}`
   }
 
   // Native asset — use the chain's CAIP-19

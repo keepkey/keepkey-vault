@@ -193,9 +193,14 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
 
   const pioneer = await getPioneer()
 
-  // Convert THORChain asset notation to CAIP for Pioneer Quote
-  const sellCaip = assetToCaip(params.fromAsset)
-  const buyCaip = assetToCaip(params.toAsset)
+  // Convert THORChain asset notation to CAIP for Pioneer Quote.
+  // Pass in the cached asset list so assetToCaip can use pioneer's canonical
+  // CAIP (correct namespace + correct case) instead of reconstructing — the
+  // reconstruct path can't recover TRON's case-sensitive base58 address from
+  // THORChain's uppercased contract field.
+  const knownAssets = await getSwapAssets()
+  const sellCaip = assetToCaip(params.fromAsset, knownAssets)
+  const buyCaip = assetToCaip(params.toAsset, knownAssets)
   const slippage = params.slippageBps ? params.slippageBps / 100 : 3 // Pioneer uses % not bps
 
   // Normalize BCH CashAddr: strip "bitcoincash:" prefix — THORChain uses short form
