@@ -289,9 +289,13 @@ export function getExplorerTxUrl(chainId: string, txid: string): string | null {
   const chain = CHAINS.find(c => c.id === chainId)
   if (!chain?.explorerTxUrl) return null
   // EVM explorers expect 0x prefix; all others (Mintscan, Runescan, Blockchair, etc.) do not
-  const normalizedTxid = chain.chainFamily === 'evm'
+  let normalizedTxid = chain.chainFamily === 'evm'
     ? (txid.startsWith('0x') ? txid : '0x' + txid)
     : txid.replace(/^0x/i, '')
+  // Tronscan URL routing is case-sensitive (`/transaction/EEB4...` 404s, `/eeb4...` works)
+  // even though TRON txids are hex. THORChain emits txids uppercased, so we'd otherwise
+  // hand the user a broken explorer link for any THORChain-routed swap landing on TRON.
+  if (chain.chainFamily === 'tron') normalizedTxid = normalizedTxid.toLowerCase()
   return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 

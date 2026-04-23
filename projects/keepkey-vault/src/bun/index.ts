@@ -2600,6 +2600,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				resetPioneer()
 				chainCatalog = []
 				catalogLoadedAt = 0
+				// Flush swap asset cache too — without this, the 5-minute TTL
+				// keeps the previous server's asset list (e.g. missing TRON.USDT)
+				// sticky after the user repoints to a server that lists more.
+				const { clearSwapCache } = await import('./swap')
+				clearSwapCache()
 				console.log('[settings] Pioneer API base set to:', url || '(default)')
 				return getAppSettings()
 			},
@@ -2762,6 +2767,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					resetPioneer()
 					chainCatalog = []
 					catalogLoadedAt = 0
+					const { clearSwapCache } = await import('./swap')
+					clearSwapCache()
 					console.log('[settings] Active server removed, reset to default')
 				}
 				console.log('[settings] Pioneer server removed:', url)
@@ -2791,6 +2798,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				resetPioneer()
 				chainCatalog = []
 				catalogLoadedAt = 0
+				const { clearSwapCache } = await import('./swap')
+				clearSwapCache()
 				console.log('[settings] Active Pioneer server set to:', url)
 				return getAppSettings()
 			},
