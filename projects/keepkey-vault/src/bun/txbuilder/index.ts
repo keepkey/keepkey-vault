@@ -548,8 +548,23 @@ export async function broadcastTx(
   // Tron: broadcast via TronGrid's broadcasttransaction (JSON format, needs raw_data + signature)
   if (chain.chainFamily === 'tron') {
     const tronGridTx = signedTx?.tronGridTx
-    const sigHex = signedTx?.signature
-    if (!tronGridTx || !sigHex) throw new Error('Tron broadcast requires tronGridTx and signature')
+    const rawSig = signedTx?.signature
+    if (!tronGridTx || !rawSig) throw new Error('Tron broadcast requires tronGridTx and signature')
+
+    // hdwallet's tronSignTx returns `signature` as a Uint8Array. TronGrid
+    // expects a hex string in the `signature` array — JSON.stringify on a
+    // Uint8Array produces `{"0":n,"1":n,...}` (array-like-as-object), which
+    // TronGrid's parser chokes on with a Java NullPointerException. Normalize
+    // to lowercase hex regardless of the input shape.
+    const sigHex =
+      rawSig instanceof Uint8Array || Buffer.isBuffer(rawSig)
+        ? Buffer.from(rawSig).toString('hex')
+        : typeof rawSig === 'string'
+          ? rawSig.replace(/^0x/, '')
+          : null
+    if (!sigHex || !/^[0-9a-fA-F]+$/.test(sigHex)) {
+      throw new Error(`Tron broadcast: signature is malformed (got ${typeof rawSig}, length=${(rawSig as any)?.length ?? 'n/a'})`)
+    }
 
     const broadcastBody = { ...tronGridTx, signature: [sigHex] }
     const resp = await fetch('https://api.trongrid.io/wallet/broadcasttransaction', {
