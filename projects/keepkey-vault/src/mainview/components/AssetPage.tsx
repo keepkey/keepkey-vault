@@ -405,6 +405,26 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							<Text fontSize="10px" color="kk.textMuted" lineHeight="1.2" maxW="140px" truncate>
 								{tok.name}
 							</Text>
+							{tok.contractAddress && (
+								<Text
+									fontSize="9px"
+									fontFamily="mono"
+									color="kk.textMuted"
+									lineHeight="1.2"
+									mt="0.5"
+									cursor="pointer"
+									_hover={{ color: "kk.textSecondary" }}
+									title={`Click to copy: ${tok.contractAddress}`}
+									onClick={(e) => {
+										e.stopPropagation()
+										navigator.clipboard.writeText(tok.contractAddress!)
+									}}
+								>
+									{tok.contractAddress.length > 14
+										? `${tok.contractAddress.slice(0, 6)}…${tok.contractAddress.slice(-6)}`
+										: tok.contractAddress}
+								</Text>
+							)}
 						</Box>
 					</HStack>
 					<Flex align="center" gap="1.5">
