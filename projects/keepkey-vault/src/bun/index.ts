@@ -2268,11 +2268,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!caip) throw new Error('caip required')
 				if (params.status !== 'visible' && params.status !== 'hidden') throw new Error('status must be visible or hidden')
 				dbSetTokenVisibility(caip, params.status)
+				// Notify any other view (Dashboard, etc.) that visibility changed
+				// so it can refetch instead of holding the stale on-mount snapshot.
+				try { rpc.send['token-visibility-changed']({ caip, status: params.status }) } catch { /* webview not ready */ }
 			},
 			removeTokenVisibility: async (params) => {
 				const caip = params.caip?.trim()
 				if (!caip) throw new Error('caip required')
 				dbRemoveTokenVisibility(caip)
+				try { rpc.send['token-visibility-changed']({ caip, status: null }) } catch { /* webview not ready */ }
 			},
 			getTokenVisibilityMap: async () => {
 				const map = getAllTokenVisibility()

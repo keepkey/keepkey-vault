@@ -126,11 +126,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 
-	// Load token visibility overrides (for spam filtering)
+	// Load token visibility overrides (for spam filtering). Refetch on
+	// `token-visibility-changed` push so a "mark as scam" action in
+	// AssetPage immediately removes the spam USD from the dashboard total
+	// (and a "mark as safe" puts it back). Without this subscription, the
+	// initial on-mount snapshot would persist and the dashboard would keep
+	// showing the spam balance until full reload.
 	useEffect(() => {
-		rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
-			.then(setVisibilityMap)
-			.catch(() => {})
+		const refetch = () => {
+			rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
+				.then(setVisibilityMap)
+				.catch(() => {})
+		}
+		refetch()
+		return onRpcMessage('token-visibility-changed', refetch)
 	}, [])
 
 	// Load feature flags (re-check when settings change)

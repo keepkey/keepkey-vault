@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
@@ -273,11 +273,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [showHidden, setShowHidden] = useState(false)
 
-	// Load visibility overrides once on mount
+	// Load visibility overrides + refetch on push so changes from Dashboard
+	// or another AssetPage tab stay in sync without a full reload.
 	useEffect(() => {
-		rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
-			.then(setVisibilityMap)
-			.catch(() => {})
+		const refetch = () => {
+			rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
+				.then(setVisibilityMap)
+				.catch(() => {})
+		}
+		refetch()
+		return onRpcMessage('token-visibility-changed', refetch)
 	}, [])
 
 	const { cleanTokens, spamTokens, zeroValueTokens, spamResults } = useMemo(() => {
