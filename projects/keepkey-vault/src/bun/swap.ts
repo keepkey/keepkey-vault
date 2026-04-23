@@ -213,14 +213,37 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   console.log(`${TAG} CAIP: ${sellCaip} → ${buyCaip}`)
   console.log(`${TAG} sender=${senderAddress}, recipient=${recipientAddress}`)
 
-  const quoteResp = await pioneer.Quote({
-    sellAsset: sellCaip,
-    sellAmount: params.amount, // Pioneer expects DECIMAL format (human-readable)
-    buyAsset: buyCaip,
-    recipientAddress,
-    senderAddress,
-    slippage,
-  })
+  let quoteResp: any
+  try {
+    quoteResp = await pioneer.Quote({
+      sellAsset: sellCaip,
+      sellAmount: params.amount, // Pioneer expects DECIMAL format (human-readable)
+      buyAsset: buyCaip,
+      recipientAddress,
+      senderAddress,
+      slippage,
+    })
+  } catch (e: any) {
+    // Pioneer-client (swagger-client) throws Error with message="Internal
+    // Server Error" but the real diagnostic from THORNode (e.g. "amount less
+    // than min swap amount (recommended_min_amount_in: …)") is in
+    // e.response.body.message. Surface the inner message so the RPC layer +
+    // frontend can render something useful instead of "Internal Server Error".
+    const inner = e?.response?.body?.message || e?.responseError?.message || e?.response?.text
+    if (inner && typeof inner === 'string') {
+      // The text body comes through as a JSON string on some swagger versions;
+      // try to unwrap once if it looks like JSON.
+      let unwrapped = inner
+      try {
+        const parsed = JSON.parse(inner)
+        if (parsed?.message) unwrapped = parsed.message
+      } catch { /* not JSON, use as-is */ }
+      const err = new Error(unwrapped)
+      ;(err as any).cause = e
+      throw err
+    }
+    throw e
+  }
 
   // Log raw response structure for debugging quote parsing issues
   const qDebug = quoteResp?.data?.data || quoteResp?.data || quoteResp

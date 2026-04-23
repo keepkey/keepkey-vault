@@ -932,6 +932,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           setError(t("swapTooSmallForFees"))
         } else if (/pool.*not available|pool.*staged/i.test(msg)) {
           setError(t("poolNotAvailable"))
+        } else if (/amount less than min swap amount/i.test(msg)) {
+          // THORNode rejects with `recommended_min_amount_in: <int>` where the
+          // integer is in THORChain's 8-decimal internal units regardless of
+          // the source chain's native decimals. Convert to the source-asset
+          // human form so the user sees something they can act on.
+          const minMatch = msg.match(/recommended_min_amount_in:\s*(\d+)/i)
+          if (minMatch && fromAsset) {
+            const minThorBaseUnits = BigInt(minMatch[1])
+            const minHumanReadable = (Number(minThorBaseUnits) / 1e8).toFixed(4)
+            setError(t("amountBelowMinimum", { min: minHumanReadable, symbol: fromAsset.symbol }))
+          } else {
+            setError(t("amountBelowMinimumGeneric"))
+          }
         } else {
           setError(msg || t("errorQuote"))
         }
