@@ -146,6 +146,41 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
     }
   }
 
+  // Pioneer's /swap/available-assets historically omitted TRON entirely
+  // even though /quote happily quotes TRON.TRX and TRON.USDT-TR7N... via
+  // THORChain (both pools verified Available against thornode). Pioneer PR
+  // #37 fixed this for both, but if a future deploy re-includes only one
+  // (different whitelist policy, drift, etc.) the all-or-nothing shim
+  // below would silently drop the other. Check each asset independently
+  // so partial pioneer coverage doesn't regress us. Same posture as the
+  // THOR.RUNE entry above.
+  const tronDef = CHAINS.find(c => c.id === 'tron')
+  if (tronDef) {
+    if (!assets.find(a => a.asset === 'TRON.TRX')) {
+      assets.push({
+        asset: 'TRON.TRX',
+        chainId: 'tron',
+        symbol: 'TRX',
+        name: 'Tron',
+        chainFamily: 'tron',
+        decimals: 6,
+        caip: tronDef.caip,
+      })
+    }
+    if (!assets.find(a => a.asset === 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T')) {
+      assets.push({
+        asset: 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T',
+        chainId: 'tron',
+        symbol: 'USDT',
+        name: 'Tether (TRON)',
+        chainFamily: 'tron',
+        decimals: 6,
+        contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        caip: 'tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+      })
+    }
+  }
+
   console.log(`${TAG} Loaded ${assets.length} swap assets from Pioneer`)
   assetCache = assets
   assetCacheTime = Date.now()
@@ -162,9 +197,14 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
 
   const pioneer = await getPioneer()
 
-  // Convert THORChain asset notation to CAIP for Pioneer Quote
-  const sellCaip = assetToCaip(params.fromAsset)
-  const buyCaip = assetToCaip(params.toAsset)
+  // Convert THORChain asset notation to CAIP for Pioneer Quote.
+  // Pass in the cached asset list so assetToCaip can use pioneer's canonical
+  // CAIP (correct namespace + correct case) instead of reconstructing — the
+  // reconstruct path can't recover TRON's case-sensitive base58 address from
+  // THORChain's uppercased contract field.
+  const knownAssets = await getSwapAssets()
+  const sellCaip = assetToCaip(params.fromAsset, knownAssets)
+  const buyCaip = assetToCaip(params.toAsset, knownAssets)
   const slippage = params.slippageBps ? params.slippageBps / 100 : 3 // Pioneer uses % not bps
 
   // Normalize BCH CashAddr: strip "bitcoincash:" prefix — THORChain uses short form
@@ -177,14 +217,37 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   console.log(`${TAG} CAIP: ${sellCaip} → ${buyCaip}`)
   console.log(`${TAG} sender=${senderAddress}, recipient=${recipientAddress}`)
 
-  const quoteResp = await pioneer.Quote({
-    sellAsset: sellCaip,
-    sellAmount: params.amount, // Pioneer expects DECIMAL format (human-readable)
-    buyAsset: buyCaip,
-    recipientAddress,
-    senderAddress,
-    slippage,
-  })
+  let quoteResp: any
+  try {
+    quoteResp = await pioneer.Quote({
+      sellAsset: sellCaip,
+      sellAmount: params.amount, // Pioneer expects DECIMAL format (human-readable)
+      buyAsset: buyCaip,
+      recipientAddress,
+      senderAddress,
+      slippage,
+    })
+  } catch (e: any) {
+    // Pioneer-client (swagger-client) throws Error with message="Internal
+    // Server Error" but the real diagnostic from THORNode (e.g. "amount less
+    // than min swap amount (recommended_min_amount_in: …)") is in
+    // e.response.body.message. Surface the inner message so the RPC layer +
+    // frontend can render something useful instead of "Internal Server Error".
+    const inner = e?.response?.body?.message || e?.responseError?.message || e?.response?.text
+    if (inner && typeof inner === 'string') {
+      // The text body comes through as a JSON string on some swagger versions;
+      // try to unwrap once if it looks like JSON.
+      let unwrapped = inner
+      try {
+        const parsed = JSON.parse(inner)
+        if (parsed?.message) unwrapped = parsed.message
+      } catch { /* not JSON, use as-is */ }
+      const err = new Error(unwrapped)
+      ;(err as any).cause = e
+      throw err
+    }
+    throw e
+  }
 
   // Log raw response structure for debugging quote parsing issues
   const qDebug = quoteResp?.data?.data || quoteResp?.data || quoteResp
@@ -370,6 +433,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── All other chains (Cosmos, XRP, Solana, Tron, TON): send to vault with memo ──
   } else {
+    // Resolve the canonical CAIP for the source asset and pull token decimals
+    // from the cached SwapAsset list. Without this, buildTx's TRC-20 detection
+    // (which keys off `params.caip` matching `tron:.../token:T...`) never
+    // triggers for a USDT-on-TRON source — buildTx falls through to the native
+    // TRX `createtransaction` path and would send `params.amount` as TRX to the
+    // THORChain inbound address instead of as a USDT.transfer() call. Same
+    // pattern would matter for any future SPL/non-EVM token sends.
+    const knownAssets = await getSwapAssets()
+    const fromAssetMeta = knownAssets.find(a => a.asset === params.fromAsset)
+    const sourceCaip = fromAssetMeta?.caip
+    const tokenDecimals = fromAssetMeta?.decimals
+
     const buildResult = await txb.buildTx(pioneer, fromChain, {
       chainId: fromChain.id,
       // MsgDeposit (RUNE/CACAO native swaps) ignores `to` — use sender as fallback
@@ -380,6 +455,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       isMax: params.isMax,
       isSwapDeposit: true, // C1 fix: explicit flag for MsgDeposit (not inferred from memo)
       fromAddress,
+      caip: sourceCaip,
+      tokenDecimals,
     })
     unsignedTx = buildResult.unsignedTx
   }
