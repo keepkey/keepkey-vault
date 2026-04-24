@@ -269,6 +269,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }

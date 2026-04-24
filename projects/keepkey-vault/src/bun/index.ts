@@ -2268,11 +2268,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!caip) throw new Error('caip required')
 				if (params.status !== 'visible' && params.status !== 'hidden') throw new Error('status must be visible or hidden')
 				dbSetTokenVisibility(caip, params.status)
+				// Notify any other view (Dashboard, etc.) that visibility changed
+				// so it can refetch instead of holding the stale on-mount snapshot.
+				try { rpc.send['token-visibility-changed']({ caip, status: params.status }) } catch { /* webview not ready */ }
 			},
 			removeTokenVisibility: async (params) => {
 				const caip = params.caip?.trim()
 				if (!caip) throw new Error('caip required')
 				dbRemoveTokenVisibility(caip)
+				try { rpc.send['token-visibility-changed']({ caip, status: null }) } catch { /* webview not ready */ }
 			},
 			getTokenVisibilityMap: async () => {
 				const map = getAllTokenVisibility()
@@ -2600,6 +2604,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				resetPioneer()
 				chainCatalog = []
 				catalogLoadedAt = 0
+				// Flush swap asset cache too — without this, the 5-minute TTL
+				// keeps the previous server's asset list (e.g. missing TRON.USDT)
+				// sticky after the user repoints to a server that lists more.
+				const { clearSwapCache } = await import('./swap')
+				clearSwapCache()
 				console.log('[settings] Pioneer API base set to:', url || '(default)')
 				return getAppSettings()
 			},
@@ -2762,6 +2771,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					resetPioneer()
 					chainCatalog = []
 					catalogLoadedAt = 0
+					const { clearSwapCache } = await import('./swap')
+					clearSwapCache()
 					console.log('[settings] Active server removed, reset to default')
 				}
 				console.log('[settings] Pioneer server removed:', url)
@@ -2791,6 +2802,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				resetPioneer()
 				chainCatalog = []
 				catalogLoadedAt = 0
+				const { clearSwapCache } = await import('./swap')
+				clearSwapCache()
 				console.log('[settings] Active Pioneer server set to:', url)
 				return getAppSettings()
 			},

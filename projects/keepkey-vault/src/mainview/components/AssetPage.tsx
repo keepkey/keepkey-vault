@@ -1,8 +1,8 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck } from "react-icons/fa"
-import { rpcRequest } from "../lib/rpc"
+import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
@@ -53,6 +53,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	const [view, setView] = useState<AssetView>("receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
+	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
@@ -272,11 +273,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [showHidden, setShowHidden] = useState(false)
 
-	// Load visibility overrides once on mount
+	// Load visibility overrides + refetch on push so changes from Dashboard
+	// or another AssetPage tab stay in sync without a full reload.
 	useEffect(() => {
-		rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
-			.then(setVisibilityMap)
-			.catch(() => {})
+		const refetch = () => {
+			rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
+				.then(setVisibilityMap)
+				.catch(() => {})
+		}
+		refetch()
+		return onRpcMessage('token-visibility-changed', refetch)
 	}, [])
 
 	const { cleanTokens, spamTokens, zeroValueTokens, spamResults } = useMemo(() => {
@@ -405,6 +411,27 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							<Text fontSize="10px" color="kk.textMuted" lineHeight="1.2" maxW="140px" truncate>
 								{tok.name}
 							</Text>
+							{tok.contractAddress && (
+								<HStack
+									gap="1"
+									mt="0.5"
+									cursor="pointer"
+									onClick={(e) => {
+										e.stopPropagation()
+										navigator.clipboard.writeText(tok.contractAddress!)
+										setCopiedCaip(tok.caip)
+										setTimeout(() => setCopiedCaip(c => c === tok.caip ? null : c), 1500)
+									}}
+									_hover={{ color: "kk.textSecondary" }}
+									title={`Click to copy: ${tok.contractAddress}`}
+									color="kk.textMuted"
+								>
+									<Text fontSize="9px" fontFamily="mono" lineHeight="1.2">
+										{tok.contractAddress}
+									</Text>
+									<Box as={copiedCaip === tok.caip ? FaCheck : FaCopy} fontSize="8px" color={copiedCaip === tok.caip ? "green.400" : "inherit"} />
+								</HStack>
+							)}
 						</Box>
 					</HStack>
 					<Flex align="center" gap="1.5">

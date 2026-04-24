@@ -264,9 +264,13 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const explorerUrl = useMemo(() => {
 		if (!txid) return null
 		// EVM explorers expect 0x prefix; all others do not
-		const normalizedTxid = chain.chainFamily === 'evm'
+		let normalizedTxid = chain.chainFamily === 'evm'
 			? (txid.startsWith('0x') ? txid : '0x' + txid)
 			: txid.replace(/^0x/i, '')
+		// Tronscan URL routing is case-sensitive — keep the same posture as
+		// shared/chains.ts:getExplorerTxUrl so TRON outbound txids (often emitted
+		// uppercase by THORChain) produce a working tronscan link.
+		if (chain.chainFamily === 'tron') normalizedTxid = normalizedTxid.toLowerCase()
 		const caip = isTokenSend && token?.caip ? token.caip : chain.caip
 		const asset = getAsset(caip)
 		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', normalizedTxid)
