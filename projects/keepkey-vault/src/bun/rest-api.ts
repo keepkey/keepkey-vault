@@ -161,6 +161,77 @@ function evictOldest<K, V>(cache: Map<K, V>, count: number) {
   }
 }
 
+/** Cache key scoped by device_id — prevents cross-device pubkey leakage.
+ *  deviceId is read at call time from engine; if no device is connected,
+ *  we still prefix with `none:` so orphan entries can be flushed together. */
+function scopedKey(engine: EngineController, prefix: string, body: unknown): string {
+  const deviceId = engine.getDeviceState().deviceId || 'none'
+  return `${deviceId}:${prefix}:${JSON.stringify(body)}`
+}
+
+/** Clear every pubkey cache entry. Call on device disconnect / device swap. */
+export function clearPubkeyCache() {
+  pubkeyCache.clear()
+}
+
+/** Clear every address cache entry. Call on device disconnect / device swap. */
+export function clearAddressCache() {
+  addressCache.clear()
+}
+
+// ── UI-active gate ─────────────────────────────────────────────────────
+// REST pubkey/address endpoints MUST NOT serve when the Vault UI is closed,
+// because cache can still hold entries from a previous session even after a
+// fresh start (features cache is cleared on disconnect, but xpubs may have
+// been persisted to DB and re-loaded — or a prior process left an open port).
+// The WebView pings `uiSetActive` on mount and `uiSetActive({active:false})`
+// on unload; the lack of a heartbeat within UI_STALE_MS is also treated as
+// closed. When `viewDeviceId` is set (user opened a specific wallet / the
+// watch-only view for device X), REST rejects any pubkey request where the
+// connected device's id does not match.
+const UI_STALE_MS = 45_000
+let uiState: { active: boolean; viewDeviceId: string | null; lastHeartbeat: number } = {
+  active: false,
+  viewDeviceId: null,
+  lastHeartbeat: 0,
+}
+
+/** Called from RPC handler when the WebView signals its state. */
+export function setUiActive(active: boolean, viewDeviceId: string | null = null) {
+  const wasActive = uiState.active
+  uiState = { active, viewDeviceId, lastHeartbeat: Date.now() }
+  if (!active && wasActive) {
+    // UI just closed — flush caches so next session can't serve stale pubkeys.
+    clearPubkeyCache()
+    clearAddressCache()
+    clearFeaturesCache()
+  }
+}
+
+/** Called from RPC handler on periodic heartbeat from the WebView.
+ *  No-op when the UI is not currently active — a stray heartbeat racing
+ *  with an explicit `setUiActive(false)` (e.g. window close) must not
+ *  re-open the gate; the WebView has to call `setUiActive(true)` to
+ *  reactivate. Heartbeats only refresh `lastHeartbeat` while active. */
+export function uiHeartbeat(viewDeviceId: string | null = null) {
+  if (!uiState.active) return
+  uiState = { active: true, viewDeviceId, lastHeartbeat: Date.now() }
+}
+
+/** Gate for any endpoint that serves device-derived material (pubkeys,
+ *  addresses). Throws 503 when the Vault UI is not open, or when the UI is
+ *  scoped to a different device than the one currently connected. */
+function requireUiActive(engine: EngineController) {
+  const fresh = uiState.active && (Date.now() - uiState.lastHeartbeat) < UI_STALE_MS
+  if (!fresh) {
+    throw new HttpError(503, 'Vault UI is not open — pubkeys are only served while the app window is active')
+  }
+  const ds = engine.getDeviceState()
+  if (uiState.viewDeviceId && ds.deviceId && uiState.viewDeviceId !== ds.deviceId) {
+    throw new HttpError(503, `Vault UI is open on device ${uiState.viewDeviceId}, but device ${ds.deviceId} is connected`)
+  }
+}
+
 // ── Cosmos-family amino signing helper ─────────────────────────────────
 async function cosmosAminoSign(
   wallet: any,
@@ -919,9 +990,26 @@ function requiredSigningFields(path: string): string[] | null {
 }
 
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
-  // Invalidate features cache on device disconnect
+  // Device-swap detection: if deviceId changes between two `ready` states,
+  // pubkey/address caches must be flushed or the old device's xpubs will
+  // leak. (lastDeviceId is also flushed on disconnect so a re-connect of the
+  // SAME device will repopulate from scratch.)
+  let lastDeviceId: string | null = null
   engine.on('state-change', (state) => {
-    if (state.state === 'disconnected') clearFeaturesCache()
+    const nextId = state.deviceId ?? null
+    if (state.state === 'disconnected') {
+      clearFeaturesCache()
+      clearPubkeyCache()
+      clearAddressCache()
+      lastDeviceId = null
+      return
+    }
+    if (nextId && lastDeviceId && nextId !== lastDeviceId) {
+      clearFeaturesCache()
+      clearPubkeyCache()
+      clearAddressCache()
+    }
+    if (nextId) lastDeviceId = nextId
   })
 
   /**
@@ -1414,9 +1502,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── ADDRESSES (9 endpoints) ──────────────────────────────────
         if (path === '/addresses/utxo' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'utxo:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'utxo', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1435,9 +1524,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/cosmos' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'cosmos:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'cosmos', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1454,9 +1544,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/osmosis' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'osmo:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'osmo', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1473,9 +1564,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/eth' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'eth:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'eth', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1492,9 +1584,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tendermint' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'tendermint:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'tendermint', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1511,9 +1604,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/thorchain' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'thor:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'thor', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1530,9 +1624,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/mayachain' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'maya:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'maya', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1549,9 +1644,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/xrp' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'xrp:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'xrp', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1568,9 +1664,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/solana' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'sol:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'sol', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1587,9 +1684,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tron' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'trx:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'trx', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1606,9 +1704,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/ton' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'ton:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'ton', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2199,9 +2298,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/info/get-public-key' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.GetPublicKeyRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'pubkey', body)
           const cached = pubkeyCache.get(cacheKey)
           if (cached) return json(cached)
           const sd = showDisplay(body.show_display)
@@ -2317,6 +2417,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/pubkeys/batch' && method === 'POST') {
           auth.requireAuth(req)
+          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.BatchPubkeysRequest)
           const paths = body.paths || []
@@ -2329,7 +2430,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // SDK sends type='address' for chains that need actual addresses, not xpubs.
             if (p.type === 'address') {
               const primaryNetwork = (p.networks || [])[0] || ''
-              const addrCacheKey = `batch-addr:${JSON.stringify(p.address_n)}:${primaryNetwork}`
+              const addrCacheKey = scopedKey(engine, 'batch-addr', { n: p.address_n, net: primaryNetwork })
               const cachedAddr = addressCache.get(addrCacheKey)
               if (cachedAddr) {
                 results.push({
@@ -2409,7 +2510,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
 
             // ── xpub/ypub/zpub-type paths (UTXO chains) ──
-            const cacheKey = JSON.stringify({ address_n: p.address_n, script_type: p.script_type })
+            const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type })
             const cached = pubkeyCache.get(cacheKey)
             if (cached) {
               results.push({

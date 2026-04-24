@@ -229,6 +229,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applyUpdate: { params: void; response: void }
       getUpdateInfo: { params: void; response: UpdateInfo | null }
       getAppVersion: { params: void; response: { version: string; channel: string } }
+      // ── REST API UI-active gate ────────────────────────────────
+      // Frontend signals whether the Vault UI window is open so the REST API
+      // (port 1646) won't serve pubkeys/addresses to 3rd-party apps unless
+      // the user's UI is present. `viewDeviceId` scopes serving to the device
+      // the user currently has open (incl. watch-only views).
+      uiSetActive: { params: { active: boolean; viewDeviceId?: string | null }; response: void }
+      uiHeartbeat: { params: { viewDeviceId?: string | null } | void; response: void }
+
       // ── Window controls (custom titlebar) ──────────────────────
       windowClose: { params: void; response: void }
       windowMinimize: { params: void; response: void }

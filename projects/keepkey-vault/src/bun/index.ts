@@ -92,7 +92,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
-import { startRestApi, clearFeaturesCache, type RestApiCallbacks } from "./rest-api"
+import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
@@ -3859,6 +3859,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				version: await Updater.localInfo.version(),
 				channel: await Updater.localInfo.channel(),
 			}),
+			// ── REST API UI-active gate ───────────────────────────────
+			// The WebView calls uiSetActive(true) on mount and uiSetActive(false)
+			// before unload, plus a periodic heartbeat. Without a fresh heartbeat,
+			// rest-api.ts refuses to serve pubkeys/addresses to 3rd-party clients.
+			uiSetActive: async ({ active, viewDeviceId }) => {
+				setUiActive(Boolean(active), viewDeviceId ?? null)
+			},
+			uiHeartbeat: async (params) => {
+				uiHeartbeat((params as any)?.viewDeviceId ?? null)
+			},
 			// ── Window controls (for custom titlebar) ─────────────────
 			windowClose: async () => { _mainWindow?.close() },
 			windowMinimize: async () => { _mainWindow?.minimize() },
@@ -4309,6 +4319,9 @@ function cleanupAndQuit() {
 	// Fire-and-forget — relay WebSocket close is best-effort within the 5s force-exit.
 	try { wcManager?.destroy().catch((e: any) => console.warn('[cleanup] WC destroy:', e.message)) } catch {}
 	stopSidecar()
+	// Flip REST UI-active flag off + flush pubkey/address caches so a late
+	// in-flight request during the 5s force-exit window can't leak state.
+	try { setUiActive(false, null) } catch {}
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()
