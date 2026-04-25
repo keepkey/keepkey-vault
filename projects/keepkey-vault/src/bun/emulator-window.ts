@@ -76,6 +76,13 @@ let pendingSeedAck: {
   resolve: () => void
 } | null = null
 
+/**
+ * True once the webview has POSTed /_emu/ready. Until then, `sendToWindow`
+ * drops messages — calling executeJavascript on a not-yet-loaded WebView
+ * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
+ */
+let viewReady = false
+
 function startBridge(): number {
   if (bridgeServer) return bridgePort
 
@@ -95,6 +102,12 @@ function startBridge(): number {
           }
           return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
         })
+      }
+
+      if (url.pathname === '/_emu/ready' && req.method === 'POST') {
+        viewReady = true
+        console.log(`${TAG} Bridge: webview signaled ready`)
+        return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
       }
 
       if (url.pathname === '/_emu/seed-ack' && req.method === 'POST') {
@@ -184,6 +197,7 @@ export function openEmulatorWindow(): void {
       pendingSeedAck = null
     }
     emuWindow = null
+    viewReady = false
   })
 
   startDisplayPoll()
@@ -203,6 +217,7 @@ export function closeEmulatorWindow(): void {
   }
   try { emuWindow.close() } catch {}
   emuWindow = null
+  viewReady = false
   stopBridge()
 }
 
@@ -213,9 +228,13 @@ export function isEmulatorWindowOpen(): boolean {
 // ── Send to webview (bun → webview via executeJavascript) ───────────────
 
 function sendToWindow(messageName: string, payload: any): void {
-  if (!emuWindow) return
+  if (!emuWindow || !viewReady) return
   const packet = JSON.stringify({ type: 'message', id: messageName, payload })
-  emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+  try {
+    emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+  } catch (err: any) {
+    console.warn(`${TAG} sendToWindow ${messageName} failed:`, err?.message)
+  }
 }
 
 // ── Seed word display ───────────────────────────────────────────────────
@@ -755,6 +774,10 @@ function buildEmulatorHTML(bridgePort: number): string {
   });
 
   console.log('[emu-ui] Ready, bridge=' + BRIDGE);
+  // Tell bun the WebView is ready to receive executeJavascript packets.
+  // Without this, display-update polls fire before window.handlePacket is
+  // defined and crash the WKWebView process (EXC_BREAKPOINT in WebKit).
+  postBridge('/_emu/ready', {});
 })();
 </script>
 </body>
