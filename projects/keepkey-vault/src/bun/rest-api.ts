@@ -179,27 +179,21 @@ export function clearAddressCache() {
   addressCache.clear()
 }
 
-// ── UI-active gate ─────────────────────────────────────────────────────
-// REST pubkey/address endpoints MUST NOT serve when the Vault UI is closed,
-// because cache can still hold entries from a previous session even after a
-// fresh start (features cache is cleared on disconnect, but xpubs may have
-// been persisted to DB and re-loaded — or a prior process left an open port).
-// The WebView pings `uiSetActive` on mount and `uiSetActive({active:false})`
-// on unload; the lack of a heartbeat within UI_STALE_MS is also treated as
-// closed. When `viewDeviceId` is set (user opened a specific wallet / the
-// watch-only view for device X), REST rejects any pubkey request where the
-// connected device's id does not match.
-const UI_STALE_MS = 45_000
-let uiState: { active: boolean; viewDeviceId: string | null; lastHeartbeat: number } = {
-  active: false,
-  viewDeviceId: null,
-  lastHeartbeat: 0,
-}
+// ── UI lifecycle signal ────────────────────────────────────────────────
+// The WebView signals `setUiActive(true)` on mount and `setUiActive(false)`
+// on unload. We use the active→inactive transition to flush caches so a
+// later re-open cannot serve entries the user might assume were re-derived.
+// Note: access control for these endpoints is handled by `auth.requireAuth`
+// (paired-app API key) plus per-device cache scoping via `scopedKey`; we do
+// NOT gate on UI visibility, because paired apps (e.g. the browser extension)
+// must be able to refresh pubkeys after a device reconnect even when the
+// Vault window is closed.
+let uiActive = false
 
 /** Called from RPC handler when the WebView signals its state. */
-export function setUiActive(active: boolean, viewDeviceId: string | null = null) {
-  const wasActive = uiState.active
-  uiState = { active, viewDeviceId, lastHeartbeat: Date.now() }
+export function setUiActive(active: boolean, _viewDeviceId: string | null = null) {
+  const wasActive = uiActive
+  uiActive = active
   if (!active && wasActive) {
     // UI just closed — flush caches so next session can't serve stale pubkeys.
     clearPubkeyCache()
@@ -209,27 +203,10 @@ export function setUiActive(active: boolean, viewDeviceId: string | null = null)
 }
 
 /** Called from RPC handler on periodic heartbeat from the WebView.
- *  No-op when the UI is not currently active — a stray heartbeat racing
- *  with an explicit `setUiActive(false)` (e.g. window close) must not
- *  re-open the gate; the WebView has to call `setUiActive(true)` to
- *  reactivate. Heartbeats only refresh `lastHeartbeat` while active. */
-export function uiHeartbeat(viewDeviceId: string | null = null) {
-  if (!uiState.active) return
-  uiState = { active: true, viewDeviceId, lastHeartbeat: Date.now() }
-}
-
-/** Gate for any endpoint that serves device-derived material (pubkeys,
- *  addresses). Throws 503 when the Vault UI is not open, or when the UI is
- *  scoped to a different device than the one currently connected. */
-function requireUiActive(engine: EngineController) {
-  const fresh = uiState.active && (Date.now() - uiState.lastHeartbeat) < UI_STALE_MS
-  if (!fresh) {
-    throw new HttpError(503, 'Vault UI is not open — pubkeys are only served while the app window is active')
-  }
-  const ds = engine.getDeviceState()
-  if (uiState.viewDeviceId && ds.deviceId && uiState.viewDeviceId !== ds.deviceId) {
-    throw new HttpError(503, `Vault UI is open on device ${uiState.viewDeviceId}, but device ${ds.deviceId} is connected`)
-  }
+ *  Retained as a no-op so the RPC contract with the frontend stays stable;
+ *  cache lifecycle is driven entirely by `setUiActive` transitions now. */
+export function uiHeartbeat(_viewDeviceId: string | null = null) {
+  // intentionally empty
 }
 
 // ── Cosmos-family amino signing helper ─────────────────────────────────
@@ -1502,7 +1479,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── ADDRESSES (9 endpoints) ──────────────────────────────────
         if (path === '/addresses/utxo' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'utxo', body)
@@ -1524,7 +1500,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/cosmos' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'cosmos', body)
@@ -1544,7 +1519,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/osmosis' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'osmo', body)
@@ -1564,7 +1538,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/eth' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'eth', body)
@@ -1584,7 +1557,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tendermint' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'tendermint', body)
@@ -1604,7 +1576,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/thorchain' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'thor', body)
@@ -1624,7 +1595,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/mayachain' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'maya', body)
@@ -1644,7 +1614,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/xrp' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'xrp', body)
@@ -1664,7 +1633,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/solana' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'sol', body)
@@ -1684,7 +1652,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tron' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'trx', body)
@@ -1704,7 +1671,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/ton' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'ton', body)
@@ -2298,7 +2264,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/info/get-public-key' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.GetPublicKeyRequest)
           const cacheKey = scopedKey(engine, 'pubkey', body)
@@ -2417,7 +2382,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/pubkeys/batch' && method === 'POST') {
           auth.requireAuth(req)
-          requireUiActive(engine)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.BatchPubkeysRequest)
           const paths = body.paths || []
