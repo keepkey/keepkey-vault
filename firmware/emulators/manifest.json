@@ -1,21 +1,21 @@
 {
   "emulators": [
     {
-      "version": "7.10.0-alpha",
-      "firmwareVersion": "7.10.0",
+      "version": "7.15.0-alpha",
+      "firmwareVersion": "7.15.0",
       "channel": "alpha",
       "arch": "arm64",
       "platform": "darwin",
-      "dylib": "7.10.0-alpha/libkkemu.dylib",
-      "binary": "7.10.0-alpha/kkemu",
+      "dylib": "7.15.0-alpha/libkkemu.dylib",
+      "binary": "7.15.0-alpha/kkemu",
       "debugLink": true,
-      "description": "Alpha — 7.10.0 emulator build (arm64 macOS)",
+      "description": "Alpha — 7.15.0 emulator build (arm64 macOS)",
       "source": {
         "repo": "BitHighlander/keepkey-firmware",
-        "ref": "release/7.10.0",
+        "ref": "alpha",
         "type": "branch"
       }
     }
   ],
-  "default": "7.10.0-alpha"
+  "default": "7.15.0-alpha"
 }
