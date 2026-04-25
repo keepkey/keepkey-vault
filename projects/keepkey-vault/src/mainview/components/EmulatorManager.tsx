@@ -1,7 +1,8 @@
 /**
  * EmulatorManager — multi-wallet emulator panel for the splash screen.
- * macOS only. Shows a list of emulator wallets (flash images tied to seeds),
- * allows starting/stopping/switching, creating new wallets, and importing seeds.
+ * macOS only. Shows a list of emulator wallets (flash images), starts/stops
+ * them, and spawns fresh emus that hand off to the standard OobSetupWizard
+ * for wallet creation/recovery — same UX as a real device.
  */
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
@@ -26,9 +27,6 @@ export function EmulatorManager() {
 	const [loading, setLoading] = useState<string | null>(null)
 	const [expanded, setExpanded] = useState(false)
 	const [showAdd, setShowAdd] = useState(false)
-	const [newName, setNewName] = useState("")
-	const [newMnemonic, setNewMnemonic] = useState("")
-	const [newLabel, setNewLabel] = useState("")
 	const [error, setError] = useState<string | null>(null)
 
 	const refresh = useCallback(async () => {
@@ -104,31 +102,32 @@ export function EmulatorManager() {
 		setLoading(null)
 	}, [refresh])
 
-	const handleImport = useCallback(async () => {
-		const name = newName.trim()
-		if (!name) return
-		const mnemonic = newMnemonic.trim()
-		if (!mnemonic) return
-		setLoading("__import")
+	/**
+	 * Spawn a fresh, uninitialized emulator on the given channel and let the
+	 * standard OobSetupWizard handle Create/Recover from there. Same UX as
+	 * plugging in a brand-new KeepKey.
+	 */
+	const handleAddNew = useCallback(async (channel: EmulatorChannel) => {
+		// Auto-name as emu-N (next free index)
+		const existing = new Set(wallets.map(w => w.name))
+		let idx = 1
+		while (existing.has(`emu-${idx}`)) idx++
+		const name = `emu-${idx}`
+
+		setLoading("__add")
 		setError(null)
 		try {
-			const s = await rpcRequest<EmulatorStatus>("emulatorImportWallet", {
-				name,
-				mnemonic,
-				label: newLabel.trim() || undefined,
-				channel: selectedChannel,
-			}, 30000)
-			setStatus(s)
+			await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name, channel }, 20000)
+			// Engine sees needs_init → App.tsx switches to setup phase → OobSetupWizard renders.
+			// Close the panel so the wizard owns the screen.
 			setShowAdd(false)
-			setNewName("")
-			setNewMnemonic("")
-			setNewLabel("")
+			setExpanded(false)
 			await refresh()
 		} catch (e: any) {
 			setError(e?.message || String(e))
 		}
 		setLoading(null)
-	}, [newName, newMnemonic, newLabel, selectedChannel, refresh])
+	}, [wallets, refresh])
 
 	const handlePair = useCallback(async () => {
 		setLoading("__pair")
@@ -416,96 +415,61 @@ export function EmulatorManager() {
 				)
 			})}
 
-			{/* Add wallet form */}
+			{/* Add new emulator: pick a channel → spawn fresh emu → standard OobSetupWizard takes over */}
 			{showAdd && (
 				<Box px="4" py="3" borderTop="1px solid rgba(192,168,96,0.2)">
-					<Text fontSize="xs" fontWeight="600" color="#C0A860" mb="2">Import Wallet</Text>
-
-					<Box
-						as="input"
-						w="100%"
-						px="3" py="1.5"
-						mb="2"
-						fontSize="xs"
-						bg="rgba(255,255,255,0.05)"
-						border="1px solid rgba(255,255,255,0.1)"
-						borderRadius="md"
-						color="gray.200"
-						placeholder="Wallet name (e.g. test-wallet-1)"
-						_placeholder={{ color: "gray.600" }}
-						_focus={{ borderColor: "rgba(192,168,96,0.5)", outline: "none" }}
-						value={newName}
-						onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
-					/>
-
-					<Box
-						as="textarea"
-						w="100%"
-						px="3" py="1.5"
-						mb="2"
-						fontSize="xs"
-						bg="rgba(255,255,255,0.05)"
-						border="1px solid rgba(255,255,255,0.1)"
-						borderRadius="md"
-						color="gray.200"
-						placeholder="Seed phrase (12 or 24 words)"
-						_placeholder={{ color: "gray.600" }}
-						_focus={{ borderColor: "rgba(192,168,96,0.5)", outline: "none" }}
-						rows={3}
-						resize="none"
-						value={newMnemonic}
-						onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewMnemonic(e.target.value)}
-					/>
-
-					<Box
-						as="input"
-						w="100%"
-						px="3" py="1.5"
-						mb="3"
-						fontSize="xs"
-						bg="rgba(255,255,255,0.05)"
-						border="1px solid rgba(255,255,255,0.1)"
-						borderRadius="md"
-						color="gray.200"
-						placeholder="Label (optional, defaults to name)"
-						_placeholder={{ color: "gray.600" }}
-						_focus={{ borderColor: "rgba(192,168,96,0.5)", outline: "none" }}
-						value={newLabel}
-						onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewLabel(e.target.value)}
-					/>
-
-					<Flex gap="2">
-						<Box
-							as="button"
-							flex="1"
-							py="6px"
-							borderRadius="md"
-							fontSize="xs"
-							fontWeight="600"
-							textAlign="center"
-							cursor={loading === "__import" ? "wait" : "pointer"}
-							bg="rgba(192,168,96,0.2)"
-							color="#C0A860"
-							border="1px solid rgba(192,168,96,0.4)"
-							_hover={{ bg: "rgba(192,168,96,0.35)" }}
-							onClick={handleImport}
-						>
-							{loading === "__import" ? "Importing..." : "Import & Start"}
-						</Box>
-						<Box
-							as="button"
-							py="6px"
-							px="3"
-							borderRadius="md"
-							fontSize="xs"
-							color="gray.400"
-							cursor="pointer"
-							_hover={{ color: "gray.200" }}
-							onClick={() => { setShowAdd(false); setNewName(""); setNewMnemonic(""); setNewLabel("") }}
-						>
-							Cancel
-						</Box>
+					<Text fontSize="xs" fontWeight="600" color="#C0A860" mb="1">New Emulator</Text>
+					<Text fontSize="10px" color="gray.500" mb="3">
+						Pick a firmware channel. Setup (create or recover) runs through the same wizard as a real KeepKey.
+					</Text>
+					<Flex direction="column" gap="2">
+						{channels.filter(c => c.installed).map(ch => {
+							const colors: Record<string, string> = { alpha: '#F59E0B', beta: '#3B82F6', release: '#22C55E' }
+							const color = colors[ch.channel] || '#C0A860'
+							const rgb = color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : color === '#22C55E' ? '34,197,94' : '192,168,96'
+							const isLoading = loading === "__add"
+							return (
+								<Box
+									key={ch.channel}
+									as="button"
+									w="100%"
+									px="3" py="2"
+									borderRadius="md"
+									textAlign="left"
+									bg={`rgba(${rgb},0.1)`}
+									border="1px solid"
+									borderColor={`rgba(${rgb},0.4)`}
+									cursor={isLoading ? "wait" : "pointer"}
+									opacity={isLoading ? 0.5 : 1}
+									_hover={!isLoading ? { bg: `rgba(${rgb},0.2)` } : undefined}
+									transition="all 0.15s"
+									onClick={() => !isLoading && handleAddNew(ch.channel as EmulatorChannel)}
+								>
+									<Text fontSize="xs" fontWeight="700" color={color} textTransform="uppercase" letterSpacing="wider">
+										{ch.channel} · v{ch.version}
+									</Text>
+									<Text fontSize="9px" color="gray.500" mt="0.5">{ch.description}</Text>
+								</Box>
+							)
+						})}
+						{channels.filter(c => c.installed).length === 0 && (
+							<Text fontSize="10px" color="#EF4444">No emulator builds installed.</Text>
+						)}
 					</Flex>
+					<Box
+						as="button"
+						mt="3"
+						py="6px"
+						px="3"
+						borderRadius="md"
+						fontSize="xs"
+						color="gray.400"
+						cursor="pointer"
+						_hover={{ color: "gray.200" }}
+						onClick={() => setShowAdd(false)}
+					>
+						Cancel
+					</Box>
 				</Box>
 			)}
 

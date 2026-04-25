@@ -172,16 +172,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		setConfirmDeleteEmu(null)
 	}, [refresh])
 
-	const handleAddEmu = useCallback(async () => {
-		// Generate a unique name like emu-1, emu-2, ...
-		const existing = new Set(emuWallets.map(w => w.name))
-		let idx = 1
-		while (existing.has(`emu-${idx}`)) idx++
-		const name = `emu-${idx}`
-		// Show channel picker for the new emulator
-		handleStartEmu(name)
-	}, [emuWallets, handleStartEmu])
-
 	const handlePairEmu = useCallback(async () => {
 		setLoading("emu:__pair")
 		try {
@@ -363,47 +353,8 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					)
 				})}
 
-				{/* ── Add Emulator card ─────────────────────────────── */}
-				{emuPaired && channelPicker && !emuWallets.some(w => w.name === channelPicker) ? (
-					/* Channel picker for new emulator */
-					<DeviceCard accentColor="#C0A860">
-						<Flex align="center" gap="2" mb="1">
-							<EmulatorIcon active={false} />
-							<Box flex="1" minW="0">
-								<Text fontSize="xs" fontWeight="600" color="gray.200" truncate>{channelPicker}</Text>
-								<Text fontSize="9px" color="gray.500">new emulator</Text>
-							</Box>
-						</Flex>
-						<ChannelPicker
-							name={channelPicker}
-							channels={emuChannels}
-							onSelect={handleStartEmuWithChannel}
-							onCancel={() => setChannelPicker(null)}
-							loading={loading === `emu:${channelPicker}`}
-						/>
-					</DeviceCard>
-				) : emuPaired && (
-					<Box
-						as="button"
-						w="180px"
-						minH="100px"
-						bg="rgba(255,255,255,0.02)"
-						border="1px dashed rgba(192,168,96,0.3)"
-						borderRadius="xl"
-						display="flex"
-						flexDirection="column"
-						alignItems="center"
-						justifyContent="center"
-						gap="1"
-						cursor={loading === "emu:__add" ? "wait" : "pointer"}
-						transition="all 0.2s"
-						_hover={{ bg: "rgba(192,168,96,0.06)", borderColor: "rgba(192,168,96,0.5)" }}
-						onClick={handleAddEmu}
-					>
-						<Text fontSize="lg" color="rgba(192,168,96,0.6)">+</Text>
-						<Text fontSize="10px" color="gray.500">{loading === "emu:__add" ? "Starting..." : "Add Emulator"}</Text>
-					</Box>
-				)}
+				{/* New emulators are added via the bottom-right EmulatorManager pill,
+				    which routes through the standard OobSetupWizard. */}
 
 				{/* ── Pair Emulator card (if not paired) ──────────── */}
 				{!emuPaired && emuStatus && (
