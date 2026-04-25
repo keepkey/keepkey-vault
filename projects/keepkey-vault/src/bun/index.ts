@@ -3543,19 +3543,31 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				deleteFlash(params.name)
 				deleteMnemonic(params.name)
+				const { deleteEmulatorWalletMeta } = await import('./db')
+				deleteEmulatorWalletMeta(params.name)
 				return getEmulatorStatus()
 			},
 			emulatorListWallets: async () => {
 				if (!emulatorEnabled) return []
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
+				const { getAllEmulatorWalletMeta } = await import('./db')
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
-				return listFlashImages().map(name => ({
-					name,
-					hasMnemonic: hasMnemonic(name),
-					isActive: name === activeFlash,
-				}))
+				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
+				return listFlashImages().map(name => {
+					const meta = metaByName.get(name)
+					return {
+						name,
+						hasMnemonic: hasMnemonic(name),
+						isActive: name === activeFlash,
+						label: meta?.label || undefined,
+						firmwareVersion: meta?.firmwareVersion || undefined,
+						channel: meta?.channel || undefined,
+						deviceId: meta?.deviceId || undefined,
+						totalUsd: meta?.totalUsd ?? 0,
+					}
+				})
 			},
 			emulatorImportWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')

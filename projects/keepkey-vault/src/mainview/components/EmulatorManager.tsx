@@ -336,6 +336,9 @@ export function EmulatorManager() {
 			{isPaired && wallets.map((w) => {
 				const active = w.isActive && isRunning
 				const isLoading = loading === w.name
+				const channelColors: Record<string, string> = { alpha: '#F59E0B', beta: '#3B82F6', release: '#22C55E' }
+				const channelColor = w.channel ? channelColors[w.channel] || '#C0A860' : null
+				const displayName = w.label || w.name
 				return (
 					<Flex
 						key={w.name}
@@ -359,9 +362,20 @@ export function EmulatorManager() {
 						{/* Name + meta */}
 						<Box flex="1" minW="0">
 							<Text fontSize="xs" fontWeight="600" color={active ? "#22C55E" : "gray.200"} truncate>
-								{w.name}
+								{displayName}
 							</Text>
-							<Flex gap="2" mt="0.5">
+							{w.label && w.label !== w.name && (
+								<Text fontSize="9px" color="gray.600" truncate>{w.name}</Text>
+							)}
+							<Flex gap="2" mt="0.5" align="center" wrap="wrap">
+								{w.firmwareVersion && (
+									<Text fontSize="9px" color="gray.500">v{w.firmwareVersion}</Text>
+								)}
+								{w.channel && channelColor && (
+									<Text fontSize="9px" fontWeight="700" color={channelColor} textTransform="uppercase" letterSpacing="wider">
+										{w.channel}
+									</Text>
+								)}
 								{w.hasMnemonic && (
 									<Text fontSize="9px" color="gray.500">seed saved</Text>
 								)}

@@ -476,6 +476,16 @@ export interface EmulatorWalletInfo {
   name: string
   hasMnemonic: boolean
   isActive: boolean
+  /** On-device label (Settings → Label). Populated after first connect. */
+  label?: string
+  /** Firmware version reported by the running emulator (e.g. "7.15.0"). */
+  firmwareVersion?: string
+  /** Channel that produced the firmware (alpha/beta/release). */
+  channel?: string
+  /** Hardware-style deviceId returned by Features. Used to join cached balances. */
+  deviceId?: string
+  /** Sum of cached balance USD across chains for this wallet's deviceId. */
+  totalUsd?: number
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */

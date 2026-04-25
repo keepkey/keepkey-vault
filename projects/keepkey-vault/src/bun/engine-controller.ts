@@ -5,7 +5,7 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
@@ -325,7 +325,25 @@ export class EngineController extends EventEmitter {
       if (this.isPassphraseWallet) {
         console.log('[Engine] Hidden wallet active — skipping device snapshot, seed identity (privacy)')
       } else if (this.isEmulator) {
-        console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
+        // Emulators get their own metadata table keyed by flash name, so the
+        // splash UI can show label / firmware / USD per wallet without
+        // contaminating real-device snapshots. Dynamic import avoids the
+        // circular dep with emulator.ts.
+        const features = this.cachedFeatures
+        const fwVer = this.extractVersion(features)
+        import('./emulator').then(({ getActiveFlashName, getEmulatorStatus }) => {
+          try {
+            saveEmulatorWalletMeta(
+              getActiveFlashName(),
+              features.label || '',
+              features.deviceId || '',
+              fwVer,
+              getEmulatorStatus().channel || '',
+            )
+          } catch (e: any) {
+            console.warn('[Engine] saveEmulatorWalletMeta failed:', e?.message)
+          }
+        }).catch(() => { /* never block on cache failure */ })
       } else {
         try {
           const deviceId = this.cachedFeatures.deviceId || 'unknown'

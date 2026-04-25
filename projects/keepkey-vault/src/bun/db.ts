@@ -248,6 +248,20 @@ export function initDb() {
       )
     }
 
+    // Per-emulator-wallet metadata (keyed by flash name, stable across re-imports).
+    // Kept separate from device_snapshot so ephemeral emu identities never
+    // contaminate the registered-device list and snapshots stay privacy-safe.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS emulator_wallet (
+        name             TEXT PRIMARY KEY,
+        label            TEXT NOT NULL DEFAULT '',
+        device_id        TEXT NOT NULL DEFAULT '',
+        firmware_version TEXT NOT NULL DEFAULT '',
+        channel          TEXT NOT NULL DEFAULT '',
+        updated_at       INTEGER NOT NULL
+      )
+    `)
+
     // Migrations: add columns to existing tables (safe to re-run)
     for (const col of ['explorer_address_link TEXT', 'explorer_tx_link TEXT']) {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
@@ -889,6 +903,64 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM reports WHERE device_id = ?', [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
+  }
+}
+
+// ── Emulator Wallet Metadata ────────────────────────────────────────
+
+export interface EmulatorWalletMeta {
+  name: string
+  label: string
+  deviceId: string
+  firmwareVersion: string
+  channel: string
+  updatedAt: number
+  totalUsd: number
+}
+
+export function saveEmulatorWalletMeta(name: string, label: string, deviceId: string, firmwareVersion: string, channel: string) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO emulator_wallet (name, label, device_id, firmware_version, channel, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      [name, label, deviceId, firmwareVersion, channel, Date.now()]
+    )
+  } catch (e: any) {
+    console.warn('[db] saveEmulatorWalletMeta failed:', e.message)
+  }
+}
+
+export function getAllEmulatorWalletMeta(): EmulatorWalletMeta[] {
+  try {
+    if (!db) return []
+    const rows = db.query(`
+      SELECT w.name, w.label, w.device_id, w.firmware_version, w.channel, w.updated_at,
+             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+      FROM emulator_wallet w
+      LEFT JOIN balances b ON b.device_id = w.device_id
+      GROUP BY w.name
+    `).all() as Array<{ name: string; label: string; device_id: string; firmware_version: string; channel: string; updated_at: number; total_usd: number }>
+    return rows.map(r => ({
+      name: r.name,
+      label: r.label,
+      deviceId: r.device_id,
+      firmwareVersion: r.firmware_version,
+      channel: r.channel,
+      updatedAt: r.updated_at,
+      totalUsd: r.total_usd,
+    }))
+  } catch (e: any) {
+    console.warn('[db] getAllEmulatorWalletMeta failed:', e.message)
+    return []
+  }
+}
+
+export function deleteEmulatorWalletMeta(name: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM emulator_wallet WHERE name = ?', [name])
+  } catch (e: any) {
+    console.warn('[db] deleteEmulatorWalletMeta failed:', e.message)
   }
 }
 

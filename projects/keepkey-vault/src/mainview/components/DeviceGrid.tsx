@@ -201,6 +201,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	}
 
 	const grandTotal = devices.reduce((sum, d) => sum + (d.totalUsd || 0), 0)
+		+ emuWallets.reduce((sum, w) => sum + (w.totalUsd || 0), 0)
 
 	function timeAgo(ts: number): string {
 		const diff = Date.now() - ts
@@ -292,22 +293,42 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 				{emuWallets.map((w) => {
 					const active = w.isActive && emuRunning
 					const isDeleting = confirmDeleteEmu === w.name
+					const channelColor = w.channel ? CHANNEL_COLORS[w.channel] || '#C0A860' : null
+					const displayName = w.label || w.name
 					return (
 						<DeviceCard key={`emu:${w.name}`} active={active} accentColor={active ? undefined : "#C0A860"}>
 							<Flex align="center" gap="2" mb="1">
 								<EmulatorIcon active={active} />
 								<Box flex="1" minW="0">
 									<Text fontSize="xs" fontWeight="600" color={active ? "#22C55E" : "gray.200"} truncate>
-										{w.name}
+										{displayName}
 									</Text>
-									<Flex gap="1.5" mt="0.5" align="center">
+									{w.label && w.label !== w.name && (
+										<Text fontSize="9px" color="gray.600" truncate>{w.name}</Text>
+									)}
+									<Flex gap="1.5" mt="0.5" align="center" wrap="wrap">
 										<Text fontSize="9px" fontWeight="700" color={active ? "#22C55E" : "#3B82F6"} bg={active ? "rgba(34,197,94,0.12)" : "rgba(59,130,246,0.15)"} px="1.5" py="0.5" borderRadius="sm">
 											{active ? "running" : "EMULATOR"}
 										</Text>
-										{w.hasMnemonic && <Text fontSize="9px" color="gray.600">seed saved</Text>}
+										{w.firmwareVersion && (
+											<Text fontSize="9px" color="gray.500">
+												fw {w.firmwareVersion}
+											</Text>
+										)}
+										{w.channel && channelColor && (
+											<Text fontSize="9px" fontWeight="700" color={channelColor} textTransform="uppercase" letterSpacing="wider">
+												{w.channel}
+											</Text>
+										)}
 									</Flex>
+									{w.hasMnemonic && <Text fontSize="9px" color="gray.600" mt="0.5">seed saved</Text>}
 								</Box>
 							</Flex>
+							{(w.totalUsd ?? 0) > 0 && (
+								<Text fontSize="sm" fontWeight="700" color={showValues ? (active ? "#22C55E" : "#C0A860") : "gray.600"} mb="1">
+									{showValues ? `$${formatUsd(w.totalUsd ?? 0)}` : "$ ****"}
+								</Text>
+							)}
 							{isDeleting ? (
 								<Box mt="auto">
 									<Text fontSize="10px" color="#EF4444" mb="1.5" lineHeight="1.4">
