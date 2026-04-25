@@ -13,7 +13,7 @@
  * Emulator binaries are bundled at: firmware/emulators/<version>/libkkemu.dylib
  * Manifest at: firmware/emulators/manifest.json
  */
-import { dlopen, FFIType, ptr, toBuffer } from 'bun:ffi'
+import { dlopen, FFIType, ptr, toArrayBuffer } from 'bun:ffi'
 import { resolve, join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import {
@@ -459,8 +459,13 @@ export function resumePoll(): void {
 
 /**
  * Read the emulator's 256x64 OLED framebuffer.
- * Returns null if the dylib doesn't expose a framebuffer (current alpha returns NULL).
- * Call between kkemu_poll() ticks — pointer is valid until next poll.
+ * Returns null if the dylib doesn't expose a framebuffer.
+ *
+ * The returned Uint8Array is a fresh copy. We use `toArrayBuffer + slice()`
+ * rather than `toBuffer` because Bun's Buffer-from-pointer wrapper attempts
+ * to free the underlying memory on GC — fine for malloc'd C buffers, but
+ * the dylib's framebuffer is a static `.bss` page and freeing it segfaults
+ * the next setInterval tick.
  */
 export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number; height: number } {
   if (!ffi) return { framebuffer: null, width: 0, height: 0 }
@@ -471,7 +476,9 @@ export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number
   const h = heightBuf[0]
   if (!fbPtr || w === 0 || h === 0) return { framebuffer: null, width: w, height: h }
   const byteLen = (w * h) / 8 // 2048 bytes for 256x64 1-bit
-  const framebuffer = new Uint8Array(toBuffer(fbPtr, 0, byteLen))
+  // .slice() forces a copy into a JS-owned ArrayBuffer; the borrowed view of
+  // the dylib's static memory is dropped immediately.
+  const framebuffer = new Uint8Array(toArrayBuffer(fbPtr, 0, byteLen)).slice()
   return { framebuffer, width: w, height: h }
 }
 
