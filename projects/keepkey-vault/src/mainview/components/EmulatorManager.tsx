@@ -1,8 +1,8 @@
 /**
  * EmulatorManager — multi-wallet emulator panel for the splash screen.
- * macOS only. Shows a list of emulator wallets (flash images), starts/stops
- * them, and spawns fresh emus that hand off to the standard OobSetupWizard
- * for wallet creation/recovery — same UX as a real device.
+ * macOS only. Lists existing emulator wallets (with start/stop/delete) and
+ * spawns fresh emus that hand off to OobSetupWizard for create/recover —
+ * the exact same flow as plugging in a real KeepKey.
  */
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
@@ -11,35 +11,21 @@ import type { EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 
 type EmulatorChannel = 'alpha' | 'beta' | 'release'
 
-interface ChannelEntry {
-	channel: string
-	version: string
-	description: string
-	installed: boolean
-	source: { repo: string; ref: string; type: string }
-}
-
 export function EmulatorManager() {
 	const [wallets, setWallets] = useState<EmulatorWalletInfo[]>([])
 	const [status, setStatus] = useState<(EmulatorStatus & { channel?: EmulatorChannel }) | null>(null)
-	const [channels, setChannels] = useState<ChannelEntry[]>([])
-	const [selectedChannel, setSelectedChannel] = useState<EmulatorChannel>('alpha')
 	const [loading, setLoading] = useState<string | null>(null)
 	const [expanded, setExpanded] = useState(false)
-	const [showAdd, setShowAdd] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 
 	const refresh = useCallback(async () => {
 		try {
-			const [s, w, ch] = await Promise.all([
+			const [s, w] = await Promise.all([
 				rpcRequest<EmulatorStatus & { channel?: EmulatorChannel }>("emulatorStatus", undefined, 5000),
 				rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 5000),
-				rpcRequest<ChannelEntry[]>("emulatorGetChannels", undefined, 5000),
 			])
 			setStatus(s)
 			setWallets(w)
-			setChannels(ch)
-			if (s.channel) setSelectedChannel(s.channel)
 			setError(null)
 		} catch (e: any) {
 			setError(e?.message || String(e))
@@ -50,7 +36,6 @@ export function EmulatorManager() {
 		refresh()
 		const unsub = onRpcMessage("emulator-status", (s) => {
 			setStatus(s as EmulatorStatus)
-			// Refresh wallet list when emulator status changes
 			rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 5000)
 				.then(setWallets)
 				.catch(() => {})
@@ -58,16 +43,16 @@ export function EmulatorManager() {
 		return unsub
 	}, [refresh])
 
-	const handleStart = useCallback(async (name: string) => {
+	/** Start an existing wallet on its remembered channel (or manifest default). */
+	const handleStart = useCallback(async (name: string, channel?: string) => {
 		setLoading(name)
 		setError(null)
 		try {
-			// If another is running, switch; otherwise init — always pass selected channel
 			if (status?.state === 'running') {
-				const s = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name, channel: selectedChannel }, 20000)
+				const s = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name, channel }, 20000)
 				setStatus(s)
 			} else {
-				const s = await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name, channel: selectedChannel }, 20000)
+				const s = await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name, channel }, 20000)
 				setStatus(s)
 			}
 			await refresh()
@@ -75,7 +60,7 @@ export function EmulatorManager() {
 			setError(e?.message || String(e))
 		}
 		setLoading(null)
-	}, [refresh, status?.state, selectedChannel])
+	}, [refresh, status?.state])
 
 	const handleStop = useCallback(async () => {
 		setLoading("__stop")
@@ -103,12 +88,11 @@ export function EmulatorManager() {
 	}, [refresh])
 
 	/**
-	 * Spawn a fresh, uninitialized emulator on the given channel and let the
-	 * standard OobSetupWizard handle Create/Recover from there. Same UX as
-	 * plugging in a brand-new KeepKey.
+	 * Spawn a fresh, uninitialized emulator on the manifest's default channel
+	 * and let OobSetupWizard handle Create/Recover from there. Same UX as
+	 * plugging in a brand-new KeepKey — no extra UI.
 	 */
-	const handleAddNew = useCallback(async (channel: EmulatorChannel) => {
-		// Auto-name as emu-N (next free index)
+	const handleAddNew = useCallback(async () => {
 		const existing = new Set(wallets.map(w => w.name))
 		let idx = 1
 		while (existing.has(`emu-${idx}`)) idx++
@@ -117,10 +101,8 @@ export function EmulatorManager() {
 		setLoading("__add")
 		setError(null)
 		try {
-			await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name, channel }, 20000)
-			// Engine sees needs_init → App.tsx switches to setup phase → OobSetupWizard renders.
-			// Close the panel so the wizard owns the screen.
-			setShowAdd(false)
+			// No channel = manifest default. Engine connects → state=needs_init → wizard fires.
+			await rpcRequest<EmulatorStatus>("emulatorInit", { flashName: name }, 20000)
 			setExpanded(false)
 			await refresh()
 		} catch (e: any) {
@@ -224,9 +206,9 @@ export function EmulatorManager() {
 							px="2" py="1"
 							cursor="pointer"
 							_hover={{ bg: "rgba(192,168,96,0.25)" }}
-							onClick={() => { setShowAdd(true); setError(null) }}
+							onClick={() => { setError(null); handleAddNew() }}
 						>
-							+ Add
+							{loading === "__add" ? "Starting…" : "+ Add"}
 						</Box>
 					)}
 					<Box
@@ -272,63 +254,11 @@ export function EmulatorManager() {
 				</Box>
 			)}
 
-			{/* Channel selector */}
-			{isPaired && channels.length > 0 && (
-				<Box px="4" py="3" borderBottom="1px solid rgba(255,255,255,0.06)">
-					<Text fontSize="10px" fontWeight="600" color="gray.400" mb="2">FIRMWARE CHANNEL</Text>
-					<Flex gap="2">
-						{channels.map(ch => {
-							const active = selectedChannel === ch.channel
-							const isActive = isRunning && status?.channel === ch.channel
-							const channelColors: Record<string, string> = {
-								alpha: '#F59E0B',
-								beta: '#3B82F6',
-								release: '#22C55E',
-							}
-							const color = channelColors[ch.channel] || '#C0A860'
-							return (
-								<Box
-									key={ch.channel}
-									as="button"
-									flex="1"
-									py="6px"
-									px="2"
-									borderRadius="md"
-									fontSize="10px"
-									fontWeight="600"
-									textAlign="center"
-									cursor={isRunning ? "not-allowed" : "pointer"}
-									opacity={!ch.installed ? 0.4 : 1}
-									bg={active ? `rgba(${color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : '34,197,94'},0.15)` : 'rgba(255,255,255,0.03)'}
-									color={active ? color : 'gray.400'}
-									border="1px solid"
-									borderColor={active ? `rgba(${color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : '34,197,94'},0.5)` : 'rgba(255,255,255,0.08)'}
-									_hover={!isRunning ? { bg: `rgba(${color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : '34,197,94'},0.1)` } : undefined}
-									onClick={() => {
-										if (!isRunning && ch.installed) setSelectedChannel(ch.channel as EmulatorChannel)
-									}}
-									title={ch.description + (ch.installed ? '' : '\n(Not installed)')}
-								>
-									{ch.channel.toUpperCase()}
-									{isActive && <Text as="span" fontSize="8px" ml="1">(active)</Text>}
-									{!ch.installed && <Text as="span" fontSize="8px" ml="1" color="red.300">!</Text>}
-								</Box>
-							)
-						})}
-					</Flex>
-					{channels.find(c => c.channel === selectedChannel) && (
-						<Text fontSize="9px" color="gray.500" mt="1">
-							{channels.find(c => c.channel === selectedChannel)?.description}
-						</Text>
-					)}
-				</Box>
-			)}
-
 			{/* Wallet list */}
-			{isPaired && wallets.length === 0 && !showAdd && (
+			{isPaired && wallets.length === 0 && (
 				<Box px="4" py="4" textAlign="center">
 					<Text fontSize="xs" color="gray.500" mb="2">No emulator wallets yet</Text>
-					<Text fontSize="10px" color="gray.600">Click "+ Add" to create one with a seed phrase</Text>
+					<Text fontSize="10px" color="gray.600">Click "+ Add" to spawn a fresh emu — setup runs through the standard wizard.</Text>
 				</Box>
 			)}
 
@@ -398,7 +328,7 @@ export function EmulatorManager() {
 									label="Start"
 									color="#C0A860"
 									loading={isLoading}
-									onClick={() => handleStart(w.name)}
+									onClick={() => handleStart(w.name, w.channel)}
 								/>
 							)}
 							{!active && (
@@ -414,64 +344,6 @@ export function EmulatorManager() {
 					</Flex>
 				)
 			})}
-
-			{/* Add new emulator: pick a channel → spawn fresh emu → standard OobSetupWizard takes over */}
-			{showAdd && (
-				<Box px="4" py="3" borderTop="1px solid rgba(192,168,96,0.2)">
-					<Text fontSize="xs" fontWeight="600" color="#C0A860" mb="1">New Emulator</Text>
-					<Text fontSize="10px" color="gray.500" mb="3">
-						Pick a firmware channel. Setup (create or recover) runs through the same wizard as a real KeepKey.
-					</Text>
-					<Flex direction="column" gap="2">
-						{channels.filter(c => c.installed).map(ch => {
-							const colors: Record<string, string> = { alpha: '#F59E0B', beta: '#3B82F6', release: '#22C55E' }
-							const color = colors[ch.channel] || '#C0A860'
-							const rgb = color === '#F59E0B' ? '245,158,11' : color === '#3B82F6' ? '59,130,246' : color === '#22C55E' ? '34,197,94' : '192,168,96'
-							const isLoading = loading === "__add"
-							return (
-								<Box
-									key={ch.channel}
-									as="button"
-									w="100%"
-									px="3" py="2"
-									borderRadius="md"
-									textAlign="left"
-									bg={`rgba(${rgb},0.1)`}
-									border="1px solid"
-									borderColor={`rgba(${rgb},0.4)`}
-									cursor={isLoading ? "wait" : "pointer"}
-									opacity={isLoading ? 0.5 : 1}
-									_hover={!isLoading ? { bg: `rgba(${rgb},0.2)` } : undefined}
-									transition="all 0.15s"
-									onClick={() => !isLoading && handleAddNew(ch.channel as EmulatorChannel)}
-								>
-									<Text fontSize="xs" fontWeight="700" color={color} textTransform="uppercase" letterSpacing="wider">
-										{ch.channel} · v{ch.version}
-									</Text>
-									<Text fontSize="9px" color="gray.500" mt="0.5">{ch.description}</Text>
-								</Box>
-							)
-						})}
-						{channels.filter(c => c.installed).length === 0 && (
-							<Text fontSize="10px" color="#EF4444">No emulator builds installed.</Text>
-						)}
-					</Flex>
-					<Box
-						as="button"
-						mt="3"
-						py="6px"
-						px="3"
-						borderRadius="md"
-						fontSize="xs"
-						color="gray.400"
-						cursor="pointer"
-						_hover={{ color: "gray.200" }}
-						onClick={() => setShowAdd(false)}
-					>
-						Cancel
-					</Box>
-				</Box>
-			)}
 
 			{/* Footer */}
 			<Box px="4" py="2" borderTop="1px solid rgba(255,255,255,0.04)">

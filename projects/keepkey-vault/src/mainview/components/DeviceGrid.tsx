@@ -19,35 +19,6 @@ interface DeviceGridProps {
 const REVEAL_DELAY_MS = 2500
 const CHANNEL_COLORS: Record<string, string> = { alpha: '#F59E0B', beta: '#3B82F6', release: '#22C55E' }
 
-function ChannelPicker({ name, channels, onSelect, onCancel, loading }: {
-	name: string
-	channels: { channel: string; installed: boolean }[]
-	onSelect: (name: string, channel: string) => void
-	onCancel: () => void
-	loading: boolean
-}) {
-	const installed = channels.filter(c => c.installed)
-	return (
-		<Box mt="auto">
-			<Text fontSize="9px" color="gray.400" mb="1.5">Select firmware:</Text>
-			<Flex gap="1.5" wrap="wrap">
-				{installed.map(c => (
-					<SolidBtn
-						key={c.channel}
-						label={c.channel}
-						bg={CHANNEL_COLORS[c.channel] || '#C0A860'}
-						onClick={() => onSelect(name, c.channel)}
-						loading={loading}
-					/>
-				))}
-				<SmallCircleBtn color="#666" label="&times;" onClick={onCancel} />
-			</Flex>
-			{installed.length === 0 && (
-				<Text fontSize="9px" color="#EF4444" mt="1">No firmware installed</Text>
-			)}
-		</Box>
-	)
-}
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
 export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }: DeviceGridProps) {
@@ -58,8 +29,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	const [loading, setLoading] = useState<string | null>(null)
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
 	const [confirmDeleteEmu, setConfirmDeleteEmu] = useState<string | null>(null)
-	const [channelPicker, setChannelPicker] = useState<string | null>(null) // emu name showing channel picker
-	const [emuChannels, setEmuChannels] = useState<{ channel: string; installed: boolean }[]>([])
 	const [error, setError] = useState<string | null>(null)
 	const [showValues, setShowValues] = useState(false)
 	const [revealed, setRevealed] = useState(hasRevealedOnce)
@@ -113,7 +82,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 			setEmuStatus(null)
 			setEmuPaired(false)
 			setEmuWallets([])
-			setChannelPicker(null)
 			setConfirmDeleteEmu(null)
 		}
 	}, [emulatorEnabled])
@@ -130,20 +98,8 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		setConfirmForget(null)
 	}, [refresh])
 
-	const handleStartEmu = useCallback(async (name: string) => {
-		// Fetch available channels and show picker
-		setError(null)
-		setChannelPicker(name)
-		try {
-			const ch = await rpcRequest<{ channel: string; installed: boolean }[]>("emulatorGetChannels", undefined, 5000)
-			setEmuChannels(ch)
-		} catch {
-			setEmuChannels([])
-		}
-	}, [])
-
-	const handleStartEmuWithChannel = useCallback(async (name: string, channel: string) => {
-		setChannelPicker(null)
+	/** Start an existing emulator wallet on its remembered channel. */
+	const handleStartEmu = useCallback(async (name: string, channel?: string) => {
 		setLoading(`emu:${name}`)
 		setError(null)
 		try {
@@ -329,20 +285,12 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 										<SmallCircleBtn color="#666" label="N" onClick={() => setConfirmDeleteEmu(null)} />
 									</Flex>
 								</Box>
-							) : channelPicker === w.name ? (
-								<ChannelPicker
-									name={w.name}
-									channels={emuChannels}
-									onSelect={handleStartEmuWithChannel}
-									onCancel={() => setChannelPicker(null)}
-									loading={loading === `emu:${w.name}`}
-								/>
 							) : (
 								<Flex mt="auto" justify="space-between" align="center">
 									{active ? (
 										<CardBtn label="Stop" color="#EF4444" onClick={handleStopEmu} loading={loading === "emu:__stop"} />
 									) : (
-										<SolidBtn label="Start" bg="#22C55E" onClick={() => handleStartEmu(w.name)} loading={loading === `emu:${w.name}`} />
+										<SolidBtn label="Start" bg="#22C55E" onClick={() => handleStartEmu(w.name, w.channel)} loading={loading === `emu:${w.name}`} />
 									)}
 									{!active && (
 										<SmallCircleBtn color="#EF4444" label="&times;" onClick={() => setConfirmDeleteEmu(w.name)} />
