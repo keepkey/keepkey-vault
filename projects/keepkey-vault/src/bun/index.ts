@@ -3586,14 +3586,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorImportWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				// Sanitize wallet name — prevent path traversal and invisible names
-				const name = params.name.trim()
-				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
-				if (/[\/\\]/.test(name)) throw new Error('Wallet name cannot contain path separators')
-				if (name.includes('..')) throw new Error('Wallet name cannot contain ".."')
-				if (name.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
-				if (name.includes('.mnemonic.')) throw new Error('Wallet name cannot contain ".mnemonic."')
-				params = { ...params, name }
+				// Wallet name validation lives in emulator-keychain.validateFlashName
+				// (called by every path builder) — call here too so we surface the
+				// error before doing any work.
+				const { validateFlashName } = await import('./emulator-keychain')
+				params = { ...params, name: validateFlashName(params.name) }
 
 				const { stopEmulator, initEmulator, getEmulatorStatus, flushRingBuffers, getActiveFlashName } = await import('./emulator')
 				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
@@ -3748,25 +3745,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				flushRingBuffers()
 				await engine.connectEmulator()
 
-				// Verify the firmware actually holds the mnemonic we generated
+				// Verify the firmware actually holds the mnemonic we generated.
+				// MUST be fatal — a successful return tells the wizard to show
+				// the user a seed they should write down. If the firmware doesn't
+				// hold this seed, the user backs up a recovery phrase that won't
+				// recover the wallet. Same contract as emulatorImportWallet.
 				const actualMnemonic = await engine.getEmulatorMnemonic()
 				if (!actualMnemonic) {
-					console.error('[Emulator] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
-				} else if (actualMnemonic.trim() !== mnemonic.trim()) {
-					console.error('[Emulator] SEED VERIFY FAIL — firmware mnemonic does NOT match generated seed')
-					console.error('[Emulator]   expected first word: %s', mnemonic.trim().split(/\s+/)[0])
-					console.error('[Emulator]   actual first word:   %s', actualMnemonic.trim().split(/\s+/)[0])
-				} else {
-					console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
+					throw new Error('Seed verification failed — firmware returned no mnemonic via DebugLink')
 				}
-
-				// Show seed words on emulator device window (NOT the main UI)
-				const { displaySeedWords, isEmulatorWindowOpen } = await import('./emulator-window')
-				if (isEmulatorWindowOpen()) {
-					await displaySeedWords(mnemonic)
+				if (actualMnemonic.trim() !== mnemonic.trim()) {
+					console.error('[Emulator] SEED VERIFY FAIL — generated first word: %s, firmware first word: %s',
+						mnemonic.trim().split(/\s+/)[0], actualMnemonic.trim().split(/\s+/)[0])
+					throw new Error('Seed verification failed — firmware mnemonic does not match generated seed')
 				}
+				console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
 
-				// Return success flag only — mnemonic stays on the "device"
+				// Show seed words on emulator device window (NOT the main UI).
+				// displaySeedWords throws if the window can't be brought up so we
+				// never tell the wizard "seedDisplayed: true" when the user didn't
+				// actually see (and ack) the words.
+				const { displaySeedWords } = await import('./emulator-window')
+				await displaySeedWords(mnemonic)
+
 				return { seedDisplayed: true }
 			},
 

@@ -257,29 +257,33 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
   }
 
   // Wait for the bridge handshake before installing the pending ack —
-  // otherwise sendToWindow silently no-ops and the awaiter (e.g.
-  // emulatorCreateWallet) blocks the entire onboarding flow forever.
+  // otherwise sendToWindow silently no-ops and the awaiter blocks forever.
+  // Throw on failure so callers (e.g. emulatorCreateWallet) don't tell the
+  // user "seed displayed" when the words were never actually shown — that
+  // would lead to backing up a seed the device doesn't hold.
   if (!viewReady) {
     const deadline = Date.now() + 5000
     while (Date.now() < deadline && !viewReady && emuWindow) {
       await new Promise(r => setTimeout(r, 50))
     }
     if (!emuWindow || !viewReady) {
-      console.error(`${TAG} Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — skipping seed display`)
-      return
+      throw new Error(
+        `Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — cannot display seed`
+      )
     }
   }
 
-  return new Promise<void>((resolve) => {
+  try { emuWindow!.focus() } catch {}
+
+  return new Promise<void>((resolve, reject) => {
     pendingSeedAck = { resolve }
 
     try {
       sendToWindow('seed-display', { words })
       sendToWindow('emu-state', { state: 'seed-display' })
-    } catch (err) {
-      console.error(`${TAG} Failed to send seed-display:`, err)
+    } catch (err: any) {
       pendingSeedAck = null
-      resolve()
+      reject(new Error(`Failed to send seed display to emulator window: ${err?.message}`))
     }
   })
 }
@@ -385,24 +389,29 @@ export function startDisplayPoll(): void {
     displayPollTimer = setInterval(() => {
       if (!emuWindow || !cachedPopFrames) return
 
-      // Drain newly captured frames from the dylib ring.
+      // Always drain the C ring so the dylib doesn't overflow during the
+      // bridge handshake. Frames captured before viewReady are held in the
+      // playback queue (capped, oldest dropped) and start emitting as soon
+      // as the webview is up — without this hold, setup-period OLED frames
+      // (boot, wipe, recovery cipher prompts) were silently lost.
       const fresh = cachedPopFrames()
       if (fresh.length > 0) {
         playbackQueue.push(...fresh)
-        // Cap queue — drop oldest if we fall behind a long animation
         while (playbackQueue.length > PLAYBACK_QUEUE_CAP) playbackQueue.shift()
       }
 
-      // Emit one frame per tick (~15fps playback).
+      // sendToWindow is a no-op until viewReady. Don't shift off the queue
+      // until then — emitted frames would be discarded mid-flight.
+      if (!viewReady) return
+
       if (playbackQueue.length > 0) {
         const fb = playbackQueue.shift()!
         const b64 = Buffer.from(fb).toString('base64')
         sendToWindow('display-update', { fb: b64, w: 256, h: 64 })
         lastHadDisplay = true
-      } else if (lastHadDisplay) {
-        // Nothing fresh and nothing queued — leave the last frame on screen.
-        // (Don't emit display-lost; the device hasn't gone away, it's just idle.)
       }
+      // No queued frame: leave the last frame on screen. (Don't emit
+      // display-lost; the device hasn't gone away, it's just idle.)
     }, 66) // ~15fps
   })
 }
@@ -496,6 +505,11 @@ export async function emuInteractiveConfirm(
       // ret_stat=false, goto exit), so the firmware exits cleanly.
       prewriteCancel()
       flushRingBuffers()
+      // The underlying wallet op (`fn()`) is still pending — it'll reject
+      // once the transport reads the firmware's Failure response triggered
+      // by Cancel. Attach a no-op catch so it doesn't surface as an
+      // UnhandledPromiseRejection after we throw the user-facing error.
+      promise.catch(() => {})
       throw new Error('Transaction rejected by user on emulator')
     }
 
