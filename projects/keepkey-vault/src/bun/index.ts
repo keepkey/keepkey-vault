@@ -537,6 +537,29 @@ async function emuSigningOp(
 	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
 }
 
+// Race engine.getEmulatorMnemonic() against a 3s deadline. The DebugLink
+// read can hang on the dylib path (documented in emu-7.15-debugging.md),
+// and a hung verify must NOT block create/import/loadDevice forever — but
+// a timeout is a verification failure, not silently OK, since shipping a
+// wallet without confirming the firmware really holds the seed leads to
+// users backing up unrecoverable phrases.
+async function raceVerifyMnemonic(expected: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+	return Promise.race<{ ok: true } | { ok: false; reason: string }>([
+		engine.getEmulatorMnemonic()
+			.then(actual => {
+				if (!actual) return { ok: false, reason: 'firmware returned no mnemonic via DebugLink' }
+				if (actual.trim() !== expected.trim()) {
+					return { ok: false, reason: 'firmware mnemonic does not match expected seed' }
+				}
+				return { ok: true }
+			})
+			.catch(err => ({ ok: false, reason: `verify error: ${err?.message || err}` })),
+		new Promise<{ ok: false; reason: string }>(resolve =>
+			setTimeout(() => resolve({ ok: false, reason: 'verify timed out after 3s' }), 3000)
+		),
+	])
+}
+
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
@@ -564,55 +587,77 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			recoverDevice: async (params) => { await engine.recoverDevice(params) },
 			loadDevice: async (params) => {
 				if (engine.isEmulator) {
+					const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
+					const { getActiveFlashName, deleteFlash, stopEmulator } = await import('./emulator')
+					const { deleteEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
+					const flashName = getActiveFlashName()
+
 					// Save mnemonic FIRST — connectEmulator's auto-reload (stale
 					// storage key recovery) will pick up the NEW seed instead of
 					// the previously saved one.
 					if (params.mnemonic) {
-						const { saveMnemonic } = await import('./emulator-keychain')
-						const { getActiveFlashName } = await import('./emulator')
-						console.log('[Vault] Saving new mnemonic before load (flash=%s)', getActiveFlashName())
-						saveMnemonic(getActiveFlashName(), params.mnemonic)
+						console.log('[Vault] Saving new mnemonic before load (flash=%s)', flashName)
+						saveMnemonic(flashName, params.mnemonic)
 					}
 
-					// Firmware rejects loadDevice on an already-initialized device.
-					// Wipe first so the new mnemonic actually takes effect.
-					if (engine.cachedFeatures?.initialized) {
-						console.log('[Vault] Emulator already initialized — wiping before loadDevice')
-						await emuConfirmOp(() => engine.wallet!.wipe())
-						const { flushRingBuffers } = await import('./emulator')
-						flushRingBuffers()
-						// connectEmulator may auto-reload our just-saved mnemonic
-						// via the stale-storage-key recovery path.
-						await engine.connectEmulator()
-					}
+					try {
+						// Firmware rejects loadDevice on an already-initialized device.
+						// Wipe first so the new mnemonic actually takes effect.
+						if (engine.cachedFeatures?.initialized) {
+							console.log('[Vault] Emulator already initialized — wiping before loadDevice')
+							await emuConfirmOp(() => engine.wallet!.wipe())
+							const { flushRingBuffers } = await import('./emulator')
+							flushRingBuffers()
+							// connectEmulator may auto-reload our just-saved mnemonic
+							// via the stale-storage-key recovery path.
+							await engine.connectEmulator()
+						}
 
-					// If auto-reload already initialized the device with the new
-					// seed, skip the manual loadDevice — firmware would reject it.
-					if (!engine.cachedFeatures?.initialized) {
-						await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
-					} else {
-						console.log('[Vault] Device already initialized after reconnect — skipping manual loadDevice')
-					}
-
-					// Drain stale ButtonAck + reconnect for clean transport
-					const { flushRingBuffers: flush } = await import('./emulator')
-					flush()
-					await engine.connectEmulator()
-
-					// Verify the firmware actually holds the mnemonic we loaded
-					if (params.mnemonic) {
-						const actual = await engine.getEmulatorMnemonic()
-						if (!actual) {
-							console.error('[Vault] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
-						} else if (actual.trim() !== params.mnemonic.trim()) {
-							console.error('[Vault] SEED VERIFY FAIL — firmware mnemonic does NOT match loaded seed')
-							console.error('[Vault]   expected first word: %s', params.mnemonic.trim().split(/\s+/)[0])
-							console.error('[Vault]   actual first word:   %s', actual.trim().split(/\s+/)[0])
+						// If auto-reload already initialized the device with the new
+						// seed, skip the manual loadDevice — firmware would reject it.
+						if (!engine.cachedFeatures?.initialized) {
+							await emuConfirmOp(() => engine.loadDevice({ ...params, skipRefresh: true }))
 						} else {
+							console.log('[Vault] Device already initialized after reconnect — skipping manual loadDevice')
+						}
+
+						// Drain stale ButtonAck + reconnect for clean transport
+						const { flushRingBuffers: flush } = await import('./emulator')
+						flush()
+						await engine.connectEmulator()
+
+						// Verify the firmware actually holds the mnemonic we loaded.
+						// MUST be fatal — same contract as create/import. Wrap in a
+						// 3s race so a stuck DebugLink doesn't block the RPC, but
+						// treat the timeout as a verification failure so the wizard
+						// doesn't silently advance with an unverified wallet.
+						if (params.mnemonic) {
+							const expected = params.mnemonic
+							const verifyResult = await raceVerifyMnemonic(expected)
+							if (!verifyResult.ok) {
+								throw new Error(`Seed verification failed — ${verifyResult.reason}`)
+							}
 							console.log('[Vault] SEED VERIFY OK — firmware mnemonic matches loaded seed')
 						}
+						return
+					} catch (err) {
+						// Rollback the saved mnemonic + persisted metadata so
+						// connectEmulator's auto-reload can't silently resurrect a
+						// wallet the wizard reported as failed.
+						console.error('[Vault] loadDevice failed, rolling back:', (err as Error).message)
+						const deviceId = engine.cachedFeatures?.deviceId
+						try {
+							const { closeEmulatorWindow } = await import('./emulator-window')
+							closeEmulatorWindow()
+						} catch {}
+						try { engine.disconnectEmulator() } catch {}
+						try { stopEmulator() } catch {}
+						try { deleteMnemonic(flashName) } catch {}
+						try { deleteFlash(flashName) } catch {}
+						try { deleteEmulatorWalletMeta(flashName) } catch {}
+						if (deviceId) { try { deleteDeviceSnapshot(deviceId) } catch {} }
+						throw err
 					}
-					return
 				}
 				await engine.loadDevice(params)
 			},
@@ -1156,6 +1201,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
 				for (const chain of nonEvmChains) {
 					if (chain.hidden) continue
+					const t0 = Date.now()
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 						if (chain.scriptType) addrParams.scriptType = chain.scriptType
@@ -1164,6 +1210,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 						const result = await wallet[method](addrParams)
 						const address = typeof result === 'string' ? result : result?.address || ''
+						const ms = Date.now() - t0
+						if (ms > 2000) console.log(`[getBalances] ${chain.id}.${method} took ${ms}ms`)
 						if (address) {
 							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
 							if (chain.id === 'tron') console.log(`[getBalances] TRON address derived: ${address}, caip: ${chain.caip}, networkId: ${chain.networkId}`)
@@ -1171,7 +1219,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (chain.id === 'tron') console.warn(`[getBalances] TRON address derivation returned empty! result:`, JSON.stringify(result))
 						}
 					} catch (e: any) {
-						console.warn(`[getBalances] ${chain.coin} address failed:`, e.message)
+						console.warn(`[getBalances] ${chain.coin} address failed (${Date.now() - t0}ms):`, e.message)
 					}
 				}
 
@@ -3531,6 +3579,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
+				const { deleteEmulatorWalletMeta, getAllEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
+
+				// Look up the deviceId BEFORE deleting metadata so we can purge
+				// all keyed-by-deviceId data (balances, cached_pubkeys, reports,
+				// device_snapshot) — the same set physical forgetDevice purges.
+				// Without this, deleting an emulator wallet leaves stale balance
+				// + xpub cache + report rows on disk keyed by an emulator
+				// deviceId that no longer maps to anything.
+				const meta = getAllEmulatorWalletMeta().find(m => m.name === params.name)
 
 				// If deleting the active wallet, stop it first so shutdown
 				// doesn't re-save the flash we're about to delete
@@ -3543,30 +3600,39 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				deleteFlash(params.name)
 				deleteMnemonic(params.name)
+				deleteEmulatorWalletMeta(params.name)
+				if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
 				return getEmulatorStatus()
 			},
 			emulatorListWallets: async () => {
 				if (!emulatorEnabled) return []
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
+				const { getAllEmulatorWalletMeta } = await import('./db')
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
-				return listFlashImages().map(name => ({
-					name,
-					hasMnemonic: hasMnemonic(name),
-					isActive: name === activeFlash,
-				}))
+				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
+				return listFlashImages().map(name => {
+					const meta = metaByName.get(name)
+					return {
+						name,
+						hasMnemonic: hasMnemonic(name),
+						isActive: name === activeFlash,
+						label: meta?.label || undefined,
+						firmwareVersion: meta?.firmwareVersion || undefined,
+						channel: meta?.channel || undefined,
+						deviceId: meta?.deviceId || undefined,
+						totalUsd: meta?.totalUsd ?? 0,
+					}
+				})
 			},
 			emulatorImportWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				// Sanitize wallet name — prevent path traversal and invisible names
-				const name = params.name.trim()
-				if (!name || name.length > 64) throw new Error('Wallet name must be 1-64 characters')
-				if (/[\/\\]/.test(name)) throw new Error('Wallet name cannot contain path separators')
-				if (name.includes('..')) throw new Error('Wallet name cannot contain ".."')
-				if (name.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
-				if (name.includes('.mnemonic.')) throw new Error('Wallet name cannot contain ".mnemonic."')
-				params = { ...params, name }
+				// Wallet name validation lives in emulator-keychain.validateFlashName
+				// (called by every path builder) — call here too so we surface the
+				// error before doing any work.
+				const { validateFlashName } = await import('./emulator-keychain')
+				params = { ...params, name: validateFlashName(params.name) }
 
 				const { stopEmulator, initEmulator, getEmulatorStatus, flushRingBuffers, getActiveFlashName } = await import('./emulator')
 				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
@@ -3617,24 +3683,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					flushRingBuffers()
 					await engine.connectEmulator()
 
-					// Verify the firmware holds the mnemonic via DebugLink
-					const actualMnemonic = await engine.getEmulatorMnemonic()
-					if (!actualMnemonic || actualMnemonic.trim() !== params.mnemonic.trim()) {
-						throw new Error('Seed verification failed — firmware mnemonic does not match imported seed')
+					// Verify the firmware holds the mnemonic via DebugLink (3s race
+					// — a stuck read is a verification failure, not silently OK).
+					const verifyResult = await raceVerifyMnemonic(params.mnemonic)
+					if (!verifyResult.ok) {
+						throw new Error(`Seed verification failed — ${verifyResult.reason}`)
 					}
 
 					// Only persist mnemonic AFTER seed is verified on device
 					saveMnemonic(params.name, params.mnemonic)
 					return getEmulatorStatus()
 				} catch (err) {
-					// Rollback: stop the failed emulator and clean up the orphaned flash
+					// Rollback: stop the failed emulator and clean up the orphaned
+					// flash + mnemonic + emulator_wallet metadata + device cache.
+					// connectEmulator persists metadata as part of its success path,
+					// so a failed verify can leave a metadata row + cached balances
+					// keyed to a wallet that no longer exists.
 					console.error('[Emulator] Import failed, rolling back:', (err as Error).message)
+					const failedDeviceId = engine.cachedFeatures?.deviceId
 					const { closeEmulatorWindow } = await import('./emulator-window')
+					const { deleteEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
 					closeEmulatorWindow()
 					engine.disconnectEmulator()
 					stopEmulator()
-					deleteFlash(params.name)
-					deleteMnemonic(params.name)
+					try { deleteFlash(params.name) } catch {}
+					try { deleteMnemonic(params.name) } catch {}
+					try { deleteEmulatorWalletMeta(params.name) } catch {}
+					if (failedDeviceId) { try { deleteDeviceSnapshot(failedDeviceId) } catch {} }
 
 					// Restore previous emulator if one was running (channel preserved by selectedChannel)
 					if (prevFlashName) {
@@ -3685,62 +3760,90 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[Emulator] Generated ${wc}-word mnemonic`)
 
 				// Save mnemonic FIRST — connectEmulator's auto-reload uses it
-				const { saveMnemonic } = await import('./emulator-keychain')
-				const { getActiveFlashName } = await import('./emulator')
-				saveMnemonic(getActiveFlashName(), mnemonic)
+				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName, deleteFlash, stopEmulator } = await import('./emulator')
+				const flashName = getActiveFlashName()
+				saveMnemonic(flashName, mnemonic)
 
-				// Wipe first if already initialized — firmware rejects loadDevice otherwise
-				if (engine.cachedFeatures?.initialized) {
-					console.log('[Emulator] Already initialized — wiping before create')
-					await emuConfirmOp(() => engine.wallet!.wipe())
+				try {
+					// Wipe first if already initialized — firmware rejects loadDevice otherwise
+					if (engine.cachedFeatures?.initialized) {
+						console.log('[Emulator] Already initialized — wiping before create')
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						const { flushRingBuffers } = await import('./emulator')
+						flushRingBuffers()
+						await engine.connectEmulator()
+					}
+
+					// If auto-reload already initialized with the new seed, skip manual load
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+							mnemonic, pin: false, passphrase: false, skipChecksum: false,
+						}))
+						console.log('[Emulator] loadDevice complete')
+					} else {
+						console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
+					}
+
+					// Auto-set label with EMU prefix
+					try {
+						await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
+						console.log('[Emulator] Label set')
+					} catch (e: any) {
+						console.warn('[Emulator] Label set failed (non-critical):', e?.message)
+					}
+
+					// Drain stale data + reconnect for clean transport
 					const { flushRingBuffers } = await import('./emulator')
 					flushRingBuffers()
 					await engine.connectEmulator()
-				}
 
-				// If auto-reload already initialized with the new seed, skip manual load
-				if (!engine.cachedFeatures?.initialized) {
-					await emuConfirmOp(() => (engine.wallet as any).loadDevice({
-						mnemonic, pin: false, passphrase: false, skipChecksum: false,
-					}))
-					console.log('[Emulator] loadDevice complete')
-				} else {
-					console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
-				}
-
-				// Auto-set label with EMU prefix
-				try {
-					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
-					console.log('[Emulator] Label set')
-				} catch (e: any) {
-					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
-				}
-
-				// Drain stale data + reconnect for clean transport
-				const { flushRingBuffers } = await import('./emulator')
-				flushRingBuffers()
-				await engine.connectEmulator()
-
-				// Verify the firmware actually holds the mnemonic we generated
-				const actualMnemonic = await engine.getEmulatorMnemonic()
-				if (!actualMnemonic) {
-					console.error('[Emulator] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
-				} else if (actualMnemonic.trim() !== mnemonic.trim()) {
-					console.error('[Emulator] SEED VERIFY FAIL — firmware mnemonic does NOT match generated seed')
-					console.error('[Emulator]   expected first word: %s', mnemonic.trim().split(/\s+/)[0])
-					console.error('[Emulator]   actual first word:   %s', actualMnemonic.trim().split(/\s+/)[0])
-				} else {
+					// Verify the firmware actually holds the mnemonic we generated.
+					// MUST be fatal — a successful return tells the wizard to show
+					// the user a seed they should write down. If the firmware doesn't
+					// hold this seed, the user backs up a recovery phrase that won't
+					// recover the wallet. raceVerifyMnemonic caps at 3s so a stuck
+					// DebugLink read doesn't hang the RPC — timeout = failure.
+					const verifyResult = await raceVerifyMnemonic(mnemonic)
+					if (!verifyResult.ok) {
+						throw new Error(`Seed verification failed — ${verifyResult.reason}`)
+					}
 					console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
-				}
 
-				// Show seed words on emulator device window (NOT the main UI)
-				const { displaySeedWords, isEmulatorWindowOpen } = await import('./emulator-window')
-				if (isEmulatorWindowOpen()) {
+					// Show seed words on emulator device window (NOT the main UI).
+					// displaySeedWords throws if the window can't be brought up OR
+					// if the user closes the window without acking — so we never
+					// tell the wizard "seedDisplayed: true" when the user didn't
+					// actually see (and ack) the words.
+					const { displaySeedWords } = await import('./emulator-window')
 					await displaySeedWords(mnemonic)
-				}
 
-				// Return success flag only — mnemonic stays on the "device"
-				return { seedDisplayed: true }
+					return { seedDisplayed: true }
+				} catch (err) {
+					// Rollback: a saved mnemonic + initialized firmware would let
+					// connectEmulator's auto-reload silently resurrect the wallet
+					// next session — meaning the user could end up using a wallet
+					// that the wizard told them failed to create and which they
+					// were never given the chance to back up. Also drop the
+					// emulator_wallet metadata + cached device data that
+					// connectEmulator persisted en route to the failed verify.
+					console.error('[Emulator] create-wallet failed, rolling back:', (err as Error).message)
+					const failedDeviceId = engine.cachedFeatures?.deviceId
+					try {
+						const { closeEmulatorWindow } = await import('./emulator-window')
+						closeEmulatorWindow()
+					} catch {}
+					try { engine.disconnectEmulator() } catch {}
+					try { stopEmulator() } catch {}
+					try { deleteMnemonic(flashName) } catch {}
+					try { deleteFlash(flashName) } catch {}
+					try {
+						const { deleteEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
+						deleteEmulatorWalletMeta(flashName)
+						if (failedDeviceId) deleteDeviceSnapshot(failedDeviceId)
+					} catch {}
+					throw err
+				}
 			},
 
 			// ── WalletConnect (native v2) ────────────────────────────

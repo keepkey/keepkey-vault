@@ -24,13 +24,22 @@ const STATE_FILE = join(STATE_DIR, 'window-state.json')
 
 interface WindowState { x: number; y: number; width: number; height: number }
 
-const DEFAULT_STATE: WindowState = { x: 50, y: 50, width: 380, height: 260 }
+const DEFAULT_STATE: WindowState = { x: 50, y: 50, width: 400, height: 380 }
+const MIN_WIDTH = 320
+const MIN_HEIGHT = 360 // header + OLED + confirm meta + buttons
 
 function loadWindowState(): WindowState {
   try {
     if (existsSync(STATE_FILE)) {
       const data = JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
-      if (data.x != null && data.y != null && data.width > 0 && data.height > 0) return data
+      if (data.x != null && data.y != null && data.width > 0 && data.height > 0) {
+        return {
+          x: data.x,
+          y: data.y,
+          width: Math.max(MIN_WIDTH, data.width),
+          height: Math.max(MIN_HEIGHT, data.height),
+        }
+      }
     }
   } catch {}
   return { ...DEFAULT_STATE }
@@ -71,10 +80,24 @@ let pendingConfirm: {
   resolve: (approved: boolean) => void
 } | null = null
 
-/** Pending seed ack — resolved when the webview POSTs to the bridge */
+/**
+ * Pending seed ack — resolved on explicit "I've recorded my words" click,
+ * rejected if the user closes the window without acking. Without the
+ * reject path, the OS close button looks identical to an ack and the
+ * wizard advances even though the user never confirmed they wrote down
+ * the recovery phrase.
+ */
 let pendingSeedAck: {
   resolve: () => void
+  reject: (err: Error) => void
 } | null = null
+
+/**
+ * True once the webview has POSTed /_emu/ready. Until then, `sendToWindow`
+ * drops messages — calling executeJavascript on a not-yet-loaded WebView
+ * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
+ */
+let viewReady = false
 
 function startBridge(): number {
   if (bridgeServer) return bridgePort
@@ -95,6 +118,12 @@ function startBridge(): number {
           }
           return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
         })
+      }
+
+      if (url.pathname === '/_emu/ready' && req.method === 'POST') {
+        viewReady = true
+        console.log(`${TAG} Bridge: webview signaled ready`)
+        return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
       }
 
       if (url.pathname === '/_emu/seed-ack' && req.method === 'POST') {
@@ -180,10 +209,14 @@ export function openEmulatorWindow(): void {
       pendingConfirm = null
     }
     if (pendingSeedAck) {
-      pendingSeedAck.resolve()
+      // Closing the window mid-seed-display is NOT an ack — caller must
+      // see this as failure so it can roll back the saved mnemonic and
+      // not advance the wizard with an unbacked-up wallet.
+      pendingSeedAck.reject(new Error('Emulator window closed before seed words were acknowledged'))
       pendingSeedAck = null
     }
     emuWindow = null
+    viewReady = false
   })
 
   startDisplayPoll()
@@ -201,8 +234,13 @@ export function closeEmulatorWindow(): void {
     pendingConfirm.resolve(false)
     pendingConfirm = null
   }
+  if (pendingSeedAck) {
+    pendingSeedAck.reject(new Error('Emulator window closed before seed words were acknowledged'))
+    pendingSeedAck = null
+  }
   try { emuWindow.close() } catch {}
   emuWindow = null
+  viewReady = false
   stopBridge()
 }
 
@@ -212,33 +250,68 @@ export function isEmulatorWindowOpen(): boolean {
 
 // ── Send to webview (bun → webview via executeJavascript) ───────────────
 
-function sendToWindow(messageName: string, payload: any): void {
-  if (!emuWindow) return
+/**
+ * Push a message into the webview via executeJavascript.
+ *
+ * Returns true if the call was issued (window present + viewReady + no
+ * thrown error), false otherwise. Callers that install a pending promise
+ * keyed off this delivery (e.g. displaySeedWords + pendingSeedAck) MUST
+ * check the return value — if delivery failed silently and the caller
+ * still installs the pending state, it can hang forever waiting for a
+ * webview interaction that the webview never received the request for.
+ */
+function sendToWindow(messageName: string, payload: any): boolean {
+  if (!emuWindow || !viewReady) return false
   const packet = JSON.stringify({ type: 'message', id: messageName, payload })
-  emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+  try {
+    emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+    return true
+  } catch (err: any) {
+    console.warn(`${TAG} sendToWindow ${messageName} failed:`, err?.message)
+    return false
+  }
 }
 
 // ── Seed word display ───────────────────────────────────────────────────
 
-export function displaySeedWords(mnemonic: string): Promise<void> {
-  return new Promise((resolve) => {
-    const words = mnemonic.trim().split(/\s+/)
+export async function displaySeedWords(mnemonic: string): Promise<void> {
+  const words = mnemonic.trim().split(/\s+/)
 
-    if (!emuWindow) {
-      console.warn(`${TAG} No emulator window — skipping seed display`)
-      resolve()
-      return
+  if (!emuWindow) {
+    console.warn(`${TAG} No emulator window — opening for seed display`)
+    openEmulatorWindow()
+  }
+
+  // Wait for the bridge handshake before installing the pending ack —
+  // otherwise sendToWindow silently no-ops and the awaiter blocks forever.
+  // Throw on failure so callers (e.g. emulatorCreateWallet) don't tell the
+  // user "seed displayed" when the words were never actually shown — that
+  // would lead to backing up a seed the device doesn't hold.
+  if (!viewReady) {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && !viewReady && emuWindow) {
+      await new Promise(r => setTimeout(r, 50))
     }
+    if (!emuWindow || !viewReady) {
+      throw new Error(
+        `Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — cannot display seed`
+      )
+    }
+  }
 
-    pendingSeedAck = { resolve }
+  try { emuWindow!.focus() } catch {}
 
-    try {
-      sendToWindow('seed-display', { words })
-      sendToWindow('emu-state', { state: 'seed-display' })
-    } catch (err) {
-      console.error(`${TAG} Failed to send seed-display:`, err)
+  return new Promise<void>((resolve, reject) => {
+    pendingSeedAck = { resolve, reject }
+
+    // sendToWindow returns false on delivery failure (window gone, view
+    // not ready, executeJavascript threw). Without this check, the pending
+    // ack stays installed and the RPC hangs forever waiting for an "I've
+    // recorded my words" click on a webview that never got the request.
+    const delivered = sendToWindow('seed-display', { words }) && sendToWindow('emu-state', { state: 'seed-display' })
+    if (!delivered) {
       pendingSeedAck = null
-      resolve()
+      reject(new Error('Failed to deliver seed display to emulator webview'))
     }
   })
 }
@@ -254,8 +327,34 @@ const CONFIRM_TIMEOUT_MS = 120_000 // 2 minutes — reject if emulator window is
 
 async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
   if (!emuWindow) {
-    console.error(`${TAG} No emulator window — rejecting (fail closed)`)
-    return false
+    // Window may have been dismissed (user clicked the OS close button) but
+    // the engine is still connected — re-open it so signing can proceed.
+    // This can also happen on the very first sign after a fresh start when
+    // the wizard's transitions raced the window's first paint.
+    console.warn(`${TAG} No emulator window for confirm — re-opening`)
+    openEmulatorWindow()
+  }
+
+  // Wait for the bridge handshake regardless of whether we just opened the
+  // window or it was already up. A window can exist with viewReady=false
+  // immediately after open (HTML hasn't loaded yet) — sendToWindow would
+  // silently no-op and the user would never see the prompt.
+  if (!viewReady) {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && !viewReady && emuWindow) {
+      await new Promise(r => setTimeout(r, 50))
+    }
+    if (!emuWindow || !viewReady) {
+      console.error(`${TAG} Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — rejecting`)
+      return false
+    }
+  }
+
+  // Bring the emu window to front so the user actually sees the prompt.
+  // Without this, a user focused on the dashboard never realizes a sign
+  // is waiting on a click in another window.
+  try { emuWindow!.focus() } catch (e: any) {
+    console.warn(`${TAG} focus() failed:`, e?.message)
   }
 
   return new Promise((resolve) => {
@@ -292,33 +391,63 @@ function sendDismiss(): void {
 }
 
 // ── Display polling (real OLED framebuffer) ─────────────────────────────
+//
+// Strategy: the dylib's libkkemu_capture_frame() callback fires from inside
+// every display_refresh() — including the ones inside confirm_helper's busy
+// loop within a single synchronous kkemu_poll() call. Those frames would
+// otherwise be invisible to JS (the canvas has reverted to home by the time
+// kkemu_poll returns).
+//
+// Each poll tick: drain the C-side capture ring into our local playback
+// queue, then emit one frame to the webview. This gives the user a visible
+// playback of intermediate screens (confirm, cipher, recovery) at ~15fps.
+// The C-side ring dedupes adjacent identical frames so an idle firmware
+// doesn't fill the queue.
 
 let displayPollTimer: ReturnType<typeof setInterval> | null = null
-let cachedGetDisplay: (() => { framebuffer: Uint8Array | null; width: number; height: number }) | null = null
+let cachedPopFrames: (() => Uint8Array[]) | null = null
+const playbackQueue: Uint8Array[] = []
+const PLAYBACK_QUEUE_CAP = 90 // ~6s at 15fps; older frames dropped
 
 export function startDisplayPoll(): void {
   if (displayPollTimer) return
   import('./emulator').then(mod => {
-    cachedGetDisplay = mod.emuGetDisplay
+    cachedPopFrames = mod.emuPopFrames
     let lastHadDisplay = false
     displayPollTimer = setInterval(() => {
-      if (!emuWindow || !cachedGetDisplay) return
-      const { framebuffer, width, height } = cachedGetDisplay()
-      if (framebuffer && width > 0 && height > 0) {
-        lastHadDisplay = true
-        const b64 = Buffer.from(framebuffer).toString('base64')
-        sendToWindow('display-update', { fb: b64, w: width, h: height })
-      } else if (lastHadDisplay) {
-        lastHadDisplay = false
-        sendToWindow('display-lost', {})
+      if (!emuWindow || !cachedPopFrames) return
+
+      // Always drain the C ring so the dylib doesn't overflow during the
+      // bridge handshake. Frames captured before viewReady are held in the
+      // playback queue (capped, oldest dropped) and start emitting as soon
+      // as the webview is up — without this hold, setup-period OLED frames
+      // (boot, wipe, recovery cipher prompts) were silently lost.
+      const fresh = cachedPopFrames()
+      if (fresh.length > 0) {
+        playbackQueue.push(...fresh)
+        while (playbackQueue.length > PLAYBACK_QUEUE_CAP) playbackQueue.shift()
       }
+
+      // sendToWindow is a no-op until viewReady. Don't shift off the queue
+      // until then — emitted frames would be discarded mid-flight.
+      if (!viewReady) return
+
+      if (playbackQueue.length > 0) {
+        const fb = playbackQueue.shift()!
+        const b64 = Buffer.from(fb).toString('base64')
+        sendToWindow('display-update', { fb: b64, w: 256, h: 64 })
+        lastHadDisplay = true
+      }
+      // No queued frame: leave the last frame on screen. (Don't emit
+      // display-lost; the device hasn't gone away, it's just idle.)
     }, 66) // ~15fps
   })
 }
 
 export function stopDisplayPoll(): void {
   if (displayPollTimer) { clearInterval(displayPollTimer); displayPollTimer = null }
-  cachedGetDisplay = null
+  cachedPopFrames = null
+  playbackQueue.length = 0
 }
 
 // Firmware confirmation counts by operation type.
@@ -356,12 +485,29 @@ function getConfirmCount(details: EmulatorConfirmDetails): number {
 /**
  * Interactive confirm wrapper for emulator signing/address operations.
  *
+ * Order preserves the HW-wallet review pattern: fn() starts FIRST so the
+ * firmware can render its OLED screens (visible via the dylib frame
+ * capture ring) BEFORE the user is asked to approve — the user reviews
+ * what the device drew, not what the host claims.
+ *
  * 1. Pause poll, start operation (chunks queue in ring buffer)
- * 2. Poll N-1 times (consume all but last chunk)
- * 3. Send confirm-request to emulator window
+ * 2. Pre-poll N-1 (consume all but the last chunk; firmware accumulates
+ *    but doesn't dispatch yet — confirm_helper isn't entered)
+ * 3. Show confirm prompt with details; user can also see captured OLED
+ *    frames in the playback queue from the pre-polls
  * 4. Wait for user Confirm/Reject (arrives via bridge HTTP POST)
- * 5. If approved: prewriteConfirmations(N) → final poll → return result
- * 6. If rejected: throw error
+ * 5. If approved: prewriteConfirmations(N), final poll -> firmware reads
+ *    the Nth chunk, dispatches, enters confirm_helper, draws screen,
+ *    sees pre-written BA+DLD, exits cleanly, returns response
+ * 6. If rejected: prewriteCancel, flushRingBuffers -> the queued Nth
+ *    chunk gets consumed and triggers confirm_helper, which sees Cancel
+ *    in its tiny-msg switch and exits ret_stat=false. Without Cancel
+ *    waiting, confirm_helper would busy-loop until the watchdog SIGKILLs.
+ *
+ * The transport's READ_TIMEOUT_MS is sized to outlive both the confirm
+ * timeout AND the firmware roundtrip so a late-but-valid approval doesn't
+ * race the readChunk deadline. POLL_SAFETY_MS likewise outlives the
+ * confirm timeout so the paused poll doesn't auto-resume mid-decision.
  *
  * CRITICAL: kkemu_poll() blocks inside confirm_helper(). The firmware may
  * call confirm_helper() multiple times per operation (e.g. ETH: data + fee).
@@ -373,7 +519,7 @@ export async function emuInteractiveConfirm(
   engineDelegate?: { chunkCount: number; autoConfirm?: boolean } | null,
 ): Promise<any> {
   const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
-  const { prewriteConfirmations } = await import('./emulator-transport')
+  const { prewriteConfirmations, prewriteCancel } = await import('./emulator-transport')
 
   const id = crypto.randomUUID()
   if (engineDelegate) engineDelegate.chunkCount = 0
@@ -381,12 +527,16 @@ export async function emuInteractiveConfirm(
   pausePoll()
 
   try {
+    // Start the wallet op — transport writes N chunks into the ring buffer.
     const promise = fn()
-    await new Promise(r => setTimeout(r, 30))
+    await new Promise(r => setTimeout(r, 30)) // let transport flush all writes
 
     const numChunks = engineDelegate?.chunkCount || 1
     console.log(`${TAG} ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
 
+    // Drive the firmware up to (but not into) confirm_helper. Pre-polling
+    // N-1 chunks lets it accumulate the message but defer dispatch until
+    // the final chunk arrives — so the JS thread isn't blocked.
     for (let i = 0; i < numChunks - 1; i++) {
       emuPollOnce()
     }
@@ -396,9 +546,19 @@ export async function emuInteractiveConfirm(
     console.log(`${TAG} User responded: approved=${approved}`)
 
     if (!approved) {
-      // Flush the last queued chunk + any stale data so the next background
-      // kkemu_poll() doesn't enter confirm_helper and spin forever.
+      // Pre-queue Cancel BEFORE flushing. flushRingBuffers calls kkemu_poll
+      // which consumes the Nth (queued) sign chunk and triggers confirm_helper.
+      // Without Cancel waiting in the ring, confirm_helper busy-loops forever
+      // for BA+DLD that never come and the watchdog SIGKILLs bun. Cancel is
+      // in confirm_helper's tiny-msg switch (case MessageType_Cancel ->
+      // ret_stat=false, goto exit), so the firmware exits cleanly.
+      prewriteCancel()
       flushRingBuffers()
+      // The underlying wallet op is still pending — it'll reject once the
+      // transport reads the firmware's Failure response triggered by Cancel.
+      // Attach a no-op catch so the eventual rejection isn't surfaced as an
+      // UnhandledPromiseRejection after we throw the user-facing error.
+      promise.catch(() => {})
       throw new Error('Transaction rejected by user on emulator')
     }
 
@@ -518,10 +678,20 @@ function buildEmulatorHTML(bridgePort: number): string {
     word-break: break-all;
     padding: 8px 12px;
   }
-  .oled-content .op-label { color: #4fc3f7; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
-  .oled-content .detail { color: #ccc; font-size: 10px; }
-  .oled-content .addr { color: #81c784; font-size: 10px; font-family: 'Courier New', monospace; }
   .idle-text { color: #666; font-size: 12px; }
+  .confirm-meta {
+    display: none;
+    padding: 8px 14px 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #ddd;
+    text-align: center;
+  }
+  .confirm-meta.visible { display: block; }
+  .confirm-meta .op-label { color: #4fc3f7; font-weight: bold; font-size: 13px; margin-bottom: 4px; }
+  .confirm-meta .detail { color: #ccc; font-size: 11px; }
+  .confirm-meta .addr { color: #81c784; font-size: 11px; word-break: break-all; }
   .buttons { display: none; padding: 10px 16px 14px; gap: 12px; justify-content: center; }
   .buttons.visible { display: flex; }
   .btn {
@@ -570,6 +740,7 @@ function buildEmulatorHTML(bridgePort: number): string {
       </div>
     </div>
   </div>
+  <div class="confirm-meta" id="confirmMeta"></div>
   <div class="seed-section" id="seedSection">
     <div class="seed-title">Recovery Phrase</div>
     <div class="seed-grid" id="seedGrid"></div>
@@ -593,6 +764,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   var seedAckBtn = document.getElementById('seedAckBtn');
   var oledCanvas = document.getElementById('oledCanvas');
   var oledCtx = oledCanvas.getContext('2d');
+  var confirmMeta = document.getElementById('confirmMeta');
   var hasRealDisplay = false;
   var currentConfirmId = null;
 
@@ -665,30 +837,28 @@ function buildEmulatorHTML(bridgePort: number): string {
   function onConfirmRequest(details) {
     console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
-    if (!hasRealDisplay) {
-      var opName = details.operation
-        .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
-        .replace('Sign Tx', 'Sign Transaction')
-        .replace('Get Address', 'Verify Address');
-      var html = '<div class="op-label">' + esc(opName) + '</div>';
-      if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
-      if (details.to) {
-        var addr = details.to;
-        if (addr.length > 20) addr = addr.slice(0, 10) + '...' + addr.slice(-8);
-        html += '<div class="addr">To: ' + esc(addr) + '</div>';
-      }
-      if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
-      if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
-      oled.innerHTML = html;
+    var opName = details.operation
+      .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
+      .replace('Sign Tx', 'Sign Transaction')
+      .replace('Get Address', 'Verify Address');
+    var html = '<div class="op-label">' + esc(opName) + '</div>';
+    if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
+    if (details.to) {
+      var addr = details.to;
+      if (addr.length > 24) addr = addr.slice(0, 12) + '...' + addr.slice(-10);
+      html += '<div class="addr">To: ' + esc(addr) + '</div>';
     }
+    if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
+    if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
+    confirmMeta.innerHTML = html;
+    confirmMeta.classList.add('visible');
     buttons.classList.add('visible');
   }
 
   function onConfirmDismiss() {
     currentConfirmId = null;
-    if (!hasRealDisplay) {
-      oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
-    }
+    confirmMeta.innerHTML = '';
+    confirmMeta.classList.remove('visible');
     buttons.classList.remove('visible');
   }
 
@@ -729,9 +899,7 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!currentConfirmId) return;
     console.log('[emu-ui] CONFIRM clicked');
     postBridge('/_emu/confirm', { id: currentConfirmId, approved: true });
-    if (!hasRealDisplay) {
-      oled.innerHTML = '<div class="idle-text" style="color:#4fc3f7">Processing...</div>';
-    }
+    confirmMeta.innerHTML = '<div class="op-label" style="color:#4fc3f7">Processing…</div>';
     buttons.classList.remove('visible');
   });
 
@@ -739,13 +907,12 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!currentConfirmId) return;
     console.log('[emu-ui] REJECT clicked');
     postBridge('/_emu/confirm', { id: currentConfirmId, approved: false });
-    if (!hasRealDisplay) {
-      oled.innerHTML = '<div class="idle-text" style="color:#e57373">Rejected</div>';
-      setTimeout(function() {
-        oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
-      }, 1500);
-    }
+    confirmMeta.innerHTML = '<div class="op-label" style="color:#e57373">Rejected</div>';
     buttons.classList.remove('visible');
+    setTimeout(function() {
+      confirmMeta.innerHTML = '';
+      confirmMeta.classList.remove('visible');
+    }, 1200);
   });
 
   seedAckBtn.addEventListener('click', function() {
@@ -755,6 +922,10 @@ function buildEmulatorHTML(bridgePort: number): string {
   });
 
   console.log('[emu-ui] Ready, bridge=' + BRIDGE);
+  // Tell bun the WebView is ready to receive executeJavascript packets.
+  // Without this, display-update polls fire before window.handlePacket is
+  // defined and crash the WKWebView process (EXC_BREAKPOINT in WebKit).
+  postBridge('/_emu/ready', {});
 })();
 </script>
 </body>

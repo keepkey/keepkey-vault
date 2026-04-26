@@ -13,7 +13,7 @@
  * Emulator binaries are bundled at: firmware/emulators/<version>/libkkemu.dylib
  * Manifest at: firmware/emulators/manifest.json
  */
-import { dlopen, FFIType, ptr, toBuffer } from 'bun:ffi'
+import { dlopen, FFIType, ptr, toArrayBuffer } from 'bun:ffi'
 import { resolve, join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import {
@@ -58,16 +58,16 @@ export type EmulatorChannel = 'alpha' | 'beta' | 'release'
 let _emuDirCache: string | null = null
 function getEmulatorsDir(): string {
   if (_emuDirCache) return _emuDirCache
-  // firmware/emulators/ lives at the vault-v11 project root, which is
-  // outside the Electrobun .app bundle. Walk up from import.meta.dir
-  // (app/bun/) through the .app structure to find it.
+  // Search order:
+  //   - depth 0/1 → packaged .app bundle (electrobun.config.ts copies
+  //     ../../firmware/emulators → Resources/app/firmware/emulators)
+  //   - depth 2..12 → source tree (firmware/emulators lives at the
+  //     vault-v11 repo root, well above projects/keepkey-vault/src/bun/)
   const candidates: string[] = []
-  // Walk 2..12 levels up from import.meta.dir — covers source tree,
-  // dev .app bundle, and production .app bundle depths.
-  for (let depth = 2; depth <= 12; depth++) {
+  for (let depth = 0; depth <= 12; depth++) {
     candidates.push(resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware', 'emulators'))
   }
-  // Also try cwd-relative
+  // Also try cwd-relative as last-resort fallback
   candidates.push(resolve(process.cwd(), 'firmware', 'emulators'))
   candidates.push(resolve(process.cwd(), '..', '..', 'firmware', 'emulators'))
 
@@ -158,6 +158,7 @@ function loadDylib(path: string) {
     kkemu_poll:         { args: [], returns: FFIType.i32 },
     kkemu_is_running:   { args: [], returns: FFIType.i32 },
     kkemu_get_display:  { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    kkemu_pop_frame:    { args: [FFIType.ptr], returns: FFIType.i32 },
   })
 }
 
@@ -422,7 +423,14 @@ export function flushRingBuffers(): void {
 // ── Poll control (for pre-writing confirmations) ────────────────────────
 
 let pollSafetyTimer: ReturnType<typeof setTimeout> | null = null
-const POLL_SAFETY_MS = 30_000 // auto-resume poll after 30s to prevent permanent stall
+// Auto-resume poll after this long to prevent a forgotten resume from
+// permanently stalling the firmware. MUST exceed both the confirm prompt
+// (CONFIRM_TIMEOUT_MS = 120s) AND the readChunk deadline (READ_TIMEOUT_MS
+// = 240s) since fn() runs while the user is deciding and chunks are
+// queued in the ring. If safety fires first, the auto-resumed poll
+// consumes the queued sign chunk -> confirm_helper enters with no
+// prewritten BA/DLD -> busy-loop -> watchdog SIGKILL.
+const POLL_SAFETY_MS = 270_000
 
 /** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
 export function pausePoll(): void {
@@ -459,8 +467,13 @@ export function resumePoll(): void {
 
 /**
  * Read the emulator's 256x64 OLED framebuffer.
- * Returns null if the dylib doesn't expose a framebuffer (current alpha returns NULL).
- * Call between kkemu_poll() ticks — pointer is valid until next poll.
+ * Returns null if the dylib doesn't expose a framebuffer.
+ *
+ * The returned Uint8Array is a fresh copy. We use `toArrayBuffer + slice()`
+ * rather than `toBuffer` because Bun's Buffer-from-pointer wrapper attempts
+ * to free the underlying memory on GC — fine for malloc'd C buffers, but
+ * the dylib's framebuffer is a static `.bss` page and freeing it segfaults
+ * the next setInterval tick.
  */
 export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number; height: number } {
   if (!ffi) return { framebuffer: null, width: 0, height: 0 }
@@ -471,8 +484,36 @@ export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number
   const h = heightBuf[0]
   if (!fbPtr || w === 0 || h === 0) return { framebuffer: null, width: w, height: h }
   const byteLen = (w * h) / 8 // 2048 bytes for 256x64 1-bit
-  const framebuffer = new Uint8Array(toBuffer(fbPtr, 0, byteLen))
+  // .slice() forces a copy into a JS-owned ArrayBuffer; the borrowed view of
+  // the dylib's static memory is dropped immediately.
+  const framebuffer = new Uint8Array(toArrayBuffer(fbPtr, 0, byteLen)).slice()
   return { framebuffer, width: w, height: h }
+}
+
+/**
+ * Pop captured framebuffers from the dylib's display ring.
+ *
+ * The firmware's display_refresh() (called every kkemu_poll AND every
+ * iteration of confirm_helper's busy loop) snapshots the canvas into a
+ * ring buffer. This drains the ring so the host can replay confirm/init/
+ * recovery screens that exist only inside synchronous C calls.
+ *
+ * Adjacent identical frames are deduplicated in C, so the returned list
+ * contains only distinct screen states. Capped per call to avoid
+ * unbounded JS work if the firmware is animating fast.
+ */
+const POP_BATCH_CAP = 64
+
+export function emuPopFrames(): Uint8Array[] {
+  if (!ffi) return []
+  const frames: Uint8Array[] = []
+  const buf = new Uint8Array(2048)
+  for (let i = 0; i < POP_BATCH_CAP; i++) {
+    const got = ffi.symbols.kkemu_pop_frame(ptr(buf))
+    if (!got) break
+    frames.push(buf.slice())
+  }
+  return frames
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────

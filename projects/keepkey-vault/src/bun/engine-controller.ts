@@ -5,10 +5,11 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
+import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -325,7 +326,24 @@ export class EngineController extends EventEmitter {
       if (this.isPassphraseWallet) {
         console.log('[Engine] Hidden wallet active — skipping device snapshot, seed identity (privacy)')
       } else if (this.isEmulator) {
-        console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
+        // Emulators get their own metadata table keyed by flash name so the
+        // splash UI can show label / firmware / USD per wallet without
+        // contaminating real-device snapshots. Synchronous write — a fire-
+        // and-forget here would race rollback paths in create/import/load
+        // that delete this metadata when verification fails.
+        try {
+          const features = this.cachedFeatures
+          const fwVer = this.extractVersion(features)
+          saveEmulatorWalletMeta(
+            getActiveFlashName(),
+            features.label || '',
+            features.deviceId || '',
+            fwVer,
+            getEmulatorStatus().channel || '',
+          )
+        } catch (e: any) {
+          console.warn('[Engine] saveEmulatorWalletMeta failed:', e?.message)
+        }
       } else {
         try {
           const deviceId = this.cachedFeatures.deviceId || 'unknown'
@@ -1059,17 +1077,31 @@ export class EngineController extends EventEmitter {
                 )
               }
 
-              // Verify auto-reload actually took effect
-              const verifyMnemonic = await this.getEmulatorMnemonic()
-              if (!verifyMnemonic) {
-                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
-              } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
-                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
-                console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
-                console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
-              } else {
-                console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
-              }
+              // Verify auto-reload actually took effect. Race against a 3s
+              // deadline — the DebugLinkGetState read can hang on the dylib
+              // path (separate timing bug). The verify is just a sanity log;
+              // if it hangs, connectEmulator must NOT block forever or the
+              // wizard / dashboard never sees state → ready.
+              const verifyPromise = this.getEmulatorMnemonic()
+                .then(verifyMnemonic => {
+                  if (!verifyMnemonic) {
+                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
+                  } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
+                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
+                    console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
+                    console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
+                  } else {
+                    console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
+                  }
+                })
+                .catch(err => console.warn('[Engine] AUTO-RELOAD VERIFY error:', err?.message || err))
+              await Promise.race([
+                verifyPromise,
+                new Promise<void>(resolve => setTimeout(() => {
+                  console.warn('[Engine] AUTO-RELOAD VERIFY timed out (3s) — continuing')
+                  resolve()
+                }, 3000)),
+              ])
 
               this.updateState(this.deriveState(this.cachedFeatures))
             } else {

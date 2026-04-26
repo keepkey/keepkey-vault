@@ -14,6 +14,7 @@ import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
+import { EmulatorManager } from "./components/EmulatorManager"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
@@ -680,6 +681,7 @@ function App() {
 						emulatorEnabled={emulatorEnabled}
 					/>
 				</SplashScreen>
+				{emulatorEnabled && <EmulatorManager />}
 			</>
 		)
 	}

@@ -28,9 +28,37 @@ function getStorageDir(): string {
   return dir
 }
 
+/**
+ * Validate a wallet name and return the canonical (trimmed) form.
+ *
+ * Wallet names flow from RPC callers (UI, REST) into filesystem paths via
+ * getFlashPath/getMnemonicPath. Without validation here, a malicious or
+ * buggy caller can use names like "../foo" or "../../etc/something" to
+ * read/write/delete files outside ~/.keepkey/emulator. emulatorImportWallet
+ * validates at the entry point but emulatorInit/SwitchWallet/DeleteFlash
+ * historically did not — keeping validation at the path builders means
+ * every path is sanitized regardless of caller.
+ *
+ * Throws on any name that could escape the storage dir or collide with the
+ * mnemonic-side suffix.
+ */
+export function validateFlashName(name: string): string {
+  if (typeof name !== 'string') throw new Error('Wallet name must be a string')
+  const trimmed = name.trim()
+  if (!trimmed || trimmed.length > 64) throw new Error('Wallet name must be 1-64 characters')
+  if (/[\/\\]/.test(trimmed)) throw new Error('Wallet name cannot contain path separators')
+  if (trimmed.includes('..')) throw new Error('Wallet name cannot contain ".."')
+  if (trimmed.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
+  // ".mnemonic" anywhere — without this, name "foo.mnemonic" produces
+  // "foo.mnemonic.enc" which collides exactly with getMnemonicPath('foo')
+  // and is also hidden from listFlashImages's .mnemonic. filter.
+  if (/\.mnemonic\b/i.test(trimmed)) throw new Error('Wallet name cannot contain ".mnemonic"')
+  return trimmed
+}
+
 /** Path to an encrypted flash image */
 export function getFlashPath(name = 'default'): string {
-  return join(getStorageDir(), `${name}.enc`)
+  return join(getStorageDir(), `${validateFlashName(name)}.enc`)
 }
 
 // ── Keychain Operations ─────────────────────────────────────────────────
@@ -247,7 +275,7 @@ export function deleteFlash(name: string): boolean {
 
 /** Path to an encrypted mnemonic file */
 function getMnemonicPath(flashName: string): string {
-  return join(getStorageDir(), `${flashName}.mnemonic.enc`)
+  return join(getStorageDir(), `${validateFlashName(flashName)}.mnemonic.enc`)
 }
 
 /**

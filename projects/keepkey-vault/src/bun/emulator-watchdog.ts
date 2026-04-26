@@ -35,6 +35,13 @@ export function startEmulatorWatchdog(): void {
   // arming the heartbeat — otherwise a failed spawn leaves an orphaned
   // setInterval writing to a file with no killer watching it.
   try {
+    // 60s deadline. The 7.15 firmware adds Zcash Orchard + BIP-85 derivation
+    // paths that, on first call, can take 5-15s in the dylib (no daemon poll
+    // thread; the caller is the only thing driving kkemu_poll while a deep
+    // derivation runs in the firmware). 15s wasn't enough headroom and
+    // turned slow-but-working flows into kill-the-app crashes. Keep the
+    // watchdog as a backstop against genuine freezes (confirm_helper-style
+    // busy loops), just give legit work room to finish.
     watchdogProc = Bun.spawn(['bash', '-c', `
       while true; do
         sleep 5
@@ -42,7 +49,7 @@ export function startEmulatorWatchdog(): void {
         last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
         now=$(date +%s)
         age=$(( now - last / 1000 ))
-        if [ "$age" -gt 15 ]; then
+        if [ "$age" -gt 60 ]; then
           kill -9 ${process.pid} 2>/dev/null
           rm -f "${HEARTBEAT_FILE}"
           exit 0
@@ -71,7 +78,7 @@ export function startEmulatorWatchdog(): void {
   }
 
   started = true
-  console.log('[EmuWatchdog] Started — will SIGKILL if emulator FFI freezes event loop >15s')
+  console.log('[EmuWatchdog] Started — will SIGKILL if emulator FFI freezes event loop >60s')
 }
 
 export function stopEmulatorWatchdog(): void {
