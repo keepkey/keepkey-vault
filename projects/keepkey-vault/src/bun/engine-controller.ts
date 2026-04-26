@@ -9,6 +9,7 @@ import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
+import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -325,25 +326,24 @@ export class EngineController extends EventEmitter {
       if (this.isPassphraseWallet) {
         console.log('[Engine] Hidden wallet active — skipping device snapshot, seed identity (privacy)')
       } else if (this.isEmulator) {
-        // Emulators get their own metadata table keyed by flash name, so the
+        // Emulators get their own metadata table keyed by flash name so the
         // splash UI can show label / firmware / USD per wallet without
-        // contaminating real-device snapshots. Dynamic import avoids the
-        // circular dep with emulator.ts.
-        const features = this.cachedFeatures
-        const fwVer = this.extractVersion(features)
-        import('./emulator').then(({ getActiveFlashName, getEmulatorStatus }) => {
-          try {
-            saveEmulatorWalletMeta(
-              getActiveFlashName(),
-              features.label || '',
-              features.deviceId || '',
-              fwVer,
-              getEmulatorStatus().channel || '',
-            )
-          } catch (e: any) {
-            console.warn('[Engine] saveEmulatorWalletMeta failed:', e?.message)
-          }
-        }).catch(() => { /* never block on cache failure */ })
+        // contaminating real-device snapshots. Synchronous write — a fire-
+        // and-forget here would race rollback paths in create/import/load
+        // that delete this metadata when verification fails.
+        try {
+          const features = this.cachedFeatures
+          const fwVer = this.extractVersion(features)
+          saveEmulatorWalletMeta(
+            getActiveFlashName(),
+            features.label || '',
+            features.deviceId || '',
+            fwVer,
+            getEmulatorStatus().channel || '',
+          )
+        } catch (e: any) {
+          console.warn('[Engine] saveEmulatorWalletMeta failed:', e?.message)
+        }
       } else {
         try {
           const deviceId = this.cachedFeatures.deviceId || 'unknown'

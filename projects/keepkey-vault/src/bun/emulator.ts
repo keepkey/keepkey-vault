@@ -424,12 +424,13 @@ export function flushRingBuffers(): void {
 
 let pollSafetyTimer: ReturnType<typeof setTimeout> | null = null
 // Auto-resume poll after this long to prevent a forgotten resume from
-// permanently stalling the firmware. MUST exceed the longest user-input
-// wait that holds a paused poll — currently emuInteractiveConfirm waits up
-// to CONFIRM_TIMEOUT_MS (120s). If safety fires first, the auto-resumed
-// poll consumes the queued sign chunk → confirm_helper enters with no
-// prewritten BA/DLD → busy-loop → watchdog SIGKILL.
-const POLL_SAFETY_MS = 180_000
+// permanently stalling the firmware. MUST exceed both the confirm prompt
+// (CONFIRM_TIMEOUT_MS = 120s) AND the readChunk deadline (READ_TIMEOUT_MS
+// = 240s) since fn() runs while the user is deciding and chunks are
+// queued in the ring. If safety fires first, the auto-resumed poll
+// consumes the queued sign chunk -> confirm_helper enters with no
+// prewritten BA/DLD -> busy-loop -> watchdog SIGKILL.
+const POLL_SAFETY_MS = 270_000
 
 /** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
 export function pausePoll(): void {
