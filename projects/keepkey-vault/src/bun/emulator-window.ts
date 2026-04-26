@@ -273,8 +273,22 @@ const CONFIRM_TIMEOUT_MS = 120_000 // 2 minutes — reject if emulator window is
 
 async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
   if (!emuWindow) {
-    console.error(`${TAG} No emulator window — rejecting (fail closed)`)
-    return false
+    // Window may have been dismissed (user clicked the OS close button) but
+    // the engine is still connected — re-open it so signing can proceed.
+    // This can also happen on the very first sign after a fresh start when
+    // the wizard's transitions raced the window's first paint.
+    console.warn(`${TAG} No emulator window for confirm — re-opening`)
+    openEmulatorWindow()
+    // Wait briefly for the webview to handshake (/_emu/ready). Up to 2s,
+    // poll every 50ms. If it never readies, fall back to fail-closed.
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline && !viewReady) {
+      await new Promise(r => setTimeout(r, 50))
+    }
+    if (!emuWindow || !viewReady) {
+      console.error(`${TAG} Emulator window failed to open — rejecting (fail closed)`)
+      return false
+    }
   }
 
   return new Promise((resolve) => {
