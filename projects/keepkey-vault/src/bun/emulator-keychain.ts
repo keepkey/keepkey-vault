@@ -49,7 +49,10 @@ export function validateFlashName(name: string): string {
   if (/[\/\\]/.test(trimmed)) throw new Error('Wallet name cannot contain path separators')
   if (trimmed.includes('..')) throw new Error('Wallet name cannot contain ".."')
   if (trimmed.includes('\0')) throw new Error('Wallet name cannot contain null bytes')
-  if (trimmed.includes('.mnemonic.')) throw new Error('Wallet name cannot contain ".mnemonic."')
+  // ".mnemonic" anywhere — without this, name "foo.mnemonic" produces
+  // "foo.mnemonic.enc" which collides exactly with getMnemonicPath('foo')
+  // and is also hidden from listFlashImages's .mnemonic. filter.
+  if (/\.mnemonic\b/i.test(trimmed)) throw new Error('Wallet name cannot contain ".mnemonic"')
   return trimmed
 }
 

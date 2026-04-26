@@ -3546,6 +3546,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
+				const { deleteEmulatorWalletMeta, getAllEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
+
+				// Look up the deviceId BEFORE deleting metadata so we can purge
+				// all keyed-by-deviceId data (balances, cached_pubkeys, reports,
+				// device_snapshot) — the same set physical forgetDevice purges.
+				// Without this, deleting an emulator wallet leaves stale balance
+				// + xpub cache + report rows on disk keyed by an emulator
+				// deviceId that no longer maps to anything.
+				const meta = getAllEmulatorWalletMeta().find(m => m.name === params.name)
 
 				// If deleting the active wallet, stop it first so shutdown
 				// doesn't re-save the flash we're about to delete
@@ -3558,8 +3567,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				deleteFlash(params.name)
 				deleteMnemonic(params.name)
-				const { deleteEmulatorWalletMeta } = await import('./db')
 				deleteEmulatorWalletMeta(params.name)
+				if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
 				return getEmulatorStatus()
 			},
 			emulatorListWallets: async () => {
@@ -3709,66 +3718,86 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[Emulator] Generated ${wc}-word mnemonic`)
 
 				// Save mnemonic FIRST — connectEmulator's auto-reload uses it
-				const { saveMnemonic } = await import('./emulator-keychain')
-				const { getActiveFlashName } = await import('./emulator')
-				saveMnemonic(getActiveFlashName(), mnemonic)
+				const { saveMnemonic, deleteMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName, deleteFlash, stopEmulator } = await import('./emulator')
+				const flashName = getActiveFlashName()
+				saveMnemonic(flashName, mnemonic)
 
-				// Wipe first if already initialized — firmware rejects loadDevice otherwise
-				if (engine.cachedFeatures?.initialized) {
-					console.log('[Emulator] Already initialized — wiping before create')
-					await emuConfirmOp(() => engine.wallet!.wipe())
+				try {
+					// Wipe first if already initialized — firmware rejects loadDevice otherwise
+					if (engine.cachedFeatures?.initialized) {
+						console.log('[Emulator] Already initialized — wiping before create')
+						await emuConfirmOp(() => engine.wallet!.wipe())
+						const { flushRingBuffers } = await import('./emulator')
+						flushRingBuffers()
+						await engine.connectEmulator()
+					}
+
+					// If auto-reload already initialized with the new seed, skip manual load
+					if (!engine.cachedFeatures?.initialized) {
+						await emuConfirmOp(() => (engine.wallet as any).loadDevice({
+							mnemonic, pin: false, passphrase: false, skipChecksum: false,
+						}))
+						console.log('[Emulator] loadDevice complete')
+					} else {
+						console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
+					}
+
+					// Auto-set label with EMU prefix
+					try {
+						await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
+						console.log('[Emulator] Label set')
+					} catch (e: any) {
+						console.warn('[Emulator] Label set failed (non-critical):', e?.message)
+					}
+
+					// Drain stale data + reconnect for clean transport
 					const { flushRingBuffers } = await import('./emulator')
 					flushRingBuffers()
 					await engine.connectEmulator()
+
+					// Verify the firmware actually holds the mnemonic we generated.
+					// MUST be fatal — a successful return tells the wizard to show
+					// the user a seed they should write down. If the firmware doesn't
+					// hold this seed, the user backs up a recovery phrase that won't
+					// recover the wallet. Same contract as emulatorImportWallet.
+					const actualMnemonic = await engine.getEmulatorMnemonic()
+					if (!actualMnemonic) {
+						throw new Error('Seed verification failed — firmware returned no mnemonic via DebugLink')
+					}
+					if (actualMnemonic.trim() !== mnemonic.trim()) {
+						console.error('[Emulator] SEED VERIFY FAIL — generated first word: %s, firmware first word: %s',
+							mnemonic.trim().split(/\s+/)[0], actualMnemonic.trim().split(/\s+/)[0])
+						throw new Error('Seed verification failed — firmware mnemonic does not match generated seed')
+					}
+					console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
+
+					// Show seed words on emulator device window (NOT the main UI).
+					// displaySeedWords throws if the window can't be brought up OR
+					// if the user closes the window without acking — so we never
+					// tell the wizard "seedDisplayed: true" when the user didn't
+					// actually see (and ack) the words.
+					const { displaySeedWords } = await import('./emulator-window')
+					await displaySeedWords(mnemonic)
+
+					return { seedDisplayed: true }
+				} catch (err) {
+					// Rollback: a saved mnemonic + initialized firmware would let
+					// connectEmulator's auto-reload silently resurrect the wallet
+					// next session — meaning the user could end up using a wallet
+					// that the wizard told them failed to create and which they
+					// were never given the chance to back up.
+					console.error('[Emulator] create-wallet failed, rolling back:', (err as Error).message)
+					try {
+						const { closeEmulatorWindow } = await import('./emulator-window')
+						closeEmulatorWindow()
+					} catch {}
+					try { engine.disconnectEmulator() } catch {}
+					try { stopEmulator() } catch {}
+					try { deleteMnemonic(flashName) } catch {}
+					try { deleteFlash(flashName) } catch {}
+					throw err
 				}
-
-				// If auto-reload already initialized with the new seed, skip manual load
-				if (!engine.cachedFeatures?.initialized) {
-					await emuConfirmOp(() => (engine.wallet as any).loadDevice({
-						mnemonic, pin: false, passphrase: false, skipChecksum: false,
-					}))
-					console.log('[Emulator] loadDevice complete')
-				} else {
-					console.log('[Emulator] Device initialized by auto-reload — skipping manual loadDevice')
-				}
-
-				// Auto-set label with EMU prefix
-				try {
-					await emuConfirmOp(() => engine.applySettings({ label: 'EMU KeepKey', skipRefresh: true }))
-					console.log('[Emulator] Label set')
-				} catch (e: any) {
-					console.warn('[Emulator] Label set failed (non-critical):', e?.message)
-				}
-
-				// Drain stale data + reconnect for clean transport
-				const { flushRingBuffers } = await import('./emulator')
-				flushRingBuffers()
-				await engine.connectEmulator()
-
-				// Verify the firmware actually holds the mnemonic we generated.
-				// MUST be fatal — a successful return tells the wizard to show
-				// the user a seed they should write down. If the firmware doesn't
-				// hold this seed, the user backs up a recovery phrase that won't
-				// recover the wallet. Same contract as emulatorImportWallet.
-				const actualMnemonic = await engine.getEmulatorMnemonic()
-				if (!actualMnemonic) {
-					throw new Error('Seed verification failed — firmware returned no mnemonic via DebugLink')
-				}
-				if (actualMnemonic.trim() !== mnemonic.trim()) {
-					console.error('[Emulator] SEED VERIFY FAIL — generated first word: %s, firmware first word: %s',
-						mnemonic.trim().split(/\s+/)[0], actualMnemonic.trim().split(/\s+/)[0])
-					throw new Error('Seed verification failed — firmware mnemonic does not match generated seed')
-				}
-				console.log('[Emulator] SEED VERIFY OK — firmware mnemonic matches generated seed')
-
-				// Show seed words on emulator device window (NOT the main UI).
-				// displaySeedWords throws if the window can't be brought up so we
-				// never tell the wizard "seedDisplayed: true" when the user didn't
-				// actually see (and ack) the words.
-				const { displaySeedWords } = await import('./emulator-window')
-				await displaySeedWords(mnemonic)
-
-				return { seedDisplayed: true }
 			},
 
 			// ── WalletConnect (native v2) ────────────────────────────

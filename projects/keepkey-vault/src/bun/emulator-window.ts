@@ -80,9 +80,16 @@ let pendingConfirm: {
   resolve: (approved: boolean) => void
 } | null = null
 
-/** Pending seed ack — resolved when the webview POSTs to the bridge */
+/**
+ * Pending seed ack — resolved on explicit "I've recorded my words" click,
+ * rejected if the user closes the window without acking. Without the
+ * reject path, the OS close button looks identical to an ack and the
+ * wizard advances even though the user never confirmed they wrote down
+ * the recovery phrase.
+ */
 let pendingSeedAck: {
   resolve: () => void
+  reject: (err: Error) => void
 } | null = null
 
 /**
@@ -202,7 +209,10 @@ export function openEmulatorWindow(): void {
       pendingConfirm = null
     }
     if (pendingSeedAck) {
-      pendingSeedAck.resolve()
+      // Closing the window mid-seed-display is NOT an ack — caller must
+      // see this as failure so it can roll back the saved mnemonic and
+      // not advance the wizard with an unbacked-up wallet.
+      pendingSeedAck.reject(new Error('Emulator window closed before seed words were acknowledged'))
       pendingSeedAck = null
     }
     emuWindow = null
@@ -223,6 +233,10 @@ export function closeEmulatorWindow(): void {
   if (pendingConfirm) {
     pendingConfirm.resolve(false)
     pendingConfirm = null
+  }
+  if (pendingSeedAck) {
+    pendingSeedAck.reject(new Error('Emulator window closed before seed words were acknowledged'))
+    pendingSeedAck = null
   }
   try { emuWindow.close() } catch {}
   emuWindow = null
@@ -276,7 +290,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
   try { emuWindow!.focus() } catch {}
 
   return new Promise<void>((resolve, reject) => {
-    pendingSeedAck = { resolve }
+    pendingSeedAck = { resolve, reject }
 
     try {
       sendToWindow('seed-display', { words })
@@ -457,12 +471,21 @@ function getConfirmCount(details: EmulatorConfirmDetails): number {
 /**
  * Interactive confirm wrapper for emulator signing/address operations.
  *
- * 1. Pause poll, start operation (chunks queue in ring buffer)
- * 2. Poll N-1 times (consume all but last chunk)
- * 3. Send confirm-request to emulator window
- * 4. Wait for user Confirm/Reject (arrives via bridge HTTP POST)
- * 5. If approved: prewriteConfirmations(N) → final poll → return result
- * 6. If rejected: throw error
+ * Order matters — `fn()` does NOT start until the user approves:
+ *
+ * 1. Show prompt, wait for user Confirm/Reject (arrives via bridge POST)
+ * 2. Reject -> throw immediately. Nothing was queued so no cleanup needed.
+ * 3. Approve -> pause poll, start fn() (chunks queue in ring buffer),
+ *    pre-poll N-1 to consume all but the last, prewrite N confirmations,
+ *    poll once -> firmware reads the Nth chunk, dispatches, enters
+ *    confirm_helper, sees pre-written BA+DLD, exits, returns response
+ * 4. Resume poll, await fn() promise, return result
+ *
+ * Why fn() can't start before approval: the transport's readChunk has a
+ * fixed 120s deadline. If fn() starts and chunks are written before the
+ * prompt, that 120s clock ticks while the user decides. A late-but-valid
+ * approval can hit the read timeout. Starting fn() AFTER approval means
+ * readChunk only races a roundtrip's worth of work, not user-think time.
  *
  * CRITICAL: kkemu_poll() blocks inside confirm_helper(). The firmware may
  * call confirm_helper() multiple times per operation (e.g. ETH: data + fee).
@@ -474,15 +497,28 @@ export async function emuInteractiveConfirm(
   engineDelegate?: { chunkCount: number; autoConfirm?: boolean } | null,
 ): Promise<any> {
   const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
-  const { prewriteConfirmations, prewriteCancel } = await import('./emulator-transport')
+  const { prewriteConfirmations } = await import('./emulator-transport')
 
   const id = crypto.randomUUID()
-  if (engineDelegate) engineDelegate.chunkCount = 0
 
+  // Show prompt FIRST. No transport activity, no readChunk deadline,
+  // no ring-buffer state to clean up if the user rejects.
+  console.log(`${TAG} Waiting for user confirmation (id=${id.slice(0, 8)}...)`)
+  const approved = await requestUserConfirm({ id, ...details })
+  console.log(`${TAG} User responded: approved=${approved}`)
+
+  if (!approved) {
+    sendDismiss()
+    throw new Error('Transaction rejected by user on emulator')
+  }
+
+  // User approved — now do the work.
+  if (engineDelegate) engineDelegate.chunkCount = 0
   pausePoll()
 
   try {
     const promise = fn()
+    // Give the transport a tick to write all chunks before we count them.
     await new Promise(r => setTimeout(r, 30))
 
     const numChunks = engineDelegate?.chunkCount || 1
@@ -490,27 +526,6 @@ export async function emuInteractiveConfirm(
 
     for (let i = 0; i < numChunks - 1; i++) {
       emuPollOnce()
-    }
-
-    console.log(`${TAG} Waiting for user confirmation (id=${id.slice(0, 8)}...)`)
-    const approved = await requestUserConfirm({ id, ...details })
-    console.log(`${TAG} User responded: approved=${approved}`)
-
-    if (!approved) {
-      // Pre-queue Cancel BEFORE flushing. flushRingBuffers calls kkemu_poll
-      // which consumes the Nth (queued) sign chunk and triggers confirm_helper.
-      // Without Cancel waiting in the ring, confirm_helper busy-loops forever
-      // for BA+DLD that never come and the watchdog SIGKILLs bun. Cancel is
-      // in confirm_helper's tiny-msg switch (case MessageType_Cancel ->
-      // ret_stat=false, goto exit), so the firmware exits cleanly.
-      prewriteCancel()
-      flushRingBuffers()
-      // The underlying wallet op (`fn()`) is still pending — it'll reject
-      // once the transport reads the firmware's Failure response triggered
-      // by Cancel. Attach a no-op catch so it doesn't surface as an
-      // UnhandledPromiseRejection after we throw the user-facing error.
-      promise.catch(() => {})
-      throw new Error('Transaction rejected by user on emulator')
     }
 
     const nConfirms = getConfirmCount(details)

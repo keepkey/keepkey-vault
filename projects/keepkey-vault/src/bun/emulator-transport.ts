@@ -185,9 +185,6 @@ function buildHidFrame(msgType: number, payload: Uint8Array = new Uint8Array(0))
 const BUTTON_ACK_FRAME = buildHidFrame(27)
 // DebugLinkDecision (type 100 = 0x0064) — yes_no=true: protobuf field 1 varint = [0x08, 0x01]
 const DEBUG_LINK_DECISION_YES = buildHidFrame(100, new Uint8Array([0x08, 0x01]))
-// Cancel (type 20 = 0x0014) — no payload. confirm_helper's tiny-msg switch
-// has an explicit case for Cancel that exits with ret_stat=false.
-const CANCEL_FRAME = buildHidFrame(20)
 
 /**
  * Pre-write N button confirmations into the emulator ring buffers.
@@ -208,19 +205,4 @@ export function prewriteConfirmations(count: number): void {
   }
 }
 
-/**
- * Pre-queue a Cancel frame on iface 0 (main).
- *
- * Use before draining the input ring on user reject: when the queued sign
- * chunk gets consumed and the firmware enters confirm_helper, its tiny-msg
- * loop will read the Cancel and exit with ret_stat=false instead of
- * busy-looping forever waiting for BA+DLD that never come.
- *
- * Without this, flushRingBuffers' kkemu_poll calls processed the chunk,
- * triggered confirm_helper, and the watchdog SIGKILLed bun at 60s.
- */
-export function prewriteCancel(): void {
-  console.log(`${TAG} Pre-writing Cancel on iface 0`)
-  emuWrite(CANCEL_FRAME, 0)
-}
 
