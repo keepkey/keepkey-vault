@@ -560,6 +560,30 @@ async function raceVerifyMnemonic(expected: string): Promise<{ ok: true } | { ok
 	])
 }
 
+/**
+ * Run a fresh Orchard scan before any Zcash send/shield/deshield. The sidecar's
+ * note set is whatever was true at `synced_to`; if that's behind the chain tip,
+ * an "unspent" note may already be nullified on-chain and the broadcast will
+ * be rejected with `orchard double-spend: duplicate nullifier` after the user
+ * has already approved on the device. Calling scan first costs ~tens of ms
+ * when at tip and a few seconds when behind — strictly better than burning a
+ * device confirm + Halo2 proof on a doomed tx.
+ *
+ * Failure here is fatal — we'd rather surface "scan failed" than silently
+ * proceed with stale data.
+ */
+async function ensureZcashScanFresh(): Promise<void> {
+	try {
+		const result = await scanOrchardNotes()
+		if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+		if ((result?.notes_found ?? 0) > 0) {
+			console.log(`[zcash-presend] Caught up to ${result.synced_to} (+${result.notes_found} new notes)`)
+		}
+	} catch (e: any) {
+		throw new Error(`Pre-send chain scan failed: ${e?.message || e}. Retry after the network is reachable.`)
+	}
+}
+
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
@@ -2412,6 +2436,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldedSend: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureZcashScanFresh()
 				// FVK already loaded means device supports Orchard — skip version check
 				// (version string may not be populated yet at call time)
 				// On the emulator, route the device-signing call through emuSigningOp so the
@@ -2432,6 +2457,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
 				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
 				// firmware; the Orchard part needs >= 7.14.0 (checked by zcashShieldedInit).
@@ -2458,6 +2484,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDeshieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureZcashScanFresh()
 				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
 				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
 				const signWrap = engine.isEmulator

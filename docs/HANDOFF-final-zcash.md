@@ -36,6 +36,14 @@ Files: `txbuilder/zcash-shielded.ts`, `txbuilder/zcash-shield.ts`, `txbuilder/zc
 
 The synthetic shielded token now renders as a special `+ {amount} private` sub-row with a shield icon (instead of the generic `1 token` count). Other tokens (if any) still render via the existing `tokensCount` line below it. `Dashboard.tsx:892-911` has the special-case.
 
+### 1h. Pre-send auto-scan to prevent stale-note double-spends
+
+**Cause** — first deshield attempt with the anchor fix in place produced a valid PCZT, the device signed, the sidecar finalized — but the broadcast was rejected with `orchard double-spend: duplicate nullifier (in finalized state: true)`. The sidecar's local note set was 38,933 blocks behind the chain (`synced_to=3282973`, tip=3321906); 2 of the 4 "unspent" notes the builder selected had actually been spent in the unscanned window. There was no in-app indicator the wallet was behind tip, and no automatic catch-up before sends.
+
+**Fix** — added `ensureZcashScanFresh()` helper at `index.ts:~563` and called it at the top of `zcashShieldedSend`, `zcashShieldZec`, and `zcashDeshieldZec`. The helper invokes `scanOrchardNotes()` which is a no-op when at tip (~tens of ms IPC roundtrip) and incremental from `synced_to` when behind. Failure throws — we'd rather surface "scan failed" than burn a device confirm + Halo2 proof on a doomed tx.
+
+User-session validation: rescan from the failure state ran in 11.7s, caught up 38,935 blocks, found 2 new notes (from this session's earlier shield), and revealed `notes_unspent` had dropped 4→2 (so the previous deshield was correctly rejected).
+
 ### 1g. Deshield (Orchard → transparent) failed with "Orchard anchor mismatch"
 
 **Cause** — `pczt_builder.rs::build_deshield_pczt` reconstructs the Orchard commitment tree to extract Merkle witnesses for the input notes:
