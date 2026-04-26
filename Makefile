@@ -301,7 +301,9 @@ test-emu:
 # Launches kkemu, runs pytest, then kills kkemu.
 # Uses alpha channel by default; override with: make test-emu-python EMU_CHANNEL=release
 EMU_CHANNEL ?= alpha
-EMU_VERSION := 7.14.0-$(EMU_CHANNEL)
+# Resolve to whichever <ver>-<channel> dir actually has a kkemu binary.
+# Falls back to the previous 7.14 layout if no 7.15 build is present.
+EMU_VERSION := $(shell test -x ./firmware/emulators/7.15.0-$(EMU_CHANNEL)/kkemu && echo 7.15.0-$(EMU_CHANNEL) || echo 7.14.0-$(EMU_CHANNEL))
 
 test-emu-python:
 	@test -x ./firmware/emulators/$(EMU_VERSION)/kkemu || \
@@ -358,10 +360,18 @@ _build-emu:
 	cd $(EMU_FW_DIR) && git submodule update --init --recursive
 	rm -rf $(EMU_BUILD_DIR)
 	mkdir -p $(EMU_BUILD_DIR)
-	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DCMAKE_BUILD_TYPE=Release \
+	@# KK_DEBUG_LINK=ON: required for the dylib FFI path. Without it the
+	@#   firmware's msg_read_tiny ignores DebugLinkDecision (#100), so
+	@#   confirm_helper busy-loops forever waiting for a confirmation it
+	@#   already received but couldn't parse — kills the Bun host via the
+	@#   vault watchdog.
+	@# KK_BUILD_DYLIB=ON: produces libkkemu.dylib alongside the standalone
+	@#   kkemu binary. The vault loads the dylib via bun:ffi.
+	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
+		-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
 		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
-	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu
+	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p firmware/emulators/$(_EMU_VERSION)
 	cp $(EMU_BUILD_DIR)/bin/kkemu firmware/emulators/$(_EMU_VERSION)/kkemu
 	@echo "    Binary: firmware/emulators/$(_EMU_VERSION)/kkemu"
