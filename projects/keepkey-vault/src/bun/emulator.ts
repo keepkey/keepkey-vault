@@ -158,6 +158,7 @@ function loadDylib(path: string) {
     kkemu_poll:         { args: [], returns: FFIType.i32 },
     kkemu_is_running:   { args: [], returns: FFIType.i32 },
     kkemu_get_display:  { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    kkemu_pop_frame:    { args: [FFIType.ptr], returns: FFIType.i32 },
   })
 }
 
@@ -480,6 +481,32 @@ export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number
   // the dylib's static memory is dropped immediately.
   const framebuffer = new Uint8Array(toArrayBuffer(fbPtr, 0, byteLen)).slice()
   return { framebuffer, width: w, height: h }
+}
+
+/**
+ * Pop captured framebuffers from the dylib's display ring.
+ *
+ * The firmware's display_refresh() (called every kkemu_poll AND every
+ * iteration of confirm_helper's busy loop) snapshots the canvas into a
+ * ring buffer. This drains the ring so the host can replay confirm/init/
+ * recovery screens that exist only inside synchronous C calls.
+ *
+ * Adjacent identical frames are deduplicated in C, so the returned list
+ * contains only distinct screen states. Capped per call to avoid
+ * unbounded JS work if the firmware is animating fast.
+ */
+const POP_BATCH_CAP = 64
+
+export function emuPopFrames(): Uint8Array[] {
+  if (!ffi) return []
+  const frames: Uint8Array[] = []
+  const buf = new Uint8Array(2048)
+  for (let i = 0; i < POP_BATCH_CAP; i++) {
+    const got = ffi.symbols.kkemu_pop_frame(ptr(buf))
+    if (!got) break
+    frames.push(buf.slice())
+  }
+  return frames
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────

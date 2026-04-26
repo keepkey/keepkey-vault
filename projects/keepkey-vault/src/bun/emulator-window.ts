@@ -24,13 +24,22 @@ const STATE_FILE = join(STATE_DIR, 'window-state.json')
 
 interface WindowState { x: number; y: number; width: number; height: number }
 
-const DEFAULT_STATE: WindowState = { x: 50, y: 50, width: 380, height: 260 }
+const DEFAULT_STATE: WindowState = { x: 50, y: 50, width: 400, height: 380 }
+const MIN_WIDTH = 320
+const MIN_HEIGHT = 360 // header + OLED + confirm meta + buttons
 
 function loadWindowState(): WindowState {
   try {
     if (existsSync(STATE_FILE)) {
       const data = JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
-      if (data.x != null && data.y != null && data.width > 0 && data.height > 0) return data
+      if (data.x != null && data.y != null && data.width > 0 && data.height > 0) {
+        return {
+          x: data.x,
+          y: data.y,
+          width: Math.max(MIN_WIDTH, data.width),
+          height: Math.max(MIN_HEIGHT, data.height),
+        }
+      }
     }
   } catch {}
   return { ...DEFAULT_STATE }
@@ -279,16 +288,28 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
     // the wizard's transitions raced the window's first paint.
     console.warn(`${TAG} No emulator window for confirm — re-opening`)
     openEmulatorWindow()
-    // Wait briefly for the webview to handshake (/_emu/ready). Up to 2s,
-    // poll every 50ms. If it never readies, fall back to fail-closed.
-    const deadline = Date.now() + 2000
-    while (Date.now() < deadline && !viewReady) {
+  }
+
+  // Wait for the bridge handshake regardless of whether we just opened the
+  // window or it was already up. A window can exist with viewReady=false
+  // immediately after open (HTML hasn't loaded yet) — sendToWindow would
+  // silently no-op and the user would never see the prompt.
+  if (!viewReady) {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && !viewReady && emuWindow) {
       await new Promise(r => setTimeout(r, 50))
     }
     if (!emuWindow || !viewReady) {
-      console.error(`${TAG} Emulator window failed to open — rejecting (fail closed)`)
+      console.error(`${TAG} Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — rejecting`)
       return false
     }
+  }
+
+  // Bring the emu window to front so the user actually sees the prompt.
+  // Without this, a user focused on the dashboard never realizes a sign
+  // is waiting on a click in another window.
+  try { emuWindow!.focus() } catch (e: any) {
+    console.warn(`${TAG} focus() failed:`, e?.message)
   }
 
   return new Promise((resolve) => {
@@ -325,25 +346,49 @@ function sendDismiss(): void {
 }
 
 // ── Display polling (real OLED framebuffer) ─────────────────────────────
+//
+// Strategy: the dylib's libkkemu_capture_frame() callback fires from inside
+// every display_refresh() — including the ones inside confirm_helper's busy
+// loop within a single synchronous kkemu_poll() call. Those frames would
+// otherwise be invisible to JS (the canvas has reverted to home by the time
+// kkemu_poll returns).
+//
+// Each poll tick: drain the C-side capture ring into our local playback
+// queue, then emit one frame to the webview. This gives the user a visible
+// playback of intermediate screens (confirm, cipher, recovery) at ~15fps.
+// The C-side ring dedupes adjacent identical frames so an idle firmware
+// doesn't fill the queue.
 
 let displayPollTimer: ReturnType<typeof setInterval> | null = null
-let cachedGetDisplay: (() => { framebuffer: Uint8Array | null; width: number; height: number }) | null = null
+let cachedPopFrames: (() => Uint8Array[]) | null = null
+const playbackQueue: Uint8Array[] = []
+const PLAYBACK_QUEUE_CAP = 90 // ~6s at 15fps; older frames dropped
 
 export function startDisplayPoll(): void {
   if (displayPollTimer) return
   import('./emulator').then(mod => {
-    cachedGetDisplay = mod.emuGetDisplay
+    cachedPopFrames = mod.emuPopFrames
     let lastHadDisplay = false
     displayPollTimer = setInterval(() => {
-      if (!emuWindow || !cachedGetDisplay) return
-      const { framebuffer, width, height } = cachedGetDisplay()
-      if (framebuffer && width > 0 && height > 0) {
+      if (!emuWindow || !cachedPopFrames) return
+
+      // Drain newly captured frames from the dylib ring.
+      const fresh = cachedPopFrames()
+      if (fresh.length > 0) {
+        playbackQueue.push(...fresh)
+        // Cap queue — drop oldest if we fall behind a long animation
+        while (playbackQueue.length > PLAYBACK_QUEUE_CAP) playbackQueue.shift()
+      }
+
+      // Emit one frame per tick (~15fps playback).
+      if (playbackQueue.length > 0) {
+        const fb = playbackQueue.shift()!
+        const b64 = Buffer.from(fb).toString('base64')
+        sendToWindow('display-update', { fb: b64, w: 256, h: 64 })
         lastHadDisplay = true
-        const b64 = Buffer.from(framebuffer).toString('base64')
-        sendToWindow('display-update', { fb: b64, w: width, h: height })
       } else if (lastHadDisplay) {
-        lastHadDisplay = false
-        sendToWindow('display-lost', {})
+        // Nothing fresh and nothing queued — leave the last frame on screen.
+        // (Don't emit display-lost; the device hasn't gone away, it's just idle.)
       }
     }, 66) // ~15fps
   })
@@ -351,7 +396,8 @@ export function startDisplayPoll(): void {
 
 export function stopDisplayPoll(): void {
   if (displayPollTimer) { clearInterval(displayPollTimer); displayPollTimer = null }
-  cachedGetDisplay = null
+  cachedPopFrames = null
+  playbackQueue.length = 0
 }
 
 // Firmware confirmation counts by operation type.
@@ -551,10 +597,20 @@ function buildEmulatorHTML(bridgePort: number): string {
     word-break: break-all;
     padding: 8px 12px;
   }
-  .oled-content .op-label { color: #4fc3f7; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
-  .oled-content .detail { color: #ccc; font-size: 10px; }
-  .oled-content .addr { color: #81c784; font-size: 10px; font-family: 'Courier New', monospace; }
   .idle-text { color: #666; font-size: 12px; }
+  .confirm-meta {
+    display: none;
+    padding: 8px 14px 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #ddd;
+    text-align: center;
+  }
+  .confirm-meta.visible { display: block; }
+  .confirm-meta .op-label { color: #4fc3f7; font-weight: bold; font-size: 13px; margin-bottom: 4px; }
+  .confirm-meta .detail { color: #ccc; font-size: 11px; }
+  .confirm-meta .addr { color: #81c784; font-size: 11px; word-break: break-all; }
   .buttons { display: none; padding: 10px 16px 14px; gap: 12px; justify-content: center; }
   .buttons.visible { display: flex; }
   .btn {
@@ -603,6 +659,7 @@ function buildEmulatorHTML(bridgePort: number): string {
       </div>
     </div>
   </div>
+  <div class="confirm-meta" id="confirmMeta"></div>
   <div class="seed-section" id="seedSection">
     <div class="seed-title">Recovery Phrase</div>
     <div class="seed-grid" id="seedGrid"></div>
@@ -626,6 +683,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   var seedAckBtn = document.getElementById('seedAckBtn');
   var oledCanvas = document.getElementById('oledCanvas');
   var oledCtx = oledCanvas.getContext('2d');
+  var confirmMeta = document.getElementById('confirmMeta');
   var hasRealDisplay = false;
   var currentConfirmId = null;
 
@@ -698,30 +756,28 @@ function buildEmulatorHTML(bridgePort: number): string {
   function onConfirmRequest(details) {
     console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
-    if (!hasRealDisplay) {
-      var opName = details.operation
-        .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
-        .replace('Sign Tx', 'Sign Transaction')
-        .replace('Get Address', 'Verify Address');
-      var html = '<div class="op-label">' + esc(opName) + '</div>';
-      if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
-      if (details.to) {
-        var addr = details.to;
-        if (addr.length > 20) addr = addr.slice(0, 10) + '...' + addr.slice(-8);
-        html += '<div class="addr">To: ' + esc(addr) + '</div>';
-      }
-      if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
-      if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
-      oled.innerHTML = html;
+    var opName = details.operation
+      .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
+      .replace('Sign Tx', 'Sign Transaction')
+      .replace('Get Address', 'Verify Address');
+    var html = '<div class="op-label">' + esc(opName) + '</div>';
+    if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
+    if (details.to) {
+      var addr = details.to;
+      if (addr.length > 24) addr = addr.slice(0, 12) + '...' + addr.slice(-10);
+      html += '<div class="addr">To: ' + esc(addr) + '</div>';
     }
+    if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
+    if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
+    confirmMeta.innerHTML = html;
+    confirmMeta.classList.add('visible');
     buttons.classList.add('visible');
   }
 
   function onConfirmDismiss() {
     currentConfirmId = null;
-    if (!hasRealDisplay) {
-      oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
-    }
+    confirmMeta.innerHTML = '';
+    confirmMeta.classList.remove('visible');
     buttons.classList.remove('visible');
   }
 
@@ -762,9 +818,7 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!currentConfirmId) return;
     console.log('[emu-ui] CONFIRM clicked');
     postBridge('/_emu/confirm', { id: currentConfirmId, approved: true });
-    if (!hasRealDisplay) {
-      oled.innerHTML = '<div class="idle-text" style="color:#4fc3f7">Processing...</div>';
-    }
+    confirmMeta.innerHTML = '<div class="op-label" style="color:#4fc3f7">Processing…</div>';
     buttons.classList.remove('visible');
   });
 
@@ -772,13 +826,12 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!currentConfirmId) return;
     console.log('[emu-ui] REJECT clicked');
     postBridge('/_emu/confirm', { id: currentConfirmId, approved: false });
-    if (!hasRealDisplay) {
-      oled.innerHTML = '<div class="idle-text" style="color:#e57373">Rejected</div>';
-      setTimeout(function() {
-        oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
-      }, 1500);
-    }
+    confirmMeta.innerHTML = '<div class="op-label" style="color:#e57373">Rejected</div>';
     buttons.classList.remove('visible');
+    setTimeout(function() {
+      confirmMeta.innerHTML = '';
+      confirmMeta.classList.remove('visible');
+    }, 1200);
   });
 
   seedAckBtn.addEventListener('click', function() {
