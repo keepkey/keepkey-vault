@@ -599,18 +599,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					flush()
 					await engine.connectEmulator()
 
-					// Verify the firmware actually holds the mnemonic we loaded
+					// Verify the firmware actually holds the mnemonic we loaded.
+					// Wrap in a short timeout — a stuck DebugLink read must not
+					// block the RPC return; the wizard awaits us to advance.
 					if (params.mnemonic) {
-						const actual = await engine.getEmulatorMnemonic()
-						if (!actual) {
-							console.error('[Vault] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
-						} else if (actual.trim() !== params.mnemonic.trim()) {
-							console.error('[Vault] SEED VERIFY FAIL — firmware mnemonic does NOT match loaded seed')
-							console.error('[Vault]   expected first word: %s', params.mnemonic.trim().split(/\s+/)[0])
-							console.error('[Vault]   actual first word:   %s', actual.trim().split(/\s+/)[0])
-						} else {
-							console.log('[Vault] SEED VERIFY OK — firmware mnemonic matches loaded seed')
-						}
+						const verifyPromise = engine.getEmulatorMnemonic()
+							.then(actual => {
+								if (!actual) {
+									console.error('[Vault] SEED VERIFY FAIL — firmware returned no mnemonic via DebugLink')
+								} else if (actual.trim() !== params.mnemonic.trim()) {
+									console.error('[Vault] SEED VERIFY FAIL — firmware mnemonic does NOT match loaded seed')
+									console.error('[Vault]   expected first word: %s', params.mnemonic.trim().split(/\s+/)[0])
+									console.error('[Vault]   actual first word:   %s', actual.trim().split(/\s+/)[0])
+								} else {
+									console.log('[Vault] SEED VERIFY OK — firmware mnemonic matches loaded seed')
+								}
+							})
+							.catch(err => console.warn('[Vault] SEED VERIFY error:', err?.message || err))
+						const timeoutPromise = new Promise<void>(resolve =>
+							setTimeout(() => {
+								console.warn('[Vault] SEED VERIFY timed out (3s) — continuing without verification')
+								resolve()
+							}, 3000)
+						)
+						await Promise.race([verifyPromise, timeoutPromise])
 					}
 					return
 				}
