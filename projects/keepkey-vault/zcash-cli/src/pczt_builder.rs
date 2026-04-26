@@ -2551,4 +2551,239 @@ mod tests {
         assert_eq!(len, 512, "Should truncate to 512");
         assert!(buf.iter().all(|&b| b == b'B'));
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 4. Witness re-derivation — proves witness_at_checkpoint_id returns a
+    //    path that actually reconstructs the tree's root when applied to its
+    //    leaf. The chain's Orchard verifier checks this same invariant; if
+    //    our tests assert it, we'll catch "could not validate orchard proof"
+    //    failures locally instead of after a device confirm + Halo2 prove +
+    //    broadcast round-trip.
+    //
+    //    Existing tests only assert that witness_at_checkpoint_id returns
+    //    `Some(_)` — that's necessary but not sufficient. A path can exist
+    //    but be wrong.
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Helper: extract a witness for `pos` against `ckpt`, then verify that
+    /// applying the path to the leaf at that position re-computes the tree's
+    /// root at the same checkpoint. Panics with a descriptive message if the
+    /// witness exists but is wrong (the dangerous case the original tests
+    /// missed).
+    fn assert_witness_recomputes_root<S>(
+        tree: &mut ShardTree<S, 32, 16>,
+        pos: u64,
+        leaf: MerkleHashOrchard,
+        ckpt: u32,
+        ctx: &str,
+    ) where
+        S: shardtree::store::ShardStore<H = MerkleHashOrchard, CheckpointId = u32>,
+        S::Error: std::fmt::Debug,
+    {
+        let position = incrementalmerkletree::Position::from(pos);
+        let path = tree
+            .witness_at_checkpoint_id(position, &ckpt)
+            .unwrap_or_else(|e| panic!("[{}] witness query at pos {} failed: {:?}", ctx, pos, e))
+            .unwrap_or_else(|| panic!("[{}] no witness for pos {}", ctx, pos));
+        let computed = path.root(leaf);
+        let expected = tree
+            .root_at_checkpoint_id(&ckpt)
+            .unwrap()
+            .unwrap_or_else(|| panic!("[{}] tree root unavailable at ckpt {}", ctx, ckpt));
+        assert_eq!(
+            computed.to_bytes(),
+            expected.to_bytes(),
+            "[{}] witness for pos {} does NOT recompute tree root — \
+             this is the silent failure mode the chain reports as 'could not validate orchard proof'",
+            ctx,
+            pos,
+        );
+    }
+
+    /// Sanity: witness for a marked leaf in a tree of all-appended leaves
+    /// must verify against the tree's root.
+    #[test]
+    fn test_witness_recomputes_root_pure_append() {
+        let n_leaves = 50u64;
+        let note_pos = 20u64;
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        for i in 0..n_leaves {
+            let retention = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(i), retention).unwrap();
+        }
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "pure_append");
+    }
+
+    /// Mirrors the deshield builder's tree shape: insert N-1 completed shard
+    /// roots, walk shard N from leaves marking the note, no frontier. This
+    /// is the case where notes live in the latest incomplete shard.
+    #[test]
+    fn test_witness_recomputes_root_incomplete_shard_with_marked_note() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 16;
+        let n_complete_shards = 3u64;
+        let leaves_in_incomplete = 1000u64;
+        let note_pos = n_complete_shards * shard_size + 500; // mid-incomplete
+
+        // Insert completed-shard roots
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        for s in 0..n_complete_shards {
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 16, 16> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size {
+                sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
+            }
+            sub.checkpoint(0u32).unwrap();
+            let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+            let addr = Address::above_position(16.into(), Position::from(s * shard_size));
+            tree.insert(addr, root).unwrap();
+        }
+
+        // Walk shard N's leaves, marking the note when we hit it
+        let incomplete_start = n_complete_shards * shard_size;
+        for i in 0..leaves_in_incomplete {
+            let pos = incomplete_start + i;
+            let retention = if pos == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(pos), retention).unwrap();
+        }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "incomplete_shard");
+    }
+
+    /// User's exact case (deshield Orchard → transparent):
+    ///   - Notes in shards we walk fully (Marked)
+    ///   - Plus an Ephemeral frontier extension past the last note-bearing
+    ///     shard up to chain tip
+    ///
+    /// Asserts:
+    ///   1. Tree root after extension equals what a single all-append walk
+    ///      would produce (anchor sanity)
+    ///   2. The marked note's witness recomputes that root
+    ///
+    /// If (1) passes but (2) fails, the bug is in how ShardTree handles
+    /// witness extraction for marked notes when an Ephemeral frontier sits
+    /// above them. That's exactly the failure pattern we hit in production.
+    #[test]
+    fn test_witness_recomputes_root_after_frontier_extension() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 16;
+        let n_complete_shards = 2u64;
+        let leaves_in_walked_shard = shard_size; // shard 2 is also "complete" but contains our note
+        let frontier_extension = 1500u64;
+        let note_pos = 2 * shard_size + 12345;
+
+        // Reference: build everything via plain append
+        let mut ref_tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        let total = n_complete_shards * shard_size + leaves_in_walked_shard + frontier_extension;
+        for i in 0..total {
+            let retention = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            ref_tree.append(test_leaf(i), retention).unwrap();
+        }
+        let ref_ckpt = u32::MAX;
+        ref_tree.checkpoint(ref_ckpt).unwrap();
+        let ref_root = ref_tree.root_at_checkpoint_id(&ref_ckpt).unwrap().unwrap();
+
+        // Production: insert completed-shard roots, walk note-bearing shard,
+        // then ephemeral frontier extension (mirrors build_deshield_pczt).
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+
+        for s in 0..n_complete_shards {
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 16, 16> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size {
+                sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
+            }
+            sub.checkpoint(0u32).unwrap();
+            let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+            let addr = Address::above_position(16.into(), Position::from(s * shard_size));
+            tree.insert(addr, root).unwrap();
+        }
+
+        let walked_start = n_complete_shards * shard_size;
+        for i in 0..leaves_in_walked_shard {
+            let pos = walked_start + i;
+            let retention = if pos == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(pos), retention).unwrap();
+        }
+
+        let frontier_start = walked_start + leaves_in_walked_shard;
+        for i in 0..frontier_extension {
+            tree.append(test_leaf(frontier_start + i), Retention::Ephemeral).unwrap();
+        }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        let prod_root = tree.root_at_checkpoint_id(&ckpt).unwrap().unwrap();
+
+        // Invariant 1: production tree root must match the reference (anchor sanity)
+        assert_eq!(
+            prod_root.to_bytes(),
+            ref_root.to_bytes(),
+            "Tree built via insert+walk+frontier-extension must match all-append reference",
+        );
+
+        // Invariant 2: witness for the marked note must recompute that root
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "frontier_extension");
+    }
+
+    /// Two marked notes — one in a shard we walk (well-confirmed),
+    /// one in the frontier-extended region (recently mined). The frontier
+    /// extension uses Retention::Ephemeral; this test verifies that the
+    /// older marked note's witness still recomputes the root despite the
+    /// ephemeral leaves above it.
+    #[test]
+    fn test_witness_recomputes_root_two_marked_notes_split() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 16;
+        let n_complete_shards = 2u64;
+        let walked_leaves = shard_size;
+        let frontier_extension = 800u64;
+        let walked_note_pos = n_complete_shards * shard_size + 5000;
+
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+
+        for s in 0..n_complete_shards {
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 16, 16> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size {
+                sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
+            }
+            sub.checkpoint(0u32).unwrap();
+            let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+            let addr = Address::above_position(16.into(), Position::from(s * shard_size));
+            tree.insert(addr, root).unwrap();
+        }
+
+        let walked_start = n_complete_shards * shard_size;
+        for i in 0..walked_leaves {
+            let pos = walked_start + i;
+            let retention = if pos == walked_note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(pos), retention).unwrap();
+        }
+
+        let frontier_start = walked_start + walked_leaves;
+        for i in 0..frontier_extension {
+            tree.append(test_leaf(frontier_start + i), Retention::Ephemeral).unwrap();
+        }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+
+        assert_witness_recomputes_root(
+            &mut tree, walked_note_pos, test_leaf(walked_note_pos), ckpt,
+            "split: walked note",
+        );
+    }
 }

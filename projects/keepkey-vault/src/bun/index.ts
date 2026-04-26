@@ -305,6 +305,14 @@ let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
+// Set to true after the local Zcash wallet DB has been validated against the
+// chain this session via a full rescan from KeepKey release block. The notes
+// table accumulates state across runs (firmware swaps, partial scans, abandoned
+// proofs, prior bugs leaving inconsistent rows), and we hit cases where Halo2
+// proof verification failed even though anchor + witness math was provably
+// correct in tests. The simplest cure is: distrust the cached set on first
+// open, re-derive from the chain, then trust it for the rest of the session.
+let zcashVerifiedThisSession = false
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
@@ -573,18 +581,47 @@ async function raceVerifyMnemonic(expected: string): Promise<{ ok: true } | { ok
  * proceed with stale data.
  */
 async function ensureZcashScanFresh(): Promise<void> {
+	const isFirstThisSession = !zcashVerifiedThisSession
 	try {
-		const result = await scanOrchardNotes()
+		// First call this session → full rescan from KeepKey release block.
+		// Wipes the cached notes table and re-derives unspent set from chain
+		// data + current FVK, eliminating cross-session staleness. ~30s once.
+		// Subsequent calls → cheap incremental scan from synced_to to tip.
+		const result = await scanOrchardNotes(undefined, isFirstThisSession)
 		if (result?.synced_to != null) updateSyncedTo(result.synced_to)
-		// Always log — silent runs made it impossible to tell whether the auto-scan
-		// fired during a session debug.
+		zcashVerifiedThisSession = true
 		console.log(
-			`[zcash-presend] Scan complete: synced_to=${result?.synced_to ?? '?'}, ` +
-			`new_notes=${result?.notes_found ?? 0}`,
+			`[zcash-presend] ${isFirstThisSession ? 'Full' : 'Incremental'} scan complete: ` +
+			`synced_to=${result?.synced_to ?? '?'}, new_notes=${result?.notes_found ?? 0}`,
 		)
 	} catch (e: any) {
+		// Allow a retry next time — don't latch verified on failure
+		if (isFirstThisSession) zcashVerifiedThisSession = false
 		throw new Error(`Pre-send chain scan failed: ${e?.message || e}. Retry after the network is reachable.`)
 	}
+}
+
+/**
+ * Kick off a full rescan in the background the first time the Privacy tab is
+ * opened in a session. Frontend already subscribes to `scan-progress` events,
+ * so the user sees the validation happen. Errors are logged but do not block
+ * the status response — failed validation just means the next send-time
+ * `ensureZcashScanFresh()` will retry.
+ */
+function maybeStartBackgroundWalletVerification(): void {
+	if (zcashVerifiedThisSession || !hasFvkLoaded()) return
+	zcashVerifiedThisSession = true // claim the slot early so concurrent status polls don't double-fire
+	;(async () => {
+		try {
+			console.log('[zcash] First privacy-tab access — full rescan from wallet creation')
+			const result = await scanOrchardNotes(undefined, true)
+			if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+			console.log(`[zcash] Wallet validated: synced_to=${result?.synced_to ?? '?'}, notes_found=${result?.notes_found ?? 0}`)
+		} catch (e: any) {
+			console.warn('[zcash] Background wallet validation failed:', e?.message || e)
+			zcashVerifiedThisSession = false // allow next status poll to retry
+		}
+	})()
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
@@ -2404,6 +2441,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const fvkLoaded = hasFvkLoaded()
 				const cached = getCachedFvk()
 				const scanState = getScanState()
+				// Privacy tab opening is the natural trigger for "validate the local
+				// wallet against the chain". Fires once per session, in the background;
+				// status response stays fast, scan-progress events drive any UI.
+				maybeStartBackgroundWalletVerification()
 				const result = {
 					ready: sidecarReady,
 					fvk_loaded: fvkLoaded,
@@ -2411,8 +2452,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fvk: cached?.fvk ?? null,
 					synced_to: scanState.syncedTo,
 					keepkey_release_block: scanState.releaseBlock,
+					verified: zcashVerifiedThisSession,
 				}
-				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {
@@ -2420,16 +2462,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// If FVK is already loaded from DB, return it immediately
 				const cached = getCachedFvk()
 				if (cached) return cached
-				// Otherwise get from device
+				// Otherwise get from device — newly-loaded FVK invalidates any prior
+				// wallet validation, since notes for a different ak shouldn't carry over.
 				if (!engine.wallet) throw new Error('No device connected')
 				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
 				setCachedFvk(result.address, result.fvk)
+				zcashVerifiedThisSession = false
 				return result
 			},
 			zcashShieldedScan: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+				// A successful scan validates the wallet against the chain — even an
+				// incremental one from synced_to brings the unspent set up to truth.
+				zcashVerifiedThisSession = true
 				return result
 			},
 			zcashShieldedBalance: async () => {

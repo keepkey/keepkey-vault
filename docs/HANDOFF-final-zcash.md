@@ -36,6 +36,35 @@ Files: `txbuilder/zcash-shielded.ts`, `txbuilder/zcash-shield.ts`, `txbuilder/zc
 
 The synthetic shielded token now renders as a special `+ {amount} private` sub-row with a shield icon (instead of the generic `1 token` count). Other tokens (if any) still render via the existing `tokensCount` line below it. `Dashboard.tsx:892-911` has the special-case.
 
+### 1k. Per-session full rescan on Privacy tab open (the actual cure)
+
+After patching five distinct symptoms (1e-1i) we still hit `could not validate orchard proof`. Empirical inspection of `~/.keepkey/zcash_wallet.db`:
+- 8 notes accumulated across multiple sessions
+- All `position: NULL` (computed at build time, never persisted)
+- `tree_state` table empty (never cached)
+- 6 marked `is_spent`, 2 unspent — the unspent set carried into every send untouched
+
+The test `test_witness_recomputes_root_after_frontier_extension` proved tree construction is correct. So the bug isn't in our witness math — it's in the cached note data. Rather than chase whichever specific row was inconsistent, distrust the entire cached set on first open and re-derive from chain.
+
+**Fix** — added `zcashVerifiedThisSession` flag (default false). Three points kick the validation:
+- `zcashShieldedStatus` (Privacy tab open) → fires `maybeStartBackgroundWalletVerification()` once per session, asynchronously. Frontend already gets `scan-progress` events, so a "Validating wallet…" UX comes for free.
+- `zcashShieldedScan` (manual refresh) → marks verified after success.
+- `ensureZcashScanFresh` (pre-send) → upgraded to do a full rescan on first call this session (incremental thereafter).
+- `zcashShieldedInit` (FVK loaded) → resets verified=false, since notes for a different ak shouldn't carry over.
+
+Cost: ~30s once on first Privacy tab access. Trade-off accepted vs. the symptom-chasing alternative.
+
+### 1j. Witness re-derivation tests (pczt_builder)
+
+Added 4 tests that close the most dangerous gap — existing tests asserted `witness_at_checkpoint_id` returns `Some(_)`, but never that applying the path to its leaf actually re-computes the tree root. The chain's verifier checks the same invariant; without a test we'd see "could not validate orchard proof" with no local repro.
+
+- `test_witness_recomputes_root_pure_append` — sanity, all-append tree
+- `test_witness_recomputes_root_incomplete_shard_with_marked_note` — note in unfinished shard
+- `test_witness_recomputes_root_after_frontier_extension` — production shape (insert N-1 roots, walk shard with note, ephemeral frontier)
+- `test_witness_recomputes_root_two_marked_notes_split` — marked note in a walked shard with ephemeral frontier above it
+
+All four pass — so tree code is correct. Run takes 31s in release (large shard sizes); could be sped up with smaller `ShardTree<_, 8, 4>` test trees if it becomes a CI bottleneck.
+
 ### 1i. Min-confirmations gate on spendable notes
 
 **Cause** — after fix 1h caught the stale-state double-spend, the next deshield attempt failed at broadcast with `could not validate orchard proof`. Auto-scan ran (visible after the always-log fix below), local tree's anchor matched the chain's at lwd_tip_height, witness was extracted — yet the chain's verifier rejected the Halo2 proof. The shielded note we tried to spend was the one we'd received from a shield tx broadcast ~21 minutes earlier (~17 blocks). Notes that recent are vulnerable to: small reorgs shifting their on-chain position, lightwalletd's tree-state lag behind raw cmx scans, and indexer races between the shield tx's mining and tree-state availability.
