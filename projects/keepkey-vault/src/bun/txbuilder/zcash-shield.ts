@@ -88,13 +88,14 @@ export async function shieldZec(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
 ): Promise<{ txid: string }> {
 	if (shieldInProgress) {
 		throw new Error("A shield transaction is already in progress")
 	}
 	shieldInProgress = true
 	try {
-		return await _shieldZecInner(wallet, pioneer, params)
+		return await _shieldZecInner(wallet, pioneer, params, opts)
 	} finally {
 		shieldInProgress = false
 	}
@@ -104,6 +105,7 @@ async function _shieldZecInner(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
@@ -317,7 +319,8 @@ async function _shieldZecInner(
 
 	let signatures: any
 	try {
-		signatures = await wallet.zcashSignPczt(signingRequest, buildResult.orchard_signing_request.sighash)
+		const signFn = () => wallet.zcashSignPczt(signingRequest, buildResult.orchard_signing_request.sighash)
+		signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 	} catch (e: any) {
 		if (e?.message?.includes("Unknown message") && hasTransparentInputs) {
 			throw new Error(

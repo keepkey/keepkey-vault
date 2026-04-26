@@ -2650,16 +2650,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
-        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.state?.firmwareVersion)
+        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.getDeviceState().firmwareVersion)
+        const zcashFwError = `Zcash requires firmware >= ${zcashShieldedDef?.minFirmware ?? 'unknown'}`
 
         if (path === '/api/zcash/shielded/status' && method === 'GET') {
-          if (!zcashFwSupported) return json({ ready: false, error: 'Zcash requires firmware >= 7.11.0' })
+          if (!zcashFwSupported) return json({ ready: false, error: zcashFwError })
           return json({ ready: isSidecarReady() })
         }
 
         // All mutating zcash endpoints require firmware support
         if (path.startsWith('/api/zcash/shielded/') && path !== '/api/zcash/shielded/status' && !zcashFwSupported) {
-          return json({ error: 'Zcash requires firmware >= 7.11.0' }, 503)
+          return json({ error: zcashFwError }, 503)
         }
 
         if (path === '/api/zcash/shielded/init' && method === 'POST') {

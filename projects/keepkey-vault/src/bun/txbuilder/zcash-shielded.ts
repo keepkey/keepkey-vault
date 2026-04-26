@@ -24,6 +24,15 @@ export interface ShieldedSendParams {
 	memo?: string
 }
 
+/**
+ * Optional wrapper around the device-signing call. When the emulator is the
+ * active transport, the caller passes a function that pops the user-approval
+ * UI and pre-writes ButtonAck + DebugLinkDecision into the firmware's confirm
+ * loop. Without this on the emulator, the firmware busy-loops in
+ * confirm_helper() and the watchdog SIGKILLs the bun process.
+ */
+export type DeviceSignWrap = <T>(fn: () => Promise<T>) => Promise<T>
+
 export interface SigningRequest {
 	n_actions: number
 	account: number
@@ -225,13 +234,14 @@ let sendInProgress = false
 export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
+	opts?: { signWrap?: DeviceSignWrap },
 ): Promise<{ txid: string }> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
 	sendInProgress = true
 	try {
-		return await _sendShieldedInner(wallet, params)
+		return await _sendShieldedInner(wallet, params, opts)
 	} finally {
 		sendInProgress = false
 	}
@@ -240,6 +250,7 @@ export async function sendShielded(
 async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
+	opts?: { signWrap?: DeviceSignWrap },
 ): Promise<{ txid: string }> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
@@ -267,7 +278,9 @@ async function _sendShieldedInner(
 	//   ZcashSignPCZT (digests + metadata) → ZcashPCZTActionAck
 	//   For each action: ZcashPCZTAction (fields) → ZcashPCZTActionAck | ZcashSignedPCZT
 	console.log("[zcash-shielded] Requesting device signatures...")
-	const signatures = await deviceSign(wallet, signing_request)
+	const signatures = opts?.signWrap
+		? await opts.signWrap(() => deviceSign(wallet, signing_request))
+		: await deviceSign(wallet, signing_request)
 	console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
 
 	// 3. Finalize via sidecar (apply sigs + binding sig + serialize)

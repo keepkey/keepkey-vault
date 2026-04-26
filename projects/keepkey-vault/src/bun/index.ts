@@ -1496,6 +1496,43 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						})
 					}
 
+					// Attach shielded ZEC as a synthetic token under native Zcash so the
+					// dashboard renders it like an ERC20 sub-row. The Orchard FVK lives
+					// in the local sidecar; the seed never left the device.
+					if (zcashPrivacyEnabled && hasFvkLoaded()) {
+						try {
+							const shielded = await Promise.race([
+								getShieldedBalance(),
+								new Promise<null>(r => setTimeout(() => r(null), 5000)),
+							])
+							if (shielded && shielded.confirmed > 0) {
+								const zcashEntry = results.find(r => r.chainId === 'zcash')
+								if (zcashEntry) {
+									const zcashCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+									const zcashNative = pureNatives.find((d: any) => d.caip === zcashCaip)
+									const zecPrice = parseFloat(zcashNative?.priceUsd ?? '0')
+									const zecAmount = shielded.confirmed / 1e8
+									const shieldedUsd = zecAmount * zecPrice
+									zcashEntry.tokens = zcashEntry.tokens || []
+									zcashEntry.tokens.push({
+										symbol: 'zZEC',
+										name: 'Shielded ZEC',
+										balance: zecAmount.toFixed(8),
+										balanceUsd: shieldedUsd,
+										priceUsd: zecPrice,
+										caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded',
+										contractAddress: 'orchard',
+										networkId: 'bip122:00040fe8ec8471911baa1db1266ea15d',
+										decimals: 8,
+										type: 'shielded',
+									})
+									zcashEntry.balanceUsd = (zcashEntry.balanceUsd || 0) + shieldedUsd
+								}
+							}
+						} catch (e: any) {
+							console.warn('[getBalances] Shielded balance fetch failed:', e?.message || e)
+						}
+					}
 
 					// Push updated BTC accounts to frontend
 					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
@@ -2377,11 +2414,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				// FVK already loaded means device supports Orchard — skip version check
 				// (version string may not be populated yet at call time)
+				// On the emulator, route the device-signing call through emuSigningOp so the
+				// confirm UI pops + ButtonAck/DLD get pre-written. Without this the firmware
+				// busy-loops in confirm_helper() and the watchdog SIGKILLs the bun process.
+				const signWrap = engine.isEmulator
+					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
+						operation: 'zcashShieldedSend', chain: 'Zcash',
+						to: params.recipient, value: String(params.amount), memo: params.memo,
+					}) as Promise<T>
+					: undefined
 				return await sendShielded(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
 					memo: params.memo,
-				})
+				}, { signWrap })
 			},
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
@@ -2396,10 +2442,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { shieldZec } = await import("./txbuilder/zcash-shield")
 				const pioneer = await getPioneer()
 				try { rpc.send['shield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const signWrap = engine.isEmulator
+					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
+						operation: 'zcashShieldZec', chain: 'Zcash', value: String(params.amount),
+					}) as Promise<T>
+					: undefined
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
 					account: params.account,
-				})
+				}, { signWrap })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},
@@ -2409,11 +2460,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
 				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const signWrap = engine.isEmulator
+					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
+						operation: 'zcashDeshieldZec', chain: 'Zcash',
+						to: params.recipient, value: String(params.amount),
+					}) as Promise<T>
+					: undefined
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
 					account: params.account,
-				})
+				}, { signWrap })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},
@@ -3390,7 +3447,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Incomplete: fewer cached chains than supported (e.g. app update added new chains)
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const supportedChains = getAllChains().filter(c => !c.hidden && isChainSupported(c, fwVersion))
+				// Mirror the user-facing dashboard filter, not the raw `!c.hidden`:
+				//   - zcash-shielded never gets its own cache row (rendered as a token of native zcash)
+				//   - zcash is hidden by default but visible when the privacy flag is on
+				//   - other hidden chains stay internal-only
+				// Without this, freshly-enabled chains are never flagged as missing and
+				// the dashboard never auto-refreshes them into the cache.
+				const supportedChains = getAllChains().filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					if (c.id === 'zcash-shielded') return false
+					if (c.id === 'zcash') return zcashPrivacyEnabled
+					return !c.hidden
+				})
 				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
 				const missingChains = supportedChains.filter(c => !cachedChainIds.has(c.id))
 				if (missingChains.length > 0) {

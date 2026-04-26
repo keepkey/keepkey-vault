@@ -1676,6 +1676,68 @@ pub async fn build_deshield_pczt(
         }
     }
 
+    // Extend the local tree past the last completed shard up to the chain
+    // tip, mirroring the shield path's incomplete-shard fetch (lines ~998-1063).
+    // Without this, the tree only reflects state at the end of the last
+    // shard containing a spent note — but the chain's anchor at lwd_tip_height
+    // includes every commitment after that, so the locally-computed root
+    // can never match `get_orchard_anchor(lwd_tip_height)` and the build
+    // fails with "Orchard anchor mismatch".
+    //
+    // Skip this when our notes are already in the latest incomplete shard;
+    // that shard's per-note loop above already walks to the tip (shard_end_pos
+    // = u64::MAX, shard_end_height = lwd_tip_height), so a second pass here
+    // would double-append leaves.
+    let last_completed_shard = subtree_roots.len() as u32;
+    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(1687104);
+    if !note_shards.contains(&last_completed_shard) && lwd_tip_height > last_completed_height {
+        let shard_start_pos = (last_completed_shard as u64) * SHARD_SIZE;
+        let tree_size_before_completing = if last_completed_height > 0 {
+            lwd_client.get_orchard_tree_size_at(last_completed_height - 1).await?
+        } else { 0 };
+        let tree_size_after_completing = lwd_client.get_orchard_tree_size_at(last_completed_height).await?;
+        let plan = plan_incomplete_shard_fetch(
+            last_completed_height, shard_start_pos,
+            tree_size_before_completing, tree_size_after_completing,
+        );
+        info!(
+            "Extending tree past shard {} to chain tip (heights {} to {}, skip {} actions)",
+            last_completed_shard, plan.fetch_start_height, lwd_tip_height, plan.actions_to_skip,
+        );
+
+        let chunk_size = 10000u64;
+        let mut current_pos = shard_start_pos;
+        let mut current_height = plan.fetch_start_height;
+        let mut global_action_counter = 0u64;
+        while current_height <= lwd_tip_height {
+            let end = std::cmp::min(current_height + chunk_size - 1, lwd_tip_height);
+            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+
+            for (_block_height, txs) in &blocks {
+                for (_tx_idx, cmxs) in txs {
+                    for cmx_bytes in cmxs.iter() {
+                        if global_action_counter < plan.actions_to_skip {
+                            global_action_counter += 1;
+                            continue;
+                        }
+                        global_action_counter += 1;
+
+                        let cmx = orchard::note::ExtractedNoteCommitment::from_bytes(cmx_bytes);
+                        if bool::from(cmx.is_none()) { continue; }
+                        let leaf = MerkleHashOrchard::from_cmx(&cmx.unwrap());
+                        // Ephemeral: we never need to spend these — they're frontier-only,
+                        // present so the locally-reconstructed root reflects the chain tip.
+                        tree.append(leaf, Retention::Ephemeral)
+                            .context(format!("Failed to append frontier leaf at pos {}", current_pos))?;
+                        current_pos += 1;
+                    }
+                }
+            }
+            current_height = end + 1;
+        }
+        info!("Frontier extension done: tree size now {}", current_pos);
+    }
+
     // Reconstruct notes
     let mut orchard_notes: Vec<Note> = Vec::new();
     for (i, spendable) in notes.iter().enumerate() {
