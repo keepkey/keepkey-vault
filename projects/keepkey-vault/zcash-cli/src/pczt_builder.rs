@@ -2569,9 +2569,11 @@ mod tests {
     /// applying the path to the leaf at that position re-computes the tree's
     /// root at the same checkpoint. Panics with a descriptive message if the
     /// witness exists but is wrong (the dangerous case the original tests
-    /// missed).
-    fn assert_witness_recomputes_root<S>(
-        tree: &mut ShardTree<S, 32, 16>,
+    /// missed). Generic over tree dimensions so tests can use small trees
+    /// (`<_, 8, 4>` = 16 leaves/shard) for fast `cargo test` runs while
+    /// still exercising the same code paths as production (`<_, 32, 16>`).
+    fn assert_witness_recomputes_root<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+        tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
         pos: u64,
         leaf: MerkleHashOrchard,
         ckpt: u32,
@@ -2600,13 +2602,19 @@ mod tests {
         );
     }
 
+    // Tests below use ShardTree<_, 8, 4> (depth 8, shard height 4 = 16 leaves
+    // per shard, 256 leaves total max) — same approach as the existing tree
+    // tests in this file. Production uses <_, 32, 16> (65k leaves/shard) but
+    // the witness invariant we're checking is identical at any depth, and
+    // shrinking dimensions takes `cargo test` from minutes to milliseconds.
+
     /// Sanity: witness for a marked leaf in a tree of all-appended leaves
     /// must verify against the tree's root.
     #[test]
     fn test_witness_recomputes_root_pure_append() {
         let n_leaves = 50u64;
         let note_pos = 20u64;
-        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
             ShardTree::new(MemoryShardStore::empty(), 100);
         for i in 0..n_leaves {
             let retention = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
@@ -2624,23 +2632,23 @@ mod tests {
     fn test_witness_recomputes_root_incomplete_shard_with_marked_note() {
         use incrementalmerkletree::{Address, Position};
 
-        let shard_size: u64 = 1 << 16;
+        let shard_size: u64 = 1 << 4; // 16
         let n_complete_shards = 3u64;
-        let leaves_in_incomplete = 1000u64;
-        let note_pos = n_complete_shards * shard_size + 500; // mid-incomplete
+        let leaves_in_incomplete = 10u64;
+        let note_pos = n_complete_shards * shard_size + 5; // mid-incomplete
 
         // Insert completed-shard roots
-        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
             ShardTree::new(MemoryShardStore::empty(), 100);
         for s in 0..n_complete_shards {
-            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 16, 16> =
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
                 ShardTree::new(MemoryShardStore::empty(), 100);
             for j in 0..shard_size {
                 sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
             }
             sub.checkpoint(0u32).unwrap();
             let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
-            let addr = Address::above_position(16.into(), Position::from(s * shard_size));
+            let addr = Address::above_position(4.into(), Position::from(s * shard_size));
             tree.insert(addr, root).unwrap();
         }
 
@@ -2674,14 +2682,14 @@ mod tests {
     fn test_witness_recomputes_root_after_frontier_extension() {
         use incrementalmerkletree::{Address, Position};
 
-        let shard_size: u64 = 1 << 16;
+        let shard_size: u64 = 1 << 4; // 16
         let n_complete_shards = 2u64;
         let leaves_in_walked_shard = shard_size; // shard 2 is also "complete" but contains our note
-        let frontier_extension = 1500u64;
-        let note_pos = 2 * shard_size + 12345;
+        let frontier_extension = 12u64;
+        let note_pos = 2 * shard_size + 7;
 
         // Reference: build everything via plain append
-        let mut ref_tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        let mut ref_tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
             ShardTree::new(MemoryShardStore::empty(), 100);
         let total = n_complete_shards * shard_size + leaves_in_walked_shard + frontier_extension;
         for i in 0..total {
@@ -2694,18 +2702,18 @@ mod tests {
 
         // Production: insert completed-shard roots, walk note-bearing shard,
         // then ephemeral frontier extension (mirrors build_deshield_pczt).
-        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
             ShardTree::new(MemoryShardStore::empty(), 100);
 
         for s in 0..n_complete_shards {
-            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 16, 16> =
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
                 ShardTree::new(MemoryShardStore::empty(), 100);
             for j in 0..shard_size {
                 sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
             }
             sub.checkpoint(0u32).unwrap();
             let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
-            let addr = Address::above_position(16.into(), Position::from(s * shard_size));
+            let addr = Address::above_position(4.into(), Position::from(s * shard_size));
             tree.insert(addr, root).unwrap();
         }
 
@@ -2745,24 +2753,24 @@ mod tests {
     fn test_witness_recomputes_root_two_marked_notes_split() {
         use incrementalmerkletree::{Address, Position};
 
-        let shard_size: u64 = 1 << 16;
+        let shard_size: u64 = 1 << 4; // 16
         let n_complete_shards = 2u64;
         let walked_leaves = shard_size;
-        let frontier_extension = 800u64;
-        let walked_note_pos = n_complete_shards * shard_size + 5000;
+        let frontier_extension = 8u64;
+        let walked_note_pos = n_complete_shards * shard_size + 6;
 
-        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
             ShardTree::new(MemoryShardStore::empty(), 100);
 
         for s in 0..n_complete_shards {
-            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 16, 16> =
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
                 ShardTree::new(MemoryShardStore::empty(), 100);
             for j in 0..shard_size {
                 sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
             }
             sub.checkpoint(0u32).unwrap();
             let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
-            let addr = Address::above_position(16.into(), Position::from(s * shard_size));
+            let addr = Address::above_position(4.into(), Position::from(s * shard_size));
             tree.insert(addr, root).unwrap();
         }
 
