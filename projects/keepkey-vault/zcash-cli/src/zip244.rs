@@ -242,25 +242,23 @@ pub fn digest_transparent_outputs(outputs: &[TransparentOutput]) -> [u8; 32] {
     blake2b_256(b"ZTxIdOutputsHash", &data)
 }
 
-/// Compute the full transparent digest for txid computation (ZIP-244 §4.5).
-/// This is the NON-sig version: prevouts || amounts || scripts || sequences || outputs.
-/// No hash_type byte, no txin_sig_digest. Used in the txid (NOT in sighash).
+/// Compute the transparent digest for txid computation (ZIP-244 §4.5 / T.1).
+///
+/// Per spec: T.1 = BLAKE2b-256("ZTxIdTranspaHash", T.2a (prevouts) || T.2b
+/// (sequence) || T.2c (outputs)). The amounts/scripts sub-digests are
+/// sighash-only (§4.10) and MUST NOT appear here, despite both digests sharing
+/// the "ZTxIdTranspaHash" personalization.
 pub fn digest_transparent_txid(inputs: &[TransparentInput], outputs: &[TransparentOutput]) -> [u8; 32] {
     if inputs.is_empty() && outputs.is_empty() {
         return EMPTY_TRANSPARENT_DIGEST;
     }
 
     let prevouts = digest_transparent_prevouts(inputs);
-    let amounts = digest_transparent_amounts(inputs);
-    let scripts = digest_transparent_scripts(inputs);
     let sequences = digest_transparent_sequence(inputs);
     let outputs_hash = digest_transparent_outputs(outputs);
 
-    // ZIP-244 §4.5: txid transparent_digest has NO hash_type byte
-    let mut data = Vec::with_capacity(32 * 5);
+    let mut data = Vec::with_capacity(32 * 3);
     data.extend_from_slice(&prevouts);
-    data.extend_from_slice(&amounts);
-    data.extend_from_slice(&scripts);
     data.extend_from_slice(&sequences);
     data.extend_from_slice(&outputs_hash);
 
@@ -329,21 +327,34 @@ pub fn compute_transparent_sig_hash(
     blake2b_256(&personal, &sighash_data)
 }
 
-/// Compute the transparent_sig_digest for Orchard spend authorization (ZIP-244 §4.7).
+/// Compute the transparent_sig_digest for Orchard spend authorization (ZIP-244 §4.10).
 ///
-/// For Orchard spend auth in hybrid (transparent + Orchard) transactions, the sighash
-/// uses transparent_sig_digest — NOT the txid transparent_digest. Per ZIP-244 §4.6-4.7,
-/// the signature digest includes hash_type (SIGHASH_ALL = 0x01) and an empty
-/// txin_sig_digest, both absent from the txid transparent_digest.
+/// Per ZIP-244 §4.10b: when the transaction has **no transparent inputs** (or only
+/// a coinbase input), the transparent_sig_digest is identical to the
+/// transparent_txid_digest (T.1 form, 3 sub-digests: prevouts || sequence ||
+/// outputs). Only when there is at least one non-coinbase transparent input
+/// being spent does the digest take the full S.2 form (hash_type ||
+/// prevouts || amounts || scripts || sequences || outputs || txin_sig_digest).
 ///
-/// When there are no transparent inputs/outputs, transparent_sig_digest equals the
-/// txid transparent_digest (both are the hash of empty data).
+/// Missing the `inputs.is_empty()` short-circuit was the bug behind deshield
+/// (orchard → transparent) broadcasts failing with "could not validate orchard
+/// proof": we'd hand the device a sighash computed via the full S.2 form, but
+/// the chain re-derived sighash via the T.1 form per §4.10b, the redpallas
+/// signature didn't bind to the chain's sighash, and consensus rejected the
+/// proof. (Shield txs spend transparent inputs, so they correctly take the
+/// full S.2 form on both sides; private sends have neither inputs nor outputs
+/// and hit the EMPTY_TRANSPARENT_DIGEST short-circuit on both sides.)
 pub fn digest_transparent_sig_for_orchard(
     inputs: &[TransparentInput],
     outputs: &[TransparentOutput],
 ) -> [u8; 32] {
     if inputs.is_empty() && outputs.is_empty() {
         return EMPTY_TRANSPARENT_DIGEST;
+    }
+
+    // ZIP-244 §4.10b: empty vin → use the txid-form digest unchanged.
+    if inputs.is_empty() {
+        return digest_transparent_txid(inputs, outputs);
     }
 
     let hash_type: u8 = 0x01; // SIGHASH_ALL (ZIP-244 convention for Orchard)
@@ -548,6 +559,39 @@ mod tests {
     fn test_transparent_sig_digest_equals_txid_for_empty() {
         let sig_digest = digest_transparent_sig_for_orchard(&[], &[]);
         assert_eq!(sig_digest, EMPTY_TRANSPARENT_DIGEST);
+    }
+
+    /// ZIP-244 §4.10b: when there are NO transparent inputs but there ARE
+    /// transparent outputs (the deshield shape — Orchard spends → transparent
+    /// output), the transparent_sig_digest is identical to the
+    /// transparent_txid_digest. The full S.2 form (with hash_type, amounts,
+    /// scripts, txin_sig_digest) is reserved for txs that actually spend a
+    /// transparent input.
+    ///
+    /// Regression: missing this special case caused deshield broadcasts to
+    /// fail with "could not validate orchard proof" — the device signed under
+    /// our wrong S.2-form sighash, the chain re-derived the right T.1-form
+    /// sighash per §4.10b, and the redpallas spend-auth signature verification
+    /// failed.
+    #[test]
+    fn test_transparent_sig_digest_uses_txid_form_when_vin_empty() {
+        let outputs = vec![TransparentOutput {
+            value: 90_000,
+            script_pubkey: vec![
+                0x76, 0xa9, 0x14, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0x88, 0xac,
+            ],
+        }];
+
+        let sig_digest = digest_transparent_sig_for_orchard(&[], &outputs);
+        let txid_digest = digest_transparent_txid(&[], &outputs);
+
+        assert_eq!(
+            sig_digest, txid_digest,
+            "ZIP-244 §4.10b violation: with no transparent inputs, \
+             transparent_sig_digest must equal transparent_txid_digest. \
+             A divergence here is exactly what makes deshield broadcasts \
+             fail consensus while the bundle verifies locally."
+        );
     }
 
     fn hex_to_array(s: &str) -> [u8; 32] {

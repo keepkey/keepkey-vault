@@ -2795,3 +2795,331 @@ mod tests {
         );
     }
 }
+
+// ── v5 transaction round-trip tests ───────────────────────────────────────
+//
+// Production private sends and shield txs broadcast successfully, but deshield
+// (orchard spends → transparent output) fails at broadcast with "could not
+// validate orchard proof" — even though the per-action redpallas signature
+// and the orchard binding signature both verify locally before serialization.
+//
+// One way that pattern can occur: the bytes we hand to lightwalletd parse to a
+// transaction whose canonical txid / digests differ from what we computed
+// internally. That would produce a bundle whose embedded Halo2 public inputs
+// disagree with what the chain extracts from the wire, so consensus rejects
+// the proof.
+//
+// These tests round-trip our v5 serializers through `zcash_primitives`'
+// canonical reader and check (a) the bytes parse, (b) per-action Orchard
+// fields survive the round-trip, and (c) our computed txid matches what
+// `Transaction::read` reconstructs.
+//
+// `roundtrip_v5_shielded_only` is a canary — production private sends use this
+// path successfully, so it MUST pass. If it doesn't, the test infra (synthetic
+// bundle, fixture bytes, comparison helpers) is what's broken.
+//
+// `roundtrip_v5_hybrid_shield` exercises the `inputs=[real], outputs=[]`
+// direction that production shield uses successfully — also expected to pass.
+//
+// `roundtrip_v5_hybrid_deshield` exercises `inputs=[], outputs=[real]` — the
+// unique combination only deshield uses. If a serializer or zip244 digest bug
+// is direction-specific, this is where it shows up.
+
+#[cfg(test)]
+mod roundtrip_v5_tests {
+    use super::{serialize_v5_hybrid_tx, serialize_v5_shielded_tx};
+    use crate::zip244::{
+        self, Zip244Digests, EMPTY_SAPLING_DIGEST, EMPTY_TRANSPARENT_DIGEST,
+        TransparentInput, TransparentOutput,
+    };
+    use nonempty::NonEmpty;
+    use orchard::{
+        bundle::{Authorized, Flags},
+        note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+        primitives::redpallas,
+        value::ValueCommitment,
+        Action, Anchor, Proof,
+    };
+    use zcash_primitives::transaction::Transaction;
+    // zcash_primitives 0.19 pins zcash_protocol 0.4; its `Transaction::read`
+    // signature wants that exact BranchId. Our crate also depends on
+    // zcash_protocol 0.7 (used elsewhere). Pull the 0.4 alias here.
+    use zcash_protocol_v04::consensus::BranchId;
+
+    /// NU5 consensus branch id. Picked because deshield txs ship under NU5+
+    /// rules and `Transaction::read` for v5 ignores the branch_id parameter
+    /// anyway — what matters is matching the value encoded in the tx header.
+    const NU5_BRANCH_ID: u32 = 0xc2d6_d0b4;
+
+    // ── Test vector bytes ────────────────────────────────────────────────
+    // Pulled from `orchard-0.12.0/src/test_vectors/note_encryption.rs` TV[0].
+    // Real, on-curve Pallas points known to round-trip through the canonical
+    // reader. We only need on-curve-ness — the values themselves are
+    // arbitrary for serialization tests.
+
+    const TV_CV_NET: [u8; 32] = [
+        0xdd, 0xba, 0x24, 0xf3, 0x9f, 0x70, 0x8e, 0xd7, 0xa7, 0x48, 0x57, 0x13, 0x71, 0x11,
+        0x42, 0xc2, 0x38, 0x51, 0x38, 0x15, 0x30, 0x2d, 0xf0, 0xf4, 0x83, 0x04, 0x21, 0xa6,
+        0xc1, 0x3e, 0x71, 0x01,
+    ];
+    const TV_NF_OLD: [u8; 32] = [
+        0xc5, 0x96, 0xfb, 0xd3, 0x2e, 0xbb, 0xcb, 0xad, 0xae, 0x60, 0xd2, 0x85, 0xc7, 0xd7,
+        0x5f, 0xa8, 0x36, 0xf9, 0xd2, 0xfa, 0x86, 0x10, 0x0a, 0xb8, 0x58, 0xea, 0x2d, 0xe1,
+        0xf1, 0x1c, 0x83, 0x06,
+    ];
+    const TV_CMX: [u8; 32] = [
+        0xa5, 0x70, 0x6f, 0x3d, 0x1b, 0x68, 0x8e, 0x9d, 0xc6, 0x34, 0xee, 0xe4, 0xe6, 0x5b,
+        0x02, 0x8a, 0x43, 0xee, 0xae, 0xd2, 0x43, 0x5b, 0xea, 0x2a, 0xe3, 0xd5, 0x16, 0x05,
+        0x75, 0xc1, 0x1a, 0x3b,
+    ];
+    const TV_EPK: [u8; 32] = [
+        0xad, 0xdb, 0x47, 0xb6, 0xac, 0x5d, 0xfc, 0x16, 0x55, 0x89, 0x23, 0xd3, 0xa8, 0xf3,
+        0x76, 0x09, 0x5c, 0x69, 0x5c, 0x04, 0x7c, 0x4e, 0x32, 0x66, 0xae, 0x67, 0x69, 0x87,
+        0xf7, 0xe3, 0x13, 0x81,
+    ];
+    const TV_C_OUT: [u8; 80] = [
+        0xcb, 0xdf, 0x68, 0xa5, 0x7f, 0xb4, 0xa4, 0x6f, 0x34, 0x60, 0xff, 0x22, 0x7b, 0xc6,
+        0x18, 0xda, 0xe1, 0x12, 0x29, 0x45, 0xb3, 0x80, 0xc7, 0xe5, 0x49, 0xcf, 0x4a, 0x6e,
+        0x8b, 0xf3, 0x75, 0x49, 0xba, 0xe1, 0x89, 0x1f, 0xd8, 0xd1, 0xa4, 0x94, 0x4f, 0xdf,
+        0x41, 0x0f, 0x07, 0x02, 0xed, 0xa5, 0x44, 0x2f, 0x0e, 0xa0, 0x1a, 0x5d, 0xf0, 0x12,
+        0xa0, 0xae, 0x4d, 0x84, 0xed, 0x79, 0x80, 0x33, 0x28, 0xbd, 0x1f, 0xd5, 0xfa, 0xc7,
+        0x19, 0x21, 0x6a, 0x77, 0x6d, 0xe6, 0x4f, 0xd1, 0x67, 0xdb,
+    ];
+
+    /// 580-byte enc_ciphertext from TV[0]. Initialized at runtime to keep the
+    /// const table small; the orchard reader doesn't validate its contents.
+    fn tv_c_enc() -> [u8; 580] {
+        let raw: &[u8] = &[
+            0x1a, 0x9a, 0xdb, 0x14, 0x24, 0x98, 0xe3, 0xdc, 0xc7, 0x6f, 0xed, 0x77, 0x86, 0x14,
+            0xdd, 0x31, 0x6c, 0x02, 0xfb, 0xb8, 0xba, 0x92, 0x44, 0xae, 0x4c, 0x2e, 0x32, 0xa0,
+            0x7d, 0xae, 0xec, 0xa4, 0x12, 0x26, 0xb9, 0x8b, 0xfe, 0x74, 0xf9, 0xfc, 0xb2, 0x28,
+            0xcf, 0xc1, 0x00, 0xf3, 0x18, 0x0f, 0x57, 0x75, 0xec, 0xe3, 0x8b, 0xe7, 0xed, 0x45,
+            0xd9, 0x40, 0x21, 0xf4, 0x40, 0x1b, 0x2a, 0x4d, 0x75, 0x82, 0xb4, 0x28, 0xd4, 0x9e,
+            0xc7, 0xf5, 0xb5, 0xa4, 0x98, 0x97, 0x3e, 0x60, 0xe3, 0x8e, 0x74, 0xf5, 0xc3, 0xe5,
+            0x77, 0x82, 0x7c, 0x38, 0x28, 0x57, 0xd8, 0x16, 0x6b, 0x54, 0xe6, 0x4f, 0x66, 0xef,
+            0x5c, 0x7e, 0x8c, 0x9b, 0xaa, 0x2a, 0x3f, 0xa9, 0xe3, 0x7d, 0x08, 0x77, 0x17, 0xd5,
+            0xe9, 0x6b, 0xc2, 0xf7, 0x3d, 0x03, 0x14, 0x50, 0xdc, 0x24, 0x32, 0xba, 0x49, 0xd8,
+            0xb7, 0x4d, 0xb2, 0x13, 0x09, 0x9e, 0xa9, 0xba, 0x04, 0xeb, 0x63, 0xb6, 0x57, 0x4d,
+            0x46, 0xc0, 0x3c, 0xe7, 0x90, 0x0d, 0x4a, 0xc4, 0xbb, 0x18, 0x8e, 0xe9, 0x03, 0x0d,
+            0x7f, 0x69, 0xc8, 0x95, 0xa9, 0x4f, 0xc1, 0x82, 0xf2, 0x25, 0xa9, 0x4f, 0x0c, 0xde,
+            0x1b, 0x49, 0x88, 0x68, 0x71, 0xa3, 0x76, 0x34, 0x1e, 0xa9, 0x41, 0x71, 0xbe, 0xfd,
+            0x95, 0xa8, 0x30, 0xfa, 0x18, 0x40, 0x70, 0x97, 0xdc, 0xa5, 0x11, 0x02, 0x54, 0x63,
+            0xd4, 0x37, 0xe9, 0x69, 0x5c, 0xaa, 0x07, 0x9a, 0x2f, 0x68, 0xcd, 0xc7, 0xf2, 0xc1,
+            0x32, 0x67, 0xbf, 0xf4, 0x19, 0x51, 0x37, 0xfa, 0x89, 0x53, 0x25, 0x2a, 0x81, 0xb2,
+            0xaf, 0xa1, 0x58, 0x2b, 0x9b, 0xfb, 0x4a, 0xc9, 0x60, 0x37, 0xed, 0x29, 0x91, 0xd3,
+            0xcb, 0xc7, 0xd5, 0x4a, 0xff, 0x6e, 0x62, 0x1b, 0x06, 0xa7, 0xb2, 0xb9, 0xca, 0xf2,
+            0x95, 0x5e, 0xfa, 0xf4, 0xea, 0x8e, 0xfc, 0xfd, 0x02, 0x3a, 0x3c, 0x17, 0x48, 0xdf,
+            0x3c, 0xbd, 0x43, 0xe0, 0xb9, 0xa8, 0xb0, 0x94, 0x56, 0x88, 0xd5, 0x20, 0x56, 0xc1,
+            0xd1, 0x6e, 0xea, 0x37, 0xe7, 0x98, 0xba, 0x31, 0xdc, 0x3e, 0x5d, 0x49, 0x52, 0xbd,
+            0x51, 0xec, 0x76, 0x9d, 0x57, 0x88, 0xb6, 0xe3, 0x5f, 0xe9, 0x04, 0x2b, 0x95, 0xd4,
+            0xd2, 0x17, 0x81, 0x40, 0x0e, 0xaf, 0xf5, 0x86, 0x16, 0xad, 0x56, 0x27, 0x96, 0x63,
+            0x6a, 0x50, 0xb8, 0xed, 0x6c, 0x7f, 0x98, 0x1d, 0xc7, 0xba, 0x81, 0x4e, 0xff, 0x15,
+            0x2c, 0xb2, 0x28, 0xa2, 0xea, 0xd2, 0xf8, 0x32, 0x66, 0x2f, 0xa4, 0xa4, 0xa5, 0x07,
+            0x97, 0xb0, 0xf8, 0x5b, 0x62, 0xd0, 0x8b, 0x1d, 0xd2, 0xd8, 0xe4, 0x3b, 0x4a, 0x5b,
+            0xfb, 0xb1, 0x59, 0xed, 0x57, 0x8e, 0xf7, 0x47, 0x5d, 0xe0, 0xad, 0xa1, 0x3e, 0x17,
+            0xad, 0x87, 0xcc, 0x23, 0x05, 0x67, 0x2b, 0xcc, 0x55, 0xa8, 0x88, 0x13, 0x17, 0xfd,
+            0xc1, 0xbf, 0xc4, 0x59, 0xb6, 0x8b, 0x2d, 0xf7, 0x0c, 0xad, 0x37, 0x70, 0xed, 0x0f,
+            0xd0, 0x2d, 0x64, 0xb9, 0x6f, 0x2b, 0xbf, 0x6f, 0x8f, 0x63, 0x2e, 0x86, 0x6c, 0xa5,
+            0xd1, 0x96, 0xd2, 0x48, 0xad, 0x05, 0xc3, 0xde, 0x64, 0x41, 0x48, 0xa8, 0x0b, 0x51,
+            0xad, 0xa9, 0x5b, 0xd0, 0x8d, 0x73, 0xcd, 0xbb, 0x45, 0x26, 0x4f, 0x3b, 0xd1, 0x13,
+            0x83, 0x5b, 0x46, 0xf9, 0xbe, 0x7b, 0x6d, 0x23, 0xa4, 0x3b, 0xdd, 0xfe, 0x1e, 0x74,
+            0x08, 0xc9, 0x70, 0x31, 0xe1, 0xa8, 0x21, 0x4b, 0xab, 0x46, 0x39, 0x10, 0x44, 0xb7,
+            0x00, 0xd3, 0x8f, 0x51, 0x92, 0xc5, 0x7f, 0xe6, 0xf8, 0x71, 0x59, 0xb5, 0x55, 0x12,
+            0x09, 0x4e, 0x29, 0xd2, 0xce, 0xba, 0xb8, 0x68, 0xc8, 0xf1, 0xad, 0xba, 0xd5, 0x70,
+            0x77, 0xcb, 0xeb, 0x5e, 0x69, 0x65, 0x85, 0x82, 0xbf, 0x98, 0xd1, 0x9d, 0x64, 0xf4,
+            0x4b, 0x0d, 0x50, 0xc7, 0xe2, 0x20, 0x9a, 0xb3, 0xfc, 0x56, 0xb4, 0xf4, 0x09, 0x12,
+            0x3a, 0xae, 0xb0, 0x26, 0x3a, 0x22, 0x45, 0x1b, 0xc1, 0x4e, 0xd7, 0x56, 0xd0, 0x48,
+            0x38, 0x5a, 0xed, 0xbb, 0x86, 0xa8, 0x46, 0x77, 0xbb, 0x2d, 0x21, 0xc5, 0x2c, 0xc9,
+            0x49, 0x41, 0x47, 0xbf, 0x0f, 0xb1, 0x02, 0x74, 0x52, 0x82, 0x99, 0x09, 0x09, 0x72,
+            0x62, 0x28, 0x18, 0x6e, 0x02, 0xc8,
+        ];
+        let mut buf = [0u8; 580];
+        buf.copy_from_slice(raw);
+        buf
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    /// One synthetic Orchard action with on-curve Pallas points + arbitrary sig.
+    fn synthetic_action() -> Action<redpallas::Signature<redpallas::SpendAuth>> {
+        let cv_net = ValueCommitment::from_bytes(&TV_CV_NET).unwrap();
+        let nf = Nullifier::from_bytes(&TV_NF_OLD).unwrap();
+        // `rk` is a randomized SpendAuth verification key — same compressed-Pallas
+        // encoding as a Nullifier, so a valid nf byte string is also valid as rk.
+        let rk = redpallas::VerificationKey::<redpallas::SpendAuth>::try_from(TV_NF_OLD)
+            .expect("TV nf bytes must round-trip as a redpallas SpendAuth VerificationKey");
+        let cmx = ExtractedNoteCommitment::from_bytes(&TV_CMX).unwrap();
+        let encrypted_note = TransmittedNoteCiphertext {
+            epk_bytes: TV_EPK,
+            enc_ciphertext: tv_c_enc(),
+            out_ciphertext: TV_C_OUT,
+        };
+        let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
+        Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, spend_auth_sig)
+    }
+
+    fn synthetic_bundle(n_actions: usize, value_balance: i64)
+        -> orchard::Bundle<Authorized, i64>
+    {
+        assert!(n_actions >= 1);
+        let actions: Vec<_> = (0..n_actions).map(|_| synthetic_action()).collect();
+        let actions_ne = NonEmpty::from_vec(actions).unwrap();
+        let flags = Flags::from_byte(0x03).unwrap();
+        let anchor = Anchor::from_bytes(TV_CMX).unwrap();
+        let proof = Proof::new(vec![0u8; 1500]);
+        let binding_sig: redpallas::Signature<redpallas::Binding> = [0xcd; 64].into();
+        let auth = Authorized::from_parts(proof, binding_sig);
+        orchard::Bundle::from_parts(actions_ne, flags, value_balance, anchor, auth)
+    }
+
+    /// Recompute the txid the way `finalize_pczt` (shielded-only) does.
+    fn our_txid_shielded(bundle: &orchard::Bundle<Authorized, i64>, branch_id: u32) -> [u8; 32] {
+        let digests = Zip244Digests {
+            header_digest: zip244::digest_header(branch_id, 0, 0),
+            transparent_digest: EMPTY_TRANSPARENT_DIGEST,
+            sapling_digest: EMPTY_SAPLING_DIGEST,
+            orchard_digest: zip244::digest_orchard(bundle),
+        };
+        zip244::compute_sighash(&digests, branch_id)
+    }
+
+    /// Recompute the txid the way `finalize_shield_pczt` / `finalize_deshield_pczt`
+    /// do (hybrid path with non-empty transparent component).
+    fn our_txid_hybrid(
+        bundle: &orchard::Bundle<Authorized, i64>,
+        inputs: &[TransparentInput],
+        outputs: &[TransparentOutput],
+        branch_id: u32,
+    ) -> [u8; 32] {
+        let digests = Zip244Digests {
+            header_digest: zip244::digest_header(branch_id, 0, 0),
+            transparent_digest: zip244::digest_transparent_txid(inputs, outputs),
+            sapling_digest: EMPTY_SAPLING_DIGEST,
+            orchard_digest: zip244::digest_orchard(bundle),
+        };
+        zip244::compute_sighash(&digests, branch_id)
+    }
+
+    // Note on cross-version comparison: `zcash_primitives 0.19` pins
+    // `orchard 0.10`, while we directly depend on `orchard 0.12`. The two
+    // `orchard::Bundle` types are distinct in the type system (different crate
+    // versions), so we can't pass our 0.12 bundle to a comparator that takes
+    // the 0.10 bundle the parser returns. Fortunately, txid = BLAKE2b(header
+    // || transparent_digest || sapling_digest || orchard_digest), so any
+    // per-action byte divergence shows up as an `orchard_digest` divergence
+    // → txid mismatch — making the txid assertion sufficient. If we ever need
+    // field-level diagnostics on failure, collect `cv_net().to_bytes()` etc.
+    // into `Vec<[u8; 32]>` on each side (raw bytes have no version skew).
+
+    fn p2pkh_script(hash160: [u8; 20]) -> Vec<u8> {
+        let mut s = Vec::with_capacity(25);
+        s.extend_from_slice(&[0x76, 0xa9, 0x14]); // OP_DUP OP_HASH160 PUSH20
+        s.extend_from_slice(&hash160);
+        s.extend_from_slice(&[0x88, 0xac]); // OP_EQUALVERIFY OP_CHECKSIG
+        s
+    }
+
+    // ── Tests ────────────────────────────────────────────────────────────
+
+    /// Canary — the all-orchard path that production private sends use.
+    /// Production confirms these on-chain, so this MUST pass.
+    #[test]
+    fn roundtrip_v5_shielded_only() {
+        let bundle = synthetic_bundle(1, 0);
+        let tx_bytes = serialize_v5_shielded_tx(&bundle, NU5_BRANCH_ID).unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu5)
+            .expect("canonical reader must accept our v5 shielded tx bytes");
+        assert!(parsed.orchard_bundle().is_some(), "orchard bundle present in parsed tx");
+        assert_eq!(
+            parsed.orchard_bundle().unwrap().actions().len(),
+            bundle.actions().len(),
+            "orchard action count round-tripped",
+        );
+
+        let ours = our_txid_shielded(&bundle, NU5_BRANCH_ID);
+        assert_eq!(
+            *parsed.txid().as_ref(), ours,
+            "shielded txid mismatch — our zip244 digests disagree with the canonical reference"
+        );
+    }
+
+    /// Hybrid with transparent INPUTS and no outputs — the direction that
+    /// production shield uses successfully. Expected to pass.
+    #[test]
+    fn roundtrip_v5_hybrid_shield() {
+        let bundle = synthetic_bundle(1, 100_000);
+        let inputs = vec![TransparentInput {
+            prevout_hash: [0x11; 32],
+            prevout_index: 0,
+            value: 105_000,
+            script_pubkey: p2pkh_script([0xde; 20]),
+            sequence: 0xffff_ffff,
+        }];
+        // 71-byte synthetic DER signature payload (the +1 SIGHASH_ALL byte is
+        // appended by serialize_v5_hybrid_tx itself).
+        let synth_sig = vec![0u8; 71];
+        let synth_pubkey = [0x02u8; 33];
+        let tx_bytes = serialize_v5_hybrid_tx(
+            &bundle, &inputs, &[], &[synth_sig], NU5_BRANCH_ID, Some(&synth_pubkey),
+        ).unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu5)
+            .expect("canonical reader must accept our v5 hybrid (shield) bytes");
+        let parsed_transparent = parsed.transparent_bundle()
+            .expect("transparent bundle present");
+        assert_eq!(parsed_transparent.vin.len(), 1, "exactly one transparent input");
+        assert_eq!(parsed_transparent.vout.len(), 0, "no transparent outputs");
+        assert_eq!(
+            parsed.orchard_bundle().expect("orchard bundle present").actions().len(),
+            bundle.actions().len(),
+            "orchard action count round-tripped",
+        );
+
+        let ours = our_txid_hybrid(&bundle, &inputs, &[], NU5_BRANCH_ID);
+        assert_eq!(
+            *parsed.txid().as_ref(), ours,
+            "shield txid mismatch — txid digest differs from canonical even though \
+             production shield works on-chain (test infra bug?)"
+        );
+    }
+
+    /// Hybrid with no transparent INPUTS and one transparent OUTPUT — the
+    /// unique combination only deshield uses. Production fails at broadcast
+    /// with "could not validate orchard proof" on this shape. If the bug is
+    /// in our serializer or zip244 digest computation, this test will pin it
+    /// down at field level.
+    #[test]
+    fn roundtrip_v5_hybrid_deshield() {
+        let bundle = synthetic_bundle(1, -190_000);
+        let outputs = vec![TransparentOutput {
+            value: 185_000,
+            script_pubkey: p2pkh_script([0xbe; 20]),
+        }];
+        let tx_bytes = serialize_v5_hybrid_tx(
+            &bundle, &[], &outputs, &[], NU5_BRANCH_ID, None,
+        ).unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu5)
+            .expect("canonical reader must accept our v5 hybrid (deshield) bytes");
+        let parsed_transparent = parsed.transparent_bundle()
+            .expect("transparent bundle present");
+        assert_eq!(parsed_transparent.vin.len(), 0, "no transparent inputs");
+        assert_eq!(parsed_transparent.vout.len(), 1, "exactly one transparent output");
+        let parsed_out = &parsed_transparent.vout[0];
+        assert_eq!(u64::from(parsed_out.value), outputs[0].value, "vout value");
+        assert_eq!(parsed_out.script_pubkey.0, outputs[0].script_pubkey, "vout script");
+        assert_eq!(
+            parsed.orchard_bundle().expect("orchard bundle present").actions().len(),
+            bundle.actions().len(),
+            "orchard action count round-tripped",
+        );
+
+        let ours = our_txid_hybrid(&bundle, &[], &outputs, NU5_BRANCH_ID);
+        assert_eq!(
+            *parsed.txid().as_ref(), ours,
+            "deshield txid mismatch — our serializer or zip244 digest disagrees \
+             with the canonical reference; this is the bug deshield broadcasts hit"
+        );
+    }
+}
