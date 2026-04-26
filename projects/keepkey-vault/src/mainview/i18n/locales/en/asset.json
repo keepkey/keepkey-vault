@@ -69,5 +69,6 @@
 	"refresh": "Refresh",
 	"refreshing": "Refreshing...",
 	"needsScanPrompt": "Wallet has not been scanned yet. Scan the chain to find your shielded notes.",
-	"scanFromBlock": "Scan from block {{block}}"
+	"scanFromBlock": "Scan from block {{block}}",
+	"validatingWallet": "Validating shielded wallet against the chain..."
 }

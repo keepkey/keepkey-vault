@@ -133,6 +133,11 @@ export function ZcashPrivacyTab() {
 
 	// Whether the wallet has never been scanned (needs initial scan)
 	const [needsScan, setNeedsScan] = useState(false)
+	// True after the bun side has validated the wallet against the chain this
+	// session via a full rescan from KeepKey release block. Until this flips
+	// true, balance/tx-history may reflect a mid-wipe DB and confuse the user.
+	// We hide the data UI behind a single "Validating shielded wallet" state.
+	const [verified, setVerified] = useState(false)
 
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
@@ -167,67 +172,75 @@ export function ZcashPrivacyTab() {
 	}, [])
 
 	// ── Auto-initialize: check status, auto-init from device if needed ──
+	// On first call, the bun side kicks off a full rescan from KeepKey release
+	// block to validate the wallet DB against the chain. We poll status until
+	// `verified=true`, then load balance + tx history from the validated set.
+	// No user buttons — this is fully automatic.
 	useEffect(() => {
 		let cancelled = false
-		;(async () => {
+		const pollIntervalMs = 1500
+		let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+		const fetchStatus = async () => {
+			if (cancelled) return
 			try {
-				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null; synced_to?: number | null }>(
-					"zcashShieldedStatus", undefined, 5000
-				)
+				const r = await rpcRequest<{
+					ready: boolean; fvk_loaded: boolean; address: string | null;
+					synced_to?: number | null; verified?: boolean
+				}>("zcashShieldedStatus", undefined, 5000)
 				if (cancelled) return
-				if (!r.ready) { setStatus("not_running"); return }
 
-				// Set scan state from sidecar ready signal (available before any balance RPC)
-				if (r.synced_to != null) {
-					setSyncedTo(r.synced_to)
-					setNeedsScan(false)
-				} else {
-					setNeedsScan(true)
-				}
-
-				if (r.fvk_loaded && r.address) {
-					// FVK auto-loaded from DB — no device interaction needed
-					setOrchardAddress(r.address)
-					setStatus("ready")
-					refreshBalance()
-					loadTransactions()
+				if (!r.ready) {
+					setStatus("not_running")
 					return
 				}
 
-				// Sidecar ready but no FVK — auto-init from device
-				setStatus("initializing")
-				const result = await rpcRequest<{ fvk: any; address: string }>(
-					"zcashShieldedInit", { account: 0 }, 60000
-				)
-				if (cancelled) return
-				setOrchardAddress(result.address)
-				setStatus("ready")
-				refreshBalance()
-				loadTransactions()
+				if (r.synced_to != null) setSyncedTo(r.synced_to)
+				setNeedsScan(false) // we never show the manual-scan UI; auto-rescan handles it
+
+				if (r.fvk_loaded && r.address) {
+					setOrchardAddress(r.address)
+					setStatus("ready")
+				} else {
+					// Sidecar ready but no FVK — auto-init from device once.
+					setStatus("initializing")
+					try {
+						const initRes = await rpcRequest<{ fvk: any; address: string }>(
+							"zcashShieldedInit", { account: 0 }, 60000
+						)
+						if (cancelled) return
+						setOrchardAddress(initRes.address)
+						setStatus("ready")
+					} catch (e: any) {
+						if (cancelled) return
+						console.error("[ZcashPrivacyTab] Auto-init failed:", e)
+						setStatus("not_running")
+						return
+					}
+				}
+
+				if (r.verified) {
+					setVerified(true)
+					refreshBalance()
+					loadTransactions()
+				} else {
+					// Bun-side full rescan in progress — poll status until verified.
+					pollTimer = setTimeout(fetchStatus, pollIntervalMs)
+				}
 			} catch (e: any) {
 				if (cancelled) return
-				console.error("[ZcashPrivacyTab] Auto-init failed:", e)
+				console.error("[ZcashPrivacyTab] status check failed:", e)
 				setStatus("not_running")
 			}
-		})()
-		return () => { cancelled = true }
-	}, [refreshBalance, loadTransactions])
-
-	// ── Manual re-init (fallback button, rarely needed) ───────────────
-	const handleInit = useCallback(async () => {
-		setStatus("initializing")
-		try {
-			const result = await rpcRequest<{ fvk: any; address: string }>(
-				"zcashShieldedInit", { account: 0 }, 60000
-			)
-			setOrchardAddress(result.address)
-			setStatus("ready")
-			refreshBalance()
-		} catch (e: any) {
-			console.error("[ZcashPrivacyTab] Init failed:", e)
-			setStatus("not_running")
 		}
-	}, [refreshBalance])
+
+		fetchStatus()
+
+		return () => {
+			cancelled = true
+			if (pollTimer) clearTimeout(pollTimer)
+		}
+	}, [refreshBalance, loadTransactions])
 
 	// ── Scan progress (pushed from bun via RPC message) ──────────────
 	const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
@@ -455,53 +468,36 @@ export function ZcashPrivacyTab() {
 					<Box w="8px" h="8px" borderRadius="full" bg={statusColor} flexShrink={0} />
 					<Text fontSize="xs" color="kk.textSecondary">{statusText}</Text>
 				</Flex>
-				{status === "ready" && !orchardAddress && (
-					<Button
-						size="xs"
-						color="kk.gold"
-						variant="outline"
-						borderColor="kk.gold"
-						_hover={{ bg: "rgba(192,168,96,0.15)" }}
-						onClick={handleInit}
-					>
-						<Box as={FaShieldAlt} fontSize="10px" mr="1.5" />
-						{t("initializePrivacy")}
-					</Button>
-				)}
+				{/* No manual "Initialize Privacy" button — auto-init in the mount
+				    effect handles it. The status dot + label is enough. */}
 				{status === "not_running" && (
 					<Text fontSize="10px" color="kk.textMuted">{t("zcashCliRequired")}</Text>
 				)}
-				{status === "initializing" && <Spinner size="xs" color="kk.gold" />}
+				{(status === "initializing" || (status === "ready" && !verified)) && <Spinner size="xs" color="kk.gold" />}
 			</Flex>
 
-			{/* Section B: Shielded balance */}
+			{/* Section B: Shielded balance — single state machine, no buttons. */}
 			{orchardAddress && (
 				<Box px="3" py="3" bg="rgba(236,178,68,0.04)" border="1px solid" borderColor="rgba(236,178,68,0.15)" borderRadius="lg">
 					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
 						{t("shieldedBalance")}
 					</Text>
-					{needsScan ? (
+					{!verified ? (
 						<Flex direction="column" gap="2">
-							<Text fontSize="xs" color="#FBBF24">
-								{t("needsScanPrompt")}
-							</Text>
-							<Button
-								size="sm"
-								bg="kk.gold"
-								color="black"
-								fontWeight="600"
-								px="4"
-								py="2"
-								_hover={{ bg: "rgba(192,168,96,0.9)" }}
-								onClick={() => handleScan()}
-								disabled={scanState === "scanning"}
-							>
-								{scanState === "scanning" ? (
-									<><Spinner size="xs" mr="2" /> {t("scanning")}</>
-								) : (
-									t("scanFromBlock", { block: KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale) })
-								)}
-							</Button>
+							<Flex align="center" gap="2">
+								<Spinner size="xs" color="kk.gold" />
+								<Text fontSize="xs" color="kk.textSecondary">{t("validatingWallet")}</Text>
+							</Flex>
+							{scanProgress && scanProgress.percent > 0 && (
+								<Box>
+									<Box w="100%" h="3px" bg="rgba(255,255,255,0.06)" borderRadius="full" overflow="hidden">
+										<Box h="3px" bg="kk.gold" borderRadius="full" w={`${Math.min(100, displayPercent)}%`} transition="width 0.2s ease-out" />
+									</Box>
+									<Text fontSize="10px" color="kk.textMuted" mt="1">
+										{Math.floor(displayPercent)}% — {scanProgress.scannedHeight.toLocaleString(fiatLocale)} / {scanProgress.tipHeight.toLocaleString(fiatLocale)}
+									</Text>
+								</Box>
+							)}
 						</Flex>
 					) : balance ? (
 						<Flex direction="column" gap="1">
@@ -523,13 +519,17 @@ export function ZcashPrivacyTab() {
 							)}
 						</Flex>
 					) : (
-						<Text fontSize="xs" color="kk.textMuted">{t("initRequired")}</Text>
+						<Flex align="center" gap="2">
+							<Spinner size="xs" color="kk.gold" />
+							<Text fontSize="xs" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>
+						</Flex>
 					)}
 				</Box>
 			)}
 
-			{/* Section F: Shield transparent → Orchard */}
-			{orchardAddress && (
+			{/* Section F: Shield transparent → Orchard. Gated on verified so a
+			    user can't initiate a send against a mid-rescan note set. */}
+			{orchardAddress && verified && (
 				<Box px="3" py="3" bg="rgba(236,178,68,0.06)" border="1px solid" borderColor="rgba(236,178,68,0.2)" borderRadius="lg">
 					<Flex align="center" gap="2" mb="2">
 						<Box as={FaShieldAlt} fontSize="11px" color="kk.gold" />
@@ -764,8 +764,10 @@ export function ZcashPrivacyTab() {
 				</Box>
 			)}
 
-			{/* Section D: Scan controls */}
-			{orchardAddress && (
+			{/* Section D: Scan controls — advanced/manual rescan from a height,
+			    or force a full rescan. Hidden until validated so users see the
+			    primary balance flow first; surfaced after for power users. */}
+			{orchardAddress && verified && (
 				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
 					<Flex align="center" justify="space-between" mb="2">
 						<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">
@@ -892,8 +894,9 @@ export function ZcashPrivacyTab() {
 				</Box>
 			)}
 
-			{/* Section E: Send shielded */}
-			{orchardAddress && (
+			{/* Section E: Send shielded — gated on verified for the same reason
+			    as the shield section: don't let users initiate sends mid-rescan. */}
+			{orchardAddress && verified && (
 				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
 					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="2">
 						{t("sendPrivately")}
@@ -978,8 +981,10 @@ export function ZcashPrivacyTab() {
 				</Box>
 			)}
 
-			{/* Section G: Transaction History with Memos */}
-			{orchardAddress && (
+			{/* Section G: Transaction History with Memos — hidden until the
+			    wallet DB has been validated against the chain this session.
+			    Otherwise we'd render rows from a mid-wipe DB. */}
+			{orchardAddress && verified && (
 				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
 					<Flex align="center" justify="space-between" mb="2">
 						<Flex align="center" gap="2">
