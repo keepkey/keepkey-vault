@@ -1077,17 +1077,31 @@ export class EngineController extends EventEmitter {
                 )
               }
 
-              // Verify auto-reload actually took effect
-              const verifyMnemonic = await this.getEmulatorMnemonic()
-              if (!verifyMnemonic) {
-                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
-              } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
-                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
-                console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
-                console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
-              } else {
-                console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
-              }
+              // Verify auto-reload actually took effect. Race against a 3s
+              // deadline — the DebugLinkGetState read can hang on the dylib
+              // path (separate timing bug). The verify is just a sanity log;
+              // if it hangs, connectEmulator must NOT block forever or the
+              // wizard / dashboard never sees state → ready.
+              const verifyPromise = this.getEmulatorMnemonic()
+                .then(verifyMnemonic => {
+                  if (!verifyMnemonic) {
+                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
+                  } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
+                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
+                    console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
+                    console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
+                  } else {
+                    console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
+                  }
+                })
+                .catch(err => console.warn('[Engine] AUTO-RELOAD VERIFY error:', err?.message || err))
+              await Promise.race([
+                verifyPromise,
+                new Promise<void>(resolve => setTimeout(() => {
+                  console.warn('[Engine] AUTO-RELOAD VERIFY timed out (3s) — continuing')
+                  resolve()
+                }, 3000)),
+              ])
 
               this.updateState(this.deriveState(this.cachedFeatures))
             } else {
