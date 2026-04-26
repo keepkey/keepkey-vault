@@ -576,9 +576,12 @@ async function ensureZcashScanFresh(): Promise<void> {
 	try {
 		const result = await scanOrchardNotes()
 		if (result?.synced_to != null) updateSyncedTo(result.synced_to)
-		if ((result?.notes_found ?? 0) > 0) {
-			console.log(`[zcash-presend] Caught up to ${result.synced_to} (+${result.notes_found} new notes)`)
-		}
+		// Always log — silent runs made it impossible to tell whether the auto-scan
+		// fired during a session debug.
+		console.log(
+			`[zcash-presend] Scan complete: synced_to=${result?.synced_to ?? '?'}, ` +
+			`new_notes=${result?.notes_found ?? 0}`,
+		)
 	} catch (e: any) {
 		throw new Error(`Pre-send chain scan failed: ${e?.message || e}. Retry after the network is reachable.`)
 	}

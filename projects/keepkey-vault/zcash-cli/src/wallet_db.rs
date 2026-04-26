@@ -234,13 +234,26 @@ impl WalletDb {
     }
 
     /// Get all unspent notes that can be used for spending.
-    pub fn get_spendable_notes(&self) -> Result<Vec<SpendableNote>> {
+    ///
+    /// `max_block_height` is the highest block height a note may have been mined
+    /// in to be eligible. Pass `tip - MIN_CONFIRMATIONS` to skip recently-mined
+    /// notes, or `None` for no filtering. Without this filter, a note received
+    /// in the last few blocks can fail the chain's Halo2 proof verification on
+    /// broadcast — its position in the local tree may differ from the chain's
+    /// after a small reorg, or lightwalletd's tree state may lag the cmx scan.
+    /// Industry default is 10 confirmations (matches zcashd / ywallet).
+    pub fn get_spendable_notes(&self, max_block_height: Option<u64>) -> Result<Vec<SpendableNote>> {
+        // Single statement form using a sentinel: when max is None, pass i64::MAX
+        // as the bound so the WHERE clause matches every row. Avoids the dance
+        // of building two different prepared statements with different param
+        // arity.
+        let max_h = max_block_height.map(|h| h as i64).unwrap_or(i64::MAX);
         let mut stmt = self.conn.prepare(
             "SELECT id, value, recipient, rho, rseed, cmx, nullifier, block_height, tx_index, action_index, position
-             FROM notes WHERE is_spent = 0 ORDER BY value DESC"
+             FROM notes WHERE is_spent = 0 AND block_height <= ?1 ORDER BY value DESC"
         )?;
 
-        let notes = stmt.query_map([], |row| {
+        let notes = stmt.query_map(params![max_h], |row| {
             let rho_blob: Vec<u8> = row.get(3)?;
             let rseed_blob: Vec<u8> = row.get(4)?;
             let cmx_blob: Vec<u8> = row.get(5)?;

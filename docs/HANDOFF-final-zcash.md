@@ -36,6 +36,18 @@ Files: `txbuilder/zcash-shielded.ts`, `txbuilder/zcash-shield.ts`, `txbuilder/zc
 
 The synthetic shielded token now renders as a special `+ {amount} private` sub-row with a shield icon (instead of the generic `1 token` count). Other tokens (if any) still render via the existing `tokensCount` line below it. `Dashboard.tsx:892-911` has the special-case.
 
+### 1i. Min-confirmations gate on spendable notes
+
+**Cause** — after fix 1h caught the stale-state double-spend, the next deshield attempt failed at broadcast with `could not validate orchard proof`. Auto-scan ran (visible after the always-log fix below), local tree's anchor matched the chain's at lwd_tip_height, witness was extracted — yet the chain's verifier rejected the Halo2 proof. The shielded note we tried to spend was the one we'd received from a shield tx broadcast ~21 minutes earlier (~17 blocks). Notes that recent are vulnerable to: small reorgs shifting their on-chain position, lightwalletd's tree-state lag behind raw cmx scans, and indexer races between the shield tx's mining and tree-state availability.
+
+**Fix** — added `MIN_CONFIRMATIONS = 10` gate to `wallet_db::get_spendable_notes(max_block_height)`. Both spend builders (`handle_build_pczt`, `handle_build_deshield_pczt`) now ask lightwalletd for the tip first and pass `tip - 10` as the cutoff. If every unspent note is too recent, the user gets an actionable error: `All N unspent notes are within 10 confirmations of the chain tip (X). Wait a few minutes and retry.` instead of a misleading "no spendable notes" or a doomed broadcast. 10 matches zcashd / ywallet / zecwallet defaults.
+
+Files: `zcash-cli/src/wallet_db.rs`, `zcash-cli/src/main.rs`. `cargo check` clean.
+
+### 1j. Auto-scan log always prints
+
+The auto-scan in `ensureZcashScanFresh` previously logged only when `notes_found > 0`. During the post-1h failure debug, we couldn't tell whether the auto-scan had actually run or not. Made the `[zcash-presend] Scan complete: synced_to=X, new_notes=Y` line unconditional. Cheap, makes future debugging trivially observable.
+
 ### 1h. Pre-send auto-scan to prevent stale-note double-spends
 
 **Cause** — first deshield attempt with the anchor fix in place produced a valid PCZT, the device signed, the sidecar finalized — but the broadcast was rejected with `orchard double-spend: duplicate nullifier (in finalized state: true)`. The sidecar's local note set was 38,933 blocks behind the chain (`synced_to=3282973`, tip=3321906); 2 of the 4 "unspent" notes the builder selected had actually been spent in the unscanned window. There was no in-app indicator the wallet was behind tip, and no automatic catch-up before sends.

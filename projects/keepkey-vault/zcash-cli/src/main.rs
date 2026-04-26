@@ -546,17 +546,35 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
     // Parse recipient address — supports UA (u1...), transparent (t1...), or raw hex
     let recipient = parse_recipient_address(recipient_str)?;
 
-    // Get spendable notes
-    let db = state.ensure_db()?;
-    let notes = db.get_spendable_notes()?;
-    if notes.is_empty() {
-        return Err(anyhow::anyhow!("No spendable notes — scan first"));
-    }
-
-    // Query current consensus branch ID from lightwalletd
+    // Connect first so we can ask the chain for its tip + branch id together.
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
+
+    // Min-confirmations: skip notes mined within the last MIN_CONFIRMATIONS
+    // blocks. A note received in the last few blocks can fail the chain's
+    // Halo2 proof verification on broadcast — its position in the local tree
+    // may differ from the chain's after a small reorg, or lightwalletd's
+    // tree state may lag the cmx scan. 10 matches zcashd / ywallet defaults.
+    const MIN_CONFIRMATIONS: u64 = 10;
+    let tip = lwd_client.get_latest_block_height().await?;
+    let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
+
+    let db = state.ensure_db()?;
+    let notes = db.get_spendable_notes(Some(max_block_height))?;
+    if notes.is_empty() {
+        // Either truly empty, or every note is too recent. Distinguish so the
+        // user sees an actionable message instead of "no spendable notes".
+        let total_unspent = db.get_spendable_notes(None)?.len();
+        if total_unspent > 0 {
+            return Err(anyhow::anyhow!(
+                "All {} unspent notes are within {} confirmations of the chain tip ({}). \
+                 Wait a few minutes and retry.",
+                total_unspent, MIN_CONFIRMATIONS, tip,
+            ));
+        }
+        return Err(anyhow::anyhow!("No spendable notes — scan first"));
+    }
 
     // Build PCZT with real chain tree data
     let pczt_state = pczt_builder::build_pczt(
@@ -748,16 +766,28 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
         }
     };
 
-    // Get spendable notes
-    let db = state.ensure_db()?;
-    let notes = db.get_spendable_notes()?;
-    if notes.is_empty() {
-        return Err(anyhow::anyhow!("No spendable notes — scan first"));
-    }
-
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
+
+    // Min-confirmations gate (see handle_build_pczt for rationale).
+    const MIN_CONFIRMATIONS: u64 = 10;
+    let tip = lwd_client.get_latest_block_height().await?;
+    let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
+
+    let db = state.ensure_db()?;
+    let notes = db.get_spendable_notes(Some(max_block_height))?;
+    if notes.is_empty() {
+        let total_unspent = db.get_spendable_notes(None)?.len();
+        if total_unspent > 0 {
+            return Err(anyhow::anyhow!(
+                "All {} unspent notes are within {} confirmations of the chain tip ({}). \
+                 Wait a few minutes and retry.",
+                total_unspent, MIN_CONFIRMATIONS, tip,
+            ));
+        }
+        return Err(anyhow::anyhow!("No spendable notes — scan first"));
+    }
 
     // Build the transparent output(s)
     let transparent_output = pczt_builder::DeshieldTransparentOutput {
