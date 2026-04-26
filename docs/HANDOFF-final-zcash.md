@@ -219,6 +219,64 @@ Maybe 2–3 days of focused work for permanent removal of an entire class of bug
 
 ---
 
+## 4.5) Retro — six failed cycles on `could not validate orchard proof`
+
+Five "fixes" landed today; deshield broadcast still fails with `could not
+validate orchard proof` after every one. This section is the post-mortem so
+the next session doesn't repeat the same patches.
+
+### What we ruled out
+
+- **Tree construction bug** — `test_witness_recomputes_root_after_frontier_extension` and three siblings prove our tree assembly produces witnesses that recompute the local root. (1.5s `cargo test`, all green.)
+- **Anchor mismatch** — sidecar verifies our local tree's root equals `lwd_client.get_orchard_anchor(lwd_tip_height)` before generating the proof. No mismatch in any failing run.
+- **Stale wallet DB** — full rescan from KeepKey release block re-derives the unspent set from chain + FVK. Bug persists.
+- **Note recency / reorg risk** — `MIN_CONFIRMATIONS=10` gate; bug reproduces with the same input note at depth 57.
+- **Auto-rescan was breaking the UX** — reverted; trust the cached DB, only do incremental.
+
+### Repro from the last session
+
+```
+Inputs:  2840000 ZAT from 2 notes
+  Note 0: block=3282982, pos=49847628 (depth ~38 980, well-confirmed change note)
+  Note 1: block=3321905, pos=49936404 (depth 57, shield output)
+Amount:  100000 ZAT → transparent (t1...)
+Anchor:  fa0eca618953365b881b11a64f894dc83e92b2675b6850dfd5ec27a5a6956f0c
+         (verified to match lightwalletd at lwd_tip_height=3321962)
+Proof generation: success
+Device signatures: 2 of 2 returned
+Finalize: success, txid b31343f64d71f667ef5a678bb2894f818957a15709e2e61f4bc02929d594a035
+Broadcast: REJECTED — could not validate orchard proof
+```
+
+### Hypotheses, ranked
+
+1. **Note field inconsistency (most likely).** The scanner stored `cmx_chain` alongside decrypted `{recipient, value, rho, rseed}`. The chain's verifier recomputes `cmx_check = commitment(recipient, value, rho, rseed)` and checks it matches the leaf at the witnessed position. If our stored fields don't actually produce `cmx_chain`, proof fails. Could happen if:
+   - Decryption used a slightly-different IVK than the chain expects (firmware FVK has the historical sign-bit bug; we auto-clear it, but maybe the scanner uses one form and the proof another)
+   - Scanner stored fields from a different output of the same tx
+2. **Spend authorizing signature mismatch.** Device's RedPallas signature is computed under an `ask` derived from the FVK + diversifier path. If the firmware derives `ask` differently from what the verifier expects (possibly the same sign-bit issue rearing in another place), the spendAuthSig is invalid. The Halo2 proof itself contains the public `rk` (randomized verification key), so this would manifest as "proof rejected" in the redjubjub layer (note the error includes `Downcast from BoxError to redjubjub::Error failed`).
+3. **Witness path subtle divergence.** Possible but unlikely given the witness tests pass and the anchor matches.
+4. **PCZT signature application order.** `Applying Orchard signatures in full-action mode: 2 signatures for 2 actions (2 real spends)` — sigs are applied positionally. If the device returns them in a different order than the actions were sent, sig 0 would authorize action 1 and vice versa. The hdwallet adapter sends actions in `sorted_notes` order (by position), but device replies might come back in submission order; need to verify.
+
+The error string `Downcast from BoxError to redjubjub::Error failed` is interesting — it says zebra's error wrapping couldn't downcast to a `redjubjub::Error`, but the original error was "could not validate orchard proof". So the failure path goes through redjubjub before the Halo2 verifier even runs. **That points strongly at hypothesis 2: spendAuthSig invalid.** If Halo2 verification was the issue, the error would be from the proof verifier, not redjubjub.
+
+### Concrete next moves (suggested order)
+
+**Step 1: Add an in-process verifier in the sidecar.** Right after `build_for_pczt` produces the bundle and before returning to vault, run `orchard::Verifier` (or whatever the librustzcash equivalent is) on the unsigned bundle to confirm the proof is valid against the public inputs. This rules out hypothesis 1 (note field inconsistency) — if local verification fails, the bundle's `(recipient, value, rho, rseed) → cmx` chain is broken and we know to look at the scanner. If local verification passes but chain rejects, hypothesis 2 (spendAuthSig) is confirmed. Estimate: ~50 LOC, ~1h of work.
+
+**Step 2: Verify spendAuthSig against the action's `rk` locally.** After the device returns each signature, the sidecar should `redjubjub::SpendAuthSig::verify(rk, sighash, sig)` before applying. If verification fails per-signature, the firmware is producing a sig that doesn't bind to `rk`. That's a firmware bug, not a sidecar bug. Estimate: ~20 LOC.
+
+**Step 3: Bypass note 1 entirely with coin selection.** Implement min-set-covering in `get_spendable_notes` callers — sort notes by value desc, take until covered. For the user's 0.001 ZEC deshield, Note 0 alone (2.74 ZEC) covers; Note 1 wouldn't be selected. Tests this whole hypothesis: if deshield-with-only-note-0 succeeds, the bug is specific to recent notes (or specific to Note 1's data). Estimate: ~30 LOC + tests.
+
+**Step 4: Diagnostic dump on broadcast failure.** When the chain rejects, log everything we can about the failed tx — sigs hex, action cmxs, witnessed positions, note fields hex, anchor. Lets the next round of investigation start from a captured artifact instead of needing to re-trigger.
+
+**Step 5: Compare the firmware FVK derivation against an external reference.** Use a known seed → derive Orchard FVK + spend key in Rust → derive `ask` for action 0 → compare against device output. If they diverge, firmware bug isolated.
+
+**If all of step 1-2 confirm the bundle + signatures are correct**, the problem is wire format (PCZT serialization, action ordering, or the v5 tx encoder). At that point the right move is **Plan C** from the earlier handoff — migrate to `zcash_client_sqlite::WalletDb` + the `librustzcash` PCZT path which is battle-tested by ywallet and zecwallet.
+
+### Pattern to break
+
+Every fix this session was driven by symptom + plausible hypothesis, not localized evidence. We've now exhausted what symptom-chasing can do. Steps 1 + 2 above produce **localized evidence** — they tell us which layer is wrong (sidecar's note storage, sidecar's bundle construction, firmware's signature derivation, or wire format). After that, we fix the actual layer instead of patching upstream.
+
 ## 5) Branch state
 
 - `final-zcash` is at the HEAD of `develop` + the two surgical fixes above (uncommitted in working tree).
