@@ -58,16 +58,16 @@ export type EmulatorChannel = 'alpha' | 'beta' | 'release'
 let _emuDirCache: string | null = null
 function getEmulatorsDir(): string {
   if (_emuDirCache) return _emuDirCache
-  // firmware/emulators/ lives at the vault-v11 project root, which is
-  // outside the Electrobun .app bundle. Walk up from import.meta.dir
-  // (app/bun/) through the .app structure to find it.
+  // Search order:
+  //   - depth 0/1 → packaged .app bundle (electrobun.config.ts copies
+  //     ../../firmware/emulators → Resources/app/firmware/emulators)
+  //   - depth 2..12 → source tree (firmware/emulators lives at the
+  //     vault-v11 repo root, well above projects/keepkey-vault/src/bun/)
   const candidates: string[] = []
-  // Walk 2..12 levels up from import.meta.dir — covers source tree,
-  // dev .app bundle, and production .app bundle depths.
-  for (let depth = 2; depth <= 12; depth++) {
+  for (let depth = 0; depth <= 12; depth++) {
     candidates.push(resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware', 'emulators'))
   }
-  // Also try cwd-relative
+  // Also try cwd-relative as last-resort fallback
   candidates.push(resolve(process.cwd(), 'firmware', 'emulators'))
   candidates.push(resolve(process.cwd(), '..', '..', 'firmware', 'emulators'))
 
@@ -423,7 +423,13 @@ export function flushRingBuffers(): void {
 // ── Poll control (for pre-writing confirmations) ────────────────────────
 
 let pollSafetyTimer: ReturnType<typeof setTimeout> | null = null
-const POLL_SAFETY_MS = 30_000 // auto-resume poll after 30s to prevent permanent stall
+// Auto-resume poll after this long to prevent a forgotten resume from
+// permanently stalling the firmware. MUST exceed the longest user-input
+// wait that holds a paused poll — currently emuInteractiveConfirm waits up
+// to CONFIRM_TIMEOUT_MS (120s). If safety fires first, the auto-resumed
+// poll consumes the queued sign chunk → confirm_helper enters with no
+// prewritten BA/DLD → busy-loop → watchdog SIGKILL.
+const POLL_SAFETY_MS = 180_000
 
 /** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
 export function pausePoll(): void {

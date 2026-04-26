@@ -248,16 +248,29 @@ function sendToWindow(messageName: string, payload: any): void {
 
 // ── Seed word display ───────────────────────────────────────────────────
 
-export function displaySeedWords(mnemonic: string): Promise<void> {
-  return new Promise((resolve) => {
-    const words = mnemonic.trim().split(/\s+/)
+export async function displaySeedWords(mnemonic: string): Promise<void> {
+  const words = mnemonic.trim().split(/\s+/)
 
-    if (!emuWindow) {
-      console.warn(`${TAG} No emulator window — skipping seed display`)
-      resolve()
+  if (!emuWindow) {
+    console.warn(`${TAG} No emulator window — opening for seed display`)
+    openEmulatorWindow()
+  }
+
+  // Wait for the bridge handshake before installing the pending ack —
+  // otherwise sendToWindow silently no-ops and the awaiter (e.g.
+  // emulatorCreateWallet) blocks the entire onboarding flow forever.
+  if (!viewReady) {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && !viewReady && emuWindow) {
+      await new Promise(r => setTimeout(r, 50))
+    }
+    if (!emuWindow || !viewReady) {
+      console.error(`${TAG} Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — skipping seed display`)
       return
     }
+  }
 
+  return new Promise<void>((resolve) => {
     pendingSeedAck = { resolve }
 
     try {
@@ -452,7 +465,7 @@ export async function emuInteractiveConfirm(
   engineDelegate?: { chunkCount: number; autoConfirm?: boolean } | null,
 ): Promise<any> {
   const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
-  const { prewriteConfirmations } = await import('./emulator-transport')
+  const { prewriteConfirmations, prewriteCancel } = await import('./emulator-transport')
 
   const id = crypto.randomUUID()
   if (engineDelegate) engineDelegate.chunkCount = 0
@@ -475,8 +488,13 @@ export async function emuInteractiveConfirm(
     console.log(`${TAG} User responded: approved=${approved}`)
 
     if (!approved) {
-      // Flush the last queued chunk + any stale data so the next background
-      // kkemu_poll() doesn't enter confirm_helper and spin forever.
+      // Pre-queue Cancel BEFORE flushing. flushRingBuffers calls kkemu_poll
+      // which consumes the Nth (queued) sign chunk and triggers confirm_helper.
+      // Without Cancel waiting in the ring, confirm_helper busy-loops forever
+      // for BA+DLD that never come and the watchdog SIGKILLs bun. Cancel is
+      // in confirm_helper's tiny-msg switch (case MessageType_Cancel ->
+      // ret_stat=false, goto exit), so the firmware exits cleanly.
+      prewriteCancel()
       flushRingBuffers()
       throw new Error('Transaction rejected by user on emulator')
     }

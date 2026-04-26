@@ -386,7 +386,7 @@ _build-emu:
 	@echo "=== $(_EMU_CHANNEL) emulator ready ==="
 
 build-emulator-alpha:
-	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.15.0-alpha _EMU_REF=bithighlander/alpha
+	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.15.0-alpha _EMU_REF=origin/alpha
 
 build-emulator-beta:
 	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=$(BETA_PIN_SHA)
