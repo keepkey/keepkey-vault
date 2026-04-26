@@ -1168,6 +1168,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
 				for (const chain of nonEvmChains) {
 					if (chain.hidden) continue
+					const t0 = Date.now()
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
 						if (chain.scriptType) addrParams.scriptType = chain.scriptType
@@ -1176,6 +1177,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 						const result = await wallet[method](addrParams)
 						const address = typeof result === 'string' ? result : result?.address || ''
+						const ms = Date.now() - t0
+						if (ms > 2000) console.log(`[getBalances] ${chain.id}.${method} took ${ms}ms`)
 						if (address) {
 							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
 							if (chain.id === 'tron') console.log(`[getBalances] TRON address derived: ${address}, caip: ${chain.caip}, networkId: ${chain.networkId}`)
@@ -1183,7 +1186,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (chain.id === 'tron') console.warn(`[getBalances] TRON address derivation returned empty! result:`, JSON.stringify(result))
 						}
 					} catch (e: any) {
-						console.warn(`[getBalances] ${chain.coin} address failed:`, e.message)
+						console.warn(`[getBalances] ${chain.coin} address failed (${Date.now() - t0}ms):`, e.message)
 					}
 				}
 
