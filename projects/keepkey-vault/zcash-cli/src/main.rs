@@ -19,6 +19,11 @@ use orchard::keys::FullViewingKey;
 use zcash_address::unified::{self, Container, Encoding};
 use zcash_protocol::consensus::NetworkType;
 
+/// Minimum confirmations required before a note is treated as spendable.
+/// Matches zcashd / ywallet / zecwallet defaults; protects against small
+/// reorgs and lightwalletd tree-state lag (see `wallet_db::get_spendable_notes`).
+const MIN_CONFIRMATIONS: u64 = 10;
+
 /// Global state persisted across IPC commands within a single sidecar session.
 struct State {
     db: Option<wallet_db::WalletDb>,
@@ -512,11 +517,24 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let (total, unspent) = db.get_note_count()?;
     let synced_to = db.last_scanned_height()?;
 
+    // Spendable view: only notes at depth >= MIN_CONFIRMATIONS from `synced_to`
+    // (proxy for tip — exact when scan is at tip, conservative when behind).
+    // The build_*_pczt paths use the same filter; UI controls (e.g. the deshield
+    // "Max" button) need this view so they don't propose amounts the builder
+    // would later reject as "all unspent notes are within N confs".
+    let max_h = synced_to.unwrap_or(0).saturating_sub(MIN_CONFIRMATIONS);
+    let spendable_notes = db.get_spendable_notes(Some(max_h))?;
+    let spendable_confirmed: u64 = spendable_notes.iter().map(|n| n.value).sum();
+    let spendable_count = spendable_notes.len() as u64;
+
     Ok(serde_json::json!({
         "confirmed": balance,
         "pending": 0,
         "notes_total": total,
         "notes_unspent": unspent,
+        "spendable_confirmed": spendable_confirmed,
+        "spendable_notes_count": spendable_count,
+        "min_confirmations": MIN_CONFIRMATIONS,
         "synced_to": synced_to,
         "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
     }))
@@ -556,7 +574,6 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
     // Halo2 proof verification on broadcast — its position in the local tree
     // may differ from the chain's after a small reorg, or lightwalletd's
     // tree state may lag the cmx scan. 10 matches zcashd / ywallet defaults.
-    const MIN_CONFIRMATIONS: u64 = 10;
     let tip = lwd_client.get_latest_block_height().await?;
     let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
 
@@ -771,7 +788,6 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
 
     // Min-confirmations gate (see handle_build_pczt for rationale).
-    const MIN_CONFIRMATIONS: u64 = 10;
     let tip = lwd_client.get_latest_block_height().await?;
     let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
 

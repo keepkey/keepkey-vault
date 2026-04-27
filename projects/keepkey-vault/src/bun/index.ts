@@ -99,7 +99,7 @@ import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
+import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
@@ -577,6 +577,24 @@ async function raceVerifyMnemonic(expected: string): Promise<{ ok: true } | { ok
  * Failure here is fatal — we'd rather surface "scan failed" than silently
  * proceed with stale data.
  */
+/**
+ * Ensure the sidecar is running and the FVK is loaded before any operation
+ * that touches notes (scan, balance, build, send). Direct RPC / REST callers
+ * may not have gone through the Privacy tab's auto-init path, so the FVK
+ * cache could be empty even when the device supports Orchard. Without this,
+ * `ensureZcashScanFresh()` would call `scanOrchardNotes` against a sidecar
+ * with no FVK and fail with "Sidecar not initialized".
+ */
+async function ensureFvkLoaded(wallet: any, account: number = 0): Promise<void> {
+	if (!isSidecarReady()) {
+		await startSidecar()
+	}
+	if (!hasFvkLoaded()) {
+		console.log("[zcash] FVK not loaded — initializing from device before scan/send...")
+		await initializeOrchardFromDevice(wallet, account)
+	}
+}
+
 async function ensureZcashScanFresh(): Promise<void> {
 	try {
 		// Always incremental — picks up blocks since synced_to. Cheap (<1s when
@@ -2462,8 +2480,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Otherwise get from device — newly-loaded FVK invalidates any prior
 				// wallet validation, since notes for a different ak shouldn't carry over.
 				if (!engine.wallet) throw new Error('No device connected')
+				// initializeOrchardFromDevice updates the in-process FVK cache itself.
 				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
-				setCachedFvk(result.address, result.fvk)
 				zcashVerifiedThisSession = false
 				return result
 			},
@@ -2483,6 +2501,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldedSend: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureFvkLoaded(engine.wallet, 0)
 				await ensureZcashScanFresh()
 				// FVK already loaded means device supports Orchard — skip version check
 				// (version string may not be populated yet at call time)
@@ -2504,10 +2523,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureFvkLoaded(engine.wallet, params.account ?? 0)
 				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
 				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
-				// firmware; the Orchard part needs >= 7.14.0 (checked by zcashShieldedInit).
+				// firmware; the Orchard part needs >= 7.15.0 (checked by zcashShieldedInit).
 				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
 				if (!zcashDef) {
 					throw new Error('Zcash shielded chain definition not found')
@@ -2531,6 +2551,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDeshieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureFvkLoaded(engine.wallet, 0)
 				await ensureZcashScanFresh()
 				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
 				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
@@ -2871,10 +2892,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setZcashPrivacyEnabled: async (params) => {
-				// Zcash shielded requires firmware >= 7.14.0
+				// Must match shared/chains.ts (zcash + zcash-shielded both at 7.15.0)
+				// and the helpers in txbuilder/zcash-shield.ts that require
+				// ZcashTransparentInput support (also 7.15.0). Letting users enable
+				// the feature on 7.14.0 only to have every action fail downstream is
+				// worse than blocking it here.
 				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
-					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
+					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
 					return getAppSettings()
 				}
 				zcashPrivacyEnabled = params.enabled
@@ -4165,11 +4190,11 @@ engine.on('state-change', (state) => {
 			setSetting('bip85_enabled', '0')
 			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
-		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.14.0') < 0)) {
+		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
 			zcashPrivacyEnabled = false
 			setSetting('zcash_privacy_enabled', '0')
 			stopSidecar()
-			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
 	}
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }

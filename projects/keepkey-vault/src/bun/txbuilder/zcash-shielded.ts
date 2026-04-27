@@ -11,7 +11,7 @@
  *   5. Sidecar (or Pioneer API) broadcasts
  */
 
-import { sendCommand, isSidecarReady, startSidecar } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, setCachedFvk } from "../zcash-sidecar"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -135,6 +135,9 @@ export async function initializeOrchardFromDevice(wallet: any, account: number =
 	// Send FVK components to sidecar
 	console.log("[zcash-shielded] Setting FVK on sidecar...")
 	const result = await sendCommand("set_fvk", { ak: akHex, nk: nkHex, rivk: rivkHex })
+	// Update the in-process cache so hasFvkLoaded() / getCachedFvk() see the
+	// new FVK without each caller having to remember to call setCachedFvk().
+	setCachedFvk(result.address, result.fvk)
 	return { fvk: result.fvk, address: result.address }
 }
 
@@ -160,10 +163,21 @@ export async function scanOrchardNotes(startHeight?: number, fullRescan?: boolea
 
 /**
  * Get the current shielded balance (in zatoshis).
+ *
+ * `confirmed` and `notes_unspent` reflect every unspent note (regardless of
+ * depth). `spendable_confirmed` and `spendable_notes_count` only count notes
+ * deeper than `min_confirmations` from `synced_to` — that's the set the
+ * builder will actually accept, so UI controls (Max button, available-to-send)
+ * should use these.
  */
 export async function getShieldedBalance(): Promise<{
 	confirmed: number
 	pending: number
+	notes_unspent?: number
+	spendable_confirmed?: number
+	spendable_notes_count?: number
+	min_confirmations?: number
+	synced_to?: number | null
 }> {
 	if (!isSidecarReady()) {
 		throw new Error("Sidecar not initialized — call initializeOrchard() first")
