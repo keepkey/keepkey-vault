@@ -221,6 +221,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // Returns null when the user cancels the selection. Frontend decodes the
       // QR with jsqr and submits the URI to wcPair.
       wcScanScreen: { params: void; response: { pngBase64: string } | null }
+      // User responses to a pending pair-approval prompt. id is the proposal id.
+      wcApprovePair: { params: { id: string }; response: void }
+      wcRejectPair: { params: { id: string }; response: void }
 
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
@@ -269,6 +272,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
       'wc-sessions': WcSessionInfo[]
+      'wc-pair-request': { id: string; peerName: string; peerUrl: string; peerIcon: string; chains: string[]; methods: string[] }
+      'wc-pair-dismiss': { id: string }
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }

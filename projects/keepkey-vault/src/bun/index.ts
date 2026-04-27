@@ -344,6 +344,124 @@ function getOrCreateWcManager(): WalletConnectManager {
 		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
 		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
 		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
+		getCosmosAccountInfo: async (caipChain) => {
+			if (!engine.wallet) return null
+			// Only cosmoshub-4 supported in v1; THOR/Maya/Osmosis use the cosmos
+			// namespace too but need different signers and bech32 prefixes — follow-up.
+			if (caipChain !== 'cosmos:cosmoshub-4') return null
+			const addressNList = [0x8000002C, 0x80000076, 0x80000000, 0, 0] // m/44'/118'/0'/0/0
+			try {
+				const addrResult = await engine.wallet.cosmosGetAddress({ addressNList, showDisplay: false })
+				const address = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				if (!address) return null
+				// Derive raw 33-byte compressed pubkey from BIP32 xpub via ethers HDNode.
+				const pubkeys = await engine.wallet.getPublicKeys([{ addressNList, curve: 'secp256k1', coin: 'Atom' }])
+				const xpub = pubkeys?.[0]?.xpub
+				if (!xpub) return null
+				const { ethers } = await import('ethers')
+				const node = ethers.utils.HDNode.fromExtendedKey(xpub)
+				const pubkeyHex = node.publicKey.replace(/^0x/, '')
+				const pubkeyBase64 = Buffer.from(pubkeyHex, 'hex').toString('base64')
+				return { address, pubkeyBase64, addressNList }
+			} catch (e: any) {
+				console.warn('[WC] getCosmosAccountInfo failed:', e.message)
+				return null
+			}
+		},
+		cosmosSignAmino: async ({ addressNList, signDoc }) => {
+			if (!engine.wallet) throw new Error('Device disconnected')
+			// Translate WC StdSignDoc → hdwallet CosmosSignTx.
+			// StdSignDoc: { chain_id, account_number, sequence, fee, msgs, memo }
+			// hdwallet:   { addressNList, tx: { msg, fee, signatures, memo }, chain_id, account_number, sequence }
+			const result = await engine.wallet.cosmosSignTx({
+				addressNList,
+				tx: {
+					msg: signDoc.msgs ?? [],
+					fee: signDoc.fee,
+					signatures: [],
+					memo: signDoc.memo ?? '',
+				},
+				chain_id: signDoc.chain_id,
+				account_number: String(signDoc.account_number ?? '0'),
+				sequence: String(signDoc.sequence ?? '0'),
+			})
+			const sig = result?.signatures?.[0]
+			if (!sig) throw new Error('Device returned no signature')
+			// hdwallet may return hex; WC requires base64.
+			const sigStripped = sig.startsWith('0x') ? sig.slice(2) : sig
+			const signatureBase64 = /^[0-9a-f]+$/i.test(sigStripped)
+				? Buffer.from(sigStripped, 'hex').toString('base64')
+				: sigStripped
+			return { signatureBase64 }
+		},
+		getSolanaAccountInfo: async (caipChain) => {
+			if (!engine.wallet) return null
+			if (caipChain !== 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp') return null
+			// Solana uses ed25519 with a 4-element fully hardened path m/44'/501'/0'/0'
+			// (NOT extended to a 5th index — see rest-api.ts:2441).
+			const addressNList = [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+			try {
+				const r = await engine.wallet.solanaGetAddress({ addressNList, showDisplay: false })
+				const address = typeof r === 'string' ? r : (r as any)?.address
+				if (!address) return null
+				return { address, addressNList }
+			} catch (e: any) {
+				console.warn('[WC] getSolanaAccountInfo failed:', e.message)
+				return null
+			}
+		},
+		solanaSignMessageRaw: async ({ addressNList, messageBase64 }) => {
+			if (!engine.wallet) throw new Error('Device disconnected')
+			const messageBytes = Buffer.from(messageBase64, 'base64')
+			const result = await engine.wallet.solanaSignMessage({
+				addressNList,
+				message: messageBytes,
+				showDisplay: true,
+			})
+			const sig = result?.signature
+			if (!sig) throw new Error('Device returned no signature')
+			const sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+			return { signatureBase64: Buffer.from(sigBytes).toString('base64') }
+		},
+		broadcastViaPioneer: async ({ networkId, serialized }) => {
+			const pioneer = await getPioneer()
+			const resp = await pioneer.Broadcast({ networkId, serialized })
+			const data = resp?.data ?? resp
+			const txid = data?.txid || data?.tx_hash || data?.hash
+			if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(data).slice(0, 200)}`)
+			return String(txid)
+		},
+		solanaSignTransactionRaw: async ({ addressNList, transactionBase64 }) => {
+			if (!engine.wallet) throw new Error('Device disconnected')
+			// Reuse the existing solanaSignTx parsing+assembly pipeline (which handles
+			// both legacy and v0 transactions). It expects rawTx as base64 of the FULL
+			// transaction (with empty sig slots), which matches what WC sends.
+			const { parseSolanaTx, solanaMessageSlice } = await import('./solana-tx')
+			const fullTx = Buffer.from(transactionBase64, 'base64')
+			const parsed = parseSolanaTx(fullTx)
+			let sigBytes: Uint8Array
+			if (parsed.isVersioned) {
+				const messageBytes = solanaMessageSlice(fullTx, parsed)
+				const msgRes = await engine.wallet.solanaSignMessage({ addressNList, message: messageBytes, showDisplay: true })
+				const sig = msgRes?.signature
+				if (!sig) throw new Error('Device returned no signature for v0 tx')
+				sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+			} else {
+				const result = await engine.wallet.solanaSignTx({
+					addressNList,
+					rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
+				})
+				if (!result?.signature) throw new Error('Device returned no signature for legacy tx')
+				sigBytes = result.signature instanceof Uint8Array ? result.signature : Buffer.from(result.signature, 'base64')
+			}
+			if (sigBytes.length !== 64) throw new Error(`Unexpected signature length ${sigBytes.length}`)
+			const out = Buffer.from(fullTx)
+			for (let i = 0; i < 64; i++) out[parsed.sigStart + i] = sigBytes[i]
+			return {
+				transactionBase64: out.toString('base64'),
+				signatureBase64: Buffer.from(sigBytes).toString('base64'),
+			}
+		},
 		requestSigningApproval: async (info) => {
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			try {
@@ -362,6 +480,17 @@ function getOrCreateWcManager(): WalletConnectManager {
 		log: (msg) => console.log(msg),
 		onSessionsChanged: (sessions) => {
 			try { rpc.send['wc-sessions'](sessions) } catch {}
+		},
+		onPairApprovalRequest: (info) => {
+			try { rpc.send['wc-pair-request'](info) } catch {}
+			try {
+				mainWindow.setAlwaysOnTop(true)
+				mainWindow.focus()
+			} catch { /* window not ready */ }
+		},
+		onPairApprovalDismiss: (id) => {
+			try { rpc.send['wc-pair-dismiss']({ id }) } catch {}
+			try { mainWindow.setAlwaysOnTop(false) } catch {}
 		},
 	})
 	return wcManager
@@ -3877,6 +4006,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			wcDisconnectSession: async (params) => {
 				if (!wcManager) return
 				await wcManager.disconnectSession(params.topic)
+			},
+			wcApprovePair: async (params) => {
+				if (!wcManager) return
+				wcManager.approvePair(params.id)
+			},
+			wcRejectPair: async (params) => {
+				if (!wcManager) return
+				wcManager.rejectPair(params.id)
 			},
 			wcScanScreen: async () => {
 				if (process.platform !== 'darwin') {
