@@ -42,6 +42,24 @@ fn zip317_fee(n_spends: usize, n_outputs: usize) -> u64 {
     ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
 }
 
+/// ZIP-317 fee for a deshield tx (Orchard spends → 1 transparent output, 1 change note).
+///
+/// Per ZIP-317 §3, `logical_actions` uses the FINAL Orchard `action_count`
+/// (post-padding) — not the pre-padding `max(n_spends, n_outputs)`.
+/// `BundleType::DEFAULT` pads to a 2-action minimum for the anonymity set,
+/// so a 1-spend deshield has 2 orchard actions on chain.
+///
+/// Underpaying triggers the chain's "Unpaid actions is higher than the limit"
+/// mempool rejection even when the orchard proof verifies cleanly — because
+/// `unpaid_actions = ceil((expected_fee - actual_fee) / marginal_fee) > 0`.
+fn zip317_deshield_fee(n_spends: usize) -> u64 {
+    const N_TRANSPARENT_ACTIONS: u64 = 1; // one transparent output
+    const N_ORCHARD_OUTPUTS: usize = 1;   // change note
+    let orchard_actions = std::cmp::max(2, std::cmp::max(n_spends, N_ORCHARD_OUTPUTS)) as u64;
+    let logical_actions = orchard_actions + N_TRANSPARENT_ACTIONS;
+    ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
+}
+
 /// Per-action fields needed by the device for signing + digest verification.
 #[derive(Debug, Clone, Serialize)]
 #[allow(dead_code)]
@@ -1523,15 +1541,8 @@ pub async fn build_deshield_pczt(
     let mut rng = OsRng;
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
 
-    // ZIP-317 fee for a deshield tx:
-    // Orchard actions = max(n_spends, n_orchard_outputs) where n_orchard_outputs = change only
-    // Transparent logical actions = max(0 inputs, 1 output) = 1
     let n_spends = notes.len();
-    let n_orchard_outputs = 1usize; // change output (or dummy pad)
-    let orchard_actions = std::cmp::max(n_spends, n_orchard_outputs);
-    let transparent_actions = 1usize; // one transparent output
-    let logical_actions = orchard_actions + transparent_actions;
-    let fee = ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions as u64);
+    let fee = zip317_deshield_fee(n_spends);
 
     let change = total_input.checked_sub(amount + fee)
         .ok_or_else(|| anyhow::anyhow!(
@@ -1999,6 +2010,25 @@ mod tests {
         buf[..8].copy_from_slice(&i.to_le_bytes());
         // This produces a valid Pallas base field element for all small i
         MerkleHashOrchard::from_bytes(&buf).unwrap()
+    }
+
+    /// ZIP-317 §3 + BundleType::DEFAULT padding. The chain counts orchard
+    /// actions post-padding; we must too, otherwise mempool rejects with
+    /// "Unpaid actions is higher than the limit" even though the orchard
+    /// proof verifies. Regression: production deshield broadcast for
+    /// (1 spend, 0.001 ZEC out, 0.0262 change) hit this with the old
+    /// pre-padding fee of 10000 ZAT — the chain wanted 15000.
+    #[test]
+    fn test_zip317_deshield_fee_post_padding() {
+        use super::zip317_deshield_fee;
+        // 1 real spend + 1 change → padded to 2 actions + 1 transparent = 3 logical.
+        assert_eq!(zip317_deshield_fee(1), 15_000);
+        // 2 real spends + 1 change → max(2, max(2,1)) = 2 actions + 1 transparent = 3.
+        assert_eq!(zip317_deshield_fee(2), 15_000);
+        // 3 real spends + 1 change → 3 actions + 1 transparent = 4 logical.
+        assert_eq!(zip317_deshield_fee(3), 20_000);
+        // 5 real spends + 1 change → 5 actions + 1 transparent = 6 logical.
+        assert_eq!(zip317_deshield_fee(5), 30_000);
     }
 
     // ══════════════════════════════════════════════════════════════════════
