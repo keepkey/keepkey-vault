@@ -134,6 +134,18 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 		try { await rpcRequest("wcRejectPair", { id }) } catch { /* same */ }
 	}, [pairRequest])
 
+	// Closing the panel (backdrop, X button, or onClose from parent) while a pair
+	// proposal is pending must reject it on the backend — otherwise the proposal
+	// hangs until the 120s timeout and the always-on-top window stays elevated.
+	const handlePanelClose = useCallback(() => {
+		if (pairRequest) {
+			const id = pairRequest.id
+			setPairRequest(null)
+			rpcRequest("wcRejectPair", { id }).catch(() => {})
+		}
+		onClose()
+	}, [pairRequest, onClose])
+
 	// Auto-pair if URI is provided (from deep link)
 	useEffect(() => {
 		if (open && nativeEnabled && wcUri) {
@@ -270,9 +282,9 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 	// Native WC v2 mode
 	return (
 		<>
-			<Box position="fixed" inset="0" bg="blackAlpha.600" zIndex={Z.drawerBackdrop} onClick={onClose} />
+			<Box position="fixed" inset="0" bg="blackAlpha.600" zIndex={Z.drawerBackdrop} onClick={handlePanelClose} />
 			<Flex position="fixed" top="0" right="0" bottom="0" w={{ base: "100vw", md: "480px" }} maxW="100vw" direction="column" bg="kk.bg" borderLeft="1px solid" borderColor="kk.border" zIndex={Z.drawerPanel} boxShadow="-4px 0 24px rgba(0,0,0,0.5)">
-				<PanelHeader onClose={onClose} title={t('walletConnect.title')} />
+				<PanelHeader onClose={handlePanelClose} title={t('walletConnect.title')} />
 
 				{/* Pair input + Scan QR + Upload */}
 				<Box

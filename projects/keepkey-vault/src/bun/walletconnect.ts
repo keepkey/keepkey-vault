@@ -50,8 +50,10 @@ const SUPPORTED_CHAIN_IDS = new Set(Object.keys(CHAIN_RPC).map(Number))
 const SUPPORTED_EVM_CHAINS = Object.keys(CHAIN_RPC).map(id => `eip155:${id}`)
 
 // Cosmos namespace: amino-format signing only for now. signDirect requires
-// proto decoding (cosmjs/proto-signing); deferred to a follow-up.
-const SUPPORTED_COSMOS_METHODS = ['cosmos_getAccounts', 'cosmos_signAmino', 'cosmos_signDirect']
+// proto decoding (cosmjs/proto-signing) and is intentionally NOT advertised
+// — advertising methods we can't fulfill produces sessions that fail at
+// request time. Handler still throws defensively in case a dApp asks anyway.
+const SUPPORTED_COSMOS_METHODS = ['cosmos_getAccounts', 'cosmos_signAmino']
 const SUPPORTED_COSMOS_EVENTS: string[] = []
 // Only cosmoshub-4 in v1 — Osmosis/THOR/Maya use cosmos namespace too but have
 // different bech32 prefixes and (in THOR/Maya's case) different hdwallet
@@ -92,7 +94,7 @@ export interface WcCallbacks {
   /** Sign a Solana message (raw bytes). Returns 64-byte ed25519 signature. */
   solanaSignMessageRaw: (params: { addressNList: number[]; messageBase64: string }) => Promise<{ signatureBase64: string }>
   /** Sign a Solana transaction (full base64 tx including empty sig slots). Returns assembled signed tx + signature. */
-  solanaSignTransactionRaw: (params: { addressNList: number[]; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string }>
+  solanaSignTransactionRaw: (params: { addressNList: number[]; signerAddress: string; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string }>
   /** Broadcast a fully-signed serialized transaction via Pioneer. Returns the on-chain txid. */
   broadcastViaPioneer: (params: { networkId: string; serialized: string }) => Promise<string>
   /** Show signing approval to user — returns true if approved. */
@@ -251,44 +253,63 @@ export class WalletConnectManager {
   private onSessionProposal = async (
     proposal: Web3WalletTypes.SessionProposal
   ) => {
-    const evmInfo = this.callbacks.getEvmAddressInfo()
-    if (!evmInfo) {
-      this.callbacks.log('[WC] Rejecting proposal — no EVM address ready')
-      await this.web3wallet!.rejectSession({
-        id: proposal.id,
-        reason: getSdkError('USER_REJECTED'),
-      })
-      return
+    // Inspect the proposal up front so we only resolve accounts for the
+    // namespaces the dApp actually asks for. A required namespace must
+    // resolve; an optional namespace silently falls out if it doesn't.
+    const required = proposal.params.requiredNamespaces ?? {}
+    const optional = proposal.params.optionalNamespaces ?? {}
+    const namespaceRequired = (ns: string) => ns in required
+    const namespaceWanted = (ns: string) => ns in required || ns in optional
+
+    let evmInfo: { address: string; addressIndex: number } | null = null
+    if (namespaceWanted('eip155')) {
+      evmInfo = this.callbacks.getEvmAddressInfo()
+      if (!evmInfo && namespaceRequired('eip155')) {
+        this.callbacks.log('[WC] Rejecting proposal — eip155 required but no EVM address ready')
+        await this.web3wallet!.rejectSession({ id: proposal.id, reason: getSdkError('USER_REJECTED') })
+        return
+      }
     }
 
-    // Resolve cosmos accounts for any cosmos chains the dApp asked for that
-    // we know how to sign for. Failures are non-fatal — cosmos namespace is
-    // dropped from the approval so the proposal can still succeed for EVM.
     const cosmosAccounts: string[] = []
     const cosmosChainsAdvertised: string[] = []
-    for (const chain of SUPPORTED_COSMOS_CHAINS) {
-      try {
-        const info = await this.callbacks.getCosmosAccountInfo(chain)
-        if (info) {
-          cosmosAccounts.push(`${chain}:${info.address}`)
-          cosmosChainsAdvertised.push(chain)
+    if (namespaceWanted('cosmos')) {
+      for (const chain of SUPPORTED_COSMOS_CHAINS) {
+        try {
+          const info = await this.callbacks.getCosmosAccountInfo(chain)
+          if (info) {
+            cosmosAccounts.push(`${chain}:${info.address}`)
+            cosmosChainsAdvertised.push(chain)
+          }
+        } catch (e: any) {
+          this.callbacks.log(`[WC] Cosmos account fetch failed for ${chain}: ${e.message}`)
         }
-      } catch (e: any) {
-        this.callbacks.log(`[WC] Cosmos account fetch failed for ${chain}: ${e.message}`)
+      }
+      if (cosmosChainsAdvertised.length === 0 && namespaceRequired('cosmos')) {
+        this.callbacks.log('[WC] Rejecting proposal — cosmos required but no cosmos account ready')
+        await this.web3wallet!.rejectSession({ id: proposal.id, reason: getSdkError('USER_REJECTED') })
+        return
       }
     }
 
     const solanaAccounts: string[] = []
     const solanaChainsAdvertised: string[] = []
-    for (const chain of SUPPORTED_SOLANA_CHAINS) {
-      try {
-        const info = await this.callbacks.getSolanaAccountInfo(chain)
-        if (info) {
-          solanaAccounts.push(`${chain}:${info.address}`)
-          solanaChainsAdvertised.push(chain)
+    if (namespaceWanted('solana')) {
+      for (const chain of SUPPORTED_SOLANA_CHAINS) {
+        try {
+          const info = await this.callbacks.getSolanaAccountInfo(chain)
+          if (info) {
+            solanaAccounts.push(`${chain}:${info.address}`)
+            solanaChainsAdvertised.push(chain)
+          }
+        } catch (e: any) {
+          this.callbacks.log(`[WC] Solana account fetch failed for ${chain}: ${e.message}`)
         }
-      } catch (e: any) {
-        this.callbacks.log(`[WC] Solana account fetch failed for ${chain}: ${e.message}`)
+      }
+      if (solanaChainsAdvertised.length === 0 && namespaceRequired('solana')) {
+        this.callbacks.log('[WC] Rejecting proposal — solana required but no solana account ready')
+        await this.web3wallet!.rejectSession({ id: proposal.id, reason: getSdkError('USER_REJECTED') })
+        return
       }
     }
 
@@ -319,15 +340,15 @@ export class WalletConnectManager {
     }
 
     try {
-      const evmAccounts = SUPPORTED_EVM_CHAINS.map(c => `${c}:${evmInfo.address}`)
-
-      const supportedNamespaces: Parameters<typeof buildApprovedNamespaces>[0]['supportedNamespaces'] = {
-        eip155: {
+      const supportedNamespaces: Parameters<typeof buildApprovedNamespaces>[0]['supportedNamespaces'] = {}
+      if (evmInfo) {
+        const evmAccounts = SUPPORTED_EVM_CHAINS.map(c => `${c}:${evmInfo!.address}`)
+        supportedNamespaces.eip155 = {
           chains: SUPPORTED_EVM_CHAINS,
           methods: SUPPORTED_METHODS,
           events: SUPPORTED_EVENTS,
           accounts: evmAccounts,
-        },
+        }
       }
       if (cosmosChainsAdvertised.length > 0) {
         supportedNamespaces.cosmos = {
@@ -588,6 +609,7 @@ export class WalletConnectManager {
         try {
           const { transactionBase64, signatureBase64 } = await this.callbacks.solanaSignTransactionRaw({
             addressNList: account.addressNList,
+            signerAddress: account.address,
             transactionBase64: transaction,
           })
           return {
@@ -617,6 +639,7 @@ export class WalletConnectManager {
         try {
           const { transactionBase64 } = await this.callbacks.solanaSignTransactionRaw({
             addressNList: account.addressNList,
+            signerAddress: account.address,
             transactionBase64: transaction,
           })
           // Pioneer broadcasts the assembled signed tx. networkId == the CAIP-2 chain.

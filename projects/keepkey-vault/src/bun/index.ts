@@ -431,17 +431,37 @@ function getOrCreateWcManager(): WalletConnectManager {
 			if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(data).slice(0, 200)}`)
 			return String(txid)
 		},
-		solanaSignTransactionRaw: async ({ addressNList, transactionBase64 }) => {
+		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (!engine.wallet) throw new Error('Device disconnected')
-			// Reuse the existing solanaSignTx parsing+assembly pipeline (which handles
-			// both legacy and v0 transactions). It expects rawTx as base64 of the FULL
-			// transaction (with empty sig slots), which matches what WC sends.
-			const { parseSolanaTx, solanaMessageSlice } = await import('./solana-tx')
+			const { parseSolanaTx, solanaMessageSlice, parseSolanaMessage } = await import('./solana-tx')
+			const bs58 = (await import('bs58')).default
 			const fullTx = Buffer.from(transactionBase64, 'base64')
 			const parsed = parseSolanaTx(fullTx)
+			const messageBytes = solanaMessageSlice(fullTx, parsed)
+
+			// Find which signer slot belongs to our account. Required signers are
+			// the first `numRequiredSignatures` entries of `staticAccounts`. If our
+			// pubkey isn't among them, this tx isn't ours to sign and writing to
+			// any slot would produce an invalid signed transaction.
+			const message = parseSolanaMessage(messageBytes)
+			const ourPubkey = bs58.decode(signerAddress)
+			if (ourPubkey.length !== 32) {
+				throw new Error(`Invalid signer address: bs58-decoded length ${ourPubkey.length} (expected 32)`)
+			}
+			let signerIdx = -1
+			for (let i = 0; i < message.header.numRequiredSignatures; i++) {
+				const acct = message.staticAccounts[i]
+				if (acct && acct.length === ourPubkey.length && Buffer.from(acct).equals(Buffer.from(ourPubkey))) {
+					signerIdx = i
+					break
+				}
+			}
+			if (signerIdx < 0) {
+				throw new Error(`Wallet account ${signerAddress} is not a required signer for this transaction`)
+			}
+
 			let sigBytes: Uint8Array
 			if (parsed.isVersioned) {
-				const messageBytes = solanaMessageSlice(fullTx, parsed)
 				const msgRes = await engine.wallet.solanaSignMessage({ addressNList, message: messageBytes, showDisplay: true })
 				const sig = msgRes?.signature
 				if (!sig) throw new Error('Device returned no signature for v0 tx')
@@ -455,8 +475,13 @@ function getOrCreateWcManager(): WalletConnectManager {
 				sigBytes = result.signature instanceof Uint8Array ? result.signature : Buffer.from(result.signature, 'base64')
 			}
 			if (sigBytes.length !== 64) throw new Error(`Unexpected signature length ${sigBytes.length}`)
+
+			const slotOffset = parsed.sigStart + signerIdx * 64
+			if (fullTx.length < slotOffset + 64) {
+				throw new Error('Raw tx too short to hold our signer slot')
+			}
 			const out = Buffer.from(fullTx)
-			for (let i = 0; i < 64; i++) out[parsed.sigStart + i] = sigBytes[i]
+			for (let i = 0; i < 64; i++) out[slotOffset + i] = sigBytes[i]
 			return {
 				transactionBase64: out.toString('base64'),
 				signatureBase64: Buffer.from(sigBytes).toString('base64'),
