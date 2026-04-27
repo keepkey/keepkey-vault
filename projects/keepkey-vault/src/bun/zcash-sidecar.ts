@@ -218,6 +218,14 @@ export async function sendCommand(cmd: string, params: Record<string, any> = {},
 
 /**
  * Stop the sidecar process.
+ *
+ * Clears every piece of cached state alongside the process so a subsequent
+ * `startSidecar()` boots into a clean slate. Without this, a privacy-disable
+ * → enable cycle (or an emulator wipe → reseed where the new device has a
+ * different FVK) would leave `cachedAddress` / `cachedFvk` / `cachedSyncedTo`
+ * pointing at the old wallet's state — `hasFvkLoaded()` would return true,
+ * `getShieldedBalance()` would short-circuit, and the dashboard would render
+ * stale numbers for whoever the new device belongs to.
  */
 export function stopSidecar(): void {
 	ready = false
@@ -236,6 +244,11 @@ export function stopSidecar(): void {
 
 		console.log("[zcash-sidecar] Stopping")
 	}
+	// Always clear cached state, even if the process was already gone.
+	cachedAddress = null
+	cachedFvk = null
+	cachedSyncedTo = null
+	cachedReleaseBlock = null
 }
 
 /**

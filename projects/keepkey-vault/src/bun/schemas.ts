@@ -269,6 +269,9 @@ export const ZcashInitRequest = z.object({
 /** POST /api/zcash/shielded/scan */
 export const ZcashScanRequest = z.object({
   start_height: z.number().int().min(0).optional(),
+  // Discard the cached note set and re-derive from `start_height` (or the
+  // KeepKey release block when omitted). Used by the "Repair wallet" flow.
+  full_rescan: z.boolean().optional(),
 }).passthrough()
 
 /** POST /api/zcash/shielded/build */

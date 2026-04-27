@@ -305,11 +305,16 @@ let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
-// Internal flag: true after the per-session background incremental scan has
-// caught the wallet up to chain tip. Used only to dedupe the background scan
-// trigger — frontend doesn't gate UI on it. Full rescan is a deliberate user
-// action (Repair Wallet button), never automatic.
+// True after the per-session incremental scan has caught the wallet up to
+// chain tip. The `verified` field on `zcashShieldedStatus` reports this so
+// API clients (and any future UI gating) get an honest answer about whether
+// validation has actually completed.
 let zcashVerifiedThisSession = false
+// True while the background scan is in flight. Separate flag so concurrent
+// status polls don't each kick their own scan, but the public `verified`
+// field above doesn't lie about completion. Cleared after the scan resolves
+// (whether successfully or not).
+let zcashBackgroundVerifyInFlight = false
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
@@ -625,16 +630,18 @@ async function ensureZcashScanFresh(): Promise<void> {
  * controls in the UI).
  */
 function maybeStartBackgroundWalletVerification(): void {
-	if (zcashVerifiedThisSession || !hasFvkLoaded()) return
-	zcashVerifiedThisSession = true // claim slot before await so concurrent polls don't double-fire
+	if (zcashVerifiedThisSession || zcashBackgroundVerifyInFlight || !hasFvkLoaded()) return
+	zcashBackgroundVerifyInFlight = true
 	;(async () => {
 		try {
 			const result = await scanOrchardNotes()
 			if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+			zcashVerifiedThisSession = true
 			console.log(`[zcash] Background scan caught up: synced_to=${result?.synced_to ?? '?'}, new_notes=${result?.notes_found ?? 0}`)
 		} catch (e: any) {
 			console.warn('[zcash] Background scan failed (non-fatal):', e?.message || e)
-			zcashVerifiedThisSession = false // allow retry next status poll
+		} finally {
+			zcashBackgroundVerifyInFlight = false
 		}
 	})()
 }
@@ -2468,8 +2475,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					synced_to: scanState.syncedTo,
 					keepkey_release_block: scanState.releaseBlock,
 					verified: zcashVerifiedThisSession,
+					verifying: zcashBackgroundVerifyInFlight,
 				}
-				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} verifying=${result.verifying} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {

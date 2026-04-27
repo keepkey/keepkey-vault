@@ -58,6 +58,10 @@ interface TransparentUtxo {
 	vout: number
 	value: number
 	scriptPubKey: string
+	/** Confirmation count if Pioneer provides one — used by the 10-conf gate. */
+	confirmations?: number
+	/** Block height the UTXO was mined at, if reported. */
+	height?: number
 }
 
 interface TransparentSigningInput {
@@ -200,11 +204,22 @@ async function _shieldZecInner(
 			const value = raw.includes('.')
 				? Math.round(parseFloat(raw) * 1e8)
 				: parseInt(raw, 10)
+			// Pull a confirmation count when Pioneer provides one. Some UTXO
+			// indexers return `confirmations` directly; others return a `height`
+			// that we'd compare against tip. We defensively keep both forms.
+			const confirmations = typeof u.confirmations === 'number'
+				? u.confirmations
+				: (typeof u.confirmations === 'string' ? parseInt(u.confirmations, 10) : undefined)
+			const height = typeof u.height === 'number'
+				? u.height
+				: (typeof u.height === 'string' ? parseInt(u.height, 10) : undefined)
 			return {
 				txid: u.txid || u.tx_hash,
 				vout: u.vout ?? u.tx_output_n ?? u.index ?? 0,
 				value: isNaN(value) ? 0 : value,
 				scriptPubKey: u.scriptPubKey || u.script || u.scriptpubkey || "",
+				confirmations: Number.isFinite(confirmations as number) ? (confirmations as number) : undefined,
+				height: Number.isFinite(height as number) ? (height as number) : undefined,
 			}
 		})
 	} catch (e: any) {
@@ -215,55 +230,87 @@ async function _shieldZecInner(
 		throw new Error("No transparent UTXOs found for shielding")
 	}
 
-	const totalAvailable = utxos.reduce((sum, u) => sum + u.value, 0)
-	console.log(`[zcash-shield] Found ${utxos.length} UTXOs totaling ${totalAvailable} ZAT`)
-
-	// 3. Coin selection — select UTXOs covering amount + fee
-	// ZIP-317: fee = 5000 × max(grace_actions, logical_actions)
-	// Shield-wrap logical_actions = max(transparent_in, transparent_out) + nActionsOrchard
-	// Orchard always pads to ≥ 2 actions; transparent has ≥ 1 input.
-	// Change output adds 1 transparent output, so: max(nInputs, 1) + 2
-	// We compute this conservatively before coin selection; re-check after.
-	const nOrchardActions = 2 // Builder always pads to minimum 2
-	const estimatedTransparent = 1 // At least 1 input, 1 change output → max(1,1) = 1
-	const logicalActions = estimatedTransparent + nOrchardActions
-	const fee = 5000 * Math.max(2, logicalActions) // ZIP-317
-	const target = params.amount + fee
-
-	if (totalAvailable < target) {
+	// Min-confirmations gate (matches the Orchard 10-conf rule in the sidecar).
+	// Reorgs can move recent transparent inputs the same way they can move recent
+	// shielded notes; signing against an unconfirmed UTXO that later disappears
+	// produces a doomed tx. 10 matches zcashd / ywallet defaults.
+	//
+	// If Pioneer doesn't report confirmations or height, we let the UTXO through
+	// rather than blocking the user — better to broadcast and have the chain
+	// reject than to fail with a confusing UI error when the indexer schema
+	// changes. This matches the existing behaviour for non-Zcash UTXOs.
+	const MIN_CONFIRMATIONS = 10
+	const filtered = utxos.filter(u => {
+		if (typeof u.confirmations === 'number') return u.confirmations >= MIN_CONFIRMATIONS
+		// No confirmation info: don't block the send.
+		return true
+	})
+	if (filtered.length === 0 && utxos.length > 0) {
 		throw new Error(
-			`Insufficient transparent balance: have ${totalAvailable} ZAT, need ${target} ZAT ` +
-			`(${params.amount} amount + ${fee} fee)`
+			`All ${utxos.length} transparent UTXOs are within ${MIN_CONFIRMATIONS} confirmations of the chain tip. ` +
+			`Wait a few minutes and retry.`
+		)
+	}
+	if (filtered.length < utxos.length) {
+		const filteredOut = utxos.length - filtered.length
+		console.log(`[zcash-shield] Filtered out ${filteredOut} UTXO(s) below ${MIN_CONFIRMATIONS} confirmations`)
+	}
+	utxos = filtered
+
+	const totalAvailable = utxos.reduce((sum, u) => sum + u.value, 0)
+	console.log(`[zcash-shield] Found ${utxos.length} UTXOs totaling ${totalAvailable} ZAT (after ${MIN_CONFIRMATIONS}-conf filter)`)
+
+	// 3. Coin selection — iteratively add UTXOs and recompute the ZIP-317 fee.
+	//
+	// The fee depends on how many inputs we end up selecting:
+	//   logical_actions = max(transparent_inputs, transparent_outputs=1)
+	//                   + max(orchard_spends, orchard_outputs)         // = 2 (BundleType::DEFAULT pad)
+	//   fee = 5000 * max(grace_actions=2, logical_actions)
+	//
+	// So adding inputs can raise the fee, which can require even more inputs
+	// to cover the new target. The previous greedy version selected against a
+	// fixed (1-input) target and then threw if the recomputed fee outran the
+	// selected total — even when more UTXOs were available. Now we recompute
+	// after each addition and keep going until the running total covers the
+	// running target, only erroring out if the entire set is short.
+	const nOrchardActions = 2 // BundleType::DEFAULT pads to a 2-action minimum
+	const computeFee = (nInputs: number): number => {
+		const transparentActions = Math.max(nInputs, 1) // max(inputs, change_outputs=1)
+		const logical = transparentActions + nOrchardActions
+		return 5000 * Math.max(2, logical)
+	}
+
+	// Cheap fast-path: even with 1 input (cheapest fee shape) we can't cover
+	// `amount + fee`, no point selecting.
+	const minFee = computeFee(1)
+	if (totalAvailable < params.amount + minFee) {
+		throw new Error(
+			`Insufficient transparent balance: have ${totalAvailable} ZAT, need ≥${params.amount + minFee} ZAT ` +
+			`(${params.amount} amount + ${minFee} fee minimum)`
 		)
 	}
 
-	// Simple greedy selection — sort by value descending, take until covered
 	const sorted = [...utxos].sort((a, b) => b.value - a.value)
 	const selected: TransparentUtxo[] = []
 	let selectedTotal = 0
+	let runningFee = computeFee(0)
 	for (const utxo of sorted) {
 		selected.push(utxo)
 		selectedTotal += utxo.value
-		if (selectedTotal >= target) break
+		runningFee = computeFee(selected.length)
+		if (selectedTotal >= params.amount + runningFee) break
 	}
 
-	console.log(`[zcash-shield] Selected ${selected.length} UTXOs totaling ${selectedTotal} ZAT`)
-
-	// Re-check fee after coin selection — more inputs = more logical actions
-	const actualTransparent = Math.max(selected.length, 1) // max(inputs, change_outputs)
-	const actualLogical = actualTransparent + nOrchardActions
-	const actualFee = 5000 * Math.max(2, actualLogical)
-	if (actualFee > fee) {
-		console.log(`[zcash-shield] ZIP-317 fee adjusted: ${fee} → ${actualFee} ZAT (${actualLogical} logical actions)`)
-		// Re-select with higher fee if needed
-		if (selectedTotal < params.amount + actualFee) {
-			throw new Error(
-				`Insufficient balance after ZIP-317 fee adjustment: have ${selectedTotal} ZAT, ` +
-				`need ${params.amount + actualFee} ZAT (${params.amount} + ${actualFee} fee for ${actualLogical} actions)`
-			)
-		}
+	const finalFee = computeFee(selected.length)
+	if (selectedTotal < params.amount + finalFee) {
+		throw new Error(
+			`Insufficient transparent balance after ZIP-317 fee for ${selected.length} input(s): ` +
+			`have ${selectedTotal} ZAT, need ${params.amount + finalFee} ZAT ` +
+			`(${params.amount} amount + ${finalFee} fee for ${selected.length + nOrchardActions} logical actions)`
+		)
 	}
-	const finalFee = Math.max(fee, actualFee)
+
+	console.log(`[zcash-shield] Selected ${selected.length} UTXOs totaling ${selectedTotal} ZAT, fee=${finalFee} ZAT`)
 
 	// Derive scriptPubKey from pubkey if UTXOs don't have it (Pioneer often omits it)
 	const derivedScriptPubKey = await p2pkhScriptPubKey(compressedPubkey!)
