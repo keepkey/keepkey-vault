@@ -60,8 +60,15 @@ const SUPPORTED_COSMOS_EVENTS: string[] = []
 // signers, so they need per-chain wiring.
 const SUPPORTED_COSMOS_CHAINS = ['cosmos:cosmoshub-4']
 
-// Solana namespace. Same shape as EVM: sign-only and sign+broadcast both supported.
-const SUPPORTED_SOLANA_METHODS = ['solana_signMessage', 'solana_signTransaction', 'solana_signAndSendTransaction']
+// Solana namespace. getAccounts/requestAccounts are common post-pair calls
+// from dApps even though WC pairs already include the account list.
+const SUPPORTED_SOLANA_METHODS = [
+  'solana_getAccounts',
+  'solana_requestAccounts',
+  'solana_signMessage',
+  'solana_signTransaction',
+  'solana_signAndSendTransaction',
+]
 const SUPPORTED_SOLANA_EVENTS: string[] = []
 // CAIP-2 mainnet genesis hash. Some dApps use other CAIPs; iterate as needed.
 const SUPPORTED_SOLANA_CHAINS = ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']
@@ -91,8 +98,8 @@ export interface WcCallbacks {
   cosmosSignAmino: (params: { addressNList: number[]; signDoc: any }) => Promise<{ signatureBase64: string }>
   /** Get the solana account (bs58-encoded ed25519 pubkey = address) for a CAIP chain. Null if not ready. */
   getSolanaAccountInfo: (caipChain: string) => Promise<{ address: string; addressNList: number[] } | null>
-  /** Sign a Solana message (raw bytes). Returns 64-byte ed25519 signature. */
-  solanaSignMessageRaw: (params: { addressNList: number[]; messageBase64: string }) => Promise<{ signatureBase64: string }>
+  /** Sign a Solana message (raw bytes, base58 per WC spec). Returns 64-byte ed25519 signature. */
+  solanaSignMessageRaw: (params: { addressNList: number[]; messageBase58: string }) => Promise<{ signatureBase64: string }>
   /** Sign a Solana transaction (full base64 tx including empty sig slots). Returns assembled signed tx + signature. */
   solanaSignTransactionRaw: (params: { addressNList: number[]; signerAddress: string; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string }>
   /** Broadcast a fully-signed serialized transaction via Pioneer. Returns the on-chain txid. */
@@ -561,8 +568,15 @@ export class WalletConnectManager {
     if (!account) throw new Error('Solana account not available')
 
     switch (method) {
+      case 'solana_getAccounts':
+      case 'solana_requestAccounts': {
+        // Return the bs58-encoded pubkey. Some dApps prefer a list of accounts;
+        // we have a single deterministic account per chain.
+        return [{ pubkey: account.address }]
+      }
+
       case 'solana_signMessage': {
-        // WC params: { pubkey: bs58, message: base64 }
+        // WC params: { pubkey: bs58, message: bs58 } per CAIP-122 / WC Solana docs.
         const { pubkey, message } = params as { pubkey: string; message: string }
         if (pubkey && pubkey !== account.address) {
           throw new Error(`Pubkey mismatch: dApp asked ${pubkey}, wallet is ${account.address}`)
@@ -582,7 +596,7 @@ export class WalletConnectManager {
         try {
           const { signatureBase64 } = await this.callbacks.solanaSignMessageRaw({
             addressNList: account.addressNList,
-            messageBase64: message,
+            messageBase58: message,
           })
           // WC dApps expect the signature as bs58 (Solana standard).
           return { signature: base64ToBase58(signatureBase64) }

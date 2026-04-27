@@ -410,9 +410,10 @@ function getOrCreateWcManager(): WalletConnectManager {
 				return null
 			}
 		},
-		solanaSignMessageRaw: async ({ addressNList, messageBase64 }) => {
+		solanaSignMessageRaw: async ({ addressNList, messageBase58 }) => {
 			if (!engine.wallet) throw new Error('Device disconnected')
-			const messageBytes = Buffer.from(messageBase64, 'base64')
+			const bs58 = (await import('bs58')).default
+			const messageBytes = Buffer.from(bs58.decode(messageBase58))
 			const result = await engine.wallet.solanaSignMessage({
 				addressNList,
 				message: messageBytes,
