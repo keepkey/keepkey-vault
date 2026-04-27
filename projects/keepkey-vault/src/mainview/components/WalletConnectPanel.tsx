@@ -1,9 +1,42 @@
 import { Box, Flex, Text, Button, Input } from "@chakra-ui/react"
 import { useRef, useEffect, useState, useCallback } from "react"
 import { useTranslation } from "react-i18next"
+import jsQR from "jsqr"
 import { Z } from "../lib/z-index"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { WcSessionInfo } from "../../shared/types"
+
+function decodeQrFromImageSrc(src: string): Promise<string | null> {
+	return new Promise((resolve) => {
+		const img = new Image()
+		img.onload = () => {
+			const canvas = document.createElement("canvas")
+			canvas.width = img.width
+			canvas.height = img.height
+			const ctx = canvas.getContext("2d", { willReadFrequently: true })
+			if (!ctx) { resolve(null); return }
+			ctx.drawImage(img, 0, 0)
+			const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+			const code = jsQR(imageData.data, imageData.width, imageData.height)
+			resolve(code?.data ?? null)
+		}
+		img.onerror = () => resolve(null)
+		img.src = src
+	})
+}
+
+function decodePngBase64ToQrString(pngBase64: string): Promise<string | null> {
+	return decodeQrFromImageSrc(`data:image/png;base64,${pngBase64}`)
+}
+
+async function decodeQrFromFile(file: File | Blob): Promise<string | null> {
+	const url = URL.createObjectURL(file)
+	try {
+		return await decodeQrFromImageSrc(url)
+	} finally {
+		URL.revokeObjectURL(url)
+	}
+}
 
 // Legacy iframe URL — used when native WC is disabled (feature flag OFF)
 const WC_DAPP_BASE = "http://localhost:1646/wc"
@@ -22,6 +55,9 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 	const [pairInput, setPairInput] = useState("")
 	const [pairing, setPairing] = useState(false)
 	const [pairError, setPairError] = useState("")
+	const [scanning, setScanning] = useState(false)
+	const [dragOver, setDragOver] = useState(false)
+	const fileInputRef = useRef<HTMLInputElement>(null)
 
 	// Load sessions on open
 	useEffect(() => {
@@ -61,6 +97,85 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 		setPairing(false)
 	}, [pairInput])
 
+	const handleScanScreen = useCallback(async () => {
+		setScanning(true)
+		setPairError("")
+		try {
+			console.log('[wc-scan] requesting screencapture')
+			const result = await rpcRequest<{ pngBase64: string } | null>("wcScanScreen")
+			if (!result) {
+				console.log('[wc-scan] user canceled screencapture')
+				setScanning(false)
+				return
+			}
+			console.log('[wc-scan] got PNG bytes:', result.pngBase64.length, 'b64 chars')
+			const decoded = await decodePngBase64ToQrString(result.pngBase64)
+			console.log('[wc-scan] jsqr decoded:', decoded ? `len=${decoded.length} prefix=${decoded.slice(0, 16)}` : 'null')
+			if (!decoded) {
+				setPairError("No QR code found in selection")
+				setScanning(false)
+				return
+			}
+			// WC URIs are case-sensitive `wc:` per spec, but be tolerant just in case
+			if (!decoded.toLowerCase().startsWith("wc:")) {
+				setPairError(`QR is not a WalletConnect URI (got "${decoded.slice(0, 30)}…")`)
+				setScanning(false)
+				return
+			}
+			setPairing(true)
+			setScanning(false)
+			await rpcRequest("wcPair", { uri: decoded })
+			setPairInput("")
+			setPairing(false)
+		} catch (e: any) {
+			console.error('[wc-scan] failed:', e)
+			if (e.message === 'SCREEN_RECORDING_PERMISSION_PROMPTED' || e.message === 'SCREEN_RECORDING_PERMISSION_REQUIRED') {
+				setPairError("Screen Recording permission required. Approve the macOS prompt or add the app via the + button in the Settings window that just opened, then quit (⌘Q) and reopen.")
+			} else {
+				setPairError(e.message || "Scan failed")
+			}
+			setScanning(false)
+			setPairing(false)
+		}
+	}, [])
+
+	const handleQrFile = useCallback(async (file: File | Blob) => {
+		setPairError("")
+		try {
+			const decoded = await decodeQrFromFile(file)
+			console.log('[wc-scan] file decoded:', decoded ? `len=${decoded.length} prefix=${decoded.slice(0, 16)}` : 'null')
+			if (!decoded) {
+				setPairError("No QR code found in image")
+				return
+			}
+			if (!decoded.toLowerCase().startsWith("wc:")) {
+				setPairError(`QR is not a WalletConnect URI (got "${decoded.slice(0, 30)}…")`)
+				return
+			}
+			setPairing(true)
+			await rpcRequest("wcPair", { uri: decoded })
+			setPairInput("")
+			setPairing(false)
+		} catch (e: any) {
+			console.error('[wc-scan] file pair failed:', e)
+			setPairError(e.message || "Pairing failed")
+			setPairing(false)
+		}
+	}, [])
+
+	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0]
+		if (file) handleQrFile(file)
+		e.target.value = "" // allow re-selecting the same file
+	}, [handleQrFile])
+
+	const handleDrop = useCallback((e: React.DragEvent) => {
+		e.preventDefault()
+		setDragOver(false)
+		const file = e.dataTransfer.files?.[0]
+		if (file && file.type.startsWith("image/")) handleQrFile(file)
+	}, [handleQrFile])
+
 	const handleDisconnect = useCallback(async (topic: string) => {
 		try {
 			await rpcRequest("wcDisconnectSession", { topic })
@@ -98,8 +213,17 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 			<Flex position="fixed" top="0" right="0" bottom="0" w={{ base: "100vw", md: "480px" }} maxW="100vw" direction="column" bg="kk.bg" borderLeft="1px solid" borderColor="kk.border" zIndex={Z.drawerPanel} boxShadow="-4px 0 24px rgba(0,0,0,0.5)">
 				<PanelHeader onClose={onClose} title={t('walletConnect.title')} />
 
-				{/* Pair input */}
-				<Box px="4" py="3" borderBottom="1px solid" borderColor="kk.border">
+				{/* Pair input + Scan QR + Upload */}
+				<Box
+					px="4" py="3"
+					borderBottom="1px solid"
+					borderColor={dragOver ? "kk.gold" : "kk.border"}
+					bg={dragOver ? "rgba(255,215,0,0.04)" : "transparent"}
+					transition="background 0.15s, border-color 0.15s"
+					onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+					onDragLeave={() => setDragOver(false)}
+					onDrop={handleDrop}
+				>
 					<Flex gap="2">
 						<Input
 							size="sm"
@@ -112,7 +236,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 							borderColor="kk.border"
 							color="kk.textPrimary"
 							_placeholder={{ color: "kk.textSecondary" }}
-							disabled={pairing}
+							disabled={pairing || scanning}
 						/>
 						<Button
 							size="sm"
@@ -121,14 +245,68 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 							fontWeight="600"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handlePair}
-							disabled={pairing || !pairInput.trim()}
+							disabled={pairing || scanning || !pairInput.trim()}
 							px="4"
 						>
 							{pairing ? "..." : "Pair"}
 						</Button>
 					</Flex>
+					<Flex gap="2" mt="2">
+						<Button
+							size="sm"
+							flex="1"
+							variant="outline"
+							borderColor="kk.border"
+							color="kk.textPrimary"
+							_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
+							onClick={handleScanScreen}
+							disabled={pairing || scanning}
+						>
+							<Flex align="center" gap="2">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<rect x="3" y="3" width="7" height="7" />
+									<rect x="14" y="3" width="7" height="7" />
+									<rect x="3" y="14" width="7" height="7" />
+									<line x1="14" y1="14" x2="14" y2="17" />
+									<line x1="17" y1="14" x2="20" y2="14" />
+									<line x1="14" y1="20" x2="20" y2="20" />
+									<line x1="20" y1="14" x2="20" y2="20" />
+								</svg>
+								<Text fontSize="sm">{scanning ? "Selecting…" : "Scan screen"}</Text>
+							</Flex>
+						</Button>
+						<Button
+							size="sm"
+							flex="1"
+							variant="outline"
+							borderColor="kk.border"
+							color="kk.textPrimary"
+							_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
+							onClick={() => fileInputRef.current?.click()}
+							disabled={pairing || scanning}
+						>
+							<Flex align="center" gap="2">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+									<polyline points="17 8 12 3 7 8" />
+									<line x1="12" y1="3" x2="12" y2="15" />
+								</svg>
+								<Text fontSize="sm">Upload image</Text>
+							</Flex>
+						</Button>
+					</Flex>
+					<Text fontSize="xs" color="kk.textSecondary" mt="2" textAlign="center">
+						{dragOver ? "Drop QR image to pair" : "Or drop a screenshot here"}
+					</Text>
+					<input
+						ref={fileInputRef}
+						type="file"
+						accept="image/*"
+						style={{ display: "none" }}
+						onChange={handleFileChange}
+					/>
 					{pairError && (
-						<Text fontSize="xs" color="red.400" mt="1">{pairError}</Text>
+						<Text fontSize="xs" color="red.400" mt="2">{pairError}</Text>
 					)}
 				</Box>
 

@@ -3848,10 +3848,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── WalletConnect (native v2) ────────────────────────────
 			wcPair: async (params) => {
+				console.log('[wcPair] called with URI prefix:', params.uri?.slice(0, 24), 'len:', params.uri?.length)
 				if (!walletConnectEnabled) throw new Error('WalletConnect is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				// Lazy-init EVM addresses so the WC session_proposal listener has a
+				// selected address ready. Without this, fresh-boot pairs (where the
+				// user hasn't navigated to ETH yet) get rejected by the auto-approve
+				// gate in walletconnect.ts:onSessionProposal.
+				if (!evmAddresses.isInitialized) {
+					console.log('[wcPair] initializing EVM addresses before pair')
+					try {
+						await evmAddresses.initialize(engine.wallet)
+					} catch (e: any) {
+						console.error('[wcPair] EVM init failed:', e.message)
+						throw new Error('Could not derive EVM address: ' + e.message)
+					}
+				}
+				const sel = evmAddresses.getSelectedAddress()
+				console.log('[wcPair] evm selectedAddress?', sel?.address ?? 'STILL NONE — proposal will reject')
 				const wc = getOrCreateWcManager()
 				await wc.pair(params.uri)
+				console.log('[wcPair] pair() returned (session_proposal handled async via listener)')
 			},
 			wcGetSessions: async () => {
 				if (!wcManager) return []
@@ -3860,6 +3877,76 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			wcDisconnectSession: async (params) => {
 				if (!wcManager) return
 				await wcManager.disconnectSession(params.topic)
+			},
+			wcScanScreen: async () => {
+				if (process.platform !== 'darwin') {
+					throw new Error('Screen QR scan is only supported on macOS')
+				}
+
+				// Ensure Screen Recording permission. CGPreflight reports current state;
+				// CGRequest pops macOS's native prompt the first time and registers our
+				// bundle with TCC so it appears in System Settings → Screen Recording.
+				// CG bool == 1 byte (Boolean / signed char) — use u8 for portability.
+				let permGranted = false
+				let promptShown = false
+				let ffiOk = false
+				try {
+					const { dlopen, FFIType } = require('bun:ffi')
+					const cgPath = '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
+					const cg = dlopen(cgPath, {
+						CGPreflightScreenCaptureAccess: { args: [], returns: FFIType.u8 },
+						CGRequestScreenCaptureAccess: { args: [], returns: FFIType.u8 },
+					})
+					ffiOk = true
+					const pre = cg.symbols.CGPreflightScreenCaptureAccess() as unknown as number
+					permGranted = pre !== 0
+					console.log('[wcScanScreen] CGPreflight =', pre, 'granted:', permGranted)
+					if (!permGranted) {
+						const req = cg.symbols.CGRequestScreenCaptureAccess() as unknown as number
+						console.log('[wcScanScreen] CGRequest returned', req, '— TCC prompt should be visible now')
+						promptShown = true
+					}
+				} catch (e: any) {
+					console.warn('[wcScanScreen] CG FFI failed:', e.message, '— assuming no permission')
+				}
+				if (!ffiOk) {
+					// FFI loader failed entirely — we can't differentiate, so proceed and
+					// let screencapture fail explicitly with the existing detection path.
+					permGranted = true
+				}
+
+				if (!permGranted) {
+					// Open the Screen Recording pane so the user can flip the toggle if they
+					// dismissed the native prompt or already denied previously.
+					try {
+						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
+					} catch { /* best effort */ }
+					throw new Error(promptShown ? 'SCREEN_RECORDING_PERMISSION_PROMPTED' : 'SCREEN_RECORDING_PERMISSION_REQUIRED')
+				}
+
+				const path = `/tmp/kk-wc-scan-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.png`
+				// -i interactive selection, -x silent, -t png format.
+				const proc = Bun.spawn(['screencapture', '-i', '-x', '-t', 'png', path], {
+					stdout: 'ignore',
+					stderr: 'pipe',
+				})
+				const stderrText = (await new Response(proc.stderr).text()).trim()
+				const exitCode = await proc.exited
+				const file = Bun.file(path)
+				const exists = await file.exists()
+				// "could not create image from rect" + non-zero exit = permission revoked or rect issue
+				if (exitCode !== 0 && /could not create image/i.test(stderrText)) {
+					console.log('[wcScanScreen] screencapture failed despite preflight pass — permission likely revoked')
+					try {
+						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
+					} catch { /* best effort */ }
+					throw new Error('SCREEN_RECORDING_PERMISSION_REQUIRED')
+				}
+				if (!exists) return null // user canceled (Esc / clicked away)
+				const bytes = await file.arrayBuffer()
+				try { fs.unlinkSync(path) } catch { /* best effort */ }
+				if (bytes.byteLength === 0) return null
+				return { pngBase64: Buffer.from(bytes).toString('base64') }
 			},
 
 			// ── Utility ──────────────────────────────────────────────
