@@ -218,23 +218,86 @@ export async function sendCommand(cmd: string, params: Record<string, any> = {},
 
 /**
  * Stop the sidecar process.
+ *
+ * Clears every piece of cached state alongside the process so a subsequent
+ * `startSidecar()` boots into a clean slate. Without this, a privacy-disable
+ * → enable cycle (or an emulator wipe → reseed where the new device has a
+ * different FVK) would leave `cachedAddress` / `cachedFvk` / `cachedSyncedTo`
+ * pointing at the old wallet's state — `hasFvkLoaded()` would return true,
+ * `getShieldedBalance()` would short-circuit, and the dashboard would render
+ * stale numbers for whoever the new device belongs to.
  */
 export function stopSidecar(): void {
 	ready = false
-	if (sidecarProc) {
+	const procToKill = sidecarProc
+	sidecarProc = null
+	if (procToKill) {
+		// Reject every in-flight request bound to this proc up-front. The new
+		// sidecar (if started after this stop) gets a fresh `pendingRequests`
+		// map and isn't aware of these req_ids, so leaving them in place would
+		// hang callers until their per-request timeout fires.
+		for (const [, pending] of pendingRequests) {
+			clearTimeout(pending.timeout)
+			pending.reject(new Error("Sidecar stopped"))
+		}
+		pendingRequests.clear()
+
 		try {
 			// Send quit command gracefully
-			sidecarProc.stdin.write('{"cmd":"quit"}\n')
-			sidecarProc.stdin.flush()
+			procToKill.stdin.write('{"cmd":"quit"}\n')
+			procToKill.stdin.flush()
 		} catch { /* already dead */ }
 
-		// Force kill after 2s
+		// Force kill after 2s. Capture the local proc reference so a
+		// stop → start cycle within 2 seconds doesn't kill the new sidecar
+		// when the old timeout fires.
 		setTimeout(() => {
-			try { sidecarProc?.kill() } catch { /* already dead */ }
-			sidecarProc = null
+			try { procToKill.kill() } catch { /* already dead */ }
 		}, 2000)
 
 		console.log("[zcash-sidecar] Stopping")
+	}
+	// Always clear cached state, even if the process was already gone.
+	cachedAddress = null
+	cachedFvk = null
+	cachedSyncedTo = null
+	cachedReleaseBlock = null
+}
+
+/**
+ * Delete the sidecar's on-disk wallet database (~/.keepkey/zcash_wallet.db).
+ *
+ * The sidecar persists the FVK + scanned notes between sessions and auto-loads
+ * them on startup. After a seed change (different mnemonic, passphrase change,
+ * or hidden-wallet activation) the persisted FVK belongs to the wrong wallet,
+ * and the auto-load would re-populate the in-process cache with stale state
+ * even after `stopSidecar()` clears it. Wipe the DB so the next start boots
+ * with no FVK and `ensureFvkLoaded()` re-derives from the device.
+ *
+ * Caller must `stopSidecar()` first — the file is locked while the sidecar
+ * holds it open.
+ */
+export function wipeSidecarWalletDb(): void {
+	try {
+		const home = process.env.HOME || process.env.USERPROFILE
+		if (!home) {
+			console.warn("[zcash-sidecar] Cannot wipe wallet DB: HOME / USERPROFILE not set")
+			return
+		}
+		const dbPath = `${home}/.keepkey/zcash_wallet.db`
+		const f = Bun.file(dbPath)
+		if (f.size > 0) {
+			// Use the synchronous filesystem API. unlinkSync would be ideal but
+			// keep the dep on bun's standard runtime by routing through node:fs.
+			// (Bun.file has no remove method; use require for consistency with
+			// the rest of this file.)
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const fs = require("node:fs")
+			fs.unlinkSync(dbPath)
+			console.log(`[zcash-sidecar] Wiped wallet DB at ${dbPath}`)
+		}
+	} catch (e: any) {
+		console.warn(`[zcash-sidecar] Failed to wipe wallet DB (non-fatal): ${e?.message || e}`)
 	}
 }
 
@@ -430,15 +493,24 @@ function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 		}
 		try { reader.releaseLock() } catch { /* already released */ }
 
-		// Process exited — reject any pending requests
-		for (const [, pending] of pendingRequests) {
-			clearTimeout(pending.timeout)
-			pending.reject(new Error("Sidecar process exited"))
+		// Process exited. Only mutate global state if THIS proc is still the
+		// current one — `stopSidecar()` may have already detached us (new proc
+		// started in the meantime), in which case it has its own
+		// `pendingRequests` ownership and `ready` flag tied to the new proc.
+		// Touching them here would clear the new sidecar's in-flight requests
+		// and silently mark it not-ready.
+		if (sidecarProc === proc) {
+			for (const [, pending] of pendingRequests) {
+				clearTimeout(pending.timeout)
+				pending.reject(new Error("Sidecar process exited"))
+			}
+			pendingRequests.clear()
+			ready = false
+			sidecarProc = null
+			console.log("[zcash-sidecar] Process exited")
+		} else {
+			console.log("[zcash-sidecar] Old process exited (already detached)")
 		}
-		pendingRequests.clear()
-		ready = false
-		sidecarProc = null
-		console.log("[zcash-sidecar] Process exited")
 	})()
 }
 

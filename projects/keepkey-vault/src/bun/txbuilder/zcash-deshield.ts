@@ -52,13 +52,14 @@ let deshieldInProgress = false
 export async function deshieldZec(
 	wallet: any,
 	params: DeshieldParams,
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
 ): Promise<{ txid: string }> {
 	if (deshieldInProgress) {
 		throw new Error("A deshield transaction is already in progress")
 	}
 	deshieldInProgress = true
 	try {
-		return await _deshieldZecInner(wallet, params)
+		return await _deshieldZecInner(wallet, params, opts)
 	} finally {
 		deshieldInProgress = false
 	}
@@ -67,6 +68,7 @@ export async function deshieldZec(
 async function _deshieldZecInner(
 	wallet: any,
 	params: DeshieldParams,
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
@@ -105,7 +107,8 @@ async function _deshieldZecInner(
 		throw new Error("hdwallet does not support zcashSignPczt — ensure Zcash-capable firmware")
 	}
 
-	const signatures = await wallet.zcashSignPczt(sr, sr.sighash)
+	const signFn = () => wallet.zcashSignPczt(sr, sr.sighash)
+	const signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 	if (!signatures || !Array.isArray(signatures)) {
 		throw new Error("Device did not return signatures")
 	}

@@ -62,6 +62,11 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3.10"
+nonempty = "0.11"
+# zcash_primitives 0.19 internally pins zcash_protocol 0.4, so its public
+# `Transaction::read(_, BranchId)` API expects the 0.4 BranchId. Our crate
+# uses 0.7 elsewhere; alias the 0.4 version for tests only.
+zcash_protocol_v04 = { package = "zcash_protocol", version = "0.4" }
 
 [build-dependencies]
 tonic-build = "0.12"

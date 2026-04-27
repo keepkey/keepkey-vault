@@ -897,11 +897,32 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										{usdNum > 0 && (
 											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : undefined} fontWeight="500" lineHeight="1.3" />
 										)}
-										{tokenCount > 0 && (
-											<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
-												{t("tokensCount", { count: tokenCount })}
-											</Text>
-										)}
+										{(() => {
+											// Zcash gets a special "+ shielded" sub-row instead of generic token count.
+											// The shielded balance is appended as a synthetic token with type:'shielded'
+											// in getBalances; surface it explicitly so users see the private balance.
+											const shielded = bal.tokens?.find(tk => tk.type === 'shielded')
+											const otherTokens = bal.tokens?.filter(tk => tk.type !== 'shielded') ?? []
+											return (
+												<>
+													{shielded && parseFloat(shielded.balance || '0') > 0 && (
+														<Flex align="center" gap="1" mt="0.5" title="Shielded (Orchard) balance — visible only to you">
+															<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={chain.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+																<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+															</svg>
+															<Text fontSize="10px" fontFamily="mono" color={chain.color} fontWeight="600" lineHeight="1.3" truncate>
+																+ {formatBalance(shielded.balance)} private
+															</Text>
+														</Flex>
+													)}
+													{otherTokens.length > 0 && (
+														<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
+															{t("tokensCount", { count: otherTokens.length })}
+														</Text>
+													)}
+												</>
+											)
+										})()}
 									</Box>
 								) : loadingBalances ? (
 									<Text fontSize="10px" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>

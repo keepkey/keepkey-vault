@@ -51,7 +51,17 @@ export function ZcashPrivacyTab() {
 	// ── State ──────────────────────────────────────────────────────────
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
-	const [balance, setBalance] = useState<{ confirmed: number; pending: number; notes_unspent?: number } | null>(null)
+	const [balance, setBalance] = useState<{
+		confirmed: number
+		pending: number
+		notes_unspent?: number
+		// Spendable view: notes deeper than min_confirmations from synced_to.
+		// Used by the Max button so it never proposes amounts the builder rejects
+		// as "all unspent notes are within N confirmations of the chain tip".
+		spendable_confirmed?: number
+		spendable_notes_count?: number
+		min_confirmations?: number
+	} | null>(null)
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
@@ -131,16 +141,35 @@ export function ZcashPrivacyTab() {
 		})
 	}, [])
 
-	// Whether the wallet has never been scanned (needs initial scan)
+	// Whether the wallet has never been scanned (needs initial scan from
+	// KeepKey release block). Drives the "first run" UX where there's no
+	// cached balance to show. Returning users skip this entirely.
 	const [needsScan, setNeedsScan] = useState(false)
+	// True when a scan (background incremental, or manual) is actively running.
+	// Drives a small progress indicator but never hides the data — we trust
+	// the cached DB by default and only surface in-flight scan status.
+	const [scanInFlight, setScanInFlight] = useState(false)
 
 	// ── Fetch balance ─────────────────────────────────────────────────
 	const refreshBalance = useCallback(async () => {
 		try {
-			const bal = await rpcRequest<{ confirmed: number; pending: number; synced_to?: number | null; notes_unspent?: number }>(
-				"zcashShieldedBalance", undefined, 10000
-			)
-			setBalance({ confirmed: bal.confirmed, pending: bal.pending, notes_unspent: bal.notes_unspent })
+			const bal = await rpcRequest<{
+				confirmed: number
+				pending: number
+				synced_to?: number | null
+				notes_unspent?: number
+				spendable_confirmed?: number
+				spendable_notes_count?: number
+				min_confirmations?: number
+			}>("zcashShieldedBalance", undefined, 10000)
+			setBalance({
+				confirmed: bal.confirmed,
+				pending: bal.pending,
+				notes_unspent: bal.notes_unspent,
+				spendable_confirmed: bal.spendable_confirmed,
+				spendable_notes_count: bal.spendable_notes_count,
+				min_confirmations: bal.min_confirmations,
+			})
 			if (bal.synced_to != null) {
 				setSyncedTo(bal.synced_to)
 				setNeedsScan(false)
@@ -166,27 +195,31 @@ export function ZcashPrivacyTab() {
 		setLoadingTxs(false)
 	}, [])
 
-	// ── Auto-initialize: check status, auto-init from device if needed ──
+	// ── Auto-initialize: check status, auto-init FVK if needed, load data ──
+	// Trust the cached DB — render balance + txs from whatever the wallet has
+	// right now. The bun side runs a background incremental scan that picks
+	// up new blocks; scan-progress events drive a small inline indicator,
+	// not a full-screen blocker.
 	useEffect(() => {
 		let cancelled = false
 		;(async () => {
 			try {
-				const r = await rpcRequest<{ ready: boolean; fvk_loaded: boolean; address: string | null; synced_to?: number | null }>(
-					"zcashShieldedStatus", undefined, 5000
-				)
+				const r = await rpcRequest<{
+					ready: boolean; fvk_loaded: boolean; address: string | null;
+					synced_to?: number | null
+				}>("zcashShieldedStatus", undefined, 5000)
 				if (cancelled) return
 				if (!r.ready) { setStatus("not_running"); return }
 
-				// Set scan state from sidecar ready signal (available before any balance RPC)
 				if (r.synced_to != null) {
 					setSyncedTo(r.synced_to)
 					setNeedsScan(false)
 				} else {
+					// Fresh wallet — never scanned. UI prompts for the first scan.
 					setNeedsScan(true)
 				}
 
 				if (r.fvk_loaded && r.address) {
-					// FVK auto-loaded from DB — no device interaction needed
 					setOrchardAddress(r.address)
 					setStatus("ready")
 					refreshBalance()
@@ -194,13 +227,13 @@ export function ZcashPrivacyTab() {
 					return
 				}
 
-				// Sidecar ready but no FVK — auto-init from device
+				// Sidecar ready but no FVK — auto-init from device.
 				setStatus("initializing")
-				const result = await rpcRequest<{ fvk: any; address: string }>(
+				const initRes = await rpcRequest<{ fvk: any; address: string }>(
 					"zcashShieldedInit", { account: 0 }, 60000
 				)
 				if (cancelled) return
-				setOrchardAddress(result.address)
+				setOrchardAddress(initRes.address)
 				setStatus("ready")
 				refreshBalance()
 				loadTransactions()
@@ -213,22 +246,6 @@ export function ZcashPrivacyTab() {
 		return () => { cancelled = true }
 	}, [refreshBalance, loadTransactions])
 
-	// ── Manual re-init (fallback button, rarely needed) ───────────────
-	const handleInit = useCallback(async () => {
-		setStatus("initializing")
-		try {
-			const result = await rpcRequest<{ fvk: any; address: string }>(
-				"zcashShieldedInit", { account: 0 }, 60000
-			)
-			setOrchardAddress(result.address)
-			setStatus("ready")
-			refreshBalance()
-		} catch (e: any) {
-			console.error("[ZcashPrivacyTab] Init failed:", e)
-			setStatus("not_running")
-		}
-	}, [refreshBalance])
-
 	// ── Scan progress (pushed from bun via RPC message) ──────────────
 	const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
 	const smoothPercent = useRef(0)
@@ -237,8 +254,19 @@ export function ZcashPrivacyTab() {
 	useEffect(() => {
 		return onRpcMessage("scan-progress", (payload: ScanProgress) => {
 			setScanProgress(payload)
+			// scanInFlight tracks any active scan (background or manual). Drives
+			// the spinner in the status bar so the user sees something is happening
+			// during the auto-incremental catch-up at tab open.
+			setScanInFlight(payload.percent < 100)
+			if (payload.percent >= 100) {
+				// Scan just finished — refresh balance + tx history so the UI
+				// shows the new state immediately instead of waiting for the
+				// next manual refresh.
+				refreshBalance()
+				loadTransactions()
+			}
 		})
-	}, [])
+	}, [refreshBalance, loadTransactions])
 
 	// Smooth the progress bar animation
 	useEffect(() => {
@@ -455,55 +483,23 @@ export function ZcashPrivacyTab() {
 					<Box w="8px" h="8px" borderRadius="full" bg={statusColor} flexShrink={0} />
 					<Text fontSize="xs" color="kk.textSecondary">{statusText}</Text>
 				</Flex>
-				{status === "ready" && !orchardAddress && (
-					<Button
-						size="xs"
-						color="kk.gold"
-						variant="outline"
-						borderColor="kk.gold"
-						_hover={{ bg: "rgba(192,168,96,0.15)" }}
-						onClick={handleInit}
-					>
-						<Box as={FaShieldAlt} fontSize="10px" mr="1.5" />
-						{t("initializePrivacy")}
-					</Button>
-				)}
+				{/* No manual "Initialize Privacy" button — auto-init in the mount
+				    effect handles it. The status dot + label is enough. */}
 				{status === "not_running" && (
 					<Text fontSize="10px" color="kk.textMuted">{t("zcashCliRequired")}</Text>
 				)}
 				{status === "initializing" && <Spinner size="xs" color="kk.gold" />}
+				{scanInFlight && <Spinner size="xs" color="kk.gold" />}
 			</Flex>
 
-			{/* Section B: Shielded balance */}
+			{/* Section B: Shielded balance — show cached value immediately,
+			    overlay a thin progress bar while a scan is in flight. */}
 			{orchardAddress && (
 				<Box px="3" py="3" bg="rgba(236,178,68,0.04)" border="1px solid" borderColor="rgba(236,178,68,0.15)" borderRadius="lg">
 					<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
 						{t("shieldedBalance")}
 					</Text>
-					{needsScan ? (
-						<Flex direction="column" gap="2">
-							<Text fontSize="xs" color="#FBBF24">
-								{t("needsScanPrompt")}
-							</Text>
-							<Button
-								size="sm"
-								bg="kk.gold"
-								color="black"
-								fontWeight="600"
-								px="4"
-								py="2"
-								_hover={{ bg: "rgba(192,168,96,0.9)" }}
-								onClick={() => handleScan()}
-								disabled={scanState === "scanning"}
-							>
-								{scanState === "scanning" ? (
-									<><Spinner size="xs" mr="2" /> {t("scanning")}</>
-								) : (
-									t("scanFromBlock", { block: KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale) })
-								)}
-							</Button>
-						</Flex>
-					) : balance ? (
+					{balance ? (
 						<Flex direction="column" gap="1">
 							<Flex align="baseline" gap="2">
 								<Text fontSize="lg" fontWeight="700" fontFamily="mono" color="white">
@@ -523,7 +519,21 @@ export function ZcashPrivacyTab() {
 							)}
 						</Flex>
 					) : (
-						<Text fontSize="xs" color="kk.textMuted">{t("initRequired")}</Text>
+						<Flex align="center" gap="2">
+							<Spinner size="xs" color="kk.gold" />
+							<Text fontSize="xs" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>
+						</Flex>
+					)}
+					{/* Inline scan progress — only when bun is actively scanning */}
+					{scanProgress && scanProgress.percent < 100 && (
+						<Box mt="2">
+							<Box w="100%" h="3px" bg="rgba(255,255,255,0.06)" borderRadius="full" overflow="hidden">
+								<Box h="3px" bg="kk.gold" borderRadius="full" w={`${Math.min(100, displayPercent)}%`} transition="width 0.2s ease-out" />
+							</Box>
+							<Text fontSize="10px" color="kk.textMuted" mt="1">
+								{t("syncing")} {Math.floor(displayPercent)}% — {scanProgress.scannedHeight.toLocaleString(fiatLocale)} / {scanProgress.tipHeight.toLocaleString(fiatLocale)}
+							</Text>
+						</Box>
 					)}
 				</Box>
 			)}
@@ -671,17 +681,23 @@ export function ZcashPrivacyTab() {
 									_focus={{ borderColor: "#F87171", boxShadow: "none" }}
 									flex="1"
 								/>
-								{balance && balance.confirmed > 0 && (
+								{balance && (balance.spendable_confirmed ?? 0) > 0 && (
 									<Button
 										size="xs"
 										variant="ghost"
 										color="#F87171"
 										onClick={() => {
-											// ZIP-317 fee: 5000 * max(2, max(n_spends, n_orchard_outputs) + 1 transparent)
-											const nSpends = balance.notes_unspent || 1
-											const orchardActions = Math.max(nSpends, 1) // at least 1 change output
+											// Use the spendable view (10-conf-filtered) — using `confirmed`
+											// would let Max pick immature notes the builder later rejects.
+											// Fee mirrors `zip317_deshield_fee` in the sidecar:
+											//   orchard_actions = max(2, max(n_spends, 1))   // BundleType::DEFAULT pads to 2
+											//   logical_actions = orchard_actions + 1        // one transparent output
+											//   fee             = 5000 * max(2, logical_actions)
+											const spendable = balance.spendable_confirmed ?? 0
+											const nSpends = Math.max(1, balance.spendable_notes_count ?? 1)
+											const orchardActions = Math.max(2, Math.max(nSpends, 1))
 											const fee = 5000 * Math.max(2, orchardActions + 1)
-											const max = Math.max(0, balance.confirmed - fee)
+											const max = Math.max(0, spendable - fee)
 											setDeshieldAmount((max / 1e8).toFixed(8))
 										}}
 										_hover={{ bg: "rgba(248,113,113,0.1)" }}
@@ -764,7 +780,9 @@ export function ZcashPrivacyTab() {
 				</Box>
 			)}
 
-			{/* Section D: Scan controls */}
+			{/* Section D: Scan controls — manual rescan from a height,
+			    or force a full rescan ("Repair wallet"). Always visible
+			    so users have a path out if cached data ever drifts. */}
 			{orchardAddress && (
 				<Box px="3" py="3" bg="rgba(255,255,255,0.02)" borderRadius="lg">
 					<Flex align="center" justify="space-between" mb="2">

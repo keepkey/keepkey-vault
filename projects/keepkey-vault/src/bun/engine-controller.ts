@@ -1082,8 +1082,15 @@ export class EngineController extends EventEmitter {
               // path (separate timing bug). The verify is just a sanity log;
               // if it hangs, connectEmulator must NOT block forever or the
               // wizard / dashboard never sees state → ready.
+              //
+              // The underlying readChunk has its own ~240s timeout and we
+              // can't cancel it from here, so the .then below may fire long
+              // after the race resolves. Suppress its log in that case so
+              // the user doesn't see a spurious VERIFY FAIL minutes later.
+              let verifyAbandoned = false
               const verifyPromise = this.getEmulatorMnemonic()
                 .then(verifyMnemonic => {
+                  if (verifyAbandoned) return
                   if (!verifyMnemonic) {
                     console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
                   } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
@@ -1094,10 +1101,14 @@ export class EngineController extends EventEmitter {
                     console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
                   }
                 })
-                .catch(err => console.warn('[Engine] AUTO-RELOAD VERIFY error:', err?.message || err))
+                .catch(err => {
+                  if (verifyAbandoned) return
+                  console.warn('[Engine] AUTO-RELOAD VERIFY error:', err?.message || err)
+                })
               await Promise.race([
                 verifyPromise,
                 new Promise<void>(resolve => setTimeout(() => {
+                  verifyAbandoned = true
                   console.warn('[Engine] AUTO-RELOAD VERIFY timed out (3s) — continuing')
                   resolve()
                 }, 3000)),

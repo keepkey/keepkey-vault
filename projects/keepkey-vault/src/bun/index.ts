@@ -98,8 +98,8 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, setCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
+import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded } from "./txbuilder/zcash-shielded"
+import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
@@ -305,6 +305,16 @@ let walletConnectEnabled = false
 let swapsEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
+// True after the per-session incremental scan has caught the wallet up to
+// chain tip. The `verified` field on `zcashShieldedStatus` reports this so
+// API clients (and any future UI gating) get an honest answer about whether
+// validation has actually completed.
+let zcashVerifiedThisSession = false
+// True while the background scan is in flight. Separate flag so concurrent
+// status polls don't each kick their own scan, but the public `verified`
+// field above doesn't lie about completion. Cleared after the scan resolves
+// (whether successfully or not).
+let zcashBackgroundVerifyInFlight = false
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
@@ -558,6 +568,64 @@ async function raceVerifyMnemonic(expected: string): Promise<{ ok: true } | { ok
 			setTimeout(() => resolve({ ok: false, reason: 'verify timed out after 3s' }), 3000)
 		),
 	])
+}
+
+/**
+ * Run a fresh Orchard scan before any Zcash send/shield/deshield. The sidecar's
+ * note set is whatever was true at `synced_to`; if that's behind the chain tip,
+ * an "unspent" note may already be nullified on-chain and the broadcast will
+ * be rejected with `orchard double-spend: duplicate nullifier` after the user
+ * has already approved on the device. Calling scan first costs ~tens of ms
+ * when at tip and a few seconds when behind — strictly better than burning a
+ * device confirm + Halo2 proof on a doomed tx.
+ *
+ * Failure here is fatal — we'd rather surface "scan failed" than silently
+ * proceed with stale data.
+ */
+async function ensureZcashScanFresh(): Promise<void> {
+	try {
+		// Always incremental — picks up blocks since synced_to. Cheap (<1s when
+		// at tip, a few seconds when behind). NEVER trigger full rescan from
+		// here: a fresh wallet's first scan from release block is one thing,
+		// but a months-old wallet would take hours and lock the user out of
+		// every send. Full rescan must be a deliberate user action.
+		const result = await scanOrchardNotes()
+		if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+		zcashVerifiedThisSession = true
+		console.log(
+			`[zcash-presend] Incremental scan complete: synced_to=${result?.synced_to ?? '?'}, ` +
+			`new_notes=${result?.notes_found ?? 0}`,
+		)
+	} catch (e: any) {
+		throw new Error(`Pre-send chain scan failed: ${e?.message || e}. Retry after the network is reachable.`)
+	}
+}
+
+/**
+ * Background incremental scan kicked off once per session on first Privacy tab
+ * access. Catches the wallet up to chain tip from `synced_to` — typically a
+ * few seconds even on long-running wallets. Frontend gets `scan-progress`
+ * events. Failure is silently logged; the next send-time scan will retry.
+ *
+ * Does NOT do a full rescan. Full rescans take hours on real wallets and
+ * must be a deliberate user action (the manual "Repair wallet" / "Full scan"
+ * controls in the UI).
+ */
+function maybeStartBackgroundWalletVerification(): void {
+	if (zcashVerifiedThisSession || zcashBackgroundVerifyInFlight || !hasFvkLoaded()) return
+	zcashBackgroundVerifyInFlight = true
+	;(async () => {
+		try {
+			const result = await scanOrchardNotes()
+			if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+			zcashVerifiedThisSession = true
+			console.log(`[zcash] Background scan caught up: synced_to=${result?.synced_to ?? '?'}, new_notes=${result?.notes_found ?? 0}`)
+		} catch (e: any) {
+			console.warn('[zcash] Background scan failed (non-fatal):', e?.message || e)
+		} finally {
+			zcashBackgroundVerifyInFlight = false
+		}
+	})()
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
@@ -1496,6 +1564,43 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						})
 					}
 
+					// Attach shielded ZEC as a synthetic token under native Zcash so the
+					// dashboard renders it like an ERC20 sub-row. The Orchard FVK lives
+					// in the local sidecar; the seed never left the device.
+					if (zcashPrivacyEnabled && hasFvkLoaded()) {
+						try {
+							const shielded = await Promise.race([
+								getShieldedBalance(),
+								new Promise<null>(r => setTimeout(() => r(null), 5000)),
+							])
+							if (shielded && shielded.confirmed > 0) {
+								const zcashEntry = results.find(r => r.chainId === 'zcash')
+								if (zcashEntry) {
+									const zcashCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+									const zcashNative = pureNatives.find((d: any) => d.caip === zcashCaip)
+									const zecPrice = parseFloat(zcashNative?.priceUsd ?? '0')
+									const zecAmount = shielded.confirmed / 1e8
+									const shieldedUsd = zecAmount * zecPrice
+									zcashEntry.tokens = zcashEntry.tokens || []
+									zcashEntry.tokens.push({
+										symbol: 'zZEC',
+										name: 'Shielded ZEC',
+										balance: zecAmount.toFixed(8),
+										balanceUsd: shieldedUsd,
+										priceUsd: zecPrice,
+										caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded',
+										contractAddress: 'orchard',
+										networkId: 'bip122:00040fe8ec8471911baa1db1266ea15d',
+										decimals: 8,
+										type: 'shielded',
+									})
+									zcashEntry.balanceUsd = (zcashEntry.balanceUsd || 0) + shieldedUsd
+								}
+							}
+						} catch (e: any) {
+							console.warn('[getBalances] Shielded balance fetch failed:', e?.message || e)
+						}
+					}
 
 					// Push updated BTC accounts to frontend
 					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
@@ -2340,6 +2445,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const fvkLoaded = hasFvkLoaded()
 				const cached = getCachedFvk()
 				const scanState = getScanState()
+				// Privacy tab opening is the natural trigger for "validate the local
+				// wallet against the chain". Fires once per session, in the background;
+				// status response stays fast, scan-progress events drive any UI.
+				maybeStartBackgroundWalletVerification()
 				const result = {
 					ready: sidecarReady,
 					fvk_loaded: fvkLoaded,
@@ -2347,8 +2456,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fvk: cached?.fvk ?? null,
 					synced_to: scanState.syncedTo,
 					keepkey_release_block: scanState.releaseBlock,
+					verified: zcashVerifiedThisSession,
+					verifying: zcashBackgroundVerifyInFlight,
 				}
-				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} verifying=${result.verifying} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {
@@ -2356,16 +2467,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// If FVK is already loaded from DB, return it immediately
 				const cached = getCachedFvk()
 				if (cached) return cached
-				// Otherwise get from device
+				// Otherwise get from device — newly-loaded FVK invalidates any prior
+				// wallet validation, since notes for a different ak shouldn't carry over.
 				if (!engine.wallet) throw new Error('No device connected')
+				// initializeOrchardFromDevice updates the in-process FVK cache itself.
 				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
-				setCachedFvk(result.address, result.fvk)
+				zcashVerifiedThisSession = false
 				return result
 			},
 			zcashShieldedScan: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				// Direct RPC callers (and the REST handler that mirrors this) may not
+				// have gone through the Privacy tab's auto-init path, so the sidecar
+				// could have no FVK loaded — `scanOrchardNotes` would then fail with
+				// "No FVK set". Refresh from device first if needed.
+				await ensureFvkLoaded(engine.wallet, 0)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+				// A successful scan validates the wallet against the chain — even an
+				// incremental one from synced_to brings the unspent set up to truth.
+				zcashVerifiedThisSession = true
 				return result
 			},
 			zcashShieldedBalance: async () => {
@@ -2375,20 +2497,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldedSend: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureFvkLoaded(engine.wallet, 0)
+				await ensureZcashScanFresh()
 				// FVK already loaded means device supports Orchard — skip version check
 				// (version string may not be populated yet at call time)
+				// On the emulator, route the device-signing call through emuSigningOp so the
+				// confirm UI pops + ButtonAck/DLD get pre-written. Without this the firmware
+				// busy-loops in confirm_helper() and the watchdog SIGKILLs the bun process.
+				const signWrap = engine.isEmulator
+					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
+						operation: 'zcashShieldedSend', chain: 'Zcash',
+						to: params.recipient, value: String(params.amount), memo: params.memo,
+					}) as Promise<T>
+					: undefined
 				return await sendShielded(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
 					memo: params.memo,
-				})
+				}, { signWrap })
 			},
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureFvkLoaded(engine.wallet, params.account ?? 0)
+				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
 				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
-				// firmware; the Orchard part needs >= 7.14.0 (checked by zcashShieldedInit).
+				// firmware; the Orchard part needs >= 7.15.0 (checked by zcashShieldedInit).
 				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
 				if (!zcashDef) {
 					throw new Error('Zcash shielded chain definition not found')
@@ -2396,10 +2531,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { shieldZec } = await import("./txbuilder/zcash-shield")
 				const pioneer = await getPioneer()
 				try { rpc.send['shield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const signWrap = engine.isEmulator
+					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
+						operation: 'zcashShieldZec', chain: 'Zcash', value: String(params.amount),
+					}) as Promise<T>
+					: undefined
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
 					account: params.account,
-				})
+				}, { signWrap })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},
@@ -2407,13 +2547,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDeshieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				await ensureFvkLoaded(engine.wallet, 0)
+				await ensureZcashScanFresh()
 				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
 				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const signWrap = engine.isEmulator
+					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
+						operation: 'zcashDeshieldZec', chain: 'Zcash',
+						to: params.recipient, value: String(params.amount),
+					}) as Promise<T>
+					: undefined
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
 					account: params.account,
-				})
+				}, { signWrap })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},
@@ -2740,10 +2888,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setZcashPrivacyEnabled: async (params) => {
-				// Zcash shielded requires firmware >= 7.14.0
+				// Must match shared/chains.ts (zcash + zcash-shielded both at 7.15.0)
+				// and the helpers in txbuilder/zcash-shield.ts that require
+				// ZcashTransparentInput support (also 7.15.0). Letting users enable
+				// the feature on 7.14.0 only to have every action fail downstream is
+				// worse than blocking it here.
 				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.14.0') < 0)) {
-					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.14.0`)
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
+					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
 					return getAppSettings()
 				}
 				zcashPrivacyEnabled = params.enabled
@@ -3390,7 +3542,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Incomplete: fewer cached chains than supported (e.g. app update added new chains)
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const supportedChains = getAllChains().filter(c => !c.hidden && isChainSupported(c, fwVersion))
+				// Mirror the user-facing dashboard filter, not the raw `!c.hidden`:
+				//   - zcash-shielded never gets its own cache row (rendered as a token of native zcash)
+				//   - zcash is hidden by default but visible when the privacy flag is on
+				//   - other hidden chains stay internal-only
+				// Without this, freshly-enabled chains are never flagged as missing and
+				// the dashboard never auto-refreshes them into the cache.
+				const supportedChains = getAllChains().filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					if (c.id === 'zcash-shielded') return false
+					if (c.id === 'zcash') return zcashPrivacyEnabled
+					return !c.hidden
+				})
 				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
 				const missingChains = supportedChains.filter(c => !cachedChainIds.has(c.id))
 				if (missingChains.length > 0) {
@@ -4023,11 +4186,11 @@ engine.on('state-change', (state) => {
 			setSetting('bip85_enabled', '0')
 			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
-		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.14.0') < 0)) {
+		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
 			zcashPrivacyEnabled = false
 			setSetting('zcash_privacy_enabled', '0')
 			stopSidecar()
-			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.14.0`)
+			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
 	}
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
@@ -4054,6 +4217,18 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	btcAccounts.reset()
 	evmAddresses.reset()
+	// Zcash sidecar holds a per-seed FVK + scanned notes both in memory and in
+	// ~/.keepkey/zcash_wallet.db. After a seed change those are wrong for the
+	// new wallet — but `hasFvkLoaded()` would still return true (cache is
+	// populated for the old seed), so `ensureFvkLoaded()` would short-circuit
+	// and the next send would build a tx against the wrong FVK. Stop the
+	// sidecar (clears in-memory cache + verification flag), wipe the on-disk
+	// DB so the next start boots without auto-loading the stale FVK, and let
+	// the next access re-init from the device.
+	stopSidecar()
+	wipeSidecarWalletDb()
+	zcashVerifiedThisSession = false
+	zcashBackgroundVerifyInFlight = false
 	// Clear stale DB caches — old seed's pubkeys and balances are wrong for the new seed
 	if (deviceId) {
 		clearCachedPubkeys(deviceId)

@@ -2957,6 +2957,7 @@ dependencies = [
  "hex",
  "incrementalmerkletree 0.8.2",
  "log",
+ "nonempty 0.11.0",
  "orchard 0.12.0",
  "pasta_curves",
  "prost",
@@ -2977,6 +2978,7 @@ dependencies = [
  "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
+ "zcash_protocol 0.4.3",
  "zcash_protocol 0.7.2",
  "zip32 0.2.1",
 ]
