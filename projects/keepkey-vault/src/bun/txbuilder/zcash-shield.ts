@@ -10,7 +10,7 @@
  *   6. Broadcast via lightwalletd
  */
 
-import { sendCommand, isSidecarReady, startSidecar, getCachedFvk } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
 
 /** Compute P2PKH scriptPubKey from compressed pubkey hex: OP_DUP OP_HASH160 <20> <HASH160> OP_EQUALVERIFY OP_CHECKSIG */
@@ -235,14 +235,22 @@ async function _shieldZecInner(
 	// shielded notes; signing against an unconfirmed UTXO that later disappears
 	// produces a doomed tx. 10 matches zcashd / ywallet defaults.
 	//
-	// If Pioneer doesn't report confirmations or height, we let the UTXO through
-	// rather than blocking the user — better to broadcast and have the chain
-	// reject than to fail with a confusing UI error when the indexer schema
-	// changes. This matches the existing behaviour for non-Zcash UTXOs.
+	// Pioneer's UTXO indexer may report `confirmations` directly OR just `height`.
+	// We prefer `confirmations` (no tip lookup needed); when only `height` is
+	// present we derive confirmations from `synced_to` (the sidecar's latest
+	// scanned block height, ≈ chain tip after the auto-scan that runs upstream
+	// of every send). If neither is present we let the UTXO through rather than
+	// blocking the user — better to broadcast and have the chain reject than to
+	// fail with a confusing UI error when the indexer schema changes.
 	const MIN_CONFIRMATIONS = 10
+	const tipHeight = getScanState().syncedTo
 	const filtered = utxos.filter(u => {
 		if (typeof u.confirmations === 'number') return u.confirmations >= MIN_CONFIRMATIONS
-		// No confirmation info: don't block the send.
+		if (typeof u.height === 'number' && tipHeight != null && u.height > 0) {
+			const derived = tipHeight - u.height + 1
+			return derived >= MIN_CONFIRMATIONS
+		}
+		// No confirmation info we can use: don't block the send.
 		return true
 	})
 	if (filtered.length === 0 && utxos.length > 0) {

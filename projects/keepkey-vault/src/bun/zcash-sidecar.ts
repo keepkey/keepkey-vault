@@ -229,17 +229,20 @@ export async function sendCommand(cmd: string, params: Record<string, any> = {},
  */
 export function stopSidecar(): void {
 	ready = false
-	if (sidecarProc) {
+	const procToKill = sidecarProc
+	sidecarProc = null
+	if (procToKill) {
 		try {
 			// Send quit command gracefully
-			sidecarProc.stdin.write('{"cmd":"quit"}\n')
-			sidecarProc.stdin.flush()
+			procToKill.stdin.write('{"cmd":"quit"}\n')
+			procToKill.stdin.flush()
 		} catch { /* already dead */ }
 
-		// Force kill after 2s
+		// Force kill after 2s. Capture the local proc reference so a
+		// stop → start cycle within 2 seconds doesn't kill the new sidecar
+		// when the old timeout fires.
 		setTimeout(() => {
-			try { sidecarProc?.kill() } catch { /* already dead */ }
-			sidecarProc = null
+			try { procToKill.kill() } catch { /* already dead */ }
 		}, 2000)
 
 		console.log("[zcash-sidecar] Stopping")
@@ -249,6 +252,43 @@ export function stopSidecar(): void {
 	cachedFvk = null
 	cachedSyncedTo = null
 	cachedReleaseBlock = null
+}
+
+/**
+ * Delete the sidecar's on-disk wallet database (~/.keepkey/zcash_wallet.db).
+ *
+ * The sidecar persists the FVK + scanned notes between sessions and auto-loads
+ * them on startup. After a seed change (different mnemonic, passphrase change,
+ * or hidden-wallet activation) the persisted FVK belongs to the wrong wallet,
+ * and the auto-load would re-populate the in-process cache with stale state
+ * even after `stopSidecar()` clears it. Wipe the DB so the next start boots
+ * with no FVK and `ensureFvkLoaded()` re-derives from the device.
+ *
+ * Caller must `stopSidecar()` first — the file is locked while the sidecar
+ * holds it open.
+ */
+export function wipeSidecarWalletDb(): void {
+	try {
+		const home = process.env.HOME || process.env.USERPROFILE
+		if (!home) {
+			console.warn("[zcash-sidecar] Cannot wipe wallet DB: HOME / USERPROFILE not set")
+			return
+		}
+		const dbPath = `${home}/.keepkey/zcash_wallet.db`
+		const f = Bun.file(dbPath)
+		if (f.size > 0) {
+			// Use the synchronous filesystem API. unlinkSync would be ideal but
+			// keep the dep on bun's standard runtime by routing through node:fs.
+			// (Bun.file has no remove method; use require for consistency with
+			// the rest of this file.)
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const fs = require("node:fs")
+			fs.unlinkSync(dbPath)
+			console.log(`[zcash-sidecar] Wiped wallet DB at ${dbPath}`)
+		}
+	} catch (e: any) {
+		console.warn(`[zcash-sidecar] Failed to wipe wallet DB (non-fatal): ${e?.message || e}`)
+	}
 }
 
 /**

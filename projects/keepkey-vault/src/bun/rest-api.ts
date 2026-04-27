@@ -8,6 +8,7 @@ import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
+  ensureFvkLoaded,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
@@ -2678,6 +2679,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashScanRequest)
+          const wallet = requireWallet(engine)
+          // REST callers haven't necessarily gone through the Privacy tab init,
+          // so the sidecar may have no FVK yet — refresh from device first
+          // rather than failing with "No FVK set".
+          await ensureFvkLoaded(wallet, 0)
           const result = await scanOrchardNotes(body.start_height, body.full_rescan)
           return json(result)
         }

@@ -98,8 +98,8 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
+import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded } from "./txbuilder/zcash-shielded"
+import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
@@ -582,24 +582,6 @@ async function raceVerifyMnemonic(expected: string): Promise<{ ok: true } | { ok
  * Failure here is fatal — we'd rather surface "scan failed" than silently
  * proceed with stale data.
  */
-/**
- * Ensure the sidecar is running and the FVK is loaded before any operation
- * that touches notes (scan, balance, build, send). Direct RPC / REST callers
- * may not have gone through the Privacy tab's auto-init path, so the FVK
- * cache could be empty even when the device supports Orchard. Without this,
- * `ensureZcashScanFresh()` would call `scanOrchardNotes` against a sidecar
- * with no FVK and fail with "Sidecar not initialized".
- */
-async function ensureFvkLoaded(wallet: any, account: number = 0): Promise<void> {
-	if (!isSidecarReady()) {
-		await startSidecar()
-	}
-	if (!hasFvkLoaded()) {
-		console.log("[zcash] FVK not loaded — initializing from device before scan/send...")
-		await initializeOrchardFromDevice(wallet, account)
-	}
-}
-
 async function ensureZcashScanFresh(): Promise<void> {
 	try {
 		// Always incremental — picks up blocks since synced_to. Cheap (<1s when
@@ -2495,6 +2477,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			zcashShieldedScan: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				// Direct RPC callers (and the REST handler that mirrors this) may not
+				// have gone through the Privacy tab's auto-init path, so the sidecar
+				// could have no FVK loaded — `scanOrchardNotes` would then fail with
+				// "No FVK set". Refresh from device first if needed.
+				await ensureFvkLoaded(engine.wallet, 0)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an
@@ -4229,6 +4217,18 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	btcAccounts.reset()
 	evmAddresses.reset()
+	// Zcash sidecar holds a per-seed FVK + scanned notes both in memory and in
+	// ~/.keepkey/zcash_wallet.db. After a seed change those are wrong for the
+	// new wallet — but `hasFvkLoaded()` would still return true (cache is
+	// populated for the old seed), so `ensureFvkLoaded()` would short-circuit
+	// and the next send would build a tx against the wrong FVK. Stop the
+	// sidecar (clears in-memory cache + verification flag), wipe the on-disk
+	// DB so the next start boots without auto-loading the stale FVK, and let
+	// the next access re-init from the device.
+	stopSidecar()
+	wipeSidecarWalletDb()
+	zcashVerifiedThisSession = false
+	zcashBackgroundVerifyInFlight = false
 	// Clear stale DB caches — old seed's pubkeys and balances are wrong for the new seed
 	if (deviceId) {
 		clearCachedPubkeys(deviceId)

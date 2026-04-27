@@ -11,7 +11,7 @@
  *   5. Sidecar (or Pioneer API) broadcasts
  */
 
-import { sendCommand, isSidecarReady, startSidecar, setCachedFvk } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded } from "../zcash-sidecar"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -139,6 +139,24 @@ export async function initializeOrchardFromDevice(wallet: any, account: number =
 	// new FVK without each caller having to remember to call setCachedFvk().
 	setCachedFvk(result.address, result.fvk)
 	return { fvk: result.fvk, address: result.address }
+}
+
+/**
+ * Ensure the sidecar is running and the FVK is loaded before any operation
+ * that touches notes (scan, balance, build, send). Direct RPC / REST callers
+ * may not have gone through the Privacy tab's auto-init path, so the FVK
+ * cache could be empty even when the device supports Orchard. Without this,
+ * `scanOrchardNotes` / `buildShieldedTx` etc. would hit a sidecar with no
+ * FVK and fail with "No FVK set".
+ */
+export async function ensureFvkLoaded(wallet: any, account: number = 0): Promise<void> {
+	if (!isSidecarReady()) {
+		await startSidecar()
+	}
+	if (!hasFvkLoaded()) {
+		console.log("[zcash] FVK not loaded — initializing from device before scan/send...")
+		await initializeOrchardFromDevice(wallet, account)
+	}
 }
 
 /**
