@@ -44,9 +44,15 @@ let cachedReleaseBlock: number | null = null
  *
  * Search order:
  *  1. ZCASH_CLI_BIN env var (explicit override)
- *  2. Source-tree dev build (zcash-cli/target/release/)
- *  3. Source-tree debug build (zcash-cli/target/debug/)
- *  4. Bundled alongside the app (production)
+ *  2. Submodule dev build  (modules/keepkey-zcash/sidecar/target/{release,debug}/)
+ *  3. Bundled alongside the app (production — Electrobun copies the binary
+ *     into the app/ dir during build-zcash-cli + bundle steps)
+ *
+ * The sidecar source moved out of the vault repo into github.com/keepkey/keepkey-zcash
+ * (consumed here as a git submodule under modules/keepkey-zcash). The old in-tree
+ * `projects/keepkey-vault/zcash-cli/` location is no longer searched — anyone
+ * running off a stale checkout will get a clear "binary not found" error
+ * pointing at the new `make build-zcash-cli` flow.
  *
  * Throws if the binary cannot be found anywhere.
  */
@@ -62,23 +68,29 @@ function getBinaryPath(): string {
 
 	const candidates: string[] = []
 
-	// 1. cwd-relative (works if cwd is the project root)
+	// Path inside the keepkey-zcash submodule, relative to the vault repo root.
+	const submoduleSidecarRel = join("modules", "keepkey-zcash", "sidecar", "target")
+
+	// 1. cwd-relative (works if cwd is the vault repo root)
 	const cwdRoot = process.cwd()
-	candidates.push(join(cwdRoot, "zcash-cli", "target", "release", bin))
-	candidates.push(join(cwdRoot, "zcash-cli", "target", "debug", bin))
+	candidates.push(join(cwdRoot, submoduleSidecarRel, "release", bin))
+	candidates.push(join(cwdRoot, submoduleSidecarRel, "debug", bin))
 
 	// 2. Walk up from app bundle to source project root.
 	//    Dev:  _build/dev-macos-arm64/keepkey-vault-dev.app/Contents/Resources/app/bun/
-	//    → 7 levels reaches _build/, 8 levels reaches project root
-	for (const depth of [7, 8, 9]) {
+	//    → 7 levels reaches _build/, 8 levels reaches project root, 9 reaches the
+	//    workspace root (where modules/ lives).
+	for (const depth of [7, 8, 9, 10]) {
 		const fromBundle = resolve(import.meta.dir, ...Array(depth).fill(".."))
-		candidates.push(join(fromBundle, "zcash-cli", "target", "release", bin))
-		candidates.push(join(fromBundle, "zcash-cli", "target", "debug", bin))
+		candidates.push(join(fromBundle, submoduleSidecarRel, "release", bin))
+		candidates.push(join(fromBundle, submoduleSidecarRel, "debug", bin))
 	}
 
 	// 3. Relative to import.meta.dir for non-bundled dev (running bun directly from src/bun/)
-	const srcRelRoot = dirname(dirname(import.meta.dir))
-	candidates.push(join(srcRelRoot, "zcash-cli", "target", "release", bin))
+	//    src/bun/ → src/ → keepkey-vault/ → projects/ → vault repo root
+	const srcRelRoot = resolve(import.meta.dir, "..", "..", "..", "..")
+	candidates.push(join(srcRelRoot, submoduleSidecarRel, "release", bin))
+	candidates.push(join(srcRelRoot, submoduleSidecarRel, "debug", bin))
 
 	// 4. Production: Electrobun copies into app/ dir, bun code runs from app/bun/
 	const appDir = resolve(import.meta.dir, "..")
@@ -102,7 +114,9 @@ function getBinaryPath(): string {
 
 	const searched = candidates.map(p => `  - ${p}`).join("\n")
 	throw new Error(
-		`zcash-cli binary not found. Build it with: cd zcash-cli && cargo build --release\n` +
+		`zcash-cli binary not found. Build it from the vault repo root with: make build-zcash-cli\n` +
+		`(this builds inside the keepkey-zcash submodule at modules/keepkey-zcash/sidecar/.\n` +
+		`If the submodule is missing, run: git submodule update --init --recursive)\n` +
 		`Searched:\n${searched}`
 	)
 }

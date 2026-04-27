@@ -12,7 +12,10 @@ HDWALLET_BUILD_INPUTS := $(shell find modules/hdwallet/packages -type f \( -name
 PROTO_BUILD_STAMP := $(STAMP_DIR)/proto-build.stamp
 PROTO_BUILD_INPUTS := $(shell find modules/proto-tx-builder/src -type f \( -name '*.ts' -o -name '*.js' \) 2>/dev/null) modules/proto-tx-builder/tsconfig.json
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
-ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
+# Sidecar lives in the keepkey-zcash submodule under modules/keepkey-zcash/sidecar/.
+# Track sources there for incremental rebuilds.
+ZCASH_CLI_DIR := modules/keepkey-zcash/sidecar
+ZCASH_CLI_SOURCES := $(shell find $(ZCASH_CLI_DIR)/src -name '*.rs' 2>/dev/null) $(ZCASH_CLI_DIR)/Cargo.toml
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
@@ -28,9 +31,14 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init --recursive
-	@# Fetch all remotes (recursive) so upstream-behind checks see latest commits
-	@git submodule foreach --recursive --quiet 'git fetch --all --prune 2>/dev/null || true'
+	@# Init only top-level submodules. Nested submodules (e.g. proto-tx-builder's
+	@# osmosis-frontend, keepkey-firmware's trezor-crypto) are init'd by the
+	@# specific targets that need them — keepkey-firmware in particular has a
+	@# stale nested-submodule URL that would fail --recursive here, but vault's
+	@# vault-only build doesn't need its contents.
+	@git submodule update --init
+	@# Fetch top-level remotes so upstream-behind checks see latest commits.
+	@git submodule foreach --quiet 'git fetch --all --prune 2>/dev/null || true'
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
@@ -70,41 +78,41 @@ modules-clean:
 # The stamp tracks source changes — rebuild + retest only when .rs or Cargo.toml change.
 # FAIL FAST: cargo test runs BEFORE the binary is considered ready.
 
-$(ZCASH_CLI_STAMP): $(ZCASH_CLI_SOURCES) | $(STAMP_DIR)
+$(ZCASH_CLI_STAMP): $(ZCASH_CLI_SOURCES) $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	@echo "=== Zcash CLI: testing ==="
-	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	cd $(ZCASH_CLI_DIR) && cargo test
 	@echo "=== Zcash CLI: building (release) ==="
-	cd $(PROJECT_DIR)/zcash-cli && cargo build --release
+	cd $(ZCASH_CLI_DIR) && cargo build --release
 ifdef ELECTROBUN_DEVELOPER_ID
 	@echo "Signing zcash-cli binary..."
 	codesign --force --verbose --timestamp \
 		--sign "Developer ID Application: $(ELECTROBUN_DEVELOPER_ID) ($(ELECTROBUN_TEAMID))" \
 		--options runtime \
-		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
+		$(ZCASH_CLI_DIR)/target/release/zcash-cli
 endif
 	@touch $@
 
 build-zcash-cli: $(ZCASH_CLI_STAMP)
 
 test-zcash-cli:
-	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	cd $(ZCASH_CLI_DIR) && cargo test
 
 build-zcash-cli-debug:
-	cd $(PROJECT_DIR)/zcash-cli && cargo test
-	cd $(PROJECT_DIR)/zcash-cli && cargo build
+	cd $(ZCASH_CLI_DIR) && cargo test
+	cd $(ZCASH_CLI_DIR) && cargo build
 
 # Cross-compile zcash-cli for Intel Mac from Apple Silicon
 build-zcash-cli-intel:
 	@echo "=== Zcash CLI: cross-compiling for x86_64-apple-darwin ==="
-	cd $(PROJECT_DIR)/zcash-cli && cargo build --release --target x86_64-apple-darwin
+	cd $(ZCASH_CLI_DIR) && cargo build --release --target x86_64-apple-darwin
 ifdef ELECTROBUN_DEVELOPER_ID
 	@echo "Signing zcash-cli (Intel) binary..."
 	codesign --force --verbose --timestamp \
 		--sign "Developer ID Application: $(ELECTROBUN_DEVELOPER_ID) ($(ELECTROBUN_TEAMID))" \
 		--options runtime \
-		$(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
+		$(ZCASH_CLI_DIR)/target/x86_64-apple-darwin/release/zcash-cli
 endif
-	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
+	@echo "=== Intel zcash-cli ready at $(ZCASH_CLI_DIR)/target/x86_64-apple-darwin/release/zcash-cli ==="
 
 # --- Architecture Verification ---
 # Verify that the binaries in the tar.zst match the expected architecture.

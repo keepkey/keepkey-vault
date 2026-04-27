@@ -15,3 +15,6 @@
 	path = modules/electrobun
 	url = https://github.com/blackboardsh/electrobun.git
 	branch = main
+[submodule "modules/keepkey-zcash"]
+	path = modules/keepkey-zcash
+	url = https://github.com/keepkey/keepkey-zcash.git
