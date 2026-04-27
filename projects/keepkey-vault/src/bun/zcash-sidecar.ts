@@ -232,6 +232,16 @@ export function stopSidecar(): void {
 	const procToKill = sidecarProc
 	sidecarProc = null
 	if (procToKill) {
+		// Reject every in-flight request bound to this proc up-front. The new
+		// sidecar (if started after this stop) gets a fresh `pendingRequests`
+		// map and isn't aware of these req_ids, so leaving them in place would
+		// hang callers until their per-request timeout fires.
+		for (const [, pending] of pendingRequests) {
+			clearTimeout(pending.timeout)
+			pending.reject(new Error("Sidecar stopped"))
+		}
+		pendingRequests.clear()
+
 		try {
 			// Send quit command gracefully
 			procToKill.stdin.write('{"cmd":"quit"}\n')
@@ -483,15 +493,24 @@ function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 		}
 		try { reader.releaseLock() } catch { /* already released */ }
 
-		// Process exited — reject any pending requests
-		for (const [, pending] of pendingRequests) {
-			clearTimeout(pending.timeout)
-			pending.reject(new Error("Sidecar process exited"))
+		// Process exited. Only mutate global state if THIS proc is still the
+		// current one — `stopSidecar()` may have already detached us (new proc
+		// started in the meantime), in which case it has its own
+		// `pendingRequests` ownership and `ready` flag tied to the new proc.
+		// Touching them here would clear the new sidecar's in-flight requests
+		// and silently mark it not-ready.
+		if (sidecarProc === proc) {
+			for (const [, pending] of pendingRequests) {
+				clearTimeout(pending.timeout)
+				pending.reject(new Error("Sidecar process exited"))
+			}
+			pendingRequests.clear()
+			ready = false
+			sidecarProc = null
+			console.log("[zcash-sidecar] Process exited")
+		} else {
+			console.log("[zcash-sidecar] Old process exited (already detached)")
 		}
-		pendingRequests.clear()
-		ready = false
-		sidecarProc = null
-		console.log("[zcash-sidecar] Process exited")
 	})()
 }
 
