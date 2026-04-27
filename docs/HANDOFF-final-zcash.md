@@ -315,3 +315,135 @@ curl -s "https://api.keepkey.info/api/v1/utxo/balance/bip122:00040fe8ec8471911ba
 # Reproduce the dispatcher gap
 curl -s "https://api.keepkey.info/api/v1/getPubkeyBalance/zcash/<xpub>"
 ```
+
+---
+
+## 7) Resolution
+
+Fixed in commits `a2cbf80` and `a27a152`. First successful deshield broadcast:
+
+```
+txid 15dff751aa3bd591138ab76ae344899280dd4ae1bdb362214b3754691ef72e8b
+     1 spend (0.02730000 ZEC change note) → 0.001 ZEC transparent + 0.0262 ZEC change
+```
+
+### Two real bugs, both in the sidecar's ZIP-244/ZIP-317 implementation
+
+**Bug A — ZIP-244 §4.10b (the "could not validate orchard proof" failure)**
+
+`digest_transparent_sig_for_orchard` always built the full S.2 form
+(`hash_type || prevouts || amounts || scripts || sequence || outputs ||
+txin_sig_digest`). But ZIP-244 §4.10b says: when a transaction has no
+transparent inputs (or only a coinbase input), `transparent_sig_digest`
+is identical to the txid form — `prevouts || sequence || outputs`, three
+sub-digests, no hash_type byte, no per-input digest.
+
+Deshield is the only path with transparent outputs but no transparent
+inputs. Every broadcast hit a sighash mismatch:
+
+| Path | Layer | Has transparent inputs? | Sig digest form | Worked? |
+|---|---|---|---|---|
+| Private send | bun → sidecar → device | no, none at all | EMPTY (short-circuit on both sides) | ✅ |
+| Shield | bun → sidecar → device | yes | full S.2 (matches both sides) | ✅ |
+| **Deshield** | bun → sidecar → device | **no** (outputs only) | ours: full S.2; chain: §4.10b txid form | ❌ |
+
+The device signed under our wrong sighash, the chain re-derived the right
+sighash, the redpallas verification failed, consensus rejected the proof.
+
+**Fix**: short-circuit `digest_transparent_sig_for_orchard` to return
+`digest_transparent_txid` when `inputs.is_empty()`. Same commit also
+fixed a (cosmetic) bug in `digest_transparent_txid` itself — it was
+including amounts + scripts (sighash-only fields per §4.10) in the txid
+digest input, contradicting ZIP-244 §4.5.
+
+**Bug B — ZIP-317 fee for post-padding orchard action count**
+
+After Bug A was fixed, the next broadcast got past orchard proof
+validation but was rejected with "Unpaid actions is higher than the
+limit". ZIP-317 §3 logical_actions counts the FINAL orchard
+`action_count` (post-padding), not the pre-padding `max(n_spends,
+n_outputs)`. `BundleType::DEFAULT` pads to a 2-action minimum for the
+anonymity set. Old code computed fee against the pre-padding count and
+underpaid by exactly one action (5000 ZAT) on the standard 1-spend
+deshield.
+
+**Fix**: `zip317_deshield_fee` now floors orchard action count at 2.
+
+### What broke the symptom-chasing pattern
+
+Section 4.5 of this handoff (the retro after six failed cycles) called
+out the pattern: every fix was symptom-driven, not evidence-driven.
+What worked this time was a different methodology:
+
+1. **Empirical constraint first.** Confirmed private sends still work →
+   bug is unique to the deshield code path or its interaction with
+   chain validation. That single data point cut the hypothesis space
+   roughly in half.
+
+2. **Localized evidence before code changes.** Instead of writing
+   another fix patched upstream of the failure, wrote round-trip tests
+   in the sidecar that compared our v5 serializer + ZIP-244 digests
+   against `zcash_primitives::transaction::Transaction::read` — the
+   canonical reference. This is exactly the "Step 1 + 2" the prior
+   retro proposed but didn't execute.
+
+3. **The canary mattered.** The `roundtrip_v5_shielded_only` test
+   passed before the others were even run, validating the test
+   infrastructure (synthetic bundle, fixture bytes, comparison
+   helpers). When `roundtrip_v5_hybrid_*` failed, we knew it was a
+   real divergence, not a test bug.
+
+4. **The first failure pointed at the wrong bug.** Both hybrid
+   round-trip tests failed on `txid` mismatch. The instinct was "this
+   is the bug" — but the chain doesn't validate our reported txid, it
+   computes its own. Reading the canonical implementation
+   (`zcash_primitives::transaction::sighash_v5`) is what surfaced
+   §4.10b: the chain's `transparent_sig_digest` has a special case for
+   empty vin that we'd missed. The txid mismatch was a symptom of a
+   broader "we got the digest formulas wrong" problem; §4.10b was the
+   root cause for broadcast.
+
+5. **One bug at a time.** Fixed the §4.10b sighash, rebuilt, tried
+   broadcast. New error (ZIP-317 fee) — different layer. Resisted the
+   urge to bundle a speculative fix; localized evidence again ("Unpaid
+   actions" is a fee message, not a sighash one), one-line fix, test,
+   ship.
+
+### Specifically what NOT to do next time
+
+- **Don't propose "Plan C / migrate to `zcash_client_sqlite::WalletDb`"
+  as a remedy for spec bugs.** Migration would have required a
+  multi-week rewrite to fix two bugs that were ultimately ~10 lines
+  changed across two files. Plan C is still the right move if and when
+  the wallet's note-storage assumptions break under multi-account or
+  reorg-handling pressure — but it's the wrong tool for "our digest
+  function is missing a special case."
+
+- **Don't trust per-sig local verification as proof of correctness.**
+  `finalize_*_pczt` already does `rk.verify(&sighash, &sig)` per action,
+  and that always passed — because we verified against the SAME wrong
+  sighash we sent the device. The chain re-derives sighash from the
+  wire bytes; if our bytes-to-sighash function diverges from canonical,
+  local verify and chain verify disagree silently.
+
+- **Don't write your own ZIP-244 implementation when a reference
+  exists.** Our `digest_transparent_sig_for_orchard` got both §4.5
+  (txid) and §4.10b (empty-vin special case) wrong. The standalone
+  Rust `zcash_primitives::transaction::sighash_v5` is ~150 lines and
+  comprehensively tested by the librustzcash maintainers. We should
+  consider replacing the `zip244` module entirely with calls into
+  `zcash_primitives` — but that's coupled to the `Authorization` trait
+  and the `TransparentAuthorizingContext` plumbing, so it's a clean-up
+  arc, not a quick fix. Until then, the round-trip tests added in
+  `pczt_builder.rs` give us a regression net against future drift.
+
+### Regression coverage
+
+- `zip244::tests::test_transparent_sig_digest_uses_txid_form_when_vin_empty`
+  — direct unit test for §4.10b
+- `pczt_builder::roundtrip_v5_tests::roundtrip_v5_shielded_only`
+- `pczt_builder::roundtrip_v5_tests::roundtrip_v5_hybrid_shield`
+- `pczt_builder::roundtrip_v5_tests::roundtrip_v5_hybrid_deshield`
+- `pczt_builder::tests::test_zip317_deshield_fee_post_padding`
+
+All run in <1.5s, no device, no network. CI-safe.
