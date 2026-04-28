@@ -723,6 +723,90 @@ export function clearApiLogs() {
   }
 }
 
+export interface ApiLogFilter {
+  route?: string
+  activityType?: string
+  txid?: string
+  chain?: string
+  since?: number
+  until?: number
+  limit?: number
+  offset?: number
+}
+
+/** Filtered query over api_log (newest first). Returns full request/response bodies. */
+export function findApiLogs(filter: ApiLogFilter = {}): ApiLogEntry[] {
+  try {
+    if (!db) return []
+    const where: string[] = []
+    const args: any[] = []
+    if (filter.route)        { where.push('route = ?');         args.push(filter.route) }
+    if (filter.activityType) { where.push('activity_type = ?'); args.push(filter.activityType) }
+    if (filter.txid)         { where.push('txid = ?');          args.push(filter.txid) }
+    if (filter.chain)        { where.push('chain = ?');         args.push(filter.chain) }
+    if (filter.since)        { where.push('timestamp >= ?');    args.push(filter.since) }
+    if (filter.until)        { where.push('timestamp <= ?');    args.push(filter.until) }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500)
+    const offset = Math.max(filter.offset ?? 0, 0)
+    const rows = db.query(
+      `SELECT id, method, route, timestamp, duration_ms, status, app_name, image_url,
+              request_body, response_body, txid, chain, activity_type
+       FROM api_log ${whereSql}
+       ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(...args, limit, offset) as Array<any>
+    return rows.map(r => ({
+      id: r.id,
+      method: r.method,
+      route: r.route,
+      timestamp: r.timestamp,
+      durationMs: r.duration_ms,
+      status: r.status,
+      appName: r.app_name,
+      imageUrl: r.image_url || undefined,
+      requestBody: r.request_body ? JSON.parse(r.request_body) : undefined,
+      responseBody: r.response_body ? JSON.parse(r.response_body) : undefined,
+      txid: r.txid || undefined,
+      chain: r.chain || undefined,
+      activityType: r.activity_type || undefined,
+    }))
+  } catch (e: any) {
+    console.warn('[db] findApiLogs failed:', e.message)
+    return []
+  }
+}
+
+/** Single api_log entry by id with full bodies. */
+export function getApiLogById(id: number): ApiLogEntry | null {
+  try {
+    if (!db) return null
+    const r: any = db.query(
+      `SELECT id, method, route, timestamp, duration_ms, status, app_name, image_url,
+              request_body, response_body, txid, chain, activity_type
+       FROM api_log WHERE id = ? LIMIT 1`
+    ).get(id)
+    if (!r) return null
+    return {
+      id: r.id,
+      method: r.method,
+      route: r.route,
+      timestamp: r.timestamp,
+      durationMs: r.duration_ms,
+      status: r.status,
+      appName: r.app_name,
+      imageUrl: r.image_url || undefined,
+      requestBody: r.request_body ? JSON.parse(r.request_body) : undefined,
+      responseBody: r.response_body ? JSON.parse(r.response_body) : undefined,
+      txid: r.txid || undefined,
+      chain: r.chain || undefined,
+      activityType: r.activity_type || undefined,
+    }
+  } catch (e: any) {
+    console.warn('[db] getApiLogById failed:', e.message)
+    return null
+  }
+}
+
 
 // ── Recent Activity (unified from api_log + swap_history) ─────────────
 

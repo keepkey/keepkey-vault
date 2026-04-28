@@ -17,7 +17,7 @@ import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting } from './db'
+import { getSetting, findApiLogs, getApiLogById } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
@@ -571,6 +571,8 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino</code></td><td>Sign Cosmos amino</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign Solana tx</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Signing history (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity/:id</code></td><td>Single audit entry with full request/response bodies (auth)</td><td>5s</td></tr>
         </tbody>
       </table>
     </div>
@@ -2527,6 +2529,36 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             cached_count: results.length,
             total_requested: paths.length,
           })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SIGNING HISTORY / AUDIT LOG (auth-required — exposes payloads)
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/activity' && method === 'GET') {
+          auth.requireAuth(req)
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const toInt = (v: string | null) => v ? parseInt(v, 10) : undefined
+          const entries = findApiLogs({
+            route:        q.get('route')         || undefined,
+            activityType: q.get('activityType')  || undefined,
+            txid:         q.get('txid')          || undefined,
+            chain:        q.get('chain')         || undefined,
+            since:        toInt(q.get('since')),
+            until:        toInt(q.get('until')),
+            limit:        toInt(q.get('limit')),
+            offset:       toInt(q.get('offset')),
+          })
+          return json({ entries, count: entries.length })
+        }
+
+        if (path.startsWith('/api/v1/activity/') && method === 'GET') {
+          auth.requireAuth(req)
+          const id = parseInt(path.split('/').pop() || '', 10)
+          if (!Number.isFinite(id)) return json({ error: 'Invalid id' }, 400)
+          const entry = getApiLogById(id)
+          if (!entry) return json({ error: 'Not found' }, 404)
+          return json(entry)
         }
 
         // ═══════════════════════════════════════════════════════════════
