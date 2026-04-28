@@ -17,7 +17,7 @@ import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting } from './db'
+import { getSetting, findApiLogs, getApiLogById } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
@@ -571,6 +571,8 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino</code></td><td>Sign Cosmos amino</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign Solana tx</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Signing history (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity/:id</code></td><td>Single audit entry with full request/response bodies (auth)</td><td>5s</td></tr>
         </tbody>
       </table>
     </div>
@@ -1042,7 +1044,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // Log the request with body + response + duration.
         // Sanitize: strip sensitive fields from signing payloads to prevent
         // leaking signatures, transaction data, or typed-data content to audit log.
-        if (callbacks?.onApiLog) {
+        //
+        // The audit-log read endpoints don't get logged — otherwise each read
+        // would persist the full prior history into a new row, recursively
+        // ballooning response_body across repeated reads.
+        const skipAuditLog = path.startsWith('/api/v1/activity')
+        if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
           // so the signing *inputs* (message, typedData, calldata, etc.) must
@@ -1054,8 +1061,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // returned to the dApp in the response body and don't add debug
           // value when duplicated in the log, so we still trim those to keep
           // log rows compact.
+          // Note: 'signature' is intentionally NOT trimmed — at ~130 chars it's small,
+          // and the audit log is the only place to retrieve a prior signature for
+          // regression debugging (recover-and-compare) without re-issuing the sign.
           const SENSITIVE_OUTPUT_KEYS = new Set([
-            'signature', 'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
+            'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
           ])
           const trimOutputs = (obj: any, depth = 0): any => {
             if (!obj || typeof obj !== 'object' || depth > 8) return obj
@@ -2527,6 +2537,51 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             cached_count: results.length,
             total_requested: paths.length,
           })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SIGNING HISTORY / AUDIT LOG (auth-required — exposes payloads)
+        // PRIVACY: standard-wallet history is hidden during passphrase sessions,
+        // matching the RPC `getApiLogs` / `getRecentActivity` behavior.
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/activity' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const parseNumParam = (name: string): number | undefined => {
+            const raw = q.get(name)
+            if (raw === null) return undefined
+            const n = Number(raw)
+            if (!Number.isFinite(n)) {
+              throw new HttpError(400, `Invalid ${name}: must be a number`)
+            }
+            return n
+          }
+          const entries = findApiLogs({
+            route:        q.get('route')         || undefined,
+            activityType: q.get('activityType')  || undefined,
+            txid:         q.get('txid')          || undefined,
+            chain:        q.get('chain')         || undefined,
+            since:        parseNumParam('since'),
+            until:        parseNumParam('until'),
+            limit:        parseNumParam('limit'),
+            offset:       parseNumParam('offset'),
+          })
+          return json({ entries, count: entries.length })
+        }
+
+        if (path.startsWith('/api/v1/activity/') && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const tail = path.split('/').pop() || ''
+          const id = Number(tail)
+          if (!Number.isFinite(id) || !Number.isInteger(id)) {
+            return json({ error: 'Invalid id' }, 400)
+          }
+          const entry = getApiLogById(id)
+          if (!entry) return json({ error: 'Not found' }, 404)
+          return json(entry)
         }
 
         // ═══════════════════════════════════════════════════════════════
