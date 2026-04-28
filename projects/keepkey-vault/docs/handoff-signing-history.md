@@ -6,7 +6,7 @@ Signing history is now available via authenticated REST. Use it to debug the 7.1
 
 ## Endpoints
 
-Both require auth (paired-app API key, same as `/api/portfolio/:id`).
+Both require auth via `Authorization: Bearer <token>` (paired-app API key from `POST /auth/pair`, same posture as `/api/portfolio/:id`). During a passphrase / hidden-wallet session, both endpoints return empty / 404 to prevent leaking standard-wallet audit history across sessions.
 
 ### `GET /api/v1/activity`
 
@@ -39,11 +39,13 @@ Single entry with full request/response bodies. Returns 404 if not found, 400 on
 1. Trigger the failing operation on the vault. (Approve on device.)
 2. Pull the most recent `eth/sign-typed-data` entry:
    ```bash
-   curl -s -H "x-api-key: $KEEPKEY_API_KEY" \
+   curl -s -H "Authorization: Bearer $KEEPKEY_API_KEY" \
      'http://localhost:1646/api/v1/activity?route=/eth/sign-typed-data&limit=1' | jq
    ```
 3. The full `requestBody.typedData` (domain + types + primaryType + message) and `responseBody.signature` are inline. Hand off to `tests/evm-eip712/uniswap-permit-prod.js` (offline half) to recover the address.
 4. If the signature doesn't recover to the device's ETH address, the vault produced a bad sig. Diff host-computed digest vs firmware to localize.
+
+> **Note on what is persisted in `responseBody`.** The signature itself is preserved verbatim (it's small and we need it for offline replay). Larger signed-output blobs — `serialized` / `serializedTx` / `signedTx` / `signed` / `signedPayload` — are still stripped to `[trimmed]` in the audit log to keep rows compact. Those are derivable from request body + signature, so the offline replay path doesn't need them from the audit log.
 
 ## What is and isn't logged
 
@@ -54,7 +56,7 @@ Single entry with full request/response bodies. Returns 404 if not found, 400 on
 - Body sizes are not currently truncated — full typed data and full Solana message bytes are persisted as JSON.
 
 **Not logged** (intentional — privacy):
-- Anything originating from a passphrase / hidden-wallet session. The `engine.isPassphraseWallet` guard at `src/bun/index.ts:584` skips DB writes for those.
+- Anything originating from a passphrase / hidden-wallet session. The `engine.isPassphraseWallet` guard at `src/bun/index.ts:584` skips DB writes for those, and the REST read endpoints additionally refuse to serve cached standard-wallet history while a passphrase session is active.
 - Read-only ops (address derivation, getFeatures, etc.) — they go through the same `onApiLog` callback but aren't tagged with `activityType`, so they'll appear in unfiltered `findApiLogs` but are filtered out by `activityType=sign`.
 
 ## Limits & retention

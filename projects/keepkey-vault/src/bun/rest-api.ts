@@ -1056,8 +1056,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // returned to the dApp in the response body and don't add debug
           // value when duplicated in the log, so we still trim those to keep
           // log rows compact.
+          // Note: 'signature' is intentionally NOT trimmed — at ~130 chars it's small,
+          // and the audit log is the only place to retrieve a prior signature for
+          // regression debugging (recover-and-compare) without re-issuing the sign.
           const SENSITIVE_OUTPUT_KEYS = new Set([
-            'signature', 'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
+            'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
           ])
           const trimOutputs = (obj: any, depth = 0): any => {
             if (!obj || typeof obj !== 'object' || depth > 8) return obj
@@ -2533,29 +2536,44 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         // ═══════════════════════════════════════════════════════════════
         // SIGNING HISTORY / AUDIT LOG (auth-required — exposes payloads)
+        // PRIVACY: standard-wallet history is hidden during passphrase sessions,
+        // matching the RPC `getApiLogs` / `getRecentActivity` behavior.
         // ═══════════════════════════════════════════════════════════════
         if (path === '/api/v1/activity' && method === 'GET') {
           auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
           const url = new URL(req.url)
           const q = url.searchParams
-          const toInt = (v: string | null) => v ? parseInt(v, 10) : undefined
+          const parseNumParam = (name: string): number | undefined => {
+            const raw = q.get(name)
+            if (raw === null) return undefined
+            const n = Number(raw)
+            if (!Number.isFinite(n)) {
+              throw new HttpError(400, `Invalid ${name}: must be a number`)
+            }
+            return n
+          }
           const entries = findApiLogs({
             route:        q.get('route')         || undefined,
             activityType: q.get('activityType')  || undefined,
             txid:         q.get('txid')          || undefined,
             chain:        q.get('chain')         || undefined,
-            since:        toInt(q.get('since')),
-            until:        toInt(q.get('until')),
-            limit:        toInt(q.get('limit')),
-            offset:       toInt(q.get('offset')),
+            since:        parseNumParam('since'),
+            until:        parseNumParam('until'),
+            limit:        parseNumParam('limit'),
+            offset:       parseNumParam('offset'),
           })
           return json({ entries, count: entries.length })
         }
 
         if (path.startsWith('/api/v1/activity/') && method === 'GET') {
           auth.requireAuth(req)
-          const id = parseInt(path.split('/').pop() || '', 10)
-          if (!Number.isFinite(id)) return json({ error: 'Invalid id' }, 400)
+          if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const tail = path.split('/').pop() || ''
+          const id = Number(tail)
+          if (!Number.isFinite(id) || !Number.isInteger(id)) {
+            return json({ error: 'Invalid id' }, 400)
+          }
           const entry = getApiLogById(id)
           if (!entry) return json({ error: 'Not found' }, 404)
           return json(entry)
