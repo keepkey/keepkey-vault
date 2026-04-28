@@ -26,6 +26,9 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 	"/mayachain/sign-amino-deposit": "signing.methodMayaDeposit",
 	"/osmosis/sign-amino": "signing.methodOsmosisSign",
 	"/solana/sign-transaction": "signing.methodSolanaSignTx",
+	"/solana/sign-transaction-blind": "signing.methodSolanaSignTx",
+	"/solana/sign-and-send": "signing.methodSolanaSignTx",
+	"/solana/sign-and-send-blind": "signing.methodSolanaSignTx",
 	"/solana/sign-message": "signing.methodSolanaSignTx",
 	"/ton/sign-transaction": "signing.methodTonSignTx",
 	"/tron/sign-transaction": "signing.methodTronSignTx",
@@ -190,6 +193,30 @@ function SolanaDecodeFailureBanner({
 					{error}
 				</Text>
 			)}
+		</Flex>
+	)
+}
+
+// Versioned (v0+) Solana txs route through the device's message-signing path,
+// which shows raw bytes — not per-instruction details. The user genuinely
+// cannot verify what they are signing on either side. Stronger warning than
+// the decode-failure banner, which still tells users to "verify on screen."
+function SolanaBlindSignBanner({ t }: { t: (k: string, f?: string) => string }) {
+	return (
+		<Flex
+			direction="column" gap="1" w="100%"
+			bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)"
+			borderRadius="lg" px="3" py="2"
+		>
+			<Text fontSize="2xs" fontWeight="700" color="#EF4444">
+				{t("signing.solanaBlindSignTitle", "⚠ Blind Signing — Versioned Transaction")}
+			</Text>
+			<Text fontSize="2xs" color="kk.textSecondary">
+				{t(
+					"signing.solanaBlindSignDescription",
+					"This is a versioned (v0) Solana transaction. The KeepKey firmware cannot parse it, so the device screen will show only an opaque hash instead of per-instruction details. Only approve if you fully trust this dApp.",
+				)}
+			</Text>
 		</Flex>
 	)
 }
@@ -459,7 +486,17 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 	// /solana/sign-message is inherently an opaque signed message with no
 	// "tx decode" step. Showing a "Clear-Signing Unavailable" banner there
 	// would be a false-positive warning about a preview that never exists.
-	const isSolanaSignTx = request.method === '/solana/sign-transaction'
+	// `-blind` variants are versioned (v0+) Solana txs that the firmware
+	// can't parse — they're routed through solanaSignMessage on the device,
+	// so the user gets no per-instruction display. Treat them like
+	// /solana/sign-transaction so the Clear-Signing-Unavailable banner fires
+	// (the warning text — "approving will sign an opaque message, verify on
+	// your KeepKey screen" — applies verbatim).
+	const isSolanaSignTx =
+		request.method === '/solana/sign-transaction' ||
+		request.method === '/solana/sign-transaction-blind' ||
+		request.method === '/solana/sign-and-send' ||
+		request.method === '/solana/sign-and-send-blind'
 	const isSolanaRequest =
 		isSolanaSignTx ||
 		request.method === '/solana/sign-message' ||
@@ -615,9 +652,11 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 					<BlindSigningBanner enabled={advancedModeEnabled} confirming={showAdvancedConfirm} onEnable={handleEnableAdvancedMode} onCancel={() => setShowAdvancedConfirm(false)} t={t} />
 				)}
 
-				{/* ── Solana clear-sign failure warning (tx-only — sign-message has no preview by design) ── */}
+				{/* ── Solana clear-sign failure / blind-sign warning ── */}
 				{isSolanaSignTx && !request.solanaDecoded && (
-					<SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
+					(request.method === '/solana/sign-transaction-blind' || request.method === '/solana/sign-and-send-blind')
+						? <SolanaBlindSignBanner t={t} />
+						: <SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
 				)}
 
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}

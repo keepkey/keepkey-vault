@@ -344,6 +344,25 @@ let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 // WalletConnect manager — lazily initialized when user pairs
 let wcManager: WalletConnectManager | null = null
+
+// Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
+// approval, device pairing approval) can independently want the window
+// elevated; using the raw API per-event drops the window prematurely when
+// any one source dismisses while another is still pending.
+let _alwaysOnTopRefs = 0
+function acquireWindowFocus() {
+	_alwaysOnTopRefs++
+	if (_alwaysOnTopRefs === 1) {
+		try { mainWindow.setAlwaysOnTop(true); mainWindow.focus() } catch { /* window not ready */ }
+	}
+}
+function releaseWindowFocus() {
+	if (_alwaysOnTopRefs === 0) return // defensive: never go negative
+	_alwaysOnTopRefs--
+	if (_alwaysOnTopRefs === 0) {
+		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+	}
+}
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
 	wcManager = new WalletConnectManager({
@@ -351,19 +370,169 @@ function getOrCreateWcManager(): WalletConnectManager {
 			const sel = evmAddresses.getSelectedAddress()
 			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
 		},
+		ensureEvmAddressInfo: async () => {
+			if (!engine.wallet) return null
+			if (!evmAddresses.isInitialized) {
+				try { await evmAddresses.initialize(engine.wallet) }
+				catch (e: any) { console.warn('[WC] EVM init failed:', e.message); return null }
+			}
+			const sel = evmAddresses.getSelectedAddress()
+			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
+		},
 		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
 		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
 		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
+		getCosmosAccountInfo: async (caipChain) => {
+			if (!engine.wallet) return null
+			// Only cosmoshub-4 supported in v1; THOR/Maya/Osmosis use the cosmos
+			// namespace too but need different signers and bech32 prefixes — follow-up.
+			if (caipChain !== 'cosmos:cosmoshub-4') return null
+			const addressNList = [0x8000002C, 0x80000076, 0x80000000, 0, 0] // m/44'/118'/0'/0/0
+			try {
+				const addrResult = await engine.wallet.cosmosGetAddress({ addressNList, showDisplay: false })
+				const address = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				if (!address) return null
+				// Derive raw 33-byte compressed pubkey from BIP32 xpub via ethers HDNode.
+				const pubkeys = await engine.wallet.getPublicKeys([{ addressNList, curve: 'secp256k1', coin: 'Atom' }])
+				const xpub = pubkeys?.[0]?.xpub
+				if (!xpub) return null
+				const { ethers } = await import('ethers')
+				const node = ethers.utils.HDNode.fromExtendedKey(xpub)
+				const pubkeyHex = node.publicKey.replace(/^0x/, '')
+				const pubkeyBase64 = Buffer.from(pubkeyHex, 'hex').toString('base64')
+				return { address, pubkeyBase64, addressNList }
+			} catch (e: any) {
+				console.warn('[WC] getCosmosAccountInfo failed:', e.message)
+				return null
+			}
+		},
+		cosmosSignAmino: async ({ addressNList, signDoc }) => {
+			if (!engine.wallet) throw new Error('Device disconnected')
+			// Translate WC StdSignDoc → hdwallet CosmosSignTx.
+			// StdSignDoc: { chain_id, account_number, sequence, fee, msgs, memo }
+			// hdwallet:   { addressNList, tx: { msg, fee, signatures, memo }, chain_id, account_number, sequence }
+			const result = await engine.wallet.cosmosSignTx({
+				addressNList,
+				tx: {
+					msg: signDoc.msgs ?? [],
+					fee: signDoc.fee,
+					signatures: [],
+					memo: signDoc.memo ?? '',
+				},
+				chain_id: signDoc.chain_id,
+				account_number: String(signDoc.account_number ?? '0'),
+				sequence: String(signDoc.sequence ?? '0'),
+			})
+			const sig = result?.signatures?.[0]
+			if (!sig) throw new Error('Device returned no signature')
+			// hdwallet may return hex; WC requires base64.
+			const sigStripped = sig.startsWith('0x') ? sig.slice(2) : sig
+			const signatureBase64 = /^[0-9a-f]+$/i.test(sigStripped)
+				? Buffer.from(sigStripped, 'hex').toString('base64')
+				: sigStripped
+			return { signatureBase64 }
+		},
+		getSolanaAccountInfo: async (caipChain) => {
+			if (!engine.wallet) return null
+			if (caipChain !== 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp') return null
+			// Solana uses ed25519 with a 4-element fully hardened path m/44'/501'/0'/0'
+			// (NOT extended to a 5th index — see rest-api.ts:2441).
+			const addressNList = [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+			try {
+				const r = await engine.wallet.solanaGetAddress({ addressNList, showDisplay: false })
+				const address = typeof r === 'string' ? r : (r as any)?.address
+				if (!address) return null
+				return { address, addressNList }
+			} catch (e: any) {
+				console.warn('[WC] getSolanaAccountInfo failed:', e.message)
+				return null
+			}
+		},
+		solanaSignMessageRaw: async ({ addressNList, messageBase58 }) => {
+			if (!engine.wallet) throw new Error('Device disconnected')
+			const bs58 = (await import('bs58')).default
+			const messageBytes = Buffer.from(bs58.decode(messageBase58))
+			const result = await engine.wallet.solanaSignMessage({
+				addressNList,
+				message: messageBytes,
+				showDisplay: true,
+			})
+			const sig = result?.signature
+			if (!sig) throw new Error('Device returned no signature')
+			const sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+			return { signatureBase64: Buffer.from(sigBytes).toString('base64') }
+		},
+		broadcastViaPioneer: async ({ networkId, serialized }) => {
+			const pioneer = await getPioneer()
+			const resp = await pioneer.Broadcast({ networkId, serialized })
+			const data = resp?.data ?? resp
+			const txid = data?.txid || data?.tx_hash || data?.hash
+			if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(data).slice(0, 200)}`)
+			return String(txid)
+		},
+		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
+			if (!engine.wallet) throw new Error('Device disconnected')
+			const { parseSolanaTx, solanaMessageSlice, parseSolanaMessage } = await import('./solana-tx')
+			const bs58 = (await import('bs58')).default
+			const fullTx = Buffer.from(transactionBase64, 'base64')
+			const parsed = parseSolanaTx(fullTx)
+			const messageBytes = solanaMessageSlice(fullTx, parsed)
+
+			// Find which signer slot belongs to our account. Required signers are
+			// the first `numRequiredSignatures` entries of `staticAccounts`. If our
+			// pubkey isn't among them, this tx isn't ours to sign and writing to
+			// any slot would produce an invalid signed transaction.
+			const message = parseSolanaMessage(messageBytes)
+			const ourPubkey = bs58.decode(signerAddress)
+			if (ourPubkey.length !== 32) {
+				throw new Error(`Invalid signer address: bs58-decoded length ${ourPubkey.length} (expected 32)`)
+			}
+			let signerIdx = -1
+			for (let i = 0; i < message.header.numRequiredSignatures; i++) {
+				const acct = message.staticAccounts[i]
+				if (acct && acct.length === ourPubkey.length && Buffer.from(acct).equals(Buffer.from(ourPubkey))) {
+					signerIdx = i
+					break
+				}
+			}
+			if (signerIdx < 0) {
+				throw new Error(`Wallet account ${signerAddress} is not a required signer for this transaction`)
+			}
+
+			let sigBytes: Uint8Array
+			if (parsed.isVersioned) {
+				const msgRes = await engine.wallet.solanaSignMessage({ addressNList, message: messageBytes, showDisplay: true })
+				const sig = msgRes?.signature
+				if (!sig) throw new Error('Device returned no signature for v0 tx')
+				sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+			} else {
+				const result = await engine.wallet.solanaSignTx({
+					addressNList,
+					rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
+				})
+				if (!result?.signature) throw new Error('Device returned no signature for legacy tx')
+				sigBytes = result.signature instanceof Uint8Array ? result.signature : Buffer.from(result.signature, 'base64')
+			}
+			if (sigBytes.length !== 64) throw new Error(`Unexpected signature length ${sigBytes.length}`)
+
+			const slotOffset = parsed.sigStart + signerIdx * 64
+			if (fullTx.length < slotOffset + 64) {
+				throw new Error('Raw tx too short to hold our signer slot')
+			}
+			const out = Buffer.from(fullTx)
+			for (let i = 0; i < 64; i++) out[slotOffset + i] = sigBytes[i]
+			return {
+				transactionBase64: out.toString('base64'),
+				signatureBase64: Buffer.from(sigBytes).toString('base64'),
+			}
+		},
 		requestSigningApproval: async (info) => {
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
-			try {
-				mainWindow.setAlwaysOnTop(true)
-				mainWindow.focus()
-			} catch { /* window not ready */ }
+			acquireWindowFocus()
 			try {
 				return await auth.requestSigningApproval(info.id)
 			} finally {
-				try { mainWindow.setAlwaysOnTop(false) } catch {}
+				releaseWindowFocus()
 			}
 		},
 		dismissSigning: (id) => {
@@ -372,6 +541,14 @@ function getOrCreateWcManager(): WalletConnectManager {
 		log: (msg) => console.log(msg),
 		onSessionsChanged: (sessions) => {
 			try { rpc.send['wc-sessions'](sessions) } catch {}
+		},
+		onPairApprovalRequest: (info) => {
+			try { rpc.send['wc-pair-request'](info) } catch {}
+			acquireWindowFocus()
+		},
+		onPairApprovalDismiss: (id) => {
+			try { rpc.send['wc-pair-dismiss']({ id }) } catch {}
+			releaseWindowFocus()
 		},
 	})
 	return wcManager
@@ -410,16 +587,11 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
-		// Bring window to front so user sees the approval prompt immediately
-		try {
-			mainWindow.setAlwaysOnTop(true)
-			mainWindow.focus()
-		} catch { /* window not ready */ }
+		acquireWindowFocus()
 		try {
 			return await auth.requestSigningApproval(info.id)
 		} finally {
-			// Restore normal window level after user responds (or timeout)
-			try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+			releaseWindowFocus()
 		}
 	},
 	onSigningDismissed: (id: string) => {
@@ -427,15 +599,10 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	onPairRequest: (info) => {
 		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
-		// Bring window to front so user sees the pairing approval prompt
-		try {
-			mainWindow.setAlwaysOnTop(true)
-			mainWindow.focus()
-		} catch { /* window not ready */ }
+		acquireWindowFocus()
 	},
 	onPairDismissed: () => {
-		// Restore normal window level + dismiss frontend overlay (covers timeout case)
-		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+		releaseWindowFocus()
 		try { rpc.send['pair-dismissed']({}) } catch { /* webview not ready */ }
 	},
 	getVersion: () => appVersionCache,
@@ -2584,15 +2751,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pairing & Signing approval ───────────────────────────
+			// Window-level release is handled by onPairDismissed (fires from the
+			// try/finally on auth.requestPair) — don't double-release here.
 			approvePairing: async () => {
 				const apiKey = auth.approvePairing()
 				if (!apiKey) throw new Error('No pending pairing request')
-				try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 				return { apiKey }
 			},
 			rejectPairing: async () => {
 				auth.rejectPairing()
-				try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 			},
 			approveSigningRequest: async (params) => {
 				if (!auth.approveSigningRequest(params.id)) throw new Error('No pending signing request with that id')
@@ -4011,10 +4178,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── WalletConnect (native v2) ────────────────────────────
 			wcPair: async (params) => {
+				console.log('[wcPair] called with URI prefix:', params.uri?.slice(0, 24), 'len:', params.uri?.length)
 				if (!walletConnectEnabled) throw new Error('WalletConnect is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				// EVM derivation is now lazy and namespace-scoped — handled by
+				// ensureEvmAddressInfo() inside onSessionProposal, only when the
+				// dApp actually requests eip155.
 				const wc = getOrCreateWcManager()
 				await wc.pair(params.uri)
+				console.log('[wcPair] pair() returned (session_proposal handled async via listener)')
 			},
 			wcGetSessions: async () => {
 				if (!wcManager) return []
@@ -4023,6 +4195,84 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			wcDisconnectSession: async (params) => {
 				if (!wcManager) return
 				await wcManager.disconnectSession(params.topic)
+			},
+			wcApprovePair: async (params) => {
+				if (!wcManager) return
+				wcManager.approvePair(params.id)
+			},
+			wcRejectPair: async (params) => {
+				if (!wcManager) return
+				wcManager.rejectPair(params.id)
+			},
+			wcScanScreen: async () => {
+				if (process.platform !== 'darwin') {
+					throw new Error('Screen QR scan is only supported on macOS')
+				}
+
+				// Ensure Screen Recording permission. CGPreflight reports current state;
+				// CGRequest pops macOS's native prompt the first time and registers our
+				// bundle with TCC so it appears in System Settings → Screen Recording.
+				// CG bool == 1 byte (Boolean / signed char) — use u8 for portability.
+				let permGranted = false
+				let promptShown = false
+				let ffiOk = false
+				try {
+					const { dlopen, FFIType } = require('bun:ffi')
+					const cgPath = '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
+					const cg = dlopen(cgPath, {
+						CGPreflightScreenCaptureAccess: { args: [], returns: FFIType.u8 },
+						CGRequestScreenCaptureAccess: { args: [], returns: FFIType.u8 },
+					})
+					ffiOk = true
+					const pre = cg.symbols.CGPreflightScreenCaptureAccess() as unknown as number
+					permGranted = pre !== 0
+					console.log('[wcScanScreen] CGPreflight =', pre, 'granted:', permGranted)
+					if (!permGranted) {
+						const req = cg.symbols.CGRequestScreenCaptureAccess() as unknown as number
+						console.log('[wcScanScreen] CGRequest returned', req, '— TCC prompt should be visible now')
+						promptShown = true
+					}
+				} catch (e: any) {
+					console.warn('[wcScanScreen] CG FFI failed:', e.message, '— assuming no permission')
+				}
+				if (!ffiOk) {
+					// FFI loader failed entirely — we can't differentiate, so proceed and
+					// let screencapture fail explicitly with the existing detection path.
+					permGranted = true
+				}
+
+				if (!permGranted) {
+					// Open the Screen Recording pane so the user can flip the toggle if they
+					// dismissed the native prompt or already denied previously.
+					try {
+						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
+					} catch { /* best effort */ }
+					throw new Error(promptShown ? 'SCREEN_RECORDING_PERMISSION_PROMPTED' : 'SCREEN_RECORDING_PERMISSION_REQUIRED')
+				}
+
+				const path = `/tmp/kk-wc-scan-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.png`
+				// -i interactive selection, -x silent, -t png format.
+				const proc = Bun.spawn(['screencapture', '-i', '-x', '-t', 'png', path], {
+					stdout: 'ignore',
+					stderr: 'pipe',
+				})
+				const stderrText = (await new Response(proc.stderr).text()).trim()
+				const exitCode = await proc.exited
+				const file = Bun.file(path)
+				const exists = await file.exists()
+				// "could not create image from rect" + non-zero exit = permission revoked or rect issue
+				if (exitCode !== 0 && /could not create image/i.test(stderrText)) {
+					console.log('[wcScanScreen] screencapture failed despite preflight pass — permission likely revoked')
+					try {
+						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
+					} catch { /* best effort */ }
+					throw new Error('SCREEN_RECORDING_PERMISSION_REQUIRED')
+				}
+				if (!exists) return null // user canceled (Esc / clicked away)
+				const bytes = await file.arrayBuffer()
+				try { fs.unlinkSync(path) } catch { /* best effort */ }
+				if (bytes.byteLength === 0) return null
+				return { pngBase64: Buffer.from(bytes).toString('base64') }
 			},
 
 			// ── Utility ──────────────────────────────────────────────
@@ -4175,9 +4425,23 @@ if (swapsEnabled) {
 	console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
 }
 
+// Hoisted above the state-change listener: engine.start() (later in the file)
+// can synchronously emit 'ready', and the listener's deep-link replay path
+// would TDZ on this binding if it were declared near the URL handler.
+let pendingDeepLinkUri: string | null = null
+
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Replay any WC deep link that was queued while no device was connected.
+	// Without this, a deep link delivered before the device was ready would
+	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
+	if (state.state === 'ready' && pendingDeepLinkUri && walletConnectEnabled) {
+		const uri = pendingDeepLinkUri
+		pendingDeepLinkUri = null
+		try { rpc.send['wc-deep-link-pair']({ uri }) }
+		catch { pendingDeepLinkUri = uri /* webview not ready — keep queued */ }
+	}
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
@@ -4520,7 +4784,8 @@ if (process.platform === 'darwin') {
 }
 
 // ── keepkey:// and keepkey-vault:// Protocol Handler ──────────────────
-let pendingDeepLinkUri: string | null = null
+// (declared above; moved earlier to avoid TDZ access from the state-change
+// listener that replays queued deep links on device-ready.)
 
 function getWalletConnectUri(inputUri: string): string | undefined {
 	const uri = inputUri
@@ -4537,13 +4802,18 @@ function handleKeepKeyUrl(url: string) {
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
 		if (walletConnectEnabled && engine.wallet) {
-			// Native WC v2 — pair directly in the backend
-			const wc = getOrCreateWcManager()
-			wc.pair(wcUri).catch(e => {
-				console.error('[WC] Pair failed:', e.message)
-				// Store for retry via getPendingDeepLink when device becomes ready
+			// Hand the URI to the panel so it mounts *before* the WC
+			// session_proposal arrives. The pair-approval modal lives inside
+			// WalletConnectPanel; pairing directly from here while the panel
+			// is closed would let the modal render invisibly and the proposal
+			// would silently time out at 120s.
+			try {
+				rpc.send['wc-deep-link-pair']({ uri: wcUri })
+				pendingDeepLinkUri = null
+			} catch {
+				// Webview not ready — let the cold-start path pick it up.
 				pendingDeepLinkUri = wcUri
-			})
+			}
 		} else if (walletConnectEnabled && !engine.wallet) {
 			// Device not ready — queue for later
 			pendingDeepLinkUri = wcUri

@@ -217,6 +217,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       wcPair: { params: { uri: string }; response: void }
       wcGetSessions: { params: void; response: WcSessionInfo[] }
       wcDisconnectSession: { params: { topic: string }; response: void }
+      // Capture a screen region (macOS interactive selection) and return the PNG.
+      // Returns null when the user cancels the selection. Frontend decodes the
+      // QR with jsqr and submits the URI to wcPair.
+      wcScanScreen: { params: void; response: { pngBase64: string } | null }
+      // User responses to a pending pair-approval prompt. id is the proposal id.
+      wcApprovePair: { params: { id: string }; response: void }
+      wcRejectPair: { params: { id: string }; response: void }
 
       // ── Utility ───────────────────────────────────────────────────────
       openUrl: { params: { url: string }; response: void }
@@ -265,6 +272,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'report-progress': { id: string; message: string; percent: number }
       'walletconnect-uri': string
       'wc-sessions': WcSessionInfo[]
+      'wc-pair-request': { id: string; peerName: string; peerUrl: string; peerIcon: string; chains: string[]; methods: string[] }
+      'wc-pair-dismiss': { id: string }
+      // Warm-path deep link: backend hands the URI to the frontend so the panel
+      // can mount *before* the WC session_proposal arrives. The pair-approval
+      // modal lives inside WalletConnectPanel.
+      'wc-deep-link-pair': { uri: string }
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }

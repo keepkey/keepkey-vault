@@ -306,6 +306,34 @@ function App() {
 		})
 	}, [])
 
+	// Warm-path WC deep link: backend hands us the URI so the panel can mount
+	// *before* the session_proposal arrives — the pair-approval modal lives
+	// inside the panel, so opening it after the proposal would let the modal
+	// render invisibly and silently time out at 120s.
+	useEffect(() => {
+		return onRpcMessage("wc-deep-link-pair", (data) => {
+			const { uri } = data as { uri: string }
+			if (!walletConnectEnabled) {
+				setWcNotSupportedOpen(true)
+				return
+			}
+			setWcUri(uri)
+			setWcPanelOpen(true)
+		})
+	}, [walletConnectEnabled])
+
+	// Force-open the panel whenever a pair proposal arrives. The pair-approval
+	// modal lives inside WalletConnectPanel and renders nothing while the panel
+	// is closed — so a proposal landing after the user closed the panel (e.g.
+	// closed it between hitting Pair and the session_proposal arriving) would
+	// be invisible until the 120s backend timeout. The panel keeps its own
+	// listener for the request payload; this one only ensures visibility.
+	useEffect(() => {
+		return onRpcMessage("wc-pair-request", () => {
+			setWcPanelOpen(true)
+		})
+	}, [])
+
 	// ── Check for pending deep link from cold start ─────────────────
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
@@ -716,8 +744,10 @@ function App() {
 					isEmulator={deviceState.isEmulator}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
+					onWalletConnectToggle={walletConnectEnabled ? handleOpenWalletConnect : undefined}
 					settingsOpen={settingsOpen}
 					mobileOpen={mobilePanelOpen}
+					walletConnectOpen={wcPanelOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
@@ -726,7 +756,7 @@ function App() {
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
-					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
+					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer

@@ -6,25 +6,12 @@ interface AppDef {
 	name: string
 	description: string
 	icon: string
-	/** Inline SVG fallback when icon URL may 404 */
-	iconFallback?: JSX.Element
 	url: string
 	enabled: boolean
 	badge?: string
 	/** If true, this app is internal (switches tab) rather than opening a URL */
 	internal?: boolean
 }
-
-/** WalletConnect logo as inline SVG (CDN icon unreliable) */
-const WalletConnectIcon = () => (
-	<svg width="80" height="80" viewBox="0 0 100 100">
-		<rect width="100" height="100" rx="20" fill="#3B99FC" />
-		<path
-			d="M31.5 38.5c10.2-10.2 26.8-10.2 37 0l1.2 1.2a1.3 1.3 0 0 1 0 1.8l-4.2 4.2a.65.65 0 0 1-.9 0l-1.7-1.7a19.3 19.3 0 0 0-26.8 0l-1.8 1.8a.65.65 0 0 1-.9 0l-4.2-4.2a1.3 1.3 0 0 1 0-1.8l1.3-1.3zm45.7 8.5l3.7 3.7a1.3 1.3 0 0 1 0 1.8L64.7 68.7a1.3 1.3 0 0 1-1.8 0L52.1 57.9a.33.33 0 0 0-.45 0L40.9 68.7a1.3 1.3 0 0 1-1.8 0L22.9 52.5a1.3 1.3 0 0 1 0-1.8l3.7-3.7a1.3 1.3 0 0 1 1.8 0l10.8 10.8a.33.33 0 0 0 .45 0L50.4 47a1.3 1.3 0 0 1 1.8 0L63 57.8a.33.33 0 0 0 .45 0L74.3 47a1.3 1.3 0 0 1 1.8 0z"
-			fill="#fff"
-		/>
-	</svg>
-)
 
 function useApps(): AppDef[] {
 	const { t } = useTranslation("appstore")
@@ -45,33 +32,19 @@ function useApps(): AppDef[] {
 			url: "https://app.shapeshift.com",
 			enabled: true,
 		},
-		{
-			id: "walletconnect",
-			name: t("walletconnectName"),
-			description: t("walletconnectDescription"),
-			icon: "",
-			iconFallback: <WalletConnectIcon />,
-			url: "https://wallet-connect-dapp-ochre.vercel.app",
-			enabled: true,
-		},
 	]
 }
 
 interface AppStoreProps {
 	onOpenApp: (url: string) => void
 	onOpenKeepKey: () => void
-	onOpenWalletConnect?: () => void
 }
 
-export function AppStore({ onOpenApp, onOpenKeepKey, onOpenWalletConnect }: AppStoreProps) {
+export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 	const { t } = useTranslation("appstore")
 	const APPS = useApps()
 	const handleClick = (app: AppDef) => {
 		if (!app.enabled) return
-		if (app.id === "walletconnect" && onOpenWalletConnect) {
-			onOpenWalletConnect()
-			return
-		}
 		if (app.internal) {
 			onOpenKeepKey()
 		} else if (app.url) {
@@ -107,20 +80,14 @@ export function AppStore({ onOpenApp, onOpenKeepKey, onOpenWalletConnect }: AppS
 							onClick={() => handleClick(app)}
 						>
 							<Flex direction="column" align="center" gap="3">
-								{app.iconFallback ? (
-									<Box w="64px" h="64px" borderRadius="xl" overflow="hidden">
-										{app.iconFallback}
-									</Box>
-								) : (
-									<Image
-										src={app.icon}
-										alt={app.name}
-										w="64px"
-										h="64px"
-										borderRadius="xl"
-										bg="gray.800"
-									/>
-								)}
+								<Image
+									src={app.icon}
+									alt={app.name}
+									w="64px"
+									h="64px"
+									borderRadius="xl"
+									bg="gray.800"
+								/>
 								<Flex direction="column" align="center" gap="0.5">
 									<Flex align="center" gap="2">
 										<Text fontSize="sm" fontWeight="600" color="white">
