@@ -1,25 +1,27 @@
 /**
- * evm-eip712/permit2.js — Uniswap Permit2 token approval via EIP-712
+ * evm-eip712/permit2.js — Uniswap Permit2 signing + sig recovery diff
  *
- * This is the #1 phishing vector in DeFi. A signed permit gives the
- * spender off-chain approval to move tokens without an on-chain approve().
+ * Reproduces the exact Uniswap dApp request that recovers to the wrong
+ * signer in production (Apr 2026). The dApp sees the device address as
+ * `0x141D9959…` (correct), but ethers.verifyTypedData on the returned
+ * signature recovers a different address — meaning the bytes the device
+ * hashed differ from the bytes ethers reconstructs from the same input.
  *
- * Vault UI SHOULD show:
- *   EIP-712 Typed Data badge
- *   Domain: Permit2
- *   Fields: token, amount, expiration, spender
- *   WARNING if amount is MAX_UINT256 or expiration is far future
- *
- * Zoo: 19-eip712-permit.png
+ * If THIS test fails (recovered ≠ device address), the bug is in the
+ * vault REST → firmware EIP-712 path, not in the BEX. If it passes,
+ * the BEX is mutating the typed data before sending to the vault.
  */
 const { run, ETH_PATH } = require('../_helpers')
+const { utils } = require('/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/node_modules/ethers')
 
-run('EIP-712 Permit2 — token spending approval', async (getSdk, assert) => {
+run('EIP-712 Permit2 — sign + recover diff (Uniswap repro)', async (getSdk, assert) => {
   const sdk = await getSdk()
 
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
-  console.log(`  Signer: ${address}`)
+  console.log(`  Device address: ${address}`)
 
+  // Exact payload captured from a failing Uniswap swap, Apr 2026.
+  // chainId is intentionally the STRING "1" — that's what Uniswap sends.
   const typedData = {
     types: {
       EIP712Domain: [
@@ -42,38 +44,61 @@ run('EIP-712 Permit2 — token spending approval', async (getSdk, assert) => {
     primaryType: 'PermitSingle',
     domain: {
       name: 'Permit2',
-      chainId: 1,
-      verifyingContract: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
+      chainId: '1',
+      verifyingContract: '0x000000000022d473030f116ddee9f6b43ac78ba3',
     },
     message: {
       details: {
-        token: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-        amount: '1000000000', // 1000 USDC — bounded
-        expiration: '1735689600', // 2024-12-31
+        token: '0x514910771af9ca656af840dff83e8264ecf986ca',  // LINK
+        amount: '1461501637330902918203684832716283019655932542975', // max uint160
+        expiration: '1779943164',
         nonce: '0',
       },
-      spender: '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD', // Uniswap Universal Router
-      sigDeadline: '1735689600',
+      spender: '0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca',
+      sigDeadline: '1777352964',
     },
   }
 
-  console.log('\n  Typed data domain:', JSON.stringify(typedData.domain, null, 4))
-  console.log('  Message:', JSON.stringify(typedData.message, null, 4))
-  console.log('\n  Expected vault UI:')
-  console.log('    Domain: Permit2')
-  console.log('    Token: USDC (0xA0b8...)')
-  console.log('    Amount: 1,000,000,000 (bounded)')
-  console.log('    Spender: Uniswap Universal Router')
-  console.log('    Expiration: 2024-12-31')
+  // ethers expects EIP712Domain stripped from `types` for hashing helpers
+  const typesNoDomain = { ...typedData.types }
+  delete typesNoDomain.EIP712Domain
+
+  // Compute what ethers thinks the device SHOULD hash
+  const expectedDomainSep = utils._TypedDataEncoder.hashDomain(typedData.domain)
+  const expectedStructHash = utils._TypedDataEncoder.from(typesNoDomain).hash(typedData.message)
+  const expectedDigest = utils._TypedDataEncoder.hash(typedData.domain, typesNoDomain, typedData.message)
+
+  console.log('\n  ── Expected (ethers) ──')
+  console.log(`  domainSeparator: ${expectedDomainSep}`)
+  console.log(`  structHash:      ${expectedStructHash}`)
+  console.log(`  digest:          ${expectedDigest}`)
+
   console.log('\n  >>> APPROVE on device <<<\n')
 
-  const result = await sdk.eth.ethSignTypedData({
-    address,
-    typedData,
-  })
-
-  assert('Got signature', !!result)
-  assert('Signature is hex string', typeof result === 'string' || typeof result.signature === 'string')
+  const result = await sdk.eth.ethSignTypedData({ address, typedData })
   const sig = typeof result === 'string' ? result : result.signature
-  console.log(`  Signature: ${sig?.slice(0, 40)}...`)
+  assert('Got signature', !!sig)
+  console.log(`\n  Returned sig: ${sig}`)
+
+  // Recover the signer from the SAME typed data we sent.
+  let recovered
+  try {
+    recovered = utils.verifyTypedData(typedData.domain, typesNoDomain, typedData.message, sig)
+  } catch (e) {
+    console.error(`  Recovery threw: ${e.message}`)
+    return
+  }
+
+  console.log(`  Recovered:      ${recovered}`)
+  console.log(`  Device:         ${address}`)
+
+  const match = recovered.toLowerCase() === address.toLowerCase()
+  assert('Recovered signer matches device address', match)
+
+  if (!match) {
+    console.log('\n  ❌ DATA DRIFT — device hashed something other than the typed data above.')
+    console.log('  Next step: diff the firmware-side domainSeparator/digest against the')
+    console.log('  expected values above to find which field gets mangled in the vault')
+    console.log('  REST → firmware path.')
+  }
 })

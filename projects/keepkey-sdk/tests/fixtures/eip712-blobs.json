@@ -1,0 +1,92 @@
+{
+  "_meta": {
+    "purpose": "Production-captured EIP-712 typed data that failed in the BEX → vault → firmware signing chain. Each entry is byte-identical to what the dApp sent. The test re-signs each blob and recovers the signer; mismatch = data drift somewhere in the chain.",
+    "captured": "2026-04-28",
+    "source": "keepkey-client BEX background console — Uniswap Permit2 swap flow"
+  },
+  "uniswap-permit2-link-attempt-1": {
+    "context": "Uniswap LINK→? swap, Apr 28 — first attempt, /v1/swap returned 404",
+    "expectedSigner": "0x141D9959cAe3853b035000490C03991eB70Fc4aC",
+    "address": "0x141D9959cAe3853b035000490C03991eB70Fc4aC",
+    "addressNList": [2147483692, 2147483708, 2147483648, 0, 0],
+    "typedData": {
+      "types": {
+        "EIP712Domain": [
+          { "name": "name", "type": "string" },
+          { "name": "chainId", "type": "uint256" },
+          { "name": "verifyingContract", "type": "address" }
+        ],
+        "PermitSingle": [
+          { "name": "details", "type": "PermitDetails" },
+          { "name": "spender", "type": "address" },
+          { "name": "sigDeadline", "type": "uint256" }
+        ],
+        "PermitDetails": [
+          { "name": "token", "type": "address" },
+          { "name": "amount", "type": "uint160" },
+          { "name": "expiration", "type": "uint48" },
+          { "name": "nonce", "type": "uint48" }
+        ]
+      },
+      "primaryType": "PermitSingle",
+      "domain": {
+        "name": "Permit2",
+        "chainId": "1",
+        "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+      },
+      "message": {
+        "details": {
+          "token": "0x514910771af9ca656af840dff83e8264ecf986ca",
+          "amount": "1461501637330902918203684832716283019655932542975",
+          "expiration": "1779943164",
+          "nonce": "0"
+        },
+        "spender": "0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca",
+        "sigDeadline": "1777352964"
+      }
+    }
+  },
+  "uniswap-permit2-link-attempt-2": {
+    "context": "Uniswap LINK→? swap, Apr 28 — second attempt, returned sig 0x44b8eec…c1b",
+    "expectedSigner": "0x141D9959cAe3853b035000490C03991eB70Fc4aC",
+    "address": "0x141D9959cAe3853b035000490C03991eB70Fc4aC",
+    "addressNList": [2147483692, 2147483708, 2147483648, 0, 0],
+    "knownGoodSignature": "0x44b8eec54435e17b89fdac5a7149d432469c290e33d0c1f730f7e27fd4975efa04a1ae54ff2397dbba6d57b852da05555c53c85279db4e38a4e4d1b19dab493c1b",
+    "typedData": {
+      "types": {
+        "EIP712Domain": [
+          { "name": "name", "type": "string" },
+          { "name": "chainId", "type": "uint256" },
+          { "name": "verifyingContract", "type": "address" }
+        ],
+        "PermitSingle": [
+          { "name": "details", "type": "PermitDetails" },
+          { "name": "spender", "type": "address" },
+          { "name": "sigDeadline", "type": "uint256" }
+        ],
+        "PermitDetails": [
+          { "name": "token", "type": "address" },
+          { "name": "amount", "type": "uint160" },
+          { "name": "expiration", "type": "uint48" },
+          { "name": "nonce", "type": "uint48" }
+        ]
+      },
+      "primaryType": "PermitSingle",
+      "domain": {
+        "name": "Permit2",
+        "chainId": "1",
+        "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+      },
+      "message": {
+        "details": {
+          "token": "0x514910771af9ca656af840dff83e8264ecf986ca",
+          "amount": "1461501637330902918203684832716283019655932542975",
+          "expiration": "1779942683",
+          "nonce": "0"
+        },
+        "spender": "0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca",
+        "sigDeadline": "1777352483"
+      }
+    }
+  }
+}
