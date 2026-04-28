@@ -1044,7 +1044,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // Log the request with body + response + duration.
         // Sanitize: strip sensitive fields from signing payloads to prevent
         // leaking signatures, transaction data, or typed-data content to audit log.
-        if (callbacks?.onApiLog) {
+        //
+        // The audit-log read endpoints don't get logged — otherwise each read
+        // would persist the full prior history into a new row, recursively
+        // ballooning response_body across repeated reads.
+        const skipAuditLog = path.startsWith('/api/v1/activity')
+        if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
           // so the signing *inputs* (message, typedData, calldata, etc.) must
