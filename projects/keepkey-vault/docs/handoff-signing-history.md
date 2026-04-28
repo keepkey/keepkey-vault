@@ -45,7 +45,7 @@ Single entry with full request/response bodies. Returns 404 if not found, 400 on
 3. The full `requestBody.typedData` (domain + types + primaryType + message) and `responseBody.signature` are inline. Hand off to `tests/evm-eip712/uniswap-permit-prod.js` (offline half) to recover the address.
 4. If the signature doesn't recover to the device's ETH address, the vault produced a bad sig. Diff host-computed digest vs firmware to localize.
 
-> **Note on what is persisted in `responseBody`.** The signature itself is preserved verbatim (it's small and we need it for offline replay). Larger signed-output blobs — `serialized` / `serializedTx` / `signedTx` / `signed` / `signedPayload` — are still stripped to `[trimmed]` in the audit log to keep rows compact. Those are derivable from request body + signature, so the offline replay path doesn't need them from the audit log.
+> **Note on what is persisted in `responseBody`.** The full response body is preserved verbatim — including signatures, `serialized` / `serializedTx` / `signedTx` / `signed` / `signedPayload`. Without the raw signed hex, the audit log is useless for re-broadcast and post-hoc replay; row-size compactness is not worth losing the only durable copy of what was signed. Audit logs live in local SQLite on the user's own machine, so privacy concerns are handled by the existing passphrase-wallet guard, not field-level redaction.
 
 ## What is and isn't logged
 

@@ -1041,9 +1041,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const chainForRoute = ROUTE_TO_CHAIN[path.split('/')[1]]
           if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
         }
-        // Log the request with body + response + duration.
-        // Sanitize: strip sensitive fields from signing payloads to prevent
-        // leaking signatures, transaction data, or typed-data content to audit log.
+        // Log the request with body + response + duration. Bodies are stored
+        // verbatim — see the per-call comment below for the rationale.
         //
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
@@ -1051,41 +1050,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         const skipAuditLog = path.startsWith('/api/v1/activity')
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
-          // Audit logs are stored locally (SQLite) on the user's own machine,
-          // so the signing *inputs* (message, typedData, calldata, etc.) must
-          // be preserved verbatim — they're the exact thing a user needs to
-          // replay when debugging "what did I just sign?". Redacting them
-          // would defeat the audit log's primary purpose.
-          //
-          // The signed *outputs* (signature blob, serialized tx) are already
-          // returned to the dApp in the response body and don't add debug
-          // value when duplicated in the log, so we still trim those to keep
-          // log rows compact.
-          // Note: 'signature' is intentionally NOT trimmed — at ~130 chars it's small,
-          // and the audit log is the only place to retrieve a prior signature for
-          // regression debugging (recover-and-compare) without re-issuing the sign.
-          const SENSITIVE_OUTPUT_KEYS = new Set([
-            'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
-          ])
-          const trimOutputs = (obj: any, depth = 0): any => {
-            if (!obj || typeof obj !== 'object' || depth > 8) return obj
-            if (Array.isArray(obj)) return obj.map(v => trimOutputs(v, depth + 1))
-            const out: any = {}
-            for (const [k, v] of Object.entries(obj)) {
-              if (SENSITIVE_OUTPUT_KEYS.has(k)) { out[k] = '[trimmed]'; continue }
-              out[k] = (v && typeof v === 'object') ? trimOutputs(v, depth + 1) : v
-            }
-            return out
-          }
-          const isSigning = SIGNING_ROUTES.has(path)
+          // Audit logs are stored locally (SQLite) on the user's own machine.
+          // Both the signing *inputs* (message, typedData, calldata) AND the
+          // signing *outputs* (signature, serialized tx hex) are preserved
+          // verbatim — without the raw signed hex, the log is useless for
+          // re-broadcast or any post-hoc replay/regression workflow. Compact
+          // rows are not worth losing the only durable copy of what we signed.
           callbacks.onApiLog({
             method, route: path, timestamp: requestStart,
             durationMs: Date.now() - requestStart,
             status, appName, imageUrl: imageUrl || undefined,
-            // Request body kept as-is so the user can see what they signed.
             requestBody: reqBody,
-            // Response body trims large signature blobs but leaves everything else.
-            responseBody: isSigning ? trimOutputs(data) : data,
+            responseBody: data,
             ...resolvedActivity,
           })
         }
