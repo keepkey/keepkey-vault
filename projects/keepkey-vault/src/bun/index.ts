@@ -360,6 +360,15 @@ function getOrCreateWcManager(): WalletConnectManager {
 			const sel = evmAddresses.getSelectedAddress()
 			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
 		},
+		ensureEvmAddressInfo: async () => {
+			if (!engine.wallet) return null
+			if (!evmAddresses.isInitialized) {
+				try { await evmAddresses.initialize(engine.wallet) }
+				catch (e: any) { console.warn('[WC] EVM init failed:', e.message); return null }
+			}
+			const sel = evmAddresses.getSelectedAddress()
+			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
+		},
 		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
 		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
 		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
@@ -4009,21 +4018,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[wcPair] called with URI prefix:', params.uri?.slice(0, 24), 'len:', params.uri?.length)
 				if (!walletConnectEnabled) throw new Error('WalletConnect is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				// Lazy-init EVM addresses so the WC session_proposal listener has a
-				// selected address ready. Without this, fresh-boot pairs (where the
-				// user hasn't navigated to ETH yet) get rejected by the auto-approve
-				// gate in walletconnect.ts:onSessionProposal.
-				if (!evmAddresses.isInitialized) {
-					console.log('[wcPair] initializing EVM addresses before pair')
-					try {
-						await evmAddresses.initialize(engine.wallet)
-					} catch (e: any) {
-						console.error('[wcPair] EVM init failed:', e.message)
-						throw new Error('Could not derive EVM address: ' + e.message)
-					}
-				}
-				const sel = evmAddresses.getSelectedAddress()
-				console.log('[wcPair] evm selectedAddress?', sel?.address ?? 'none (Solana/Cosmos-only proposals will still pair)')
+				// EVM derivation is now lazy and namespace-scoped — handled by
+				// ensureEvmAddressInfo() inside onSessionProposal, only when the
+				// dApp actually requests eip155.
 				const wc = getOrCreateWcManager()
 				await wc.pair(params.uri)
 				console.log('[wcPair] pair() returned (session_proposal handled async via listener)')
@@ -4615,13 +4612,18 @@ function handleKeepKeyUrl(url: string) {
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
 		if (walletConnectEnabled && engine.wallet) {
-			// Native WC v2 — pair directly in the backend
-			const wc = getOrCreateWcManager()
-			wc.pair(wcUri).catch(e => {
-				console.error('[WC] Pair failed:', e.message)
-				// Store for retry via getPendingDeepLink when device becomes ready
+			// Hand the URI to the panel so it mounts *before* the WC
+			// session_proposal arrives. The pair-approval modal lives inside
+			// WalletConnectPanel; pairing directly from here while the panel
+			// is closed would let the modal render invisibly and the proposal
+			// would silently time out at 120s.
+			try {
+				rpc.send['wc-deep-link-pair']({ uri: wcUri })
+				pendingDeepLinkUri = null
+			} catch {
+				// Webview not ready — let the cold-start path pick it up.
 				pendingDeepLinkUri = wcUri
-			})
+			}
 		} else if (walletConnectEnabled && !engine.wallet) {
 			// Device not ready — queue for later
 			pendingDeepLinkUri = wcUri

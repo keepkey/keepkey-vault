@@ -306,6 +306,22 @@ function App() {
 		})
 	}, [])
 
+	// Warm-path WC deep link: backend hands us the URI so the panel can mount
+	// *before* the session_proposal arrives — the pair-approval modal lives
+	// inside the panel, so opening it after the proposal would let the modal
+	// render invisibly and silently time out at 120s.
+	useEffect(() => {
+		return onRpcMessage("wc-deep-link-pair", (data) => {
+			const { uri } = data as { uri: string }
+			if (!walletConnectEnabled) {
+				setWcNotSupportedOpen(true)
+				return
+			}
+			setWcUri(uri)
+			setWcPanelOpen(true)
+		})
+	}, [walletConnectEnabled])
+
 	// ── Check for pending deep link from cold start ─────────────────
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {

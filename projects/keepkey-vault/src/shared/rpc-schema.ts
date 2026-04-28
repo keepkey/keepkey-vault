@@ -274,6 +274,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'wc-sessions': WcSessionInfo[]
       'wc-pair-request': { id: string; peerName: string; peerUrl: string; peerIcon: string; chains: string[]; methods: string[] }
       'wc-pair-dismiss': { id: string }
+      // Warm-path deep link: backend hands the URI to the frontend so the panel
+      // can mount *before* the WC session_proposal arrives. The pair-approval
+      // modal lives inside WalletConnectPanel.
+      'wc-deep-link-pair': { uri: string }
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }

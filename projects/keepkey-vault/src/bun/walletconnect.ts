@@ -13,9 +13,23 @@ import type { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import bs58 from 'bs58'
 import type { SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
+import { parseSolanaTx } from './solana-tx'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
+}
+
+/** Versioned (v0+) Solana transactions cannot be parsed by current firmware,
+ *  so they are signed via the message-signing path — i.e. blind-signed. We
+ *  surface this in the approval method name so the UI can render a stronger
+ *  warning. Returns false (treat as legacy) if the tx fails to parse, since
+ *  legacy is the safer fallback (forces the firmware tx-parse path). */
+function isVersionedSolanaTx(transactionBase64: string): boolean {
+  try {
+    return parseSolanaTx(Buffer.from(transactionBase64, 'base64')).isVersioned
+  } catch {
+    return false
+  }
 }
 
 const WC_PROJECT_ID = process.env.WALLETCONNECT_PROJECT_ID || '14d36ca1bc76a70273d44d384e8475ae'
@@ -86,6 +100,10 @@ export interface WcPairApprovalInfo {
 export interface WcCallbacks {
   /** Get the current EVM address (checksummed) and its derivation index. Null if not ready. */
   getEvmAddressInfo: () => { address: string; addressIndex: number } | null
+  /** Lazy-derive the EVM address if not yet initialized. Called from the
+   *  proposal handler only when the dApp actually wants eip155 — Solana- or
+   *  Cosmos-only proposals never trigger EVM derivation. */
+  ensureEvmAddressInfo: () => Promise<{ address: string; addressIndex: number } | null>
   /** Sign an EVM transaction via the KeepKey device. */
   ethSignTx: (params: any) => Promise<any>
   /** Sign a message via the KeepKey device. */
@@ -270,7 +288,12 @@ export class WalletConnectManager {
 
     let evmInfo: { address: string; addressIndex: number } | null = null
     if (namespaceWanted('eip155')) {
-      evmInfo = this.callbacks.getEvmAddressInfo()
+      // Lazy-derive on demand. Solana/Cosmos-only proposals never reach here.
+      try {
+        evmInfo = await this.callbacks.ensureEvmAddressInfo()
+      } catch (e: any) {
+        this.callbacks.log(`[WC] EVM address derivation failed: ${e.message}`)
+      }
       if (!evmInfo && namespaceRequired('eip155')) {
         this.callbacks.log('[WC] Rejecting proposal — eip155 required but no EVM address ready')
         await this.web3wallet!.rejectSession({ id: proposal.id, reason: getSdkError('USER_REJECTED') })
@@ -611,7 +634,11 @@ export class WalletConnectManager {
         const signingId = crypto.randomUUID()
         const signingInfo: SigningRequestInfo = {
           id: signingId,
-          method: '/solana/sign-transaction',
+          // v0+ versioned txs hit the message-signing path on the device — the
+          // firmware can't display program/account details, so this is blind.
+          method: isVersionedSolanaTx(transaction)
+            ? '/solana/sign-transaction-blind'
+            : '/solana/sign-transaction',
           appName,
           chain: 'solana',
           from: account.address,
@@ -641,7 +668,9 @@ export class WalletConnectManager {
         const signingId = crypto.randomUUID()
         const signingInfo: SigningRequestInfo = {
           id: signingId,
-          method: '/solana/sign-and-send',
+          method: isVersionedSolanaTx(transaction)
+            ? '/solana/sign-and-send-blind'
+            : '/solana/sign-and-send',
           appName,
           chain: 'solana',
           from: account.address,
