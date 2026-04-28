@@ -334,6 +334,25 @@ let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 // WalletConnect manager — lazily initialized when user pairs
 let wcManager: WalletConnectManager | null = null
+
+// Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
+// approval, device pairing approval) can independently want the window
+// elevated; using the raw API per-event drops the window prematurely when
+// any one source dismisses while another is still pending.
+let _alwaysOnTopRefs = 0
+function acquireWindowFocus() {
+	_alwaysOnTopRefs++
+	if (_alwaysOnTopRefs === 1) {
+		try { mainWindow.setAlwaysOnTop(true); mainWindow.focus() } catch { /* window not ready */ }
+	}
+}
+function releaseWindowFocus() {
+	if (_alwaysOnTopRefs === 0) return // defensive: never go negative
+	_alwaysOnTopRefs--
+	if (_alwaysOnTopRefs === 0) {
+		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+	}
+}
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
 	wcManager = new WalletConnectManager({
@@ -490,14 +509,11 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		requestSigningApproval: async (info) => {
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
-			try {
-				mainWindow.setAlwaysOnTop(true)
-				mainWindow.focus()
-			} catch { /* window not ready */ }
+			acquireWindowFocus()
 			try {
 				return await auth.requestSigningApproval(info.id)
 			} finally {
-				try { mainWindow.setAlwaysOnTop(false) } catch {}
+				releaseWindowFocus()
 			}
 		},
 		dismissSigning: (id) => {
@@ -509,14 +525,11 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		onPairApprovalRequest: (info) => {
 			try { rpc.send['wc-pair-request'](info) } catch {}
-			try {
-				mainWindow.setAlwaysOnTop(true)
-				mainWindow.focus()
-			} catch { /* window not ready */ }
+			acquireWindowFocus()
 		},
 		onPairApprovalDismiss: (id) => {
 			try { rpc.send['wc-pair-dismiss']({ id }) } catch {}
-			try { mainWindow.setAlwaysOnTop(false) } catch {}
+			releaseWindowFocus()
 		},
 	})
 	return wcManager
@@ -555,16 +568,11 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
-		// Bring window to front so user sees the approval prompt immediately
-		try {
-			mainWindow.setAlwaysOnTop(true)
-			mainWindow.focus()
-		} catch { /* window not ready */ }
+		acquireWindowFocus()
 		try {
 			return await auth.requestSigningApproval(info.id)
 		} finally {
-			// Restore normal window level after user responds (or timeout)
-			try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+			releaseWindowFocus()
 		}
 	},
 	onSigningDismissed: (id: string) => {
@@ -572,15 +580,10 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	onPairRequest: (info) => {
 		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
-		// Bring window to front so user sees the pairing approval prompt
-		try {
-			mainWindow.setAlwaysOnTop(true)
-			mainWindow.focus()
-		} catch { /* window not ready */ }
+		acquireWindowFocus()
 	},
 	onPairDismissed: () => {
-		// Restore normal window level + dismiss frontend overlay (covers timeout case)
-		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+		releaseWindowFocus()
 		try { rpc.send['pair-dismissed']({}) } catch { /* webview not ready */ }
 	},
 	getVersion: () => appVersionCache,
@@ -2591,15 +2594,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pairing & Signing approval ───────────────────────────
+			// Window-level release is handled by onPairDismissed (fires from the
+			// try/finally on auth.requestPair) — don't double-release here.
 			approvePairing: async () => {
 				const apiKey = auth.approvePairing()
 				if (!apiKey) throw new Error('No pending pairing request')
-				try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 				return { apiKey }
 			},
 			rejectPairing: async () => {
 				auth.rejectPairing()
-				try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 			},
 			approveSigningRequest: async (params) => {
 				if (!auth.approveSigningRequest(params.id)) throw new Error('No pending signing request with that id')
@@ -4020,7 +4023,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 				const sel = evmAddresses.getSelectedAddress()
-				console.log('[wcPair] evm selectedAddress?', sel?.address ?? 'STILL NONE — proposal will reject')
+				console.log('[wcPair] evm selectedAddress?', sel?.address ?? 'none (Solana/Cosmos-only proposals will still pair)')
 				const wc = getOrCreateWcManager()
 				await wc.pair(params.uri)
 				console.log('[wcPair] pair() returned (session_proposal handled async via listener)')
