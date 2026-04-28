@@ -26,8 +26,10 @@ interface TopNavProps {
 	isEmulator?: boolean
 	onSettingsToggle: () => void
 	onMobileToggle?: () => void
+	onWalletConnectToggle?: () => void
 	settingsOpen?: boolean
 	mobileOpen?: boolean
+	walletConnectOpen?: boolean
 	activeTab: NavTab
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
@@ -101,7 +103,7 @@ export function SplashNav() {
 	)
 }
 
-export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, isEmulator, onSettingsToggle, onMobileToggle, settingsOpen, mobileOpen, activeTab, onTabChange, watchOnly, onExitToDeviceSelect, passphraseActive }: TopNavProps) {
+export function TopNav({ label, connected, firmwareVersion, firmwareVerified, needsFirmwareUpdate, latestFirmware, isEmulator, onSettingsToggle, onMobileToggle, onWalletConnectToggle, settingsOpen, mobileOpen, walletConnectOpen, activeTab, onTabChange, watchOnly, onExitToDeviceSelect, passphraseActive }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -275,8 +277,24 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 				})}
 			</HStack>
 
-			{/* Right: mobile + settings gear */}
+			{/* Right: walletconnect + mobile + settings gear */}
 			<Flex flex="1" justify="flex-end" align="center" gap="0.5">
+				{onWalletConnectToggle && (
+					<IconButton
+						aria-label={t("walletConnect", { defaultValue: "WalletConnect" })}
+						onClick={onWalletConnectToggle}
+						size="sm"
+						variant="ghost"
+						color={walletConnectOpen ? "kk.gold" : "kk.textSecondary"}
+						_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+						className="electrobun-webkit-app-region-no-drag"
+					>
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<path d="M5.5 9.5c3.6-3.6 9.4-3.6 13 0" />
+							<path d="M3 12l3 3 3-3 3 3 3-3 3 3 3-3" />
+						</svg>
+					</IconButton>
+				)}
 				{onMobileToggle && (
 					<IconButton
 						aria-label={t("mobileApp", { defaultValue: "Mobile App" })}

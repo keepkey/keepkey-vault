@@ -716,8 +716,10 @@ function App() {
 					isEmulator={deviceState.isEmulator}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
+					onWalletConnectToggle={walletConnectEnabled ? handleOpenWalletConnect : undefined}
 					settingsOpen={settingsOpen}
 					mobileOpen={mobilePanelOpen}
+					walletConnectOpen={wcPanelOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
@@ -726,7 +728,7 @@ function App() {
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
 				{/* pt: 54px TopNav + 50px banner height when visible */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
-					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
+					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
