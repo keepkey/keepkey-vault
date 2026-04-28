@@ -8,9 +8,9 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, EthTxStatusRow, EthTxStatus } from '../shared/types'
 
-const SCHEMA_VERSION = '8'
+const SCHEMA_VERSION = '9'
 
 let db: Database | null = null
 
@@ -217,6 +217,37 @@ export function initDb() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_created ON swap_history(created_at DESC)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_status ON swap_history(status)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_txid ON swap_history(txid)`)
+
+    // Plain ETH tx tracking — mutable lifecycle for txs we signed via /eth/sign-transaction.
+    // Distinct from swap_history (which is THORChain-shaped) and api_log (append-only audit).
+    // Raw signed hex lives in api_log.response_body.serialized; this table holds the polling state.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS eth_tx_status (
+        txid                TEXT PRIMARY KEY,
+        network_id          TEXT NOT NULL,
+        chain_id            INTEGER NOT NULL,
+        from_address        TEXT NOT NULL,
+        to_address          TEXT NOT NULL,
+        value_wei           TEXT NOT NULL DEFAULT '0',
+        nonce               INTEGER NOT NULL,
+        status              TEXT NOT NULL DEFAULT 'broadcast',
+        attempts            INTEGER NOT NULL DEFAULT 0,
+        confirmations       INTEGER NOT NULL DEFAULT 0,
+        block_number        INTEGER,
+        gas_used            TEXT,
+        effective_gas_price TEXT,
+        error_reason        TEXT,
+        broadcast_at_ms     INTEGER NOT NULL,
+        last_check_ms       INTEGER NOT NULL,
+        terminal_at_ms      INTEGER,
+        origin              TEXT,
+        app_name            TEXT,
+        label               TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_eth_tx_status_open ON eth_tx_status(status, broadcast_at_ms DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_eth_tx_status_from ON eth_tx_status(from_address, broadcast_at_ms DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_eth_tx_status_network ON eth_tx_status(network_id, broadcast_at_ms DESC)`)
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS bip85_seeds (
@@ -1369,6 +1400,163 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     estimatedTimeSeconds: r.estimated_time_secs,
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
+  }
+}
+
+// ── Plain ETH tx tracking ───────────────────────────────────────────
+
+const TERMINAL_TX_STATUSES = new Set<EthTxStatus>(['confirmed', 'failed', 'dropped'])
+
+function mapEthTxRow(r: any): EthTxStatusRow {
+  return {
+    txid: r.txid,
+    networkId: r.network_id,
+    chainId: r.chain_id,
+    from: r.from_address,
+    to: r.to_address,
+    valueWei: r.value_wei,
+    nonce: r.nonce,
+    status: r.status as EthTxStatus,
+    attempts: r.attempts,
+    confirmations: r.confirmations,
+    blockNumber: r.block_number == null ? undefined : r.block_number,
+    gasUsed: r.gas_used == null ? undefined : r.gas_used,
+    effectiveGasPrice: r.effective_gas_price == null ? undefined : r.effective_gas_price,
+    errorReason: r.error_reason == null ? undefined : r.error_reason,
+    broadcastAtMs: r.broadcast_at_ms,
+    lastCheckMs: r.last_check_ms,
+    terminalAtMs: r.terminal_at_ms == null ? undefined : r.terminal_at_ms,
+    origin: r.origin == null ? undefined : r.origin,
+    appName: r.app_name == null ? undefined : r.app_name,
+    label: r.label == null ? undefined : r.label,
+  }
+}
+
+/** Insert a newly-registered tx row. Idempotent on (txid) — re-signs collapse cleanly. */
+export function insertEthTxStatus(row: EthTxStatusRow): void {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO eth_tx_status
+        (txid, network_id, chain_id, from_address, to_address, value_wei, nonce,
+         status, attempts, confirmations, block_number, gas_used, effective_gas_price,
+         error_reason, broadcast_at_ms, last_check_ms, terminal_at_ms, origin, app_name, label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.txid, row.networkId, row.chainId, row.from, row.to, row.valueWei, row.nonce,
+        row.status, row.attempts, row.confirmations,
+        row.blockNumber ?? null, row.gasUsed ?? null, row.effectiveGasPrice ?? null,
+        row.errorReason ?? null, row.broadcastAtMs, row.lastCheckMs, row.terminalAtMs ?? null,
+        row.origin ?? null, row.appName ?? null, row.label ?? null,
+      ]
+    )
+  } catch (e: any) {
+    console.warn('[db] insertEthTxStatus failed:', e.message)
+  }
+}
+
+/** Patch an existing row. Only provided fields are written. terminal_at_ms is auto-set when status flips terminal. */
+export function updateEthTxStatus(txid: string, patch: Partial<Omit<EthTxStatusRow, 'txid'>>): void {
+  try {
+    if (!db) return
+    const cols: Array<{ col: string; val: any }> = []
+    if (patch.status !== undefined)            cols.push({ col: 'status', val: patch.status })
+    if (patch.attempts !== undefined)          cols.push({ col: 'attempts', val: patch.attempts })
+    if (patch.confirmations !== undefined)     cols.push({ col: 'confirmations', val: patch.confirmations })
+    if (patch.blockNumber !== undefined)       cols.push({ col: 'block_number', val: patch.blockNumber })
+    if (patch.gasUsed !== undefined)           cols.push({ col: 'gas_used', val: patch.gasUsed })
+    if (patch.effectiveGasPrice !== undefined) cols.push({ col: 'effective_gas_price', val: patch.effectiveGasPrice })
+    if (patch.errorReason !== undefined)       cols.push({ col: 'error_reason', val: patch.errorReason })
+    if (patch.lastCheckMs !== undefined)       cols.push({ col: 'last_check_ms', val: patch.lastCheckMs })
+    if (patch.label !== undefined)             cols.push({ col: 'label', val: patch.label })
+
+    // Auto-stamp terminal_at_ms when status crosses into a terminal state and we don't already have one
+    if (patch.status && TERMINAL_TX_STATUSES.has(patch.status)) {
+      const existing = db.query('SELECT terminal_at_ms FROM eth_tx_status WHERE txid = ?').get(txid) as { terminal_at_ms: number | null } | null
+      if (existing && existing.terminal_at_ms == null) {
+        cols.push({ col: 'terminal_at_ms', val: patch.terminalAtMs ?? Date.now() })
+      }
+    } else if (patch.terminalAtMs !== undefined) {
+      cols.push({ col: 'terminal_at_ms', val: patch.terminalAtMs })
+    }
+
+    if (cols.length === 0) return
+    const sql = `UPDATE eth_tx_status SET ${cols.map(c => `${c.col} = ?`).join(', ')} WHERE txid = ?`
+    db.run(sql, [...cols.map(c => c.val), txid])
+  } catch (e: any) {
+    console.warn('[db] updateEthTxStatus failed:', e.message)
+  }
+}
+
+/** Read a single tx by txid. Lower-case the input. */
+export function getEthTxStatus(txid: string): EthTxStatusRow | null {
+  try {
+    if (!db) return null
+    const row = db.query('SELECT * FROM eth_tx_status WHERE txid = ?').get(txid.toLowerCase()) as any
+    return row ? mapEthTxRow(row) : null
+  } catch (e: any) {
+    console.warn('[db] getEthTxStatus failed:', e.message)
+    return null
+  }
+}
+
+/** All open txs (status NOT in confirmed/failed/dropped), newest first. Optional networkId filter. */
+export function getOpenEthTxStatuses(filter?: { networkId?: string; from?: string; limit?: number }): EthTxStatusRow[] {
+  try {
+    if (!db) return []
+    let sql = `SELECT * FROM eth_tx_status WHERE status IN ('broadcast', 'pending')`
+    const params: any[] = []
+    if (filter?.networkId) { sql += ` AND network_id = ?`; params.push(filter.networkId) }
+    if (filter?.from)      { sql += ` AND from_address = ?`; params.push(filter.from.toLowerCase()) }
+    sql += ` ORDER BY broadcast_at_ms DESC LIMIT ?`
+    params.push(filter?.limit ?? 100)
+    const rows = db.query(sql).all(...params) as any[]
+    return rows.map(mapEthTxRow)
+  } catch (e: any) {
+    console.warn('[db] getOpenEthTxStatuses failed:', e.message)
+    return []
+  }
+}
+
+/** Recent txs for a given from address regardless of status. */
+export function getEthTxStatusesByAddress(from: string, limit = 50): EthTxStatusRow[] {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      'SELECT * FROM eth_tx_status WHERE from_address = ? ORDER BY broadcast_at_ms DESC LIMIT ?'
+    ).all(from.toLowerCase(), limit) as any[]
+    return rows.map(mapEthTxRow)
+  } catch (e: any) {
+    console.warn('[db] getEthTxStatusesByAddress failed:', e.message)
+    return []
+  }
+}
+
+/**
+ * Recover the raw signed hex for a previously-tracked tx by joining
+ * eth_tx_status to api_log on the response_body containing the txid.
+ *
+ * api_log doesn't index by txid directly (it's an append-only audit
+ * table), so we look up the most recent /eth/sign-transaction response
+ * whose serialized field hashes to this txid. Returns null if api_log
+ * has been pruned past this entry.
+ */
+export function getEthRawTxByTxid(txid: string): string | null {
+  try {
+    if (!db) return null
+    const row = db.query(
+      `SELECT response_body FROM api_log
+       WHERE route = '/eth/sign-transaction' AND txid = ?
+       ORDER BY timestamp DESC LIMIT 1`
+    ).get(txid.toLowerCase()) as { response_body: string } | null
+    if (!row?.response_body) return null
+    const body = JSON.parse(row.response_body)
+    const serialized = body?.serialized
+    if (!serialized || serialized === '[trimmed]') return null
+    return serialized
+  } catch (e: any) {
+    console.warn('[db] getEthRawTxByTxid failed:', e.message)
+    return null
   }
 }
 

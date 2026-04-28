@@ -18,6 +18,7 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSweepRoute } from './rest-sweep'
 import { getSetting, findApiLogs, getApiLogById } from './db'
+import { registerSignedTx, listOpenTxs, getOneTx } from './eth-tx-store'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
@@ -573,6 +574,8 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Signing history (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/activity/:id</code></td><td>Single audit entry with full request/response bodies (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/tx/pending</code></td><td>Open (non-terminal) transactions, optional <code>?networkId=</code>/<code>?from=</code> filters; refreshes via Pioneer (auth)</td><td>10s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/tx/:txid</code></td><td>Single tx with raw signed hex if available; refreshes via Pioneer (auth)</td><td>10s</td></tr>
         </tbody>
       </table>
     </div>
@@ -1774,7 +1777,35 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           try {
             const result = await emuWrap(() => wallet.ethSignTx(msg), { operation: 'ethSignTx', chain: 'Ethereum', to: msg.to, value: msg.value })
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
-            return json(validateResponse(result, S.EthSignTransactionResponse, path))
+
+            // Register tx in the passive tracker. Vault never polls — clients
+            // refresh on-demand via GET /api/v1/tx/... Failures here are
+            // logged but never break signing.
+            let registeredTxid: string | null = null
+            try {
+              const fromAddr = String(body.from || '').toLowerCase()
+              const nonceRaw = body.nonce ?? msg.nonce ?? '0x0'
+              const nonceNum = Number(BigInt(typeof nonceRaw === 'string' && nonceRaw.length > 0 ? nonceRaw : '0x0'))
+              registeredTxid = registerSignedTx({
+                serialized: result.serialized,
+                networkId: `eip155:${chainId}`,
+                chainId,
+                from: fromAddr,
+                to: msg.to,
+                valueWei: msg.value || '0x0',
+                nonce: Number.isFinite(nonceNum) ? nonceNum : 0,
+                origin: req.headers.get('referer') || undefined,
+                appName: resolveAppInfo().appName,
+              })
+            } catch (e: any) {
+              console.warn('[REST] eth-tx-store register failed:', e.message)
+            }
+
+            return json(
+              validateResponse(result, S.EthSignTransactionResponse, path),
+              200,
+              registeredTxid ? { txid: registeredTxid, chain: 'ETH', activityType: 'sign' } : undefined,
+            )
           } catch (err: any) {
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
@@ -2582,6 +2613,43 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const entry = getApiLogById(id)
           if (!entry) return json({ error: 'Not found' }, 404)
           return json(entry)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // TRANSACTION TRACKING (chain-agnostic, filter via networkId)
+        //
+        // Vault is a passive store — it does NOT poll chain state. These
+        // endpoints look up the latest status via Pioneer at request time
+        // (HARD rule: never call anything but Pioneer for chain reads).
+        //
+        // Currently scoped to EVM (eth_tx_status table). UTXO/Cosmos/Solana
+        // can plug into the same routes by adding their own backing tables
+        // and dispatching on networkId.
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/tx/pending' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ txs: [], count: 0 })
+          const url = new URL(req.url)
+          const networkId = url.searchParams.get('networkId') || undefined
+          const from = url.searchParams.get('from') || undefined
+          const refresh = url.searchParams.get('refresh') !== 'false' // default true
+          const txs = await listOpenTxs({ networkId, from, refresh })
+          return json({ txs, count: txs.length })
+        }
+
+        if (path.startsWith('/api/v1/tx/') && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const tail = path.slice('/api/v1/tx/'.length)
+          // Reject sub-paths like /api/v1/tx/:txid/foo — those are POST endpoints
+          if (tail.includes('/')) return json({ error: 'Not found' }, 404)
+          const txid = tail.toLowerCase()
+          if (!/^0x[0-9a-f]{64}$/.test(txid)) return json({ error: 'Invalid txid' }, 400)
+          const url = new URL(req.url)
+          const refresh = url.searchParams.get('refresh') !== 'false' // default true
+          const tx = await getOneTx(txid, { refresh })
+          if (!tx) return json({ error: 'Not found' }, 404)
+          return json(tx)
         }
 
         // ═══════════════════════════════════════════════════════════════

@@ -798,6 +798,67 @@ export interface SwapHistoryStats {
   pending: number
 }
 
+// ── Plain ETH tx tracking ──────────────────────────────────────────────
+
+/**
+ * Lifecycle states for a tracked ETH transaction.
+ *   broadcast → just signed/registered, no chain confirmation seen yet
+ *   pending   → present in mempool, not mined
+ *   confirmed → mined with status === 0x1
+ *   failed    → mined with status === 0x0 (revert)
+ *   dropped   → not in mempool AND `pending == latest` for >2 min after broadcast
+ */
+export type EthTxStatus = 'broadcast' | 'pending' | 'confirmed' | 'failed' | 'dropped'
+
+/** Wire format for /api/v1/eth/pending and /api/v1/eth/tx/:txid */
+export interface PendingEthTx {
+  txid: string                   // 0x-prefixed lowercase
+  networkId: string              // 'eip155:1'
+  chainId: number                // 1
+  from: string                   // lowercase
+  to: string                     // lowercase
+  valueWei: string               // hex or decimal-as-string
+  nonce: number
+  status: EthTxStatus
+  attempts: number               // poll cycles since last status change
+  confirmations: number
+  blockNumber?: number
+  gasUsed?: string
+  effectiveGasPrice?: string
+  errorReason?: string
+  broadcastAtMs: number
+  lastCheckMs: number
+  terminalAtMs?: number
+  origin?: string                // dApp URL if known
+  appName?: string               // paired-app name from auth
+  label?: string                 // optional human label
+  rawHex?: string                // signed bytes; populated on /:id endpoint, omitted from list
+}
+
+/** SQLite row shape for eth_tx_status */
+export interface EthTxStatusRow {
+  txid: string
+  networkId: string
+  chainId: number
+  from: string
+  to: string
+  valueWei: string
+  nonce: number
+  status: EthTxStatus
+  attempts: number
+  confirmations: number
+  blockNumber?: number
+  gasUsed?: string
+  effectiveGasPrice?: string
+  errorReason?: string
+  broadcastAtMs: number
+  lastCheckMs: number
+  terminalAtMs?: number
+  origin?: string
+  appName?: string
+  label?: string
+}
+
 // ── Recent Activity types ──────────────────────────────────────────────
 
 export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve'
