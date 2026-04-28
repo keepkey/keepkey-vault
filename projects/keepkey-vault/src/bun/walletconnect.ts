@@ -19,6 +19,33 @@ function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
 }
 
+/** Throws if the dApp-supplied signer address doesn't match the account
+ *  that the WC session was approved with. Without this, a malicious dApp
+ *  could pair on account A and request a signature claiming account B —
+ *  we'd display B in the approval but sign with A's key. */
+function assertSignerMatches(requested: string | undefined, selected: string) {
+  if (!requested) return // dApp omitted; trust the WC session account
+  if (requested.toLowerCase() !== selected.toLowerCase()) {
+    throw new Error(`Signer mismatch: dApp requested ${requested}, wallet account is ${selected}`)
+  }
+}
+
+/** Throws if the tx's declared chainId doesn't match the WC session chain.
+ *  Same risk: tx.chainId override would let a dApp paired on chain X push
+ *  a sign request for chain Y, leaking the session's signing intent across
+ *  chains. We accept either decimal or 0x-prefixed hex per EIP-1898. */
+function assertChainIdMatches(txChainId: unknown, sessionChainId: number) {
+  if (txChainId === undefined || txChainId === null || txChainId === '') return
+  const raw = String(txChainId).trim()
+  const parsed = raw.startsWith('0x') ? parseInt(raw, 16) : parseInt(raw, 10)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid tx.chainId: ${txChainId}`)
+  }
+  if (parsed !== sessionChainId) {
+    throw new Error(`Chain mismatch: tx.chainId=${parsed} but WC session chain is ${sessionChainId}`)
+  }
+}
+
 /** Versioned (v0+) Solana transactions cannot be parsed by current firmware,
  *  so they are signed via the message-signing path — i.e. blind-signed. We
  *  surface this in the approval method name so the UI can render a stronger
@@ -487,6 +514,8 @@ export class WalletConnectManager {
       case 'eth_sign': {
         // personal_sign: [message, address], eth_sign: [address, message]
         const message = method === 'personal_sign' ? evmParams[0] : evmParams[1]
+        const requestedAddress = method === 'personal_sign' ? evmParams[1] : evmParams[0]
+        assertSignerMatches(requestedAddress, info.address)
         return this.signMessage(message, addressNList, appName, chainIdNum)
       }
 
@@ -494,6 +523,7 @@ export class WalletConnectManager {
       case 'eth_signTypedData_v3':
       case 'eth_signTypedData_v4': {
         // params: [address, typedDataJSON]
+        assertSignerMatches(evmParams[0], info.address)
         const typedData = typeof evmParams[1] === 'string' ? JSON.parse(evmParams[1]) : evmParams[1]
         return this.signTypedData(typedData, addressNList, appName, chainIdNum)
       }
@@ -501,6 +531,8 @@ export class WalletConnectManager {
       case 'eth_sendTransaction':
       case 'eth_signTransaction': {
         const tx = evmParams[0]
+        assertSignerMatches(tx?.from, info.address)
+        assertChainIdMatches(tx?.chainId, chainIdNum)
         return this.signTransaction(tx, addressNList, appName, chainIdNum, method === 'eth_sendTransaction')
       }
 

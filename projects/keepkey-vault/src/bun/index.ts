@@ -4265,6 +4265,15 @@ if (swapsEnabled) {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Replay any WC deep link that was queued while no device was connected.
+	// Without this, a deep link delivered before the device was ready would
+	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
+	if (state.state === 'ready' && pendingDeepLinkUri && walletConnectEnabled) {
+		const uri = pendingDeepLinkUri
+		pendingDeepLinkUri = null
+		try { rpc.send['wc-deep-link-pair']({ uri }) }
+		catch { pendingDeepLinkUri = uri /* webview not ready — keep queued */ }
+	}
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion

@@ -322,6 +322,18 @@ function App() {
 		})
 	}, [walletConnectEnabled])
 
+	// Force-open the panel whenever a pair proposal arrives. The pair-approval
+	// modal lives inside WalletConnectPanel and renders nothing while the panel
+	// is closed — so a proposal landing after the user closed the panel (e.g.
+	// closed it between hitting Pair and the session_proposal arriving) would
+	// be invisible until the 120s backend timeout. The panel keeps its own
+	// listener for the request payload; this one only ensures visibility.
+	useEffect(() => {
+		return onRpcMessage("wc-pair-request", () => {
+			setWcPanelOpen(true)
+		})
+	}, [])
+
 	// ── Check for pending deep link from cold start ─────────────────
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
