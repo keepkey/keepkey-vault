@@ -4262,6 +4262,11 @@ if (swapsEnabled) {
 	console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
 }
 
+// Hoisted above the state-change listener: engine.start() (later in the file)
+// can synchronously emit 'ready', and the listener's deep-link replay path
+// would TDZ on this binding if it were declared near the URL handler.
+let pendingDeepLinkUri: string | null = null
+
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
@@ -4604,7 +4609,8 @@ if (process.platform === 'darwin') {
 }
 
 // ── keepkey:// and keepkey-vault:// Protocol Handler ──────────────────
-let pendingDeepLinkUri: string | null = null
+// (declared above; moved earlier to avoid TDZ access from the state-change
+// listener that replays queued deep links on device-ready.)
 
 function getWalletConnectUri(inputUri: string): string | undefined {
 	const uri = inputUri
