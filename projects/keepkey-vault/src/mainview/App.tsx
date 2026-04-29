@@ -16,6 +16,7 @@ import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { EmulatorManager } from "./components/EmulatorManager"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
+import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
@@ -687,27 +688,33 @@ function App() {
 		const isError = deviceState.state === "error"
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
+		const linuxUdevBlocked = !!deviceState.linuxUdevPermissionDenied
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
-						needsPin ? t("unlockYourKeepKey", { ns: "nav" })
+						linuxUdevBlocked ? "KeepKey detected — install udev rules to continue"
+						: needsPin ? t("unlockYourKeepKey", { ns: "nav" })
 						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
 						: isConnecting ? t("keepkeyDetectedConnecting", { ns: "nav" })
 						: isError ? t("errorWithMessage", { ns: "nav", error: deviceState.error || "Unknown" })
 						: t("searchingForKeepKey", { ns: "nav" })
 					}
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
-					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
-					childrenReady={gridReady}
-					onLogoClick={needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
+					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
+					childrenReady={linuxUdevBlocked ? true : gridReady}
+					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
 				>
-					{/* Unified device grid — registered devices + emulator wallets */}
-					<DeviceGrid
-						onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
-						onReady={() => setGridReady(true)}
-						emulatorEnabled={emulatorEnabled}
-					/>
+					{linuxUdevBlocked ? (
+						<LinuxUdevWarning />
+					) : (
+						/* Unified device grid — registered devices + emulator wallets */
+						<DeviceGrid
+							onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
+							onReady={() => setGridReady(true)}
+							emulatorEnabled={emulatorEnabled}
+						/>
+					)}
 				</SplashScreen>
 				{emulatorEnabled && <EmulatorManager />}
 			</>

@@ -230,6 +230,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getPendingDeepLink: { params: void; response: string | null }
       consumePendingDeepLink: { params: void; response: void }
 
+      // ── Linux: udev rules auto-fix ───────────────────────────────
+      // Writes /etc/udev/rules.d/51-keepkey.rules via pkexec so the user
+      // can talk to the device without re-running the app as root.
+      installLinuxUdevRules: { params: void; response: { success: boolean; error?: string } }
+
       // ── App Updates ────────────────────────────────────────────────────
       checkForUpdate: { params: void; response: UpdateInfo }
       downloadUpdate: { params: void; response: void }
