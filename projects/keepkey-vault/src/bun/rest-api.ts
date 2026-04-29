@@ -2121,6 +2121,129 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
+        // ── MESSAGE SIGNING (firmware 7.14.1+) ────────────────────────
+        // TIP-191 personal_sign for TRON.
+        // hash = keccak256("\x19TRON Signed Message:\n" + len + msg)
+        if (path === '/tron/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          const message = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          const result = await emuWrap(() => wallet.tronSignMessage({
+            addressNList,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'tronSignMessage', chain: 'Tron' })
+          if (!result) throw new HttpError(500, 'tronSignMessage returned no result')
+          return json({
+            address: result.address,
+            signature: result.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('hex')
+              : result.signature,
+          })
+        }
+
+        // TIP-191 verify — recovers signer pubkey from sig + checks claimed address.
+        if (path === '/tron/verify-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronVerifyMessageRequest)
+          const sig = Buffer.from(body.signature.replace(/^0x/i, ''), 'hex')
+          const message = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          const ok = await emuWrap(() => wallet.tronVerifyMessage({
+            address: body.address,
+            signature: sig,
+            message,
+          }), { operation: 'tronVerifyMessage', chain: 'Tron' })
+          return json({ verified: !!ok })
+        }
+
+        // TIP-712 typed-data signing (hash mode). Host pre-computes the
+        // domainSeparator + message hashes per the TIP-712 spec; device
+        // assembles keccak256("\x19\x01" || ds_hash || msg_hash) and signs.
+        if (path === '/tron/sign-typed-hash' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignTypedHashRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          const dsHash = Buffer.from(body.domain_separator_hash.replace(/^0x/i, ''), 'hex')
+          const msgHash = body.message_hash
+            ? Buffer.from(body.message_hash.replace(/^0x/i, ''), 'hex')
+            : undefined
+          const result = await emuWrap(() => wallet.tronSignTypedHash({
+            addressNList,
+            domainSeparatorHash: dsHash,
+            messageHash: msgHash,
+          }), { operation: 'tronSignTypedHash', chain: 'Tron' })
+          if (!result) throw new HttpError(500, 'tronSignTypedHash returned no result')
+          return json({
+            address: result.address,
+            signature: result.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('hex')
+              : result.signature,
+          })
+        }
+
+        // Bare Ed25519 SignMessage for TON. Firmware fences this behind
+        // the AdvancedMode policy — without it, expect Failure.
+        if (path === '/ton/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TonSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
+          const message = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          const result = await emuWrap(() => wallet.tonSignMessage({
+            addressNList,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'tonSignMessage', chain: 'TON' })
+          if (!result) throw new HttpError(500, 'tonSignMessage returned no result')
+          return json({
+            publicKey: result.publicKey instanceof Uint8Array
+              ? Buffer.from(result.publicKey).toString('hex')
+              : result.publicKey,
+            signature: result.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('hex')
+              : result.signature,
+          })
+        }
+
+        // Domain-separated Solana off-chain message. Firmware constructs
+        //   "\xff" || "solana offchain" || version || format || length || msg
+        // and Ed25519-signs the envelope.
+        if (path === '/solana/sign-offchain-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SolanaSignOffchainMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const message = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          const result = await emuWrap(() => wallet.solanaSignOffchainMessage({
+            addressNList,
+            version: body.version,
+            messageFormat: body.message_format,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
+          if (!result) throw new HttpError(500, 'solanaSignOffchainMessage returned no result')
+          return json({
+            publicKey: result.publicKey instanceof Uint8Array
+              ? Buffer.from(result.publicKey).toString('hex')
+              : result.publicKey,
+            signature: result.signature instanceof Uint8Array
+              ? Buffer.from(result.signature).toString('hex')
+              : result.signature,
+          })
+        }
+
         // ── TON BUILD + FINALIZE (2 endpoints) ────────────────────────
         // Exposes the local v4R2 BOC builder so thin clients (browser
         // extension, mobile) don't have to embed a TON lib + toncenter

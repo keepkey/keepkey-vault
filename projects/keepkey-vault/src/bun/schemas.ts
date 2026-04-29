@@ -158,6 +158,59 @@ export const TonSignRequest = z.object({
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
 }).strip()
 
+// ── Message-signing surface (firmware 7.14.1+) ──────────────────────
+
+/** POST /tron/sign-message — TIP-191 personal_sign */
+export const TronSignMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** Message bytes as hex (with or without 0x) or UTF-8 string */
+  message: z.string().min(0),
+  /** If true, encode `message` as UTF-8 bytes; otherwise expect hex */
+  is_text: z.boolean().optional(),
+  show_display: z.boolean().optional(),
+}).strip()
+
+/** POST /tron/verify-message — TIP-191 verify */
+export const TronVerifyMessageRequest = z.object({
+  address: z.string().min(1),
+  signature: z.string().min(1),  // hex (with or without 0x)
+  message: z.string().min(0),
+  is_text: z.boolean().optional(),
+}).strip()
+
+/** POST /tron/sign-typed-hash — TIP-712 hash mode */
+export const TronSignTypedHashRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** 32-byte domainSeparator hash, hex (with or without 0x) */
+  domain_separator_hash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+  /** 32-byte message hash, hex; omit for primaryType=EIP712Domain */
+  message_hash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+}).strip()
+
+/** POST /ton/sign-message — bare Ed25519 (firmware fences behind AdvancedMode) */
+export const TonSignMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  message: z.string().min(1),
+  is_text: z.boolean().optional(),
+  show_display: z.boolean().optional(),
+}).strip()
+
+/** POST /solana/sign-offchain-message — domain-separated envelope */
+export const SolanaSignOffchainMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  message: z.string().min(1),
+  is_text: z.boolean().optional(),
+  /** Off-chain spec version. Only 0 is currently defined. */
+  version: z.number().int().min(0).max(0).optional(),
+  /** 0 = restricted ASCII, 1 = UTF-8 limited (max 1212 bytes). 2 is rejected device-side. */
+  message_format: z.number().int().min(0).max(1).optional(),
+  show_display: z.boolean().optional(),
+}).strip()
+
 /**
  * POST /ton/build-transfer — build an unsigned TON v4R2 transfer.
  * Returns the 32-byte body hash (hex) the device should sign plus the

@@ -67,8 +67,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       osmosisSignTx: { params: any; response: any } // TODO: type
       xrpSignTx: { params: any; response: any } // TODO: type
       solanaSignTx: { params: any; response: any }
+      solanaSignOffchainMessage: { params: any; response: any }
       tronSignTx: { params: any; response: any }
+      tronSignMessage: { params: any; response: any }
+      tronVerifyMessage: { params: any; response: any }
+      tronSignTypedHash: { params: any; response: any }
       tonSignTx: { params: any; response: any }
+      tonSignMessage: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: void; response: ChainBalance[] }
