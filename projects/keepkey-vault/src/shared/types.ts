@@ -41,6 +41,11 @@ export interface DeviceStateInfo {
   /** True when using a hidden wallet (non-empty passphrase). Reports and chain
    *  history are unavailable; no data is persisted to disk for privacy. */
   isHiddenWallet: boolean
+  /** Linux only — set when a KeepKey is enumerated on the USB bus but neither
+   *  WebUSB nor HID could open it. Almost always means /etc/udev/rules.d
+   *  is missing the 51-keepkey.rules entry. The UI surfaces an auto-fix flow
+   *  (writes the rule via pkexec, reloads udev). */
+  linuxUdevPermissionDenied?: boolean
 }
 
 export interface FirmwareProgress {

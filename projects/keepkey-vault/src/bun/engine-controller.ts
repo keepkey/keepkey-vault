@@ -116,6 +116,9 @@ export class EngineController extends EventEmitter {
   private retryCount = 0
   private static readonly MAX_PAIR_RETRIES = 24 // ~2 minutes at 5s intervals
   private rebootPollTimer: ReturnType<typeof setInterval> | null = null
+  // Linux: KeepKey was enumerated on the bus but neither transport could open
+  // it. Surfaces in DeviceStateInfo so the UI can offer the udev-rules auto-fix.
+  private linuxUdevPermissionDenied = false
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
@@ -655,6 +658,16 @@ export class EngineController extends EventEmitter {
       // Try to pair via WebUSB then HID
       const result = await this.initializeWallet()
 
+      // Linux only: KeepKey enumerated on the bus but no transport could open
+      // it → udev rules are missing. Cleared on any successful pair below.
+      // Track transitions so we can force a state-change emit when the flag
+      // flips while the device-state itself stays "disconnected" — without
+      // this the UI never learns the udev rule is missing.
+      const prevLinuxUdevDenied = this.linuxUdevPermissionDenied
+      this.linuxUdevPermissionDenied =
+        process.platform === 'linux' && result.keepKeyOnBus && !result.usbDetected
+      const linuxUdevFlagChanged = this.linuxUdevPermissionDenied !== prevLinuxUdevDenied
+
       if (result.wallet) {
         this.wallet = result.wallet
         this.retryCount = 0
@@ -710,6 +723,12 @@ export class EngineController extends EventEmitter {
         }
         this.lastError = null
         this.updateState('disconnected')
+      } else if (linuxUdevFlagChanged) {
+        // No state transition (still disconnected), but the udev-permission flag
+        // flipped — push a state-change so the UI can render or clear the
+        // Linux udev warning.
+        console.log(`[Engine] linuxUdevPermissionDenied → ${this.linuxUdevPermissionDenied}`)
+        this.emit('state-change', this.getDeviceState())
       }
     } catch (err) {
       console.error('[Engine] syncState error:', err)
@@ -806,10 +825,24 @@ export class EngineController extends EventEmitter {
   private async initializeWallet(): Promise<{
     wallet: any | undefined
     usbDetected: boolean
+    /** True when libusb sees a KeepKey on the bus (vendor 0x2B24) regardless of
+     *  whether we could open it. Used on Linux to distinguish "no device plugged
+     *  in" from "device plugged in but we can't talk to it" (udev rules). */
+    keepKeyOnBus: boolean
     error: string | null
   }> {
     let usbDetected = false
     let lastError: string | null = null
+
+    // Snapshot the USB bus before trying to open the device. libusb's
+    // getDeviceList() reads /sys/bus/usb and works for unprivileged users —
+    // it's the actual open() that needs udev permissions on Linux.
+    let keepKeyOnBus = false
+    try {
+      keepKeyOnBus = usb.getDeviceList().some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    } catch (err: any) {
+      console.warn('[Engine] initializeWallet: getDeviceList() threw:', err?.message || err)
+    }
 
     // Clear stale keyring entries before attempting to pair — without this,
     // a previous failed pairing leaves the transport in "opened" state and
@@ -839,7 +872,7 @@ export class EngineController extends EventEmitter {
           if (wallet) {
             this.activeTransport = 'webusb'
             console.log('[Engine] Paired via WebUSB')
-            return { wallet, usbDetected: true, error: null }
+            return { wallet, usbDetected: true, keepKeyOnBus, error: null }
           }
           console.warn('[Engine] WebUSB pairRawDevice returned falsy')
         } catch (err: any) {
@@ -879,7 +912,7 @@ export class EngineController extends EventEmitter {
           if (wallet) {
             this.activeTransport = 'hid'
             console.log('[Engine] Paired via HID')
-            return { wallet, usbDetected: true, error: null }
+            return { wallet, usbDetected: true, keepKeyOnBus, error: null }
           }
           console.warn('[Engine] HID pairRawDevice returned falsy')
         } catch (err: any) {
@@ -891,8 +924,8 @@ export class EngineController extends EventEmitter {
       console.warn('[Engine] HID getDevice error:', err?.message || err)
     }
 
-    console.log(`[Engine] initializeWallet done — usbDetected=${usbDetected}, error=${lastError}`)
-    return { wallet: undefined, usbDetected, error: lastError }
+    console.log(`[Engine] initializeWallet done — usbDetected=${usbDetected}, keepKeyOnBus=${keepKeyOnBus}, error=${lastError}`)
+    return { wallet: undefined, usbDetected, keepKeyOnBus, error: lastError }
   }
 
   // ── Emulator Transport ────────────────────────────────────────────────
@@ -1270,6 +1303,7 @@ export class EngineController extends EventEmitter {
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
       isHiddenWallet: this.hiddenWalletActive,
+      linuxUdevPermissionDenied: this.linuxUdevPermissionDenied || undefined,
     }
   }
 

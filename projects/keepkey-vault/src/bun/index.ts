@@ -4301,6 +4301,62 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				pendingDeepLinkUri = null
 			},
 
+			// ── Linux: install udev rules for KeepKey ────────────────
+			// Writes /etc/udev/rules.d/51-keepkey.rules via pkexec, then
+			// reloads udev and re-triggers detection. Polkit-aware desktop
+			// sessions show a graphical password prompt automatically.
+			//
+			// Uses TAG+="uaccess" (systemd-logind) instead of GROUP="plugdev"
+			// so access is granted to the active seat user without requiring
+			// the user be in a specific group — works out-of-the-box on every
+			// modern systemd distro (Ubuntu 22.04+, Fedora, Arch, Debian 12+).
+			installLinuxUdevRules: async () => {
+				if (process.platform !== 'linux') {
+					return { success: false, error: 'Only available on Linux' }
+				}
+				const RULE_PATH = '/etc/udev/rules.d/51-keepkey.rules'
+				const RULE_BODY = `# KeepKey hardware wallet — installed by KeepKey Vault
+# Grants the active seat user raw USB + hidraw access to the device.
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="2b24", ATTRS{idProduct}=="0001", TAG+="uaccess"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="2b24", ATTRS{idProduct}=="0002", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="2b24", TAG+="uaccess"
+`
+				// Heredoc with a quoted sentinel ('KKEOF') prevents the shell
+				// from interpolating any character in the rule body.
+				const script = `set -e
+cat > ${RULE_PATH} <<'KKEOF'
+${RULE_BODY}KKEOF
+chmod 0644 ${RULE_PATH}
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trigger
+`
+				try {
+					const proc = Bun.spawn(['pkexec', '/bin/sh', '-c', script], {
+						stdout: 'pipe',
+						stderr: 'pipe',
+					})
+					const exitCode = await proc.exited
+					if (exitCode === 0) {
+						console.log('[udev] Installed KeepKey udev rules — re-syncing device state')
+						// Give udev a moment, then re-probe so the UI updates without manual retry.
+						setTimeout(() => engine.syncState().catch(() => {}), 500)
+						return { success: true }
+					}
+					// pkexec exit codes: 126 = auth dismissed, 127 = pkexec/command not found,
+					// other = command failed. stderr usually carries the cause.
+					const stderr = await new Response(proc.stderr as any).text()
+					if (exitCode === 127) {
+						return { success: false, error: 'pkexec is not installed. Install policykit-1 (Debian/Ubuntu) or polkit (Fedora/Arch), or copy the rule manually — see the link below.' }
+					}
+					if (exitCode === 126) {
+						return { success: false, error: 'Authentication was cancelled.' }
+					}
+					return { success: false, error: stderr.trim() || `pkexec exited ${exitCode}` }
+				} catch (err: any) {
+					return { success: false, error: err?.message || String(err) }
+				}
+			},
+
 			// ── App Updates ──────────────────────────────────────────
 			checkForUpdate: async () => {
 				const localVer = await Updater.localInfo.version()

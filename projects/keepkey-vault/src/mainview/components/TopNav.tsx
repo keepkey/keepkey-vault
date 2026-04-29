@@ -1,7 +1,7 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
-import { IS_WINDOWS } from "../lib/platform"
+import { IS_WINDOWS, IS_MAC } from "../lib/platform"
 import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
@@ -81,7 +81,7 @@ export function SplashNav() {
 			align="center"
 			px="4"
 			zIndex={Z.nav}
-			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(IS_MAC ? { className: "electrobun-webkit-app-region-drag" } : {})}
 			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
 			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
@@ -138,7 +138,7 @@ export function TopNav({ label, connected, firmwareVersion, firmwareVerified, ne
 			align="center"
 			px="4"
 			zIndex={Z.nav}
-			{...(!IS_WINDOWS ? { className: "electrobun-webkit-app-region-drag" } : {})}
+			{...(IS_MAC ? { className: "electrobun-webkit-app-region-drag" } : {})}
 			{...(windowDrag ? { onMouseDown: windowDrag.onMouseDown } : {})}
 			onDoubleClick={IS_WINDOWS ? () => rpcRequest("windowMaximize") : undefined}
 		>
