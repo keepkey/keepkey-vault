@@ -67,6 +67,33 @@ function requireWallet(engine: EngineController) {
   return engine.wallet
 }
 
+/**
+ * Parse a hex string into a Buffer with explicit validation.
+ *
+ * `Buffer.from(str, 'hex')` silently truncates on the first non-hex char
+ * or odd length, which surfaces downstream as "wrong-length signature"
+ * errors that don't point at the actual bug. This helper rejects bad
+ * input up front with a clear 400.
+ */
+function parseHex(input: string, label: string, expectedBytes?: number): Buffer {
+  const stripped = input.replace(/^0x/i, '')
+  if (!/^[0-9a-fA-F]*$/.test(stripped)) {
+    throw new HttpError(400, `${label}: invalid hex (non-hex characters)`)
+  }
+  if (stripped.length % 2 !== 0) {
+    throw new HttpError(400, `${label}: invalid hex (odd-length string, must be even)`)
+  }
+  if (expectedBytes !== undefined && stripped.length !== expectedBytes * 2) {
+    throw new HttpError(400, `${label}: expected ${expectedBytes} bytes, got ${stripped.length / 2}`)
+  }
+  return Buffer.from(stripped, 'hex')
+}
+
+/** Decode a `message` body field per `is_text` (default UTF-8, false = hex bytes). */
+function decodeMessageBody(message: string, isText: boolean | undefined, label: string): Buffer {
+  return isText === false ? parseHex(message, `${label}.message (is_text=false)`) : Buffer.from(message, 'utf8')
+}
+
 /** SLIP44 coin type → KeepKey firmware coin name (must match firmware coin table) */
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
@@ -2129,9 +2156,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.TronSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
-          const message = body.is_text === false
-            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
-            : Buffer.from(body.message, 'utf8')
+          const message = decodeMessageBody(body.message, body.is_text, 'tronSignMessage')
           const result = await emuWrap(() => wallet.tronSignMessage({
             addressNList,
             message,
@@ -2151,10 +2176,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.TronVerifyMessageRequest)
-          const sig = Buffer.from(body.signature.replace(/^0x/i, ''), 'hex')
-          const message = body.is_text === false
-            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
-            : Buffer.from(body.message, 'utf8')
+          // signature is regex-validated to 65 bytes hex by zod; parseHex is belt-and-braces.
+          const sig = parseHex(body.signature, 'tronVerifyMessage.signature', 65)
+          const message = decodeMessageBody(body.message, body.is_text, 'tronVerifyMessage')
           const ok = await emuWrap(() => wallet.tronVerifyMessage({
             address: body.address,
             signature: sig,
@@ -2171,9 +2195,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.TronSignTypedHashRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
-          const dsHash = Buffer.from(body.domain_separator_hash.replace(/^0x/i, ''), 'hex')
+          // Both hashes are regex-validated to 32 bytes hex by zod; parseHex
+          // re-checks length defensively in case the schema constraint loosens.
+          const dsHash = parseHex(body.domain_separator_hash, 'tronSignTypedHash.domain_separator_hash', 32)
           const msgHash = body.message_hash
-            ? Buffer.from(body.message_hash.replace(/^0x/i, ''), 'hex')
+            ? parseHex(body.message_hash, 'tronSignTypedHash.message_hash', 32)
             : undefined
           const result = await emuWrap(() => wallet.tronSignTypedHash({
             addressNList,
@@ -2196,9 +2222,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.TonSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
-          const message = body.is_text === false
-            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
-            : Buffer.from(body.message, 'utf8')
+          const message = decodeMessageBody(body.message, body.is_text, 'tonSignMessage')
           const result = await emuWrap(() => wallet.tonSignMessage({
             addressNList,
             message,
@@ -2223,9 +2247,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignOffchainMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
-          const message = body.is_text === false
-            ? Buffer.from(body.message.replace(/^0x/i, ''), 'hex')
-            : Buffer.from(body.message, 'utf8')
+          const message = decodeMessageBody(body.message, body.is_text, 'solanaSignOffchainMessage')
           const result = await emuWrap(() => wallet.solanaSignOffchainMessage({
             addressNList,
             version: body.version,

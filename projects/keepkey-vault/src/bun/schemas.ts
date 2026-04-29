@@ -160,13 +160,17 @@ export const TonSignRequest = z.object({
 
 // ── Message-signing surface (firmware 7.14.1+) ──────────────────────
 
+// 65-byte recoverable secp256k1 signature, hex with optional 0x prefix.
+const HEX_SIG_65 = /^(0x)?[0-9a-fA-F]{130}$/
+
 /** POST /tron/sign-message — TIP-191 personal_sign */
 export const TronSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
-  /** Message bytes as hex (with or without 0x) or UTF-8 string */
-  message: z.string().min(0),
-  /** If true, encode `message` as UTF-8 bytes; otherwise expect hex */
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
+  message: z.string().min(1),
+  /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
   is_text: z.boolean().optional(),
   show_display: z.boolean().optional(),
 }).strip()
@@ -174,8 +178,12 @@ export const TronSignMessageRequest = z.object({
 /** POST /tron/verify-message — TIP-191 verify */
 export const TronVerifyMessageRequest = z.object({
   address: z.string().min(1),
-  signature: z.string().min(1),  // hex (with or without 0x)
-  message: z.string().min(0),
+  /** 65-byte recoverable signature (r || s || v), hex with optional 0x. */
+  signature: z.string().regex(HEX_SIG_65),
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
+  message: z.string().min(1),
+  /** Default: true. Pass false to interpret `message` as raw hex bytes instead of UTF-8. */
   is_text: z.boolean().optional(),
 }).strip()
 
@@ -193,7 +201,10 @@ export const TronSignTypedHashRequest = z.object({
 export const TonSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
   message: z.string().min(1),
+  /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
   is_text: z.boolean().optional(),
   show_display: z.boolean().optional(),
 }).strip()
@@ -202,7 +213,10 @@ export const TonSignMessageRequest = z.object({
 export const SolanaSignOffchainMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
   message: z.string().min(1),
+  /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
   is_text: z.boolean().optional(),
   /** Off-chain spec version. Only 0 is currently defined. */
   version: z.number().int().min(0).max(0).optional(),
