@@ -719,6 +719,18 @@ export class EngineController extends EventEmitter {
           this.lastError = `Failed to read device: ${err}`
           this.updateState('error')
         }
+      } else if (this.linuxUdevPermissionDenied) {
+        // Linux udev block: enumeration sets result.usbDetected=true even
+        // when pairRawDevice() failed with EACCES, which would otherwise
+        // route us into the connected_unpaired+error branch below — and
+        // App.tsx renders that as the DeviceClaimedDialog, not the splash
+        // with LinuxUdevWarning. Treat it as disconnected instead so the
+        // UI hits the splash branch and reads linuxUdevPermissionDenied
+        // off DeviceStateInfo. updateState() always emits state-change,
+        // so calling it when lastState is already 'disconnected' still
+        // refreshes the flag for the renderer.
+        this.lastError = null
+        this.updateState('disconnected')
       } else if (result.usbDetected) {
         this.lastError = result.error || 'Device detected but cannot be claimed'
         console.warn(`[Engine] Device seen but not paired: ${this.lastError}`)
