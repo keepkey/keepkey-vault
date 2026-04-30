@@ -359,7 +359,7 @@ export class EngineController extends EventEmitter {
             features.label || '',
             features.deviceId || '',
             fwVer,
-            getEmulatorStatus().channel || '',
+            '',
           )
         } catch (e: any) {
           console.warn('[Engine] saveEmulatorWalletMeta failed:', e?.message)

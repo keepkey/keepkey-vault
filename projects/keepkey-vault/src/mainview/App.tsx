@@ -14,7 +14,6 @@ import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
-import { EmulatorManager } from "./components/EmulatorManager"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { OobSetupWizard } from "./components/OobSetupWizard"
@@ -716,7 +715,6 @@ function App() {
 						/>
 					)}
 				</SplashScreen>
-				{emulatorEnabled && <EmulatorManager />}
 			</>
 		)
 	}

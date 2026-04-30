@@ -43,12 +43,6 @@ export default {
 			// so tampering with any binary breaks Apple's signature. Provides an offline
 			// floor when the remote manifest is unreachable. See firmware-bundle/README.md.
 			"firmware-bundle": "firmware-bundle",
-			// Emulator dylibs + standalone kkemu binaries (manifest.json + per-channel
-			// libkkemu.dylib). The bun backend loads these via dlopen(); without this
-			// copy the signed app cannot find the manifest and emulator features fail
-			// silently. Resolves to <repo-root>/firmware/emulators because the dir
-			// lives outside this project, shared across vault-v6/v7/v11.
-			"../../firmware/emulators": "firmware/emulators",
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},

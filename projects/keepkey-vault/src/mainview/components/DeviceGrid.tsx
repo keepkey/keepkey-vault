@@ -17,7 +17,6 @@ interface DeviceGridProps {
 }
 
 const REVEAL_DELAY_MS = 2500
-const CHANNEL_COLORS: Record<string, string> = { alpha: '#F59E0B', beta: '#3B82F6', release: '#22C55E' }
 
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
@@ -25,7 +24,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
-	const [emuPaired, setEmuPaired] = useState(false)
 	const [loading, setLoading] = useState<string | null>(null)
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
 	const [confirmDeleteEmu, setConfirmDeleteEmu] = useState<string | null>(null)
@@ -55,7 +53,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					: Promise.resolve([] as EmulatorWalletInfo[]),
 			])
 			setDevices(devs)
-			if (status) { setEmuStatus(status); setEmuPaired(status.paired) }
+			if (status) setEmuStatus(status)
 			setEmuWallets(wallets)
 			setError(null)
 		} catch (e: any) {
@@ -75,12 +73,10 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	}, [refresh, emulatorEnabled])
 
 	// When the flag is flipped off while the grid is mounted, clear any stale
-	// emulator state so the render-site conditionals (emuPaired, emuStatus,
-	// emuWallets.length) all short-circuit cleanly.
+	// emulator state so the render-site conditionals short-circuit cleanly.
 	useEffect(() => {
 		if (!emulatorEnabled) {
 			setEmuStatus(null)
-			setEmuPaired(false)
 			setEmuWallets([])
 			setConfirmDeleteEmu(null)
 		}
@@ -98,12 +94,11 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		setConfirmForget(null)
 	}, [refresh])
 
-	/** Start an existing emulator wallet on its remembered channel. */
-	const handleStartEmu = useCallback(async (name: string, channel?: string) => {
+	const handleStartEmu = useCallback(async (name: string) => {
 		setLoading(`emu:${name}`)
 		setError(null)
 		try {
-			await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name, channel }, 20000)
+			await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
 			await refresh()
 		} catch (e: any) { setError(e?.message || String(e)) }
 		setLoading(null)
@@ -128,18 +123,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		setConfirmDeleteEmu(null)
 	}, [refresh])
 
-	const handlePairEmu = useCallback(async () => {
-		setLoading("emu:__pair")
-		try {
-			const s = await rpcRequest<EmulatorStatus>("emulatorPair", undefined, 10000)
-			setEmuStatus(s)
-			setEmuPaired(s.paired)
-			await refresh()
-		} catch (e: any) { setError(e?.message || String(e)) }
-		setLoading(null)
-	}, [refresh])
-
-
 	// ── Helpers ──────────────────────────────────────────────────────
 
 	function formatUsd(n: number): string {
@@ -161,9 +144,9 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	}
 
 	const emuRunning = emuStatus?.state === "running"
-	// Show grid if there are devices, emulator wallets, OR if the emulator
-	// system responded at all (so "Pair Emulator" card is reachable on clean install)
-	const hasContent = devices.length > 0 || emuWallets.length > 0 || emuPaired || emuStatus !== null
+	// Show grid if there are devices or existing emu wallets. We no longer
+	// surface a Pair-Emulator invitation, so an empty grid stays empty.
+	const hasContent = devices.length > 0 || emuWallets.length > 0
 
 	// Notify parent when grid is ready to display
 	useEffect(() => {
@@ -235,11 +218,10 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					</DeviceCard>
 				)})}
 
-				{/* ── Emulator wallet cards ─────────────────────────── */}
+				{/* ── Emulator wallet cards (only for users who already have one) ─ */}
 				{emuWallets.map((w) => {
 					const active = w.isActive && emuRunning
 					const isDeleting = confirmDeleteEmu === w.name
-					const channelColor = w.channel ? CHANNEL_COLORS[w.channel] || '#C0A860' : null
 					const displayName = w.label || w.name
 					return (
 						<DeviceCard key={`emu:${w.name}`} active={active} accentColor={active ? undefined : "#C0A860"}>
@@ -256,16 +238,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 										<Text fontSize="9px" fontWeight="700" color={active ? "#22C55E" : "#3B82F6"} bg={active ? "rgba(34,197,94,0.12)" : "rgba(59,130,246,0.15)"} px="1.5" py="0.5" borderRadius="sm">
 											{active ? "running" : "EMULATOR"}
 										</Text>
-										{w.firmwareVersion && (
-											<Text fontSize="9px" color="gray.500">
-												fw {w.firmwareVersion}
-											</Text>
-										)}
-										{w.channel && channelColor && (
-											<Text fontSize="9px" fontWeight="700" color={channelColor} textTransform="uppercase" letterSpacing="wider">
-												{w.channel}
-											</Text>
-										)}
 									</Flex>
 									{w.hasMnemonic && <Text fontSize="9px" color="gray.600" mt="0.5">seed saved</Text>}
 								</Box>
@@ -290,7 +262,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 									{active ? (
 										<CardBtn label="Stop" color="#EF4444" onClick={handleStopEmu} loading={loading === "emu:__stop"} />
 									) : (
-										<SolidBtn label="Start" bg="#22C55E" onClick={() => handleStartEmu(w.name, w.channel)} loading={loading === `emu:${w.name}`} />
+										<SolidBtn label="Start" bg="#22C55E" onClick={() => handleStartEmu(w.name)} loading={loading === `emu:${w.name}`} />
 									)}
 									{!active && (
 										<SmallCircleBtn color="#EF4444" label="&times;" onClick={() => setConfirmDeleteEmu(w.name)} />
@@ -300,35 +272,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 						</DeviceCard>
 					)
 				})}
-
-				{/* New emulators are added via the bottom-right EmulatorManager pill,
-				    which routes through the standard OobSetupWizard. */}
-
-				{/* ── Pair Emulator card (if not paired) ──────────── */}
-				{!emuPaired && emuStatus && (
-					<Box
-						as="button"
-						w="180px"
-						minH="100px"
-						bg="rgba(255,255,255,0.02)"
-						border="1px dashed rgba(192,168,96,0.3)"
-						borderRadius="xl"
-						display="flex"
-						flexDirection="column"
-						alignItems="center"
-						justifyContent="center"
-						gap="1"
-						cursor={loading === "emu:__pair" ? "wait" : "pointer"}
-						transition="all 0.2s"
-						_hover={{ bg: "rgba(192,168,96,0.06)", borderColor: "rgba(192,168,96,0.5)" }}
-						onClick={handlePairEmu}
-					>
-						<EmulatorIcon active={false} />
-						<Text fontSize="10px" color="gray.500" mt="1">
-							{loading === "emu:__pair" ? "Pairing..." : "Pair Emulator"}
-						</Text>
-					</Box>
-				)}
 			</Flex>
 
 			{/* Grand total + eyeball toggle */}

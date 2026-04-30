@@ -6,19 +6,20 @@ import type { FirmwareAnalysis, FirmwareProgress } from "../../shared/types"
 import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 
 /**
- * FirmwareDropZone — Global drag-and-drop firmware flasher.
+ * FirmwareDropZone — Global drag-and-drop dispatcher.
  *
- * Renders nothing when idle. When a .bin file is dragged over the window,
- * shows a full-screen drop zone. After drop, analyzes the firmware binary
- * (signed/unsigned detection, version comparison) and shows a confirmation
- * dialog with appropriate warnings before flashing.
+ * Renders nothing when idle. Detects file type on drop:
+ *   - .bin  → firmware analysis + flash flow (signed/unsigned, version compare).
+ *   - .dylib → emulator dylib install (macOS only). Replaces any previously
+ *             installed emulator and flips the emulator dev flag on.
  *
- * Warning levels:
+ * Warning levels for firmware:
  * - Signed firmware: green badge, standard confirmation
  * - Unsigned firmware (device already unsigned): orange warning, developer-only notice
  * - Signed → Unsigned transition: RED double warning — "THIS WILL WIPE THE DEVICE"
  */
-type FlashPhase = "idle" | "analyzing" | "confirm" | "flashing" | "complete" | "error"
+type FlashPhase = "idle" | "analyzing" | "confirm" | "flashing" | "complete" | "error" | "emu-installing" | "emu-starting" | "emu-installed"
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
 
 export function FirmwareDropZone() {
 	const [isDragging, setIsDragging] = useState(false)
@@ -78,13 +79,24 @@ export function FirmwareDropZone() {
 			if (!files?.length) return
 
 			const file = files[0]
-			if (!file.name.endsWith(".bin")) {
-				setError("Only .bin firmware files are supported")
-				setPhase("error")
+			const lower = file.name.toLowerCase()
+			if (lower.endsWith(".bin")) {
+				await processFile(file)
 				return
 			}
-
-			await processFile(file)
+			if (lower.endsWith(".dylib")) {
+				if (!IS_MAC) {
+					setError("Emulator is only available on macOS")
+					setPhase("error")
+					return
+				}
+				await processDylib(file)
+				return
+			}
+			setError(IS_MAC
+				? "Only .bin firmware or .dylib emulator files are supported"
+				: "Only .bin firmware files are supported")
+			setPhase("error")
 		}
 
 		document.addEventListener("dragenter", handleDragEnter)
@@ -96,6 +108,43 @@ export function FirmwareDropZone() {
 			document.removeEventListener("dragleave", handleDragLeave)
 			document.removeEventListener("dragover", handleDragOver)
 			document.removeEventListener("drop", handleDrop)
+		}
+	}, [])
+
+	const processDylib = useCallback(async (file: File) => {
+		setPhase("emu-installing")
+		setFileName(file.name)
+		setError(null)
+		try {
+			const arrayBuf = await file.arrayBuffer()
+			const bytes = new Uint8Array(arrayBuf)
+			const CHUNK = 8192
+			let binary = ''
+			for (let i = 0; i < bytes.length; i += CHUNK) {
+				binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+			}
+			const b64 = btoa(binary)
+			await rpcRequest("emulatorInstallDylib", { data: b64 }, 30000)
+
+			// First-time install (no existing wallets) — auto-pair + boot a fresh
+			// emulator so the device hits needs_init and the OOB wizard takes over.
+			// Replacement install (wallets already on disk) — leave them as-is, just
+			// confirm the swap. The user can Start any existing card from DeviceGrid.
+			const wallets = await rpcRequest<Array<{ name: string }>>("emulatorListWallets").catch(() => [])
+			if (wallets.length === 0) {
+				setPhase("emu-starting")
+				try { await rpcRequest("emulatorPair", undefined, 10000) } catch { /* may already be paired */ }
+				await rpcRequest("emulatorInit", { flashName: "default" }, 30000)
+				// Engine.connectEmulator() flips device state to needs_init; App.tsx
+				// transitions phase to 'setup' which mounts OobSetupWizard. Drop our
+				// own dialog so the wizard isn't covered.
+				setPhase("idle")
+				return
+			}
+			setPhase("emu-installed")
+		} catch (err: any) {
+			setError(err?.message || "Failed to install emulator")
+			setPhase("error")
 		}
 	}, [])
 
@@ -183,11 +232,14 @@ export function FirmwareDropZone() {
 						<line x1="12" y1="15" x2="12" y2="3" />
 					</svg>
 					<Text fontSize="xl" fontWeight="700" color="kk.gold">
-						Drop Firmware File
+						Drop File
 					</Text>
 					<Text fontSize="sm" color="kk.textSecondary" textAlign="center">
-						Drop a .bin firmware file to flash your KeepKey.
-						Signed and unsigned firmware supported.
+						{IS_MAC
+							? <>Drop a <Text as="span" fontFamily="mono">.bin</Text> firmware to flash your KeepKey,
+							   or a <Text as="span" fontFamily="mono">.dylib</Text> to install an emulator.</>
+							: <>Drop a <Text as="span" fontFamily="mono">.bin</Text> firmware file to flash your KeepKey.
+							   Signed and unsigned firmware supported.</>}
 					</Text>
 				</Flex>
 			</Box>
@@ -229,6 +281,52 @@ export function FirmwareDropZone() {
 							Analyzing Firmware...
 						</Text>
 						<Text fontSize="sm" color="kk.textSecondary">{fileName}</Text>
+					</Box>
+				)}
+
+				{/* ── Emulator dylib install (macOS-only dev feature) ─ */}
+				{phase === "emu-installing" && (
+					<Box p="8" textAlign="center">
+						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">
+							Installing Emulator...
+						</Text>
+						<Text fontSize="sm" color="kk.textSecondary">{fileName}</Text>
+					</Box>
+				)}
+				{phase === "emu-starting" && (
+					<Box p="8" textAlign="center">
+						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">
+							Starting Emulator...
+						</Text>
+						<Text fontSize="sm" color="kk.textSecondary">
+							Pairing with Keychain and booting your first emulator wallet.
+						</Text>
+					</Box>
+				)}
+				{phase === "emu-installed" && (
+					<Box p="8" textAlign="center">
+						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#48BB78" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
+							<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+							<polyline points="22 4 12 14.01 9 11.01" />
+						</svg>
+						<Text fontSize="lg" fontWeight="700" color="#48BB78" mb="2">
+							Emulator Updated
+						</Text>
+						<Text fontSize="sm" color="kk.textSecondary" mb="4">
+							New libkkemu installed. Your existing emulator wallets are unchanged —
+							start any of them from the device grid.
+						</Text>
+						<Button
+							size="sm"
+							bg="kk.gold"
+							color="black"
+							fontWeight="600"
+							px="4" py="2"
+							_hover={{ bg: "kk.goldHover" }}
+							onClick={handleDismiss}
+						>
+							Done
+						</Button>
 					</Box>
 				)}
 
