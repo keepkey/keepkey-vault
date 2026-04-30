@@ -95,11 +95,15 @@ jobs:
       - name: Build modules (hdwallet + proto-tx-builder)
         shell: bash
         run: |
-          for i in 1 2 3; do
-            make modules-build && break
-            echo "Attempt $i failed, retrying in 10s..."
-            sleep 10
-          done
+          cd modules/hdwallet
+          yarn install --frozen-lockfile
+          yarn tsc --build
+
+          cd ../proto-tx-builder
+          bun install
+          git submodule update --init osmosis-frontend
+          npx tsc -p .
+          test -f dist/index.js
 
       - name: Populate device-protocol lib/
         shell: bash
