@@ -8,7 +8,7 @@ import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
-  ensureFvkLoaded,
+  ensureFvkLoaded, displayOrchardAddressOnDevice,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
@@ -614,6 +614,7 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Health &amp; version</td><td>5s</td></tr>
           <tr><td><code>POST</code></td><td><code>/auth/pair</code></td><td>Pair app (device approval)</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/system/info/get-features</code></td><td>Device info, firmware</td><td>30s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/zcash/shielded/display-address</code></td><td>Display device-derived Orchard UA</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/addresses/eth</code></td><td>Derive ETH address</td><td>30s</td></tr>
           <tr><td><code>POST</code></td><td><code>/eth/sign-transaction</code></td><td>Sign EVM transaction</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/eth/sign-typed-data</code></td><td>Sign EIP-712</td><td>600s</td></tr>
@@ -2921,6 +2922,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           // seed_hex path is dev/test only — reject in production builds
           return json({ error: 'seed_hex init disabled — use from_device: true' }, 403)
+        }
+
+        if (path === '/api/zcash/shielded/display-address' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashDisplayAddressRequest)
+          const wallet = requireWallet(engine)
+          return json(await displayOrchardAddressOnDevice(wallet, body.account ?? 0))
         }
 
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {

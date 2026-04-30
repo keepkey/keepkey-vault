@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
-import { FaShieldAlt, FaCopy, FaCheck, FaEnvelope, FaChevronDown, FaChevronUp } from "react-icons/fa"
+import { FaShieldAlt, FaCopy, FaCheck, FaEnvelope, FaChevronDown, FaChevronUp, FaEye } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
@@ -66,6 +66,9 @@ export function ZcashPrivacyTab() {
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
+	const [viewingOnDevice, setViewingOnDevice] = useState(false)
+	const [viewOnDeviceOk, setViewOnDeviceOk] = useState(false)
+	const [viewOnDeviceError, setViewOnDeviceError] = useState<string | null>(null)
 
 	// Send form state
 	const [recipient, setRecipient] = useState("")
@@ -463,6 +466,22 @@ export function ZcashPrivacyTab() {
 		setTimeout(() => setCopied(false), 2000)
 	}, [orchardAddress])
 
+	const viewAddressOnDevice = useCallback(async () => {
+		setViewingOnDevice(true)
+		setViewOnDeviceOk(false)
+		setViewOnDeviceError(null)
+		try {
+			const result = await rpcRequest<{ address: string }>("zcashDisplayAddress", { account: 0 }, 600000)
+			setOrchardAddress(result.address)
+			setViewOnDeviceOk(true)
+			setTimeout(() => setViewOnDeviceOk(false), 3000)
+		} catch (e: any) {
+			setViewOnDeviceError(e.message || "Failed to display address on device")
+		} finally {
+			setViewingOnDevice(false)
+		}
+	}, [])
+
 	// ── Status indicator color ────────────────────────────────────────
 	const statusColor = status === "ready" ? "#4ADE80"
 		: status === "initializing" || status === "checking" ? "#FBBF24"
@@ -763,18 +782,42 @@ export function ZcashPrivacyTab() {
 							>
 								{orchardAddress}
 							</Text>
-							<Button
-								size="xs"
-								variant="outline"
-								borderColor="kk.border"
-								color={copied ? "#4ADE80" : "kk.textSecondary"}
-								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
-								onClick={copyAddress}
-								w="fit-content"
-							>
-								<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
-								{copied ? t("copied") : t("copyAddress")}
-							</Button>
+							<Flex gap="2" wrap="wrap">
+								<Button
+									size="xs"
+									variant="outline"
+									borderColor="kk.border"
+									color={viewOnDeviceOk ? "#4ADE80" : "kk.textSecondary"}
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={viewAddressOnDevice}
+									disabled={viewingOnDevice}
+									w="fit-content"
+								>
+									{viewingOnDevice ? (
+										<Spinner size="xs" color="kk.gold" mr="1.5" />
+									) : (
+										<Box as={viewOnDeviceOk ? FaCheck : FaEye} fontSize="10px" mr="1.5" />
+									)}
+									{viewingOnDevice ? t("confirmOnDevice") : viewOnDeviceOk ? t("verified") : t("viewOnDevice")}
+								</Button>
+								<Button
+									size="xs"
+									variant="outline"
+									borderColor="kk.border"
+									color={copied ? "#4ADE80" : "kk.textSecondary"}
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={copyAddress}
+									w="fit-content"
+								>
+									<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
+									{copied ? t("copied") : t("copyAddress")}
+								</Button>
+							</Flex>
+							{viewOnDeviceError && (
+								<Text fontSize="11px" color="#F87171" lineHeight="1.4">
+									{viewOnDeviceError}
+								</Text>
+							)}
 						</Flex>
 					</Flex>
 				</Box>

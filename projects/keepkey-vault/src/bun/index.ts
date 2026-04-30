@@ -107,7 +107,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded } from "./txbuilder/zcash-shielded"
+import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -2822,6 +2822,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const { backfillMemos } = await import("./zcash-sidecar")
 				return await backfillMemos()
+			},
+			zcashDisplayAddress: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				return await displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0)
 			},
 
 			zcashDiagnoseAnchor: async (params: any) => {

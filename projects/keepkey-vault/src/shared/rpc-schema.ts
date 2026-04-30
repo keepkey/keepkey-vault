@@ -127,6 +127,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
+      zcashDisplayAddress: { params: { account?: number }; response: { address: string } }
 
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }

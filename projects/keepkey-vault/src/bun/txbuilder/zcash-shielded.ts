@@ -33,6 +33,26 @@ export interface ShieldedSendParams {
  */
 export type DeviceSignWrap = <T>(fn: () => Promise<T>) => Promise<T>
 
+export async function displayOrchardAddressOnDevice(wallet: any, account: number = 0): Promise<{ address: string }> {
+	if (typeof wallet.zcashDisplayAddress !== "function") {
+		throw new Error(
+			"hdwallet does not support zcashDisplayAddress — " +
+			"ensure KeepKey firmware and hdwallet include ZcashDisplayAddress support"
+		)
+	}
+
+	const H = 0x80000000
+	const result = await wallet.zcashDisplayAddress({
+		addressNList: [H + 32, H + 133, H + account],
+		account,
+	})
+	const address = result?.address
+	if (!address) {
+		throw new Error("Device returned an empty Zcash address")
+	}
+	return { address }
+}
+
 export interface SigningRequest {
 	n_actions: number
 	account: number
