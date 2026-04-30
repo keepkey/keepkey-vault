@@ -213,9 +213,12 @@ export const TonSignMessageRequest = z.object({
 export const SolanaSignOffchainMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
-  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
-   *  expect hex (with or without 0x prefix). */
-  message: z.string().min(1),
+  /** Message payload. Default: encoded as UTF-8 bytes (max 1212 chars).
+   *  If is_text=false, expect hex (max 2424 chars = 1212 bytes; with or
+   *  without 0x prefix). 1212 is the spec ceiling for formats 0 and 1;
+   *  firmware rejects above this anyway, but enforcing here surfaces the
+   *  error pre-USB-roundtrip. */
+  message: z.string().min(1).max(2424),
   /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
   is_text: z.boolean().optional(),
   /** Off-chain spec version. Only 0 is currently defined. */

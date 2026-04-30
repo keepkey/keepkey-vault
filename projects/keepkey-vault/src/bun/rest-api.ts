@@ -94,6 +94,11 @@ function decodeMessageBody(message: string, isText: boolean | undefined, label: 
   return isText === false ? parseHex(message, `${label}.message (is_text=false)`) : Buffer.from(message, 'utf8')
 }
 
+/** Single-shot Uint8Array → hex serializer used by every signing handler. */
+function toHex(value: Uint8Array | string): string {
+  return value instanceof Uint8Array ? Buffer.from(value).toString('hex') : value
+}
+
 /** SLIP44 coin type → KeepKey firmware coin name (must match firmware coin table) */
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
@@ -2163,12 +2168,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display,
           }), { operation: 'tronSignMessage', chain: 'Tron' })
           if (!result) throw new HttpError(500, 'tronSignMessage returned no result')
-          return json({
-            address: result.address,
-            signature: result.signature instanceof Uint8Array
-              ? Buffer.from(result.signature).toString('hex')
-              : result.signature,
-          })
+          return json({ address: result.address, signature: toHex(result.signature) })
         }
 
         // TIP-191 verify — recovers signer pubkey from sig + checks claimed address.
@@ -2207,12 +2207,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             messageHash: msgHash,
           }), { operation: 'tronSignTypedHash', chain: 'Tron' })
           if (!result) throw new HttpError(500, 'tronSignTypedHash returned no result')
-          return json({
-            address: result.address,
-            signature: result.signature instanceof Uint8Array
-              ? Buffer.from(result.signature).toString('hex')
-              : result.signature,
-          })
+          return json({ address: result.address, signature: toHex(result.signature) })
         }
 
         // Bare Ed25519 SignMessage for TON. Firmware fences this behind
@@ -2229,14 +2224,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display,
           }), { operation: 'tonSignMessage', chain: 'TON' })
           if (!result) throw new HttpError(500, 'tonSignMessage returned no result')
-          return json({
-            publicKey: result.publicKey instanceof Uint8Array
-              ? Buffer.from(result.publicKey).toString('hex')
-              : result.publicKey,
-            signature: result.signature instanceof Uint8Array
-              ? Buffer.from(result.signature).toString('hex')
-              : result.signature,
-          })
+          return json({ publicKey: toHex(result.publicKey), signature: toHex(result.signature) })
         }
 
         // Domain-separated Solana off-chain message. Firmware constructs
@@ -2248,6 +2236,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.SolanaSignOffchainMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
           const message = decodeMessageBody(body.message, body.is_text, 'solanaSignOffchainMessage')
+          // Off-chain spec: 1212-byte ceiling for formats 0/1. Firmware
+          // rejects above this anyway; enforcing here surfaces the error
+          // pre-USB-roundtrip with a clearer source.
+          if (message.length > 1212) {
+            throw new HttpError(400, `solanaSignOffchainMessage.message: exceeds 1212-byte off-chain spec ceiling (got ${message.length})`)
+          }
           const result = await emuWrap(() => wallet.solanaSignOffchainMessage({
             addressNList,
             version: body.version,
@@ -2256,14 +2250,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: body.show_display,
           }), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
           if (!result) throw new HttpError(500, 'solanaSignOffchainMessage returned no result')
-          return json({
-            publicKey: result.publicKey instanceof Uint8Array
-              ? Buffer.from(result.publicKey).toString('hex')
-              : result.publicKey,
-            signature: result.signature instanceof Uint8Array
-              ? Buffer.from(result.signature).toString('hex')
-              : result.signature,
-          })
+          return json({ publicKey: toHex(result.publicKey), signature: toHex(result.signature) })
         }
 
         // ── TON BUILD + FINALIZE (2 endpoints) ────────────────────────
