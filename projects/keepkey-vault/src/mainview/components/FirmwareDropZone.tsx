@@ -125,6 +125,10 @@ export function FirmwareDropZone() {
 			}
 			const b64 = btoa(binary)
 			await rpcRequest("emulatorInstallDylib", { data: b64 }, 30000)
+			// Backend auto-flips emulator_enabled when a dylib is installed; tell
+			// the rest of the app to re-pull settings so DeviceGrid stops
+			// short-circuiting emulator RPCs.
+			window.dispatchEvent(new Event("keepkey-settings-changed"))
 
 			// First-time install (no existing wallets) — auto-pair + boot a fresh
 			// emulator so the device hits needs_init and the OOB wizard takes over.

@@ -295,6 +295,8 @@ test-rest:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-api.test.ts
 
 test-emu:
+	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \
+		(echo "ERROR: emulator not installed. Run: make build-emulator"; exit 1)
 	cd $(PROJECT_DIR) && bun test tests/emulator/
 
 # --- Emulator (developer feature) ---
