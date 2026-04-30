@@ -20,6 +20,7 @@ import { handleSweepRoute } from './rest-sweep'
 import { getSetting, findApiLogs, getApiLogById } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import {
   buildTonTransfer,
@@ -111,6 +112,23 @@ const TICKER_TO_COIN: Record<string, string> = {
   BTC: 'Bitcoin', LTC: 'Litecoin', DOGE: 'Dogecoin', DASH: 'Dash',
   DGB: 'DigiByte', ETH: 'Ethereum', ATOM: 'Cosmos', XRP: 'Ripple',
   BCH: 'BitcoinCash', TRX: 'Tron', SOL: 'Solana', TON: 'Ton', RUNE: 'Rune',
+}
+
+const DEFAULT_SOLANA_ADDRESS_N = [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+
+function pickAddressNList(body: any, fallback: number[]): number[] {
+  return Array.isArray(body?.addressNList)
+    ? body.addressNList
+    : Array.isArray(body?.address_n)
+      ? body.address_n
+      : fallback
+}
+
+function formatAddressNPath(addressNList: number[]): string {
+  return 'm/' + addressNList.map((n) => {
+    const hardened = n >= 0x80000000
+    return `${hardened ? n - 0x80000000 : n}${hardened ? "'" : ''}`
+  }).join('/')
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -1422,6 +1440,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // Tron: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address
               signingInfo.value = preview.amount
+            } else if (path === '/solana/sign-message') {
+              const raw = typeof preview.message === 'string' ? preview.message : ''
+              const messageEncoding = /^[0-9a-fA-F]+$/.test(raw) ? 'hex' : 'base64'
+              const addressNList = pickAddressNList(preview, DEFAULT_SOLANA_ADDRESS_N)
+              const claimedSigner = typeof preview.pubkey === 'string'
+                ? preview.pubkey
+                : typeof preview.address === 'string'
+                  ? preview.address
+                  : undefined
+              let actualSigner = formatAddressNPath(addressNList)
+              try {
+                const wallet = requireWallet(engine)
+                const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
+                const derivedSigner = typeof derived === 'string' ? derived : derived?.address
+                if (derivedSigner) actualSigner = derivedSigner
+                if (claimedSigner && derivedSigner && claimedSigner !== derivedSigner) {
+                  throw new HttpError(400, 'Solana signer mismatch: claimed signer does not match address_n/addressNList')
+                }
+              } catch (e: any) {
+                if (e instanceof HttpError) throw e
+                console.warn('[REST] Could not derive Solana signer for preview:', e?.message || e)
+              }
+              signingInfo.chain = 'solana'
+              signingInfo.from = actualSigner
+              signingInfo.data = raw
+              signingInfo.needsBlindSigning = true
+              signingInfo.requiresAdvancedMode = true
+              signingInfo.solanaMessageDecoded = buildSolanaMessageDecodedInfo(raw, {
+                // Match hdwallet's SolanaSignMessage string coercion exactly:
+                // hex strings sign hex bytes, everything else signs base64 bytes.
+                encoding: messageEncoding,
+                signer: actualSigner,
+              })
             } else if (path === '/solana/sign-transaction') {
               // Solana clear-signing: parse v0/legacy message, resolve ALTs,
               // decode each instruction via the pioneer-discovery program
@@ -1478,7 +1529,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning}, source=${decoded?.source}`)
               }
             }
-          } catch { /* body parse failed, non-fatal */ }
+          } catch (e: any) {
+            if (e instanceof HttpError) throw e
+            console.warn('[REST] Signing preview extraction failed:', e?.message || e)
+          }
 
           // Check device AdvancedMode policy before presenting to user.
           // ONLY use cached features — never call getFeatures() here because
@@ -2034,7 +2088,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignRequest)
-          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const addressNList = pickAddressNList(body, DEFAULT_SOLANA_ADDRESS_N)
 
           // Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
           // Firmware expects just the message bytes. See solana-tx.ts for the
@@ -2764,6 +2818,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.ApplyPoliciesRequest)
           await wallet.applyPolicy(body)
           featuresCache = null
+          try {
+            await engine.refreshFeaturesSnapshot()
+          } catch (e: any) {
+            engine.invalidateFeaturesSnapshot()
+            console.warn('[REST] Applied policy but failed to refresh features:', e?.message || e)
+          }
           return json({ success: true })
         }
 

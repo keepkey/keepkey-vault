@@ -133,6 +133,20 @@ export class EngineController extends EventEmitter {
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
   get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
+  /** Read-only snapshot used by signing approval UI; avoids transport calls mid-prompt. */
+  getCachedFeaturesSnapshot(): any | null { return this.cachedFeatures }
+  /** Refresh feature policy state after explicit settings/policy mutations. */
+  async refreshFeaturesSnapshot(): Promise<any> {
+    if (!this.wallet) throw new Error('No device connected')
+    this.cachedFeatures = await this.wallet.getFeatures()
+    this.updateState(this.deriveState(this.cachedFeatures))
+    return this.cachedFeatures
+  }
+  /** Drop stale features when a refresh fails so signing UI does not trust old policy state. */
+  invalidateFeaturesSnapshot(): void {
+    this.cachedFeatures = null
+    this.emit('state-change', this.getDeviceState())
+  }
 
   constructor() {
     super()
