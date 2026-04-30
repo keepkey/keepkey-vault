@@ -33,6 +33,22 @@ export interface ShieldedSendParams {
  */
 export type DeviceSignWrap = <T>(fn: () => Promise<T>) => Promise<T>
 
+export async function displayOrchardAddressOnDevice(wallet: any, account: number = 0): Promise<{ address: string }> {
+	if (typeof wallet.zcashDisplayAddress !== "function") {
+		throw new Error(
+			"View on device requires firmware 7.15.0+ with ZcashDisplayAddress and a matching hdwallet wrapper"
+		)
+	}
+
+	const H = 0x80000000
+	const result = await wallet.zcashDisplayAddress({
+		addressNList: [H + 32, H + 133, H + account],
+		account,
+	})
+	if (!result?.address) throw new Error("Device did not return a Zcash address")
+	return { address: result.address }
+}
+
 export interface SigningRequest {
 	n_actions: number
 	account: number

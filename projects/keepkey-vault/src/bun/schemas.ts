@@ -336,6 +336,11 @@ export const ZcashInitRequest = z.object({
   account: z.number().int().min(0).optional(),
 }).passthrough()
 
+/** POST /api/zcash/shielded/display-address */
+export const ZcashDisplayAddressRequest = z.object({
+  account: z.number().int().min(0).optional(),
+}).passthrough()
+
 /** POST /api/zcash/shielded/scan */
 export const ZcashScanRequest = z.object({
   start_height: z.number().int().min(0).optional(),

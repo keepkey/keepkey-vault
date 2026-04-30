@@ -127,6 +127,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
+      // Ask the device to derive and display its Orchard UA for this account.
+      // No host-cached UA or FVK material is sent for this display flow.
+      zcashDisplayAddress: { params: { account?: number }; response: { address: string } }
 
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
-import { FaShieldAlt, FaCopy, FaCheck, FaEnvelope, FaChevronDown, FaChevronUp } from "react-icons/fa"
+import { FaShieldAlt, FaCopy, FaCheck, FaEnvelope, FaChevronDown, FaChevronUp, FaEye } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
@@ -463,6 +463,29 @@ export function ZcashPrivacyTab() {
 		setTimeout(() => setCopied(false), 2000)
 	}, [orchardAddress])
 
+	// ── View shielded address on device ───────────────────────────────
+	// Firmware derives the Orchard UA from the device seed and displays it.
+	// Vault sends only the ZIP-32 account/path for this display flow.
+	const [verifyingOnDevice, setVerifyingOnDevice] = useState(false)
+	const [verifyError, setVerifyError] = useState<string | null>(null)
+	const [verifySucceeded, setVerifySucceeded] = useState(false)
+	const verifyOnDevice = useCallback(async () => {
+		if (!orchardAddress) return
+		setVerifyingOnDevice(true)
+		setVerifyError(null)
+		setVerifySucceeded(false)
+		try {
+			const result = await rpcRequest<{ address: string }>("zcashDisplayAddress", { account: 0 }, 600000)
+			if (result.address) setOrchardAddress(result.address)
+			setVerifySucceeded(true)
+			setTimeout(() => setVerifySucceeded(false), 4000)
+		} catch (e: any) {
+			setVerifyError(e?.message ?? String(e))
+		} finally {
+			setVerifyingOnDevice(false)
+		}
+	}, [orchardAddress])
+
 	// ── Status indicator color ────────────────────────────────────────
 	const statusColor = status === "ready" ? "#4ADE80"
 		: status === "initializing" || status === "checking" ? "#FBBF24"
@@ -763,18 +786,43 @@ export function ZcashPrivacyTab() {
 							>
 								{orchardAddress}
 							</Text>
-							<Button
-								size="xs"
-								variant="outline"
-								borderColor="kk.border"
-								color={copied ? "#4ADE80" : "kk.textSecondary"}
-								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
-								onClick={copyAddress}
-								w="fit-content"
-							>
-								<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
-								{copied ? t("copied") : t("copyAddress")}
-							</Button>
+							<Flex gap="2" wrap="wrap">
+								<Button
+									size="xs"
+									variant="outline"
+									borderColor="kk.border"
+									color={verifySucceeded ? "#4ADE80" : "kk.textSecondary"}
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={verifyOnDevice}
+									disabled={verifyingOnDevice || !orchardAddress}
+									w="fit-content"
+									title={t("viewShieldedAddressTooltip", "Derives and shows this Orchard address on your KeepKey device.")}
+								>
+									<Box as={verifySucceeded ? FaCheck : FaEye} fontSize="10px" mr="1.5" />
+									{verifyingOnDevice
+										? t("checkDevice", "Check device")
+										: verifySucceeded
+											? t("verified", "Verified")
+											: t("viewOnDevice", "View on device")}
+								</Button>
+								<Button
+									size="xs"
+									variant="outline"
+									borderColor="kk.border"
+									color={copied ? "#4ADE80" : "kk.textSecondary"}
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={copyAddress}
+									w="fit-content"
+								>
+									<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
+									{copied ? t("copied") : t("copyAddress")}
+								</Button>
+							</Flex>
+							{verifyError && (
+								<Text fontSize="10px" color="#F87171" mt="1">
+									{verifyError}
+								</Text>
+							)}
 						</Flex>
 					</Flex>
 				</Box>
