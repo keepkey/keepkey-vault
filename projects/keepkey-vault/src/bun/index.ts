@@ -1053,6 +1053,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				await engine.wallet.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
 				clearFeaturesCache()
+				try {
+					await engine.refreshFeaturesSnapshot()
+				} catch (e: any) {
+					engine.invalidateFeaturesSnapshot()
+					console.warn('[policy] Applied policy but failed to refresh features:', e?.message || e)
+				}
 			},
 			ping: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')

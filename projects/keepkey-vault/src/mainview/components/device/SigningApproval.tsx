@@ -106,9 +106,9 @@ function TrustBadge({ level, hasSigned, t }: { level: 'verified' | 'known' | 'un
 
 // ── Blind signing warning ─────────────────────────────────────────────
 
-function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription }: {
+function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription, enableLabel, error }: {
 	enabled: boolean; confirming: boolean; onEnable: () => void; onCancel: () => void; t: (k: string, f?: string) => string
-	title?: string; description?: string; confirmDescription?: string
+	title?: string; description?: string; confirmDescription?: string; enableLabel?: string; error?: string | null
 }) {
 	if (enabled) return null
 	return (
@@ -135,10 +135,15 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title,
 						cursor="pointer" _hover={{ bg: "rgba(245,163,59,0.35)" }}
 						flexShrink={0} onClick={onEnable}
 					>
-						{t("signing.enableNow", "Enable")}
+						{enableLabel ?? t("signing.enableNow", "Enable")}
 					</Box>
 				)}
 			</Flex>
+			{error && (
+				<Text fontSize="2xs" color="#F56565">
+					{error}
+				</Text>
+			)}
 			{confirming && (
 				<Flex gap="2" justify="flex-end">
 					<Box
@@ -554,6 +559,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 	const [elapsed, setElapsed] = useState(0)
 	const [advancedModeEnabled, setAdvancedModeEnabled] = useState(request.advancedModeEnabled ?? false)
 	const [enablingPolicy, setEnablingPolicy] = useState(false)
+	const [advancedModeError, setAdvancedModeError] = useState<string | null>(null)
 
 	// Only show blind-signing warnings on firmware 7.14.0+
 	const fwSupportsBlindSignGate = request.firmwareVersion
@@ -591,7 +597,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		request.chain === 'solana'
 	const isSimpleTransfer =
 		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
-	const advancedModeRequired = !!request.requiresAdvancedMode || (fwSupportsBlindSignGate && !!request.needsBlindSigning)
+	const advancedModeRequired = isSolanaSignMessage || !!request.requiresAdvancedMode || (fwSupportsBlindSignGate && !!request.needsBlindSigning)
 	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
 	const approveDisabled = enablingPolicy || advancedModeBlocked
 
@@ -603,15 +609,17 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 			return
 		}
 		setEnablingPolicy(true)
+		setAdvancedModeError(null)
 		try {
 			await rpcRequest("applyPolicy", { policyName: "AdvancedMode", enabled: true }, 60000)
 			setAdvancedModeEnabled(true)
 		} catch (e: any) {
 			console.error("Failed to enable AdvancedMode:", e)
+			setAdvancedModeError(e?.message || t("signing.advancedModeEnableFailed", "Failed to enable Advanced Mode."))
 		}
 		setEnablingPolicy(false)
 		setShowAdvancedConfirm(false)
-	}, [showAdvancedConfirm])
+	}, [showAdvancedConfirm, t])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -750,8 +758,10 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						t={t}
 						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required") : undefined}
 						description={isSolanaSignMessage
-							? t("signing.solanaAdvancedModeDescription", "Enable Advanced Mode before approving this raw Solana message signature.")
+							? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
 							: undefined}
+						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
+						error={advancedModeError}
 					/>
 				)}
 
