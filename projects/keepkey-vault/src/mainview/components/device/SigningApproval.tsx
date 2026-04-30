@@ -3,7 +3,7 @@ import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
-import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo } from "../../../shared/types"
+import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo } from "../../../shared/types"
 import { versionCompare } from "../../../shared/firmware-versions"
 
 interface SigningApprovalProps {
@@ -29,7 +29,7 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 	"/solana/sign-transaction-blind": "signing.methodSolanaSignTx",
 	"/solana/sign-and-send": "signing.methodSolanaSignTx",
 	"/solana/sign-and-send-blind": "signing.methodSolanaSignTx",
-	"/solana/sign-message": "signing.methodSolanaSignTx",
+	"/solana/sign-message": "signing.methodSolanaSignMessage",
 	"/ton/sign-transaction": "signing.methodTonSignTx",
 	"/tron/sign-transaction": "signing.methodTronSignTx",
 }
@@ -106,8 +106,9 @@ function TrustBadge({ level, hasSigned, t }: { level: 'verified' | 'known' | 'un
 
 // ── Blind signing warning ─────────────────────────────────────────────
 
-function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t }: {
+function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription }: {
 	enabled: boolean; confirming: boolean; onEnable: () => void; onCancel: () => void; t: (k: string, f?: string) => string
+	title?: string; description?: string; confirmDescription?: string
 }) {
 	if (enabled) return null
 	return (
@@ -119,12 +120,12 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t }: {
 			<Flex align="center" gap="2">
 				<Box flex="1">
 					<Text fontSize="2xs" fontWeight="600" color="#F5A33B">
-						{t("signing.blindSigningRequired", "Blind Signing Required")}
+						{title ?? t("signing.blindSigningRequired", "Blind Signing Required")}
 					</Text>
 					<Text fontSize="2xs" color="kk.textSecondary">
 						{confirming
-							? t("signing.advancedModeWarning", "This permanently enables blind signing for ALL future transactions on this device. You can disable it later in Settings.")
-							: t("signing.blindSigningDescription", "Enable Advanced Mode on device to sign unverified contract data.")}
+							? (confirmDescription ?? t("signing.advancedModeWarning", "This permanently enables blind signing for ALL future transactions on this device. You can disable it later in Settings."))
+							: (description ?? t("signing.blindSigningDescription", "Enable Advanced Mode on device to sign unverified contract data."))}
 					</Text>
 				</Box>
 				{!confirming && (
@@ -216,6 +217,36 @@ function SolanaBlindSignBanner({ t }: { t: (k: string, f?: string) => string }) 
 					"signing.solanaBlindSignDescription",
 					"This is a versioned (v0) Solana transaction. The KeepKey firmware cannot parse it, so the device screen will show only an opaque hash instead of per-instruction details. Only approve if you fully trust this dApp.",
 				)}
+			</Text>
+		</Flex>
+	)
+}
+
+function SolanaUnsafeMessageBanner({ classification, t }: {
+	classification?: SolanaMessageDecodedInfo['classification']; t: (k: string, f?: string) => string
+}) {
+	const looksLikeTx = classification === 'solana-transaction' || classification === 'solana-transaction-message'
+	return (
+		<Flex
+			direction="column" gap="1" w="100%"
+			bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)"
+			borderRadius="lg" px="3" py="2"
+		>
+			<Text fontSize="2xs" fontWeight="700" color="#EF4444">
+				{looksLikeTx
+					? t("signing.solanaMessageLooksLikeTxTitle", "Unsafe Solana Message - Transaction-Like Payload")
+					: t("signing.solanaUnsafeMessageTitle", "Unsafe Solana Message Signing")}
+			</Text>
+			<Text fontSize="2xs" color="kk.textSecondary">
+				{looksLikeTx
+					? t(
+						"signing.solanaMessageLooksLikeTxDescription",
+						"This payload looks like Solana transaction data but was submitted as a raw message. Reject unless you fully trust this dApp.",
+					)
+					: t(
+						"signing.solanaUnsafeMessageDescription",
+						"This dApp does not use KeepKey's safe Solana off-chain message format. Continue at your own risk.",
+					)}
 			</Text>
 		</Flex>
 	)
@@ -369,6 +400,74 @@ function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t:
 	)
 }
 
+function solanaClassificationLabel(classification: SolanaMessageDecodedInfo['classification'], t: (k: string, f?: string) => string): string {
+	switch (classification) {
+		case 'text-message': return t("signing.solanaMessageText", "Text message")
+		case 'binary-message': return t("signing.solanaMessageBinary", "Binary message")
+		case 'solana-transaction': return t("signing.solanaMessageSerializedTx", "Serialized transaction")
+		case 'solana-transaction-message': return t("signing.solanaMessageRawTxMessage", "Raw transaction message")
+	}
+}
+
+function SolanaMessageSection({ decoded, t }: {
+	decoded: SolanaMessageDecodedInfo; t: (k: string, f?: string) => string
+}) {
+	const [showRaw, setShowRaw] = useState(!decoded.messageText)
+	return (
+		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
+			<Flex gap="2" align="center">
+				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
+					{t("signing.solanaMessageToSign", "Message to Sign")}
+				</Text>
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+					{decoded.encoding.toUpperCase()}
+				</Text>
+			</Flex>
+			<Row label="Signer" value={decoded.signer} />
+			<Row label={t("signing.solanaMessageKind", "Looks Like")} value={solanaClassificationLabel(decoded.classification, t)} mono={false} />
+			<Row label="Bytes" value={String(decoded.byteLength)} mono={false} />
+			{decoded.sanityCheck && (
+				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
+					{decoded.sanityCheck}
+				</Text>
+			)}
+			{decoded.messageText !== undefined ? (
+				<Box
+					bg="rgba(0,0,0,0.35)" borderRadius="lg"
+					p="2" maxH="240px" overflowY="auto"
+				>
+					<Text fontSize="xs" color="kk.textPrimary" whiteSpace="pre-wrap" wordBreak="break-word">
+						{decoded.messageText}
+					</Text>
+				</Box>
+			) : (
+				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
+					{t(
+						"signing.solanaMessageNotUtf8",
+						"Message is not readable UTF-8. Verify the raw bytes before approving.",
+					)}
+				</Text>
+			)}
+			<Flex
+				as="button" justify="space-between" align="center"
+				onClick={() => setShowRaw((s) => !s)} cursor="pointer"
+				fontSize="2xs" color="kk.textMuted" py="1"
+				_hover={{ color: "kk.textSecondary" }}
+			>
+				<Text fontSize="2xs">{t("signing.solanaMessageRaw", "Raw bytes")}</Text>
+				<Text fontSize="2xs">{showRaw ? "▲" : "▼"}</Text>
+			</Flex>
+			{showRaw && (
+				<Box bg="rgba(0,0,0,0.35)" borderRadius="lg" p="2" maxH="200px" overflowY="auto">
+					<Text fontSize="2xs" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
+						{decoded.messageHex || "(empty)"}
+					</Text>
+				</Box>
+			)}
+		</VStack>
+	)
+}
+
 // ── EIP-191 personal_sign section ─────────────────────────────────────
 //
 // /eth/sign receives a hex-encoded message. The wire format is opaque —
@@ -477,33 +576,24 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		trustLevel = request.typedDataDecoded.isKnownType ? 'verified' : 'known'
 	}
 
-	// Solana is never a "simple transfer" — the signing payload is an opaque
-	// binary message that the user cannot meaningfully inspect without the
-	// clear-sign preview. Hiding the trust badge + warnings when
-	// solanaDecoded is missing would silently downgrade the approval UX.
-	//
-	// But only /solana/sign-transaction has a clear-sign preview — a plain
-	// /solana/sign-message is inherently an opaque signed message with no
-	// "tx decode" step. Showing a "Clear-Signing Unavailable" banner there
-	// would be a false-positive warning about a preview that never exists.
-	// `-blind` variants are versioned (v0+) Solana txs that the firmware
-	// can't parse — they're routed through solanaSignMessage on the device,
-	// so the user gets no per-instruction display. Treat them like
-	// /solana/sign-transaction so the Clear-Signing-Unavailable banner fires
-	// (the warning text — "approving will sign an opaque message, verify on
-	// your KeepKey screen" — applies verbatim).
+	// Solana is never a "simple transfer". Transactions need a clear-sign
+	// preview; raw message signing is AdvancedMode-gated because it lacks the
+	// safe off-chain Solana domain separator supported by the firmware.
 	const isSolanaSignTx =
 		request.method === '/solana/sign-transaction' ||
 		request.method === '/solana/sign-transaction-blind' ||
 		request.method === '/solana/sign-and-send' ||
 		request.method === '/solana/sign-and-send-blind'
+	const isSolanaSignMessage = request.method === '/solana/sign-message'
 	const isSolanaRequest =
 		isSolanaSignTx ||
-		request.method === '/solana/sign-message' ||
+		isSolanaSignMessage ||
 		request.chain === 'solana'
 	const isSimpleTransfer =
-		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !isSolanaRequest
-	const blindSigningWarning = fwSupportsBlindSignGate && request.needsBlindSigning && !advancedModeEnabled
+		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
+	const advancedModeRequired = !!request.requiresAdvancedMode || (fwSupportsBlindSignGate && !!request.needsBlindSigning)
+	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
+	const approveDisabled = enablingPolicy || advancedModeBlocked
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
@@ -525,12 +615,15 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
-			if (e.key === "Enter" && phase === 'approve') { e.preventDefault(); onApprove() }
+			if (e.key === "Enter" && phase === 'approve') {
+				e.preventDefault()
+				if (!approveDisabled) onApprove()
+			}
 			if (e.key === "Escape" && phase === 'approve') { e.preventDefault(); onReject() }
 		}
 		document.addEventListener("keydown", handler)
 		return () => document.removeEventListener("keydown", handler)
-	}, [onApprove, onReject, phase])
+	}, [onApprove, onReject, phase, approveDisabled])
 
 	useEffect(() => {
 		if (phase !== 'approve') return
@@ -606,7 +699,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 			<style>{SIGNING_ANIMATIONS}</style>
 			<VStack
 				bg="kk.cardBg" border="2px solid"
-				borderColor={blindSigningWarning ? "rgba(245,163,59,0.6)" : "kk.gold"}
+				borderColor={advancedModeBlocked ? "rgba(245,163,59,0.6)" : "kk.gold"}
 				borderRadius="2xl" p="6" gap="3"
 				maxW="640px" w="95vw" maxH="90vh" overflowY="auto"
 				css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 2s ease-in-out infinite 0.3s" }}
@@ -632,10 +725,10 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						  / "Signed & Verified" badge there is misleading — the user
 						  might think the *message* has been audited when nothing of
 						  the sort has happened. Hide the badge for plain EIP-191
-						  requests; keep it for EIP-712 (typedData has a
-						  verifyingContract) and tx signing paths.
+						  requests. Solana has program/message semantics, not an
+						  EVM verified-contract trust signal, so hide it there too.
 						*/}
-						{!isSimpleTransfer && !request.ethMessageDecoded && (
+						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
@@ -647,9 +740,23 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 				{/* ── Method ── */}
 				<Text fontSize="sm" fontWeight="600" color="white">{methodLabel}</Text>
 
-				{/* ── Blind signing warning (firmware 7.14.0+ only) ── */}
-				{fwSupportsBlindSignGate && request.needsBlindSigning && (
-					<BlindSigningBanner enabled={advancedModeEnabled} confirming={showAdvancedConfirm} onEnable={handleEnableAdvancedMode} onCancel={() => setShowAdvancedConfirm(false)} t={t} />
+				{/* ── AdvancedMode gate ── */}
+				{advancedModeRequired && (
+					<BlindSigningBanner
+						enabled={advancedModeEnabled}
+						confirming={showAdvancedConfirm}
+						onEnable={handleEnableAdvancedMode}
+						onCancel={() => setShowAdvancedConfirm(false)}
+						t={t}
+						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required") : undefined}
+						description={isSolanaSignMessage
+							? t("signing.solanaAdvancedModeDescription", "Enable Advanced Mode before approving this raw Solana message signature.")
+							: undefined}
+					/>
+				)}
+
+				{isSolanaSignMessage && (
+					<SolanaUnsafeMessageBanner classification={request.solanaMessageDecoded?.classification} t={t} />
 				)}
 
 				{/* ── Solana clear-sign failure / blind-sign warning ── */}
@@ -661,22 +768,24 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
 				<Flex w="100%" gap="3" direction={{ base: "column", sm: "row" }}>
-					{/* Left: decoded calldata, typed data, Solana tx, or EIP-191 message */}
-					{(request.solanaDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
+					{/* Left: decoded calldata, typed data, Solana tx, or message payload */}
+					{(request.solanaDecoded || request.solanaMessageDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
 						<Box flex="1" minW="0">
 							{request.solanaDecoded
 								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} />
-								: request.typedDataDecoded
-									? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
-									: request.ethMessageDecoded
-										? <EthMessageSection decoded={request.ethMessageDecoded} t={t} />
-										: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} t={t} />
+								: request.solanaMessageDecoded
+									? <SolanaMessageSection decoded={request.solanaMessageDecoded} t={t} />
+									: request.typedDataDecoded
+										? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
+										: request.ethMessageDecoded
+											? <EthMessageSection decoded={request.ethMessageDecoded} t={t} />
+											: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} t={t} />
 							}
 						</Box>
 					)}
 
 					{/* Right: transaction fields */}
-					{!request.typedDataDecoded && !request.solanaDecoded && !request.ethMessageDecoded && (
+					{!request.typedDataDecoded && !request.solanaDecoded && !request.solanaMessageDecoded && !request.ethMessageDecoded && (
 						<Box flex="1" minW="0">
 							<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 								<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">
@@ -704,10 +813,10 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						flex="1" bg="kk.gold"
 						color="black" fontWeight="600" size="md"
 						_hover={{ bg: "kk.goldHover" }}
-						onClick={onApprove} disabled={enablingPolicy}
-						cursor="pointer"
+						onClick={onApprove} disabled={approveDisabled}
+						cursor={approveDisabled ? "not-allowed" : "pointer"}
 					>
-						{t("signing.approve")}
+						{advancedModeBlocked ? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve") : t("signing.approve")}
 					</Button>
 					<Button
 						flex="1" variant="ghost" color="kk.textSecondary"
@@ -720,7 +829,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 				</Flex>
 
 				<Text fontSize="2xs" color="kk.textMuted">
-					{t("signing.keyboardHint")}
+					{advancedModeBlocked ? t("signing.enableAdvancedModeHint", "Enable Advanced Mode above to unlock signing") : t("signing.keyboardHint")}
 				</Text>
 			</VStack>
 		</Box>

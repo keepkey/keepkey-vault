@@ -270,6 +270,22 @@ const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
 
+function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
+	const features = engine.getCachedFeaturesSnapshot()
+	if (features) {
+		const policies: any[] = features.policiesList || features.policies || []
+		const advPol = policies.find((p: any) => (p.policyName || p.policy_name) === 'AdvancedMode')
+		if (advPol) info.advancedModeEnabled = !!advPol.enabled
+		if (!info.firmwareVersion && features.majorVersion) {
+			info.firmwareVersion = `${features.majorVersion}.${features.minorVersion}.${features.patchVersion}`
+		}
+	}
+	if (!info.firmwareVersion) {
+		info.firmwareVersion = engine.getDeviceState().firmwareVersion
+	}
+	return info
+}
+
 // PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
 // from being read/written to disk during passphrase sessions.
 evmAddresses.canPersist = () => !engine.isPassphraseWallet
@@ -536,6 +552,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			}
 		},
 		requestSigningApproval: async (info) => {
+			attachSigningPolicySnapshot(info)
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
@@ -595,6 +612,7 @@ const restCallbacks: RestApiCallbacks = {
 		}
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
+		attachSigningPolicySnapshot(info)
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {

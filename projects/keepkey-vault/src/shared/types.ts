@@ -314,6 +314,25 @@ export interface EthMessageDecodedInfo {
   isUtf8Text: boolean
 }
 
+export interface SolanaMessageDecodedInfo {
+  /** Signer pubkey/address shown so the user confirms which account is signing. */
+  signer?: string
+  /** Raw message value exactly as supplied by the caller. */
+  messageRaw: string
+  /** Best-effort input encoding used to turn `messageRaw` into bytes for display checks. */
+  encoding: 'base58' | 'base64' | 'hex' | 'utf8'
+  /** Message interpreted as UTF-8 text. Undefined when the bytes are not valid UTF-8. */
+  messageText?: string
+  /** Raw bytes as hex for byte-for-byte inspection. */
+  messageHex: string
+  /** Number of message bytes being signed. */
+  byteLength: number
+  /** Best-effort sanity check: raw text, opaque bytes, or something shaped like a Solana tx. */
+  classification: 'text-message' | 'binary-message' | 'solana-transaction' | 'solana-transaction-message'
+  /** Diagnostic from the transaction/message shape check, shown only when useful. */
+  sanityCheck?: string
+}
+
 // ── Calldata clear-signing types ─────────────────────────────────────────
 
 export interface CalldataDecodedField {
@@ -351,6 +370,8 @@ export interface SigningRequestInfo {
   calldataDecoded?: CalldataDecodedInfo   // Clear-signing: decoded contract calldata
   /** Clear-signing: decoded EIP-191 personal_sign message. Always set for /eth/sign requests. */
   ethMessageDecoded?: EthMessageDecodedInfo
+  /** Clear-signing: decoded raw Solana message signing payload. */
+  solanaMessageDecoded?: SolanaMessageDecodedInfo
   /** Clear-signing: decoded Solana tx — per-instruction rows + resolved ALT accounts */
   solanaDecoded?: SolanaTxDecodedInfo
   /**
@@ -363,6 +384,8 @@ export interface SigningRequestInfo {
   solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
+  /** true when the UI must enable AdvancedMode before allowing approval */
+  requiresAdvancedMode?: boolean
   /** true when device AdvancedMode policy is currently enabled */
   advancedModeEnabled?: boolean
   /** Device firmware version string e.g. "7.14.0" — used to gate blind-signing UI */

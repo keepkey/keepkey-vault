@@ -20,6 +20,7 @@ import { handleSweepRoute } from './rest-sweep'
 import { getSetting, findApiLogs, getApiLogById } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import {
   buildTonTransfer,
@@ -1422,6 +1423,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // Tron: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address
               signingInfo.value = preview.amount
+            } else if (path === '/solana/sign-message') {
+              const raw = typeof preview.message === 'string' ? preview.message : ''
+              const messageEncoding = /^[0-9a-fA-F]+$/.test(raw) ? 'hex' : 'base64'
+              signingInfo.chain = 'solana'
+              signingInfo.from = preview.pubkey || preview.address
+              signingInfo.data = raw
+              signingInfo.needsBlindSigning = true
+              signingInfo.requiresAdvancedMode = true
+              signingInfo.solanaMessageDecoded = buildSolanaMessageDecodedInfo(raw, {
+                // Match hdwallet's SolanaSignMessage string coercion exactly:
+                // hex strings sign hex bytes, everything else signs base64 bytes.
+                encoding: messageEncoding,
+                signer: signingInfo.from,
+              })
             } else if (path === '/solana/sign-transaction') {
               // Solana clear-signing: parse v0/legacy message, resolve ALTs,
               // decode each instruction via the pioneer-discovery program

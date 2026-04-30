@@ -14,6 +14,7 @@ import bs58 from 'bs58'
 import type { SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { parseSolanaTx } from './solana-tx'
+import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
@@ -645,6 +646,12 @@ export class WalletConnectManager {
           from: account.address,
           chainId: 0,
           data: message,
+          needsBlindSigning: true,
+          requiresAdvancedMode: true,
+          solanaMessageDecoded: buildSolanaMessageDecodedInfo(message, {
+            encoding: 'base58',
+            signer: account.address,
+          }),
         }
         const approved = await this.callbacks.requestSigningApproval(signingInfo)
         if (!approved) throw new Error('User rejected signing')

@@ -133,6 +133,8 @@ export class EngineController extends EventEmitter {
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
   get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
+  /** Read-only snapshot used by signing approval UI; avoids transport calls mid-prompt. */
+  getCachedFeaturesSnapshot(): any | null { return this.cachedFeatures }
 
   constructor() {
     super()
