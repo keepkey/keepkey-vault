@@ -67,6 +67,38 @@ function requireWallet(engine: EngineController) {
   return engine.wallet
 }
 
+/**
+ * Parse a hex string into a Buffer with explicit validation.
+ *
+ * `Buffer.from(str, 'hex')` silently truncates on the first non-hex char
+ * or odd length, which surfaces downstream as "wrong-length signature"
+ * errors that don't point at the actual bug. This helper rejects bad
+ * input up front with a clear 400.
+ */
+function parseHex(input: string, label: string, expectedBytes?: number): Buffer {
+  const stripped = input.replace(/^0x/i, '')
+  if (!/^[0-9a-fA-F]*$/.test(stripped)) {
+    throw new HttpError(400, `${label}: invalid hex (non-hex characters)`)
+  }
+  if (stripped.length % 2 !== 0) {
+    throw new HttpError(400, `${label}: invalid hex (odd-length string, must be even)`)
+  }
+  if (expectedBytes !== undefined && stripped.length !== expectedBytes * 2) {
+    throw new HttpError(400, `${label}: expected ${expectedBytes} bytes, got ${stripped.length / 2}`)
+  }
+  return Buffer.from(stripped, 'hex')
+}
+
+/** Decode a `message` body field per `is_text` (default UTF-8, false = hex bytes). */
+function decodeMessageBody(message: string, isText: boolean | undefined, label: string): Buffer {
+  return isText === false ? parseHex(message, `${label}.message (is_text=false)`) : Buffer.from(message, 'utf8')
+}
+
+/** Single-shot Uint8Array → hex serializer used by every signing handler. */
+function toHex(value: Uint8Array | string): string {
+  return value instanceof Uint8Array ? Buffer.from(value).toString('hex') : value
+}
+
 /** SLIP44 coin type → KeepKey firmware coin name (must match firmware coin table) */
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
@@ -2119,6 +2151,106 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }), { operation: 'tonSignTx', chain: 'TON' })
           if (!result) throw new HttpError(500, 'tonSignTx returned no result')
           return json(result)
+        }
+
+        // ── MESSAGE SIGNING (firmware 7.14.1+) ────────────────────────
+        // TIP-191 personal_sign for TRON.
+        // hash = keccak256("\x19TRON Signed Message:\n" + len + msg)
+        if (path === '/tron/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          const message = decodeMessageBody(body.message, body.is_text, 'tronSignMessage')
+          const result = await emuWrap(() => wallet.tronSignMessage({
+            addressNList,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'tronSignMessage', chain: 'Tron' })
+          if (!result) throw new HttpError(500, 'tronSignMessage returned no result')
+          return json({ address: result.address, signature: toHex(result.signature) })
+        }
+
+        // TIP-191 verify — recovers signer pubkey from sig + checks claimed address.
+        if (path === '/tron/verify-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronVerifyMessageRequest)
+          // signature is regex-validated to 65 bytes hex by zod; parseHex is belt-and-braces.
+          const sig = parseHex(body.signature, 'tronVerifyMessage.signature', 65)
+          const message = decodeMessageBody(body.message, body.is_text, 'tronVerifyMessage')
+          const ok = await emuWrap(() => wallet.tronVerifyMessage({
+            address: body.address,
+            signature: sig,
+            message,
+          }), { operation: 'tronVerifyMessage', chain: 'Tron' })
+          return json({ verified: !!ok })
+        }
+
+        // TIP-712 typed-data signing (hash mode). Host pre-computes the
+        // domainSeparator + message hashes per the TIP-712 spec; device
+        // assembles keccak256("\x19\x01" || ds_hash || msg_hash) and signs.
+        if (path === '/tron/sign-typed-hash' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignTypedHashRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          // Both hashes are regex-validated to 32 bytes hex by zod; parseHex
+          // re-checks length defensively in case the schema constraint loosens.
+          const dsHash = parseHex(body.domain_separator_hash, 'tronSignTypedHash.domain_separator_hash', 32)
+          const msgHash = body.message_hash
+            ? parseHex(body.message_hash, 'tronSignTypedHash.message_hash', 32)
+            : undefined
+          const result = await emuWrap(() => wallet.tronSignTypedHash({
+            addressNList,
+            domainSeparatorHash: dsHash,
+            messageHash: msgHash,
+          }), { operation: 'tronSignTypedHash', chain: 'Tron' })
+          if (!result) throw new HttpError(500, 'tronSignTypedHash returned no result')
+          return json({ address: result.address, signature: toHex(result.signature) })
+        }
+
+        // Bare Ed25519 SignMessage for TON. Firmware fences this behind
+        // the AdvancedMode policy — without it, expect Failure.
+        if (path === '/ton/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TonSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
+          const message = decodeMessageBody(body.message, body.is_text, 'tonSignMessage')
+          const result = await emuWrap(() => wallet.tonSignMessage({
+            addressNList,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'tonSignMessage', chain: 'TON' })
+          if (!result) throw new HttpError(500, 'tonSignMessage returned no result')
+          return json({ publicKey: toHex(result.publicKey), signature: toHex(result.signature) })
+        }
+
+        // Domain-separated Solana off-chain message. Firmware constructs
+        //   "\xff" || "solana offchain" || version || format || length || msg
+        // and Ed25519-signs the envelope.
+        if (path === '/solana/sign-offchain-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SolanaSignOffchainMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const message = decodeMessageBody(body.message, body.is_text, 'solanaSignOffchainMessage')
+          // Off-chain spec: 1212-byte ceiling for formats 0/1. Firmware
+          // rejects above this anyway; enforcing here surfaces the error
+          // pre-USB-roundtrip with a clearer source.
+          if (message.length > 1212) {
+            throw new HttpError(400, `solanaSignOffchainMessage.message: exceeds 1212-byte off-chain spec ceiling (got ${message.length})`)
+          }
+          const result = await emuWrap(() => wallet.solanaSignOffchainMessage({
+            addressNList,
+            version: body.version,
+            messageFormat: body.message_format,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
+          if (!result) throw new HttpError(500, 'solanaSignOffchainMessage returned no result')
+          return json({ publicKey: toHex(result.publicKey), signature: toHex(result.signature) })
         }
 
         // ── TON BUILD + FINALIZE (2 endpoints) ────────────────────────

@@ -14,8 +14,17 @@ import type {
   XrpSignTxParams,
   BnbSignTxParams,
   SolanaSignTxParams,
+  SolanaSignOffchainMessageParams,
+  SolanaOffchainMessageSignatureResult,
   TronSignTxParams,
+  TronSignMessageParams,
+  TronMessageSignatureResult,
+  TronVerifyMessageParams,
+  TronSignTypedHashParams,
+  TronTypedDataSignatureResult,
   TonSignTxParams,
+  TonSignMessageParams,
+  TonMessageSignatureResult,
   TonBuildTransferParams,
   TonBuildTransferResult,
   TonFinalizeTransferParams,
@@ -454,6 +463,22 @@ export class KeepKeySdk {
     /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
     solanaSignTransaction: (params: SolanaSignTxParams): Promise<SignedTx> =>
       this.client.post('/solana/sign-transaction', params),
+
+    /**
+     * Sign a Solana off-chain message with domain separation. Firmware
+     * builds the spec envelope (`\xff` || "solana offchain" || version ||
+     * format || length || message) and Ed25519-signs it. NO AdvancedMode
+     * gate is needed — the envelope's leading `\xff` byte is invalid as a
+     * Solana transaction prefix, providing the domain separation that
+     * `solanaSignMessage` lacks. Format 2 (extended UTF-8) is rejected
+     * device-side; only formats 0 (ASCII) and 1 (UTF-8 limited, max 1212
+     * bytes) are supported. Verifier MUST reconstruct the envelope locally
+     * and verify against it, NOT against the bare message.
+     */
+    solanaSignOffchainMessage: (
+      params: SolanaSignOffchainMessageParams,
+    ): Promise<SolanaOffchainMessageSignatureResult> =>
+      this.client.post('/solana/sign-offchain-message', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -465,6 +490,43 @@ export class KeepKeySdk {
     /** Sign a TRON transaction. `amount` is in sun (1 TRX = 1,000,000 sun). */
     tronSignTransaction: (params: TronSignTxParams): Promise<SignedTx> =>
       this.client.post('/tron/sign-transaction', params),
+
+    /**
+     * Sign a message under TIP-191 (TRON's analog of EIP-191 personal_sign):
+     *   hash = keccak256("\x19TRON Signed Message:\n" + decimal(len) + msg)
+     *   sig  = secp256k1_sign(hash) → 65 bytes (r || s || 27+v)
+     *
+     * Pass `is_text=false` to send `message` as hex bytes; default treats
+     * it as UTF-8.
+     */
+    tronSignMessage: (
+      params: TronSignMessageParams,
+    ): Promise<TronMessageSignatureResult> =>
+      this.client.post('/tron/sign-message', params),
+
+    /**
+     * Verify a TIP-191 signature against the claimed Base58Check address.
+     * The device recovers the secp256k1 pubkey, derives the canonical
+     * TRON address, and compares it against `address`. Returns
+     * `{ verified: boolean }`.
+     */
+    tronVerifyMessage: (
+      params: TronVerifyMessageParams,
+    ): Promise<{ verified: boolean }> =>
+      this.client.post('/tron/verify-message', params),
+
+    /**
+     * TIP-712 typed-data signing in hash mode. Host pre-computes the
+     * domainSeparator + message hashes per the TIP-712 spec; the device
+     * assembles
+     *   keccak256("\x19\x01" || domain_separator_hash || message_hash)
+     * and signs with secp256k1. Both hashes must be exactly 32 bytes;
+     * omit `message_hash` for primaryType="EIP712Domain".
+     */
+    tronSignTypedHash: (
+      params: TronSignTypedHashParams,
+    ): Promise<TronTypedDataSignatureResult> =>
+      this.client.post('/tron/sign-typed-hash', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -476,6 +538,21 @@ export class KeepKeySdk {
     /** Sign a TON transaction. `raw_tx` must be the base64- or hex-encoded raw transaction. */
     tonSignTransaction: (params: TonSignTxParams): Promise<SignedTx> =>
       this.client.post('/ton/sign-transaction', params),
+
+    /**
+     * Bare Ed25519 over message bytes. NO domain separation — firmware
+     * fences this behind the `AdvancedMode` policy. With the policy
+     * disabled (default) this call returns a Failure response. Returns
+     * the 32-byte Ed25519 public key + 64-byte signature, both hex.
+     *
+     * For TON Connect-style auth flows, prefer the upcoming `ton_proof`
+     * envelope (separate endpoint, not yet implemented) which carries
+     * proper domain separation and doesn't need the policy gate.
+     */
+    tonSignMessage: (
+      params: TonSignMessageParams,
+    ): Promise<TonMessageSignatureResult> =>
+      this.client.post('/ton/sign-message', params),
 
     /**
      * Build an unsigned TON v4R2 transfer. Fetches seqno and wallet

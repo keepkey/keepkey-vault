@@ -18,6 +18,15 @@ import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
 
+/**
+ * hdwallet returns signature/pubkey fields as `Uint8Array | string`
+ * depending on transport path. RPC clients want hex, so collapse the
+ * union here. Used by the message-signing handlers; pre-existing
+ * tx-signing handlers still inline the same pattern (left untouched).
+ */
+const bytesToHex = (v: Uint8Array | string): string =>
+	v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v
+
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
 try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
@@ -1338,6 +1347,53 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Pass tonBuildResult through for BOC assembly in broadcastTx
 					tonBuildResult: (params as any).tonBuildResult,
 				}
+			},
+
+			// ── TRON TIP-191 personal_sign ────────────────────────────────
+			tronSignMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tronSignMessage(params), { operation: 'tronSignMessage', chain: 'Tron' })
+					: await engine.wallet.tronSignMessage(params)
+				if (!result) throw new Error('tronSignMessage returned no result')
+				return { address: result.address, signature: bytesToHex(result.signature) }
+			},
+			tronVerifyMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const ok = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tronVerifyMessage(params), { operation: 'tronVerifyMessage', chain: 'Tron' })
+					: await engine.wallet.tronVerifyMessage(params)
+				return { verified: !!ok }
+			},
+
+			// ── TRON TIP-712 typed-data hash mode ─────────────────────────
+			tronSignTypedHash: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tronSignTypedHash(params), { operation: 'tronSignTypedHash', chain: 'Tron' })
+					: await engine.wallet.tronSignTypedHash(params)
+				if (!result) throw new Error('tronSignTypedHash returned no result')
+				return { address: result.address, signature: bytesToHex(result.signature) }
+			},
+
+			// ── TON Ed25519 SignMessage (AdvancedMode-gated firmware-side) ─
+			tonSignMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.tonSignMessage(params), { operation: 'tonSignMessage', chain: 'TON' })
+					: await engine.wallet.tonSignMessage(params)
+				if (!result) throw new Error('tonSignMessage returned no result')
+				return { publicKey: bytesToHex(result.publicKey), signature: bytesToHex(result.signature) }
+			},
+
+			// ── Solana off-chain message (domain-separated envelope) ─────
+			solanaSignOffchainMessage: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.solanaSignOffchainMessage(params), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
+					: await engine.wallet.solanaSignOffchainMessage(params)
+				if (!result) throw new Error('solanaSignOffchainMessage returned no result')
+				return { publicKey: bytesToHex(result.publicKey), signature: bytesToHex(result.signature) }
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
