@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulators build-emulator-alpha build-emulator-beta build-emulator-release download-emulators download-emulator-alpha download-emulator-beta download-emulator-release emulator-status clean-emulators
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulator clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -295,21 +295,54 @@ test-rest:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-api.test.ts
 
 test-emu:
+	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \
+		(echo "ERROR: emulator not installed. Run: make build-emulator"; exit 1)
 	cd $(PROJECT_DIR) && bun test tests/emulator/
 
-# Run python-keepkey consistency tests against the kkemu binary (UDP).
-# Launches kkemu, runs pytest, then kills kkemu.
-# Uses alpha channel by default; override with: make test-emu-python EMU_CHANNEL=release
-EMU_CHANNEL ?= alpha
-# Resolve to whichever <ver>-<channel> dir actually has a kkemu binary.
-# Falls back to the previous 7.14 layout if no 7.15 build is present.
-EMU_VERSION := $(shell test -x ./firmware/emulators/7.15.0-$(EMU_CHANNEL)/kkemu && echo 7.15.0-$(EMU_CHANNEL) || echo 7.14.0-$(EMU_CHANNEL))
+# --- Emulator (developer feature) ---
+# Build the native macOS emulator (libkkemu.dylib + kkemu) from the firmware
+# submodule on the current checkout, install the dylib at
+# ~/.keepkey/emulator/libkkemu.dylib (where the vault loads it), and place
+# the standalone kkemu binary alongside for python-keepkey UDP testing.
+#
+# No channels — devs bring their own firmware checkout. Switch revs by
+# checking out the target ref in modules/keepkey-firmware before running.
 
+EMU_FW_DIR := modules/keepkey-firmware
+EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
+EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
+
+build-emulator:
+	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
+	@cd $(EMU_FW_DIR) && git rev-parse HEAD | xargs -I{} echo "    Source SHA: {}"
+	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	rm -rf $(EMU_BUILD_DIR)
+	mkdir -p $(EMU_BUILD_DIR)
+	@# KK_DEBUG_LINK=ON: required for the dylib FFI path (DebugLinkDecision parsing).
+	@# KK_BUILD_DYLIB=ON: produces libkkemu.dylib alongside standalone kkemu.
+	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
+		-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
+		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
+	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
+	mkdir -p $(EMU_INSTALL_DIR)
+	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
+		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
+		echo "    Dylib:  $(EMU_INSTALL_DIR)/libkkemu.dylib"; \
+	else \
+		echo "ERROR: libkkemu.dylib missing from build output"; exit 1; \
+	fi
+	cp $(EMU_BUILD_DIR)/bin/kkemu $(EMU_INSTALL_DIR)/kkemu
+	chmod +x $(EMU_INSTALL_DIR)/kkemu
+	@echo "    Binary: $(EMU_INSTALL_DIR)/kkemu"
+	@echo "=== Emulator installed ==="
+
+# Run python-keepkey consistency tests against the locally-built kkemu binary.
 test-emu-python:
-	@test -x ./firmware/emulators/$(EMU_VERSION)/kkemu || \
-		(echo "ERROR: kkemu not found for $(EMU_CHANNEL) channel. Run: make build-emulator-$(EMU_CHANNEL)"; exit 1)
-	@echo "Starting kkemu ($(EMU_CHANNEL) channel, UDP 11044/11045)..."
-	@./firmware/emulators/$(EMU_VERSION)/kkemu & KKPID=$$!; \
+	@test -x $(EMU_INSTALL_DIR)/kkemu || \
+		(echo "ERROR: kkemu not found at $(EMU_INSTALL_DIR)/kkemu. Run: make build-emulator"; exit 1)
+	@echo "Starting kkemu (UDP 11044/11045)..."
+	@$(EMU_INSTALL_DIR)/kkemu & KKPID=$$!; \
 	sleep 1; \
 	echo "Running python-keepkey tests..."; \
 	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
@@ -327,94 +360,9 @@ test-emu-python:
 	kill $$KKPID 2>/dev/null; \
 	exit $$EXIT
 
-# --- Emulator Channels (alpha/beta/release) ---
-# Build native macOS emulator (libkkemu.dylib + kkemu) from the firmware submodule.
-# Each channel gets its own directory under firmware/emulators/<version>/.
-#   alpha   — tracks BitHighlander fork branch tip (moves with new commits)
-#   beta    — pinned to a specific commit SHA (manually promoted)
-#   release — tracks upstream keepkey/keepkey-firmware master
-#
-# To promote a new beta, update BETA_PIN_SHA here AND in manifest.json.
-
-EMU_FW_DIR := modules/keepkey-firmware
-EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
-BETA_PIN_SHA := 9f52bb69f2e32a71f08b31b0c7df788129a0578e
-EMU_UPSTREAM_URL := https://github.com/keepkey/keepkey-firmware.git
-
-# Common cmake emulator build (called by channel-specific targets)
-# _EMU_REF can be a branch (origin/release/7.14.0), a remote/branch, or a commit SHA.
-_build-emu:
-	@echo "=== Building emulator for $(_EMU_CHANNEL) channel ==="
-	@echo "    Source: $(_EMU_REF)"
-	@echo "    Output: firmware/emulators/$(_EMU_VERSION)/"
-	@# Ensure the upstream (keepkey) remote exists — .gitmodules points to the fork,
-	@# so fresh clones only have origin. The release channel needs keepkey/master.
-	@cd $(EMU_FW_DIR) && git remote get-url keepkey >/dev/null 2>&1 || \
-		(echo "    Adding keepkey remote ($(EMU_UPSTREAM_URL))..." && \
-		 cd $(EMU_FW_DIR) && git remote add keepkey $(EMU_UPSTREAM_URL))
-	cd $(EMU_FW_DIR) && git fetch --all --prune 2>/dev/null
-	cd $(EMU_FW_DIR) && git checkout $(_EMU_REF)
-	@# Verify we landed on the expected ref (catches typos in SHA)
-	@ACTUAL=$$(cd $(EMU_FW_DIR) && git rev-parse HEAD); \
-	echo "    Checked out: $$ACTUAL"
-	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+clean-emulator:
 	rm -rf $(EMU_BUILD_DIR)
-	mkdir -p $(EMU_BUILD_DIR)
-	@# KK_DEBUG_LINK=ON: required for the dylib FFI path. Without it the
-	@#   firmware's msg_read_tiny ignores DebugLinkDecision (#100), so
-	@#   confirm_helper busy-loops forever waiting for a confirmation it
-	@#   already received but couldn't parse — kills the Bun host via the
-	@#   vault watchdog.
-	@# KK_BUILD_DYLIB=ON: produces libkkemu.dylib alongside the standalone
-	@#   kkemu binary. The vault loads the dylib via bun:ffi.
-	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
-		-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
-		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
-	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
-	mkdir -p firmware/emulators/$(_EMU_VERSION)
-	cp $(EMU_BUILD_DIR)/bin/kkemu firmware/emulators/$(_EMU_VERSION)/kkemu
-	@echo "    Binary: firmware/emulators/$(_EMU_VERSION)/kkemu"
-	@# Check if a shared lib was also built (optional — depends on CMake config)
-	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
-		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib; \
-		echo "    Dylib:  firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib"; \
-	fi
-	chmod +x firmware/emulators/$(_EMU_VERSION)/kkemu
-	@# Record which commit was actually built
-	@cd $(EMU_FW_DIR) && git rev-parse HEAD > ../../firmware/emulators/$(_EMU_VERSION)/.build-sha
-	@echo "=== $(_EMU_CHANNEL) emulator ready ==="
-
-build-emulator-alpha:
-	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.15.0-alpha _EMU_REF=origin/alpha
-
-build-emulator-beta:
-	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=$(BETA_PIN_SHA)
-
-build-emulator-release:
-	$(MAKE) _build-emu _EMU_CHANNEL=release _EMU_VERSION=7.14.0-release _EMU_REF=keepkey/master
-
-build-emulators: build-emulator-alpha build-emulator-beta build-emulator-release
-
-# Download pre-built emulators (if published as release assets)
-download-emulators:
-	bun firmware/download-emulators.ts
-
-download-emulator-alpha:
-	bun firmware/download-emulators.ts --channel alpha
-
-download-emulator-beta:
-	bun firmware/download-emulators.ts --channel beta
-
-download-emulator-release:
-	bun firmware/download-emulators.ts --channel release
-
-emulator-status:
-	bun firmware/download-emulators.ts --status
-
-clean-emulators:
-	rm -rf firmware/emulators/7.14.0-alpha firmware/emulators/7.14.0-beta firmware/emulators/7.14.0-release
-	rm -rf $(EMU_BUILD_DIR)
+	rm -f $(EMU_INSTALL_DIR)/libkkemu.dylib $(EMU_INSTALL_DIR)/kkemu
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -729,14 +677,11 @@ help:
 	@echo "  make clean          - Remove all build artifacts and node_modules"
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
-	@echo "Emulator Channels:"
-	@echo "  make build-emulators       - Build all 3 emulator channels from firmware submodule"
-	@echo "  make build-emulator-alpha  - Build alpha (BitHighlander fork, release/7.14.0)"
-	@echo "  make build-emulator-beta   - Build beta (BitHighlander fork, release/7.14.0)"
-	@echo "  make build-emulator-release - Build release (upstream keepkey/keepkey-firmware master)"
-	@echo "  make download-emulators    - Download pre-built emulator binaries"
-	@echo "  make emulator-status       - Show installed emulator channels"
-	@echo "  make clean-emulators       - Remove all built emulator binaries"
+	@echo "Emulator (developer feature, macOS only):"
+	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
+	@echo "                               and install to ~/.keepkey/emulator/"
+	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
+	@echo "  make clean-emulator        - Remove the installed dylib + binary"
 
 # --- Pre-release Validation ---
 preflight: submodules

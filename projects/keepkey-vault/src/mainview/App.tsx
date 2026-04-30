@@ -14,7 +14,6 @@ import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
-import { EmulatorManager } from "./components/EmulatorManager"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { OobSetupWizard } from "./components/OobSetupWizard"
@@ -77,9 +76,17 @@ function App() {
 		rpcRequest<{ version: string; channel: string }>("getAppVersion")
 			.then(setAppVersion)
 			.catch(() => {})
-		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
-			.catch(() => {})
+		const refreshSettings = () => {
+			rpcRequest<AppSettings>("getAppSettings")
+				.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+				.catch(() => {})
+		}
+		refreshSettings()
+		// Other surfaces (settings drawer close, drop-zone dylib install) flip
+		// server-side flags then dispatch this event so the React tree picks up
+		// the new state without waiting for the user to reopen settings.
+		window.addEventListener("keepkey-settings-changed", refreshSettings)
+		return () => window.removeEventListener("keepkey-settings-changed", refreshSettings)
 	}, [])
 
 	// ── REST API UI-active handshake ─────────────────────────────────
@@ -716,7 +723,6 @@ function App() {
 						/>
 					)}
 				</SplashScreen>
-				{emulatorEnabled && <EmulatorManager />}
 			</>
 		)
 	}

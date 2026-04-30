@@ -3956,7 +3956,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorInit: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { initEmulator } = await import('./emulator')
-				const status = initEmulator(params?.flashName, undefined, params?.channel)
+				const status = initEmulator(params?.flashName)
 				if (status.state === 'running') {
 					// Open the emulator device window
 					const { openEmulatorWindow } = await import('./emulator-window')
@@ -3986,10 +3986,54 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { getEmulatorStatus } = await import('./emulator')
 				return getEmulatorStatus()
 			},
-			emulatorGetChannels: async () => {
-				if (!emulatorEnabled) return []
-				const { getEmulatorChannels } = await import('./emulator')
-				return getEmulatorChannels()
+			emulatorInstallDylib: async (params) => {
+				// macOS-only: copy a user-supplied libkkemu.dylib into ~/.keepkey/emulator/
+				// so subsequent emulatorInit() loads it. Auto-flips emulator_enabled
+				// since the user has explicitly opted in by dropping a binary.
+				if (process.platform !== 'darwin') throw new Error('Emulator is only available on macOS')
+				if (!params?.data) throw new Error('Missing dylib payload')
+
+				const buf = Buffer.from(params.data, 'base64')
+				if (buf.length < 4) throw new Error('Empty dylib payload')
+				// Mach-O header (thin or fat). Reject anything else early so we
+				// don't dlopen() an arbitrary file later.
+				const magic = buf.readUInt32BE(0)
+				const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
+				if (!MACHO_MAGIC.has(magic)) {
+					throw new Error('File is not a Mach-O dynamic library')
+				}
+
+				// Stop any running emulator before swapping the dylib — replacing
+				// a dlopen'd file mid-flight is undefined behavior on macOS.
+				const { getEmulatorStatus, stopEmulator, getDylibPath } = await import('./emulator')
+				if (getEmulatorStatus().state === 'running') {
+					const { closeEmulatorWindow } = await import('./emulator-window')
+					closeEmulatorWindow()
+					engine.disconnectEmulator()
+					stopEmulator()
+				}
+
+				// Write to a temp file then atomically rename so a partial copy
+				// can never leave a half-written dylib in place.
+				const { writeFileSync, renameSync, mkdirSync, statSync } = await import('fs')
+				const { dirname } = await import('path')
+				const finalPath = getDylibPath()
+				const dir = dirname(finalPath)
+				mkdirSync(dir, { recursive: true, mode: 0o700 })
+				const tmp = `${finalPath}.tmp-${Date.now()}`
+				writeFileSync(tmp, buf, { mode: 0o600 })
+				renameSync(tmp, finalPath)
+				const size = statSync(finalPath).size
+				console.log(`[emulator] Installed dylib at ${finalPath} (${size} bytes)`)
+
+				// Auto-enable emulator setting — dropping a dylib is an explicit
+				// opt-in to dev features.
+				if (!emulatorEnabled) {
+					emulatorEnabled = true
+					setSetting('emulator_enabled', '1')
+					console.log('[settings] Emulator enabled by dylib install')
+				}
+				return { path: finalPath, size, emulatorEnabled }
 			},
 			emulatorDeleteFlash: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
@@ -4067,7 +4111,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Init with the new flash name + channel (creates flash file on disk)
-				const status = initEmulator(params.name, undefined, params.channel)
+				const status = initEmulator(params.name)
 				if (status.state !== 'running') return status
 
 				try {
@@ -4127,7 +4171,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try { deleteEmulatorWalletMeta(params.name) } catch {}
 					if (failedDeviceId) { try { deleteDeviceSnapshot(failedDeviceId) } catch {} }
 
-					// Restore previous emulator if one was running (channel preserved by selectedChannel)
+					// Restore previous emulator if one was running
 					if (prevFlashName) {
 						const restored = initEmulator(prevFlashName)
 						if (restored.state === 'running') {
@@ -4152,7 +4196,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Init with the requested flash name + channel
-				const status = initEmulator(params.name, undefined, params.channel)
+				const status = initEmulator(params.name)
 				if (status.state !== 'running') return status
 
 				// Open window + connect engine (auto-reloads saved mnemonic)
