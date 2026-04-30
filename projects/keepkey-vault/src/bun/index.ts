@@ -2800,6 +2800,52 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return await backfillMemos()
 			},
 
+			// Send the cached UA + FVK to the device for on-screen verification
+			// (firmware ZcashDisplayAddress flow). Device re-derives the FVK from
+			// its seed at the same account and rejects with Failure if the
+			// host-supplied (ak, nk, rivk) doesn't match — proves the address
+			// belongs to this device's seed at this account.
+			//
+			// Requires:
+			//   - firmware ≥ 7.15.0 with the ZcashDisplayAddress proto handler
+			//     (currently on keepkey-firmware:feature-zcash, not yet on develop)
+			//   - hdwallet-keepkey wallet.zcashDisplayAddress() wrapper
+			//     (not yet shipped)
+			//
+			// Until both upstream pieces land, this handler intentionally fails
+			// fast with a precise message so the UI button can render the right
+			// state. When they do land, no vault change is required.
+			zcashDisplayAddress: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const cached = getCachedFvk()
+				if (!cached) throw new Error('Initialize Zcash shielded first (FVK not loaded)')
+
+				const wallet = engine.wallet as any
+				if (typeof wallet.zcashDisplayAddress !== 'function') {
+					throw new Error(
+						'Verify on device requires firmware 7.15.0+ with ZcashDisplayAddress, ' +
+						'and the matching hdwallet wrapper. Both are in flight upstream.'
+					)
+				}
+
+				const account = params?.account ?? 0
+				const H = 0x80000000
+				const akBytes = Buffer.from(cached.fvk.ak, 'hex')
+				const nkBytes = Buffer.from(cached.fvk.nk, 'hex')
+				const rivkBytes = Buffer.from(cached.fvk.rivk, 'hex')
+
+				const result = await wallet.zcashDisplayAddress({
+					addressNList: [(H | 32) >>> 0, (H | 133) >>> 0, (H | account) >>> 0],
+					account,
+					address: cached.address,
+					ak: akBytes,
+					nk: nkBytes,
+					rivk: rivkBytes,
+				})
+				return { address: (result?.address as string) ?? cached.address }
+			},
+
 			zcashDiagnoseAnchor: async (params: any) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				const { diagnoseAnchor } = await import("./zcash-sidecar")

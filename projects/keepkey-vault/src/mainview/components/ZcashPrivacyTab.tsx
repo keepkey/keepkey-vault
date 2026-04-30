@@ -463,6 +463,35 @@ export function ZcashPrivacyTab() {
 		setTimeout(() => setCopied(false), 2000)
 	}, [orchardAddress])
 
+	// ── Verify shielded address on device ─────────────────────────────
+	// Sends the cached UA + FVK (ak, nk, rivk) to the device. Firmware
+	// re-derives the FVK from its seed at the same account and rejects
+	// unless the host's FVK matches device-derived — proves the address
+	// belongs to this device's seed.
+	//
+	// Requires firmware ≥ 7.15.0 with the ZcashDisplayAddress flow plus
+	// a matching hdwallet wrapper. Both are in flight upstream; until
+	// they land the bun handler returns a precise error string and we
+	// surface it here.
+	const [verifyingOnDevice, setVerifyingOnDevice] = useState(false)
+	const [verifyError, setVerifyError] = useState<string | null>(null)
+	const [verifySucceeded, setVerifySucceeded] = useState(false)
+	const verifyOnDevice = useCallback(async () => {
+		if (!orchardAddress) return
+		setVerifyingOnDevice(true)
+		setVerifyError(null)
+		setVerifySucceeded(false)
+		try {
+			await rpcRequest("zcashDisplayAddress", { account: 0 }, 600000)
+			setVerifySucceeded(true)
+			setTimeout(() => setVerifySucceeded(false), 4000)
+		} catch (e: any) {
+			setVerifyError(e?.message ?? String(e))
+		} finally {
+			setVerifyingOnDevice(false)
+		}
+	}, [orchardAddress])
+
 	// ── Status indicator color ────────────────────────────────────────
 	const statusColor = status === "ready" ? "#4ADE80"
 		: status === "initializing" || status === "checking" ? "#FBBF24"
@@ -763,18 +792,43 @@ export function ZcashPrivacyTab() {
 							>
 								{orchardAddress}
 							</Text>
-							<Button
-								size="xs"
-								variant="outline"
-								borderColor="kk.border"
-								color={copied ? "#4ADE80" : "kk.textSecondary"}
-								_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
-								onClick={copyAddress}
-								w="fit-content"
-							>
-								<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
-								{copied ? t("copied") : t("copyAddress")}
-							</Button>
+							<Flex gap="2" wrap="wrap">
+								<Button
+									size="xs"
+									variant="outline"
+									borderColor="kk.border"
+									color={copied ? "#4ADE80" : "kk.textSecondary"}
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={copyAddress}
+									w="fit-content"
+								>
+									<Box as={copied ? FaCheck : FaCopy} fontSize="10px" mr="1.5" />
+									{copied ? t("copied") : t("copyAddress")}
+								</Button>
+								<Button
+									size="xs"
+									variant="outline"
+									borderColor="kk.border"
+									color={verifySucceeded ? "#4ADE80" : "kk.textSecondary"}
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={verifyOnDevice}
+									disabled={verifyingOnDevice || !orchardAddress}
+									w="fit-content"
+									title={t("verifyShieldedAddressTooltip", "Re-derives the FVK on the device and shows the address on screen for confirmation. Proves the address belongs to this device's seed.")}
+								>
+									<Box as={verifySucceeded ? FaCheck : FaShieldAlt} fontSize="10px" mr="1.5" />
+									{verifyingOnDevice
+										? t("checkDevice", "Check device")
+										: verifySucceeded
+											? t("verified", "Verified")
+											: t("verifyOnDevice", "Verify on device")}
+								</Button>
+							</Flex>
+							{verifyError && (
+								<Text fontSize="10px" color="#F87171" mt="1">
+									{verifyError}
+								</Text>
+							)}
 						</Flex>
 					</Flex>
 				</Box>

@@ -127,6 +127,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
+      // Send the cached Orchard UA + FVK to the device for on-screen verification.
+      // Returns the confirmed address string when the user accepts on the device,
+      // or rejects with Failure if the host-supplied FVK doesn't match the
+      // device-derived FVK (see firmware ZcashDisplayAddress handler).
+      zcashDisplayAddress: { params: { account?: number }; response: { address: string } }
 
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }
