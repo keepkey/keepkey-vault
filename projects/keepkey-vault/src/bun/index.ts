@@ -4339,13 +4339,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error('Screen QR scan is only supported on macOS')
 				}
 
-				// Ensure Screen Recording permission. CGPreflight reports current state;
-				// CGRequest pops macOS's native prompt the first time and registers our
-				// bundle with TCC so it appears in System Settings → Screen Recording.
-				// CG bool == 1 byte (Boolean / signed char) — use u8 for portability.
-				let permGranted = false
+				const openScreenCaptureSettings = () => {
+					try {
+						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
+					} catch { /* best effort */ }
+				}
+
+				// CGPreflight is only a hint here. In packaged Electrobun builds this
+				// code runs from the embedded Bun helper, while TCC may show the outer
+				// app bundle in System Settings. Blocking solely on preflight creates
+				// false "missing permission" errors after the user has toggled Vault on.
+				let preflightGranted = false
 				let promptShown = false
-				let ffiOk = false
+				let requestResult: number | null = null
 				try {
 					const { dlopen, FFIType } = require('bun:ffi')
 					const cgPath = '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
@@ -4353,31 +4359,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						CGPreflightScreenCaptureAccess: { args: [], returns: FFIType.u8 },
 						CGRequestScreenCaptureAccess: { args: [], returns: FFIType.u8 },
 					})
-					ffiOk = true
 					const pre = cg.symbols.CGPreflightScreenCaptureAccess() as unknown as number
-					permGranted = pre !== 0
-					console.log('[wcScanScreen] CGPreflight =', pre, 'granted:', permGranted)
-					if (!permGranted) {
+					preflightGranted = pre !== 0
+					console.log('[wcScanScreen] CGPreflight =', pre, 'granted:', preflightGranted)
+					if (!preflightGranted) {
 						const req = cg.symbols.CGRequestScreenCaptureAccess() as unknown as number
+						requestResult = req
 						console.log('[wcScanScreen] CGRequest returned', req, '— TCC prompt should be visible now')
 						promptShown = true
 					}
 				} catch (e: any) {
-					console.warn('[wcScanScreen] CG FFI failed:', e.message, '— assuming no permission')
-				}
-				if (!ffiOk) {
-					// FFI loader failed entirely — we can't differentiate, so proceed and
-					// let screencapture fail explicitly with the existing detection path.
-					permGranted = true
-				}
-
-				if (!permGranted) {
-					// Open the Screen Recording pane so the user can flip the toggle if they
-					// dismissed the native prompt or already denied previously.
-					try {
-						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
-					} catch { /* best effort */ }
-					throw new Error(promptShown ? 'SCREEN_RECORDING_PERMISSION_PROMPTED' : 'SCREEN_RECORDING_PERMISSION_REQUIRED')
+					console.warn('[wcScanScreen] CG FFI failed:', e.message, '— falling through to screencapture')
 				}
 
 				const path = `/tmp/kk-wc-scan-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.png`
@@ -4390,13 +4382,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const exitCode = await proc.exited
 				const file = Bun.file(path)
 				const exists = await file.exists()
-				// "could not create image from rect" + non-zero exit = permission revoked or rect issue
-				if (exitCode !== 0 && /could not create image/i.test(stderrText)) {
-					console.log('[wcScanScreen] screencapture failed despite preflight pass — permission likely revoked')
-					try {
-						Bun.spawn(['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'])
-					} catch { /* best effort */ }
-					throw new Error('SCREEN_RECORDING_PERMISSION_REQUIRED')
+
+				const permissionFailure = exitCode !== 0 && (
+					/could not create image|not authori[sz]ed|screen recording|permission|denied|privacy/i.test(stderrText) ||
+					(!exists && requestResult === 0)
+				)
+				if (permissionFailure) {
+					console.log('[wcScanScreen] screencapture failed; permission likely missing or stale', {
+						exitCode,
+						stderrText,
+						preflightGranted,
+						promptShown,
+						requestResult,
+					})
+					openScreenCaptureSettings()
+					throw new Error(promptShown ? 'SCREEN_RECORDING_PERMISSION_PROMPTED' : 'SCREEN_RECORDING_PERMISSION_REQUIRED')
 				}
 				if (!exists) return null // user canceled (Esc / clicked away)
 				const bytes = await file.arrayBuffer()
@@ -4949,13 +4949,41 @@ Updater.localInfo.channel().then(ch => {
 	}
 })
 
+function findMacAppBundlePath(): string | null {
+	const starts = [
+		process.execPath,
+		process.argv[1],
+		import.meta.dir,
+		process.cwd(),
+	].filter((p): p is string => !!p)
+
+	for (const start of starts) {
+		let current = start
+		try {
+			if (fs.existsSync(current) && fs.statSync(current).isFile()) current = path.dirname(current)
+		} catch { /* best effort */ }
+
+		for (let i = 0; i < 10; i++) {
+			if (current.endsWith('.app') && fs.existsSync(path.join(current, 'Contents', 'Info.plist'))) {
+				return current
+			}
+			const next = path.dirname(current)
+			if (next === current) break
+			current = next
+		}
+	}
+
+	return null
+}
+
 // ── Force keepkey:// protocol registration (override old keepkey-desktop) ──
 if (process.platform === 'darwin') {
 	// Re-register this app as the handler for keepkey:// via Launch Services.
 	// When both keepkey-desktop (Electron) and keepkey-vault (Electrobun) are
 	// installed, the last one to register wins. We force it on every launch.
 	try {
-		const appPath = path.resolve(import.meta.dir, '..', '..', '..')
+		const appPath = findMacAppBundlePath()
+		if (!appPath) throw new Error('Could not locate enclosing .app bundle')
 		const lsregister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister'
 		// -f forces re-registration of the app's URL schemes from its Info.plist,
 		// ensuring keepkey:// points to this vault instead of the old Electron desktop app.
