@@ -307,6 +307,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'wc-deep-link-pair': { uri: string }
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
+      /** Finer-grained substage during executeSwap. The coarse `phase` enum
+       *  (approving/signing/broadcasting) is too narrow for ERC-20 flows that
+       *  go approve-sign → approve-broadcast → wait-receipt → swap-sign →
+       *  swap-broadcast. Without this signal the UI shows "Approving token…
+       *  1/2 Waiting on KeepKey" for the entire flow including the swap step.
+       *  Stages match the SwapSubStage type in src/bun/swap.ts. */
+      'swap-substage': { stage: 'approve-signing' | 'approve-broadcasting' | 'approve-waiting-receipt' | 'swap-signing' | 'swap-broadcasting' }
       /** REST → SwapDialog command. Lets external clients drive the dialog
        *  the same way a user click would: open it, set a field, request a
        *  re-quote, or close it. Signing/broadcast are NEVER triggered this

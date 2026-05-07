@@ -3620,6 +3620,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					wrapSign: engine.isEmulator
 						? (fn, details) => emuSigningOp(fn, details)
 						: (fn) => fn(),
+					pushSubStage: (stage) => {
+						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
+					},
 				})
 				// Look up cached quote for real tracker data
 				// Match by asset pair + amount + inboundAddress to avoid collisions between

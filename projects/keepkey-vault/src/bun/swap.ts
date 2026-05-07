@@ -250,6 +250,19 @@ export interface SwapWallet {
 }
 
 /** Dependencies injected by the caller (index.ts) to avoid circular imports */
+/** Substage of executeSwap. The frontend's coarse phase ('approving' /
+ *  'signing' / 'broadcasting') stays the same; this finer-grained value is a
+ *  separate UI signal so the "Approving token… 1/2" label can become
+ *  "Broadcasting approval…" / "Sign swap on device" etc. as the flow
+ *  progresses. Without this, ERC-20 swaps display "Approving token… 1/2"
+ *  for the entire executeSwap including the swap signing step (retro #1). */
+export type SwapSubStage =
+  | 'approve-signing'         // device prompting for ERC-20 approve
+  | 'approve-broadcasting'    // approve tx going to mempool
+  | 'approve-waiting-receipt' // waiting for approve to confirm
+  | 'swap-signing'            // device prompting for the swap itself
+  | 'swap-broadcasting'       // swap tx going to mempool
+
 export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
@@ -258,11 +271,14 @@ export interface SwapContext {
   getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
   /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
   wrapSign: (fn: () => Promise<any>, details: { operation: string; chain?: string; to?: string; value?: string; memo?: string }) => Promise<any>
+  /** Optional: push a finer-grained substage label to the UI. No-op in REST/headless. */
+  pushSubStage?: (stage: SwapSubStage) => void
 }
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign } = ctx
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage } = ctx
+  const stage = (s: SwapSubStage) => { try { pushSubStage?.(s) } catch { /* never block on push */ } }
 
   // Resolve source chain
   const allChains = getAllChains()
@@ -359,6 +375,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
     if (result.approveTx) {
       console.log(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
+      stage('approve-signing')
       const signedApprove = await wallet.ethSignTx(result.approveTx)
       console.log(`${TAG} Device signed approveTx`)
       let approveHex: string = typeof signedApprove === 'string'
@@ -367,9 +384,11 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
       if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
       const rpcUrl = getRpcUrl(fromChain)
+      stage('approve-broadcasting')
       if (rpcUrl) {
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
         console.log(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
+        stage('approve-waiting-receipt')
         const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
         if (receipt && !receipt.status) {
           throw new Error(`Relay-path ERC-20 approve reverted (txid: ${approvalTxid}). Swap aborted — no relay tx sent.`)
@@ -384,7 +403,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
   } else if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getRpcUrl, isErc20Source, wallet)
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getRpcUrl, isErc20Source, wallet, /* previewMode */ false, stage)
     unsignedTx = result.unsignedTx
     approvalTxid = result.approvalTxid
 
@@ -500,6 +519,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
   console.log(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
+  stage('swap-signing')
   let signedTx: any
   try {
     signedTx = await wrapSign(
@@ -515,6 +535,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   console.log(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
 
   // 5. Broadcast — prefer direct RPC for EVM chains (Pioneer relay can silently drop txs)
+  stage('swap-broadcasting')
   let txid: string
   const swapRpcUrl = fromChain.chainFamily === 'evm' ? getRpcUrl(fromChain) : undefined
   if (swapRpcUrl && fromChain.chainFamily === 'evm') {
@@ -909,6 +930,7 @@ async function buildEvmSwapTx(
   isErc20Source: boolean,
   wallet: any,
   previewMode = false,
+  stage: (s: SwapSubStage) => void = () => {},
 ): Promise<{ unsignedTx: any; approvalTxid?: string; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   // Some protocols (e.g. Mayachain) only return `inboundAddress` and use it as the
   // router for EVM deposits. Accept either; throw only if both are missing.
@@ -1134,6 +1156,7 @@ async function buildEvmSwapTx(
         nonce += 1
       } else {
       console.log(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
+      stage('approve-signing')
       const signedApprove = await wallet.ethSignTx(approveTx)
 
       // Extract serialized tx
@@ -1151,12 +1174,14 @@ async function buildEvmSwapTx(
 
       // Broadcast approve tx
       if (rpcUrl) {
+        stage('approve-broadcasting')
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
         console.log(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
 
         // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts.
         // 180s tolerates busy mainnet (some hours: pending pool 30-60s, then mining).
         console.log(`${TAG} Waiting for approval receipt (up to 180s)...`)
+        stage('approve-waiting-receipt')
         const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
         if (receipt && !receipt.status) {
           throw new Error(`ERC-20 approve tx reverted on-chain (txid: ${approvalTxid}). Swap aborted — no deposit was sent.`)

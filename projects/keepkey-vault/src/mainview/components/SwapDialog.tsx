@@ -542,6 +542,26 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     try { localStorage.setItem('swap.slippageBps', String(clamped)) } catch { /* ignore */ }
   }, [])
 
+  // ── ExecuteSwap substage (retro #1 fix) ────────────────────────
+  // Coarse `phase` is approving/signing/broadcasting. For ERC-20 swaps that
+  // resolves to "approving" for the entire flow including the swap step,
+  // making the UI lie ("Approving token… 1/2 Waiting on KeepKey" while the
+  // device is actually prompting for the SWAP). Bun pushes finer-grained
+  // substages via `swap-substage` so the label can reflect the truth.
+  type SwapSubStage = 'approve-signing' | 'approve-broadcasting' | 'approve-waiting-receipt' | 'swap-signing' | 'swap-broadcasting'
+  const [subStage, setSubStage] = useState<SwapSubStage | null>(null)
+  useEffect(() => {
+    return onRpcMessage('swap-substage', (msg: { stage: SwapSubStage }) => {
+      setSubStage(msg.stage)
+    })
+  }, [])
+  // Reset substage whenever we leave the busy phases
+  useEffect(() => {
+    if (phase !== 'approving' && phase !== 'signing' && phase !== 'broadcasting') {
+      setSubStage(null)
+    }
+  }, [phase])
+
   // ── Live swap tracking state ────────────────────────────────────
   const [liveStatus, setLiveStatus] = useState<SwapTrackingStatus>('pending')
   const [liveConfirmations, setLiveConfirmations] = useState(0)
@@ -1832,19 +1852,39 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <VStack gap="0" align="flex-start">
                   <HStack gap="1.5">
                     <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-                      {phase === 'approving' ? t("approvingToken") : phase === 'signing' ? t("confirmOnDevice") : t("broadcasting")}
+                      {/* Substage-aware label — see retro #1. Falls back to coarse
+                          phase for non-ERC-20 swaps (single-step) and for clients
+                          that don't see the substage push (e.g. resumed swaps). */}
+                      {subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")
+                       : subStage === 'approve-broadcasting'  ? t("approvalBroadcasting", "Broadcasting approval…")
+                       : subStage === 'approve-waiting-receipt' ? t("approvalWaiting", "Waiting for approval to confirm…")
+                       : subStage === 'swap-signing'          ? t("confirmOnDevice")
+                       : subStage === 'swap-broadcasting'     ? t("broadcasting")
+                       : phase === 'approving'                ? t("approvingToken")
+                       : phase === 'signing'                  ? t("confirmOnDevice")
+                                                              : t("broadcasting")}
                     </Text>
-                    {/* For ERC-20 swaps: show 1/2 (approval) or 2/2 (swap). Single-step swaps: no badge. */}
+                    {/* For ERC-20 swaps: show 1/2 during approval substages, 2/2 during swap substages. */}
                     {fromAsset?.contractAddress && (
                       <Box bg="rgba(255,215,0,0.12)" border="1px solid" borderColor="rgba(255,215,0,0.3)" px="1.5" borderRadius="sm">
                         <Text fontSize="9px" fontWeight="700" color="#FFD700">
-                          {phase === 'approving' ? '1/2' : '2/2'}
+                          {subStage?.startsWith('approve-') ? '1/2'
+                           : subStage?.startsWith('swap-')  ? '2/2'
+                           : phase === 'approving'          ? '1/2'
+                                                            : '2/2'}
                         </Text>
                       </Box>
                     )}
                   </HStack>
                   <Text fontSize="xs" color="kk.textMuted">
-                    {phase === 'signing' ? t("confirmOnDeviceDesc") : phase === 'approving' ? t("approvalRequired") : t("broadcastingDesc")}
+                    {subStage === 'approve-signing'         ? t("approvalRequired")
+                     : subStage === 'approve-broadcasting'  ? t("approvalBroadcastingDesc", "Submitting the approval to the network…")
+                     : subStage === 'approve-waiting-receipt' ? t("approvalWaitingDesc", "Waiting for the approval to mine before we can sign the swap.")
+                     : subStage === 'swap-signing'          ? t("confirmOnDeviceDesc")
+                     : subStage === 'swap-broadcasting'     ? t("broadcastingDesc")
+                     : phase === 'signing'                  ? t("confirmOnDeviceDesc")
+                     : phase === 'approving'                ? t("approvalRequired")
+                                                            : t("broadcastingDesc")}
                   </Text>
                 </VStack>
               </Flex>
