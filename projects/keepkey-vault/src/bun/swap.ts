@@ -8,12 +8,12 @@
  *
  * NO direct THORNode or other third-party calls — fail fast if Pioneer is down.
  */
-import { CHAINS } from '../shared/chains'
+import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
-import { getEvmGasPrice, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
+import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
 export { parseQuoteResponse, parseAssetsResponse, parseThorAsset, assetToCaip, THOR_TO_CHAIN } from './swap-parsing'
@@ -32,15 +32,20 @@ function formatWei(wei: bigint, decimals = 18): string {
 }
 
 /** Chain-aware minimum gas price floors (gwei) — enforced even when RPC/Pioneer report lower.
- *  L2s and less-used chains frequently report unrealistically low fees that cause mempool drops. */
+ *  L2s and less-used chains frequently report unrealistically low fees that cause mempool drops.
+ *  ETH mainnet floor raised from 1 → 3: 1 gwei txs sit in mempool on busy days and time out.
+ *  L2 floors raised so legacy-gas fallback path doesn't ship sub-base-fee txs. */
 const MIN_GAS_GWEI: Record<string, number> = {
-  ethereum: 1,
+  ethereum: 3,
   polygon: 30,
   avalanche: 25,
   bsc: 3,
-  base: 1,
-  arbitrum: 1,
-  optimism: 1,
+  base: 0.05,        // L2 base fees are sub-gwei; floor still must beat them
+  arbitrum: 0.1,
+  optimism: 0.05,
+  gnosis: 2,
+  monad: 50,
+  hyperliquid: 0.1,
 }
 
 /** Chain-aware gas limits for depositWithExpiry — L2s need more for L1 data posting */
@@ -60,51 +65,10 @@ const DEPOSIT_GAS_LIMITS: Record<string, bigint> = {
  *  from Pioneer/THORNode and only enforce the THORChain protocol limit. */
 const MEMO_LIMIT = 250
 
-// ── Router validation via Pioneer ───────────────────────────────────
-// Pioneer proxies THORNode inbound_addresses — validate router from quote
-// matches what Pioneer reports, to guard against stale/tampered quotes.
-
-let routerCache: { routers: Map<string, string>; ts: number } = { routers: new Map(), ts: 0 }
-const ROUTER_CACHE_TTL = 5 * 60_000 // 5 minutes
-
-const CHAIN_TO_THORNODE: Record<string, string> = {
-  ethereum: 'ETH', avalanche: 'AVAX', bsc: 'BSC', polygon: 'MATIC',
-  base: 'BASE', arbitrum: 'ARB', optimism: 'OP',
-}
-
-async function validateRouterAddress(router: string, chain: ChainDef, pioneer: any): Promise<void> {
-  const thorChain = CHAIN_TO_THORNODE[chain.id]
-  if (!thorChain) return // non-EVM or unmapped chains
-
-  // Check cache first
-  if (routerCache.routers.size > 0 && Date.now() - routerCache.ts < ROUTER_CACHE_TTL) {
-    const expected = routerCache.routers.get(thorChain)
-    if (expected && router.toLowerCase() !== expected) {
-      throw new Error(`Router mismatch: quote=${router}, Pioneer inbound=${expected} for ${thorChain}. Swap aborted.`)
-    }
-    return
-  }
-
-  // Fetch inbound addresses from Pioneer
-  try {
-    const resp = await pioneer.GetInboundAddresses()
-    const data: Array<{ chain: string; router?: string }> = resp?.data || resp || []
-    const routers = new Map<string, string>()
-    for (const entry of data) {
-      if (entry.router) routers.set(entry.chain, entry.router.toLowerCase())
-    }
-    routerCache = { routers, ts: Date.now() }
-
-    const expected = routers.get(thorChain)
-    if (expected && router.toLowerCase() !== expected) {
-      throw new Error(`Router mismatch: quote=${router}, Pioneer inbound=${expected} for ${thorChain}. Swap aborted.`)
-    }
-  } catch (e: any) {
-    if (e.message?.includes('Router mismatch')) throw e
-    // Pioneer unavailable — log warning but don't block the swap
-    console.warn(`${TAG} Could not validate router via Pioneer: ${e.message}`)
-  }
-}
+// Router/inbound-address validation belongs in pioneer-router (which runs
+// each integration's own checks before returning a quote). The vault trusts
+// the router string Pioneer hands back. Kept here as a comment so future
+// readers don't reintroduce a redundant check on the client side.
 
 // ── Pool/Asset fetching via Pioneer ─────────────────────────────────
 
@@ -195,6 +159,16 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     throw new Error('Amount must be greater than 0')
   }
 
+  // Slippage policy: 0 is rejected (no protection = funds at risk on any
+  // volatile pair). Anything outside [10, 5000] bps is clamped to that range.
+  // Default to 100 bps (1%) when caller omits the field.
+  if (params.slippageBps === 0) {
+    throw new Error('Slippage of 0 is not allowed — choose a tolerance between 0.1% and 50%')
+  }
+  const slippageBps = params.slippageBps == null
+    ? 100
+    : Math.max(10, Math.min(5000, Math.round(params.slippageBps)))
+
   const pioneer = await getPioneer()
 
   // Convert THORChain asset notation to CAIP for Pioneer Quote.
@@ -205,7 +179,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   const knownAssets = await getSwapAssets()
   const sellCaip = assetToCaip(params.fromAsset, knownAssets)
   const buyCaip = assetToCaip(params.toAsset, knownAssets)
-  const slippage = params.slippageBps ? params.slippageBps / 100 : 3 // Pioneer uses % not bps
+  const slippage = slippageBps / 100 // Pioneer uses % not bps
 
   // Normalize BCH CashAddr: strip "bitcoincash:" prefix — THORChain uses short form
   const normalizeBchAddr = (addr: string) =>
@@ -254,8 +228,15 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   const firstQuote = Array.isArray(qDebug) ? qDebug[0] : qDebug
   console.log(`${TAG} Raw quote response keys: ${firstQuote ? Object.keys(firstQuote).join(', ') : 'EMPTY'}`)
 
-  const result = parseQuoteResponse(quoteResp, params)
-  console.log(`${TAG} Quote: ${result.expectedOutput} (via ${result.integration}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
+  // Pass the validated/clamped slippageBps so parseQuoteResponse's fallback
+  // calc lines up with what was actually requested upstream.
+  const result = parseQuoteResponse(quoteResp, { ...params, slippageBps })
+  // Surface the underlying protocol when the integration is an aggregator
+  // (e.g. ShapeShift → Relay/Thorchain/0x). Falls back to integration name.
+  const route = result.swapper && result.swapper.toLowerCase() !== (result.integration || '').toLowerCase()
+    ? `${result.swapper} via ${result.integration}`
+    : (result.integration || 'unknown')
+  console.log(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
   return result
 }
 
@@ -339,12 +320,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   // 2. Validate required fields
-  // Relay integration provides pre-built tx with calldata — no memo or inbound address needed
-  const isRelay = params.integration === 'relay' && !!params.relayTx
+  // Calldata-based integrations (relay, shapeshiftSwap, …) ship the full
+  // tx in `relayTx` — no memo or inbound address needed. Anything else is
+  // memo+vault-routed (THORChain/Maya).
+  const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
-  if (!params.inboundAddress && !isNativeDeposit && !isRelay) throw new Error('Missing inbound vault address from quote')
-  if (!params.memo && !isRelay) throw new Error('Missing swap memo from quote')
+  if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
+  if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
   if (params.memo) {
     const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
     if (memoByteLength > MEMO_LIMIT) {
@@ -353,8 +336,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   console.log(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)
-  if (isRelay) {
-    console.log(`${TAG} Relay integration — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
+  if (hasPrebuiltTx) {
+    console.log(`${TAG} ${params.integration} — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
   } else {
     console.log(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
   }
@@ -366,10 +349,38 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   let unsignedTx: any
   let approvalTxid: string | undefined
 
-  // ── Relay integration: sign pre-built tx directly ──
-  if (isRelay) {
-    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl)
+  // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt tx ──
+  if (hasPrebuiltTx) {
+    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
     unsignedTx = result.unsignedTx
+
+    // ERC-20 relay txs may need an approval to the router (THORChain Router,
+    // 0x exchange proxy, etc.) — without it the router's transferFrom call
+    // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
+    if (result.approveTx) {
+      console.log(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
+      const signedApprove = await wallet.ethSignTx(result.approveTx)
+      console.log(`${TAG} Device signed approveTx`)
+      let approveHex: string = typeof signedApprove === 'string'
+        ? signedApprove
+        : (signedApprove?.serializedTx || signedApprove?.serialized || '')
+      if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
+      if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
+      const rpcUrl = getRpcUrl(fromChain)
+      if (rpcUrl) {
+        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+        console.log(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
+        const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
+        if (receipt && !receipt.status) {
+          throw new Error(`Relay-path ERC-20 approve reverted (txid: ${approvalTxid}). Swap aborted — no relay tx sent.`)
+        }
+        if (!receipt) console.warn(`${TAG} Relay-path approve receipt not confirmed in 180s — proceeding (nonce gap risk)`)
+      } else {
+        const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
+        approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
+        console.log(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
+      }
+    }
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
   } else if (fromChain.chainFamily === 'evm') {
@@ -401,6 +412,32 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           const btcInfo = getBtcXpub()
           if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
         } catch {}
+      }
+      if (!xpub) {
+        // Lazy-init: btcAccountManager hasn't been hydrated (user opened swap
+        // without visiting BTC dashboard first). Derive ALL three scriptTypes
+        // (Legacy/SegWit/NativeSegWit) from device — funds may live on any.
+        // Without this we'd fall through to the chain.scriptType fallback below
+        // which is `p2pkh` (Legacy) and miss every modern wallet.
+        const paths = BTC_SCRIPT_TYPES.map(st => ({
+          addressNList: btcAccountPath(st.purpose, 0),
+          coin: 'Bitcoin',
+          scriptType: st.scriptType,
+          curve: 'secp256k1',
+        }))
+        const results = await wallet.getPublicKeys(paths)
+        const derived: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+        for (let i = 0; i < BTC_SCRIPT_TYPES.length; i++) {
+          const xp = results?.[i]?.xpub
+          if (xp) derived.push({ xpub: xp, scriptType: BTC_SCRIPT_TYPES[i].scriptType, accountPath: paths[i].addressNList })
+        }
+        if (derived.length > 0) {
+          const native = derived.find(d => d.scriptType === 'p2wpkh') || derived[0]
+          xpub = native.xpub
+          accountPath = native.accountPath
+          allXpubs = derived
+          console.log(`${TAG} BTC lazy-derive: ${derived.length} scriptTypes from device (primary=${native.scriptType})`)
+        }
       }
     }
     if (!xpub) {
@@ -527,20 +564,141 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
 // ── Relay swap tx building (pre-built calldata from bridge protocol) ──
 
+/** Build the unsigned swap tx(s) without signing or broadcasting. Used by
+ *  the UI to surface the exact hdwallet payload on the Confirm Quote screen
+ *  so the user can audit before clicking Confirm. For ERC-20 sources that
+ *  need approval, returns BOTH the approve tx and the projected deposit tx
+ *  (with nonce assumed to advance after approval). */
+export async function previewSwapBuild(
+  params: ExecuteSwapParams,
+  ctx: SwapContext,
+): Promise<{ approveTx?: any; unsignedTx: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs } = ctx
+
+  const allChains = getAllChains()
+  const fromChain = allChains.find(c => c.id === params.fromChainId)
+  if (!fromChain) throw new Error(`Unknown source chain: ${params.fromChainId}`)
+  const toChain = allChains.find(c => c.id === params.toChainId)
+  if (!toChain) throw new Error(`Unknown destination chain: ${params.toChainId}`)
+
+  const isErc20Source = params.fromAsset.includes('-') && fromChain.chainFamily === 'evm'
+
+  let fromAddress = params.fromAddressOverride
+  if (!fromAddress) {
+    const addrParams: any = {
+      addressNList: fromChain.defaultPath,
+      showDisplay: false,
+      coin: fromChain.chainFamily === 'evm' ? 'Ethereum' : fromChain.coin,
+    }
+    if (fromChain.scriptType) addrParams.scriptType = fromChain.scriptType
+    const addrMethod = fromChain.id === 'ripple' ? 'rippleGetAddress' : fromChain.rpcMethod
+    const addrResult = await wallet[addrMethod](addrParams)
+    fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+  }
+  if (!fromAddress) throw new Error('Could not derive sender address')
+
+  const hasPrebuiltTx = !!params.relayTx
+  const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
+  if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
+  if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
+
+  const pioneer = await getPioneer()
+
+  if (hasPrebuiltTx) {
+    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ true)
+    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
+  }
+  if (fromChain.chainFamily === 'evm') {
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getRpcUrl, isErc20Source, wallet, /* previewMode */ true)
+    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
+  }
+  if (fromChain.chainFamily === 'utxo') {
+    let xpub: string | undefined
+    let accountPath: number[] | undefined
+    let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+    if (fromChain.id === 'bitcoin') {
+      try {
+        allXpubs = getAllBtcXpubs()
+        if (allXpubs.length > 0) {
+          const btcInfo = getBtcXpub()
+          xpub = btcInfo?.xpub || allXpubs[0].xpub
+          accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
+        }
+      } catch { /* BTC account manager not ready */ }
+    }
+    if (!xpub) {
+      const btcInfo = (() => { try { return getBtcXpub() } catch { return undefined } })()
+      if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+    }
+    if (!xpub && fromChain.id === 'bitcoin') {
+      // Lazy-init: same as executeSwap — derive all 3 BTC scriptTypes when
+      // btcAccountManager is empty. See executeSwap path for rationale.
+      const paths = BTC_SCRIPT_TYPES.map(st => ({
+        addressNList: btcAccountPath(st.purpose, 0),
+        coin: 'Bitcoin',
+        scriptType: st.scriptType,
+        curve: 'secp256k1',
+      }))
+      const results = await wallet.getPublicKeys(paths)
+      const derived: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+      for (let i = 0; i < BTC_SCRIPT_TYPES.length; i++) {
+        const xp = results?.[i]?.xpub
+        if (xp) derived.push({ xpub: xp, scriptType: BTC_SCRIPT_TYPES[i].scriptType, accountPath: paths[i].addressNList })
+      }
+      if (derived.length > 0) {
+        const native = derived.find(d => d.scriptType === 'p2wpkh') || derived[0]
+        xpub = native.xpub
+        accountPath = native.accountPath
+        allXpubs = derived
+      }
+    }
+    if (!xpub) {
+      const result = await wallet.getPublicKeys([{
+        addressNList: fromChain.defaultPath.slice(0, 3),
+        coin: fromChain.coin,
+        scriptType: fromChain.scriptType,
+        curve: 'secp256k1',
+      }])
+      xpub = result?.[0]?.xpub
+    }
+    const buildResult = await txb.buildTx(pioneer, fromChain, {
+      chainId: fromChain.id, to: params.inboundAddress, amount: params.amount, memo: params.memo,
+      feeLevel: params.feeLevel, isMax: params.isMax, fromAddress, xpub, allXpubs, accountPath,
+    })
+    return { unsignedTx: buildResult.unsignedTx }
+  }
+  // cosmos / xrp / solana / tron / ton
+  const knownAssets = await getSwapAssets()
+  const fromAssetMeta = knownAssets.find(a => a.asset === params.fromAsset)
+  const buildResult = await txb.buildTx(pioneer, fromChain, {
+    chainId: fromChain.id,
+    to: params.inboundAddress || fromAddress,
+    amount: params.amount, memo: params.memo, feeLevel: params.feeLevel, isMax: params.isMax,
+    isSwapDeposit: true, fromAddress,
+    caip: fromAssetMeta?.caip, tokenDecimals: fromAssetMeta?.decimals,
+  })
+  return { unsignedTx: buildResult.unsignedTx }
+}
+
 async function buildRelaySwapTx(
   params: ExecuteSwapParams,
   fromChain: ChainDef,
   fromAddress: string,
   getRpcUrl: (chain: ChainDef) => string | undefined,
-): Promise<{ unsignedTx: any }> {
+  isErc20Source = false,
+  _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
+): Promise<{ unsignedTx: any; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
 
-  // Guard: relay chainId MUST match the locally-resolved source chain to prevent
-  // signing a tx for chain A with a nonce fetched from chain B.
+  // Guard: when the quote ships a chainId, it MUST match the locally-resolved
+  // source chain to prevent signing a tx for chain A with a nonce from chain
+  // B (real risk for cross-chain bridges like Relay). Single-chain
+  // aggregators (e.g. shapeshiftSwap on ETH → ETH) omit chainId because
+  // it's implicit; in that case we trust the source chain.
   const expectedChainId = parseInt(fromChain.chainId || '0', 10)
-  if (relay.chainId !== expectedChainId) {
+  if (relay.chainId != null && relay.chainId !== expectedChainId) {
     throw new Error(
-      `Relay chainId mismatch: quote says ${relay.chainId} but source chain ${fromChain.id} is ${expectedChainId}. ` +
+      `Quote chainId mismatch: quote says ${relay.chainId} but source chain ${fromChain.id} is ${expectedChainId}. ` +
       `Aborting — stale or mismatched quote.`
     )
   }
@@ -581,29 +739,117 @@ async function buildRelaySwapTx(
     // EIP-1559 tx — use quote values
     maxFeePerGas = relay.maxFeePerGas
     maxPriorityFeePerGas = relay.maxPriorityFeePerGas || '1000000' // 0.001 gwei fallback
-  } else {
-    // Legacy gas price — try RPC, then Pioneer, then chain-specific floor
-    if (rpcUrl) {
+  } else if (rpcUrl) {
+    // Quote shipped only legacy gasPrice (or nothing) — prefer EIP-1559 from RPC
+    // since legacy gasPrice on EIP-1559 chains often comes back below base fee.
+    const feeData = await getEvmFeeData(rpcUrl)
+    if (feeData) {
+      // Floor maxFeePerGas at 2x chain min (so we still beat base on quiet chains)
+      const floor1559 = fallbackGasPrice * 2n
+      maxFeePerGas = toHex(feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559)
+      maxPriorityFeePerGas = toHex(feeData.maxPriorityFeePerGas)
+      console.log(`${TAG} Relay tx: using EIP-1559 from RPC (maxFee=${feeData.maxFeePerGas}, prio=${feeData.maxPriorityFeePerGas})`)
+    } else {
+      // Chain doesn't support eth_feeHistory — fall back to legacy gasPrice with floor
       try {
         const gp = await getEvmGasPrice(rpcUrl)
         gasPrice = toHex(gp < fallbackGasPrice ? fallbackGasPrice : gp)
       } catch {
-        console.warn(`${TAG} RPC gas price failed for relay tx, trying Pioneer...`)
+        gasPrice = toHex(fallbackGasPrice)
       }
     }
-    if (!gasPrice) {
+  }
+  if (!maxFeePerGas && !gasPrice) {
+    // No RPC available — last-resort Pioneer + floor
+    try {
+      const pioneer = await getPioneer()
+      const gp = await pioneer.GetGasPriceByNetwork({ networkId: fromChain.networkId })
+      const gpData = gp?.data
+      const gpGwei = typeof gpData === 'object'
+        ? parseFloat(gpData.average || gpData.fast || String(fallbackGwei))
+        : parseFloat(gpData || String(fallbackGwei))
+      const gpWei = BigInt(Math.round((isNaN(gpGwei) ? fallbackGwei : gpGwei) * 1e9))
+      gasPrice = toHex(gpWei < fallbackGasPrice ? fallbackGasPrice : gpWei)
+    } catch (e: any) {
+      console.warn(`${TAG} Pioneer gas price failed for relay tx, using ${fallbackGwei} gwei floor: ${e.message}`)
+      gasPrice = toHex(fallbackGasPrice)
+    }
+  }
+
+  // ── ERC-20 allowance check & approve generation ────────────────────
+  // Relay-aggregator txs (e.g. shapeshiftSwap calling THORChain Router) pull
+  // ERC-20 tokens via transferFrom — the user MUST have approved relay.to as
+  // the spender. Without this check the swap silently reverts on-chain.
+  let pendingApproveTx: any | undefined
+  let allowanceInfo: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string } | undefined
+  let balanceInfo: { current: string; required: string; sufficient: boolean; tokenContract?: string } | undefined
+
+  if (isErc20Source && rpcUrl) {
+    // Pull token contract from THORChain asset string ("ETH.USDT-0xDAC17...")
+    const assetParts = params.fromAsset.split('-')
+    const tokenContract = assetParts.slice(1).join('-').toLowerCase()
+    if (tokenContract && tokenContract.startsWith('0x')) {
       try {
-        const pioneer = await getPioneer()
-        const gp = await pioneer.GetGasPriceByNetwork({ networkId: fromChain.networkId })
-        const gpData = gp?.data
-        const gpGwei = typeof gpData === 'object'
-          ? parseFloat(gpData.average || gpData.fast || String(fallbackGwei))
-          : parseFloat(gpData || String(fallbackGwei))
-        const gpWei = BigInt(Math.round((isNaN(gpGwei) ? fallbackGwei : gpGwei) * 1e9))
-        gasPrice = toHex(gpWei < fallbackGasPrice ? fallbackGasPrice : gpWei)
+        const tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract).catch(() => undefined)
+        if (tokenDecimals !== undefined) {
+          const amountBaseUnits = parseUnits(params.amount, tokenDecimals)
+          const [currentAllowance, currentBalance] = await Promise.all([
+            getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n),
+            getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null),
+          ])
+          const sufficient = currentAllowance >= amountBaseUnits
+
+          allowanceInfo = {
+            current: currentAllowance.toString(),
+            required: amountBaseUnits.toString(),
+            sufficient,
+            spender: relay.to,
+            tokenContract,
+          }
+          if (currentBalance !== null) {
+            const balSufficient = currentBalance >= amountBaseUnits
+            balanceInfo = {
+              current: currentBalance.toString(),
+              required: amountBaseUnits.toString(),
+              sufficient: balSufficient,
+              tokenContract,
+            }
+            console.log(`${TAG} Relay tx balance check: current=${currentBalance}, required=${amountBaseUnits}, sufficient=${balSufficient}`)
+            if (!balSufficient && !_previewMode) {
+              throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
+            }
+          }
+          console.log(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
+
+          if (!sufficient) {
+            // Build approveTx — same pattern as buildEvmSwapTx (exact-amount,
+            // for hardware-wallet safety; not MaxUint256).
+            const approveData = encodeApprove(relay.to, amountBaseUnits)
+            const approveGasLimit = 80000n
+            const approveTx: any = {
+              chainId,
+              addressNList: fromChain.defaultPath,
+              nonce: toHex(BigInt(nonce)),
+              gasLimit: toHex(approveGasLimit),
+              to: tokenContract,
+              value: '0x0',
+              data: approveData,
+            }
+            if (maxFeePerGas) {
+              approveTx.maxFeePerGas = toHex(BigInt(maxFeePerGas))
+              approveTx.maxPriorityFeePerGas = toHex(BigInt(maxPriorityFeePerGas || '1000000'))
+            } else if (gasPrice) {
+              approveTx.gasPrice = gasPrice
+            }
+            pendingApproveTx = approveTx
+            // Caller (executeSwap) handles the gate + sign + broadcast + receipt
+            // wait for the approve. We just project the nonce here so the
+            // returned relay tx uses the post-approval nonce.
+            nonce += 1
+          }
+        }
       } catch (e: any) {
-        console.warn(`${TAG} Pioneer gas price failed for relay tx, using ${fallbackGwei} gwei floor: ${e.message}`)
-        gasPrice = toHex(fallbackGasPrice)
+        console.warn(`${TAG} Relay allowance check failed (non-fatal): ${e?.message}`)
       }
     }
   }
@@ -627,8 +873,29 @@ async function buildRelaySwapTx(
     unsignedTx.gasPrice = gasPrice
   }
 
+  // Sanity guard — any swap whose execution depends on protocol-specific
+  // calldata (ERC-20 transferFrom OR cross-chain memo/router call) MUST end
+  // up as a contract call. An empty `data` field would broadcast a plain
+  // value transfer that can't encode swap intent (which BTC address to send
+  // to, which protocol to route through, etc.). We hit this twice in
+  // shapeshiftSwap quotes:
+  //   - USDT→BTC (Maya, txid 0x8426ca…) — ERC-20 source, dust transfer to non-vault EOA
+  //   - ETH→BTC (NEAR Intents) — native source, would have broadcast 0.04 ETH with no destination encoded
+  const isCrossChain = params.fromChainId !== params.toChainId
+  const dataIsEmpty = !relay.data || relay.data === '0x' || relay.data === '0x0' || relay.data.length < 10
+  if (dataIsEmpty && (isErc20Source || isCrossChain)) {
+    const reason = isErc20Source
+      ? `source is ERC-20 but quote's relayTx has empty calldata`
+      : `cross-chain swap (${params.fromChainId} → ${params.toChainId}) but quote's relayTx has empty calldata — no destination encoded`
+    throw new Error(
+      `Refusing to sign: ${reason}. Broadcasting would send a plain transfer to ${relay.to} ` +
+      `with value=${relay.value} instead of executing the swap. Pioneer returned a malformed quote ` +
+      `— try a different route or pair.`
+    )
+  }
+
   console.log(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
-  return { unsignedTx }
+  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────
@@ -641,11 +908,9 @@ async function buildEvmSwapTx(
   getRpcUrl: (chain: ChainDef) => string | undefined,
   isErc20Source: boolean,
   wallet: any,
-): Promise<{ unsignedTx: any; approvalTxid?: string }> {
+  previewMode = false,
+): Promise<{ unsignedTx: any; approvalTxid?: string; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   if (!params.router) throw new Error('EVM swaps require a router address from the quote')
-
-  // Validate router against Pioneer inbound_addresses to catch stale/tampered quotes
-  await validateRouterAddress(params.router, fromChain, pioneer)
 
   // Use expiry from quote if available, otherwise 1 hour from now
   const expiry = params.expiry && params.expiry > Math.floor(Date.now() / 1000)
@@ -654,14 +919,26 @@ async function buildEvmSwapTx(
   const chainId = parseInt(fromChain.chainId || '1', 10)
   const rpcUrl = getRpcUrl(fromChain)
 
-  // Fetch gas price, nonce, native balance
+  // Fetch gas price (preferring EIP-1559), nonce, native balance.
+  // EIP-1559 path: maxFeePerGas + maxPriorityFeePerGas, used on chains that support eth_feeHistory.
+  // Legacy path: gasPrice, used as fallback. Both paths enforce a chain-specific floor.
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
-  let gasPrice: bigint
+  let gasPrice: bigint = fallbackGasPrice
+  let maxFeePerGas: bigint | undefined
+  let maxPriorityFeePerGas: bigint | undefined
+
   if (rpcUrl) {
-    try { gasPrice = await getEvmGasPrice(rpcUrl) } catch (e: any) {
-      console.warn(`${TAG} Failed to fetch gas price via RPC, using ${fallbackGwei} gwei fallback for ${fromChain.id}: ${e.message}`)
-      gasPrice = fallbackGasPrice
+    const feeData = await getEvmFeeData(rpcUrl)
+    if (feeData) {
+      const floor1559 = fallbackGasPrice * 2n
+      maxFeePerGas = feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559
+      maxPriorityFeePerGas = feeData.maxPriorityFeePerGas
+      console.log(`${TAG} Using EIP-1559 (maxFee=${maxFeePerGas}, prio=${maxPriorityFeePerGas}) for ${fromChain.id}`)
+    } else {
+      try { gasPrice = await getEvmGasPrice(rpcUrl) } catch (e: any) {
+        console.warn(`${TAG} Failed to fetch gas price via RPC, using ${fallbackGwei} gwei fallback for ${fromChain.id}: ${e.message}`)
+      }
     }
   } else {
     try {
@@ -671,17 +948,27 @@ async function buildEvmSwapTx(
       gasPrice = BigInt(Math.round((isNaN(gpGwei) ? fallbackGwei : gpGwei) * 1e9))
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch gas price via Pioneer, using ${fallbackGwei} gwei fallback for ${fromChain.id}: ${e.message}`)
-      gasPrice = fallbackGasPrice
     }
   }
-  // Enforce minimum gas price floor — RPC/Pioneer frequently report unrealistically low fees
-  if (gasPrice < fallbackGasPrice) {
+
+  // Enforce minimum floor on legacy path
+  if (!maxFeePerGas && gasPrice < fallbackGasPrice) {
     console.log(`${TAG} Gas price ${gasPrice} below floor ${fallbackGasPrice} (${fallbackGwei} gwei) — using floor`)
     gasPrice = fallbackGasPrice
   }
 
-  if (params.feeLevel != null && params.feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
-  else if (params.feeLevel != null && params.feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
+  // Apply user fee level (1-9: 1-2 = slow, 8-9 = fast). Scales whichever fee field is in use.
+  const feeLevelMul = (n: bigint): bigint => {
+    if (params.feeLevel != null && params.feeLevel <= 2) return n * 80n / 100n
+    if (params.feeLevel != null && params.feeLevel >= 8) return n * 150n / 100n
+    return n
+  }
+  if (maxFeePerGas) {
+    maxFeePerGas = feeLevelMul(maxFeePerGas)
+    maxPriorityFeePerGas = feeLevelMul(maxPriorityFeePerGas!)
+  } else {
+    gasPrice = feeLevelMul(gasPrice)
+  }
 
   let nonce: number | undefined
   if (rpcUrl) {
@@ -765,7 +1052,9 @@ async function buildEvmSwapTx(
     // Validate native balance covers gas for approve + deposit
     const approveGasLimit = 80000n
     const depositGasLimit = 200000n
-    const totalGas = gasPrice * (approveGasLimit + depositGasLimit)
+    // For balance reservation: use the worst-case fee field (maxFeePerGas if EIP-1559)
+    const effectiveFeePerGas = maxFeePerGas ?? gasPrice
+    const totalGas = effectiveFeePerGas * (approveGasLimit + depositGasLimit)
     if (nativeBalance < totalGas) {
       throw new Error(
         `Insufficient ${fromChain.symbol} for gas: need ~${formatWei(totalGas)}, ` +
@@ -773,34 +1062,70 @@ async function buildEvmSwapTx(
       )
     }
 
-    // d) Check allowance
+    // d) Check allowance + balance (parallel)
     let needsApproval = true
+    let currentAllowanceWei = 0n
+    let currentTokenBalance: bigint | null = null
     if (rpcUrl) {
       try {
-        const currentAllowance = await getErc20Allowance(rpcUrl, tokenContract, fromAddress, params.router)
-        needsApproval = currentAllowance < amountBaseUnits
-        console.log(`${TAG} Current allowance: ${currentAllowance}, needed: ${amountBaseUnits}, needsApproval: ${needsApproval}`)
+        const [allowance, bal] = await Promise.all([
+          getErc20Allowance(rpcUrl, tokenContract, fromAddress, params.router),
+          getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null),
+        ])
+        currentAllowanceWei = allowance
+        currentTokenBalance = bal
+        needsApproval = currentAllowanceWei < amountBaseUnits
+        console.log(`${TAG} Current allowance: ${currentAllowanceWei}, needed: ${amountBaseUnits}, needsApproval: ${needsApproval}`)
+        if (bal !== null) console.log(`${TAG} Token balance: ${bal}, needed: ${amountBaseUnits}, sufficient: ${bal >= amountBaseUnits}`)
       } catch (e: any) {
-        console.warn(`${TAG} Allowance check failed, assuming approval needed: ${e.message}`)
+        console.warn(`${TAG} Allowance/balance check failed, assuming approval needed: ${e.message}`)
       }
+    }
+    const allowanceInfo = {
+      current: currentAllowanceWei.toString(),
+      required: amountBaseUnits.toString(),
+      sufficient: !needsApproval,
+      spender: params.router,
+      tokenContract,
+    }
+    const balanceInfo = currentTokenBalance !== null ? {
+      current: currentTokenBalance.toString(),
+      required: amountBaseUnits.toString(),
+      sufficient: currentTokenBalance >= amountBaseUnits,
+      tokenContract,
+    } : undefined
+    if (balanceInfo && !balanceInfo.sufficient && !previewMode) {
+      throw new Error(`Insufficient ${tokenContract} balance: have ${currentTokenBalance!.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
     }
 
     // e) If allowance insufficient, sign + broadcast approve tx
     //    H2 fix: approve exact amount (not MaxUint256) — safer for hardware wallet users
+    let pendingApproveTx: any | undefined
     if (needsApproval) {
       const approveData = encodeApprove(params.router, amountBaseUnits)
 
-      const approveTx = {
+      const approveTx: any = {
         chainId,
         addressNList: fromChain.defaultPath,
         nonce: toHex(nonce),
         gasLimit: toHex(approveGasLimit),
-        gasPrice: toHex(gasPrice),
         to: tokenContract,  // approve is called on the token contract
         value: '0x0',       // no ETH value
         data: approveData,
       }
+      if (maxFeePerGas) {
+        approveTx.maxFeePerGas = toHex(maxFeePerGas)
+        approveTx.maxPriorityFeePerGas = toHex(maxPriorityFeePerGas!)
+      } else {
+        approveTx.gasPrice = toHex(gasPrice)
+      }
+      pendingApproveTx = approveTx
 
+      // Preview mode: caller wants the unsigned txs without signing — project
+      // the deposit nonce as if approval succeeded and skip device sign/broadcast.
+      if (previewMode) {
+        nonce += 1
+      } else {
       console.log(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${params.router}, amount=${amountBaseUnits}`)
       const signedApprove = await wallet.ethSignTx(approveTx)
 
@@ -822,14 +1147,15 @@ async function buildEvmSwapTx(
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
         console.log(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
 
-        // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts
-        console.log(`${TAG} Waiting for approval receipt (up to 90s)...`)
-        const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 90_000)
+        // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts.
+        // 180s tolerates busy mainnet (some hours: pending pool 30-60s, then mining).
+        console.log(`${TAG} Waiting for approval receipt (up to 180s)...`)
+        const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
         if (receipt && !receipt.status) {
           throw new Error(`ERC-20 approve tx reverted on-chain (txid: ${approvalTxid}). Swap aborted — no deposit was sent.`)
         }
         if (!receipt) {
-          console.warn(`${TAG} Approval receipt not confirmed within 90s — proceeding with deposit (nonce gap risk)`)
+          console.warn(`${TAG} Approval receipt not confirmed within 180s — proceeding with deposit (nonce gap risk)`)
         } else {
           console.log(`${TAG} Approval confirmed on-chain (gas used: ${receipt.gasUsed})`)
         }
@@ -842,6 +1168,7 @@ async function buildEvmSwapTx(
       }
 
       nonce += 1
+      } // end !previewMode
     }
 
     // f) Build depositWithExpiry with token contract as asset, value = 0x0
@@ -862,19 +1189,24 @@ async function buildEvmSwapTx(
       console.log(`${TAG} Estimated deposit gas: ${erc20DepositGas} (fallback: ${depositGasLimit})`)
     }
 
-    const unsignedTx = {
+    const unsignedTx: any = {
       chainId,
       addressNList: fromChain.defaultPath,
       nonce: toHex(nonce),
       gasLimit: toHex(erc20DepositGas),
-      gasPrice: toHex(gasPrice),
       to: params.router,     // ROUTER contract, NOT vault
       value: '0x0',          // no ETH value for ERC-20 swaps
       data: depositData,
     }
+    if (maxFeePerGas) {
+      unsignedTx.maxFeePerGas = toHex(maxFeePerGas)
+      unsignedTx.maxPriorityFeePerGas = toHex(maxPriorityFeePerGas!)
+    } else {
+      unsignedTx.gasPrice = toHex(gasPrice)
+    }
 
     console.log(`${TAG} ERC-20 router call: to=${params.router}, vault=${params.inboundAddress}, token=${tokenContract}, amount=${amountBaseUnits}`)
-    return { unsignedTx, approvalTxid }
+    return { unsignedTx, approvalTxid, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
 
   } else {
     // ── Native asset swap: asset = 0x0, value = amountWei ──
@@ -884,7 +1216,9 @@ async function buildEvmSwapTx(
     // Dynamic gas estimation with static fallback (use static for initial estimate)
     let gasLimit = staticGasLimit
 
-    const gasFee = gasPrice * gasLimit
+    // Reservation uses worst-case fee per gas (maxFeePerGas if EIP-1559, else gasPrice)
+    const reservedGasPrice = maxFeePerGas ?? gasPrice
+    const gasFee = reservedGasPrice * gasLimit
 
     // sendMax: deduct gas from send amount so the entire balance is used
     if (params.isMax && nativeBalance > gasFee) {
@@ -913,7 +1247,7 @@ async function buildEvmSwapTx(
       }
     }
 
-    const finalGasFee = gasPrice * gasLimit
+    const finalGasFee = reservedGasPrice * gasLimit
 
     // L2 chains (OP Stack): reserve extra for L1 data posting fee, which is separate from
     // gasPrice * gasLimit. Without this, sendMax overspends by the L1 fee and gets rejected.
@@ -943,15 +1277,20 @@ async function buildEvmSwapTx(
       expiry,
     )
 
-    const unsignedTx = {
+    const unsignedTx: any = {
       chainId,
       addressNList: fromChain.defaultPath,
       nonce: toHex(nonce),
       gasLimit: toHex(gasLimit),
-      gasPrice: toHex(gasPrice),
       to: params.router,         // ROUTER contract, NOT vault
       value: toHex(amountWei),   // ETH value sent with the call
       data: finalData,           // depositWithExpiry encoded call
+    }
+    if (maxFeePerGas) {
+      unsignedTx.maxFeePerGas = toHex(maxFeePerGas)
+      unsignedTx.maxPriorityFeePerGas = toHex(maxPriorityFeePerGas!)
+    } else {
+      unsignedTx.gasPrice = toHex(gasPrice)
     }
 
     console.log(`${TAG} EVM native router call: to=${params.router}, vault=${params.inboundAddress}, value=${formatWei(amountWei)} ${fromChain.symbol}${params.isMax ? ' (sendMax)' : ''}`)

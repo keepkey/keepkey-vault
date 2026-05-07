@@ -11,6 +11,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { getExplorerTxUrl } from "../../shared/chains"
 import type { PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryStats, SwapTrackingStatus } from "../../shared/types"
+import { ProviderBadge } from "./ProviderBadge"
 
 const ExternalLinkIcon = () => (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -302,7 +303,10 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
             {record.status}
           </Text>
         </HStack>
-        <Text fontSize="10px" color="kk.textMuted">{formatDate(record.createdAt)}</Text>
+        <HStack gap="2">
+          <ProviderBadge swapper={record.swapper || record.integration} integration={record.integration} size={14} variant="compact" />
+          <Text fontSize="10px" color="kk.textMuted">{formatDate(record.createdAt)}</Text>
+        </HStack>
       </Flex>
 
       {/* Amounts row */}
@@ -336,7 +340,13 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       {expanded && (
         <Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
           <VStack gap="1.5" align="stretch">
-            <DetailRow label="Integration" value={record.integration} />
+            <Flex justify="space-between" align="center" gap="2">
+              <Text fontSize="10px" color="kk.textMuted" minW="80px">Route</Text>
+              <ProviderBadge swapper={record.swapper || record.integration} integration={record.integration} size={16} variant="detailed" />
+            </Flex>
+            {record.swapper && record.integration && record.swapper.toLowerCase() !== record.integration.toLowerCase() && (
+              <DetailRow label="Source" value={record.integration} />
+            )}
             <DetailRow label="Slippage" value={`${record.slippageBps} bps (${(record.slippageBps / 100).toFixed(1)}%)`} />
             <DetailRow label="Fee" value={`${record.feeBps} bps`} />
             <DetailRow label="Outbound Fee" value={record.feeOutbound} />

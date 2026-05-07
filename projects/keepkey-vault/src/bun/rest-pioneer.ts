@@ -148,29 +148,7 @@ export async function handleV2DataRoute(
       return json({ data: resp?.data || resp })
     }
 
-    // ── Swap ───────────────────────────────────────────────────────
-
-    if (path === '/api/v2/swap/quote' && method === 'POST') {
-      auth.requireAuth(req)
-      const body = await parseRequest(req, S.SwapQuoteRequest)
-      const pioneer = await getPioneer()
-      const resp = await pioneer.Quote({
-        sellAsset: body.sellAsset,
-        buyAsset: body.buyAsset,
-        sellAmount: body.sellAmount,
-        senderAddress: body.senderAddress,
-        recipientAddress: body.recipientAddress,
-        slippage: body.slippage ?? 3,
-      })
-      return json({ data: resp?.data || resp })
-    }
-
-    if (path === '/api/v2/swap/inbound-addresses' && method === 'GET') {
-      auth.requireAuth(req)
-      const pioneer = await getPioneer()
-      const resp = await pioneer.GetInboundAddresses()
-      return json({ data: resp?.data || resp })
-    }
+    // ── Swap routes moved to rest-swap.ts (/api/v2/swap/*) ────────────
 
     return null
 

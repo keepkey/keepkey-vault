@@ -276,7 +276,20 @@ describe('parseQuoteResponse', () => {
   test('throws on missing output amount', () => {
     const badResp = { data: [{ quote: { inbound_address: '0x123' } }] }
     expect(() => parseQuoteResponse(badResp, baseParams))
-      .toThrow('Quote response missing output amount')
+      .toThrow(/No quote output for/)
+  })
+
+  test('throws on zero output amount (Pioneer schema drift / no liquidity)', () => {
+    const badResp = { data: [{ quote: { buyAmount: '0', inbound_address: '0x123' } }] }
+    expect(() => parseQuoteResponse(badResp, baseParams))
+      .toThrow(/No quote output for/)
+  })
+
+  test('accepts new Pioneer field names (expectedAmountOut, amount_out)', () => {
+    const camel = { data: [{ quote: { expectedAmountOut: '2.5', inbound_address: '0xv' } }] }
+    expect(parseQuoteResponse(camel, baseParams).expectedOutput).toBe('2.5')
+    const snake = { data: [{ quote: { amount_out: '3.7', inbound_address: '0xv' } }] }
+    expect(parseQuoteResponse(snake, baseParams).expectedOutput).toBe('3.7')
   })
 
   test('throws on missing inbound address', () => {

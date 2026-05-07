@@ -192,6 +192,8 @@ export function initDb() {
         to_symbol           TEXT NOT NULL,
         from_chain_id       TEXT NOT NULL,
         to_chain_id         TEXT NOT NULL,
+        from_caip           TEXT,
+        to_caip             TEXT,
         from_amount         TEXT NOT NULL,
         quoted_output       TEXT NOT NULL,
         minimum_output      TEXT NOT NULL DEFAULT '0',
@@ -200,6 +202,7 @@ export function initDb() {
         fee_bps             INTEGER NOT NULL DEFAULT 0,
         fee_outbound        TEXT NOT NULL DEFAULT '0',
         integration         TEXT NOT NULL DEFAULT 'thorchain',
+        swapper             TEXT,
         memo                TEXT NOT NULL DEFAULT '',
         inbound_address     TEXT NOT NULL DEFAULT '',
         router              TEXT,
@@ -269,6 +272,13 @@ export function initDb() {
     // Activity tracking columns on api_log (sign/broadcast ops)
     for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT']) {
       try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
+    // Underlying protocol when integration is an aggregator (e.g. Relay, 0x via ShapeShift)
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN swapper TEXT`) } catch { /* already exists */ }
+    // CAIPs for both sides — needed so the SwapDialog resume path can render
+    // asset logos without a Pioneer round-trip.
+    for (const col of ['from_caip TEXT', 'to_caip TEXT']) {
+      try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
 
@@ -876,7 +886,8 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
     })
 
     // Swap history entries (dedupe by txid against logActivities)
-    let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, from_amount, status, created_at
+    let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, to_chain_id,
+       from_caip, to_caip, from_amount, quoted_output, received_output, status, created_at
        FROM swap_history`
     const swapParams: any[] = []
     if (chainFilter) {
@@ -889,7 +900,10 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
 
     const swapRows = db.query(swapSql).all(...swapParams) as Array<{
       id: string; txid: string; from_symbol: string; to_symbol: string;
-      from_chain_id: string; from_amount: string; status: string; created_at: number
+      from_chain_id: string; to_chain_id: string;
+      from_caip: string | null; to_caip: string | null;
+      from_amount: string; quoted_output: string; received_output: string | null;
+      status: string; created_at: number
     }>
 
     const logTxids = new Set(logActivities.filter(a => a.txid).map(a => a.txid))
@@ -903,7 +917,12 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
         type: 'swap' as const,
         source: 'app' as const,
         amount: r.from_amount,
-        asset: `${r.from_symbol}\u2192${r.to_symbol}`,
+        asset: r.from_symbol,
+        outAmount: r.received_output || r.quoted_output || undefined,
+        outAsset: r.to_symbol,
+        outChainId: r.to_chain_id,
+        fromCaip: r.from_caip || undefined,
+        toCaip: r.to_caip || undefined,
         status: r.status === 'completed' ? 'completed' as const : r.status === 'failed' ? 'failed' as const : r.status === 'refunded' ? 'refunded' as const : 'broadcast' as const,
         swapStatus: r.status as any,
         createdAt: r.created_at,
@@ -1195,17 +1214,18 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
     db.run(
       `INSERT OR REPLACE INTO swap_history
         (id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
-         from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
-         fee_outbound, integration, memo, inbound_address, router, status, outbound_txid,
+         from_caip, to_caip, from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
+         fee_outbound, integration, swapper, memo, inbound_address, router, status, outbound_txid,
          error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id, record.txid, record.fromAsset, record.toAsset,
         record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
+        record.fromCaip || null, record.toCaip || null,
         record.fromAmount, record.quotedOutput, record.minimumOutput,
         record.receivedOutput || null,
         record.slippageBps, record.feeBps, record.feeOutbound,
-        record.integration, record.memo, record.inboundAddress,
+        record.integration, record.swapper || null, record.memo, record.inboundAddress,
         record.router || null, record.status, record.outboundTxid || null,
         record.error || null, record.createdAt, record.updatedAt,
         record.completedAt || null, record.estimatedTimeSeconds,
@@ -1225,6 +1245,7 @@ export function updateSwapHistoryStatus(
     outboundTxid?: string
     error?: string
     receivedOutput?: string
+    swapper?: string
     completedAt?: number
     actualTimeSeconds?: number
   }
@@ -1243,6 +1264,7 @@ export function updateSwapHistoryStatus(
     if (extra?.outboundTxid) setClauses.push({ col: 'outbound_txid', value: extra.outboundTxid })
     if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
     if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
+    if (extra?.swapper) setClauses.push({ col: 'swapper', value: extra.swapper })
     if (isFinal) {
       setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
       if (extra?.actualTimeSeconds !== undefined) {
@@ -1349,6 +1371,8 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     toSymbol: r.to_symbol,
     fromChainId: r.from_chain_id,
     toChainId: r.to_chain_id,
+    fromCaip: r.from_caip || undefined,
+    toCaip: r.to_caip || undefined,
     fromAmount: r.from_amount,
     quotedOutput: r.quoted_output,
     minimumOutput: r.minimum_output,
@@ -1357,6 +1381,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     feeBps: r.fee_bps,
     feeOutbound: r.fee_outbound,
     integration: r.integration,
+    swapper: r.swapper || undefined,
     memo: r.memo,
     inboundAddress: r.inbound_address,
     router: r.router || undefined,

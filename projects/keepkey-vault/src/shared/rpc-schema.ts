@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -175,13 +175,26 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getSwapAssets: { params: void; response: SwapAsset[] }
       getSwapQuote: { params: SwapQuoteParams; response: SwapQuote }
       executeSwap: { params: ExecuteSwapParams; response: SwapResult }
+      /** Build the unsigned swap tx(s) without signing — used to surface the
+       *  hdwallet payload on the Confirm Quote screen for auditing. Returns
+       *  `approveTx` only when an ERC-20 allowance bump is required. */
+      previewSwapBuild: { params: ExecuteSwapParams; response: { approveTx?: any; unsignedTx: any } }
       getPendingSwaps: { params: void; response: PendingSwap[] }
       dismissSwap: { params: { txid: string }; response: void }
 
       // ── Swap History (SQLite-persisted) ─────────────────────────────
+      getSwapByTxid: { params: { txid: string }; response: PendingSwap | null }
+      /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
+       *  open — there is no background polling timer (by design). */
+      refreshSwap: { params: { txid: string }; response: PendingSwap | null }
       getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
       getSwapHistoryStats: { params: void; response: SwapHistoryStats }
       exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
+
+      // ── Swap UI mirror (WebView publishes its visible state to Bun) ──
+      // Fire-and-forget from the SwapDialog; Bun caches the latest snapshot
+      // so REST /api/v2/swap/state can read what the user sees.
+      publishSwapUiState: { params: SwapUiState; response: void }
 
       // ── Recent Activity ──────────────────────────────────────────────────
       getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
@@ -294,6 +307,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'wc-deep-link-pair': { uri: string }
       'swap-update': SwapStatusUpdate
       'swap-complete': PendingSwap
+      /** REST → SwapDialog command. Lets external clients drive the dialog
+       *  the same way a user click would: open it, set a field, request a
+       *  re-quote, or close it. Signing/broadcast are NEVER triggered this
+       *  way — the user must press Sign in the dialog. */
+      'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }

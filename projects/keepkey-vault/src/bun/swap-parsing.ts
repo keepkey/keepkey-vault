@@ -73,17 +73,49 @@ export function parseQuoteResponse(
   // Pioneer wraps THORNode data in quote.raw and tx details in quote.txs[]
   const raw = quote.raw || {}
   const txParams = quote.txs?.[0]?.txParams || {}
+  // Underlying protocol for aggregator integrations. ShapeShift surfaces this
+  // as quote.swapper (and quote.meta.swapper) — e.g. "Relay", "Thorchain", "0x",
+  // "Uniswap". Falls back to undefined for direct integrations (THORChain,
+  // ChainFlip) where `integration` already names the protocol.
+  const swapperRaw = quote.swapper || quote.meta?.swapper || raw.swapper
+  const swapper = swapperRaw && typeof swapperRaw === 'string' && swapperRaw.toLowerCase() !== 'unknown'
+    ? swapperRaw
+    : undefined
 
-  // Extract fields from Pioneer's normalized fields + raw THORNode data
-  const expectedOutput = quote.buyAmount || quote.amountOut || raw.expected_amount_out
-  if (!expectedOutput) throw new Error('Quote response missing output amount')
+  // Extract fields from Pioneer's normalized fields + raw THORNode data.
+  // Snake_case fallbacks added because Pioneer's Quote response has drifted —
+  // some integrations now return `expectedAmountOut` / `amount_out` / etc.
+  const expectedOutput = quote.buyAmount
+    ?? quote.amountOut
+    ?? quote.expectedAmountOut
+    ?? quote.expected_amount_out
+    ?? quote.amount_out
+    ?? raw.expected_amount_out
+    ?? raw.expectedAmountOut
+  if (expectedOutput == null || expectedOutput === '' || expectedOutput === 0 || expectedOutput === '0') {
+    // Dump field shapes so we can see exactly what Pioneer returned. This is
+    // the "expected output coming back 0" path users hit when a pool has no
+    // liquidity or Pioneer drifts its schema; without this dump the bug is
+    // invisible in production logs.
+    console.error(`${TAG} expectedOutput is empty/zero — dumping response structure:`)
+    console.error(`${TAG}   integration: ${integration}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
+    console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
+    throw new Error(`No quote output for ${params.fromAsset} → ${params.toAsset} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
+  }
   const expectedOutputStr = String(expectedOutput)
 
-  // ── Relay integration: pre-built tx with calldata, no memo ──
-  const isRelay = integration === 'relay'
+  // ── Pre-built calldata integrations (relay, shapeshiftSwap, …) ──
+  // Any integration that hands us calldata gets the same treatment: we sign
+  // the supplied tx as-is. The field stays named `relayTx` for backwards
+  // compatibility with ExecuteSwapParams; conceptually it's "prebuilt tx".
+  const hasPrebuiltTx = !!txParams.data
   let relayTx: RelayTxParams | undefined
 
-  if (isRelay && txParams.data) {
+  if (hasPrebuiltTx) {
     relayTx = {
       to: txParams.to,
       data: txParams.data,
@@ -93,7 +125,7 @@ export function parseQuoteResponse(
       maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? String(txParams.maxPriorityFeePerGas) : undefined,
       chainId: txParams.chainId,
     }
-    console.log(`${TAG} Relay integration — pre-built tx extracted (to=${relayTx.to}, chainId=${relayTx.chainId})`)
+    console.log(`${TAG} ${integration} — prebuilt tx extracted (to=${relayTx.to}, chainId=${relayTx.chainId})`)
   }
 
   // Memo lives in txParams (Pioneer constructs it), fallback to raw
@@ -121,7 +153,7 @@ export function parseQuoteResponse(
   // Native THORChain/Maya swaps (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
 
-  if (!inboundAddress && !isNativeDeposit && !isRelay) {
+  if (!inboundAddress && !isNativeDeposit && !hasPrebuiltTx) {
     // Dump full response structure to help diagnose missing field
     console.error(`${TAG} MISSING inbound address — dumping response structure:`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
@@ -131,7 +163,7 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  if (!memo && !isRelay) {
+  if (!memo && !hasPrebuiltTx) {
     console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
   }
 
@@ -140,7 +172,7 @@ export function parseQuoteResponse(
   let totalBps = fees.total_bps || fees.totalBps || 0
   let outboundFee = fees.outbound || fees.outboundFee || '0'
   let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
-  const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 300)
+  const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 100)
 
   // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc
   const expectedNum = parseFloat(expectedOutputStr)
@@ -173,6 +205,7 @@ export function parseQuoteResponse(
     fromAsset: params.fromAsset,
     toAsset: params.toAsset,
     integration,
+    swapper,
     relayTx,
   }
 }

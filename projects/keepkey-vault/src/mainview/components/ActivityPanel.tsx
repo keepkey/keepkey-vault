@@ -408,7 +408,18 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
         </HStack>
         <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
       </Flex>
-      {(activity.amount || activity.fee) && (
+      {activity.type === 'swap' && (activity.amount || activity.outAmount) ? (
+        <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="1.5" align="center" flexWrap="wrap">
+          {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
+          <Text color="#FFD700">&rarr;</Text>
+          {activity.outAmount
+            ? <Text truncate color={activity.swapStatus === 'completed' ? '#23DCC8' : 'whiteAlpha.500'}>
+                {activity.swapStatus === 'completed' ? '' : '~'}{activity.outAmount} {activity.outAsset || ''}
+              </Text>
+            : <Text color="whiteAlpha.300" fontStyle="italic">{activity.outAsset || '?'}</Text>
+          }
+        </Flex>
+      ) : (activity.amount || activity.fee) && (
         <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="2">
           {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
           {activity.fee && <Text color="whiteAlpha.300">fee: {activity.fee}</Text>}
