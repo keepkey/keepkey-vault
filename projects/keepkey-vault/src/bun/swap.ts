@@ -910,7 +910,10 @@ async function buildEvmSwapTx(
   wallet: any,
   previewMode = false,
 ): Promise<{ unsignedTx: any; approvalTxid?: string; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
-  if (!params.router) throw new Error('EVM swaps require a router address from the quote')
+  // Some protocols (e.g. Mayachain) only return `inboundAddress` and use it as the
+  // router for EVM deposits. Accept either; throw only if both are missing.
+  const routerAddress = params.router || params.inboundAddress
+  if (!routerAddress) throw new Error('EVM swaps require a router/inboundAddress from the quote')
 
   // Use expiry from quote if available, otherwise 1 hour from now
   const expiry = params.expiry && params.expiry > Math.floor(Date.now() / 1000)
@@ -1009,8 +1012,12 @@ async function buildEvmSwapTx(
     // ── ERC-20 source swap: approve + depositWithExpiry ──
 
     // a) Extract token contract from THORChain asset string "ETH.USDT-0xDAC17F..."
+    // THORChain canonicalizes the contract address to UPPERCASE 0X — the asset
+    // ID looks like "ETH.USDT-0XDAC17F..." not "ETH.USDT-0xDAC17F...". Compare
+    // case-insensitively + normalize to lowercase for downstream use (eth_call
+    // accepts either case but our internal Map keys assume lowercase).
     const assetParts = params.fromAsset.split('-')
-    const tokenContract = assetParts.slice(1).join('-') // rejoin in case of multiple hyphens
+    const tokenContract = assetParts.slice(1).join('-').toLowerCase()
     if (!tokenContract || !tokenContract.startsWith('0x')) {
       throw new Error(`Cannot extract token contract from asset: ${params.fromAsset}`)
     }
@@ -1069,7 +1076,7 @@ async function buildEvmSwapTx(
     if (rpcUrl) {
       try {
         const [allowance, bal] = await Promise.all([
-          getErc20Allowance(rpcUrl, tokenContract, fromAddress, params.router),
+          getErc20Allowance(rpcUrl, tokenContract, fromAddress, routerAddress),
           getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null),
         ])
         currentAllowanceWei = allowance
@@ -1085,7 +1092,7 @@ async function buildEvmSwapTx(
       current: currentAllowanceWei.toString(),
       required: amountBaseUnits.toString(),
       sufficient: !needsApproval,
-      spender: params.router,
+      spender: routerAddress,
       tokenContract,
     }
     const balanceInfo = currentTokenBalance !== null ? {
@@ -1102,7 +1109,7 @@ async function buildEvmSwapTx(
     //    H2 fix: approve exact amount (not MaxUint256) — safer for hardware wallet users
     let pendingApproveTx: any | undefined
     if (needsApproval) {
-      const approveData = encodeApprove(params.router, amountBaseUnits)
+      const approveData = encodeApprove(routerAddress, amountBaseUnits)
 
       const approveTx: any = {
         chainId,
@@ -1126,7 +1133,7 @@ async function buildEvmSwapTx(
       if (previewMode) {
         nonce += 1
       } else {
-      console.log(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${params.router}, amount=${amountBaseUnits}`)
+      console.log(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
       const signedApprove = await wallet.ethSignTx(approveTx)
 
       // Extract serialized tx
@@ -1184,7 +1191,7 @@ async function buildEvmSwapTx(
     let erc20DepositGas = depositGasLimit
     if (rpcUrl) {
       erc20DepositGas = await estimateGas(rpcUrl, {
-        to: params.router, from: fromAddress, data: depositData, value: '0x0',
+        to: routerAddress, from: fromAddress, data: depositData, value: '0x0',
       }, depositGasLimit)
       console.log(`${TAG} Estimated deposit gas: ${erc20DepositGas} (fallback: ${depositGasLimit})`)
     }
@@ -1194,7 +1201,7 @@ async function buildEvmSwapTx(
       addressNList: fromChain.defaultPath,
       nonce: toHex(nonce),
       gasLimit: toHex(erc20DepositGas),
-      to: params.router,     // ROUTER contract, NOT vault
+      to: routerAddress,     // ROUTER contract, NOT vault
       value: '0x0',          // no ETH value for ERC-20 swaps
       data: depositData,
     }
@@ -1205,7 +1212,7 @@ async function buildEvmSwapTx(
       unsignedTx.gasPrice = toHex(gasPrice)
     }
 
-    console.log(`${TAG} ERC-20 router call: to=${params.router}, vault=${params.inboundAddress}, token=${tokenContract}, amount=${amountBaseUnits}`)
+    console.log(`${TAG} ERC-20 router call: to=${routerAddress}, vault=${params.inboundAddress}, token=${tokenContract}, amount=${amountBaseUnits}`)
     return { unsignedTx, approvalTxid, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
 
   } else {
@@ -1238,7 +1245,7 @@ async function buildEvmSwapTx(
     if (rpcUrl) {
       try {
         gasLimit = await estimateGas(rpcUrl, {
-          to: params.router, from: fromAddress, data, value: toHex(amountWei),
+          to: routerAddress, from: fromAddress, data, value: toHex(amountWei),
         }, staticGasLimit)
         console.log(`${TAG} Estimated native deposit gas: ${gasLimit} (fallback: ${staticGasLimit})`)
       } catch (e: any) {
@@ -1282,7 +1289,7 @@ async function buildEvmSwapTx(
       addressNList: fromChain.defaultPath,
       nonce: toHex(nonce),
       gasLimit: toHex(gasLimit),
-      to: params.router,         // ROUTER contract, NOT vault
+      to: routerAddress,         // ROUTER contract, NOT vault
       value: toHex(amountWei),   // ETH value sent with the call
       data: finalData,           // depositWithExpiry encoded call
     }
@@ -1293,7 +1300,7 @@ async function buildEvmSwapTx(
       unsignedTx.gasPrice = toHex(gasPrice)
     }
 
-    console.log(`${TAG} EVM native router call: to=${params.router}, vault=${params.inboundAddress}, value=${formatWei(amountWei)} ${fromChain.symbol}${params.isMax ? ' (sendMax)' : ''}`)
+    console.log(`${TAG} EVM native router call: to=${routerAddress}, vault=${params.inboundAddress}, value=${formatWei(amountWei)} ${fromChain.symbol}${params.isMax ? ' (sendMax)' : ''}`)
     return { unsignedTx }
   }
 }

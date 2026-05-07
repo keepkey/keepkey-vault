@@ -2110,6 +2110,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Flex>
               )}
 
+              {/* Dust-fee warning — protocol fees + spread eat too much of the swap.
+                  THORChain has fixed ~$1.20 BTC outbound fee that crushes small swaps:
+                  $2 in → $1.78 out is 11% loss. Tier the warning so users understand:
+                  >10% = strongly recommend bigger amount; >25% = "you're throwing money away".
+                  Computed from displayed in/out USD values, not just quote.fees.totalBps,
+                  so msg.value EVM fees and spread are captured. */}
+              {(() => {
+                const inAmt = parseFloat(isMax ? (fromBalance || '0') : amount) || 0
+                const outAmt = parseFloat(quote.expectedOutput || '0') || 0
+                const inUsd = inAmt * fromPriceUsd
+                const outUsd = outAmt * toPriceUsd
+                if (inUsd <= 0 || outUsd <= 0) return null
+                const lossPct = ((inUsd - outUsd) / inUsd) * 100
+                if (lossPct < 10) return null
+                const severe = lossPct > 25
+                return (
+                  <Flex align="center" gap="2"
+                    bg={severe ? "rgba(255,23,68,0.1)" : "rgba(251,146,60,0.08)"}
+                    border="1px solid"
+                    borderColor={severe ? "rgba(255,23,68,0.4)" : "rgba(251,146,60,0.3)"}
+                    px="3" py="2" borderRadius="lg" w="full">
+                    <Text fontSize="10px" color={severe ? "kk.error" : "#FB923C"} lineHeight="1.4">
+                      {severe
+                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: (inUsd - outUsd).toFixed(2), inUsd: inUsd.toFixed(2), minUsd: Math.ceil(inUsd * 4) })
+                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: (inUsd - outUsd).toFixed(2), inUsd: inUsd.toFixed(2) })}
+                    </Text>
+                  </Flex>
+                )
+              })()}
+
               {/* TRON blind-sign warning OR verify-on-device note */}
               {fromAsset.chainFamily === 'tron' ? (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">

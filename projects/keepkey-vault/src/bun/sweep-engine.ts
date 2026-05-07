@@ -9,7 +9,7 @@
  *   check balances via Pioneer → build sweep tx → sign → broadcast.
  */
 import { BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
-import { getPioneer, getPioneerApiBase } from './pioneer'
+import { getPioneer } from './pioneer'
 import coinSelectSplit from 'coinselect/split'
 
 const TAG = '[sweep]'
@@ -193,21 +193,23 @@ async function checkAddressBalance(address: string): Promise<number> {
 
 async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
   try {
-    // Use blockbook API directly — Pioneer's ListUnspent needs xpub, not address
-    const base = getPioneerApiBase()
-    const resp = await fetch(`${base}/api/v2/utxo/${address}`)
-    if (!resp.ok) {
-      console.warn(`${TAG} Blockbook UTXO fetch failed for ${address}: ${resp.status}`)
-      return []
-    }
-    const data = await resp.json() as any[]
-    if (!Array.isArray(data)) return []
+    // Pioneer's ListUnspent endpoint accepts both xpubs AND single addresses
+    // (verified 2026-05-07). Path: /api/v1/utxo/unspent/{network}/{xpub-or-address}.
+    // Older code hit /api/v2/utxo/{address} on Pioneer's base URL — that route
+    // doesn't exist on pioneer-server (404), so the sweep tool was silently
+    // returning [] for every funded address found.
+    const pioneer = await getPioneer()
+    const resp = await pioneer.ListUnspent({ network: BTC_NETWORK_ID, xpub: address })
+    const data = Array.isArray(resp) ? resp
+      : Array.isArray(resp?.data) ? resp.data
+      : Array.isArray(resp?.data?.data) ? resp.data.data
+      : []
 
     return data.map((u: any) => ({
       txid: u.txid,
       vout: u.vout,
       value: parseInt(u.value, 10) || 0,
-      hex: u.hex || undefined,
+      hex: u.tx?.hex || u.hex || undefined,
     })).filter((u: SweepUtxo) => u.value > 0)
   } catch (e: any) {
     console.warn(`${TAG} UTXO fetch failed for ${address}: ${e.message}`)
@@ -217,11 +219,12 @@ async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
 
 async function fetchTxHex(txid: string): Promise<string | undefined> {
   try {
-    const base = getPioneerApiBase()
-    const resp = await fetch(`${base}/api/v2/tx-specific/${txid}`)
-    if (!resp.ok) return undefined
-    const data = await resp.json() as any
-    return data?.hex || undefined
+    // Pioneer's tx lookup: /api/v1/utxo/lookup/{networkId}/{txid}.
+    // Older code hit /api/v2/tx-specific/{txid} on Pioneer's base URL — 404.
+    const pioneer = await getPioneer()
+    const resp = await pioneer.UtxoLookup({ networkId: BTC_NETWORK_ID, txid })
+    const data = resp?.data || resp
+    return data?.hex || data?.tx?.hex || undefined
   } catch {
     return undefined
   }

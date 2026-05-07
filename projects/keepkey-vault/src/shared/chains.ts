@@ -50,7 +50,12 @@ const CONFIGS: ChainConfig[] = [
     id: 'bitcoin', chain: Chain.Bitcoin, coin: 'Bitcoin', symbol: 'BTC',
     chainFamily: 'utxo', color: '#F7931A',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
-    defaultPath: [0x8000002C, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    // Native SegWit (BIP84) — matches btcAccountManager's default `p2wpkh`
+    // selection. Was Legacy (m/44'/0'/0') which silently sent BTC swap deliveries
+    // to a 1... address users didn't normally watch when btcAccountManager hadn't
+    // been initialized (cold start before BTC dashboard). Native SegWit is the
+    // de-facto modern default since 2017.
+    defaultPath: [0x80000054, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2wpkh',
     explorerTxUrl: 'https://blockchair.com/bitcoin/transaction/{{txid}}',
     explorerAddressUrl: 'https://blockchair.com/bitcoin/address/{{address}}',
   },
