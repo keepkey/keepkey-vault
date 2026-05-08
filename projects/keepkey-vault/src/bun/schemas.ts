@@ -480,6 +480,23 @@ export const SwapQuoteRequest = z.object({
   slippage: z.number().optional(),
 }).passthrough()
 
+// ── Swap UI control (REST → SwapDialog) ────────────────────────────────
+// Mirrors SwapUiCommand discriminated union in shared/types.ts.
+
+const SwapSeedFields = {
+  fromAsset: z.string().optional(),
+  toAsset: z.string().optional(),
+  amount: z.string().optional(),
+  slippageBps: z.number().int().min(10).max(5000).optional(),
+  inputMode: z.enum(['crypto', 'fiat']).optional(),
+  isMax: z.boolean().optional(),
+  useCustomAddress: z.boolean().optional(),
+  customToAddress: z.string().optional(),
+}
+
+export const SwapUiOpenRequest = z.object(SwapSeedFields).passthrough()
+export const SwapUiSetRequest = z.object(SwapSeedFields).passthrough()
+
 // ═══════════════════════════════════════════════════════════════════════
 // Sweep tool schemas
 // ═══════════════════════════════════════════════════════════════════════

@@ -689,6 +689,11 @@ export interface SwapQuote {
   fromAsset: string          // THORChain asset identifier
   toAsset: string            // THORChain asset identifier
   integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
+  /** Underlying protocol when `integration` is an aggregator. ShapeShift's swapper
+   *  routes through Relay / THORChain / 0x / Uniswap / Curve / etc.; this names
+   *  which one will actually execute so the user sees it before signing.
+   *  Undefined for non-aggregator integrations (use `integration` directly). */
+  swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
 }
 
@@ -744,12 +749,16 @@ export interface PendingSwap {
   toSymbol: string
   fromChainId: string     // our chain id
   toChainId: string
+  fromCaip?: string       // CAIP-19 — preserved so the resumed dialog can render the asset logo
+  toCaip?: string
   fromAmount: string      // human-readable
-  expectedOutput: string  // human-readable
+  expectedOutput: string  // human-readable (quote-time estimate; replaced with actual when received)
+  receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string
   inboundAddress: string
   router?: string
   integration: string     // "thorchain", "shapeshift", etc.
+  swapper?: string        // underlying protocol when integration is an aggregator (e.g. "Relay", "Thorchain", "0x")
   status: SwapTrackingStatus
   confirmations: number
   outboundConfirmations?: number
@@ -757,8 +766,10 @@ export interface PendingSwap {
   outboundTxid?: string
   createdAt: number       // unix ms
   updatedAt: number       // unix ms
+  completedAt?: number    // unix ms — when terminal status reached
   estimatedTime: number   // seconds
   error?: string
+  slippageBps?: number    // slippage tolerance used at quote time (preserved across resumes)
 }
 
 export interface SwapStatusUpdate {
@@ -769,6 +780,10 @@ export interface SwapStatusUpdate {
   outboundRequiredConfirmations?: number
   outboundTxid?: string
   error?: string
+  /** Underlying protocol detected by the tracker (e.g. "thorchain", "mayachain",
+   *  "Relay"). Pioneer surfaces this in `details.protocol.protocol` even when
+   *  the original quote response didn't include it — most reliable post-broadcast. */
+  swapper?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
@@ -781,6 +796,8 @@ export interface SwapHistoryRecord {
   toSymbol: string
   fromChainId: string
   toChainId: string
+  fromCaip?: string              // CAIP-19 (preserved for icon resolution on resume)
+  toCaip?: string
   fromAmount: string             // human-readable amount sent
   quotedOutput: string           // expected output at quote time
   minimumOutput: string          // minimum after slippage at quote time
@@ -789,6 +806,7 @@ export interface SwapHistoryRecord {
   feeBps: number                 // total fee in basis points
   feeOutbound: string            // outbound gas fee quoted
   integration: string            // "thorchain", "shapeshift", "chainflip"
+  swapper?: string               // underlying protocol when integration is an aggregator
   memo: string
   inboundAddress: string         // vault address
   router?: string
@@ -822,6 +840,53 @@ export interface SwapHistoryStats {
   pending: number
 }
 
+// ── Swap UI mirror (REST → UI control) ────────────────────────────────
+
+export type SwapUiPhase = 'closed' | 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
+
+/** Snapshot of the SwapDialog visible state. Published by the WebView on every
+ *  meaningful state change so REST clients (and Bun internals) can observe what
+ *  the user sees without scraping the DOM. */
+export interface SwapUiState {
+  phase: SwapUiPhase
+  fromAsset: string | null      // THORChain asset id (e.g. 'BTC.BTC')
+  toAsset: string | null
+  amount: string                // crypto-denominated user input
+  fiatAmount: string
+  inputMode: 'crypto' | 'fiat'
+  isMax: boolean
+  slippageBps: number
+  fromAddress: string
+  toAddress: string
+  useCustomAddress: boolean
+  customToAddress: string
+  quote: SwapQuote | null
+  /** Unsigned tx(s) built ahead of confirm — populated when phase==='review'.
+   *  `allowance` describes the current ERC-20 allowance state vs required —
+   *  populated for ERC-20 source swaps so the UI can show "approval needed"
+   *  vs "✓ already approved" without ambiguity. */
+  previewBuild: {
+    approveTx?: any
+    unsignedTx: any
+    allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
+    balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
+  } | null
+  error: string | null
+  txid: string | null
+}
+
+/** Bun → WebView commands: nudge the SwapDialog the same way a user click
+ *  would. The physical KeepKey button press still requires the user — REST
+ *  can drive every UI button up to the device prompt, then the user must
+ *  confirm on hardware. */
+export type SwapUiCommand =
+  | { kind: 'open'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'set'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; inputMode?: 'crypto' | 'fiat'; isMax?: boolean; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'requote' }
+  | { kind: 'advance' }   // input → review (UI navigation only)
+  | { kind: 'confirm' }   // click "Confirm Swap" → kicks off executeSwap
+  | { kind: 'close' }
+
 // ── Recent Activity types ──────────────────────────────────────────────
 
 export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve'
@@ -840,6 +905,12 @@ export interface RecentActivity {
   appName?: string           // for API-originating activities
   status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
   swapStatus?: SwapTrackingStatus  // detailed swap lifecycle status (only for type === 'swap')
+  // ── Swap-only output side (only set when type === 'swap') ──
+  outAmount?: string         // received_output if completed, else quoted_output
+  outAsset?: string          // toSymbol
+  outChainId?: string        // toChainId — for the output asset's chain badge / explorer
+  fromCaip?: string          // CAIP-19 for input asset (icon resolution)
+  toCaip?: string            // CAIP-19 for output asset (icon resolution)
   createdAt: number
   // ── On-chain confirmation data (populated by scan, updated on rescan) ──
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)

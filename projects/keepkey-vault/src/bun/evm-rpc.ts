@@ -80,6 +80,15 @@ export async function getErc20Allowance(rpcUrl: string, tokenContract: string, o
   return BigInt(result || '0x0')
 }
 
+/** Check ERC-20 balanceOf(owner) via eth_call */
+export async function getErc20Balance(rpcUrl: string, tokenContract: string, owner: string): Promise<bigint> {
+  const selector = '70a08231' // balanceOf(address)
+  const ownerPad = owner.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+  const data = '0x' + selector + ownerPad
+  const result = await ethCall(rpcUrl, tokenContract, data)
+  return BigInt(result || '0x0')
+}
+
 /** Get ERC-20 decimals via eth_call. Throws if the call fails or returns empty — caller must handle. */
 export async function getErc20Decimals(rpcUrl: string, tokenContract: string): Promise<number> {
   const result = await ethCall(rpcUrl, tokenContract, '0x313ce567') // decimals()
@@ -99,6 +108,30 @@ export async function getEvmBalance(rpcUrl: string, address: string): Promise<bi
 export async function getEvmGasPrice(rpcUrl: string): Promise<bigint> {
   const result = await ethRpc(rpcUrl, 'eth_gasPrice', [])
   return BigInt(result || '0x0')
+}
+
+/** EIP-1559 fee data — uses eth_feeHistory to derive maxFeePerGas + priority fee.
+ *  Falls back to null on chains that don't support it; caller uses legacy gasPrice. */
+export async function getEvmFeeData(rpcUrl: string): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
+  try {
+    // Pull recent base fees + percentile-based priority fees
+    const hist = await ethRpc(rpcUrl, 'eth_feeHistory', ['0x4', 'latest', [50]])
+    const baseFees = (hist?.baseFeePerGas || []).map((h: string) => BigInt(h))
+    const priorityFees = (hist?.reward || []).map((blk: string[]) => BigInt(blk?.[0] || '0x0'))
+    if (baseFees.length === 0) return null
+    // Use the next-block base fee (last entry is the predicted next block)
+    const nextBaseFee = baseFees[baseFees.length - 1]
+    // Median priority fee from the sample, with a 1 gwei minimum
+    const sortedPriority = [...priorityFees].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    const medianPriority = sortedPriority[Math.floor(sortedPriority.length / 2)] ?? 0n
+    const minPriority = BigInt(1e9) // 1 gwei
+    const maxPriorityFeePerGas = medianPriority > minPriority ? medianPriority : minPriority
+    // 2x the next base fee to absorb base-fee growth across blocks
+    const maxFeePerGas = nextBaseFee * 2n + maxPriorityFeePerGas
+    return { maxFeePerGas, maxPriorityFeePerGas }
+  } catch {
+    return null
+  }
 }
 
 export async function getEvmNonce(rpcUrl: string, address: string): Promise<number> {
@@ -128,6 +161,28 @@ export async function broadcastEvmTx(rpcUrl: string, signedTxHex: string): Promi
 }
 
 /** Poll for tx receipt, returning null if not mined within maxWaitMs */
+/** One-shot receipt check — does NOT wait. Returns null if tx isn't mined yet,
+ *  the receipt {status, gasUsed} once it is. `status: false` means the tx
+ *  reverted on-chain (call exception, allowance failure, etc.) — caller should
+ *  surface this as a swap failure instead of waiting forever for a confirmation
+ *  that already happened. */
+export async function getTxReceiptOnce(
+  rpcUrl: string,
+  txHash: string,
+): Promise<{ status: boolean; gasUsed: bigint; blockNumber: number } | null> {
+  try {
+    const receipt = await ethRpc(rpcUrl, 'eth_getTransactionReceipt', [txHash])
+    if (!receipt || receipt.status === undefined) return null
+    return {
+      status: receipt.status === '0x1',
+      gasUsed: BigInt(receipt.gasUsed || '0x0'),
+      blockNumber: Number(BigInt(receipt.blockNumber || '0x0')),
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function waitForTxReceipt(
   rpcUrl: string,
   txHash: string,

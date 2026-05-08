@@ -304,6 +304,28 @@ function deferredInit() {
 		if (stored.length) console.log(`[Vault] Loaded ${stored.length} custom chains from DB`)
 	} catch {}
 	perf('db + chains loaded')
+
+	// Settings + tracker init MUST run after initDb so swapsEnabled reflects
+	// the persisted flag. Without this, tracker won't rehydrate pending swaps
+	// from history on cold boot — they'd stall until executeSwap lazy-init kicks in.
+	loadSettings()
+	if (swapsEnabled) {
+		import('./swap-tracker').then(async ({ initSwapTracker }) => {
+			await initSwapTracker((msg: string, data: any) => {
+				try {
+					if (msg === 'swap-update') rpc.send['swap-update'](data)
+					else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+					else console.error(`[swap-tracker] Unknown message: ${msg}`)
+				} catch (e: any) {
+					console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+				}
+			})
+		}).catch((e) => {
+			console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
+		})
+	} else {
+		console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
+	}
 }
 
 /** All chains: built-in + user-added custom chains */
@@ -369,6 +391,32 @@ let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 // WalletConnect manager — lazily initialized when user pairs
 let wcManager: WalletConnectManager | null = null
+
+// SwapDialog UI state mirror — published fire-and-forget by the WebView on
+// each meaningful state change so REST callers (and other Bun internals) can
+// observe what the user sees. Cleared when the dialog closes.
+let swapUiState: import('../shared/types').SwapUiState = {
+	phase: 'closed',
+	fromAsset: null,
+	toAsset: null,
+	amount: '',
+	fiatAmount: '',
+	inputMode: 'crypto',
+	isMax: false,
+	slippageBps: 100,
+	fromAddress: '',
+	toAddress: '',
+	useCustomAddress: false,
+	customToAddress: '',
+	quote: null,
+	previewBuild: null,
+	error: null,
+	txid: null,
+}
+let swapUiUpdatedAt = 0
+export function getSwapUiState(): { state: import('../shared/types').SwapUiState; updatedAt: number } {
+	return { state: swapUiState, updatedAt: swapUiUpdatedAt }
+}
 
 // Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
 // approval, device pairing approval) can independently want the window
@@ -634,6 +682,10 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	getVersion: () => appVersionCache,
 	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
+	getSwapUiState: () => getSwapUiState(),
+	sendSwapCmd: (cmd) => {
+		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
+	},
 }
 
 /** Check if a port is already in use by trying to connect to it */
@@ -3088,7 +3140,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							try {
 								if (msg === 'swap-update') rpc.send['swap-update'](data)
 								else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-								else console.error(`[swap-tracker] Unknown message: ${msg}`)
+											else console.error(`[swap-tracker] Unknown message: ${msg}`)
 							} catch (e: any) {
 								console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 							}
@@ -3545,7 +3597,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						try {
 							if (msg === 'swap-update') rpc.send['swap-update'](data)
 							else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-						} catch (e: any) {
+								} catch (e: any) {
 							console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 						}
 					})
@@ -3568,6 +3620,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					wrapSign: engine.isEmulator
 						? (fn, details) => emuSigningOp(fn, details)
 						: (fn) => fn(),
+					pushSubStage: (stage) => {
+						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
+					},
 				})
 				// Look up cached quote for real tracker data
 				// Match by asset pair + amount + inboundAddress to avoid collisions between
@@ -3598,6 +3653,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						fromAsset: params.fromAsset,
 						toAsset: params.toAsset,
 						integration: cachedQuote?.integration || 'thorchain',
+						swapper: cachedQuote?.swapper,
 					}, { skipPersist: engine.isPassphraseWallet })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
@@ -3619,6 +3675,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { dismissSwap } = await import('./swap-tracker')
 				dismissSwap(params.txid)
 			},
+			previewSwapBuild: async (params) => {
+				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const { previewSwapBuild } = await import('./swap')
+				return previewSwapBuild(params, {
+					wallet: engine.wallet,
+					getAllChains,
+					getRpcUrl,
+					getBtcXpub: () => {
+						if (btcAccounts.isInitialized) {
+							const selected = btcAccounts.getSelectedXpub()
+							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
+						}
+						return undefined
+					},
+					getAllBtcXpubs: () => {
+						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+						return []
+					},
+					wrapSign: (fn) => fn(), // unused in preview
+				})
+			},
 
 			// ── Swap History (SQLite-persisted) ─────────────────────
 			getSwapByTxid: async (params) => {
@@ -3626,7 +3704,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) return null
 				const record = getSwapHistoryByTxid(params.txid)
 				if (!record) return null
-				const { inferConfirmationsFromStatus } = await import('./swap-tracker')
+				const { inferConfirmationsFromStatus, getPendingSwaps } = await import('./swap-tracker')
+				// Prefer the in-memory tracker copy when present — it has live
+				// outboundConfirmations / required / swapper that the DB row doesn't
+				// store. Falls back to the persisted record otherwise.
+				const live = getPendingSwaps().find(s => s.txid === record.txid)
+				// Lazy CAIP backfill for swaps inserted before the from_caip/to_caip
+				// columns existed — derive on the fly from the THORChain asset id.
+				let fromCaip = record.fromCaip
+				let toCaip = record.toCaip
+				if (!fromCaip || !toCaip) {
+					const { assetToCaip } = await import('./swap-parsing')
+					if (!fromCaip) try { fromCaip = assetToCaip(record.fromAsset) } catch { /* unknown chain */ }
+					if (!toCaip) try { toCaip = assetToCaip(record.toAsset) } catch { /* unknown chain */ }
+				}
 				return {
 					txid: record.txid,
 					fromAsset: record.fromAsset,
@@ -3635,19 +3726,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					toSymbol: record.toSymbol,
 					fromChainId: record.fromChainId,
 					toChainId: record.toChainId,
+					fromCaip,
+					toCaip,
 					fromAmount: record.fromAmount,
-					expectedOutput: record.quotedOutput,
+					expectedOutput: record.receivedOutput || record.quotedOutput,
+					receivedOutput: record.receivedOutput,
 					memo: record.memo,
 					inboundAddress: record.inboundAddress,
 					router: record.router,
 					integration: record.integration,
+					swapper: record.swapper || live?.swapper,
 					status: record.status,
-					confirmations: inferConfirmationsFromStatus(record.status),
+					confirmations: live?.confirmations ?? inferConfirmationsFromStatus(record.status),
+					outboundConfirmations: live?.outboundConfirmations,
+					outboundRequiredConfirmations: live?.outboundRequiredConfirmations,
 					outboundTxid: record.outboundTxid,
+					error: record.error,
 					createdAt: record.createdAt,
 					updatedAt: record.updatedAt,
+					completedAt: record.completedAt,
 					estimatedTime: record.estimatedTimeSeconds,
+					slippageBps: record.slippageBps,
 				}
+			},
+			refreshSwap: async (params) => {
+				// PRIVACY: Standard-wallet swaps are not refreshable from a hidden session.
+				if (engine.isPassphraseWallet) return null
+				const { refreshSwap } = await import('./swap-tracker')
+				return await refreshSwap(params.txid)
 			},
 			getSwapHistory: async (params) => {
 				if (engine.isPassphraseWallet) return []
@@ -3657,6 +3763,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) return { total: 0, completed: 0, failed: 0, pending: 0, totalVolumeUsd: 0 }
 				return getSwapHistoryStats()
 			},
+			// Fire-and-forget mirror — SwapDialog calls this on every state change
+			// so Bun (and REST) can observe what the user sees. Phase 'closed' on
+			// dialog dismount resets the snapshot.
+			publishSwapUiState: async (params) => {
+				swapUiState = params
+				swapUiUpdatedAt = Date.now()
+			},
+
 			exportSwapReport: async (params) => {
 				if (engine.isPassphraseWallet) throw new Error('Swap reports are not available for passphrase-protected wallets (privacy).')
 				const records = getSwapHistory({
@@ -4592,24 +4706,7 @@ sendFatal = (source, err) => {
 	try { rpc.send['fatal']({ source, message, stack }) } catch { /* webview not ready */ }
 }
 
-// Initialize swap tracker with typed RPC message sender (only if swaps feature is ON)
-if (swapsEnabled) {
-	import('./swap-tracker').then(async ({ initSwapTracker }) => {
-		await initSwapTracker((msg: string, data: any) => {
-			try {
-				if (msg === 'swap-update') rpc.send['swap-update'](data)
-				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-				else console.error(`[swap-tracker] Unknown message: ${msg}`)
-			} catch (e: any) {
-				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-			}
-		})
-	}).catch((e) => {
-		console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
-	})
-} else {
-	console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
-}
+// Tracker init moved into deferredInit() so it runs after DB ready + settings loaded.
 
 // Hoisted above the state-change listener: engine.start() (later in the file)
 // can synchronously emit 'ready', and the listener's deep-link replay path

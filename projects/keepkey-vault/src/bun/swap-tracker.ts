@@ -1,11 +1,13 @@
 /**
- * Swap Tracker — monitors pending swaps via Pioneer HTTP polling.
+ * Swap Tracker — pull-only state for in-flight swaps.
  *
- * After executeSwap broadcasts a tx, the tracker:
- *   1. Registers the swap with Pioneer (CreatePendingSwap)
- *   2. Polls Pioneer API (GetPendingSwap per txHash) for status updates
- *   3. Pushes status changes to the frontend via RPC messages
- *   4. Auto-removes completed/failed swaps after a grace period
+ * Lifecycle:
+ *   1. trackSwap() registers a freshly broadcast swap (in-memory + DB) and
+ *      tells Pioneer about it via CreatePendingSwap.
+ *   2. The SwapDialog drives polling on-demand via refreshSwap(txid) — there
+ *      is no background timer. When the dialog closes, polling stops.
+ *   3. Status changes get pushed to the UI via the existing swap-update
+ *      RPC message and persisted to SQLite.
  *
  * Pioneer operationIds used:
  *   - CreatePendingSwap  (POST /swaps/pending)
@@ -14,7 +16,8 @@
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { assetToCaip } from './swap-parsing'
-import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory } from './db'
+import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid } from './db'
+import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
 
 const TAG = '[swap-tracker]'
 
@@ -35,24 +38,11 @@ export function inferConfirmationsFromStatus(status: SwapTrackingStatus): number
 // ── In-memory swap registry ─────────────────────────────────────────
 
 const pendingSwaps = new Map<string, PendingSwap>()
-const dismissedSwaps = new Set<string>() // prevents race between dismiss and poll
 // PRIVACY: txids that must not be persisted to DB (passphrase wallet swaps)
 const noPersistSwaps = new Set<string>()
-let pollTimer: ReturnType<typeof setTimeout> | null = null
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 let initPromise: Promise<void> | null = null
-
-/** Adaptive polling: fast at first, backs off as swap ages, gives up after 1 hour */
-const FAST_POLL_MS = 10_000       // 10s for first 2 minutes
-const NORMAL_POLL_MS = 20_000     // 20s for 2-10 minutes
-const SLOW_POLL_MS = 30_000       // 30s for 10-20 minutes
-const BACKOFF_POLL_MS = 60_000    // 60s after 20 minutes
-const FAST_PHASE_MS = 2 * 60_000  // 2 min
-const NORMAL_PHASE_MS = 10 * 60_000 // 10 min
-const BACKOFF_PHASE_MS = 20 * 60_000 // 20 min — start backing off
-const MAX_TRACKING_MS = 60 * 60_000  // 1 hour — give up, user can manually refresh
-const COMPLETED_GRACE_MS = 120_000 // keep completed swaps visible for 2 min
 
 // Required Pioneer SDK methods — app MUST NOT start without these
 const REQUIRED_METHODS = ['CreatePendingSwap', 'GetPendingSwap'] as const
@@ -115,25 +105,32 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
           toSymbol: r.toSymbol,
           fromChainId: r.fromChainId,
           toChainId: r.toChainId,
+          fromCaip: r.fromCaip,
+          toCaip: r.toCaip,
           fromAmount: r.fromAmount,
           expectedOutput: r.quotedOutput,
+          receivedOutput: r.receivedOutput,
           memo: r.memo,
           inboundAddress: r.inboundAddress,
           router: r.router,
           integration: r.integration,
+          swapper: r.swapper,
           status: r.status,
           confirmations: inferConfirmationsFromStatus(r.status),
           outboundTxid: r.outboundTxid,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
+          completedAt: r.completedAt,
           estimatedTime: r.estimatedTimeSeconds,
+          slippageBps: r.slippageBps,
         }
         pendingSwaps.set(r.txid, swap)
       }
     }
     if (pendingSwaps.size > 0) {
       console.log(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
-      startPolling()
+      // No polling at boot — refreshSwap() drives status updates only when the
+      // user opens that specific swap in the dialog.
     }
   } catch (e: any) {
     console.warn(`${TAG} Failed to rehydrate swaps from SQLite: ${e.message}`)
@@ -149,6 +146,14 @@ export function trackSwap(
   opts?: { skipPersist?: boolean },
 ): void {
   const now = Date.now()
+  // Best-effort CAIP derivation — used by the SwapDialog resume path to
+  // resolve asset logos without a Pioneer round-trip. Falls back to undefined
+  // on unknown chains; AssetIcon handles that gracefully.
+  let fromCaip: string | undefined
+  let toCaip: string | undefined
+  try { fromCaip = assetToCaip(params.fromAsset) } catch { /* unknown chain */ }
+  try { toCaip = assetToCaip(params.toAsset) } catch { /* unknown chain */ }
+
   const swap: PendingSwap = {
     txid: result.txid,
     fromAsset: params.fromAsset,
@@ -157,17 +162,21 @@ export function trackSwap(
     toSymbol: params.toAsset.split('.').pop()?.split('-')[0] || params.toAsset,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
+    fromCaip,
+    toCaip,
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     memo: params.memo,
     inboundAddress: params.inboundAddress,
     router: params.router,
     integration: quote.integration || 'thorchain',
+    swapper: quote.swapper,
     status: 'pending',
     confirmations: 0,
     createdAt: now,
     updatedAt: now,
     estimatedTime: quote.estimatedTime,
+    slippageBps: quote.slippageBps,
   }
 
   pendingSwaps.set(result.txid, swap)
@@ -183,6 +192,8 @@ export function trackSwap(
     toSymbol: swap.toSymbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
+    fromCaip,
+    toCaip,
     fromAmount: params.amount,
     quotedOutput: quote.expectedOutput || params.expectedOutput,
     minimumOutput: quote.minimumOutput || '0',
@@ -190,6 +201,7 @@ export function trackSwap(
     feeBps: quote.fees?.totalBps || 0,
     feeOutbound: quote.fees?.outbound || '0',
     integration: quote.integration || 'thorchain',
+    swapper: quote.swapper,
     memo: params.memo,
     inboundAddress: params.inboundAddress,
     router: params.router,
@@ -215,8 +227,8 @@ export function trackSwap(
     console.error(`${TAG} Stack: ${e.stack}`)
   })
 
-  // Start polling
-  startPolling()
+  // Polling is on-demand — the UI calls refreshSwap(txid) once the dialog
+  // mounts in the 'submitted' phase.
 }
 
 /** Get all pending swaps (for getPendingSwaps RPC) */
@@ -227,32 +239,50 @@ export function getPendingSwaps(): PendingSwap[] {
 
 /** Dismiss a swap from the tracker (user clicked dismiss) */
 export function dismissSwap(txid: string): void {
-  dismissedSwaps.add(txid)
   pendingSwaps.delete(txid)
-  // Only stop polling when no ACTIVE swaps remain — don't kill polling for other pending swaps
-  const hasActive = Array.from(pendingSwaps.values()).some(s =>
-    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
-  )
-  if (pendingSwaps.size === 0 || !hasActive) {
-    stopPolling()
-  }
 }
 
-/** Convert THORChain asset to CAIP, falling back to the raw string on unsupported chains */
-function safeAssetToCaip(thorAsset: string): string {
-  try { return assetToCaip(thorAsset) } catch { return thorAsset }
+/** Convert THORChain asset to CAIP using the cached Pioneer asset list so we
+ *  pick up the canonical lowercased form for EVM tokens (and the base58 case
+ *  for TRON tokens). The reconstruct fallback path preserves THORChain's
+ *  uppercased contract address — Pioneer's swap-tracker rejects that with
+ *  a 400. Falls back to the raw thorAsset if conversion fails entirely. */
+async function safeAssetToCaip(thorAsset: string): Promise<string> {
+  try {
+    const { getSwapAssets } = await import('./swap')
+    const knownAssets = await getSwapAssets()
+    return assetToCaip(thorAsset, knownAssets)
+  } catch {
+    try { return assetToCaip(thorAsset) } catch { return thorAsset }
+  }
 }
 
 // ── Pioneer REST registration ───────────────────────────────────────
 
+// Pioneer's CreatePendingSwap validator only accepts these integration values
+// (see pioneer-server's swagger). Vault internally uses the module-level names
+// returned by /api/v1/quote (e.g. "shapeshiftSwap"), so map to the validator
+// enum here. Unknown values fall through unchanged — Pioneer will 400 and the
+// log will show the mismatch so we can extend this map.
+const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
+  shapeshiftSwap: 'shapeshift',
+}
+
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   const pioneer = await getPioneer()
+
+  const [sellCaip, buyCaip] = await Promise.all([
+    safeAssetToCaip(swap.fromAsset),
+    safeAssetToCaip(swap.toAsset),
+  ])
+
+  const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
 
   const body = {
     txHash: swap.txid,
     addresses: [],
     sellAsset: {
-      caip: safeAssetToCaip(swap.fromAsset),
+      caip: sellCaip,
       symbol: swap.fromSymbol,
       amount: swap.fromAmount,
       amountBaseUnits: swap.fromAmount,
@@ -260,7 +290,7 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
       networkId: swap.fromChainId,
     },
     buyAsset: {
-      caip: safeAssetToCaip(swap.toAsset),
+      caip: buyCaip,
       symbol: swap.toSymbol,
       amount: swap.expectedOutput,
       amountBaseUnits: swap.expectedOutput,
@@ -269,70 +299,25 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
     },
     quote: {
       id: swap.txid,
-      integration: swap.integration,
+      integration,
       expectedAmountOut: swap.expectedOutput,
       minimumAmountOut: swap.expectedOutput,
       slippage: 3,
       fees: { affiliate: '0', protocol: '0', network: '0' },
       memo: swap.memo,
     },
-    integration: swap.integration,
+    integration,
+    swapper: swap.swapper,
   }
 
-  console.log(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration }))
+  console.log(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
   const resp = await pioneer.CreatePendingSwap(body)
   console.log(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
   console.log(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
 }
 
-// ── HTTP Polling ────────────────────────────────────────────────────
-
-/** Get adaptive poll interval based on oldest active swap age */
-function getPollInterval(): number {
-  let oldestAge = 0
-  for (const swap of pendingSwaps.values()) {
-    if (swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded') continue
-    const age = Date.now() - swap.createdAt
-    if (age > oldestAge) oldestAge = age
-  }
-  if (oldestAge < FAST_PHASE_MS) return FAST_POLL_MS
-  if (oldestAge < NORMAL_PHASE_MS) return NORMAL_POLL_MS
-  if (oldestAge < BACKOFF_PHASE_MS) return SLOW_POLL_MS
-  return BACKOFF_POLL_MS
-}
-
-function startPolling(): void {
-  if (pollTimer) return
-  // Poll immediately on start, then schedule next
-  pollAllSwaps().then(scheduleNextPoll)
-}
-
-/** Schedule next poll using setTimeout (prevents stacking if pollAllSwaps is slow) */
-function scheduleNextPoll(): void {
-  if (pollTimer) clearTimeout(pollTimer)
-  // Don't schedule if no active swaps remain
-  const hasActive = Array.from(pendingSwaps.values()).some(s =>
-    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
-  )
-  if (pendingSwaps.size === 0 || !hasActive) {
-    pollTimer = null
-    return
-  }
-  const interval = getPollInterval()
-  pollTimer = setTimeout(async () => {
-    await pollAllSwaps()
-    scheduleNextPoll()
-  }, interval)
-}
-
-function stopPolling(): void {
-  if (pollTimer) {
-    clearTimeout(pollTimer)
-    pollTimer = null
-    console.log(`${TAG} Stopped polling (no active swaps)`)
-  }
-}
+// ── On-demand Pioneer fetch ────────────────────────────────────────
 
 /** Apply remote swap data to local swap, push updates if changed */
 function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
@@ -343,6 +328,10 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
     || remoteSwap.mayachainData?.outboundTxHash
     || remoteSwap.relayData?.outTxHashes?.[0]
+  // Pioneer surfaces the detected underlying protocol in `details.protocol.protocol`.
+  // If the quote-time parse missed `swapper` (common for aggregator routes where
+  // ShapeShift's response shape varies), this is the authoritative value.
+  const detectedSwapper: string | undefined = remoteSwap.details?.protocol?.protocol || remoteSwap.swapper || undefined
   const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
     || (remoteSwap.error ? String(remoteSwap.error) : undefined)
   const timeEstimate = remoteSwap.timeEstimate
@@ -351,7 +340,8 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     newStatus !== swap.status ||
     confirmations !== swap.confirmations ||
     (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
-    (outboundTxid && outboundTxid !== swap.outboundTxid)
+    (outboundTxid && outboundTxid !== swap.outboundTxid) ||
+    (detectedSwapper && detectedSwapper !== swap.swapper)
 
   if (changed) {
     swap.status = newStatus
@@ -361,6 +351,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
     if (outboundTxid) swap.outboundTxid = outboundTxid
     if (errorMsg) swap.error = errorMsg
+    if (detectedSwapper && !swap.swapper) swap.swapper = detectedSwapper
 
     if (timeEstimate?.total_swap_seconds && timeEstimate.total_swap_seconds > 0) {
       swap.estimatedTime = timeEstimate.total_swap_seconds
@@ -370,6 +361,8 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       ? remoteSwap.buyAsset.amount
       : undefined
     if (receivedOutput) {
+      swap.receivedOutput = receivedOutput
+      // Backward-compat: display still reads expectedOutput in some places.
       swap.expectedOutput = receivedOutput
     }
 
@@ -382,6 +375,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       outboundTxid: outboundTxid || undefined,
       error: errorMsg || undefined,
       receivedOutput,
+      swapper: swap.swapper,
       completedAt: isFinal ? now : undefined,
       actualTimeSeconds: isFinal ? Math.round((now - swap.createdAt) / 1000) : undefined,
     })
@@ -394,87 +388,124 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   }
 }
 
-async function pollAllSwaps(): Promise<void> {
-  const now = Date.now()
+/** Hydrate the in-memory swap from the persisted record. Returns null when
+ *  the swap is unknown to both. */
+function hydrateFromDb(txid: string): PendingSwap | null {
+  const r = getSwapHistoryByTxid(txid)
+  if (!r) return null
+  const swap: PendingSwap = {
+    txid: r.txid,
+    fromAsset: r.fromAsset, toAsset: r.toAsset,
+    fromSymbol: r.fromSymbol, toSymbol: r.toSymbol,
+    fromChainId: r.fromChainId, toChainId: r.toChainId,
+    fromCaip: r.fromCaip, toCaip: r.toCaip,
+    fromAmount: r.fromAmount,
+    expectedOutput: r.receivedOutput || r.quotedOutput,
+    receivedOutput: r.receivedOutput,
+    memo: r.memo, inboundAddress: r.inboundAddress, router: r.router,
+    integration: r.integration, swapper: r.swapper,
+    status: r.status, confirmations: inferConfirmationsFromStatus(r.status),
+    outboundTxid: r.outboundTxid,
+    createdAt: r.createdAt, updatedAt: r.updatedAt, completedAt: r.completedAt,
+    estimatedTime: r.estimatedTimeSeconds,
+    slippageBps: r.slippageBps,
+    error: r.error,
+  }
+  pendingSwaps.set(txid, swap)
+  return swap
+}
 
-  // Expire swaps older than 1 hour — stop tracking, user can manually refresh
-  for (const [txid, swap] of pendingSwaps) {
-    if (swap.status !== 'completed' && swap.status !== 'failed' && swap.status !== 'refunded') {
-      if (now - swap.createdAt > MAX_TRACKING_MS) {
-        console.log(`${TAG} Swap ${txid.slice(0, 10)}... exceeded 1h tracking limit — stopping (status was: ${swap.status})`)
-        swap.status = 'failed'
-        swap.error = 'Tracking timed out after 1 hour. Use refresh to check status manually.'
-        swap.updatedAt = now
-        if (!noPersistSwaps.has(txid)) updateSwapHistoryStatus(txid, 'failed', { error: swap.error })
-        pushUpdate(swap)
-      }
+// Vault stores fromChainId in mixed formats — historical 'ethereum', current
+// 'eip155:1', or sometimes the bare numeric. Map any of them to the EVM_RPC_URLS
+// numeric key. Anything not in this table is treated as non-EVM.
+const EVM_CHAIN_TO_NUMERIC: Record<string, string> = {
+  ethereum: '1', polygon: '137', arbitrum: '42161', optimism: '10',
+  avalanche: '43114', bsc: '56', base: '8453',
+}
+function evmRpcUrlFor(fromChainId: string): string | undefined {
+  if (!fromChainId) return undefined
+  // CAIP form: "eip155:1" → "1"
+  if (fromChainId.startsWith('eip155:')) return EVM_RPC_URLS[fromChainId.slice('eip155:'.length)]
+  // Legacy slug: "ethereum" → "1" → URL
+  if (EVM_CHAIN_TO_NUMERIC[fromChainId]) return EVM_RPC_URLS[EVM_CHAIN_TO_NUMERIC[fromChainId]]
+  // Bare numeric: "1" → URL
+  return EVM_RPC_URLS[fromChainId]
+}
+
+/** Check the EVM source receipt directly. If status=0x0 the tx reverted on-chain
+ *  (allowance failed, contract revert, etc.) — the swap will NEVER complete and
+ *  the user is just being lied to with "waiting for confirmations". Mark failed
+ *  + push update so the UI flips to a failure state.
+ *
+ *  Returns true if we definitively flagged the swap as failed (caller should
+ *  short-circuit any further status polling). */
+async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
+  if (swap.status === 'failed' || swap.status === 'completed' || swap.status === 'refunded') return false
+  const rpcUrl = evmRpcUrlFor(swap.fromChainId || '')
+  if (!rpcUrl) return false
+  try {
+    const receipt = await getTxReceiptOnce(rpcUrl, swap.txid)
+    if (!receipt) return false  // not mined yet
+    if (receipt.status === false) {
+      console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${receipt.blockNumber}) — marking failed`)
+      swap.status = 'failed'
+      swap.error = 'Transaction reverted on-chain — gas spent, asset NOT delivered. Common causes: insufficient allowance, slippage tripped, or contract reverted.'
+      swap.updatedAt = Date.now()
+      try { updateSwapHistoryStatus(swap.txid, 'failed') } catch { /* ignore */ }
+      pushUpdate(swap)
+      return true
     }
+  } catch (e: any) {
+    console.warn(`${TAG} EVM receipt check failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
+  }
+  return false
+}
+
+/** Single on-demand Pioneer poll for one swap.
+ *  Called by the SwapDialog while the user has it open (there is no background
+ *  timer). Returns the latest in-memory swap state, or null if unknown. */
+export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
+  let swap = pendingSwaps.get(txid) || hydrateFromDb(txid)
+  if (!swap) {
+    console.log(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
+    return null
   }
 
-  const active = Array.from(pendingSwaps.values()).filter(s =>
-    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
-  )
-
-  if (active.length === 0) {
-    // Clean up completed swaps past grace period
-    for (const [txid, swap] of pendingSwaps) {
-      if ((swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded') &&
-          now - swap.updatedAt > COMPLETED_GRACE_MS) {
-        pendingSwaps.delete(txid)
-      }
-    }
-    if (pendingSwaps.size === 0) {
-      stopPolling()
-    }
-    return
-  }
+  // Detect EVM revert FIRST — Pioneer's THORChain/Maya queries return "still
+  // processing" forever for reverted txs because the protocol never observed
+  // them. Without this check the user sees "waiting for confirmations" until
+  // the heat-death of the universe.
+  if (await detectEvmRevert(swap)) return swap
 
   const pioneer = await getPioneer()
+  try {
+    const resp = await pioneer.GetPendingSwap({ txHash: txid })
+    const remoteSwap = resp?.data || resp
+    if (!remoteSwap || remoteSwap.status === 'not_found') {
+      console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
+      return swap
+    }
+    console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
+    applyRemoteSwapData(swap, remoteSwap)
 
-  console.log(`${TAG} Polling ${active.length} active swap(s) via GetPendingSwap (per-txHash)...`)
-
-  // Poll each swap individually — GetPendingSwap uses /swaps/pending/{txHash}
-  // which doesn't conflict with the SwapHistoryController route
-  for (const swap of active) {
-    // Skip swaps dismissed mid-poll cycle (race condition guard)
-    if (dismissedSwaps.has(swap.txid)) continue
-    try {
-      // GetPendingSwap expects txHash as a path parameter
-      // pioneer-client for GET: first arg = parameters (mapped to spec params)
-      const resp = await pioneer.GetPendingSwap({ txHash: swap.txid })
-      const remoteSwap = resp?.data || resp
-
-      if (!remoteSwap || remoteSwap.status === 'not_found') {
-        console.log(`${TAG} Swap ${swap.txid.slice(0, 10)}... not found in Pioneer yet`)
-        continue
-      }
-
-      console.log(`${TAG} GetPendingSwap ${swap.txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
-
-      applyRemoteSwapData(swap, remoteSwap)
-
-      // When swap just completed and we don't have outbound txid, do a rescan to get it
-      if (swap.status === 'completed' && !swap.outboundTxid) {
-        try {
-          console.log(`${TAG} Swap completed but no outbound txid — requesting rescan...`)
-          const rescanResp = await pioneer.GetPendingSwap({ txHash: swap.txid, rescan: true })
-          const rescanData = rescanResp?.data || rescanResp
-          if (rescanData && rescanData.status !== 'not_found') {
-            applyRemoteSwapData(swap, rescanData)
-          }
-        } catch (e: any) {
-          console.warn(`${TAG} Rescan failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
-        }
-      }
-    } catch (e: any) {
-      // 404 is expected for newly created swaps that haven't been indexed yet
-      if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
-        console.log(`${TAG} Swap ${swap.txid.slice(0, 10)}... not indexed yet (404)`)
-      } else {
-        console.error(`${TAG} GetPendingSwap FAILED for ${swap.txid.slice(0, 10)}...: ${e.message}`)
+    // If just completed without an outbound txid, request a rescan to pick it up.
+    if (swap.status === 'completed' && !swap.outboundTxid) {
+      try {
+        const rescanResp = await pioneer.GetPendingSwap({ txHash: txid, rescan: true })
+        const rescanData = rescanResp?.data || rescanResp
+        if (rescanData && rescanData.status !== 'not_found') applyRemoteSwapData(swap, rescanData)
+      } catch (e: any) {
+        console.warn(`${TAG} refreshSwap rescan failed for ${txid.slice(0, 10)}...: ${e.message}`)
       }
     }
+  } catch (e: any) {
+    if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
+      console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
+    } else {
+      console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
+    }
   }
+  return swap
 }
 
 function mapPioneerStatus(status: string): SwapTrackingStatus {
@@ -506,6 +537,7 @@ function pushUpdate(swap: PendingSwap): void {
     outboundRequiredConfirmations: swap.outboundRequiredConfirmations,
     outboundTxid: swap.outboundTxid,
     error: swap.error,
+    swapper: swap.swapper,
   }
   console.log(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)

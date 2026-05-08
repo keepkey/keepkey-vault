@@ -29,6 +29,7 @@ import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
+import { SwapRpcMount } from "./components/SwapRpcMount"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
@@ -821,6 +822,8 @@ function App() {
 				nativeEnabled={walletConnectEnabled}
 			/>
 			<ActivityTracker />
+			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
+			<SwapRpcMount />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{/* ── WalletConnect Not Supported dialog ──────────────────── */}
 			{wcNotSupportedOpen && (

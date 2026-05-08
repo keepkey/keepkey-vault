@@ -16,6 +16,7 @@ import { join } from 'path'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
+import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
 import { getSetting, findApiLogs, getApiLogById } from './db'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
@@ -49,6 +50,10 @@ export interface RestApiCallbacks {
   getVersion: () => string
   /** Wrap a signing/display op for the emulator (pre-writes confirmations, interactive approve) */
   emuSigningOp?: (fn: () => Promise<any>, details: EmuSigningDetails) => Promise<any>
+  /** Read the latest SwapDialog UI state mirror (set by /api/v2/swap/state) */
+  getSwapUiState?: () => { state: import('../shared/types').SwapUiState; updatedAt: number }
+  /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
+  sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -2970,8 +2975,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
-        // ── REST v2 data routes (balances, market, UTXOs, swap, etc.) ──
-        if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/')) {
+        // ── REST v2 swap routes (UI control + parsed/raw quotes + history) ──
+        // Must come before handleV2DataRoute so the new /swap/* paths match
+        // the dedicated handler instead of falling through to the legacy
+        // pioneer-passthrough quote endpoint.
+        if (path.startsWith('/api/v2/swap')) {
+          const resp = await handleSwapRoute(path, method, req, auth, json, callbacks)
+          if (resp) return resp
+        }
+
+        // ── REST v2 data routes (balances, market, UTXOs, etc.) ──
+        if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/') && !path.startsWith('/api/v2/swap')) {
           const resp = await handleV2DataRoute(path, method, req, auth, json)
           if (resp) return resp
         }
