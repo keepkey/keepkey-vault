@@ -364,6 +364,20 @@ describe('canonicalizeChainCaip2 / canonicalizeCaip', () => {
   test('chain-only CAIP-2 (no slash) still aliases', () => {
     expect(canonicalizeCaip('tron:27Lqcw')).toBe('tron:0x2b6653dc')
   })
+
+  test('BSC token namespace folds /bep20: → /erc20: at canonicalization', () => {
+    // Outgoing CAIP that goes to Pioneer Quote must be /erc20: — pioneer-server
+    // returns "No quotes available" for /bep20: BSC USDT. Folding here means
+    // the picker, matrix lookup, and quote call all see the same form.
+    expect(canonicalizeCaip('eip155:56/bep20:0x55d398326f99059ff775485246999027b3197955'))
+      .toBe('eip155:56/erc20:0x55d398326f99059ff775485246999027b3197955')
+    // /erc20: pass-through (already canonical).
+    expect(canonicalizeCaip('eip155:56/erc20:0x55d398326f99059ff775485246999027b3197955'))
+      .toBe('eip155:56/erc20:0x55d398326f99059ff775485246999027b3197955')
+    // Other chains' bep20-look-alike namespaces are NOT touched (unlikely but
+    // defensive — bep20 only exists on BSC).
+    expect(canonicalizeCaip('eip155:1/bep20:0xfoo')).toBe('eip155:1/bep20:0xfoo')
+  })
 })
 
 describe('parseCaip — single source for namespace classification', () => {

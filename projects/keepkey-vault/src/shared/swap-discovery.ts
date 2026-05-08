@@ -176,15 +176,29 @@ export function parseCaip(caip: string): {
   return { chainCaip2, isToken: false }
 }
 
+/** BSC tokens are equivalently expressible as `/erc20:` (CAIP-19 standard for
+ *  EVM tokens) or `/bep20:` (BSC-specific extension pioneer-discovery emits).
+ *  Pioneer-server's quote endpoint only routes the `/erc20:` form — sending
+ *  `/bep20:` returns "No quotes available" (verified live 2026-05). Fold to
+ *  `/erc20:` at canonicalization so the picker, matrix, and outgoing quote
+ *  CAIP all agree. */
+function canonicalizeTokenNamespace(caip: string): string {
+  // Only BSC has the bep20/erc20 split; other chains' namespaces are unique.
+  return caip.replace(/^eip155:56\/bep20:/, 'eip155:56/erc20:')
+}
+
 /** Canonicalize a full CAIP-19 by remapping the chain prefix when it has
- *  alternate encodings. Both `tron:27Lqcw/slip44:195` and `tron:27lqcw/slip44:195`
- *  collapse to `tron:0x2b6653dc/slip44:195`. */
+ *  alternate encodings, AND folding the token namespace where multiple forms
+ *  exist. Both `tron:27Lqcw/slip44:195` and `tron:27lqcw/slip44:195` collapse
+ *  to `tron:0x2b6653dc/slip44:195`; `eip155:56/bep20:0x...` collapses to
+ *  `eip155:56/erc20:0x...`. */
 export function canonicalizeCaip(caip: string): string {
   const slash = caip.indexOf('/')
   if (slash < 0) return canonicalizeChainCaip2(caip)
   const chain = caip.slice(0, slash)
   const canonical = canonicalizeChainCaip2(chain)
-  return canonical === chain ? caip : `${canonical}${caip.slice(slash)}`
+  const withChain = canonical === chain ? caip : `${canonical}${caip.slice(slash)}`
+  return canonicalizeTokenNamespace(withChain)
 }
 
 /** Build CAIP-2 → ChainMeta map. Memoized — CHAINS is static. Both canonical

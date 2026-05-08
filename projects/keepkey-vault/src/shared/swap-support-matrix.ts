@@ -76,6 +76,15 @@ export function normalizeChainCaip2(chainCaip2: string): string {
   return CHAIN_CAIP2_ALIASES[chainCaip2] || chainCaip2
 }
 
+/** Fold BSC's `/bep20:` namespace into the standard `/erc20:` form so matrix
+ *  lookups (and downstream Pioneer Quote calls) only have to know one
+ *  encoding. pioneer-server's quote endpoint returns "No quotes available"
+ *  for `/bep20:` BSC USDT but routes the same asset cleanly under `/erc20:`
+ *  (verified live 2026-05). Pure string op — no I/O. */
+function normalizeTokenNamespace(caip: string): string {
+  return caip.replace(/^eip155:56\/bep20:/, 'eip155:56/erc20:')
+}
+
 /** UTXO + EVM + Cosmos + Solana + TRON chains routable by THORChain pools.
  *  Verified against pioneer-server's ENABLED_ASSETS_V1 (2026-05). */
 const THORCHAIN_CHAINS = new Set<string>([
@@ -172,6 +181,11 @@ const SHAPESHIFT_CHAINS = new Set<string>([
 // ── Well-known stablecoins per chain (CAIP-19 token IDs) ────────────────
 // Hardcoded so we can confidently say "USDT-on-Ethereum is swappable" without
 // a quote round-trip. Anything else on these chains falls through to `unknown`.
+//
+// Token namespace convention: BSC tokens are keyed as `/erc20:` here to match
+// what pioneer-server's quote endpoint accepts. Pioneer-discovery emits
+// `/bep20:` for the same assets — the canonicalize() step below folds bep20
+// into erc20 before the lookup hits this set.
 
 const STABLECOIN_TOKENS = new Set<string>([
   // USDT
@@ -217,13 +231,16 @@ export function assessAvailability(caip: string): AvailabilityAssessment {
 
   const slash = caip.indexOf('/')
   const rawChainId = slash >= 0 ? caip.slice(0, slash) : caip
-  // Normalize alternate encodings (TRON base58 ↔ hex) before set lookup so
-  // pioneer-discovery and pioneer-server agree on identity. The full CAIP
-  // gets the same prefix swap so STABLECOIN_TOKENS lookups also hit.
+  // Normalize alternate encodings before set lookup so pioneer-discovery and
+  // pioneer-server agree on identity:
+  //   - chain-prefix aliases (TRON base58 ↔ hex)
+  //   - token namespace fold (BSC `/bep20:` → `/erc20:`)
+  // The full CAIP gets both treatments so STABLECOIN_TOKENS lookups hit.
   const chainId = normalizeChainCaip2(rawChainId)
-  const normalizedCaip = chainId !== rawChainId
+  const chainSwapped = chainId !== rawChainId
     ? `${chainId}${caip.slice(rawChainId.length)}`
     : caip
+  const normalizedCaip = normalizeTokenNamespace(chainSwapped)
   const isToken = slash >= 0 && !caip.includes('/slip44:')
 
   const providers: SwapProvider[] = []

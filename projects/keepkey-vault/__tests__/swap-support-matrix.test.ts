@@ -159,6 +159,31 @@ describe('assessAvailability — well-known stablecoins', () => {
     expect(a.status).toBe('swappable')
     expect(a.providers).toContain('thorchain')
   })
+
+  test('BSC USDT — both /erc20: and /bep20: forms resolve to swappable', () => {
+    // pioneer-server's quote endpoint only routes BSC tokens under /erc20:
+    // (verified live: /bep20: returns "No quotes available"). pioneer-discovery
+    // emits BSC tokens as /bep20:. STABLECOIN_TOKENS is keyed on /erc20: per
+    // pioneer-server convention; assessAvailability folds /bep20: into /erc20:
+    // so picker rows from discovery aren't stuck in `unknown`.
+    const usdtErc = 'eip155:56/erc20:0x55d398326f99059ff775485246999027b3197955'
+    const usdtBep = 'eip155:56/bep20:0x55d398326f99059ff775485246999027b3197955'
+    expect(assessAvailability(usdtErc).status).toBe('swappable')
+    expect(assessAvailability(usdtBep).status).toBe('swappable')
+    expect(assessAvailability(usdtBep).providers).toContain('thorchain')
+  })
+
+  test('BSC USDC — /bep20: form resolves to swappable (regression)', () => {
+    const usdcBep = 'eip155:56/bep20:0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d'
+    expect(assessAvailability(usdcBep).status).toBe('swappable')
+  })
+
+  test('Random BSC bep20 token still falls through to unknown (try-quote)', () => {
+    // Bug check: namespace fold must NOT make every BSC bep20 row swappable
+    // — only the ones explicitly in the stablecoin set.
+    const random = 'eip155:56/bep20:0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+    expect(assessAvailability(random).status).toBe('unknown')
+  })
 })
 
 describe('assessAvailability — long-tail tokens', () => {
