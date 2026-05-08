@@ -66,24 +66,40 @@ function chainBadgeCaip(entry: AssetEntry): string | undefined {
   return chainMetaForCaip2(entry.chainId)?.nativeCaip
 }
 
-/** Decide whether a row is selectable for this picker's side.
+/** Decide whether a row is selectable.
  *
- *  Both sides allow `swappable` and `unknown` — the user explicitly wants
- *  to be able to attempt quotes for matrix-swappable and "try a quote" rows.
- *  If Pioneer didn't pre-list it, the existing quote-error UX surfaces the
- *  rejection. `unsupported_*` stays disabled with a reason tooltip. */
-function isRowSelectable(status: AvailabilityStatus): boolean {
-  return status === 'swappable' || status === 'unknown'
+ *  Two gates:
+ *    1. Matrix says swappable or unknown (try-quote).
+ *    2. Vault has a ChainDef for this chain — without one we can't derive
+ *       the destination address, sign for the source, or build the tx.
+ *       Without the gate, matrix-swappable chains like Berachain/Linea/
+ *       Celo/Sonic etc. (Relay routes them, but vault has no chain entry)
+ *       rendered as selectable then silently swallowed the click — the
+ *       synthesizer returned null because chainMetaForCaip2 was null. */
+function isRowSelectable(entry: AssetEntry): boolean {
+  const status = entry.availability.status
+  if (status !== 'swappable' && status !== 'unknown') return false
+  return chainMetaForCaip2(entry.chainId) !== null
 }
 
 /** Build a human-readable reason for why an asset can't be selected (or has
  *  ambiguous availability). The matrix returns CAIP-formatted reasons like
  *  "tron:27Lqcw is not currently supported"; this swaps in the chain's
- *  display name and produces something a user can act on. Returns null for
- *  cleanly swappable rows (no reason needed). */
+ *  display name and produces something a user can act on. Returns null only
+ *  for cleanly swappable rows that vault can also operate on. */
 function humanReason(entry: AssetEntry): string | null {
   const status = entry.availability.status
   const chain = networkDisplayName(entry.chainId)
+  const vaultKnowsChain = chainMetaForCaip2(entry.chainId) !== null
+
+  // Matrix says we can route, but vault has no ChainDef → can't sign or
+  // derive an address → not actually selectable. This catches Berachain /
+  // Linea / Celo / Sonic / Mode / Manta / Mantle / Scroll / zkSync / Blast
+  // — the matrix added them per Relay coverage but vault's chains.ts doesn't
+  // have entries yet, so until that lands the picker has to be honest.
+  if ((status === 'swappable' || status === 'unknown') && !vaultKnowsChain) {
+    return `${chain} routing is supported but vault doesn't have this chain configured yet — sign and address-derive paths are blocked.`
+  }
   if (status === 'swappable') return null
   if (status === 'unknown') {
     return `${chain} is supported — Pioneer didn't pre-list this token, but a quote may still route via aggregators (try it).`
@@ -92,7 +108,7 @@ function humanReason(entry: AssetEntry): string | null {
     return `${chain} natives swap fine, but this specific token isn't routable through any provider yet.`
   }
   // unsupported_chain
-  return `${chain} isn't supported by any swap provider yet (THORChain, Mayachain, Relay, 0x, ChainFlip).`
+  return `${chain} isn't supported by any swap provider yet (THORChain, Mayachain, Relay, 0x, ChainFlip, ShapeShift).`
 }
 
 export function AssetPickerDialog({
@@ -159,7 +175,7 @@ export function AssetPickerDialog({
   }, [searchIndex, search, excludeCaip])
 
   const handleSelect = useCallback((entry: AssetEntry) => {
-    if (!isRowSelectable(entry.availability.status)) return
+    if (!isRowSelectable(entry)) return
     // Prefer Pioneer-listed SwapAsset (canonical asset name + verified routing).
     // Fall back to a synthesized one when Pioneer didn't include this CAIP —
     // matches the "try quote" UX and lets Pioneer reject with a real reason
@@ -258,12 +274,12 @@ interface AssetRowProps {
 
 function AssetRow({ entry, onSelect, fmtCompact, t }: AssetRowProps) {
   const status = entry.availability.status
-  const selectable = isRowSelectable(status)
+  const selectable = isRowSelectable(entry)
   // For tokens, surface the network so USDT-on-ETH vs USDT-on-BSC is unambiguous.
   // Falls back to discovery's chain name (covers chains vault doesn't have a ChainDef for).
   const networkLabel = networkDisplayName(entry.chainId)
   const reason = humanReason(entry)
-  const isUnsupported = status === 'unsupported_chain' || status === 'unsupported_token'
+  const isUnsupported = !selectable
 
   return (
     <Box

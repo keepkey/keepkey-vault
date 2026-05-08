@@ -47,22 +47,27 @@ export interface AvailabilityAssessment {
 
 /** Canonical chain CAIP-2 → alternate encoding(s) emitted by other tools.
  *
- *  Pioneer-discovery and Relay disagree on chain IDs for some chains:
- *    - TRON: pioneer-discovery emits `tron:27Lqcw` (base58, sometimes lowercase);
- *      pioneer-server and Relay use `tron:0x2b6653dc` (hex genesis hash).
- *    - Hyperliquid: pioneer-discovery emits `eip155:2868` (stale/wrong number);
- *      Relay routes the real Hyperliquid mainnet at `eip155:999`.
- *  Matrix is keyed on the canonical form Relay/pioneer-server use; alternates
- *  hit normalizeChainCaip2 first.
+ *  Pioneer-discovery emits TRON in three encodings (`tron:27Lqcw`,
+ *  `tron:27lqcw`, `tron:0x2b6653dc`); pioneer-server and Relay use the hex
+ *  genesis hash. Matrix is keyed on the canonical form Relay/pioneer-server
+ *  use; alternates hit normalizeChainCaip2 first.
  *
  *  Exported so swap-discovery.ts can use the same table — keeps the alias list
  *  single-source. Adding to this map both fixes matrix lookups AND the picker's
- *  duplicate-row dedupe in one edit. */
+ *  duplicate-row dedupe in one edit.
+ *
+ *  Note on Hyperliquid: pioneer-discovery and vault's CHAINS table agree on
+ *  `eip155:2868` but the actual Hyperliquid mainnet chainId per chainID.network
+ *  is 999. Relay routes 999. We previously aliased 2868→999 here, but vault's
+ *  ChainDef doesn't have a 999 entry, so any picker click would silently fail
+ *  (synthesizeSwapAsset returned null). Until vault's CHAINS table is
+ *  reconciled, Hyperliquid is intentionally absent from RELAY_CHAINS /
+ *  SHAPESHIFT_CHAINS — picker shows it as unsupported_chain with a clear
+ *  reason rather than letting it look swappable and break on click. */
 export const CHAIN_CAIP2_ALIASES: Record<string, string> = {
   // alternate → canonical
   'tron:27Lqcw': 'tron:0x2b6653dc',
   'tron:27lqcw': 'tron:0x2b6653dc',  // case-insensitive defensive
-  'eip155:2868': 'eip155:999',        // Hyperliquid mainnet
 }
 
 /** Normalize a chain CAIP-2 to the canonical encoding the matrix uses.
@@ -132,7 +137,7 @@ const RELAY_CHAINS = new Set<string>([
   'eip155:80094',      // Berachain
   'eip155:81457',      // Blast
   'eip155:534352',     // Scroll
-  'eip155:999',        // Hyperliquid mainnet (alternate id eip155:2868 aliases here)
+  // Hyperliquid (eip155:999) is omitted — see CHAIN_CAIP2_ALIASES note above.
 ])
 
 /** 0x — single-chain EVM aggregator. */
@@ -162,7 +167,6 @@ const SHAPESHIFT_CHAINS = new Set<string>([
   'eip155:324', 'eip155:5000', 'eip155:8453', 'eip155:34443',
   'eip155:42161', 'eip155:42220', 'eip155:43114', 'eip155:59144',
   'eip155:80094', 'eip155:81457', 'eip155:534352',
-  'eip155:999',  // Hyperliquid
 ])
 
 // ── Well-known stablecoins per chain (CAIP-19 token IDs) ────────────────

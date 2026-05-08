@@ -38,18 +38,20 @@ function isNativeDepositCaip(fromCaip: string): boolean {
   return fromCaip === RUNE_CAIP || fromCaip === CACAO_CAIP
 }
 
-/** True for ERC-20 / Tron-token sources. CAIP namespaces tell the truth here:
- *  `/erc20:` for EVM tokens, `/token:` for Tron. Native chains use `/slip44:`. */
+// CAIP namespace parser is shared with the picker so a future namespace
+// addition (Solana SPL, etc.) only needs editing in one place.
+import { parseCaip } from '../shared/swap-discovery'
+
+/** True for ERC-20 / BEP-20 / TRC-20 token sources. */
 function isTokenCaip(caip: string): boolean {
-  return caip.includes('/erc20:') || caip.includes('/token:') || caip.includes('/bep20:')
+  return parseCaip(caip).isToken
 }
 
 /** Extract the contract/token address from a CAIP-19, or null for native
  *  assets. Returns the raw form (CAIP preserves source case — EVM lowercase,
  *  Tron base58 case-sensitive). Caller is responsible for case normalization. */
 function extractContractFromCaip(caip: string): string | null {
-  const match = caip.match(/\/(erc20|bep20|token):(.+)$/)
-  return match ? match[2] : null
+  return parseCaip(caip).contractAddress ?? null
 }
 
 /** Debug log — gated behind SWAP_DEBUG=1 (env) or localStorage `swap.debug=1`.

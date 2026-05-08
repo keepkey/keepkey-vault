@@ -20,6 +20,7 @@ import {
   chainMetaForCaip2,
   canonicalizeCaip,
   canonicalizeChainCaip2,
+  parseCaip,
   synthesizeSwapAsset,
   type AssetEntry,
 } from '../src/shared/swap-discovery'
@@ -335,8 +336,15 @@ describe('canonicalizeChainCaip2 / canonicalizeCaip', () => {
     expect(canonicalizeChainCaip2('tron:27lqcw')).toBe('tron:0x2b6653dc')
   })
 
-  test('Hyperliquid pioneer-discovery encoding (eip155:2868) → Relay-canonical (eip155:999)', () => {
-    expect(canonicalizeChainCaip2('eip155:2868')).toBe('eip155:999')
+  test('Hyperliquid is intentionally NOT aliased', () => {
+    // The 2868 vs 999 mismatch between vault CHAINS and chainID.network
+    // is unresolved. Aliasing 2868→999 would let the picker show Hyperliquid
+    // as swappable, but vault's ChainDef sits at 2868 (with a non-mainnet
+    // chainId) so click would silently fail in the synthesizer. Until the
+    // upstream is reconciled, both encodings pass through and Hyperliquid
+    // shows in the picker as unsupported_chain with a clear reason.
+    expect(canonicalizeChainCaip2('eip155:2868')).toBe('eip155:2868')
+    expect(canonicalizeChainCaip2('eip155:999')).toBe('eip155:999')
   })
 
   test('canonical encodings pass through unchanged', () => {
@@ -355,6 +363,58 @@ describe('canonicalizeChainCaip2 / canonicalizeCaip', () => {
 
   test('chain-only CAIP-2 (no slash) still aliases', () => {
     expect(canonicalizeCaip('tron:27Lqcw')).toBe('tron:0x2b6653dc')
-    expect(canonicalizeCaip('eip155:2868')).toBe('eip155:999')
+  })
+})
+
+describe('parseCaip — single source for namespace classification', () => {
+  // Earlier homemade isNative checks excluded `/erc20:` and `/token:` but
+  // missed `/bep20:` — pioneer-discovery emits BSC tokens under that namespace.
+  // The picker classified BSC tokens as native, the synthesizer dropped their
+  // contractAddress, and the dialog showed native BNB pricing for them.
+  test('ERC-20 → token + contract address preserved', () => {
+    const r = parseCaip('eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7')
+    expect(r.isToken).toBe(true)
+    expect(r.contractAddress).toBe('0xdac17f958d2ee523a2206206994597c13d831ec7')
+    expect(r.chainCaip2).toBe('eip155:1')
+  })
+
+  test('BEP-20 → token + contract address preserved (was the bug)', () => {
+    const r = parseCaip('eip155:56/bep20:0x55d398326f99059ff775485246999027b3197955')
+    expect(r.isToken).toBe(true)
+    expect(r.contractAddress).toBe('0x55d398326f99059ff775485246999027b3197955')
+  })
+
+  test('TRON token namespace (case-sensitive contract) → preserved as-is', () => {
+    const r = parseCaip('tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t')
+    expect(r.isToken).toBe(true)
+    // Contract case must be preserved — base58 is case-sensitive on TRON.
+    expect(r.contractAddress).toBe('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t')
+  })
+
+  test('Native chain (slip44) → not a token', () => {
+    expect(parseCaip('eip155:1/slip44:60').isToken).toBe(false)
+    expect(parseCaip('bip122:000000000019d6689c085ae165831e93/slip44:0').isToken).toBe(false)
+  })
+
+  test('Chain-only (no namespace) → not a token', () => {
+    expect(parseCaip('eip155:1').isToken).toBe(false)
+  })
+})
+
+describe('synthesizeSwapAsset — BEP-20 contract is preserved (regression)', () => {
+  test('BSC USDT (bep20 namespace) keeps contract address', () => {
+    const e = entry({
+      caip: 'eip155:56/bep20:0x55d398326f99059ff775485246999027b3197955',
+      symbol: 'USDT', name: 'Tether',
+      chainId: 'eip155:56',
+      isNative: false,
+      availability: { status: 'swappable', providers: ['relay'] },
+    })
+    const s = synthesizeSwapAsset(e)
+    expect(s).not.toBeNull()
+    expect(s!.contractAddress).toBe('0x55d398326f99059ff775485246999027b3197955')
+    // Synthesized asset string also gets the contract via THORChain convention.
+    expect(s!.asset).toContain('-0X55D398326F99059FF775485246999027B3197955')
+    expect(s!.chainId).toBe('bsc')
   })
 })

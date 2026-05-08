@@ -148,6 +148,34 @@ export function canonicalizeChainCaip2(chainCaip2: string): string {
   return normalizeChainCaip2(chainCaip2)
 }
 
+/** Token-namespace prefixes that mean "this CAIP describes a contract token,
+ *  not a chain-native asset". Native assets use `/slip44:N` regardless of
+ *  chain family. BEP-20 was missing from the picker's earlier isNative check,
+ *  which silently classified BSC tokens as native and stripped their contract
+ *  address during synthesis — caller used native BNB balances instead. */
+const TOKEN_NAMESPACES = ['/erc20:', '/bep20:', '/token:'] as const
+
+/** Parse a CAIP-19 into its components. Returns the contract address (raw
+ *  case-preserving) for token CAIPs, undefined for natives. Single source so
+ *  swap-discovery, swap.ts, and synthesizeSwapAsset agree. */
+export function parseCaip(caip: string): {
+  chainCaip2: string
+  isToken: boolean
+  /** Token contract address — raw case (TRON tokens are case-sensitive). */
+  contractAddress?: string
+} {
+  const slash = caip.indexOf('/')
+  if (slash < 0) return { chainCaip2: caip, isToken: false }
+  const chainCaip2 = caip.slice(0, slash)
+  const tail = caip.slice(slash) // includes leading '/'
+  for (const ns of TOKEN_NAMESPACES) {
+    if (tail.startsWith(ns)) {
+      return { chainCaip2, isToken: true, contractAddress: tail.slice(ns.length) }
+    }
+  }
+  return { chainCaip2, isToken: false }
+}
+
 /** Canonicalize a full CAIP-19 by remapping the chain prefix when it has
  *  alternate encodings. Both `tron:27Lqcw/slip44:195` and `tron:27lqcw/slip44:195`
  *  collapse to `tron:0x2b6653dc/slip44:195`. */
@@ -226,12 +254,10 @@ export function synthesizeSwapAsset(entry: AssetEntry): {
   const meta = chainMetaForCaip2(entry.chainId)
   if (!meta) return null  // unknown chain — caller should refuse the selection
 
-  const slash = entry.caip.indexOf('/')
-  const tokenSegment = slash >= 0 ? entry.caip.slice(slash + 1) : ''
-  // Token address segment is everything after the namespace (erc20:0x.../token:T...)
-  const colon = tokenSegment.indexOf(':')
-  const contractAddress = entry.isNative ? undefined
-    : (colon >= 0 ? tokenSegment.slice(colon + 1) : undefined)
+  // Single parser, namespace-aware. Was previously homemade and missed `/bep20:`
+  // entirely — BSC tokens lost their contract address during synthesis and the
+  // SwapDialog rendered native BNB pricing for them.
+  const { isToken, contractAddress } = parseCaip(entry.caip)
 
   // Pioneer's `asset` field (THORChain-style "CHAIN.SYMBOL-CONTRACT") is
   // load-bearing for the `assetToCaip` reconstruct path, which splits on `.`
@@ -243,9 +269,9 @@ export function synthesizeSwapAsset(entry: AssetEntry): {
   // mapped (defensive, paired with long-form aliases in THOR_TO_CHAIN).
   const chainShort = VAULT_CHAIN_TO_THOR[meta.vaultChainId]
     ?? meta.displayName.split(/\s+/)[0].toUpperCase()
-  const asset = entry.isNative
-    ? `${chainShort}.${entry.symbol}`
-    : `${chainShort}.${entry.symbol}${contractAddress ? `-${contractAddress.toUpperCase()}` : ''}`
+  const asset = isToken && contractAddress
+    ? `${chainShort}.${entry.symbol}-${contractAddress.toUpperCase()}`
+    : `${chainShort}.${entry.symbol}`
 
   return {
     asset,
@@ -314,7 +340,11 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
     const swappable = swappableByCaip.get(caip) ?? swappableByCaip.get(rawCaip)
     const balance = balanceByCaip.get(caip) ?? balanceByCaip.get(rawCaip)
     const availability = assessAvailability(caip)
-    const isNative = !!raw.isNative || raw.type === 'native' || !caip.includes('/erc20:') && !caip.includes('/token:')
+    // CAIP namespace is the source of truth — `/slip44:` is native, anything
+    // under `/erc20:` `/bep20:` or `/token:` is a token. Discovery's own
+    // isNative/type fields can disagree (saw it lie about BEP-20s).
+    const { isToken } = parseCaip(caip)
+    const isNative = !isToken
     entries.push({
       caip,
       symbol: raw.symbol,
