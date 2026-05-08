@@ -15,9 +15,63 @@
  */
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
-import { assetToCaip } from './swap-parsing'
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid } from './db'
 import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
+import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
+import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
+
+/** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
+ *  layer accepts; symbols / asset names / display names are derived here for
+ *  UI rendering and historic records, never used for routing or selection.
+ *
+ *  Falls back to a CAIP-derived hint for assets pioneer-discovery doesn't
+ *  know — better than crashing or silently writing empty strings. */
+function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
+  const entry = (discoveryAssetData as Record<string, { symbol?: string; name?: string; chainId?: string }>)[caip]
+  const symbol = entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
+  const name = entry?.name || symbol
+  // THORChain-style display string (CHAIN.SYMBOL[-CONTRACT]). Used only for
+  // log lines + history rows; vault never parses this back to identify.
+  const chainId = entry?.chainId || caip.split('/')[0]
+  const thorPrefix = VAULT_CHAIN_TO_THOR[chainIdToVaultId(chainId)] || symbol
+  const tokenMatch = caip.match(/\/(erc20|bep20|token):(.+)$/)
+  const asset = tokenMatch
+    ? `${thorPrefix}.${symbol}-${tokenMatch[2].toUpperCase()}`
+    : `${thorPrefix}.${symbol}`
+  return { symbol, name, asset }
+}
+
+/** Best-effort CAIP-2 → vault chain id (e.g. 'eip155:1' → 'ethereum'). Used
+ *  by resolveDisplayFromCaip — VAULT_CHAIN_TO_THOR is keyed on vault ids,
+ *  not raw CAIP-2. Safe fallback: return the CAIP-2 itself when unknown. */
+function chainIdToVaultId(caip2: string): string {
+  // Inline the small mapping rather than importing CHAINS just for this —
+  // covers every chain that has a THORChain prefix in our lookup.
+  const map: Record<string, string> = {
+    'bip122:000000000019d6689c085ae165831e93': 'bitcoin',
+    'bip122:000000000000000000651ef99cb9fcbe': 'bitcoincash',
+    'bip122:00000000001a91e3dace36e2be3bf030': 'dogecoin',
+    'bip122:12a765e31ffd4059bada1e25190f6e98': 'litecoin',
+    'bip122:000007d91d1254d60e2dd1ae58038307': 'dash',
+    'eip155:1': 'ethereum',
+    'eip155:10': 'optimism',
+    'eip155:56': 'bsc',
+    'eip155:137': 'polygon',
+    'eip155:8453': 'base',
+    'eip155:42161': 'arbitrum',
+    'eip155:43114': 'avalanche',
+    'cosmos:cosmoshub-4': 'cosmos',
+    'cosmos:thorchain-mainnet-v1': 'thorchain',
+    'cosmos:mayachain-mainnet-v1': 'mayachain',
+    'cosmos:osmosis-1': 'osmosis',
+    'tron:0x2b6653dc': 'tron',
+    'tron:27Lqcw': 'tron',
+    'ton:-239': 'ton',
+    'ripple:0': 'ripple',
+    'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'solana',
+  }
+  return map[caip2] || caip2
+}
 import { decideRevertOutcome } from '../shared/swap-revert'
 export { decideRevertOutcome } from '../shared/swap-revert'
 
@@ -160,24 +214,22 @@ export function trackSwap(
   opts?: { skipPersist?: boolean },
 ): void {
   const now = Date.now()
-  // Best-effort CAIP derivation — used by the SwapDialog resume path to
-  // resolve asset logos without a Pioneer round-trip. Falls back to undefined
-  // on unknown chains; AssetIcon handles that gracefully.
-  let fromCaip: string | undefined
-  let toCaip: string | undefined
-  try { fromCaip = assetToCaip(params.fromAsset) } catch { /* unknown chain */ }
-  try { toCaip = assetToCaip(params.toAsset) } catch { /* unknown chain */ }
+  // CAIP is the only identifier the caller provides. Display strings
+  // (symbol, name, THORChain-style asset) are derived here so UI/history
+  // can render without a Pioneer round-trip — never used for routing.
+  const fromDisplay = resolveDisplayFromCaip(params.fromCaip)
+  const toDisplay = resolveDisplayFromCaip(params.toCaip)
 
   const swap: PendingSwap = {
     txid: result.txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
-    fromSymbol: params.fromAsset.split('.').pop()?.split('-')[0] || params.fromAsset,
-    toSymbol: params.toAsset.split('.').pop()?.split('-')[0] || params.toAsset,
+    fromAsset: fromDisplay.asset,
+    toAsset: toDisplay.asset,
+    fromSymbol: fromDisplay.symbol,
+    toSymbol: toDisplay.symbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
-    fromCaip,
-    toCaip,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     memo: params.memo,
@@ -196,18 +248,19 @@ export function trackSwap(
   pendingSwaps.set(result.txid, swap)
   swapLog(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
 
-  // Persist to SQLite — full lifecycle record
+  // Persist to SQLite — full lifecycle record. Asset string + symbols are
+  // derived display fields, populated from the CAIP. CAIP is canonical.
   const historyRecord: SwapHistoryRecord = {
     id: crypto.randomUUID(),
     txid: result.txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
-    fromSymbol: swap.fromSymbol,
-    toSymbol: swap.toSymbol,
+    fromAsset: fromDisplay.asset,
+    toAsset: toDisplay.asset,
+    fromSymbol: fromDisplay.symbol,
+    toSymbol: toDisplay.symbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
-    fromCaip,
-    toCaip,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     quotedOutput: quote.expectedOutput || params.expectedOutput,
     minimumOutput: quote.minimumOutput || '0',
@@ -256,21 +309,6 @@ export function dismissSwap(txid: string): void {
   pendingSwaps.delete(txid)
 }
 
-/** Convert THORChain asset to CAIP using the cached Pioneer asset list so we
- *  pick up the canonical lowercased form for EVM tokens (and the base58 case
- *  for TRON tokens). The reconstruct fallback path preserves THORChain's
- *  uppercased contract address — Pioneer's swap-tracker rejects that with
- *  a 400. Falls back to the raw thorAsset if conversion fails entirely. */
-async function safeAssetToCaip(thorAsset: string): Promise<string> {
-  try {
-    const { getSwapAssets } = await import('./swap')
-    const knownAssets = await getSwapAssets()
-    return assetToCaip(thorAsset, knownAssets)
-  } catch {
-    try { return assetToCaip(thorAsset) } catch { return thorAsset }
-  }
-}
-
 // ── Pioneer REST registration ───────────────────────────────────────
 
 // Pioneer's CreatePendingSwap validator only accepts these integration values
@@ -285,10 +323,14 @@ const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   const pioneer = await getPioneer()
 
-  const [sellCaip, buyCaip] = await Promise.all([
-    safeAssetToCaip(swap.fromAsset),
-    safeAssetToCaip(swap.toAsset),
-  ])
+  // CAIP comes straight from the swap record — no asset-string round-trip
+  // needed. PendingSwap.fromCaip is populated by trackSwap() from the picker's
+  // selection and is the canonical identifier Pioneer's tracker keys on.
+  const sellCaip = swap.fromCaip
+  const buyCaip = swap.toCaip
+  if (!sellCaip || !buyCaip) {
+    throw new Error(`registerWithPioneer: missing CAIP (from=${sellCaip}, to=${buyCaip}) for ${swap.txid}`)
+  }
 
   const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
 

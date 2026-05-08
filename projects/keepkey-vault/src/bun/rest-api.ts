@@ -633,6 +633,8 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>GET</code></td><td><code>/api/v1/swaps</code></td><td>Swap history (auth) — filter by status/asset/fromDate/toDate/limit/offset</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/swaps/stats</code></td><td>Aggregate counts: total/completed/failed/refunded/pending (auth)</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/swaps/:txid</code></td><td>Single swap record with full fee + memo + status detail (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swap/availability/:caip</code></td><td>Picker classification for one CAIP-19 (debug) — assessment + provider list + reason (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swap/discovery</code></td><td>Search the unified asset universe (~30k); filter by ?q=&amp;status=&amp;limit= (auth)</td><td>5s</td></tr>
         </tbody>
       </table>
     </div>
@@ -2840,6 +2842,79 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const record = getSwapHistoryByTxid(tail)
           if (!record) return json({ error: 'Not found' }, 404)
           return json(record)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SWAP AVAILABILITY (debug — picker classification visibility)
+        // Returns the same data the AssetPickerDialog uses to decide
+        // whether each row is selectable. Keyed by CAIP-19. Auth-gated.
+        //   GET /api/v1/swap/availability/:caip          — single asset
+        //   GET /api/v1/swap/discovery?q=&limit=&status= — search + filter
+        // ═══════════════════════════════════════════════════════════════
+        if (path.startsWith('/api/v1/swap/availability/') && method === 'GET') {
+          auth.requireAuth(req)
+          // Path is "/api/v1/swap/availability/<caip>" — caip itself contains
+          // ':' and '/' so we can't naively split. Slice from the prefix.
+          const caip = decodeURIComponent(path.slice('/api/v1/swap/availability/'.length))
+          if (!caip) return json({ error: 'Missing caip' }, 400)
+          const { assessAvailability } = await import('../shared/swap-support-matrix')
+          const { networkDisplayName, chainMetaForCaip2 } = await import('../shared/swap-discovery')
+          const slash = caip.indexOf('/')
+          const chainCaip2 = slash >= 0 ? caip.slice(0, slash) : caip
+          return json({
+            caip,
+            chainCaip2,
+            chainDisplayName: networkDisplayName(chainCaip2),
+            chainKnownToVault: !!chainMetaForCaip2(chainCaip2),
+            assessment: assessAvailability(caip),
+          })
+        }
+
+        if (path === '/api/v1/swap/discovery' && method === 'GET') {
+          auth.requireAuth(req)
+          const url = new URL(req.url)
+          const q = url.searchParams.get('q') || ''
+          const statusFilter = url.searchParams.get('status')
+          const limitRaw = url.searchParams.get('limit')
+          const limit = limitRaw ? Math.max(1, Math.min(500, Number(limitRaw))) : 50
+          if (limitRaw && !Number.isFinite(Number(limitRaw))) {
+            throw new HttpError(400, `Invalid limit: ${limitRaw}`)
+          }
+
+          const { buildAssetEntries, buildSearchIndex, searchEntries, bucketFor } = await import('../shared/swap-discovery')
+          // Debug endpoint — uses the same swappable list as the picker but
+          // intentionally drops balances. The classification (status, providers,
+          // bucket) is what callers want to inspect; balances would skew rows
+          // into bucket 0/1 and conflate UX-state with matrix correctness.
+          const { getSwapAssets } = await import('./swap')
+          const swappable = await getSwapAssets()
+          const entries = await buildAssetEntries({ swappable, balances: [] })
+          const idx = buildSearchIndex(entries)
+          let results = searchEntries(idx, q)
+          if (statusFilter) {
+            const allowed = ['swappable', 'unknown', 'unsupported_chain', 'unsupported_token']
+            if (!allowed.includes(statusFilter)) {
+              throw new HttpError(400, `Invalid status: ${statusFilter} (allowed: ${allowed.join(', ')})`)
+            }
+            results = results.filter(e => e.availability.status === statusFilter)
+          }
+          return json({
+            query: q,
+            statusFilter: statusFilter || null,
+            totalUniverse: entries.length,
+            matched: results.length,
+            entries: results.slice(0, limit).map(e => ({
+              caip: e.caip,
+              chainId: e.chainId,
+              symbol: e.symbol,
+              name: e.name,
+              isNative: e.isNative,
+              hasBalance: !!e.balance,
+              pioneerSwappable: !!e.swappable,
+              bucket: bucketFor(e),
+              availability: e.availability,
+            })),
+          })
         }
 
         // ═══════════════════════════════════════════════════════════════

@@ -147,7 +147,8 @@ const FIXTURE_ASSETS_FLAT = {
 // ── Quote parsing tests ─────────────────────────────────────────────
 
 describe('parseQuoteResponse', () => {
-  const baseParams = { fromAsset: 'BASE.ETH', toAsset: 'ETH.ETH', slippageBps: 300 }
+  // CAIP-only — Pioneer's Quote endpoint is the source of truth for routing.
+  const baseParams = { fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
 
   test('BASE → ETH: extracts memo from txParams', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
@@ -206,39 +207,33 @@ describe('parseQuoteResponse', () => {
     expect(result.minimumOutput).toBe('0.00238')
   })
 
-  test('BASE → ETH: preserves fromAsset/toAsset from params', () => {
-    const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
-    expect(result.fromAsset).toBe('BASE.ETH')
-    expect(result.toAsset).toBe('ETH.ETH')
-  })
-
   // BTC → ETH (no router, memo in txParams)
   test('BTC → ETH: extracts memo from txParams', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.memo).toBe('=:ETH.ETH:0xdest456:125000')
   })
 
   test('BTC → ETH: inboundAddress from txParams.vaultAddress', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.inboundAddress).toBe('bc1qvaultaddress')
   })
 
   test('BTC → ETH: router is undefined (UTXO chains have no router)', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.router).toBeUndefined()
   })
 
   test('BTC → ETH: estimatedTime from raw.total_swap_seconds', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.estimatedTime).toBe(900)
   })
 
   test('BTC → ETH: minimumOutput calculated from slippage when no amountOutMin', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     // 1.25 * (1 - 85/10000) = 1.25 * 0.9915 = 1.239375
     expect(parseFloat(result.minimumOutput)).toBeCloseTo(1.239375, 4)
@@ -246,7 +241,7 @@ describe('parseQuoteResponse', () => {
 
   // Minimal response (fields at top-level quote, no raw/txs)
   test('minimal: extracts fields from top-level quote properties', () => {
-    const params = { fromAsset: 'ETH.ETH', toAsset: 'BTC.BTC', slippageBps: 300 }
+    const params = { fromCaip: 'eip155:1/slip44:60', toCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_MINIMAL_QUOTE, params)
     expect(result.memo).toBe('swap:ETH.ETH:0xdest')
     expect(result.inboundAddress).toBe('0xvault789')
@@ -259,7 +254,7 @@ describe('parseQuoteResponse', () => {
 
   // Single object (not array)
   test('single object response: wraps in array and parses', () => {
-    const params = { fromAsset: 'ETH.ETH', toAsset: 'BTC.BTC', slippageBps: 300 }
+    const params = { fromCaip: 'eip155:1/slip44:60', toCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_SINGLE_QUOTE, params)
     expect(result.expectedOutput).toBe('0.5')
     expect(result.memo).toBe('cf:swap')
@@ -296,6 +291,36 @@ describe('parseQuoteResponse', () => {
     const badResp = { data: [{ quote: { buyAmount: '1.0' } }] }
     expect(() => parseQuoteResponse(badResp, baseParams))
       .toThrow('Quote response missing inbound address')
+  })
+
+  test('native THORChain RUNE deposit: missing inbound is OK (uses MsgDeposit)', () => {
+    // The check that previously string-compared `params.fromAsset === 'THOR.RUNE'`
+    // is now CAIP-driven. Pin the canonical CAIP so anyone who renames or moves
+    // the constant in swap-parsing.ts has to also update this test.
+    const RUNE_CAIP = 'cosmos:thorchain-mainnet-v1/slip44:931'
+    const resp = { data: [{ quote: { buyAmount: '1.0' } }] }
+    const params = { fromCaip: RUNE_CAIP, toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
+    expect(() => parseQuoteResponse(resp, params)).not.toThrow()
+  })
+
+  test('native Mayachain CACAO deposit: missing inbound is OK (uses MsgDeposit)', () => {
+    const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
+    const resp = { data: [{ quote: { buyAmount: '1.0' } }] }
+    const params = { fromCaip: CACAO_CAIP, toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
+    expect(() => parseQuoteResponse(resp, params)).not.toThrow()
+  })
+
+  test('error message uses CAIPs (not THORChain asset strings)', () => {
+    // The "Unsupported THORChain chain" class of errors is gone — vault is
+    // CAIP-native — so error messages must reference CAIPs.
+    const params = {
+      fromCaip: 'eip155:1/slip44:60',
+      toCaip: 'eip155:10/erc20:0x9560e827af36c94d2ac33a39bce1fe78631088db', // VELO
+      slippageBps: 300,
+    }
+    const noOutput = { data: [{ quote: { inbound_address: '0xv' } }] }
+    expect(() => parseQuoteResponse(noOutput, params))
+      .toThrow(/eip155:10\/erc20:0x9560/)
   })
 })
 

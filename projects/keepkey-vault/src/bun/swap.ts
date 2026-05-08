@@ -16,10 +16,41 @@ import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txb
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
-export { parseQuoteResponse, parseAssetsResponse, parseThorAsset, assetToCaip, THOR_TO_CHAIN } from './swap-parsing'
-import { parseQuoteResponse, parseAssetsResponse, assetToCaip } from './swap-parsing'
+// assetToCaip is exported for backwards-compat (legacy code that hydrates old
+// history rows without CAIP). The swap quote/execute path no longer uses it —
+// vault is CAIP-native end-to-end.
+export { parseAssetsResponse, parseQuoteResponse, assetToCaip } from './swap-parsing'
+import { parseQuoteResponse, parseAssetsResponse } from './swap-parsing'
 
 const TAG = '[swap]'
+
+// CAIP-19 of native THORChain (RUNE) and Mayachain (CACAO) — the only assets
+// that route via MsgDeposit instead of a vault inbound address. CAIP is the
+// canonical identifier; symbols and THOR-style asset strings are derived
+// display data, never load-bearing.
+const RUNE_CAIP  = 'cosmos:thorchain-mainnet-v1/slip44:931'
+const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
+
+/** True for native THORChain/Maya deposits (CAIP-driven; replaces the
+ *  fragile `fromAsset === 'THOR.RUNE'` check that depended on canonical
+ *  THORChain prefix). */
+function isNativeDepositCaip(fromCaip: string): boolean {
+  return fromCaip === RUNE_CAIP || fromCaip === CACAO_CAIP
+}
+
+/** True for ERC-20 / Tron-token sources. CAIP namespaces tell the truth here:
+ *  `/erc20:` for EVM tokens, `/token:` for Tron. Native chains use `/slip44:`. */
+function isTokenCaip(caip: string): boolean {
+  return caip.includes('/erc20:') || caip.includes('/token:') || caip.includes('/bep20:')
+}
+
+/** Extract the contract/token address from a CAIP-19, or null for native
+ *  assets. Returns the raw form (CAIP preserves source case — EVM lowercase,
+ *  Tron base58 case-sensitive). Caller is responsible for case normalization. */
+function extractContractFromCaip(caip: string): string | null {
+  const match = caip.match(/\/(erc20|bep20|token):(.+)$/)
+  return match ? match[2] : null
+}
 
 /** Debug log — gated behind SWAP_DEBUG=1 (env) or localStorage `swap.debug=1`.
  *  Used in place of console.log for high-volume per-swap chatter. console.warn /
@@ -183,14 +214,11 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
 
   const pioneer = await getPioneer()
 
-  // Convert THORChain asset notation to CAIP for Pioneer Quote.
-  // Pass in the cached asset list so assetToCaip can use pioneer's canonical
-  // CAIP (correct namespace + correct case) instead of reconstructing — the
-  // reconstruct path can't recover TRON's case-sensitive base58 address from
-  // THORChain's uppercased contract field.
-  const knownAssets = await getSwapAssets()
-  const sellCaip = assetToCaip(params.fromAsset, knownAssets)
-  const buyCaip = assetToCaip(params.toAsset, knownAssets)
+  // Pioneer Quote takes CAIP directly — no THORChain-asset round-trip needed.
+  // The legacy `fromAsset` / `toAsset` strings are still carried for tracking
+  // + display, but vault no longer parses them to derive identity.
+  const sellCaip = params.fromCaip
+  const buyCaip = params.toCaip
   const slippage = slippageBps / 100 // Pioneer uses % not bps
 
   // Normalize BCH CashAddr: strip "bitcoincash:" prefix — THORChain uses short form
@@ -199,7 +227,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   const senderAddress = normalizeBchAddr(params.fromAddress)
   const recipientAddress = normalizeBchAddr(params.toAddress)
 
-  swapLog(`${TAG} Fetching quote: ${params.fromAsset} → ${params.toAsset} (${params.amount})`)
+  swapLog(`${TAG} Fetching quote: ${params.fromCaip} → ${params.toCaip} (${params.amount})`)
   swapLog(`${TAG} CAIP: ${sellCaip} → ${buyCaip}`)
   swapLog(`${TAG} sender=${senderAddress}, recipient=${recipientAddress}`)
 
@@ -302,8 +330,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const fromChain = allChains.find(c => c.id === params.fromChainId)
   if (!fromChain) throw new Error(`Unknown source chain: ${params.fromChainId}`)
 
-  // Detect ERC-20 source (THORChain format: "ETH.USDT-0xDAC17F..." — has hyphen + contract)
-  const isErc20Source = params.fromAsset.includes('-') && fromChain.chainFamily === 'evm'
+  // CAIP-driven: '/erc20:' / '/bep20:' namespaces are tokens; '/slip44:' is native.
+  const isErc20Source = isTokenCaip(params.fromCaip) && fromChain.chainFamily === 'evm'
 
   // 1. Get sender address (use override if provided, otherwise derive from defaultPath)
   let fromAddress = params.fromAddressOverride
@@ -358,7 +386,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // memo+vault-routed (THORChain/Maya).
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
-  const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
+  const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
   if (params.memo) {
@@ -368,13 +396,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     }
   }
 
-  swapLog(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)
+  swapLog(`${TAG} Executing: ${params.fromCaip} → ${params.toCaip}, amount=${params.amount}`)
   if (hasPrebuiltTx) {
     swapLog(`${TAG} ${params.integration} — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
   } else {
     swapLog(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
   }
-  if (isErc20Source) swapLog(`${TAG} ERC-20 source detected: ${params.fromAsset}`)
+  if (isErc20Source) swapLog(`${TAG} ERC-20 source detected: ${params.fromCaip}`)
 
   // 3. Get Pioneer for tx building
   const pioneer = await getPioneer()
@@ -514,8 +542,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // THORChain inbound address instead of as a USDT.transfer() call. Same
     // pattern would matter for any future SPL/non-EVM token sends.
     const knownAssets = await getSwapAssets()
-    const fromAssetMeta = knownAssets.find(a => a.asset === params.fromAsset)
-    const sourceCaip = fromAssetMeta?.caip
+    // CAIP-keyed lookup. Synthesized assets (picker selections Pioneer didn't
+    // pre-list) won't be in knownAssets; fromAssetMeta is undefined in that
+    // case and downstream code already handles it (decimals fall back to
+    // chain default; sourceCaip falls back to params.fromCaip).
+    const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
+    const sourceCaip = fromAssetMeta?.caip ?? params.fromCaip
     const tokenDecimals = fromAssetMeta?.decimals
 
     const buildResult = await txb.buildTx(pioneer, fromChain, {
@@ -592,8 +624,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   return {
     txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
@@ -619,7 +651,7 @@ export async function previewSwapBuild(
   const toChain = allChains.find(c => c.id === params.toChainId)
   if (!toChain) throw new Error(`Unknown destination chain: ${params.toChainId}`)
 
-  const isErc20Source = params.fromAsset.includes('-') && fromChain.chainFamily === 'evm'
+  const isErc20Source = isTokenCaip(params.fromCaip) && fromChain.chainFamily === 'evm'
 
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
@@ -636,7 +668,7 @@ export async function previewSwapBuild(
   if (!fromAddress) throw new Error('Could not derive sender address')
 
   const hasPrebuiltTx = !!params.relayTx
-  const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
+  const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
 
@@ -707,13 +739,15 @@ export async function previewSwapBuild(
   }
   // cosmos / xrp / solana / tron / ton
   const knownAssets = await getSwapAssets()
-  const fromAssetMeta = knownAssets.find(a => a.asset === params.fromAsset)
+  const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
   const buildResult = await txb.buildTx(pioneer, fromChain, {
     chainId: fromChain.id,
     to: params.inboundAddress || fromAddress,
     amount: params.amount, memo: params.memo, feeLevel: params.feeLevel, isMax: params.isMax,
     isSwapDeposit: true, fromAddress,
-    caip: fromAssetMeta?.caip, tokenDecimals: fromAssetMeta?.decimals,
+    // Prefer Pioneer's canonical CAIP (correct case for TRON tokens) but fall
+    // back to the picker-supplied CAIP for synthesized selections.
+    caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
   })
   return { unsignedTx: buildResult.unsignedTx }
 }
@@ -823,9 +857,9 @@ async function buildRelaySwapTx(
   let balanceInfo: { current: string; required: string; sufficient: boolean; tokenContract?: string } | undefined
 
   if (isErc20Source && rpcUrl) {
-    // Pull token contract from THORChain asset string ("ETH.USDT-0xDAC17...")
-    const assetParts = params.fromAsset.split('-')
-    const tokenContract = assetParts.slice(1).join('-').toLowerCase()
+    // Token contract comes from the CAIP-19 (after the `:` of `/erc20:` or
+    // `/bep20:`). CAIP is the only identifier — no separate contract param.
+    const tokenContract = (extractContractFromCaip(params.fromCaip) || '').toLowerCase()
     if (tokenContract && tokenContract.startsWith('0x')) {
       try {
         const tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract).catch(() => undefined)
@@ -1050,15 +1084,12 @@ async function buildEvmSwapTx(
   if (isErc20Source) {
     // ── ERC-20 source swap: approve + depositWithExpiry ──
 
-    // a) Extract token contract from THORChain asset string "ETH.USDT-0xDAC17F..."
-    // THORChain canonicalizes the contract address to UPPERCASE 0X — the asset
-    // ID looks like "ETH.USDT-0XDAC17F..." not "ETH.USDT-0xDAC17F...". Compare
-    // case-insensitively + normalize to lowercase for downstream use (eth_call
-    // accepts either case but our internal Map keys assume lowercase).
-    const assetParts = params.fromAsset.split('-')
-    const tokenContract = assetParts.slice(1).join('-').toLowerCase()
+    // a) Token contract comes from the CAIP-19. CAIP is canonical — no
+    //    separate contract param. Lowercased for internal Map keys (eth_call
+    //    accepts either case).
+    const tokenContract = (extractContractFromCaip(params.fromCaip) || '').toLowerCase()
     if (!tokenContract || !tokenContract.startsWith('0x')) {
-      throw new Error(`Cannot extract token contract from asset: ${params.fromAsset}`)
+      throw new Error(`Cannot extract token contract from CAIP: ${params.fromCaip}`)
     }
 
     // b) Get token decimals (direct RPC first, then Pioneer fallback)

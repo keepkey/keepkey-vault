@@ -21,6 +21,7 @@ import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
+import { AssetPickerDialog } from "./AssetPickerDialog"
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
@@ -125,13 +126,6 @@ const SwapArrowIcon = () => (
 const ChevronDownIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="6 9 12 15 18 9" />
-  </svg>
-)
-
-const SearchIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8" />
-    <path d="m21 21-4.35-4.35" />
   </svg>
 )
 
@@ -298,129 +292,19 @@ const DIALOG_CSS = `
 `
 
 // ── Asset Selector ──────────────────────────────────────────────────
+// Renders the selected-asset display (or a "select asset" prompt). Clicking
+// either delegates to the parent SwapDialog, which renders a single shared
+// AssetPickerDialog at modal-over-modal z-index. Search/filter logic moved
+// out of this component into AssetPickerDialog + swap-discovery.
 interface AssetSelectorProps {
   label: string
   selected: SwapAsset | null
-  assets: SwapAsset[]
-  onSelect: (asset: SwapAsset) => void
-  balances?: ChainBalance[]
-  exclude?: string
+  onOpenPicker: () => void
   disabled?: boolean
-  nativeOnly?: boolean
 }
 
-function AssetSelector({ label, selected, assets, onSelect, balances, exclude, disabled, nativeOnly }: AssetSelectorProps) {
+function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelectorProps) {
   const { t } = useTranslation("swap")
-  const { fmtCompact } = useFiat()
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (open && inputRef.current) inputRef.current.focus()
-  }, [open])
-
-  const filtered = useMemo(() => {
-    let list = exclude ? assets.filter(a => a.asset !== exclude) : assets
-    if (nativeOnly) list = list.filter(a => !a.contractAddress)
-    if (search) {
-      const q = search.toLowerCase()
-      list = list.filter(a =>
-        a.symbol.toLowerCase().includes(q) ||
-        a.name.toLowerCase().includes(q) ||
-        a.chainId.toLowerCase().includes(q)
-      )
-    }
-    return list.slice(0, 50)
-  }, [assets, search, exclude, nativeOnly])
-
-  const getBalance = useCallback((asset: SwapAsset): { balance: string; usd: number } | null => {
-    if (!balances) return null
-    const chain = balances.find(b => b.chainId === asset.chainId)
-    if (!chain) return null
-    if (asset.contractAddress && chain.tokens) {
-      const token = chain.tokens.find(t =>
-        t.contractAddress?.toLowerCase() === asset.contractAddress?.toLowerCase()
-      )
-      return token ? { balance: token.balance, usd: token.balanceUsd || 0 } : null
-    }
-    return { balance: chain.balance, usd: chain.balanceUsd || 0 }
-  }, [balances])
-
-  if (open) {
-    return (
-      <Box>
-        <Text fontSize="xs" color="kk.textMuted" mb="1">{label}</Text>
-        <Box bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="lg" overflow="hidden">
-          <Flex align="center" gap="2" px="3" py="2" borderBottom="1px solid" borderColor="kk.border">
-            <SearchIcon />
-            <Input
-              ref={inputRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("searchAssets")}
-              bg="transparent"
-              border="none"
-              color="kk.textPrimary"
-              size="sm"
-              px="0"
-              _focus={{ outline: "none", boxShadow: "none" }}
-            />
-            <Button
-              size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-              onClick={() => { setOpen(false); setSearch("") }}
-            >
-              &times;
-            </Button>
-          </Flex>
-          <Box maxH="200px" overflow="auto">
-            {filtered.length === 0 ? (
-              <Text fontSize="xs" color="kk.textMuted" p="3" textAlign="center">{t("noAssets")}</Text>
-            ) : (
-              filtered.map((asset) => {
-                const balInfo = getBalance(asset)
-                return (
-                  <Flex
-                    key={asset.asset}
-                    align="center"
-                    gap="3"
-                    px="3"
-                    py="2.5"
-                    cursor="pointer"
-                    _hover={{ bg: "rgba(35,220,200,0.06)" }}
-                    transition="all 0.15s"
-                    onClick={() => { onSelect(asset); setOpen(false); setSearch("") }}
-                    borderRadius="lg"
-                    mx="1"
-                  >
-                    <AssetIcon
-                      caip={asset.caip}
-                      iconUrl={asset.icon}
-                      chainCaip={chainBadgeCaip(asset)}
-                      size={48}
-                      alt={asset.symbol}
-                    />
-                    <Flex direction="column" flex="1" minW="0">
-                      <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{asset.symbol}</Text>
-                      <Text fontSize="10px" color="kk.textMuted" truncate>{asset.name}</Text>
-                    </Flex>
-                    {balInfo && (
-                      <Flex direction="column" align="flex-end" gap="0">
-                        <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">{formatBalance(balInfo.balance)}</Text>
-                        {balInfo.usd > 0 && (
-                          <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(balInfo.usd)}</Text>
-                        )}
-                      </Flex>
-                    )}
-                  </Flex>
-                )
-              })
-            )}
-          </Box>
-        </Box>
-      </Box>
-    )
-  }
 
   /* ── Selected asset → big prominent display ── */
   if (selected) {
@@ -431,7 +315,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
           {!disabled && (
             <Box as="button" display="flex" alignItems="center" gap="1" color="kk.textMuted" fontSize="11px" fontWeight="500"
               _hover={{ color: "kk.gold" }} transition="color 0.15s"
-              onClick={() => setOpen(true)}>
+              onClick={onOpenPicker}>
               {t("change") || "Change"} <ChevronDownIcon />
             </Box>
           )}
@@ -440,7 +324,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
           align="center" gap="5"
           cursor={disabled ? "default" : "pointer"}
           opacity={disabled ? 0.7 : 1}
-          onClick={() => { if (!disabled) setOpen(true) }}
+          onClick={() => { if (!disabled) onOpenPicker() }}
           _hover={disabled ? {} : { opacity: 0.85 }}
           transition="opacity 0.15s"
         >
@@ -482,7 +366,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
         opacity={disabled ? 0.6 : 1}
         _hover={disabled ? {} : { borderColor: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
         transition="all 0.2s"
-        onClick={() => { if (!disabled) setOpen(true) }}
+        onClick={() => { if (!disabled) onOpenPicker() }}
       >
         <Box w="64px" h="64px" borderRadius="full" bg="rgba(255,255,255,0.06)" display="flex" alignItems="center" justifyContent="center">
           <Text fontSize="xl" color="kk.textMuted">?</Text>
@@ -518,6 +402,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  // Which side opened the asset picker — null when closed. Single shared
+  // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
+  const [pickerSide, setPickerSide] = useState<'from' | 'to' | null>(null)
   const [amount, setAmount] = useState("")
   const [fiatAmount, setFiatAmount] = useState("")
   const [inputMode, setInputMode] = useState<'crypto' | 'fiat'>('crypto')
@@ -862,8 +749,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       // Preserve real slippage from history; fall back to current setting so
       // the review screen never displays a misleading 0%.
       slippageBps: resumeSwap.slippageBps ?? slippageBps,
-      fromAsset: resumeSwap.fromAsset,
-      toAsset: resumeSwap.toAsset,
     })
     setPhase('submitted')
   }, [open, resumeSwap])
@@ -1067,8 +952,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     rpcRequest<{ approveTx?: any; unsignedTx: any }>('previewSwapBuild', {
       fromChainId: fromAsset.chainId,
       toChainId: toAsset.chainId,
-      fromAsset: fromAsset.asset,
-      toAsset: toAsset.asset,
+      fromCaip: fromAsset.caip!,
+      toCaip: toAsset.caip!,
       amount: isMax ? (fromBalance || '0') : amount,
       memo: quote.memo,
       inboundAddress: quote.inboundAddress,
@@ -1107,9 +992,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
     quoteTimerRef.current = setTimeout(async () => {
       try {
+        // CAIP-only — Pioneer Quote keys on CAIP. The picker's SwapAsset
+        // always carries .caip (Pioneer-listed entries set it; synthesized
+        // entries carry the pioneer-discovery CAIP). If a future code path
+        // sets fromAsset without a CAIP, fail loud here rather than letting
+        // Pioneer reject with an opaque error downstream.
+        if (!fromAsset!.caip || !toAsset!.caip) {
+          throw new Error('Selected assets are missing CAIP — pick again from the asset picker')
+        }
         const result = await rpcRequest<SwapQuote>('getSwapQuote', {
-          fromAsset: fromAsset!.asset,
-          toAsset: toAsset!.asset,
+          fromCaip: fromAsset!.caip,
+          toCaip: toAsset!.caip,
           amount: isMax ? (fromBalance || '0') : amount,
           fromAddress,
           toAddress,
@@ -1178,8 +1071,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setRefreshingQuote(true)
       try {
         const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
-          fromAsset: fromAsset.asset,
-          toAsset: toAsset.asset,
+          fromCaip: fromAsset.caip!,
+          toCaip: toAsset.caip!,
           amount: isMax ? (fromBalance || '0') : amount,
           fromAddress, toAddress, slippageBps,
         }, 30000)
@@ -1231,8 +1124,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       const result = await rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
         fromChainId: fromAsset.chainId,
         toChainId: toAsset.chainId,
-        fromAsset: fromAsset.asset,
-        toAsset: toAsset.asset,
+        fromCaip: fromAsset.caip!,
+        toCaip: toAsset.caip!,
         amount: isMax ? (fromBalance || '0') : amount,
         memo: liveQuote.memo,
         inboundAddress: liveQuote.inboundAddress,
@@ -2267,10 +2160,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <AssetSelector
                     label={t("from")}
                     selected={fromAsset}
-                    assets={assets}
-                    onSelect={(a) => { setFromAsset(a); setQuote(null); setPhase('input'); setError(null) }}
-                    balances={balances}
-                    exclude={toAsset?.asset}
+                    onOpenPicker={() => setPickerSide('from')}
                     disabled={busy}
                   />
 
@@ -2402,10 +2292,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <AssetSelector
                     label={t("to")}
                     selected={toAsset}
-                    assets={assets}
-                    onSelect={(a) => { setToAsset(a); setQuote(null); setPhase('input'); setError(null) }}
-                    balances={balances}
-                    exclude={fromAsset?.asset}
+                    onOpenPicker={() => setPickerSide('to')}
                     disabled={busy}
                   />
 
@@ -2564,6 +2451,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           </Flex>
         )}
       </Box>
+
+      {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
+      <AssetPickerDialog
+        open={pickerSide !== null}
+        onClose={() => setPickerSide(null)}
+        swappable={assets}
+        balances={balances}
+        excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
+        side={pickerSide || 'from'}
+        onSelect={(a) => {
+          if (pickerSide === 'from') setFromAsset(a)
+          else if (pickerSide === 'to') setToAsset(a)
+          setQuote(null)
+          setPhase('input')
+          setError(null)
+        }}
+      />
     </Box>
   )
 }
