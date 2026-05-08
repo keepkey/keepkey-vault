@@ -18,8 +18,22 @@ import { getPioneer } from './pioneer'
 import { assetToCaip } from './swap-parsing'
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid } from './db'
 import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
+import { decideRevertOutcome } from '../shared/swap-revert'
+export { decideRevertOutcome } from '../shared/swap-revert'
 
 const TAG = '[swap-tracker]'
+
+/** Debug log — gated behind SWAP_DEBUG=1 (env) or localStorage `swap.debug=1`.
+ *  Used in place of console.log for high-volume per-swap chatter. console.warn /
+ *  console.error are deliberately *not* gated — those still ship in prod. */
+const SWAP_DEBUG = ((): boolean => {
+  try {
+    if (typeof process !== 'undefined' && process.env?.SWAP_DEBUG === '1') return true
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('swap.debug') === '1') return true
+  } catch { /* noop */ }
+  return false
+})()
+const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
 /** Infer a reasonable confirmation count from persisted status when the DB lacks a confirmations column.
  *  These are conservative lower-bounds — the next poll will replace them with real data. */
@@ -81,7 +95,7 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
     }
 
     pioneerVerified = true
-    console.log(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+    swapLog(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
   })()
 
   try {
@@ -128,7 +142,7 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
       }
     }
     if (pendingSwaps.size > 0) {
-      console.log(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
+      swapLog(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
       // No polling at boot — refreshSwap() drives status updates only when the
       // user opens that specific swap in the dialog.
     }
@@ -180,7 +194,7 @@ export function trackSwap(
   }
 
   pendingSwaps.set(result.txid, swap)
-  console.log(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
+  swapLog(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
 
   // Persist to SQLite — full lifecycle record
   const historyRecord: SwapHistoryRecord = {
@@ -310,11 +324,11 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
     swapper: swap.swapper,
   }
 
-  console.log(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
+  swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
   const resp = await pioneer.CreatePendingSwap(body)
-  console.log(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
-  console.log(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
+  swapLog(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
+  swapLog(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
 }
 
 // ── On-demand Pioneer fetch ────────────────────────────────────────
@@ -366,7 +380,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       swap.expectedOutput = receivedOutput
     }
 
-    console.log(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
+    swapLog(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
 
     // Persist status change to SQLite (skip for passphrase wallet swaps)
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
@@ -440,21 +454,19 @@ function evmRpcUrlFor(fromChainId: string): string | undefined {
  *  Returns true if we definitively flagged the swap as failed (caller should
  *  short-circuit any further status polling). */
 async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
-  if (swap.status === 'failed' || swap.status === 'completed' || swap.status === 'refunded') return false
   const rpcUrl = evmRpcUrlFor(swap.fromChainId || '')
   if (!rpcUrl) return false
   try {
     const receipt = await getTxReceiptOnce(rpcUrl, swap.txid)
-    if (!receipt) return false  // not mined yet
-    if (receipt.status === false) {
-      console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${receipt.blockNumber}) — marking failed`)
-      swap.status = 'failed'
-      swap.error = 'Transaction reverted on-chain — gas spent, asset NOT delivered. Common causes: insufficient allowance, slippage tripped, or contract reverted.'
-      swap.updatedAt = Date.now()
-      try { updateSwapHistoryStatus(swap.txid, 'failed') } catch { /* ignore */ }
-      pushUpdate(swap)
-      return true
-    }
+    const decision = decideRevertOutcome(swap.status, receipt)
+    if (!decision) return false
+    console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${decision.blockNumber}) — marking failed`)
+    swap.status = decision.status
+    swap.error = decision.error
+    swap.updatedAt = Date.now()
+    try { updateSwapHistoryStatus(swap.txid, 'failed') } catch { /* ignore */ }
+    pushUpdate(swap)
+    return true
   } catch (e: any) {
     console.warn(`${TAG} EVM receipt check failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
   }
@@ -467,7 +479,7 @@ async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
 export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
   let swap = pendingSwaps.get(txid) || hydrateFromDb(txid)
   if (!swap) {
-    console.log(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
+    swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
     return null
   }
 
@@ -482,10 +494,10 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
     const resp = await pioneer.GetPendingSwap({ txHash: txid })
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
-      console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
       return swap
     }
-    console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
+    swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
     applyRemoteSwapData(swap, remoteSwap)
 
     // If just completed without an outbound txid, request a rescan to pick it up.
@@ -500,7 +512,7 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
     }
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
-      console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
     } else {
       console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
     }
@@ -539,12 +551,12 @@ function pushUpdate(swap: PendingSwap): void {
     error: swap.error,
     swapper: swap.swapper,
   }
-  console.log(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
+  swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)
 }
 
 function pushComplete(swap: PendingSwap): void {
   if (!sendMessage) return
-  console.log(`${TAG} Pushing swap-complete: ${swap.txid} status=${swap.status}`)
+  swapLog(`${TAG} Pushing swap-complete: ${swap.txid} status=${swap.status}`)
   sendMessage('swap-complete', swap)
 }

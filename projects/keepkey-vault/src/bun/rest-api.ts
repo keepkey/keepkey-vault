@@ -18,7 +18,8 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting, findApiLogs, getApiLogById } from './db'
+import { getSetting, findApiLogs, getApiLogById, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats } from './db'
+import type { SwapTrackingStatus } from '../shared/types'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
@@ -629,6 +630,9 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Signing history (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/activity/:id</code></td><td>Single audit entry with full request/response bodies (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swaps</code></td><td>Swap history (auth) — filter by status/asset/fromDate/toDate/limit/offset</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swaps/stats</code></td><td>Aggregate counts: total/completed/failed/refunded/pending (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swaps/:txid</code></td><td>Single swap record with full fee + memo + status detail (auth)</td><td>5s</td></tr>
         </tbody>
       </table>
     </div>
@@ -2774,6 +2778,68 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const entry = getApiLogById(id)
           if (!entry) return json({ error: 'Not found' }, 404)
           return json(entry)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SWAP HISTORY (auth-required — reports / external tooling)
+        // PRIVACY: standard-wallet history is hidden during passphrase
+        // sessions, matching the RPC `getSwapHistory` behavior.
+        // Read-only — the table is owned by swap-tracker / executeSwap.
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/swaps/stats' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) {
+            return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
+          }
+          return json(getSwapHistoryStats())
+        }
+
+        if (path === '/api/v1/swaps' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const parseNumParam = (name: string): number | undefined => {
+            const raw = q.get(name)
+            if (raw === null) return undefined
+            const n = Number(raw)
+            if (!Number.isFinite(n)) throw new HttpError(400, `Invalid ${name}: must be a number`)
+            return n
+          }
+          // Whitelist `status` so callers can't smuggle arbitrary text into the
+          // query — invalid values get rejected loudly instead of silently
+          // returning everything via a no-match LIKE.
+          const VALID_STATUSES: ReadonlyArray<SwapTrackingStatus | 'all'> = [
+            'all', 'pending', 'confirming', 'output_detected', 'output_confirming',
+            'output_confirmed', 'completed', 'failed', 'refunded',
+          ]
+          const rawStatus = q.get('status')
+          let status: SwapTrackingStatus | 'all' | undefined
+          if (rawStatus !== null) {
+            if (!VALID_STATUSES.includes(rawStatus as any)) {
+              throw new HttpError(400, `Invalid status: ${rawStatus} (allowed: ${VALID_STATUSES.join(', ')})`)
+            }
+            status = rawStatus as SwapTrackingStatus | 'all'
+          }
+          const entries = getSwapHistory({
+            status,
+            asset:    q.get('asset')   || undefined,
+            fromDate: parseNumParam('fromDate'),
+            toDate:   parseNumParam('toDate'),
+            limit:    parseNumParam('limit'),
+            offset:   parseNumParam('offset'),
+          })
+          return json({ entries, count: entries.length })
+        }
+
+        if (path.startsWith('/api/v1/swaps/') && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const tail = path.split('/').pop() || ''
+          if (!tail) return json({ error: 'Invalid txid' }, 400)
+          const record = getSwapHistoryByTxid(tail)
+          if (!record) return json({ error: 'Not found' }, 404)
+          return json(record)
         }
 
         // ═══════════════════════════════════════════════════════════════

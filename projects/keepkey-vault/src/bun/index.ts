@@ -3678,7 +3678,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			previewSwapBuild: async (params) => {
 				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				const { previewSwapBuild } = await import('./swap')
+				const { previewSwapBuild, NOOP_PUSH_SUBSTAGE } = await import('./swap')
 				return previewSwapBuild(params, {
 					wallet: engine.wallet,
 					getAllChains,
@@ -3695,6 +3695,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						return []
 					},
 					wrapSign: (fn) => fn(), // unused in preview
+					pushSubStage: NOOP_PUSH_SUBSTAGE,
 				})
 			},
 

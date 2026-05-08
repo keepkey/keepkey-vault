@@ -20,9 +20,18 @@ import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTracking
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
+import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
+
+/** Debug log — gated behind localStorage `swap.debug=1`. Used in place of
+ *  console.log for high-volume per-render chatter. console.warn/error stay
+ *  ungated. Set in DevTools: localStorage.setItem('swap.debug','1'). */
+const SWAP_DEBUG = ((): boolean => {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem('swap.debug') === '1' } catch { return false }
+})()
+const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
 // Chain CAIP for the network badge — only set for tokens (native assets
 // would just duplicate the main logo).
@@ -883,46 +892,46 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
   const fromPriceUsd = useMemo(() => {
-    if (!fromAsset) { console.log('[SWAP-PRICE] fromPriceUsd: no fromAsset'); return 0 }
+    if (!fromAsset) { swapLog('[SWAP-PRICE] fromPriceUsd: no fromAsset'); return 0 }
     const cb = balance && chain && fromAsset.chainId === chain.id ? balance : balances.find(b => b.chainId === fromAsset.chainId)
-    if (!cb) { console.log(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
+    if (!cb) { swapLog(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
     // Token assets: only ever use the token's own price. Falling through to the
     // native price logic when tokens haven't loaded yet causes a USDT swap to
     // display the ETH price ($229k for 100 USDT in one observed case). If we
     // can't find the token's price, return 0 — the UI will show "—" instead of
     // a wildly wrong number.
     if (fromAsset.contractAddress) {
-      if (!cb.tokens) { console.log(`[SWAP-PRICE] fromPriceUsd: token but cb.tokens not loaded yet`); return 0 }
+      if (!cb.tokens) { swapLog(`[SWAP-PRICE] fromPriceUsd: token but cb.tokens not loaded yet`); return 0 }
       const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
-      console.log(`[SWAP-PRICE] fromPriceUsd: token path, contract=${fromAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
+      swapLog(`[SWAP-PRICE] fromPriceUsd: token path, contract=${fromAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
-    console.log(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
     if (bal <= 0) return 0
     const nativeUsd = cb.nativeBalanceUsd ?? 0
     const result = nativeUsd > 0 ? nativeUsd / bal : 0
-    console.log(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
+    swapLog(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
     return result
   }, [fromAsset, balance, chain, balances])
 
   const toPriceUsdFromBalance = useMemo(() => {
-    if (!toAsset) { console.log('[SWAP-PRICE] toPriceUsdFromBalance: no toAsset'); return 0 }
+    if (!toAsset) { swapLog('[SWAP-PRICE] toPriceUsdFromBalance: no toAsset'); return 0 }
     const cb = balances.find(b => b.chainId === toAsset.chainId)
-    if (!cb) { console.log(`[SWAP-PRICE] toPriceUsdFromBalance: no balance for chainId=${toAsset.chainId}, available=${balances.map(b => b.chainId).join(',')}`); return 0 }
+    if (!cb) { swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: no balance for chainId=${toAsset.chainId}, available=${balances.map(b => b.chainId).join(',')}`); return 0 }
     // Token assets: only token price, never fall through to native (see fromPriceUsd).
     if (toAsset.contractAddress) {
-      if (!cb.tokens) { console.log(`[SWAP-PRICE] toPriceUsdFromBalance: token but cb.tokens not loaded yet`); return 0 }
+      if (!cb.tokens) { swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: token but cb.tokens not loaded yet`); return 0 }
       const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === toAsset.contractAddress?.toLowerCase())
-      console.log(`[SWAP-PRICE] toPriceUsdFromBalance: token path, contract=${toAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
+      swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: token path, contract=${toAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
     const nativeUsd = cb.nativeBalanceUsd ?? 0
-    console.log(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
     if (bal <= 0) return 0
     const result = nativeUsd > 0 ? nativeUsd / bal : 0
-    console.log(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
+    swapLog(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
     return result
   }, [toAsset, balances])
 
@@ -931,7 +940,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const toPriceUsd = useMemo(() => {
     // When isMax, amount is "" — use fromBalance instead (same as quote request logic)
     const effectiveAmount = isMax ? (fromBalance || '0') : amount
-    console.log(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
+    swapLog(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
     if (toPriceUsdFromBalance > 0) return toPriceUsdFromBalance
     // Fallback: derive from FROM price and quote ratio
     if (fromPriceUsd > 0 && quote?.expectedOutput && effectiveAmount) {
@@ -939,11 +948,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       const outAmt = parseFloat(quote.expectedOutput)
       if (inAmt > 0 && outAmt > 0) {
         const derived = (inAmt / outAmt) * fromPriceUsd
-        console.log(`[SWAP-PRICE] toPriceUsd FALLBACK: (${inAmt}/${outAmt}) * $${fromPriceUsd} = $${derived}`)
+        swapLog(`[SWAP-PRICE] toPriceUsd FALLBACK: (${inAmt}/${outAmt}) * $${fromPriceUsd} = $${derived}`)
         return derived
       }
     }
-    console.log('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
+    swapLog('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
     return 0
   }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, amount, isMax, fromBalance])
 
@@ -2141,11 +2150,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 )
               })()}
 
-              {/* High-slippage warning — flagged at >3% */}
-              {(quote.slippageBps / 100) > 3 && (
+              {/* High-slippage warning — flagged at >HIGH_SLIPPAGE_PCT.
+                  Use max(quote, user) so a tight market quote doesn't hide a loose
+                  user tolerance — the user's setting is the one that bounds risk. */}
+              {shouldWarnHighSlippage(quote.slippageBps, slippageBps) && (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
                   <Text fontSize="10px" color="#FB923C">
-                    {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (quote.slippageBps / 100).toFixed(1) })}
+                    {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}
                   </Text>
                 </Flex>
               )}
@@ -2153,18 +2164,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Dust-fee warning — protocol fees + spread eat too much of the swap.
                   THORChain has fixed ~$1.20 BTC outbound fee that crushes small swaps:
                   $2 in → $1.78 out is 11% loss. Tier the warning so users understand:
-                  >10% = strongly recommend bigger amount; >25% = "you're throwing money away".
+                  >DUST_FEE_WARNING_PCT = strongly recommend bigger amount;
+                  >DUST_FEE_SEVERE_PCT  = "you're throwing money away".
                   Computed from displayed in/out USD values, not just quote.fees.totalBps,
                   so msg.value EVM fees and spread are captured. */}
               {(() => {
-                const inAmt = parseFloat(isMax ? (fromBalance || '0') : amount) || 0
-                const outAmt = parseFloat(quote.expectedOutput || '0') || 0
-                const inUsd = inAmt * fromPriceUsd
-                const outUsd = outAmt * toPriceUsd
-                if (inUsd <= 0 || outUsd <= 0) return null
-                const lossPct = ((inUsd - outUsd) / inUsd) * 100
-                if (lossPct < 10) return null
-                const severe = lossPct > 25
+                const dust = computeDustWarning({
+                  inAmount: parseFloat(isMax ? (fromBalance || '0') : amount) || 0,
+                  outAmount: parseFloat(quote.expectedOutput || '0') || 0,
+                  fromPriceUsd,
+                  toPriceUsd,
+                })
+                if (!dust) return null
+                const { severe, lossPct, inUsd, lostUsd, recommendedMinUsd } = dust
                 return (
                   <Flex align="center" gap="2"
                     bg={severe ? "rgba(255,23,68,0.1)" : "rgba(251,146,60,0.08)"}
@@ -2173,8 +2185,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     px="3" py="2" borderRadius="lg" w="full">
                     <Text fontSize="10px" color={severe ? "kk.error" : "#FB923C"} lineHeight="1.4">
                       {severe
-                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: (inUsd - outUsd).toFixed(2), inUsd: inUsd.toFixed(2), minUsd: Math.ceil(inUsd * 4) })
-                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: (inUsd - outUsd).toFixed(2), inUsd: inUsd.toFixed(2) })}
+                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2), minUsd: recommendedMinUsd })
+                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2) })}
                     </Text>
                   </Flex>
                 )

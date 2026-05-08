@@ -21,6 +21,18 @@ import { parseQuoteResponse, parseAssetsResponse, assetToCaip } from './swap-par
 
 const TAG = '[swap]'
 
+/** Debug log — gated behind SWAP_DEBUG=1 (env) or localStorage `swap.debug=1`.
+ *  Used in place of console.log for high-volume per-swap chatter. console.warn /
+ *  console.error are deliberately *not* gated — those still ship in prod. */
+const SWAP_DEBUG = ((): boolean => {
+  try {
+    if (typeof process !== 'undefined' && process.env?.SWAP_DEBUG === '1') return true
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('swap.debug') === '1') return true
+  } catch { /* noop */ }
+  return false
+})()
+const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
+
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 /** Format a bigint wei value as a human-readable string (avoids Number() precision loss for large values) */
@@ -89,7 +101,7 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
   }
 
   const pioneer = await getPioneer()
-  console.log(`${TAG} Fetching available swap assets from Pioneer...`)
+  swapLog(`${TAG} Fetching available swap assets from Pioneer...`)
 
   const resp = await pioneer.GetAvailableAssets()
   const assets = parseAssetsResponse(resp)
@@ -145,7 +157,7 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
     }
   }
 
-  console.log(`${TAG} Loaded ${assets.length} swap assets from Pioneer`)
+  swapLog(`${TAG} Loaded ${assets.length} swap assets from Pioneer`)
   assetCache = assets
   assetCacheTime = Date.now()
   return assets
@@ -187,9 +199,9 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   const senderAddress = normalizeBchAddr(params.fromAddress)
   const recipientAddress = normalizeBchAddr(params.toAddress)
 
-  console.log(`${TAG} Fetching quote: ${params.fromAsset} → ${params.toAsset} (${params.amount})`)
-  console.log(`${TAG} CAIP: ${sellCaip} → ${buyCaip}`)
-  console.log(`${TAG} sender=${senderAddress}, recipient=${recipientAddress}`)
+  swapLog(`${TAG} Fetching quote: ${params.fromAsset} → ${params.toAsset} (${params.amount})`)
+  swapLog(`${TAG} CAIP: ${sellCaip} → ${buyCaip}`)
+  swapLog(`${TAG} sender=${senderAddress}, recipient=${recipientAddress}`)
 
   let quoteResp: any
   try {
@@ -226,7 +238,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   // Log raw response structure for debugging quote parsing issues
   const qDebug = quoteResp?.data?.data || quoteResp?.data || quoteResp
   const firstQuote = Array.isArray(qDebug) ? qDebug[0] : qDebug
-  console.log(`${TAG} Raw quote response keys: ${firstQuote ? Object.keys(firstQuote).join(', ') : 'EMPTY'}`)
+  swapLog(`${TAG} Raw quote response keys: ${firstQuote ? Object.keys(firstQuote).join(', ') : 'EMPTY'}`)
 
   // Pass the validated/clamped slippageBps so parseQuoteResponse's fallback
   // calc lines up with what was actually requested upstream.
@@ -236,7 +248,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   const route = result.swapper && result.swapper.toLowerCase() !== (result.integration || '').toLowerCase()
     ? `${result.swapper} via ${result.integration}`
     : (result.integration || 'unknown')
-  console.log(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
+  swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
   return result
 }
 
@@ -271,14 +283,19 @@ export interface SwapContext {
   getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
   /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
   wrapSign: (fn: () => Promise<any>, details: { operation: string; chain?: string; to?: string; value?: string; memo?: string }) => Promise<any>
-  /** Optional: push a finer-grained substage label to the UI. No-op in REST/headless. */
-  pushSubStage?: (stage: SwapSubStage) => void
+  /** Push a finer-grained substage label to the UI. Required (use NOOP_PUSH_SUBSTAGE
+   *  for REST/headless callers) so a future entry point can't silently regress
+   *  the UI to a coarse phase by forgetting to wire it up. */
+  pushSubStage: (stage: SwapSubStage) => void
 }
+
+/** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
+export const NOOP_PUSH_SUBSTAGE = (_stage: SwapSubStage): void => { /* intentional no-op */ }
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
   const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage } = ctx
-  const stage = (s: SwapSubStage) => { try { pushSubStage?.(s) } catch { /* never block on push */ } }
+  const stage = (s: SwapSubStage) => { try { pushSubStage(s) } catch { /* never block on push */ } }
 
   // Resolve source chain
   const allChains = getAllChains()
@@ -351,13 +368,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     }
   }
 
-  console.log(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)
+  swapLog(`${TAG} Executing: ${params.fromAsset} → ${params.toAsset}, amount=${params.amount}`)
   if (hasPrebuiltTx) {
-    console.log(`${TAG} ${params.integration} — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
+    swapLog(`${TAG} ${params.integration} — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
   } else {
-    console.log(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
+    swapLog(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
   }
-  if (isErc20Source) console.log(`${TAG} ERC-20 source detected: ${params.fromAsset}`)
+  if (isErc20Source) swapLog(`${TAG} ERC-20 source detected: ${params.fromAsset}`)
 
   // 3. Get Pioneer for tx building
   const pioneer = await getPioneer()
@@ -374,10 +391,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // 0x exchange proxy, etc.) — without it the router's transferFrom call
     // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
     if (result.approveTx) {
-      console.log(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
+      swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
       stage('approve-signing')
       const signedApprove = await wallet.ethSignTx(result.approveTx)
-      console.log(`${TAG} Device signed approveTx`)
+      swapLog(`${TAG} Device signed approveTx`)
       let approveHex: string = typeof signedApprove === 'string'
         ? signedApprove
         : (signedApprove?.serializedTx || signedApprove?.serialized || '')
@@ -387,7 +404,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       stage('approve-broadcasting')
       if (rpcUrl) {
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
-        console.log(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
+        swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
         stage('approve-waiting-receipt')
         const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
         if (receipt && !receipt.status) {
@@ -397,7 +414,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       } else {
         const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
         approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
-        console.log(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
+        swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
       }
     }
 
@@ -418,7 +435,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       try {
         allXpubs = getAllBtcXpubs()
         if (allXpubs.length > 0) {
-          console.log(`${TAG} BTC multi-xpub: ${allXpubs.length} funded xpubs`)
+          swapLog(`${TAG} BTC multi-xpub: ${allXpubs.length} funded xpubs`)
           // Primary xpub for change address = selected, or first funded
           const btcInfo = getBtcXpub()
           xpub = btcInfo?.xpub || allXpubs[0].xpub
@@ -455,7 +472,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           xpub = native.xpub
           accountPath = native.accountPath
           allXpubs = derived
-          console.log(`${TAG} BTC lazy-derive: ${derived.length} scriptTypes from device (primary=${native.scriptType})`)
+          swapLog(`${TAG} BTC lazy-derive: ${derived.length} scriptTypes from device (primary=${native.scriptType})`)
         }
       }
     }
@@ -518,7 +535,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
-  console.log(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
+  swapLog(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
   stage('swap-signing')
   let signedTx: any
   try {
@@ -532,7 +549,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     console.error(`${TAG}   stack: ${e.stack?.split('\n').slice(0, 5).join('\n')}`)
     throw e
   }
-  console.log(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
+  swapLog(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
 
   // 5. Broadcast — prefer direct RPC for EVM chains (Pioneer relay can silently drop txs)
   stage('swap-broadcasting')
@@ -547,7 +564,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     }
     try {
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
-      console.log(`${TAG} Broadcast via direct RPC: ${txid}`)
+      swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
       console.warn(`${TAG} Direct RPC broadcast failed (${directErr.message}), falling back to Pioneer...`)
       try {
@@ -571,7 +588,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     }
   }
 
-  console.log(`${TAG} Broadcast success: ${txid}`)
+  swapLog(`${TAG} Broadcast success: ${txid}`)
 
   return {
     txid,
@@ -769,7 +786,7 @@ async function buildRelaySwapTx(
       const floor1559 = fallbackGasPrice * 2n
       maxFeePerGas = toHex(feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559)
       maxPriorityFeePerGas = toHex(feeData.maxPriorityFeePerGas)
-      console.log(`${TAG} Relay tx: using EIP-1559 from RPC (maxFee=${feeData.maxFeePerGas}, prio=${feeData.maxPriorityFeePerGas})`)
+      swapLog(`${TAG} Relay tx: using EIP-1559 from RPC (maxFee=${feeData.maxFeePerGas}, prio=${feeData.maxPriorityFeePerGas})`)
     } else {
       // Chain doesn't support eth_feeHistory — fall back to legacy gasPrice with floor
       try {
@@ -835,12 +852,12 @@ async function buildRelaySwapTx(
               sufficient: balSufficient,
               tokenContract,
             }
-            console.log(`${TAG} Relay tx balance check: current=${currentBalance}, required=${amountBaseUnits}, sufficient=${balSufficient}`)
+            swapLog(`${TAG} Relay tx balance check: current=${currentBalance}, required=${amountBaseUnits}, sufficient=${balSufficient}`)
             if (!balSufficient && !_previewMode) {
               throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
             }
           }
-          console.log(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
+          swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
 
           if (!sufficient) {
             // Build approveTx — same pattern as buildEvmSwapTx (exact-amount,
@@ -915,7 +932,7 @@ async function buildRelaySwapTx(
     )
   }
 
-  console.log(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
+  swapLog(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
   return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
 }
 
@@ -959,7 +976,7 @@ async function buildEvmSwapTx(
       const floor1559 = fallbackGasPrice * 2n
       maxFeePerGas = feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559
       maxPriorityFeePerGas = feeData.maxPriorityFeePerGas
-      console.log(`${TAG} Using EIP-1559 (maxFee=${maxFeePerGas}, prio=${maxPriorityFeePerGas}) for ${fromChain.id}`)
+      swapLog(`${TAG} Using EIP-1559 (maxFee=${maxFeePerGas}, prio=${maxPriorityFeePerGas}) for ${fromChain.id}`)
     } else {
       try { gasPrice = await getEvmGasPrice(rpcUrl) } catch (e: any) {
         console.warn(`${TAG} Failed to fetch gas price via RPC, using ${fallbackGwei} gwei fallback for ${fromChain.id}: ${e.message}`)
@@ -978,7 +995,7 @@ async function buildEvmSwapTx(
 
   // Enforce minimum floor on legacy path
   if (!maxFeePerGas && gasPrice < fallbackGasPrice) {
-    console.log(`${TAG} Gas price ${gasPrice} below floor ${fallbackGasPrice} (${fallbackGwei} gwei) — using floor`)
+    swapLog(`${TAG} Gas price ${gasPrice} below floor ${fallbackGasPrice} (${fallbackGwei} gwei) — using floor`)
     gasPrice = fallbackGasPrice
   }
 
@@ -1051,7 +1068,7 @@ async function buildEvmSwapTx(
     if (rpcUrl) {
       try {
         tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract)
-        console.log(`${TAG} Token decimals (direct RPC): ${tokenDecimals}`)
+        swapLog(`${TAG} Token decimals (direct RPC): ${tokenDecimals}`)
       } catch (e: any) {
         console.warn(`${TAG} Direct RPC decimals failed: ${e.message}, trying Pioneer...`)
         try {
@@ -1076,7 +1093,7 @@ async function buildEvmSwapTx(
 
     // c) Parse amount using TOKEN decimals (not chain's native 18)
     const amountBaseUnits = parseUnits(params.amount, tokenDecimals)
-    console.log(`${TAG} ERC-20 amount: ${amountBaseUnits} base units (${tokenDecimals} decimals)`)
+    swapLog(`${TAG} ERC-20 amount: ${amountBaseUnits} base units (${tokenDecimals} decimals)`)
 
     // Validate native balance covers gas for approve + deposit
     const approveGasLimit = 80000n
@@ -1104,8 +1121,8 @@ async function buildEvmSwapTx(
         currentAllowanceWei = allowance
         currentTokenBalance = bal
         needsApproval = currentAllowanceWei < amountBaseUnits
-        console.log(`${TAG} Current allowance: ${currentAllowanceWei}, needed: ${amountBaseUnits}, needsApproval: ${needsApproval}`)
-        if (bal !== null) console.log(`${TAG} Token balance: ${bal}, needed: ${amountBaseUnits}, sufficient: ${bal >= amountBaseUnits}`)
+        swapLog(`${TAG} Current allowance: ${currentAllowanceWei}, needed: ${amountBaseUnits}, needsApproval: ${needsApproval}`)
+        if (bal !== null) swapLog(`${TAG} Token balance: ${bal}, needed: ${amountBaseUnits}, sufficient: ${bal >= amountBaseUnits}`)
       } catch (e: any) {
         console.warn(`${TAG} Allowance/balance check failed, assuming approval needed: ${e.message}`)
       }
@@ -1155,7 +1172,7 @@ async function buildEvmSwapTx(
       if (previewMode) {
         nonce += 1
       } else {
-      console.log(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
+      swapLog(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
       stage('approve-signing')
       const signedApprove = await wallet.ethSignTx(approveTx)
 
@@ -1176,11 +1193,11 @@ async function buildEvmSwapTx(
       if (rpcUrl) {
         stage('approve-broadcasting')
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
-        console.log(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
+        swapLog(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
 
         // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts.
         // 180s tolerates busy mainnet (some hours: pending pool 30-60s, then mining).
-        console.log(`${TAG} Waiting for approval receipt (up to 180s)...`)
+        swapLog(`${TAG} Waiting for approval receipt (up to 180s)...`)
         stage('approve-waiting-receipt')
         const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
         if (receipt && !receipt.status) {
@@ -1189,12 +1206,12 @@ async function buildEvmSwapTx(
         if (!receipt) {
           console.warn(`${TAG} Approval receipt not confirmed within 180s — proceeding with deposit (nonce gap risk)`)
         } else {
-          console.log(`${TAG} Approval confirmed on-chain (gas used: ${receipt.gasUsed})`)
+          swapLog(`${TAG} Approval confirmed on-chain (gas used: ${receipt.gasUsed})`)
         }
       } else {
         const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
         approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
-        console.log(`${TAG} Approve tx broadcast (Pioneer): ${approvalTxid}`)
+        swapLog(`${TAG} Approve tx broadcast (Pioneer): ${approvalTxid}`)
         // No receipt check available without RPC — warn user
         console.warn(`${TAG} No direct RPC — cannot verify approval receipt. Proceeding with deposit.`)
       }
@@ -1218,7 +1235,7 @@ async function buildEvmSwapTx(
       erc20DepositGas = await estimateGas(rpcUrl, {
         to: routerAddress, from: fromAddress, data: depositData, value: '0x0',
       }, depositGasLimit)
-      console.log(`${TAG} Estimated deposit gas: ${erc20DepositGas} (fallback: ${depositGasLimit})`)
+      swapLog(`${TAG} Estimated deposit gas: ${erc20DepositGas} (fallback: ${depositGasLimit})`)
     }
 
     const unsignedTx: any = {
@@ -1237,7 +1254,7 @@ async function buildEvmSwapTx(
       unsignedTx.gasPrice = toHex(gasPrice)
     }
 
-    console.log(`${TAG} ERC-20 router call: to=${routerAddress}, vault=${params.inboundAddress}, token=${tokenContract}, amount=${amountBaseUnits}`)
+    swapLog(`${TAG} ERC-20 router call: to=${routerAddress}, vault=${params.inboundAddress}, token=${tokenContract}, amount=${amountBaseUnits}`)
     return { unsignedTx, approvalTxid, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
 
   } else {
@@ -1255,7 +1272,7 @@ async function buildEvmSwapTx(
     // sendMax: deduct gas from send amount so the entire balance is used
     if (params.isMax && nativeBalance > gasFee) {
       amountWei = nativeBalance - gasFee
-      console.log(`${TAG} sendMax: adjusted amount to ${formatWei(amountWei)} ${fromChain.symbol} (balance ${formatWei(nativeBalance)} - gas ${formatWei(gasFee)})`)
+      swapLog(`${TAG} sendMax: adjusted amount to ${formatWei(amountWei)} ${fromChain.symbol} (balance ${formatWei(nativeBalance)} - gas ${formatWei(gasFee)})`)
     }
 
     const data = encodeDepositWithExpiry(
@@ -1272,7 +1289,7 @@ async function buildEvmSwapTx(
         gasLimit = await estimateGas(rpcUrl, {
           to: routerAddress, from: fromAddress, data, value: toHex(amountWei),
         }, staticGasLimit)
-        console.log(`${TAG} Estimated native deposit gas: ${gasLimit} (fallback: ${staticGasLimit})`)
+        swapLog(`${TAG} Estimated native deposit gas: ${gasLimit} (fallback: ${staticGasLimit})`)
       } catch (e: any) {
         console.warn(`${TAG} Gas estimation failed, using static fallback ${staticGasLimit}: ${e.message}`)
         gasLimit = staticGasLimit
@@ -1290,7 +1307,7 @@ async function buildEvmSwapTx(
     // Re-adjust for sendMax with refined gas estimate + L1 data fee buffer
     if (params.isMax && nativeBalance > totalGasReserve) {
       amountWei = nativeBalance - totalGasReserve
-      if (l1DataFeeBuffer > 0n) console.log(`${TAG} sendMax includes L1 data fee buffer: ${formatWei(l1DataFeeBuffer)}`)
+      if (l1DataFeeBuffer > 0n) swapLog(`${TAG} sendMax includes L1 data fee buffer: ${formatWei(l1DataFeeBuffer)}`)
     }
 
     if (nativeBalance < amountWei + totalGasReserve) {
@@ -1325,7 +1342,7 @@ async function buildEvmSwapTx(
       unsignedTx.gasPrice = toHex(gasPrice)
     }
 
-    console.log(`${TAG} EVM native router call: to=${routerAddress}, vault=${params.inboundAddress}, value=${formatWei(amountWei)} ${fromChain.symbol}${params.isMax ? ' (sendMax)' : ''}`)
+    swapLog(`${TAG} EVM native router call: to=${routerAddress}, vault=${params.inboundAddress}, value=${formatWei(amountWei)} ${fromChain.symbol}${params.isMax ? ' (sendMax)' : ''}`)
     return { unsignedTx }
   }
 }
