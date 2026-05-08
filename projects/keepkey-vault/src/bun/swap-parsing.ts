@@ -258,6 +258,24 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
 
     const isToken = !!parsed.contractAddress
 
+    // CAIP is required for tokens — pioneer-server's swap-config controller
+    // ALWAYS emits it (verified live; the response is keyed on CAIP). If a
+    // token entry arrives without one, that's a malformed Pioneer response;
+    // dropping the asset is safer than falling back to the native chain CAIP,
+    // which would silently quote / attach the wrong asset (e.g. ETH.USDT
+    // routing as eip155:1/slip44:60 — native ETH).
+    let caip: string
+    if (isToken) {
+      if (!raw.caip) {
+        console.warn(`[swap] dropping token ${thorAsset} — pioneer-server response missing caip`)
+        continue
+      }
+      caip = raw.caip
+    } else {
+      // Native: chainDef.caip is correct by definition (chain native = chain CAIP).
+      caip = raw.caip || chainDef.caip
+    }
+
     assets.push({
       asset: thorAsset,
       chainId: ourChainId,
@@ -265,7 +283,7 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
       name: raw.name || (isToken ? `${parsed.symbol} (${chainDef.coin})` : chainDef.coin),
       chainFamily: chainDef.chainFamily,
       decimals: raw.decimals ?? chainDef.decimals,
-      caip: raw.caip || chainDef.caip,
+      caip,
       contractAddress: parsed.contractAddress,
       icon: raw.icon || raw.image,
     })

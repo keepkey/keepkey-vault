@@ -119,17 +119,25 @@ const FIXTURE_SINGLE_QUOTE = {
   },
 }
 
-/** Assets response from Pioneer GetAvailableAssets */
+/** Assets response from Pioneer GetAvailableAssets — every entry includes
+ *  caip per pioneer-server's swap-config controller contract (the response is
+ *  built from a CAIP-keyed whitelist). The token-without-caip fixture below
+ *  pins the malformed-response defense. */
 const FIXTURE_ASSETS_RESPONSE = {
   data: {
     success: true,
     data: {
       assets: [
-        { asset: 'BTC.BTC', symbol: 'BTC', name: 'Bitcoin', decimals: 8 },
-        { asset: 'ETH.ETH', symbol: 'ETH', name: 'Ethereum', decimals: 18 },
-        { asset: 'ETH.USDT-0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
-        { asset: 'GAIA.ATOM', symbol: 'ATOM', name: 'Cosmos Hub', decimals: 6 },
-        { asset: 'BASE.ETH', symbol: 'ETH', name: 'Base ETH', decimals: 18 },
+        { asset: 'BTC.BTC', symbol: 'BTC', name: 'Bitcoin', decimals: 8,
+          caip: 'bip122:000000000019d6689c085ae165831e93/slip44:0' },
+        { asset: 'ETH.ETH', symbol: 'ETH', name: 'Ethereum', decimals: 18,
+          caip: 'eip155:1/slip44:60' },
+        { asset: 'ETH.USDT-0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', name: 'Tether USD', decimals: 6,
+          caip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7' },
+        { asset: 'GAIA.ATOM', symbol: 'ATOM', name: 'Cosmos Hub', decimals: 6,
+          caip: 'cosmos:cosmoshub-4/slip44:118' },
+        { asset: 'BASE.ETH', symbol: 'ETH', name: 'Base ETH', decimals: 18,
+          caip: 'eip155:8453/slip44:60' },
         { asset: 'UNKNOWN.FOO', symbol: 'FOO' }, // unknown chain — should be filtered out
       ],
     },
@@ -377,6 +385,41 @@ describe('parseAssetsResponse', () => {
     const assets = parseAssetsResponse(FIXTURE_ASSETS_RESPONSE)
     const unknown = assets.find(a => a.asset === 'UNKNOWN.FOO')
     expect(unknown).toBeUndefined()
+  })
+
+  test('preserves token caip from pioneer-server (case-sensitive)', () => {
+    // pioneer-server's swap-config controller emits caip with lowercase
+    // contract for EVM tokens (CAIP-19 spec) — vault must NOT silently
+    // fall back to the native chain CAIP when raw.caip is present.
+    const assets = parseAssetsResponse(FIXTURE_ASSETS_RESPONSE)
+    const usdt = assets.find(a => a.symbol === 'USDT' && a.contractAddress)
+    expect(usdt).toBeTruthy()
+    expect(usdt!.caip).toBe('eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7')
+    expect(usdt!.caip).not.toBe('eip155:1/slip44:60') // would be the bug — token attached to native CAIP
+  })
+
+  test('drops malformed token assets (missing caip) instead of falling back to native', () => {
+    // If pioneer-server ever emits a token entry without caip, the previous
+    // `raw.caip || chainDef.caip` fallback would make the token quote against
+    // the chain's NATIVE CAIP — silent corruption. Defense: drop + warn.
+    const malformed = {
+      data: {
+        success: true,
+        data: {
+          assets: [
+            { asset: 'ETH.ETH', symbol: 'ETH', decimals: 18,
+              caip: 'eip155:1/slip44:60' }, // native — fine
+            { asset: 'ETH.USDT-0xdAC17F958D2ee523a2206206994597C13D831ec7',
+              symbol: 'USDT', decimals: 6 }, // token without caip — should be dropped
+          ],
+        },
+      },
+    }
+    const assets = parseAssetsResponse(malformed)
+    expect(assets.length).toBe(1)
+    expect(assets[0].asset).toBe('ETH.ETH')
+    // The token was dropped, not silently keyed under native CAIP.
+    expect(assets.find(a => a.symbol === 'USDT')).toBeUndefined()
   })
 
   test('parses flat array response (single unwrap)', () => {

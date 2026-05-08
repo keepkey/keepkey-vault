@@ -180,11 +180,17 @@ export function AssetPickerDialog({
     // Fall back to a synthesized one when Pioneer didn't include this CAIP —
     // matches the "try quote" UX and lets Pioneer reject with a real reason
     // instead of the picker silently swallowing the click.
-    const asset = entry.swappable ?? synthesizeSwapAsset(entry)
-    if (!asset) {
+    const base = entry.swappable ?? synthesizeSwapAsset(entry)
+    if (!base) {
       console.warn('[AssetPickerDialog] No vault chain config for', entry.chainId, '- refusing select')
       return
     }
+    // Force the outgoing CAIP to match the canonicalized form the picker
+    // resolved to (entry.caip went through canonicalizeCaip at build time;
+    // base.caip is whatever pioneer-server emitted, which can drift —
+    // currently pioneer-server uses /erc20: for BSC tokens but discovery
+    // emits /bep20:; mirror this in case pioneer-server ever diverges).
+    const asset = base.caip === entry.caip ? base : { ...base, caip: entry.caip }
     onSelect(asset)
     onClose()
   }, [onSelect, onClose])
