@@ -15,11 +15,79 @@
  */
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
-import { assetToCaip } from './swap-parsing'
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid } from './db'
 import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
+import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
+import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
+
+/** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
+ *  layer accepts; symbols / asset names / display names are derived here for
+ *  UI rendering and historic records, never used for routing or selection.
+ *
+ *  Falls back to a CAIP-derived hint for assets pioneer-discovery doesn't
+ *  know — better than crashing or silently writing empty strings. */
+function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
+  const entry = (discoveryAssetData as Record<string, { symbol?: string; name?: string; chainId?: string }>)[caip]
+  const symbol = entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
+  const name = entry?.name || symbol
+  // THORChain-style display string (CHAIN.SYMBOL[-CONTRACT]). Used only for
+  // log lines + history rows; vault never parses this back to identify.
+  const chainId = entry?.chainId || caip.split('/')[0]
+  const thorPrefix = VAULT_CHAIN_TO_THOR[chainIdToVaultId(chainId)] || symbol
+  const tokenMatch = caip.match(/\/(erc20|bep20|token):(.+)$/)
+  const asset = tokenMatch
+    ? `${thorPrefix}.${symbol}-${tokenMatch[2].toUpperCase()}`
+    : `${thorPrefix}.${symbol}`
+  return { symbol, name, asset }
+}
+
+/** Best-effort CAIP-2 → vault chain id (e.g. 'eip155:1' → 'ethereum'). Used
+ *  by resolveDisplayFromCaip — VAULT_CHAIN_TO_THOR is keyed on vault ids,
+ *  not raw CAIP-2. Safe fallback: return the CAIP-2 itself when unknown. */
+function chainIdToVaultId(caip2: string): string {
+  // Inline the small mapping rather than importing CHAINS just for this —
+  // covers every chain that has a THORChain prefix in our lookup.
+  const map: Record<string, string> = {
+    'bip122:000000000019d6689c085ae165831e93': 'bitcoin',
+    'bip122:000000000000000000651ef99cb9fcbe': 'bitcoincash',
+    'bip122:00000000001a91e3dace36e2be3bf030': 'dogecoin',
+    'bip122:12a765e31ffd4059bada1e25190f6e98': 'litecoin',
+    'bip122:000007d91d1254d60e2dd1ae58038307': 'dash',
+    'eip155:1': 'ethereum',
+    'eip155:10': 'optimism',
+    'eip155:56': 'bsc',
+    'eip155:137': 'polygon',
+    'eip155:8453': 'base',
+    'eip155:42161': 'arbitrum',
+    'eip155:43114': 'avalanche',
+    'cosmos:cosmoshub-4': 'cosmos',
+    'cosmos:thorchain-mainnet-v1': 'thorchain',
+    'cosmos:mayachain-mainnet-v1': 'mayachain',
+    'cosmos:osmosis-1': 'osmosis',
+    'tron:0x2b6653dc': 'tron',
+    'tron:27Lqcw': 'tron',
+    'ton:-239': 'ton',
+    'ripple:0': 'ripple',
+    'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'solana',
+  }
+  return map[caip2] || caip2
+}
+import { decideRevertOutcome } from '../shared/swap-revert'
+export { decideRevertOutcome } from '../shared/swap-revert'
 
 const TAG = '[swap-tracker]'
+
+/** Debug log — gated behind SWAP_DEBUG=1 (env) or localStorage `swap.debug=1`.
+ *  Used in place of console.log for high-volume per-swap chatter. console.warn /
+ *  console.error are deliberately *not* gated — those still ship in prod. */
+const SWAP_DEBUG = ((): boolean => {
+  try {
+    if (typeof process !== 'undefined' && process.env?.SWAP_DEBUG === '1') return true
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('swap.debug') === '1') return true
+  } catch { /* noop */ }
+  return false
+})()
+const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
 /** Infer a reasonable confirmation count from persisted status when the DB lacks a confirmations column.
  *  These are conservative lower-bounds — the next poll will replace them with real data. */
@@ -81,7 +149,7 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
     }
 
     pioneerVerified = true
-    console.log(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+    swapLog(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
   })()
 
   try {
@@ -128,7 +196,7 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
       }
     }
     if (pendingSwaps.size > 0) {
-      console.log(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
+      swapLog(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
       // No polling at boot — refreshSwap() drives status updates only when the
       // user opens that specific swap in the dialog.
     }
@@ -146,24 +214,22 @@ export function trackSwap(
   opts?: { skipPersist?: boolean },
 ): void {
   const now = Date.now()
-  // Best-effort CAIP derivation — used by the SwapDialog resume path to
-  // resolve asset logos without a Pioneer round-trip. Falls back to undefined
-  // on unknown chains; AssetIcon handles that gracefully.
-  let fromCaip: string | undefined
-  let toCaip: string | undefined
-  try { fromCaip = assetToCaip(params.fromAsset) } catch { /* unknown chain */ }
-  try { toCaip = assetToCaip(params.toAsset) } catch { /* unknown chain */ }
+  // CAIP is the only identifier the caller provides. Display strings
+  // (symbol, name, THORChain-style asset) are derived here so UI/history
+  // can render without a Pioneer round-trip — never used for routing.
+  const fromDisplay = resolveDisplayFromCaip(params.fromCaip)
+  const toDisplay = resolveDisplayFromCaip(params.toCaip)
 
   const swap: PendingSwap = {
     txid: result.txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
-    fromSymbol: params.fromAsset.split('.').pop()?.split('-')[0] || params.fromAsset,
-    toSymbol: params.toAsset.split('.').pop()?.split('-')[0] || params.toAsset,
+    fromAsset: fromDisplay.asset,
+    toAsset: toDisplay.asset,
+    fromSymbol: fromDisplay.symbol,
+    toSymbol: toDisplay.symbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
-    fromCaip,
-    toCaip,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     memo: params.memo,
@@ -180,20 +246,21 @@ export function trackSwap(
   }
 
   pendingSwaps.set(result.txid, swap)
-  console.log(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
+  swapLog(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
 
-  // Persist to SQLite — full lifecycle record
+  // Persist to SQLite — full lifecycle record. Asset string + symbols are
+  // derived display fields, populated from the CAIP. CAIP is canonical.
   const historyRecord: SwapHistoryRecord = {
     id: crypto.randomUUID(),
     txid: result.txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
-    fromSymbol: swap.fromSymbol,
-    toSymbol: swap.toSymbol,
+    fromAsset: fromDisplay.asset,
+    toAsset: toDisplay.asset,
+    fromSymbol: fromDisplay.symbol,
+    toSymbol: toDisplay.symbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
-    fromCaip,
-    toCaip,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     quotedOutput: quote.expectedOutput || params.expectedOutput,
     minimumOutput: quote.minimumOutput || '0',
@@ -242,21 +309,6 @@ export function dismissSwap(txid: string): void {
   pendingSwaps.delete(txid)
 }
 
-/** Convert THORChain asset to CAIP using the cached Pioneer asset list so we
- *  pick up the canonical lowercased form for EVM tokens (and the base58 case
- *  for TRON tokens). The reconstruct fallback path preserves THORChain's
- *  uppercased contract address — Pioneer's swap-tracker rejects that with
- *  a 400. Falls back to the raw thorAsset if conversion fails entirely. */
-async function safeAssetToCaip(thorAsset: string): Promise<string> {
-  try {
-    const { getSwapAssets } = await import('./swap')
-    const knownAssets = await getSwapAssets()
-    return assetToCaip(thorAsset, knownAssets)
-  } catch {
-    try { return assetToCaip(thorAsset) } catch { return thorAsset }
-  }
-}
-
 // ── Pioneer REST registration ───────────────────────────────────────
 
 // Pioneer's CreatePendingSwap validator only accepts these integration values
@@ -271,10 +323,14 @@ const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   const pioneer = await getPioneer()
 
-  const [sellCaip, buyCaip] = await Promise.all([
-    safeAssetToCaip(swap.fromAsset),
-    safeAssetToCaip(swap.toAsset),
-  ])
+  // CAIP comes straight from the swap record — no asset-string round-trip
+  // needed. PendingSwap.fromCaip is populated by trackSwap() from the picker's
+  // selection and is the canonical identifier Pioneer's tracker keys on.
+  const sellCaip = swap.fromCaip
+  const buyCaip = swap.toCaip
+  if (!sellCaip || !buyCaip) {
+    throw new Error(`registerWithPioneer: missing CAIP (from=${sellCaip}, to=${buyCaip}) for ${swap.txid}`)
+  }
 
   const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
 
@@ -310,11 +366,11 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
     swapper: swap.swapper,
   }
 
-  console.log(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
+  swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
   const resp = await pioneer.CreatePendingSwap(body)
-  console.log(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
-  console.log(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
+  swapLog(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
+  swapLog(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
 }
 
 // ── On-demand Pioneer fetch ────────────────────────────────────────
@@ -366,7 +422,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       swap.expectedOutput = receivedOutput
     }
 
-    console.log(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
+    swapLog(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
 
     // Persist status change to SQLite (skip for passphrase wallet swaps)
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
@@ -440,21 +496,19 @@ function evmRpcUrlFor(fromChainId: string): string | undefined {
  *  Returns true if we definitively flagged the swap as failed (caller should
  *  short-circuit any further status polling). */
 async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
-  if (swap.status === 'failed' || swap.status === 'completed' || swap.status === 'refunded') return false
   const rpcUrl = evmRpcUrlFor(swap.fromChainId || '')
   if (!rpcUrl) return false
   try {
     const receipt = await getTxReceiptOnce(rpcUrl, swap.txid)
-    if (!receipt) return false  // not mined yet
-    if (receipt.status === false) {
-      console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${receipt.blockNumber}) — marking failed`)
-      swap.status = 'failed'
-      swap.error = 'Transaction reverted on-chain — gas spent, asset NOT delivered. Common causes: insufficient allowance, slippage tripped, or contract reverted.'
-      swap.updatedAt = Date.now()
-      try { updateSwapHistoryStatus(swap.txid, 'failed') } catch { /* ignore */ }
-      pushUpdate(swap)
-      return true
-    }
+    const decision = decideRevertOutcome(swap.status, receipt)
+    if (!decision) return false
+    console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${decision.blockNumber}) — marking failed`)
+    swap.status = decision.status
+    swap.error = decision.error
+    swap.updatedAt = Date.now()
+    try { updateSwapHistoryStatus(swap.txid, 'failed') } catch { /* ignore */ }
+    pushUpdate(swap)
+    return true
   } catch (e: any) {
     console.warn(`${TAG} EVM receipt check failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
   }
@@ -467,7 +521,7 @@ async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
 export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
   let swap = pendingSwaps.get(txid) || hydrateFromDb(txid)
   if (!swap) {
-    console.log(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
+    swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
     return null
   }
 
@@ -482,10 +536,10 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
     const resp = await pioneer.GetPendingSwap({ txHash: txid })
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
-      console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
       return swap
     }
-    console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
+    swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
     applyRemoteSwapData(swap, remoteSwap)
 
     // If just completed without an outbound txid, request a rescan to pick it up.
@@ -500,7 +554,7 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
     }
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
-      console.log(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
     } else {
       console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
     }
@@ -539,12 +593,12 @@ function pushUpdate(swap: PendingSwap): void {
     error: swap.error,
     swapper: swap.swapper,
   }
-  console.log(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
+  swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)
 }
 
 function pushComplete(swap: PendingSwap): void {
   if (!sendMessage) return
-  console.log(`${TAG} Pushing swap-complete: ${swap.txid} status=${swap.status}`)
+  swapLog(`${TAG} Pushing swap-complete: ${swap.txid} status=${swap.status}`)
   sendMessage('swap-complete', swap)
 }

@@ -20,9 +20,19 @@ import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTracking
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
+import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
+import { AssetPickerDialog } from "./AssetPickerDialog"
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
+
+/** Debug log — gated behind localStorage `swap.debug=1`. Used in place of
+ *  console.log for high-volume per-render chatter. console.warn/error stay
+ *  ungated. Set in DevTools: localStorage.setItem('swap.debug','1'). */
+const SWAP_DEBUG = ((): boolean => {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem('swap.debug') === '1' } catch { return false }
+})()
+const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
 // Chain CAIP for the network badge — only set for tokens (native assets
 // would just duplicate the main logo).
@@ -116,13 +126,6 @@ const SwapArrowIcon = () => (
 const ChevronDownIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="6 9 12 15 18 9" />
-  </svg>
-)
-
-const SearchIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8" />
-    <path d="m21 21-4.35-4.35" />
   </svg>
 )
 
@@ -289,129 +292,19 @@ const DIALOG_CSS = `
 `
 
 // ── Asset Selector ──────────────────────────────────────────────────
+// Renders the selected-asset display (or a "select asset" prompt). Clicking
+// either delegates to the parent SwapDialog, which renders a single shared
+// AssetPickerDialog at modal-over-modal z-index. Search/filter logic moved
+// out of this component into AssetPickerDialog + swap-discovery.
 interface AssetSelectorProps {
   label: string
   selected: SwapAsset | null
-  assets: SwapAsset[]
-  onSelect: (asset: SwapAsset) => void
-  balances?: ChainBalance[]
-  exclude?: string
+  onOpenPicker: () => void
   disabled?: boolean
-  nativeOnly?: boolean
 }
 
-function AssetSelector({ label, selected, assets, onSelect, balances, exclude, disabled, nativeOnly }: AssetSelectorProps) {
+function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelectorProps) {
   const { t } = useTranslation("swap")
-  const { fmtCompact } = useFiat()
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (open && inputRef.current) inputRef.current.focus()
-  }, [open])
-
-  const filtered = useMemo(() => {
-    let list = exclude ? assets.filter(a => a.asset !== exclude) : assets
-    if (nativeOnly) list = list.filter(a => !a.contractAddress)
-    if (search) {
-      const q = search.toLowerCase()
-      list = list.filter(a =>
-        a.symbol.toLowerCase().includes(q) ||
-        a.name.toLowerCase().includes(q) ||
-        a.chainId.toLowerCase().includes(q)
-      )
-    }
-    return list.slice(0, 50)
-  }, [assets, search, exclude, nativeOnly])
-
-  const getBalance = useCallback((asset: SwapAsset): { balance: string; usd: number } | null => {
-    if (!balances) return null
-    const chain = balances.find(b => b.chainId === asset.chainId)
-    if (!chain) return null
-    if (asset.contractAddress && chain.tokens) {
-      const token = chain.tokens.find(t =>
-        t.contractAddress?.toLowerCase() === asset.contractAddress?.toLowerCase()
-      )
-      return token ? { balance: token.balance, usd: token.balanceUsd || 0 } : null
-    }
-    return { balance: chain.balance, usd: chain.balanceUsd || 0 }
-  }, [balances])
-
-  if (open) {
-    return (
-      <Box>
-        <Text fontSize="xs" color="kk.textMuted" mb="1">{label}</Text>
-        <Box bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="lg" overflow="hidden">
-          <Flex align="center" gap="2" px="3" py="2" borderBottom="1px solid" borderColor="kk.border">
-            <SearchIcon />
-            <Input
-              ref={inputRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("searchAssets")}
-              bg="transparent"
-              border="none"
-              color="kk.textPrimary"
-              size="sm"
-              px="0"
-              _focus={{ outline: "none", boxShadow: "none" }}
-            />
-            <Button
-              size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-              onClick={() => { setOpen(false); setSearch("") }}
-            >
-              &times;
-            </Button>
-          </Flex>
-          <Box maxH="200px" overflow="auto">
-            {filtered.length === 0 ? (
-              <Text fontSize="xs" color="kk.textMuted" p="3" textAlign="center">{t("noAssets")}</Text>
-            ) : (
-              filtered.map((asset) => {
-                const balInfo = getBalance(asset)
-                return (
-                  <Flex
-                    key={asset.asset}
-                    align="center"
-                    gap="3"
-                    px="3"
-                    py="2.5"
-                    cursor="pointer"
-                    _hover={{ bg: "rgba(35,220,200,0.06)" }}
-                    transition="all 0.15s"
-                    onClick={() => { onSelect(asset); setOpen(false); setSearch("") }}
-                    borderRadius="lg"
-                    mx="1"
-                  >
-                    <AssetIcon
-                      caip={asset.caip}
-                      iconUrl={asset.icon}
-                      chainCaip={chainBadgeCaip(asset)}
-                      size={48}
-                      alt={asset.symbol}
-                    />
-                    <Flex direction="column" flex="1" minW="0">
-                      <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{asset.symbol}</Text>
-                      <Text fontSize="10px" color="kk.textMuted" truncate>{asset.name}</Text>
-                    </Flex>
-                    {balInfo && (
-                      <Flex direction="column" align="flex-end" gap="0">
-                        <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary">{formatBalance(balInfo.balance)}</Text>
-                        {balInfo.usd > 0 && (
-                          <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(balInfo.usd)}</Text>
-                        )}
-                      </Flex>
-                    )}
-                  </Flex>
-                )
-              })
-            )}
-          </Box>
-        </Box>
-      </Box>
-    )
-  }
 
   /* ── Selected asset → big prominent display ── */
   if (selected) {
@@ -422,7 +315,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
           {!disabled && (
             <Box as="button" display="flex" alignItems="center" gap="1" color="kk.textMuted" fontSize="11px" fontWeight="500"
               _hover={{ color: "kk.gold" }} transition="color 0.15s"
-              onClick={() => setOpen(true)}>
+              onClick={onOpenPicker}>
               {t("change") || "Change"} <ChevronDownIcon />
             </Box>
           )}
@@ -431,7 +324,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
           align="center" gap="5"
           cursor={disabled ? "default" : "pointer"}
           opacity={disabled ? 0.7 : 1}
-          onClick={() => { if (!disabled) setOpen(true) }}
+          onClick={() => { if (!disabled) onOpenPicker() }}
           _hover={disabled ? {} : { opacity: 0.85 }}
           transition="opacity 0.15s"
         >
@@ -473,7 +366,7 @@ function AssetSelector({ label, selected, assets, onSelect, balances, exclude, d
         opacity={disabled ? 0.6 : 1}
         _hover={disabled ? {} : { borderColor: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
         transition="all 0.2s"
-        onClick={() => { if (!disabled) setOpen(true) }}
+        onClick={() => { if (!disabled) onOpenPicker() }}
       >
         <Box w="64px" h="64px" borderRadius="full" bg="rgba(255,255,255,0.06)" display="flex" alignItems="center" justifyContent="center">
           <Text fontSize="xl" color="kk.textMuted">?</Text>
@@ -509,6 +402,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  // Which side opened the asset picker — null when closed. Single shared
+  // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
+  const [pickerSide, setPickerSide] = useState<'from' | 'to' | null>(null)
   const [amount, setAmount] = useState("")
   const [fiatAmount, setFiatAmount] = useState("")
   const [inputMode, setInputMode] = useState<'crypto' | 'fiat'>('crypto')
@@ -853,8 +749,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       // Preserve real slippage from history; fall back to current setting so
       // the review screen never displays a misleading 0%.
       slippageBps: resumeSwap.slippageBps ?? slippageBps,
-      fromAsset: resumeSwap.fromAsset,
-      toAsset: resumeSwap.toAsset,
     })
     setPhase('submitted')
   }, [open, resumeSwap])
@@ -883,46 +777,46 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
   const fromPriceUsd = useMemo(() => {
-    if (!fromAsset) { console.log('[SWAP-PRICE] fromPriceUsd: no fromAsset'); return 0 }
+    if (!fromAsset) { swapLog('[SWAP-PRICE] fromPriceUsd: no fromAsset'); return 0 }
     const cb = balance && chain && fromAsset.chainId === chain.id ? balance : balances.find(b => b.chainId === fromAsset.chainId)
-    if (!cb) { console.log(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
+    if (!cb) { swapLog(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
     // Token assets: only ever use the token's own price. Falling through to the
     // native price logic when tokens haven't loaded yet causes a USDT swap to
     // display the ETH price ($229k for 100 USDT in one observed case). If we
     // can't find the token's price, return 0 — the UI will show "—" instead of
     // a wildly wrong number.
     if (fromAsset.contractAddress) {
-      if (!cb.tokens) { console.log(`[SWAP-PRICE] fromPriceUsd: token but cb.tokens not loaded yet`); return 0 }
+      if (!cb.tokens) { swapLog(`[SWAP-PRICE] fromPriceUsd: token but cb.tokens not loaded yet`); return 0 }
       const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
-      console.log(`[SWAP-PRICE] fromPriceUsd: token path, contract=${fromAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
+      swapLog(`[SWAP-PRICE] fromPriceUsd: token path, contract=${fromAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
-    console.log(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
     if (bal <= 0) return 0
     const nativeUsd = cb.nativeBalanceUsd ?? 0
     const result = nativeUsd > 0 ? nativeUsd / bal : 0
-    console.log(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
+    swapLog(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
     return result
   }, [fromAsset, balance, chain, balances])
 
   const toPriceUsdFromBalance = useMemo(() => {
-    if (!toAsset) { console.log('[SWAP-PRICE] toPriceUsdFromBalance: no toAsset'); return 0 }
+    if (!toAsset) { swapLog('[SWAP-PRICE] toPriceUsdFromBalance: no toAsset'); return 0 }
     const cb = balances.find(b => b.chainId === toAsset.chainId)
-    if (!cb) { console.log(`[SWAP-PRICE] toPriceUsdFromBalance: no balance for chainId=${toAsset.chainId}, available=${balances.map(b => b.chainId).join(',')}`); return 0 }
+    if (!cb) { swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: no balance for chainId=${toAsset.chainId}, available=${balances.map(b => b.chainId).join(',')}`); return 0 }
     // Token assets: only token price, never fall through to native (see fromPriceUsd).
     if (toAsset.contractAddress) {
-      if (!cb.tokens) { console.log(`[SWAP-PRICE] toPriceUsdFromBalance: token but cb.tokens not loaded yet`); return 0 }
+      if (!cb.tokens) { swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: token but cb.tokens not loaded yet`); return 0 }
       const tok = cb.tokens.find(t => t.contractAddress?.toLowerCase() === toAsset.contractAddress?.toLowerCase())
-      console.log(`[SWAP-PRICE] toPriceUsdFromBalance: token path, contract=${toAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
+      swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: token path, contract=${toAsset.contractAddress}, found=${!!tok}, priceUsd=${tok?.priceUsd}`)
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
     const nativeUsd = cb.nativeBalanceUsd ?? 0
-    console.log(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
     if (bal <= 0) return 0
     const result = nativeUsd > 0 ? nativeUsd / bal : 0
-    console.log(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
+    swapLog(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
     return result
   }, [toAsset, balances])
 
@@ -931,7 +825,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const toPriceUsd = useMemo(() => {
     // When isMax, amount is "" — use fromBalance instead (same as quote request logic)
     const effectiveAmount = isMax ? (fromBalance || '0') : amount
-    console.log(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
+    swapLog(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
     if (toPriceUsdFromBalance > 0) return toPriceUsdFromBalance
     // Fallback: derive from FROM price and quote ratio
     if (fromPriceUsd > 0 && quote?.expectedOutput && effectiveAmount) {
@@ -939,11 +833,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       const outAmt = parseFloat(quote.expectedOutput)
       if (inAmt > 0 && outAmt > 0) {
         const derived = (inAmt / outAmt) * fromPriceUsd
-        console.log(`[SWAP-PRICE] toPriceUsd FALLBACK: (${inAmt}/${outAmt}) * $${fromPriceUsd} = $${derived}`)
+        swapLog(`[SWAP-PRICE] toPriceUsd FALLBACK: (${inAmt}/${outAmt}) * $${fromPriceUsd} = $${derived}`)
         return derived
       }
     }
-    console.log('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
+    swapLog('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
     return 0
   }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, amount, isMax, fromBalance])
 
@@ -1058,8 +952,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     rpcRequest<{ approveTx?: any; unsignedTx: any }>('previewSwapBuild', {
       fromChainId: fromAsset.chainId,
       toChainId: toAsset.chainId,
-      fromAsset: fromAsset.asset,
-      toAsset: toAsset.asset,
+      fromCaip: fromAsset.caip!,
+      toCaip: toAsset.caip!,
       amount: isMax ? (fromBalance || '0') : amount,
       memo: quote.memo,
       inboundAddress: quote.inboundAddress,
@@ -1098,9 +992,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
     quoteTimerRef.current = setTimeout(async () => {
       try {
+        // CAIP-only — Pioneer Quote keys on CAIP. The picker's SwapAsset
+        // always carries .caip (Pioneer-listed entries set it; synthesized
+        // entries carry the pioneer-discovery CAIP). If a future code path
+        // sets fromAsset without a CAIP, fail loud here rather than letting
+        // Pioneer reject with an opaque error downstream.
+        if (!fromAsset!.caip || !toAsset!.caip) {
+          throw new Error('Selected assets are missing CAIP — pick again from the asset picker')
+        }
         const result = await rpcRequest<SwapQuote>('getSwapQuote', {
-          fromAsset: fromAsset!.asset,
-          toAsset: toAsset!.asset,
+          fromCaip: fromAsset!.caip,
+          toCaip: toAsset!.caip,
           amount: isMax ? (fromBalance || '0') : amount,
           fromAddress,
           toAddress,
@@ -1169,8 +1071,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setRefreshingQuote(true)
       try {
         const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
-          fromAsset: fromAsset.asset,
-          toAsset: toAsset.asset,
+          fromCaip: fromAsset.caip!,
+          toCaip: toAsset.caip!,
           amount: isMax ? (fromBalance || '0') : amount,
           fromAddress, toAddress, slippageBps,
         }, 30000)
@@ -1222,8 +1124,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       const result = await rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
         fromChainId: fromAsset.chainId,
         toChainId: toAsset.chainId,
-        fromAsset: fromAsset.asset,
-        toAsset: toAsset.asset,
+        fromCaip: fromAsset.caip!,
+        toCaip: toAsset.caip!,
         amount: isMax ? (fromBalance || '0') : amount,
         memo: liveQuote.memo,
         inboundAddress: liveQuote.inboundAddress,
@@ -2141,11 +2043,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 )
               })()}
 
-              {/* High-slippage warning — flagged at >3% */}
-              {(quote.slippageBps / 100) > 3 && (
+              {/* High-slippage warning — flagged at >HIGH_SLIPPAGE_PCT.
+                  Use max(quote, user) so a tight market quote doesn't hide a loose
+                  user tolerance — the user's setting is the one that bounds risk. */}
+              {shouldWarnHighSlippage(quote.slippageBps, slippageBps) && (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
                   <Text fontSize="10px" color="#FB923C">
-                    {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (quote.slippageBps / 100).toFixed(1) })}
+                    {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}
                   </Text>
                 </Flex>
               )}
@@ -2153,18 +2057,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Dust-fee warning — protocol fees + spread eat too much of the swap.
                   THORChain has fixed ~$1.20 BTC outbound fee that crushes small swaps:
                   $2 in → $1.78 out is 11% loss. Tier the warning so users understand:
-                  >10% = strongly recommend bigger amount; >25% = "you're throwing money away".
+                  >DUST_FEE_WARNING_PCT = strongly recommend bigger amount;
+                  >DUST_FEE_SEVERE_PCT  = "you're throwing money away".
                   Computed from displayed in/out USD values, not just quote.fees.totalBps,
                   so msg.value EVM fees and spread are captured. */}
               {(() => {
-                const inAmt = parseFloat(isMax ? (fromBalance || '0') : amount) || 0
-                const outAmt = parseFloat(quote.expectedOutput || '0') || 0
-                const inUsd = inAmt * fromPriceUsd
-                const outUsd = outAmt * toPriceUsd
-                if (inUsd <= 0 || outUsd <= 0) return null
-                const lossPct = ((inUsd - outUsd) / inUsd) * 100
-                if (lossPct < 10) return null
-                const severe = lossPct > 25
+                const dust = computeDustWarning({
+                  inAmount: parseFloat(isMax ? (fromBalance || '0') : amount) || 0,
+                  outAmount: parseFloat(quote.expectedOutput || '0') || 0,
+                  fromPriceUsd,
+                  toPriceUsd,
+                })
+                if (!dust) return null
+                const { severe, lossPct, inUsd, lostUsd, recommendedMinUsd } = dust
                 return (
                   <Flex align="center" gap="2"
                     bg={severe ? "rgba(255,23,68,0.1)" : "rgba(251,146,60,0.08)"}
@@ -2173,8 +2078,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     px="3" py="2" borderRadius="lg" w="full">
                     <Text fontSize="10px" color={severe ? "kk.error" : "#FB923C"} lineHeight="1.4">
                       {severe
-                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: (inUsd - outUsd).toFixed(2), inUsd: inUsd.toFixed(2), minUsd: Math.ceil(inUsd * 4) })
-                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: (inUsd - outUsd).toFixed(2), inUsd: inUsd.toFixed(2) })}
+                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2), minUsd: recommendedMinUsd })
+                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2) })}
                     </Text>
                   </Flex>
                 )
@@ -2255,10 +2160,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <AssetSelector
                     label={t("from")}
                     selected={fromAsset}
-                    assets={assets}
-                    onSelect={(a) => { setFromAsset(a); setQuote(null); setPhase('input'); setError(null) }}
-                    balances={balances}
-                    exclude={toAsset?.asset}
+                    onOpenPicker={() => setPickerSide('from')}
                     disabled={busy}
                   />
 
@@ -2390,10 +2292,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <AssetSelector
                     label={t("to")}
                     selected={toAsset}
-                    assets={assets}
-                    onSelect={(a) => { setToAsset(a); setQuote(null); setPhase('input'); setError(null) }}
-                    balances={balances}
-                    exclude={fromAsset?.asset}
+                    onOpenPicker={() => setPickerSide('to')}
                     disabled={busy}
                   />
 
@@ -2552,6 +2451,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           </Flex>
         )}
       </Box>
+
+      {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
+      <AssetPickerDialog
+        open={pickerSide !== null}
+        onClose={() => setPickerSide(null)}
+        swappable={assets}
+        balances={balances}
+        excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
+        side={pickerSide || 'from'}
+        onSelect={(a) => {
+          if (pickerSide === 'from') setFromAsset(a)
+          else if (pickerSide === 'to') setToAsset(a)
+          setQuote(null)
+          setPhase('input')
+          setError(null)
+        }}
+      />
     </Box>
   )
 }

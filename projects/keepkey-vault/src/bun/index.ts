@@ -3518,7 +3518,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getSwapQuote: async (params) => {
 				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
-				const { getSwapQuote, THOR_TO_CHAIN, parseThorAsset } = await import('./swap')
+				const { getSwapQuote } = await import('./swap')
 
 				// Resolve xpub addresses to real receive addresses for UTXO chains.
 				// ChainBalance.address can be an xpub when Pioneer doesn't return
@@ -3527,15 +3527,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
 
 				if (engine.wallet) {
-					const resolveAddr = async (thorAsset: string, addr: string): Promise<string> => {
+					// CAIP-driven: find vault chain by matching CAIP-19 directly.
+					const resolveAddr = async (caip: string, addr: string): Promise<string> => {
 						if (!isXpub(addr)) return addr
-						const parsed = parseThorAsset(thorAsset)
-						const chainId = THOR_TO_CHAIN[parsed.chain]
-						if (!chainId) return addr
-						const chainDef = getAllChains().find(c => c.id === chainId)
+						const chainDef = getAllChains().find(c => c.caip === caip)
 						if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
 						try {
-							// Use selected BTC account path/scriptType when available
 							const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
 								? btcAccounts.getSelectedXpub() : undefined
 							// selected.path is account-level (3 elements: m/purpose'/0'/account')
@@ -3551,32 +3548,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							})
 							const resolved = typeof result === 'string' ? result : result?.address
 							if (resolved) {
-								console.log(`[swap] Resolved xpub → ${resolved} for ${thorAsset}`)
+								console.log(`[swap] Resolved xpub → ${resolved} for ${caip}`)
 								return resolved
 							}
 						} catch (e: any) {
-							console.warn(`[swap] Failed to resolve xpub for ${thorAsset}: ${e.message}`)
+							console.warn(`[swap] Failed to resolve xpub for ${caip}: ${e.message}`)
 						}
 						return addr
 					}
 					params = {
 						...params,
-						fromAddress: await resolveAddr(params.fromAsset, params.fromAddress),
-						toAddress: await resolveAddr(params.toAsset, params.toAddress),
+						fromAddress: await resolveAddr(params.fromCaip, params.fromAddress),
+						toAddress: await resolveAddr(params.toCaip, params.toAddress),
 					}
 				}
 
 				// Fail fast if addresses are still xpubs after resolution attempt
 				if (isXpub(params.fromAddress)) {
-					throw new Error(`Could not resolve source address for ${params.fromAsset} — device may be locked or disconnected`)
+					throw new Error(`Could not resolve source address for ${params.fromCaip} — device may be locked or disconnected`)
 				}
 				if (isXpub(params.toAddress)) {
-					throw new Error(`Could not resolve destination address for ${params.toAsset} — device may be locked or disconnected`)
+					throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
 				}
 
 				const quote = await getSwapQuote(params)
 				// Cache quote so executeSwap can pass real data to the tracker
-				const cacheKey = `${params.fromAsset}-${params.toAsset}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
+				const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
 				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
 				swapQuoteCache.set(cacheKey, quote)
 				// Keep cache small (last 10 quotes)
@@ -3625,13 +3622,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					},
 				})
 				// Look up cached quote for real tracker data
-				// Match by asset pair + amount + inboundAddress to avoid collisions between
+				// Match by CAIP pair + amount + inboundAddress to avoid collisions between
 				// quotes that share the same pair/amount but differ in slippage/addresses
 				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
 				for (const [key, val] of swapQuoteCache) {
-					// Key format: fromAsset-toAsset-amount-slippageBps-fromAddress-toAddress
-					// Match on the asset-pair+amount prefix AND inboundAddress from the quote
-					const keyPrefix = `${params.fromAsset}-${params.toAsset}-${params.amount}-`
+					// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
+					const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
 					if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
 						cachedQuote = val
 						break
@@ -3650,8 +3646,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
 						estimatedTime: cachedQuote?.estimatedTime || 600,
 						slippageBps: cachedQuote?.slippageBps || 300,
-						fromAsset: params.fromAsset,
-						toAsset: params.toAsset,
 						integration: cachedQuote?.integration || 'thorchain',
 						swapper: cachedQuote?.swapper,
 					}, { skipPersist: engine.isPassphraseWallet })
@@ -3678,7 +3672,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			previewSwapBuild: async (params) => {
 				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				const { previewSwapBuild } = await import('./swap')
+				const { previewSwapBuild, NOOP_PUSH_SUBSTAGE } = await import('./swap')
 				return previewSwapBuild(params, {
 					wallet: engine.wallet,
 					getAllChains,
@@ -3695,6 +3689,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						return []
 					},
 					wrapSign: (fn) => fn(), // unused in preview
+					pushSubStage: NOOP_PUSH_SUBSTAGE,
 				})
 			},
 

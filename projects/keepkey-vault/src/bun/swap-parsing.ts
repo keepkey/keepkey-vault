@@ -6,6 +6,7 @@
  */
 import { CHAINS } from '../shared/chains'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
+import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
 const TAG = '[swap]'
 
@@ -20,28 +21,44 @@ export function parseThorAsset(asset: string): { chain: string; symbol: string; 
   return { chain, symbol: rest.slice(0, dashIdx), contractAddress: rest.slice(dashIdx + 1) }
 }
 
-/** Map THORChain chain prefixes to our chain IDs */
+/** Map THORChain chain prefixes to our vault chain IDs.
+ *
+ *  Source of truth: `@pioneer-platform/pioneer-coins` `COIN_MAP_LONG`. The
+ *  overlay below covers two narrow gaps:
+ *    1. BSC mismatch — pioneer-coins maps `BSC → 'binance'`, but vault's
+ *       chains.ts uses `'bsc'` as the chain id; we override here.
+ *    2. Long-form aliases (OPTIMISM, ARBITRUM, BASE, etc.) — ShapeShift
+ *       swapper and ad-hoc paths sometimes emit the long chain name. Without
+ *       these, parseThorAsset throws "Unsupported THORChain chain: OPTIMISM"
+ *       on tokens like VELO routed via ShapeShift.
+ *    3. TRON alias — THORChain memos use `TRON.TRX`, pioneer-coins only has
+ *       the symbol form `TRX`. */
 export const THOR_TO_CHAIN: Record<string, string> = {
-  BTC: 'bitcoin',
-  ETH: 'ethereum',
-  LTC: 'litecoin',
-  DOGE: 'dogecoin',
-  BCH: 'bitcoincash',
-  DASH: 'dash',
-  GAIA: 'cosmos',
-  THOR: 'thorchain',
-  MAYA: 'mayachain',
-  AVAX: 'avalanche',
-  BSC: 'bsc',
-  BASE: 'base',
-  ARB: 'arbitrum',
-  OP: 'optimism',
-  MATIC: 'polygon',
-  XRP: 'ripple',
-  SOL: 'solana',
+  ...COIN_MAP_LONG,
+  // Vault chain-id overrides (where vault and pioneer-coins disagree)
+  BSC:  'bsc',
+  BNB:  'bsc',
+  // THORChain memo aliases not in pioneer-coins
   TRON: 'tron',
-  TON: 'ton',
+  // Long-form aliases — defensive against ShapeShift swapper output
+  ETHEREUM:    'ethereum',
+  AVALANCHE:   'avalanche',
+  ARBITRUM:    'arbitrum',
+  OPTIMISM:    'optimism',
+  POLYGON:     'polygon',
+  BITCOIN:     'bitcoin',
+  LITECOIN:    'litecoin',
+  DOGECOIN:    'dogecoin',
+  BITCOINCASH: 'bitcoincash',
+  COSMOS:      'cosmos',
+  SOLANA:      'solana',
+  RIPPLE:      'ripple',
 }
+
+// VAULT_CHAIN_TO_THOR lives in shared/swap-discovery.ts so both bun and
+// frontend can use it without crossing the layer boundary. Re-exported here
+// for callers that already import from this module.
+export { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 
 // ── Quote parsing ───────────────────────────────────────────────────
 
@@ -55,7 +72,7 @@ export const THOR_TO_CHAIN: Record<string, string> = {
  */
 export function parseQuoteResponse(
   quoteResp: any,
-  params: { fromAsset: string; toAsset: string; slippageBps?: number },
+  params: { fromCaip: string; toCaip: string; slippageBps?: number },
 ): SwapQuote {
   // Pioneer SDK wraps responses: { data: { success, data: [...] } }
   const qOuter = quoteResp?.data || quoteResp
@@ -104,7 +121,7 @@ export function parseQuoteResponse(
     console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
     console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
-    throw new Error(`No quote output for ${params.fromAsset} → ${params.toAsset} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
+    throw new Error(`No quote output for ${params.fromCaip} → ${params.toCaip} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
   }
   const expectedOutputStr = String(expectedOutput)
 
@@ -151,7 +168,9 @@ export function parseQuoteResponse(
   const expiry = raw.expiry || quote.expiry || 0
 
   // Native THORChain/Maya swaps (RUNE, CACAO) use MsgDeposit — no inbound vault needed
-  const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
+  const isNativeDeposit =
+    params.fromCaip === 'cosmos:thorchain-mainnet-v1/slip44:931' ||
+    params.fromCaip === 'cosmos:mayachain-mainnet-v1/slip44:931'
 
   if (!inboundAddress && !isNativeDeposit && !hasPrebuiltTx) {
     // Dump full response structure to help diagnose missing field
@@ -202,8 +221,6 @@ export function parseQuoteResponse(
     estimatedTime: Number(estimatedTime),
     warning: raw.warning || quote.warning || undefined,
     slippageBps: Number(actualSlippageBps),
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
     integration,
     swapper,
     relayTx,
@@ -241,6 +258,24 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
 
     const isToken = !!parsed.contractAddress
 
+    // CAIP is required for tokens — pioneer-server's swap-config controller
+    // ALWAYS emits it (verified live; the response is keyed on CAIP). If a
+    // token entry arrives without one, that's a malformed Pioneer response;
+    // dropping the asset is safer than falling back to the native chain CAIP,
+    // which would silently quote / attach the wrong asset (e.g. ETH.USDT
+    // routing as eip155:1/slip44:60 — native ETH).
+    let caip: string
+    if (isToken) {
+      if (!raw.caip) {
+        console.warn(`[swap] dropping token ${thorAsset} — pioneer-server response missing caip`)
+        continue
+      }
+      caip = raw.caip
+    } else {
+      // Native: chainDef.caip is correct by definition (chain native = chain CAIP).
+      caip = raw.caip || chainDef.caip
+    }
+
     assets.push({
       asset: thorAsset,
       chainId: ourChainId,
@@ -248,7 +283,7 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
       name: raw.name || (isToken ? `${parsed.symbol} (${chainDef.coin})` : chainDef.coin),
       chainFamily: chainDef.chainFamily,
       decimals: raw.decimals ?? chainDef.decimals,
-      caip: raw.caip || chainDef.caip,
+      caip,
       contractAddress: parsed.contractAddress,
       icon: raw.icon || raw.image,
     })

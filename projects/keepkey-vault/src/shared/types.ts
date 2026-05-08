@@ -686,8 +686,6 @@ export interface SwapQuote {
   estimatedTime: number      // seconds
   warning?: string           // streaming swap note, dust threshold, etc.
   slippageBps: number        // actual slippage in bps
-  fromAsset: string          // THORChain asset identifier
-  toAsset: string            // THORChain asset identifier
   integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
   /** Underlying protocol when `integration` is an aggregator. ShapeShift's swapper
    *  routes through Relay / THORChain / 0x / Uniswap / Curve / etc.; this names
@@ -697,41 +695,49 @@ export interface SwapQuote {
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
 }
 
-/** Parameters for getSwapQuote RPC */
+/** Parameters for getSwapQuote RPC.
+ *
+ *  CAIP is the only identifier the swap stack accepts. Pioneer's Quote
+ *  endpoint takes CAIP directly and dispatches to the right swapper
+ *  (THORChain / Mayachain / ShapeShift / Relay / 0x). Symbols and
+ *  THORChain-style asset names are display concerns — derived from CAIP
+ *  by the tracker, not passed as parameters. */
 export interface SwapQuoteParams {
-  fromAsset: string   // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
-  toAsset: string     // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
-  amount: string      // human-readable amount
-  fromAddress: string // sender address
-  toAddress: string   // destination address
-  slippageBps?: number // slippage tolerance (default 300 = 3%)
+  fromCaip: string         // CAIP-19 of the sell asset
+  toCaip: string           // CAIP-19 of the buy asset
+  amount: string           // human-readable amount
+  fromAddress: string      // sender address
+  toAddress: string        // destination address
+  slippageBps?: number     // slippage tolerance (default 300 = 3%)
 }
 
-/** Parameters for executeSwap RPC */
+/** Parameters for executeSwap RPC. CAIP-only identification — the tracker
+ *  resolves symbol/name/asset-string for display from the CAIP via
+ *  pioneer-discovery. Caller never specifies a token via symbol. */
 export interface ExecuteSwapParams {
-  fromChainId: string       // our chain id
-  toChainId: string         // our chain id
-  fromAsset: string         // THORChain asset id
-  toAsset: string           // THORChain asset id
-  amount: string            // human-readable amount
-  memo: string              // THORChain routing memo
-  inboundAddress: string    // vault address
-  router?: string           // EVM router (for token approvals)
-  expiry?: number           // unix timestamp for depositWithExpiry
-  expectedOutput: string    // for display
+  fromChainId: string             // our chain id (resolves to ChainDef for signing)
+  toChainId: string               // our chain id
+  fromCaip: string                // CAIP-19 — primary identifier
+  toCaip: string                  // CAIP-19 — primary identifier
+  amount: string                  // human-readable amount
+  memo: string                    // THORChain routing memo (empty for memoless integrations)
+  inboundAddress: string          // vault address
+  router?: string                 // EVM router (for token approvals)
+  expiry?: number                 // unix timestamp for depositWithExpiry
+  expectedOutput: string          // for display
   isMax?: boolean
   feeLevel?: number
-  fromAddressOverride?: string  // pre-resolved sender address (skips defaultPath derivation)
-  toAddressOverride?: string    // pre-resolved destination address (skips defaultPath derivation)
-  integration?: string      // DEX source (relay quotes skip memo+router flow)
-  relayTx?: RelayTxParams   // pre-built tx for relay/bridge integrations
+  fromAddressOverride?: string    // pre-resolved sender address (skips defaultPath derivation)
+  toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
+  integration?: string            // DEX source (relay quotes skip memo+router flow)
+  relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
 }
 
 /** Result of executeSwap RPC */
 export interface SwapResult {
   txid: string
-  fromAsset: string
-  toAsset: string
+  fromCaip: string
+  toCaip: string
   fromAmount: string
   expectedOutput: string
   approvalTxid?: string
