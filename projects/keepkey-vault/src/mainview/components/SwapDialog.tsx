@@ -48,6 +48,44 @@ const chainBadgeCaip = (asset: SwapAsset): string | undefined =>
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
 const UINT256_MAX = (1n << 256n) - 1n
 
+/** Conservative gas reserve (in native units) for native MAX swaps.
+ *  Only applies to native EVM assets — token swaps spend the token, not
+ *  the native, and UTXO/Cosmos MAX is computed precisely server-side from
+ *  the input set. The numbers here are a UX cushion: backend still does
+ *  precise gas estimation at sign time, but we want the user to *see* a
+ *  realistic post-gas amount when they click MAX so they don't think the
+ *  whole balance will be swapped. */
+const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
+  'eip155:1':     0.005,    // Ethereum L1 — swap router can cost ~$10-50
+  'eip155:8453':  0.00015,  // Base — L2 cheap, but L1 data fee adds up
+  'eip155:10':    0.00015,  // Optimism
+  'eip155:42161': 0.0002,   // Arbitrum
+  'eip155:137':   0.05,     // Polygon (MATIC)
+  'eip155:56':    0.002,    // BNB Smart Chain
+  'eip155:43114': 0.005,    // Avalanche C-Chain
+}
+const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
+
+function nativeEvmGasReserve(asset: SwapAsset): number {
+  if (asset.chainFamily !== 'evm' || asset.contractAddress) return 0
+  return NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
+}
+
+/** Returns the displayable & spendable max amount for native MAX. For
+ *  non-EVM-native assets, returns the full balance unchanged (UTXO etc.
+ *  are handled correctly server-side and the user expectation matches). */
+function maxSpendableAmount(asset: SwapAsset, balance: string): string {
+  const bal = parseFloat(balance || '0')
+  if (!isFinite(bal) || bal <= 0) return balance
+  const reserve = nativeEvmGasReserve(asset)
+  if (reserve <= 0) return balance
+  const spendable = bal - reserve
+  if (spendable <= 0) return '0'
+  // Trim to a reasonable precision; keep the original digit count if the
+  // reserve subtracts cleanly. The mono input formats this anyway.
+  return spendable.toFixed(8).replace(/\.?0+$/, '')
+}
+
 function parseApproveCalldata(data?: string | null): { spender: string; amount: bigint } | null {
   if (!data || typeof data !== 'string') return null
   const hex = data.toLowerCase()
@@ -779,6 +817,32 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return null
   }, [fromAsset, balance, chain, balances])
 
+  /* Native EVM MAX gas reservation — frontend pre-clamps the balance by a
+   * conservative gas reserve so the displayed and submitted amount match
+   * what the user actually spends. UTXO/Cosmos/etc. still use isMax=true
+   * server-side because their fee math depends on input set + memo. */
+  const nativeEvmMaxAmount = useMemo(() => {
+    if (!fromAsset || !fromBalance) return null
+    if (fromAsset.chainFamily !== 'evm' || fromAsset.contractAddress) return null
+    return maxSpendableAmount(fromAsset, fromBalance)
+  }, [fromAsset, fromBalance])
+
+  /* Resolved (amount, isMax) tuple to send to the backend. For native EVM
+   * MAX the amount is already clamped, so isMax is dropped to keep the
+   * display honest. For non-EVM-native MAX, isMax remains true so the
+   * backend's input-aware fee math runs. */
+  const sendAmount = useMemo(() => {
+    if (!isMax) return amount
+    return nativeEvmMaxAmount ?? (fromBalance || '0')
+  }, [isMax, amount, nativeEvmMaxAmount, fromBalance])
+
+  const sendIsMax = isMax && nativeEvmMaxAmount === null
+
+  /* When the native balance is too small to even cover gas, MAX is
+   * unusable — flag it so the UI can show "insufficient for gas" instead
+   * of letting the user submit a 0 swap. */
+  const nativeMaxInsufficient = isMax && nativeEvmMaxAmount !== null && parseFloat(nativeEvmMaxAmount) <= 0
+
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
   const fromPriceUsd = useMemo(() => {
@@ -829,7 +893,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // (e.g., user has dust/zero native balance but tokens on the chain)
   const toPriceUsd = useMemo(() => {
     // When isMax, amount is "" — use fromBalance instead (same as quote request logic)
-    const effectiveAmount = isMax ? (fromBalance || '0') : amount
+    const effectiveAmount = sendAmount
     swapLog(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
     if (toPriceUsdFromBalance > 0) return toPriceUsdFromBalance
     // Fallback: derive from FROM price and quote ratio
@@ -940,7 +1004,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return keepKeyToAddress
   }, [useCustomAddress, customToAddress, keepKeyToAddress])
 
-  const validAmount = isMax || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
+  const validAmount = (isMax && !nativeMaxInsufficient) || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
   const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !exceedsBalance && !customAddressError
 
   // ── Preview-build the unsigned tx(s) when entering Confirm Quote ──
@@ -959,13 +1023,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       toChainId: toAsset.chainId,
       fromCaip: fromAsset.caip!,
       toCaip: toAsset.caip!,
-      amount: isMax ? (fromBalance || '0') : amount,
+      amount: sendAmount,
       memo: quote.memo,
       inboundAddress: quote.inboundAddress,
       router: quote.router,
       expiry: quote.expiry,
       expectedOutput: quote.expectedOutput,
-      isMax, feeLevel: 5,
+      isMax: sendIsMax, feeLevel: 5,
       fromAddressOverride: fromAddress,
       toAddressOverride: toAddress,
       integration: quote.integration,
@@ -1008,7 +1072,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         const result = await rpcRequest<SwapQuote>('getSwapQuote', {
           fromCaip: fromAsset!.caip,
           toCaip: toAsset!.caip,
-          amount: isMax ? (fromBalance || '0') : amount,
+          amount: sendAmount,
           fromAddress,
           toAddress,
           slippageBps,
@@ -1078,7 +1142,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
           fromCaip: fromAsset.caip!,
           toCaip: toAsset.caip!,
-          amount: isMax ? (fromBalance || '0') : amount,
+          amount: sendAmount,
           fromAddress, toAddress, slippageBps,
         }, 30000)
         // Block on >1% output drop — quote degraded, user should re-review
@@ -1108,7 +1172,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setError(null)
 
     // Freeze the sent amount so balance changes don't affect the display
-    setSentAmount(isMax ? (fromBalance || '0') : amount)
+    setSentAmount(sendAmount)
 
     // Capture before-balances
     const fromBal = fromBalance || '0'
@@ -1131,13 +1195,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         toChainId: toAsset.chainId,
         fromCaip: fromAsset.caip!,
         toCaip: toAsset.caip!,
-        amount: isMax ? (fromBalance || '0') : amount,
+        amount: sendAmount,
         memo: liveQuote.memo,
         inboundAddress: liveQuote.inboundAddress,
         router: liveQuote.router,
         expiry: liveQuote.expiry,
         expectedOutput: liveQuote.expectedOutput,
-        isMax,
+        isMax: sendIsMax,
         feeLevel: 5,
         fromAddressOverride: fromAddress,
         toAddressOverride: toAddress,
@@ -1220,9 +1284,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   }, [t])
 
   const busy = phase === 'approving' || phase === 'signing' || phase === 'broadcasting'
-  const displayAmount = sentAmount ?? (isMax ? (fromBalance || '0') : amount)
-  // sendMax on native EVM: quote uses full balance but execution subtracts gas, so output is overstated
-  const isNativeEvmMax = isMax && !!fromAsset && fromAsset.chainFamily === 'evm' && !fromAsset.contractAddress
+  const displayAmount = sentAmount ?? sendAmount
+  const isNativeEvmMax = isMax && nativeEvmMaxAmount !== null
 
   // Must be above early return to satisfy Rules of Hooks
   const swappableChainIds = useMemo(() => new Set(assets.map(a => a.chainId)), [assets])
@@ -2080,7 +2143,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   so msg.value EVM fees and spread are captured. */}
               {(() => {
                 const dust = computeDustWarning({
-                  inAmount: parseFloat(isMax ? (fromBalance || '0') : amount) || 0,
+                  inAmount: parseFloat(sendAmount) || 0,
                   outAmount: parseFloat(quote.expectedOutput || '0') || 0,
                   fromPriceUsd,
                   toPriceUsd,
@@ -2233,7 +2296,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
                         )}
                         <Input
-                          value={isMax ? (fromBalance ? formatBalance(fromBalance) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
+                          value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
                           onChange={(e) => { if (isMax) setIsMax(false); inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                           placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
                           bg="rgba(0,0,0,0.4)" border="1px solid"
@@ -2267,6 +2330,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       )}
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
+                      )}
+                      {isNativeEvmMax && !nativeMaxInsufficient && fromAsset && (
+                        <Text fontSize="10px" color="kk.textMuted" mt="1" fontFamily="mono" letterSpacing="0.02em">
+                          {t("maxReservesGas", { defaultValue: "Reserves ~{{reserve}} {{symbol}} for network fees", reserve: nativeEvmGasReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
+                        </Text>
+                      )}
+                      {nativeMaxInsufficient && fromAsset && (
+                        <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">
+                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the gas reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeEvmGasReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
+                        </Text>
                       )}
                     </Box>
                   )}
