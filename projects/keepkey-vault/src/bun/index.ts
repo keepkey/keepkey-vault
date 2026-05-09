@@ -418,6 +418,22 @@ let swapUiUpdatedAt = 0
 export function getSwapUiState(): { state: import('../shared/types').SwapUiState; updatedAt: number } {
 	return { state: swapUiState, updatedAt: swapUiUpdatedAt }
 }
+// Force the cached snapshot back to a clean 'closed' state. Called by REST
+// `/api/v2/swap/close` so a stale 'submitted' snapshot from a prior failed
+// swap doesn't survive into the next REST-driven session if no SwapDialog
+// instance happens to be mounted (and therefore no unmount publishes 'closed').
+export function resetSwapUiState(): void {
+	swapUiState = {
+		phase: 'closed',
+		fromAsset: null, toAsset: null,
+		amount: '', fiatAmount: '',
+		inputMode: 'crypto', isMax: false, slippageBps: 100,
+		fromAddress: '', toAddress: '',
+		useCustomAddress: false, customToAddress: '',
+		quote: null, previewBuild: null, error: null, txid: null,
+	}
+	swapUiUpdatedAt = Date.now()
+}
 
 // Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
 // approval, device pairing approval) can independently want the window

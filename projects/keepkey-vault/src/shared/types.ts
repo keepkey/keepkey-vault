@@ -786,6 +786,17 @@ export interface PendingSwap {
    *  refreshSwap via api.relay.link. Drives the "Relay Track" external link
    *  on relay/shapeshift integrations. */
   relayRequestId?: string
+  /** Vault chain id of the actual outbound (refunds outbound on the source chain,
+   *  not the destination). Populated by the Maya/Thor classifier — used to route
+   *  the explorer link to the correct chain. Falls back to toChainId when absent. */
+  outboundChainId?: string
+  /** Reason text from a Maya/Thor refund, when status='refunded'. */
+  refundReason?: string
+  /** Set true when classifySwapOutcome (Midgard) has populated this record.
+   *  Once set, Pioneer's mapPioneerStatus is no longer authoritative — Pioneer
+   *  cannot distinguish "swap completed" from "refund completed", and would
+   *  otherwise ping-pong status with Midgard on every refresh. */
+  midgardClassified?: boolean
 }
 
 export interface SwapStatusUpdate {
@@ -804,6 +815,12 @@ export interface SwapStatusUpdate {
    *  resolves it via api.relay.link, so the UI can render the tracker link
    *  without a full re-fetch. */
   relayRequestId?: string
+  /** Vault chain id of the actual outbound. Refunds outbound on the source
+   *  chain, completions on the destination chain — Midgard's action.out asset
+   *  is the only authority. UI uses this to pick the explorer URL. */
+  outboundChainId?: string
+  /** Refund reason surfaced from the source chain (Midgard) when status='refunded'. */
+  refundReason?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */

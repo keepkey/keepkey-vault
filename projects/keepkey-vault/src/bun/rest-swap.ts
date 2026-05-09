@@ -56,6 +56,8 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.SwapUiOpenRequest)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
+      const validation = await validateSeedAssets(body)
+      if (validation) return json(validation, 400)
       callbacks.sendSwapCmd({ kind: 'open', ...body } as SwapUiCommand)
       return json({ data: { ok: true } })
     }
@@ -64,6 +66,8 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.SwapUiSetRequest)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
+      const validation = await validateSeedAssets(body)
+      if (validation) return json(validation, 400)
       callbacks.sendSwapCmd({ kind: 'set', ...body } as SwapUiCommand)
       return json({ data: { ok: true } })
     }
@@ -96,6 +100,12 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
       callbacks.sendSwapCmd({ kind: 'close' })
+      // Belt-and-braces: dispatch the cmd to any mounted dialog AND reset the
+      // Bun-side cached snapshot. Without this reset, a prior 'submitted'
+      // state can survive close (no dialog mounted → no unmount publish), and
+      // subsequent /state reads keep returning the stale failed swap.
+      const { resetSwapUiState } = await import('./index')
+      resetSwapUiState()
       return json({ data: { ok: true } })
     }
 
@@ -106,4 +116,18 @@ export async function handleSwapRoute(
     console.error(`${TAG} Error on ${path}:`, err.message)
     return json({ error: 'Swap API error', details: err.message }, 502)
   }
+}
+
+// Reject seeds with unknown asset keys at the REST boundary instead of letting
+// SwapDialog silently no-op the lookup. Accepts either the `.asset` form
+// ("ETH.ETH") or the `.caip` form ("eip155:1/slip44:60") for forward-compat.
+async function validateSeedAssets(body: { fromAsset?: string; toAsset?: string }): Promise<{ error: string; details: { unknownAsset: string; field: 'fromAsset' | 'toAsset' } } | null> {
+  if (!body.fromAsset && !body.toAsset) return null
+  const { getSwapAssets } = await import('./swap')
+  let assets: Awaited<ReturnType<typeof getSwapAssets>>
+  try { assets = await getSwapAssets() } catch { return null /* don't block on transient asset-list failures */ }
+  const has = (key: string) => assets.some(a => a.asset === key || a.caip === key)
+  if (body.fromAsset && !has(body.fromAsset)) return { error: 'Unknown fromAsset', details: { unknownAsset: body.fromAsset, field: 'fromAsset' } }
+  if (body.toAsset && !has(body.toAsset)) return { error: 'Unknown toAsset', details: { unknownAsset: body.toAsset, field: 'toAsset' } }
+  return null
 }
