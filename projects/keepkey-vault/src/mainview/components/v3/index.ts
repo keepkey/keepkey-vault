@@ -5,5 +5,6 @@ export { LogoTile } from './LogoTile';
 export { NetworkRow } from './NetworkRow';
 export { PillTabs } from './PillTabs';
 export { SidePanel } from './SidePanel';
+export { RouteMap } from './RouteMap';
 export type { TokenLike, NetworkLike, DeviceState, IconName } from './types';
 export type { PillTabItem } from './PillTabs';

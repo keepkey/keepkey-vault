@@ -22,7 +22,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { AssetPickerDialog } from "./AssetPickerDialog"
-import { KeepKeyDevice } from "./v3"
+import { KeepKeyDevice, RouteMap } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
@@ -1807,84 +1807,92 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           )}
 
           {/* ── SIGNING / APPROVING / BROADCASTING ───────────────── */}
+          {/* ── AWAITING DEVICE — dedicated full-screen confirm
+              Per handoff design: 220px KeepKey gif, prominent headline,
+              concise instruction, then a single summary chip. The
+              substage detail moves into the chip area as small mono text
+              instead of competing with the device illustration. */}
           {busy && fromAsset && toAsset && (
-            <VStack gap="3" py="4" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
-              {/* Device icon with label inline */}
-              <Flex align="center" gap="4">
-                <Box flexShrink={0}>
-                  <KeepKeyDevice
-                    state={
-                      subStage?.endsWith('-broadcasting') || phase === 'broadcasting'
-                        ? 'active'
-                        : 'signing'
-                    }
-                    size={120}
-                    signingLabel={
-                      subStage?.startsWith('approve-') || phase === 'approving'
-                        ? 'APPROVE'
-                        : 'CONFIRM'
-                    }
-                    signingDetail={
-                      fromAsset && toAsset
-                        ? `${fromAsset.symbol} → ${toAsset.symbol}`
-                        : 'SWAP'
-                    }
-                  />
-                </Box>
-                <VStack gap="0" align="flex-start">
-                  <HStack gap="1.5">
-                    <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-                      {/* Substage-aware label — see retro #1. Falls back to coarse
-                          phase for non-ERC-20 swaps (single-step) and for clients
-                          that don't see the substage push (e.g. resumed swaps). */}
-                      {subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")
-                       : subStage === 'approve-broadcasting'  ? t("approvalBroadcasting", "Broadcasting approval…")
-                       : subStage === 'approve-waiting-receipt' ? t("approvalWaiting", "Waiting for approval to confirm…")
-                       : subStage === 'swap-signing'          ? t("confirmOnDevice")
-                       : subStage === 'swap-broadcasting'     ? t("broadcasting")
-                       : phase === 'approving'                ? t("approvingToken")
-                       : phase === 'signing'                  ? t("confirmOnDevice")
-                                                              : t("broadcasting")}
-                    </Text>
-                    {/* For ERC-20 swaps: show 1/2 during approval substages, 2/2 during swap substages. */}
-                    {fromAsset?.contractAddress && (
-                      <Box bg="rgba(233,196,106,0.12)" border="1px solid" borderColor="rgba(233,196,106,0.3)" px="1.5" borderRadius="sm">
-                        <Text fontSize="9px" fontWeight="700" color="var(--gold)">
-                          {subStage?.startsWith('approve-') ? '1/2'
-                           : subStage?.startsWith('swap-')  ? '2/2'
-                           : phase === 'approving'          ? '1/2'
-                                                            : '2/2'}
-                        </Text>
-                      </Box>
-                    )}
-                  </HStack>
-                  <Text fontSize="xs" color="kk.textMuted">
-                    {subStage === 'approve-signing'         ? t("approvalRequired")
-                     : subStage === 'approve-broadcasting'  ? t("approvalBroadcastingDesc", "Submitting the approval to the network…")
-                     : subStage === 'approve-waiting-receipt' ? t("approvalWaitingDesc", "Waiting for the approval to mine before we can sign the swap.")
-                     : subStage === 'swap-signing'          ? t("confirmOnDeviceDesc")
-                     : subStage === 'swap-broadcasting'     ? t("broadcastingDesc")
-                     : phase === 'signing'                  ? t("confirmOnDeviceDesc")
-                     : phase === 'approving'                ? t("approvalRequired")
-                                                            : t("broadcastingDesc")}
-                  </Text>
-                </VStack>
-              </Flex>
+            <VStack gap="6" py="6" align="center" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+              {/* Big device illustration — 220px gif drives the whole screen */}
+              <Box flexShrink={0}>
+                <KeepKeyDevice
+                  state={subStage?.endsWith('-broadcasting') || phase === 'broadcasting' ? 'active' : 'signing'}
+                  size={220}
+                />
+              </Box>
 
-              {/* Mini summary */}
-              <VStack gap="0.5">
-                <Flex align="center" gap="2" bg="rgba(255,255,255,0.04)" px="4" py="2" borderRadius="lg">
-                  <Text fontSize="sm" color="kk.textSecondary">{displayAmount} {fromAsset.symbol}</Text>
-                  <Text color="kk.textMuted">&rarr;</Text>
-                  <Text fontSize="sm" color="var(--teal)">~<GreenCountUp value={quote?.expectedOutput || '0'} color="var(--teal)" suffix={` ${toAsset.symbol}`} /></Text>
-                </Flex>
-                {hasFromPrice && (
-                  <Text fontSize="10px" color="kk.textMuted">
-                    {fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}
-                    {hasToPrice && quote?.expectedOutput ? ` \u2192 ${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}` : ''}
+              {/* Headline + secondary instruction */}
+              <VStack gap="1.5" align="center" textAlign="center" maxW="380px">
+                <HStack gap="2" align="center">
+                  <Text
+                    fontSize="20px"
+                    fontWeight="600"
+                    color="kk.textPrimary"
+                    fontFamily="serif"
+                    fontStyle="italic"
+                    letterSpacing="-0.01em"
+                  >
+                    {subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")
+                     : subStage === 'approve-broadcasting'  ? t("approvalBroadcasting", "Broadcasting approval…")
+                     : subStage === 'approve-waiting-receipt' ? t("approvalWaiting", "Waiting for approval to confirm…")
+                     : subStage === 'swap-signing'          ? t("confirmOnDevice")
+                     : subStage === 'swap-broadcasting'     ? t("broadcasting")
+                     : phase === 'approving'                ? t("approvingToken")
+                     : phase === 'signing'                  ? t("confirmOnDevice")
+                                                            : t("broadcasting")}
                   </Text>
-                )}
+                  {fromAsset?.contractAddress && (
+                    <Box bg="rgba(233,196,106,0.12)" border="1px solid" borderColor="rgba(233,196,106,0.3)" px="1.5" py="0.5" borderRadius="md">
+                      <Text fontSize="10px" fontWeight="700" color="var(--gold)" fontFamily="mono">
+                        {subStage?.startsWith('approve-') ? '1/2'
+                         : subStage?.startsWith('swap-')  ? '2/2'
+                         : phase === 'approving'          ? '1/2'
+                                                          : '2/2'}
+                      </Text>
+                    </Box>
+                  )}
+                </HStack>
+                <Text fontSize="13px" color="kk.textSecondary" lineHeight="1.5">
+                  {subStage === 'approve-signing'         ? t("approvalRequired")
+                   : subStage === 'approve-broadcasting'  ? t("approvalBroadcastingDesc", "Submitting the approval to the network…")
+                   : subStage === 'approve-waiting-receipt' ? t("approvalWaitingDesc", "Waiting for the approval to mine before we can sign the swap.")
+                   : subStage === 'swap-signing'          ? t("confirmOnDeviceDesc")
+                   : subStage === 'swap-broadcasting'     ? t("broadcastingDesc")
+                   : phase === 'signing'                  ? t("confirmOnDeviceDesc")
+                   : phase === 'approving'                ? t("approvalRequired")
+                                                          : t("broadcastingDesc")}
+                </Text>
               </VStack>
+
+              {/* Summary chip — single inline pill, mono numbers */}
+              <Flex
+                align="center"
+                gap="3.5"
+                px="5"
+                py="3"
+                bg="var(--ink-1)"
+                border="1px solid var(--ink-3)"
+                borderRadius="14px"
+              >
+                <Text fontSize="14px" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
+                  {displayAmount} {fromAsset.symbol}
+                </Text>
+                <Box color="var(--gold)" flexShrink={0}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </Box>
+                <Text fontSize="14px" fontWeight="600" color="var(--teal-2)" fontFamily="mono">
+                  ~<GreenCountUp value={quote?.expectedOutput || '0'} color="var(--teal-2)" suffix={` ${toAsset.symbol}`} />
+                </Text>
+              </Flex>
+              {hasFromPrice && (
+                <Text fontSize="11px" color="kk.textMuted" fontFamily="mono" mt="-3">
+                  {fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}
+                  {hasToPrice && quote?.expectedOutput ? ` → ${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}` : ''}
+                </Text>
+              )}
             </VStack>
           )}
 
@@ -1919,19 +1927,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 )}
               </Box>
 
-              {/* Routing provider — who actually executes this swap.
-                  Surface this prominently so the user knows the route
-                  before they sign, not buried in collapsed details. */}
+              {/* Animated route map — gold dot travels from-token →
+                  integration → to-token. Shows the actual swap topology
+                  (not just a pill). Integration label uses Pioneer's
+                  authoritative swapper name when available. */}
               {(() => {
                 const info = resolveProvider(quote.swapper || quote.integration)
+                const integrationName = quote.swapper || quote.integration || info.name
+                const fromColor = CHAINS.find(c => c.id === fromAsset.chainId)?.color
+                const toColor   = CHAINS.find(c => c.id === toAsset.chainId)?.color
                 return (
-                  <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
-                    <Flex align="center" gap="2">
-                      <Text fontSize="10px" color="kk.textMuted" w="68px" flexShrink={0}>{t("route", "Route")}</Text>
-                      <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={20} variant="detailed" />
-                      <Box flex="1" />
-                      <Box w="6px" h="6px" borderRadius="full" bg={info.color} boxShadow={`0 0 6px ${info.color}80`} flexShrink={0} />
+                  <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" px="3" py="3">
+                    <Flex align="center" justify="space-between" mb="1.5" px="1">
+                      <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.04em" textTransform="uppercase">
+                        {t("route", "Route")}
+                      </Text>
+                      <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="compact" />
                     </Flex>
+                    <RouteMap
+                      from={{ iconUrl: fromAsset.icon, color: fromColor, glyph: fromAsset.symbol.slice(0, 1) }}
+                      to={{ iconUrl: toAsset.icon, color: toColor, glyph: toAsset.symbol.slice(0, 1) }}
+                      integration={typeof integrationName === 'string' ? integrationName : undefined}
+                    />
                   </Box>
                 )
               })()}
@@ -2190,26 +2207,67 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Box>
               )}
 
+              {/* Safety note — "Address will be verified on your KeepKey
+                  device." Per handoff design, this primes the user for the
+                  confirm-on-device step before they sign. */}
+              <Flex
+                w="full"
+                align="center"
+                gap="2"
+                px="3.5"
+                py="2.5"
+                bg="rgba(139,227,196,0.06)"
+                border="1px solid rgba(139,227,196,0.20)"
+                borderRadius="12px"
+              >
+                <Box flexShrink={0}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                </Box>
+                <Text fontSize="11px" color="var(--text-1)" letterSpacing="-0.005em">
+                  {t("addressVerifiedOnDevice", "Address will be verified on your KeepKey device.")}
+                </Text>
+              </Flex>
+
               <Flex gap="2" w="full">
-                <Button
-                  size="sm" flex="1"
-                  px="4" py="2"
-                  variant="outline"
-                  color="kk.textSecondary"
-                  borderColor="kk.border"
-                  _hover={{ bg: "rgba(255,255,255,0.06)" }}
+                <Box
+                  as="button"
+                  flex="1"
+                  py="3"
+                  borderRadius="14px"
+                  fontSize="14px"
+                  fontWeight="500"
+                  color="var(--text-1)"
+                  bg="var(--ink-2)"
+                  border="1px solid var(--ink-3)"
+                  cursor="pointer"
+                  _hover={{ bg: "var(--ink-3)" }}
+                  transition="background 0.15s"
                   onClick={() => { setQuote(null); setPhase('input') }}
                 >
                   {t("back")}
-                </Button>
-                <Button
-                  size="sm" flex="2"
-                  px="4" py="2"
-                  bg="var(--teal)"
-                  color="black"
+                </Box>
+                <Box
+                  as="button"
+                  flex="2"
+                  py="3"
+                  borderRadius="14px"
+                  fontSize="14px"
                   fontWeight="600"
-                  _hover={{ opacity: 0.9 }}
-                  onClick={handleExecuteSwap}
+                  color="var(--ink-0)"
+                  border="0"
+                  cursor={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient) ? "default" : "pointer"}
+                  opacity={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient) ? 0.5 : 1}
+                  style={{
+                    background: 'linear-gradient(180deg, var(--teal-2), var(--teal))',
+                    boxShadow: '0 8px 24px -8px rgba(139,227,196,0.5)',
+                    transition: 'transform 0.15s, box-shadow 0.15s',
+                  }}
+                  _hover={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient)
+                    ? {}
+                    : { transform: "translateY(-1px)" }}
+                  onClick={() => { if (!refreshingQuote && !(previewBuild?.balance && !previewBuild.balance.sufficient)) handleExecuteSwap() }}
                   disabled={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient)}
                 >
                   {refreshingQuote
@@ -2219,16 +2277,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       : (previewBuild?.allowance && !previewBuild.allowance.sufficient)
                         ? t("approveAndSwap", "Approve & Swap")
                         : t("confirmSwap")}
-                </Button>
+                </Box>
               </Flex>
             </VStack>
           )}
 
-          {/* ── INPUT — side-by-side layout ─────────────────────── */}
+          {/* ── INPUT — side-by-side You pay / You receive ─────────── */}
           {!loadingAssets && !assetLoadError && (phase === 'input' || phase === 'quoting') && (
             <VStack gap="2" align="stretch">
-              {/* Side-by-side: FROM | flip | TO */}
-              <Flex gap="2" align="stretch">
+              {/* Side-by-side: FROM | center pivot | TO. Pivot is absolutely
+                  positioned over the gap so the two columns stay equal-width.
+                  Hover rotates 180° + glows gold to read as "swap direction". */}
+              <Box position="relative">
+              <Flex gap="3" align="stretch">
                 {/* FROM column */}
                 <Box
                   flex="1"
@@ -2238,7 +2299,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   _hover={{ borderColor: "rgba(139,227,196,0.22)" }}
                 >
                   <AssetSelector
-                    label={t("from")}
+                    label={t("youPay", "You pay")}
                     selected={fromAsset}
                     onOpenPicker={() => setPickerSide('from')}
                     disabled={busy}
@@ -2380,7 +2441,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   _hover={{ borderColor: "rgba(139,227,196,0.22)" }}
                 >
                   <AssetSelector
-                    label={t("to")}
+                    label={t("youReceive", "You receive")}
                     selected={toAsset}
                     onOpenPicker={() => setPickerSide('to')}
                     disabled={busy}
@@ -2451,6 +2512,49 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Box>
               </Flex>
 
+              {/* Center pivot — flips fromAsset / toAsset, rotates 180° on
+                  hover. Absolutely positioned so the column widths stay
+                  equal. Disabled while a swap is in flight. */}
+              <Box
+                as="button"
+                position="absolute"
+                left="50%"
+                top="50%"
+                transform="translate(-50%, -50%)"
+                w="40px"
+                h="40px"
+                borderRadius="full"
+                bg="var(--ink-3)"
+                border="1px solid var(--ink-4)"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                color="var(--gold)"
+                style={{
+                  boxShadow: '0 0 0 4px var(--ink-0), 0 6px 18px -6px rgba(0,0,0,0.6)',
+                  transition: 'transform 0.3s, color 0.2s',
+                }}
+                _hover={{
+                  color: "var(--gold-2)",
+                }}
+                onMouseEnter={(e: any) => { (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) rotate(180deg)' }}
+                onMouseLeave={(e: any) => { (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) rotate(0)' }}
+                disabled={busy || !fromAsset || !toAsset}
+                cursor={busy || !fromAsset || !toAsset ? "default" : "pointer"}
+                opacity={busy || !fromAsset || !toAsset ? 0.4 : 1}
+                onClick={() => { if (!busy && fromAsset && toAsset) handleFlip() }}
+                aria-label="Swap direction"
+                zIndex={2}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 3L4 7l4 4" />
+                  <path d="M4 7h16" />
+                  <path d="M16 21l4-4-4-4" />
+                  <path d="M20 17H4" />
+                </svg>
+              </Box>
+              </Box>
+
               {/* Slippage tolerance — visible whenever a swap target is selected.
                   Bps math: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom prompts for a value. */}
               {fromAsset && toAsset && (
@@ -2512,12 +2616,33 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Flex>
               )}
 
-              {/* Review Swap button — only when quote is ready */}
+              {/* Review Swap button — only when quote is ready. Gradient
+                  matches the handoff CTA style: teal-2 → teal with a soft
+                  teal glow shadow. Bigger touch target than the prior xs button. */}
               {phase === 'input' && quote && fromAsset && toAsset && !sameAsset && (
-                <Button w="full" size="sm" bg="var(--teal)" color="black" fontWeight="700" fontSize="xs"
-                  borderRadius="lg" _hover={{ opacity: 0.9 }} onClick={() => setPhase('review')}>
+                <Box
+                  as="button"
+                  w="full"
+                  py="3"
+                  borderRadius="14px"
+                  fontWeight="600"
+                  fontSize="14px"
+                  letterSpacing="-0.005em"
+                  color="var(--ink-0)"
+                  border="0"
+                  cursor="pointer"
+                  style={{
+                    background: 'linear-gradient(180deg, var(--teal-2), var(--teal))',
+                    boxShadow: '0 8px 24px -8px rgba(139,227,196,0.5)',
+                    transition: 'transform 0.15s, box-shadow 0.15s',
+                  }}
+                  _hover={{
+                    transform: "translateY(-1px)",
+                  }}
+                  onClick={() => setPhase('review')}
+                >
                   {t("reviewSwap") || "Review Swap"}
-                </Button>
+                </Box>
               )}
 
               {/* Hint */}
