@@ -149,11 +149,11 @@ export function SwapTracker() {
           style={hasNew ? { animation: 'kkTrackerPulse 2s ease-in-out infinite' } : {}}
         >
           {activeSwaps.length > 0 ? (
-            <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkTrackerPulse 1.5s ease-in-out infinite' }} />
+            <Box w="8px" h="8px" borderRadius="full" bg="var(--teal)" style={{ animation: 'kkTrackerPulse 1.5s ease-in-out infinite' }} />
           ) : (
             <Text fontSize="xs">&#9889;</Text>
           )}
-          <Text fontSize="xs" fontWeight="600" color="#23DCC8">
+          <Text fontSize="xs" fontWeight="600" color="var(--teal)">
             {activeSwaps.length > 0 ? `${activeSwaps.length} swap${activeSwaps.length > 1 ? 's' : ''}` : t("activeSwaps")}
           </Text>
         </Box>

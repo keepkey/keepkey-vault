@@ -134,7 +134,7 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 				{/* Error */}
 				{error && (
 					<Box bg="rgba(239,68,68,0.1)" border="1px solid rgba(239,68,68,0.3)" borderRadius="lg" p="3" w="100%">
-						<Text fontSize="sm" color="#EF4444">{error}</Text>
+						<Text fontSize="sm" color="var(--rose)">{error}</Text>
 					</Box>
 				)}
 
@@ -150,7 +150,7 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 								{result.code}
 							</Text>
 							{timeLeft && (
-								<Text fontSize="xs" color={timeLeft === t("mobilePairing.expired") ? "#EF4444" : "kk.textMuted"} mt="1">
+								<Text fontSize="xs" color={timeLeft === t("mobilePairing.expired") ? "var(--rose)" : "kk.textMuted"} mt="1">
 									{timeLeft === t("mobilePairing.expired") ? timeLeft : t("mobilePairing.expiresIn", { time: timeLeft })}
 								</Text>
 							)}

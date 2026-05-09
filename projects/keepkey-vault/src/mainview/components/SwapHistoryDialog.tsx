@@ -199,7 +199,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
       )}
 
       {swap.error && (
-        <Text fontSize="10px" color="#EF4444" mt="2">{swap.error}</Text>
+        <Text fontSize="10px" color="var(--rose)" mt="2">{swap.error}</Text>
       )}
 
       <Flex justify="space-between" align="center" mt="3" pt="2" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
@@ -211,14 +211,14 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
           <Button
             size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
             fontSize="10px" onClick={(e) => { e.stopPropagation(); copyTxid() }}
-            _hover={{ color: "#23DCC8" }}
+            _hover={{ color: "var(--teal)" }}
           >
             {copied ? t("copied") : swap.txid.slice(0, 6) + '...' + swap.txid.slice(-4)}
           </Button>
           {(() => {
             const url = getExplorerTxUrl(swap.fromChainId, swap.txid)
             return url ? (
-              <Button size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+              <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                 onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                 <ExternalLinkIcon />
               </Button>
@@ -333,7 +333,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       )}
 
       {record.error && (
-        <Text fontSize="10px" color="#EF4444" mt="1" noOfLines={expanded ? undefined : 1}>{record.error}</Text>
+        <Text fontSize="10px" color="var(--rose)" mt="1" noOfLines={expanded ? undefined : 1}>{record.error}</Text>
       )}
 
       {/* Expanded details */}
@@ -365,7 +365,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
               <Text fontSize="10px" color="kk.textMuted" minW="80px">Inbound TX</Text>
               <HStack gap="1">
                 <Button
-                  size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                  size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                   fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.txid, 'inbound') }}
                   _hover={{ color: "var(--teal)" }}
                 >
@@ -374,7 +374,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 {(() => {
                   const url = getExplorerTxUrl(record.fromChainId, record.txid)
                   return url ? (
-                    <Button size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                    <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                       onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                       <ExternalLinkIcon />
                     </Button>
@@ -387,7 +387,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 <Text fontSize="10px" color="kk.textMuted" minW="80px">Outbound TX</Text>
                 <HStack gap="1">
                   <Button
-                    size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                    size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                     fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.outboundTxid!, 'outbound') }}
                     _hover={{ color: "var(--teal)" }}
                   >
@@ -410,7 +410,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 <Text fontSize="10px" color="kk.textMuted" minW="80px">Approval TX</Text>
                 <HStack gap="1">
                   <Button
-                    size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                    size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                     fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.approvalTxid!, 'approval') }}
                     _hover={{ color: "var(--teal)" }}
                   >
@@ -419,7 +419,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                   {(() => {
                     const url = getExplorerTxUrl(record.fromChainId, record.approvalTxid)
                     return url ? (
-                      <Button size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                      <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                         onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                         <ExternalLinkIcon />
                       </Button>
@@ -436,7 +436,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 mt="2"
                 w="full"
                 bg="rgba(35,220,200,0.12)"
-                color="#23DCC8"
+                color="var(--teal)"
                 fontWeight="600"
                 fontSize="11px"
                 _hover={{ bg: "rgba(35,220,200,0.2)" }}
@@ -653,7 +653,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                   {stats.completed}
                 </Text>
                 {stats.failed > 0 && (
-                  <Text fontSize="10px" color="#EF4444" bg="rgba(239,68,68,0.1)" px="1.5" py="0.5" borderRadius="md">
+                  <Text fontSize="10px" color="var(--rose)" bg="rgba(239,68,68,0.1)" px="1.5" py="0.5" borderRadius="md">
                     {stats.failed}
                   </Text>
                 )}
@@ -747,8 +747,8 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 {activeSwaps.length > 0 && (
                   <>
                     <HStack gap="2" mb="1">
-                      <Box w="6px" h="6px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
-                      <Text fontSize="xs" fontWeight="600" color="#23DCC8" textTransform="uppercase" letterSpacing="0.05em">
+                      <Box w="6px" h="6px" borderRadius="full" bg="var(--teal)" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
+                      <Text fontSize="xs" fontWeight="600" color="var(--teal)" textTransform="uppercase" letterSpacing="0.05em">
                         {t("activeSwaps")} ({activeSwaps.length})
                       </Text>
                     </HStack>
@@ -822,7 +822,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 <Flex justify="center" align="center" py="10" direction="column" gap="2">
                   <Text fontSize="sm" color="kk.textMuted">No swap history found</Text>
                   {statusFilter !== 'all' && (
-                    <Button size="xs" variant="ghost" color="#23DCC8" onClick={() => setStatusFilter('all')}>
+                    <Button size="xs" variant="ghost" color="var(--teal)" onClick={() => setStatusFilter('all')}>
                       Clear filter
                     </Button>
                   )}

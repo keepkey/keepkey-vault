@@ -121,10 +121,10 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 		return (
 			<Flex align="center" gap="1">
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-					<circle cx="12" cy="12" r="10" fill="#22C55E" />
+					<circle cx="12" cy="12" r="10" fill="var(--teal)" />
 					<path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 				</svg>
-				<Text fontSize="11px" color="#22C55E" fontWeight="600">{t("official")}</Text>
+				<Text fontSize="11px" color="var(--teal)" fontWeight="600">{t("official")}</Text>
 			</Flex>
 		)
 	}
@@ -1002,10 +1002,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											w="8px"
 											h="8px"
 											borderRadius="full"
-											bg={appSettings.restApiEnabled ? "#22C55E" : "#EF4444"}
+											bg={appSettings.restApiEnabled ? "var(--teal)" : "var(--rose)"}
 											boxShadow={appSettings.restApiEnabled ? "0 0 6px rgba(34,197,94,0.5)" : "0 0 6px rgba(239,68,68,0.4)"}
 										/>
-										<Text fontSize="sm" fontWeight="500" color={appSettings.restApiEnabled ? "#22C55E" : "#EF4444"}>
+										<Text fontSize="sm" fontWeight="500" color={appSettings.restApiEnabled ? "var(--teal)" : "var(--rose)"}>
 											{appSettings.restApiEnabled ? t("running") : t("stopped")}
 										</Text>
 									</Flex>
@@ -1134,8 +1134,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								{updatePhase === "ready" && onApplyUpdate && (
 									<Box
 										as="button" mt="2" px="3" py="1.5" borderRadius="full"
-										bg="#22C55E" color="white" fontSize="xs" fontWeight="600"
-										cursor="pointer" _hover={{ bg: "#16A34A" }}
+										bg="var(--teal)" color="white" fontSize="xs" fontWeight="600"
+										cursor="pointer" _hover={{ bg: "var(--teal)" }}
 										onClick={onApplyUpdate}
 									>
 										{t("restartToUpdate", { defaultValue: "Restart & Install" })}
@@ -1256,7 +1256,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
 									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M16 3l5 5-5 5" />
 											<path d="M21 8H9" />
 											<path d="M8 21l-5-5 5-5" />

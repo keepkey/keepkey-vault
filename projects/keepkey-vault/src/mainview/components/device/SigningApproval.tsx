@@ -87,10 +87,10 @@ function Row({ label, value, mono = true }: { label: string; value?: string; mon
 
 function TrustBadge({ level, hasSigned, t }: { level: 'verified' | 'known' | 'unknown'; hasSigned?: boolean; t: (k: string, f?: string) => string }) {
 	const cfg = level === 'verified'
-		? { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "#22C55E", label: hasSigned ? t("signing.signedVerified", "Signed & Verified") : t("signing.verified", "Verified Contract") }
+		? { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "var(--teal)", label: hasSigned ? t("signing.signedVerified", "Signed & Verified") : t("signing.verified", "Verified Contract") }
 		: level === 'known'
 			? { bg: "rgba(233,196,106,0.12)", border: "rgba(233,196,106,0.3)", color: "var(--gold)", label: t("signing.knownPattern", "Known Pattern") }
-			: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "#EF4444", label: t("signing.unverifiedContract", "Unverified Contract") }
+			: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "var(--rose)", label: t("signing.unverifiedContract", "Unverified Contract") }
 
 	return (
 		<Flex
@@ -185,7 +185,7 @@ function SolanaDecodeFailureBanner({
 			bg="rgba(239,68,68,0.1)" border="1px solid rgba(239,68,68,0.4)"
 			borderRadius="lg" px="3" py="2"
 		>
-			<Text fontSize="2xs" fontWeight="600" color="#EF4444">
+			<Text fontSize="2xs" fontWeight="600" color="var(--rose)">
 				{t("signing.solanaDecodeFailedTitle", "Clear-Signing Unavailable")}
 			</Text>
 			<Text fontSize="2xs" color="kk.textSecondary">
@@ -214,7 +214,7 @@ function SolanaBlindSignBanner({ t }: { t: (k: string, f?: string) => string }) 
 			bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)"
 			borderRadius="lg" px="3" py="2"
 		>
-			<Text fontSize="2xs" fontWeight="700" color="#EF4444">
+			<Text fontSize="2xs" fontWeight="700" color="var(--rose)">
 				{t("signing.solanaBlindSignTitle", "⚠ Blind Signing — Versioned Transaction")}
 			</Text>
 			<Text fontSize="2xs" color="kk.textSecondary">
@@ -237,7 +237,7 @@ function SolanaUnsafeMessageBanner({ classification, t }: {
 			bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)"
 			borderRadius="lg" px="3" py="2"
 		>
-			<Text fontSize="2xs" fontWeight="700" color="#EF4444">
+			<Text fontSize="2xs" fontWeight="700" color="var(--rose)">
 				{looksLikeTx
 					? t("signing.solanaMessageLooksLikeTxTitle", "Unsafe Solana Message - Transaction-Like Payload")
 					: t("signing.solanaUnsafeMessageTitle", "Unsafe Solana Message Signing")}

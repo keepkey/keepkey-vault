@@ -182,7 +182,7 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 				<Box flex="1" overflow="auto" px="5" py="4">
 					{/* Warning */}
 					<Flex bg="rgba(251,146,60,0.08)" border="1px solid rgba(251,146,60,0.2)" borderRadius="lg" p="3" gap="2" align="start" mb="4">
-						<Text fontSize="sm" color="#FB923C" mt="0.5">&#9888;</Text>
+						<Text fontSize="sm" color="var(--gold)" mt="0.5">&#9888;</Text>
 						<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.5">{t("bip85.warning")}</Text>
 					</Flex>
 
@@ -358,12 +358,12 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 										>
 											<Box flex="1" minW="0">
 												<Flex align="center" gap="2">
-													<Text fontSize="sm" fontWeight="600" color={isJustCreated ? "#4ade80" : "kk.textPrimary"} truncate
+													<Text fontSize="sm" fontWeight="600" color={isJustCreated ? "var(--teal)" : "kk.textPrimary"} truncate
 														style={{ transition: "color 0.8s ease-out" }}>
 														{seed.label || `Seed #${seed.index}`}
 													</Text>
 													{isJustCreated && (
-														<Text fontSize="9px" fontWeight="700" color="#4ade80" bg="rgba(74,222,128,0.15)"
+														<Text fontSize="9px" fontWeight="700" color="var(--teal)" bg="rgba(139,227,196,0.15)"
 															px="1.5" py="0.5" borderRadius="sm" letterSpacing="0.5px"
 															style={{ animation: "fadeInScale 0.3s ease-out" }}>
 															SAVED

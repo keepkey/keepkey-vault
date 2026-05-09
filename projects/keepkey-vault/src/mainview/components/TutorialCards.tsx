@@ -65,7 +65,7 @@ function CipherGrid() {
         {letters.slice(0, 18).map((l, i) => (
           <Flex key={i} w="20px" h="20px" bg="rgba(35,220,200,0.1)" borderRadius="sm"
             align="center" justify="center" border="1px solid rgba(35,220,200,0.15)">
-            <Text fontSize="8px" fontWeight="600" color="#23DCC8">{l}</Text>
+            <Text fontSize="8px" fontWeight="600" color="var(--teal)">{l}</Text>
           </Flex>
         ))}
       </Flex>
@@ -113,7 +113,7 @@ function DeviceCheck() {
     <Box w="48px" h="72px" bg="rgba(72,187,120,0.08)" borderRadius="lg"
       border="2px solid rgba(72,187,120,0.3)" display="flex" alignItems="center" justifyContent="center"
       position="relative">
-      <FaCheckCircle color="#48BB78" size={18} />
+      <FaCheckCircle color="var(--teal)" size={18} />
       <Box position="absolute" bottom="-2px" left="50%" transform="translateX(-50%)"
         w="20px" h="4px" bg="rgba(72,187,120,0.2)" borderRadius="full" />
     </Box>
@@ -144,7 +144,7 @@ const PRE_CARDS: TutorialCard[] = [
     title: 'Your Words = Your Wallet',
     body: 'Write your 12/24 words on paper. Store them somewhere safe. Never type them into a computer, website, or phone. Anyone with these words controls your funds.',
     accent: '#FC8181',
-    icon1: <FaKey size={28} color="#FC8181" />,
+    icon1: <FaKey size={28} color="var(--rose)" />,
     icon2: <WordSlots />,
     icon3: <FaPen size={22} color="rgba(252,129,129,0.6)" />,
   },
@@ -152,7 +152,7 @@ const PRE_CARDS: TutorialCard[] = [
     title: 'Scrambled Recovery Entry',
     body: 'When recovering, KeepKey scrambles the alphabet on the device screen. You enter words by position — never by typing actual letters. Keyloggers see nothing useful.',
     accent: '#23DCC8',
-    icon1: <FaShieldAlt size={28} color="#23DCC8" />,
+    icon1: <FaShieldAlt size={28} color="var(--teal)" />,
     icon2: <CipherGrid />,
     icon3: <FaKeyboard size={22} color="rgba(35,220,200,0.6)" />,
   },
@@ -163,7 +163,7 @@ const POST_CARDS: TutorialCard[] = [
     title: 'Trust Your Device Screen',
     body: 'Always confirm the address and amount on your KeepKey before approving. Your computer can be compromised — your device screen cannot. Especially for large transactions.',
     accent: '#48BB78',
-    icon1: <FaCheckCircle size={28} color="#48BB78" />,
+    icon1: <FaCheckCircle size={28} color="var(--teal)" />,
     icon2: <DeviceCheck />,
     icon3: <Box position="relative" display="inline-flex">
       <FaDesktop size={22} color="rgba(72,187,120,0.5)" />
