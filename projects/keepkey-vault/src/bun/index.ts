@@ -121,7 +121,7 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -3515,6 +3515,62 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
 				return await getSwapAssets()
+			},
+
+			/** Look up an unknown EVM token by contract address.
+			 *  Tries Ethereum + common L2s/sidechains in parallel via Pioneer's
+			 *  GetMarketInfo + GetTokenDecimals. Frontend uses this to "add custom
+			 *  token" when the user pastes a contract into the picker search and
+			 *  nothing matches. */
+			lookupTokenContract: async (params) => {
+				if (!swapsEnabled) return { hits: [], reason: 'swaps-disabled' as string | undefined }
+				const raw = (params.contractAddress || '').trim()
+				if (!/^0x[a-fA-F0-9]{40}$/.test(raw)) {
+					return { hits: [] as SwapAsset[], reason: 'invalid-evm-contract' }
+				}
+				const lower = raw.toLowerCase()
+
+				/* When the user specifies a chainId, only probe that one. Otherwise
+				 * try every EVM RPC we have configured in parallel — direct
+				 * on-chain ERC20 reads (name/symbol/decimals) work even for
+				 * tokens Pioneer hasn't indexed yet. */
+				const chainsToProbe = params.chainId
+					? [params.chainId.replace(/^eip155:/, '')]
+					: Object.keys(EVM_RPC_URLS)
+
+				const hits = (await Promise.all(chainsToProbe.map(async (numericId) => {
+					const rpcUrl = EVM_RPC_URLS[numericId]
+					if (!rpcUrl) return null
+					try {
+						const meta = await withTimeout(
+							getTokenMetadata(rpcUrl, lower),
+							8000,
+							`getTokenMetadata(${numericId})`,
+						)
+						/* Reject empty responses — RPCs sometimes return zero-length
+						 * strings for EOA addresses or bogus contracts. We need a real
+						 * symbol + decimals to safely build a swap. */
+						if (!meta.symbol || typeof meta.decimals !== 'number') return null
+						const chainId = `eip155:${numericId}`
+						const caip = `${chainId}/erc20:${lower}`
+						return {
+							asset: meta.symbol,
+							caip,
+							chainId,
+							chainFamily: 'evm',
+							contractAddress: lower,
+							decimals: meta.decimals,
+							symbol: meta.symbol,
+							name: meta.name || meta.symbol,
+						} as SwapAsset
+					} catch (e: any) {
+						/* Per-chain failure is fine — most RPCs will return "execution
+						 * reverted" because the contract doesn't exist on that chain. */
+						return null
+					}
+				}))).filter((h): h is SwapAsset => h !== null)
+
+				return { hits }
 			},
 			getSwapQuote: async (params) => {
 				if (!swapsEnabled) throw new Error('Swaps feature is disabled')

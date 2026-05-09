@@ -173,6 +173,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }
       getSwapAssets: { params: void; response: SwapAsset[] }
+      /** Look up an unknown token by contract address across common chains.
+       *  When no chainId is provided, candidate EVM chains are queried in
+       *  parallel and any with metadata are returned. The frontend uses this
+       *  to auto-add a token when the user pastes a contract into the asset
+       *  picker search box. */
+      lookupTokenContract: {
+        params: { contractAddress: string; chainId?: string }
+        response: { hits: SwapAsset[]; reason?: string }
+      }
       getSwapQuote: { params: SwapQuoteParams; response: SwapQuote }
       executeSwap: { params: ExecuteSwapParams; response: SwapResult }
       /** Build the unsigned swap tx(s) without signing — used to surface the
