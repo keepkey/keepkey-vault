@@ -1,5 +1,5 @@
 import { Component, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
-import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
+import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { versionCompare } from "../../shared/firmware-versions"
@@ -7,7 +7,7 @@ import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
-import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
+import type { DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
@@ -113,7 +113,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
 	const [loadingBalances, setLoadingBalances] = useState(false)
 	const [initialLoaded, setInitialLoaded] = useState(false)
-	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
@@ -437,11 +436,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
 
-	// Show big CTA when last check is older than 24 hours
-	const cacheOlderThanDay = !loadingBalances && !watchOnly && initialLoaded && (
-		!cacheUpdatedAt || (Date.now() - cacheUpdatedAt > 86_400_000)
-	)
-
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
 		return (
@@ -451,9 +445,117 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		)
 	}
 
+	const totalDollars = Math.floor(totalUsd)
+	const totalCents = (totalUsd - totalDollars).toFixed(2).slice(2)
+	const cleanTokenTotal = Array.from(cleanBalanceUsd.values()).reduce((s, b) => s + b.cleanTokenCount, 0)
+	const cacheAgeAccent = (() => {
+		if (!cacheUpdatedAt) return "var(--text-3)"
+		const age = Date.now() - cacheUpdatedAt
+		if (age < 3_600_000) return "var(--teal)"
+		if (age < 86_400_000) return "var(--gold)"
+		return "var(--rose)"
+	})()
+
 	return (
-		<Box w="100%" maxW="600px" mx="auto" pt="2">
+		<Box w="100%" maxW="880px" mx="auto" pt="6" pb="8" px={{ base: "4", md: "6" }} className="v3-page-enter">
 			<style>{DASHBOARD_ANIMATIONS}</style>
+
+			{/* Hero — Portfolio eyebrow + huge total + chains·assets meta + refresh */}
+			<Flex
+				align={{ base: "flex-start", sm: "flex-end" }}
+				justify="space-between"
+				gap="4"
+				mb="6"
+				direction={{ base: "column", sm: "row" }}
+			>
+				<Box>
+					<Text
+						fontSize="11px"
+						color="var(--text-3)"
+						letterSpacing="0.18em"
+						textTransform="uppercase"
+						fontWeight="500"
+						mb="2"
+					>
+						{watchOnly ? "Watching" : "Portfolio"}
+					</Text>
+					<Flex align="baseline" gap="0">
+						<Text
+							fontSize={{ base: "44px", md: "56px" }}
+							fontWeight="500"
+							color="var(--text-0)"
+							letterSpacing="-0.04em"
+							lineHeight="1"
+							fontFamily="body"
+						>
+							${totalDollars.toLocaleString()}
+						</Text>
+						<Text
+							fontSize={{ base: "22px", md: "28px" }}
+							fontWeight="400"
+							color="var(--text-2)"
+							letterSpacing="-0.02em"
+							lineHeight="1"
+							fontFamily="body"
+							ml="1"
+						>
+							.{totalCents}
+						</Text>
+					</Flex>
+					<Text
+						fontSize="11px"
+						color="var(--text-3)"
+						letterSpacing="0.12em"
+						textTransform="uppercase"
+						mt="3"
+						fontFamily="mono"
+					>
+						{sortedChains.length} CHAINS
+						{cleanTokenTotal > 0 && ` · ${cleanTokenTotal} ASSETS`}
+					</Text>
+				</Box>
+
+				{/* Refresh chip — replaces the bottom-of-card refresh row, lives next to the hero */}
+				{!watchOnly && (
+					<Box
+						as="button"
+						onClick={loadingBalances ? undefined : refreshBalances}
+						disabled={loadingBalances}
+						className="electrobun-webkit-app-region-no-drag"
+						display="inline-flex"
+						alignItems="center"
+						gap="2.5"
+						px="3.5"
+						py="2"
+						borderRadius="999px"
+						bg="var(--ink-2)"
+						border="1px solid var(--line)"
+						color="var(--text-2)"
+						cursor={loadingBalances ? "default" : "pointer"}
+						_hover={loadingBalances ? {} : { borderColor: "var(--line-2)", color: "var(--text-0)" }}
+						transition="all 0.18s"
+						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
+						flexShrink={0}
+					>
+						{loadingBalances ? (
+							<Spinner size="xs" color="var(--gold)" />
+						) : (
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+							</svg>
+						)}
+						{cacheUpdatedAt && !loadingBalances && (
+							<Box w="5px" h="5px" borderRadius="full" bg={cacheAgeAccent} />
+						)}
+						<Text fontSize="11px" fontFamily="mono" letterSpacing="0.04em" textTransform="uppercase">
+							{loadingBalances
+								? t("refreshing")
+								: cacheUpdatedAt ? formatTimeAgo(cacheUpdatedAt, t) : t("refreshPrompt")}
+						</Text>
+					</Box>
+				)}
+			</Flex>
 
 			{/* Watch-only banner */}
 			{watchOnly && (
@@ -593,218 +695,118 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Portfolio Chart — or Welcome placeholder for empty wallets */}
-			{hasAnyBalance ? (
+			{/* Welcome placeholder — only when wallet is loaded but empty.
+			    The donut card was removed: the hero total + per-network rows already
+			    convey the same information without the dense legend block. */}
+			{!hasAnyBalance && !loadingBalances && initialLoaded && (
 				<Box
 					w="100%"
-					p="4"
-					mb="2"
-					borderRadius="xl"
-					bg="kk.cardBg"
-					border="1px solid"
-					borderColor="kk.border"
-				>
-					<Flex direction="column" align="center" gap="3">
-						<DonutChart
-							data={chartData}
-							size={160}
-							activeIndex={activeSliceIndex}
-							onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-						/>
-						<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
-							<ChartLegend
-								data={chartData}
-								total={totalUsd}
-								activeIndex={activeSliceIndex}
-								onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-							/>
-						</Box>
-					</Flex>
-				</Box>
-			) : !loadingBalances && initialLoaded && (
-				<Box
-					w="100%"
-					p="5"
+					p={{ base: "5", md: "7" }}
 					mb="5"
-					borderRadius="xl"
-					bg="kk.cardBg"
-					border="1px solid"
-					borderColor="rgba(233,196,106,0.2)"
+					borderRadius="var(--r-lg)"
+					bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
+					border="1px solid var(--line-2)"
+					position="relative"
+					overflow="hidden"
 				>
-					<Flex direction="column" align="center" gap="3" textAlign="center">
-						{/* Shield / vault icon */}
+					<Box position="absolute" top="-40px" right="-40px" w="140px" h="140px" borderRadius="full" bg="var(--gold)" opacity="0.06" filter="blur(28px)" pointerEvents="none" />
+
+					<Flex direction="column" gap="4" position="relative">
 						<Box
-							w="56px"
-							h="56px"
-							borderRadius="full"
-							bg="rgba(233,196,106,0.1)"
+							w="48px"
+							h="48px"
+							borderRadius="14px"
+							bg="var(--ink-3)"
+							border="1px solid var(--line-2)"
 							display="flex"
 							alignItems="center"
 							justifyContent="center"
 						>
-							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 								<path d="M9 12l2 2 4-4" />
 							</svg>
 						</Box>
 
 						<Box>
-							<Text fontSize="md" fontWeight="600" color="white" mb="1">
+							<Text
+								as="h2"
+								fontFamily="serif"
+								fontStyle="italic"
+								fontWeight="400"
+								fontSize={{ base: "26px", md: "30px" }}
+								letterSpacing="-0.01em"
+								color="var(--text-0)"
+								lineHeight="1.1"
+								m="0"
+							>
 								{t("welcomeTitle")}
 							</Text>
-							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
+							<Text fontSize="14px" color="var(--text-2)" lineHeight="1.55" mt="2" maxW="480px">
 								{t("welcomeSubtitle")}
 							</Text>
 						</Box>
 
-						<Flex direction="column" gap="2" w="100%" maxW="340px" mt="1">
-							<Flex align="flex-start" gap="2.5" textAlign="left">
-								<Text fontSize="sm" mt="0.5">1.</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip1")}
-								</Text>
+						<Flex direction="column" gap="2.5" mt="2" maxW="480px">
+							<Flex align="flex-start" gap="3">
+								<Text fontSize="11px" fontFamily="mono" color="var(--gold)" letterSpacing="0.06em" mt="1" w="14px" flexShrink={0}>01</Text>
+								<Text fontSize="13px" color="var(--text-1)" lineHeight="1.5">{t("welcomeTip1")}</Text>
 							</Flex>
-							<Flex align="flex-start" gap="2.5" textAlign="left">
-								<Text fontSize="sm" mt="0.5">2.</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip2")}
-								</Text>
+							<Flex align="flex-start" gap="3">
+								<Text fontSize="11px" fontFamily="mono" color="var(--gold)" letterSpacing="0.06em" mt="1" w="14px" flexShrink={0}>02</Text>
+								<Text fontSize="13px" color="var(--text-1)" lineHeight="1.5">{t("welcomeTip2")}</Text>
 							</Flex>
 						</Flex>
 					</Flex>
 				</Box>
 			)}
 
-			{/* Refresh + Reports buttons — below chart */}
-			{!watchOnly && (
-				<Flex justify="center" gap="3" mb="4">
-					{!isHiddenWallet && <Box
+			{/* Reports link — refresh chip now lives in the hero strip */}
+			{!watchOnly && !isHiddenWallet && (
+				<Flex justify="flex-end" mb="3">
+					<Box
 						as="button"
-						px="3"
+						className="electrobun-webkit-app-region-no-drag"
+						px="2.5"
 						py="1"
 						fontSize="11px"
-						fontWeight="600"
-						color="kk.gold"
+						fontFamily="mono"
+						color="var(--text-3)"
 						bg="transparent"
-						borderRadius="full"
+						borderRadius="999px"
 						cursor="pointer"
+						letterSpacing="0.04em"
+						textTransform="uppercase"
 						transition="all 0.2s"
-						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
+						_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
 						onClick={() => setShowReports(true)}
 					>
 						<Flex align="center" gap="1.5">
-							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
 								<polyline points="14 2 14 8 20 8" />
 								<line x1="16" y1="13" x2="8" y2="13" />
 								<line x1="16" y1="17" x2="8" y2="17" />
-								<polyline points="10 9 9 9 8 9" />
 							</svg>
 							{t("reports")}
-						</Flex>
-					</Box>}
-					<Box
-						as="button"
-						px="3"
-						py="1"
-						fontSize="11px"
-						fontWeight="600"
-						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
-						bg="transparent"
-						borderRadius="full"
-						cursor={loadingBalances ? "default" : "pointer"}
-						transition="all 0.2s"
-						_hover={loadingBalances ? {} : {
-							color: "white",
-							bg: "rgba(233,196,106,0.12)",
-						}}
-						onClick={loadingBalances ? undefined : refreshBalances}
-						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
-					>
-						<Flex align="center" gap="1.5">
-							{loadingBalances ? (
-								<Spinner size="xs" color="kk.gold" />
-							) : (
-								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-									<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-									<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-								</svg>
-							)}
-							{loadingBalances
-								? t("refreshing")
-								: cacheUpdatedAt
-									? <>
-										<Text as="span" color={(() => {
-											const age = Date.now() - cacheUpdatedAt
-											if (age < 3_600_000) return "var(--teal)"
-											if (age < 86_400_000) return "var(--gold)"
-											return "var(--rose)"
-										})()}>
-											{formatTimeAgo(cacheUpdatedAt, t)}
-										</Text>
-										{" · "}{t("refreshBalances")}
-									</>
-									: t("refreshPrompt")}
 						</Flex>
 					</Box>
 				</Flex>
 			)}
 
-			{/* Big glowing CTA when balances haven't been checked in over a day */}
-			{cacheOlderThanDay && (
-				<Box
-					as="button"
-					w="100%"
-					mb="4"
-					px="5"
-					py="4"
-					bg="rgba(233,196,106,0.08)"
-					border="1px solid"
-					borderColor="rgba(233,196,106,0.35)"
-					borderRadius="xl"
-					cursor="pointer"
-					transition="all 0.3s ease-out"
-					css={{ animation: "glowCta 3s ease-in-out infinite" }}
-					_hover={{
-						bg: "rgba(233,196,106,0.15)",
-						borderColor: "kk.gold",
-						transform: "scale(1.02)",
-						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
-					}}
-					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
-					onClick={refreshBalances}
-				>
-					<Flex align="center" justify="center" gap="3">
-						<Box
-							w="40px"
-							h="40px"
-							borderRadius="full"
-							bg="rgba(233,196,106,0.15)"
-							display="flex"
-							alignItems="center"
-							justifyContent="center"
-							flexShrink={0}
-						>
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-							</svg>
-						</Box>
-						<Flex direction="column" align="flex-start">
-							<Text fontSize="md" fontWeight="700" color="kk.gold" lineHeight="1.3">
-								{t("staleCtaTitle")}
-							</Text>
-							<Text fontSize="xs" color="kk.textMuted" lineHeight="1.3">
-								{cacheUpdatedAt
-									? t("staleCtaSubtitle", { time: formatTimeAgo(cacheUpdatedAt, t) })
-									: t("lastUpdatedNever")}
-							</Text>
-						</Flex>
-					</Flex>
-				</Box>
+			{/* Networks header */}
+			{hasAnyBalance && (
+				<Flex align="center" justify="space-between" px="1" pb="3" mt="2">
+					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.18em" textTransform="uppercase" fontWeight="500">
+						Networks · {sortedChains.length}
+					</Text>
+					<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase">
+						Chain · Balance · Value
+					</Text>
+				</Flex>
 			)}
 
-		<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
+			<Flex direction="column" gap="2">
 				{sortedChains.map((chain) => {
 					const bal = balances.get(chain.id)
 					const clean = cleanBalanceUsd.get(chain.id)
@@ -818,23 +820,30 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					const tokenUsd = usdNum - nativeUsd
 					const lowGas = chain.chainFamily === 'evm' && nativeUsd < 1 && tokenUsd > 1
 
+					const shielded = bal?.tokens?.find(tk => tk.type === 'shielded')
+					const hasShielded = !!shielded && parseFloat(shielded.balance || '0') > 0
+					const pct = totalUsd > 0 ? (usdNum / totalUsd) * 100 : 0
+
 					return (
 						<Box
 							key={chain.id}
-							bg="kk.cardBg"
-							border="1px solid"
-							borderColor={hasBalance ? `${chain.color}50` : "kk.border"}
-							borderRadius="xl"
-							p="3"
+							as="button"
+							className="electrobun-webkit-app-region-no-drag"
+							textAlign="left"
+							w="100%"
+							display="grid"
+							gridTemplateColumns={{ base: "36px 1fr auto", sm: "44px 1fr 140px 110px" }}
+							alignItems="center"
+							gap={{ base: "3", sm: "4" }}
+							px={{ base: "3", sm: "4" }}
+							py="3.5"
+							borderRadius="var(--r-md)"
+							bg="var(--ink-1)"
+							border="1px solid var(--line)"
 							cursor="pointer"
-							transition="all 0.15s"
-							_hover={{
-								borderColor: chain.color,
-								bg: `${chain.color}10`,
-								transform: "translateY(-1px)",
-								boxShadow: `0 4px 12px ${chain.color}15`,
-							}}
-							_active={{ transform: "scale(0.98)" }}
+							transition="all 0.18s"
+							_hover={{ bg: "var(--ink-2)", borderColor: "var(--line-2)" }}
+							_active={{ transform: "scale(0.995)" }}
 							onClick={() => setSelectedChain(chain)}
 							position="relative"
 							overflow="hidden"
@@ -842,125 +851,152 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							{hasBalance && (
 								<Box
 									position="absolute"
-									top="-20px"
-									right="-20px"
-									w="60px"
-									h="60px"
+									top="-30px"
+									right="-30px"
+									w="100px"
+									h="100px"
 									borderRadius="full"
 									bg={chain.color}
-									opacity={0.06}
+									opacity={0.05}
+									filter="blur(20px)"
 									pointerEvents="none"
 								/>
 							)}
 
-							<Flex direction="column" gap="2" position="relative">
+							<Image
+								src={getAssetIcon(chain.caip)}
+								alt={chain.symbol}
+								w={{ base: "32px", sm: "36px" }}
+								h={{ base: "32px", sm: "36px" }}
+								borderRadius="full"
+								flexShrink={0}
+								bg="var(--ink-2)"
+								boxShadow={hasBalance ? `0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}` : "0 0 0 1px var(--line)"}
+								position="relative"
+							/>
+
+							<Box minW="0" position="relative">
 								<Flex align="center" gap="2">
-									<Image
-										src={getAssetIcon(chain.caip)}
-										alt={chain.symbol}
-										w="28px"
-										h="28px"
-										borderRadius="full"
-										flexShrink={0}
-										bg={chain.color}
-									/>
-									<Box overflow="hidden" flex="1">
-										<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2" truncate>
-											{chain.coin}
-										</Text>
-										<Text fontSize="10px" color="kk.textMuted" lineHeight="1.2">
-											{chain.symbol}
-										</Text>
-									</Box>
+									<Text fontSize="14px" fontWeight="500" color="var(--text-0)" letterSpacing="-0.005em" truncate>
+										{chain.coin}
+									</Text>
 									{lowGas && (
-										<Flex
-											direction="column"
-											align="center"
+										<Box
 											title={`Low ${chain.symbol} for gas \u2014 you need ${chain.symbol} to send tokens on ${chain.coin}`}
+											fontSize="9px"
+											fontFamily="mono"
+											fontWeight="600"
+											letterSpacing="0.08em"
+											textTransform="uppercase"
+											color="var(--rose)"
+											bg="rgba(224,140,123,0.10)"
+											border="1px solid rgba(224,140,123,0.25)"
+											borderRadius="sm"
+											px="1.5"
+											py="0.5"
 											flexShrink={0}
 											cursor="help"
-											onClick={(e) => e.stopPropagation()}
+											onClick={(e: React.MouseEvent) => e.stopPropagation()}
 										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
-												<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
-											</svg>
-											<Text fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1" mt="1">LOW GAS</Text>
-										</Flex>
+											LOW GAS
+										</Box>
 									)}
 								</Flex>
-
-								{bal ? (
-									<Box>
-										<Text fontSize="xs" fontFamily="mono" fontWeight="500" color={isStale ? "kk.textMuted" : "white"} lineHeight="1.3" truncate>
-											{formatBalance(bal.balance)} {chain.symbol}
+								<Flex align="center" gap="2" mt="0.5">
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" truncate>
+										{chain.symbol}
+									</Text>
+									{tokenCount > 0 && (
+										<Text fontSize="11px" fontFamily="mono" color="var(--text-3)">
+											\u00b7 {t("tokensCount", { count: tokenCount })}
 										</Text>
-										{usdNum > 0 && (
-											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : undefined} fontWeight="500" lineHeight="1.3" />
-										)}
-										{(() => {
-											// Zcash gets a special "+ shielded" sub-row instead of generic token count.
-											// The shielded balance is appended as a synthetic token with type:'shielded'
-											// in getBalances; surface it explicitly so users see the private balance.
-											const shielded = bal.tokens?.find(tk => tk.type === 'shielded')
-											const otherTokens = bal.tokens?.filter(tk => tk.type !== 'shielded') ?? []
-											return (
-												<>
-													{shielded && parseFloat(shielded.balance || '0') > 0 && (
-														<Flex align="center" gap="1" mt="0.5" title="Shielded (Orchard) balance — visible only to you">
-															<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={chain.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-																<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-															</svg>
-															<Text fontSize="10px" fontFamily="mono" color={chain.color} fontWeight="600" lineHeight="1.3" truncate>
-																+ {formatBalance(shielded.balance)} private
-															</Text>
-														</Flex>
-													)}
-													{otherTokens.length > 0 && (
-														<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
-															{t("tokensCount", { count: otherTokens.length })}
-														</Text>
-													)}
-												</>
-											)
-										})()}
-									</Box>
-								) : loadingBalances ? (
-									<Text fontSize="10px" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>
-								) : (
-									<Text fontSize="10px" color="kk.textMuted">{t("noBalance")}</Text>
+									)}
+								</Flex>
+								{hasShielded && shielded && (
+									<Flex align="center" gap="1" mt="1" title="Shielded (Orchard) balance \u2014 visible only to you">
+										<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+										</svg>
+										<Text fontSize="10px" fontFamily="mono" color="var(--teal)" fontWeight="500" letterSpacing="0.02em">
+											+ {formatBalance(shielded.balance)} private
+										</Text>
+									</Flex>
 								)}
-							</Flex>
+							</Box>
+
+							<Box display={{ base: "none", sm: "block" }} textAlign="right" position="relative">
+								{bal ? (
+									<Text fontSize="13px" fontFamily="mono" color={isStale ? "var(--text-3)" : "var(--text-1)"} fontWeight="500" letterSpacing="0.02em" lineHeight="1.2">
+										{formatBalance(bal.balance)}
+										<Box as="span" color="var(--text-3)" ml="1">{chain.symbol}</Box>
+									</Text>
+								) : loadingBalances ? (
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.04em" textTransform="uppercase">{t("loading", { ns: "common" })}</Text>
+								) : (
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)">\u2014</Text>
+								)}
+							</Box>
+
+							<Box textAlign="right" position="relative">
+								{bal && usdNum > 0 ? (
+									<>
+										<AnimatedUsd value={usdNum} fontSize="14px" color={isStale ? "var(--text-2)" : "var(--text-0)"} fontWeight="500" fontFamily="mono" lineHeight="1.2" />
+										{totalUsd > 0 && (
+											<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em">
+												{pct.toFixed(1)}%
+											</Text>
+										)}
+										<Box display={{ base: "block", sm: "none" }}>
+											<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em">
+												{bal && formatBalance(bal.balance)} {chain.symbol}
+											</Text>
+										</Box>
+									</>
+								) : bal ? (
+									<Text fontSize="13px" fontFamily="mono" color="var(--text-3)">\u2014</Text>
+								) : loadingBalances ? (
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.04em" textTransform="uppercase">{t("loading", { ns: "common" })}</Text>
+								) : (
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.04em" textTransform="uppercase">{t("noBalance")}</Text>
+								)}
+							</Box>
 						</Box>
 					)
 				})}
 
-				{/* Add Chain card — hidden in watch-only mode */}
+				{/* Add Chain row — single full-width dashed surface */}
 				{!watchOnly && (
 					<Box
-						bg="kk.cardBg"
-						border="1px dashed"
-						borderColor="kk.border"
-						borderRadius="xl"
-						p="3"
-						cursor="pointer"
-						transition="all 0.15s"
-						_hover={{
-							borderColor: "kk.gold",
-							bg: "rgba(233,196,106,0.05)",
-						}}
-						onClick={() => setShowAddChain(true)}
+						as="button"
+						className="electrobun-webkit-app-region-no-drag"
+						w="100%"
 						display="flex"
 						alignItems="center"
 						justifyContent="center"
-						minH="80px"
+						gap="2"
+						py="3.5"
+						borderRadius="var(--r-md)"
+						bg="transparent"
+						border="1px dashed var(--line-2)"
+						color="var(--text-3)"
+						cursor="pointer"
+						transition="all 0.18s"
+						_hover={{
+							borderColor: "var(--gold)",
+							color: "var(--gold)",
+							bg: "rgba(233,196,106,0.04)",
+						}}
+						onClick={() => setShowAddChain(true)}
 					>
-						<Flex direction="column" align="center" gap="1">
-							<Text fontSize="lg" color="kk.textMuted">+</Text>
-							<Text fontSize="10px" color="kk.textMuted">{t("addChain")}</Text>
-						</Flex>
+						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+							<path d="M12 5v14M5 12h14"/>
+						</svg>
+						<Text fontSize="12px" fontFamily="mono" letterSpacing="0.06em" textTransform="uppercase">
+							{t("addChain")}
+						</Text>
 					</Box>
 				)}
-			</SimpleGrid>
+			</Flex>
 
 			{showAddChain && (
 				<AddChainDialog
