@@ -504,106 +504,169 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	}
 
 	return (
-		<Flex flex="1" direction="column" align="center" justify="center" px={{ base: "3", md: "6" }} py="4">
-			<Box w="100%" maxW={{ base: "100%", sm: "560px", md: "680px" }}>
-				{/* Header */}
-				<Flex align="center" gap={{ base: "2", md: "3" }} mb="1">
-					<Button
-						size="sm"
-						variant="ghost"
-						color="kk.textSecondary"
-						_hover={{ color: "kk.textPrimary" }}
+		<Flex flex="1" direction="column" align="center" px={{ base: "3", md: "6" }} py={{ base: "5", md: "8" }} className="v3-page-enter">
+			<Box w="100%" maxW={{ base: "100%", sm: "640px", md: "880px" }}>
+				{/* Header — back button + chain identity hero + balance on the right */}
+				<Flex align="center" gap={{ base: "3", md: "4" }} mb="6">
+					<Box
+						as="button"
 						onClick={onBack}
-						px="2"
-						minW="auto"
+						w="36px"
+						h="36px"
+						borderRadius="10px"
+						bg="var(--ink-2)"
+						border="1px solid var(--line)"
+						color="var(--text-1)"
+						display="grid"
+						placeItems="center"
+						cursor="pointer"
+						_hover={{ bg: "var(--ink-3)", color: "var(--text-0)", borderColor: "var(--line-2)" }}
+						transition="all 0.18s"
+						flexShrink={0}
+						className="electrobun-webkit-app-region-no-drag"
+						aria-label="Back"
 					>
-						&larr;
-					</Button>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+							<path d="M19 12H5M12 19l-7-7 7-7"/>
+						</svg>
+					</Box>
+
 					<Image
 						src={getAssetIcon(chain.caip)}
 						alt={chain.symbol}
-						w="28px"
-						h="28px"
+						w={{ base: "44px", md: "52px" }}
+						h={{ base: "44px", md: "52px" }}
 						borderRadius="full"
 						flexShrink={0}
-						bg={chain.color}
+						bg="var(--ink-2)"
+						boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
 					/>
-					<Text fontSize={{ base: "md", md: "lg" }} fontWeight="600" color="kk.textPrimary">{chain.coin}</Text>
-					<Text fontSize={{ base: "xs", md: "sm" }} color="kk.textMuted">{chain.symbol}</Text>
+
+					<Box flex="1" minW="0">
+						<Flex align="baseline" gap="2.5">
+							<Text
+								fontFamily="serif"
+								fontStyle="italic"
+								fontWeight="400"
+								fontSize={{ base: "26px", md: "34px" }}
+								letterSpacing="-0.02em"
+								color="var(--text-0)"
+								lineHeight="1.05"
+								truncate
+							>
+								{chain.coin}
+							</Text>
+							<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
+						</Flex>
+						<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" mt="0.5" truncate>
+							{chain.caip}
+						</Text>
+					</Box>
+
 					{activeBalance && (
-						<Flex ml="auto" align="center" gap="2" flexShrink={0}>
-							<Text fontSize={{ base: "xs", md: "sm" }} fontFamily="mono" color="kk.textPrimary">
-								{activeBalance.balance} {chain.symbol}
+						<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
+							<Text
+								fontFamily="mono"
+								fontSize={{ base: "16px", md: "20px" }}
+								fontWeight="500"
+								color="var(--text-0)"
+								letterSpacing="0.01em"
+								lineHeight="1.2"
+							>
+								{activeBalance.balance}
+								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
 							</Text>
 							{cleanBalanceUsd > 0 && (
-								<AnimatedUsd value={cleanBalanceUsd} prefix="(" suffix=")" fontSize="xs" fontWeight="500" display={{ base: "none", sm: "block" }} />
+								<AnimatedUsd
+									value={cleanBalanceUsd}
+									prefix="≈ "
+									fontSize="12px"
+									fontFamily="mono"
+									color="var(--text-2)"
+									fontWeight="400"
+								/>
 							)}
-							<Box
-								as="button"
-								px="2.5"
-								py="1"
-								fontSize="11px"
-								fontWeight="600"
-								color={refreshing ? "kk.textMuted" : "kk.gold"}
-								bg="transparent"
-								borderRadius="full"
-								cursor={refreshing ? "default" : "pointer"}
-								transition="all 0.2s"
-								_hover={refreshing ? {} : { color: "white", bg: "rgba(233,196,106,0.12)" }}
-								onClick={refreshing ? undefined : handleRefresh}
-							>
-								<Flex align="center" gap="1.5">
-									{refreshing ? (
-										<Spinner size="xs" color="kk.gold" />
-									) : (
-										<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-											<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-										</svg>
-									)}
-									{refreshing ? t("refreshing") : t("refresh")}
-								</Flex>
-							</Box>
 						</Flex>
 					)}
-				</Flex>
-				{/* CAIP badge */}
-				<Flex justify="center" mb="2">
-					<Text fontSize="10px" fontFamily="mono" color="kk.textMuted" bg="rgba(255,255,255,0.04)" px="2" py="0.5" borderRadius="md">
-						{chain.caip}
-					</Text>
+
+					<Box
+						as="button"
+						onClick={refreshing ? undefined : handleRefresh}
+						disabled={refreshing}
+						className="electrobun-webkit-app-region-no-drag"
+						w="36px"
+						h="36px"
+						borderRadius="10px"
+						bg="transparent"
+						color={refreshing ? "var(--text-3)" : "var(--text-2)"}
+						display="grid"
+						placeItems="center"
+						cursor={refreshing ? "default" : "pointer"}
+						_hover={refreshing ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
+						transition="all 0.18s"
+						flexShrink={0}
+						aria-label={String(t("refresh"))}
+					>
+						{refreshing ? (
+							<Spinner size="xs" color="var(--gold)" />
+						) : (
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+							</svg>
+						)}
+					</Box>
 				</Flex>
 
-				{/* Pill toggle */}
-				<Flex justify="center" mb="3">
-					<Flex gap="1" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg">
-						{PILLS.map((p) => (
-							<Button
-								key={p.id}
-								size="sm"
-								variant="ghost"
-								color={view === p.id ? "kk.gold" : "kk.textSecondary"}
-								bg={view === p.id ? "rgba(233,196,106,0.1)" : "transparent"}
-								_hover={{ bg: "rgba(255,255,255,0.06)" }}
-								fontWeight={view === p.id ? "600" : "400"}
-								fontSize="13px"
-								px={{ base: "5", md: "6" }}
-								py="2"
-								borderRadius="md"
-								onClick={() => {
-									if (p.id === 'swap') { setShowSwapDialog(true); return }
-									setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
-								}}
-								display="flex"
-								alignItems="center"
-								gap="1.5"
-								minW="100px"
-								justifyContent="center"
-							>
-								<Box as={p.icon} fontSize="12px" />
-								{p.label}
-							</Button>
-						))}
+				{/* Mobile-only balance row */}
+				{activeBalance && (
+					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
+						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
+							{activeBalance.balance}
+							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{chain.symbol}</Box>
+						</Text>
+						{cleanBalanceUsd > 0 && (
+							<AnimatedUsd value={cleanBalanceUsd} prefix="≈ " fontSize="13px" fontFamily="mono" color="var(--text-2)" fontWeight="400" />
+						)}
+					</Flex>
+				)}
+
+				{/* Action tabs — v3 pill toggle, gold active fill */}
+				<Flex justify="center" mb="5">
+					<Flex gap="2px" bg="var(--ink-2)" border="1px solid var(--line)" p="3px" borderRadius="999px">
+						{PILLS.map((p) => {
+							const isActive = view === p.id
+							return (
+								<Box
+									key={p.id}
+									as="button"
+									className="electrobun-webkit-app-region-no-drag"
+									onClick={() => {
+										if (p.id === 'swap') { setShowSwapDialog(true); return }
+										setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
+									}}
+									display="flex"
+									alignItems="center"
+									gap="2"
+									px={{ base: "5", md: "6" }}
+									py="2.5"
+									borderRadius="999px"
+									fontSize="13px"
+									fontWeight="500"
+									letterSpacing="-0.005em"
+									color={isActive ? "var(--ink-0)" : "var(--text-2)"}
+									bg={isActive ? "var(--gold)" : "transparent"}
+									_hover={isActive ? {} : { color: "var(--text-0)", bg: "var(--ink-3)" }}
+									transition="all 0.18s"
+									cursor="pointer"
+									minW="110px"
+									justifyContent="center"
+								>
+									<Box as={p.icon} fontSize="12px" />
+									{p.label}
+								</Box>
+							)
+						})}
 					</Flex>
 				</Flex>
 
@@ -645,7 +708,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 				)}
 
 				{/* Content */}
-				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }} minH="280px">
+				<Box bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))" border="1px solid var(--line)" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
 					{view === "send" ? (
 						isBtc && !btcSelected?.xpubData ? (
 							<Flex align="center" justify="center" minH="200px">
@@ -697,7 +760,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 				{/* Staking section — Cosmos-family chains */}
 				{chain.chainFamily === 'cosmos' && (chain.id === 'cosmos' || chain.id === 'osmosis') && (
-					<Box mt="4" bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p={{ base: "3", md: "5" }}>
+					<Box mt="5" bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))" border="1px solid var(--line)" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }}>
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<StakingPanel
 								chain={chain}
@@ -711,27 +774,22 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 				{/* Tokens Section — with spam filter */}
 				{(tokens.length > 0 || isEvmChain) && (
-					<Box mt="4">
-						<Flex align="center" justify="space-between" mb="2" px="1">
-							<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em">
-								{t("tokens")}
+					<Box mt="6">
+						<Flex align="center" justify="space-between" mb="3" px="1">
+							<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
+								{t("tokens")}{cleanTokens.length > 0 && ` · ${cleanTokens.length}`}
 							</Text>
 							<HStack gap="2">
-								{cleanTokens.length > 0 && (
-									<Text fontSize="xs" color="kk.textMuted">
-										{t("tokenCount", { count: cleanTokens.length })}
-									</Text>
-								)}
 								{tokenTotalUsd > 0 && (
-									<Text fontSize="xs" color="kk.gold" fontWeight="500">{fmtCompact(tokenTotalUsd)}</Text>
+									<Text fontSize="12px" fontFamily="mono" color="var(--text-2)" fontWeight="500">{fmtCompact(tokenTotalUsd)}</Text>
 								)}
 								{isEvmChain && (
 									<IconButton
 										aria-label={t("addCustomToken")}
 										size="xs"
 										variant="ghost"
-										color="kk.textMuted"
-										_hover={{ color: "kk.gold", bg: "rgba(255,255,255,0.06)" }}
+										color="var(--text-3)"
+										_hover={{ color: "var(--gold)", bg: "var(--ink-2)" }}
 										onClick={() => setShowAddToken(true)}
 									>
 										<FaPlus />
@@ -822,9 +880,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 					w="40px"
 					h="40px"
 					borderRadius="full"
-					bg="rgba(74,222,128,0.08)"
+					bg="rgba(139,227,196,0.08)"
 					border="1px solid"
-					borderColor="rgba(74,222,128,0.15)"
+					borderColor="rgba(139,227,196,0.18)"
 					display="flex"
 					alignItems="center"
 					justifyContent="center"
@@ -833,8 +891,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 					opacity={0.6}
 					_hover={{
 						opacity: 1,
-						bg: "rgba(74,222,128,0.18)",
-						borderColor: "rgba(74,222,128,0.4)",
+						bg: "rgba(139,227,196,0.18)",
+						borderColor: "rgba(139,227,196,0.4)",
 						transform: "scale(1.08)",
 					}}
 					_active={{ transform: "scale(0.95)" }}
@@ -842,7 +900,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 					zIndex={10}
 					title="Sweep Scanner — find BTC on non-standard paths & higher accounts"
 				>
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M3 21h4l-1-3-3 3z" />
 						<path d="M6 18L18 6" />
 						<path d="M14 6h4v4" />
