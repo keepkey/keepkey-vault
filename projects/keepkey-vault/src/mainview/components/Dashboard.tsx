@@ -73,7 +73,239 @@ const DASHBOARD_ANIMATIONS = `
 		50% { box-shadow: 0 0 16px rgba(233,196,106,0.5), 0 0 40px rgba(233,196,106,0.2); }
 		100% { box-shadow: 0 0 8px rgba(233,196,106,0.3), 0 0 20px rgba(233,196,106,0.1); }
 	}
+	@keyframes v3-spin {
+		from { transform: rotate(0deg); }
+		to   { transform: rotate(360deg); }
+	}
 `
+
+/* localStorage key for user's preferred portfolio view. */
+const DASHBOARD_VIEW_KEY = 'keepkey.dashboard.view'
+type DashboardView = 'orbital' | 'donut'
+function readSavedView(): DashboardView {
+	try {
+		const v = localStorage.getItem(DASHBOARD_VIEW_KEY)
+		return v === 'donut' ? 'donut' : 'orbital'
+	} catch { return 'orbital' }
+}
+
+/** Orbital portfolio view — chain logos placed on a slowly rotating ring
+ *  around a center total. Ported from the design handoff (balances.jsx
+ *  OrbitalView) with vault tokens. Logos sized by sqrt(usd) so a
+ *  $10k chain isn't 1000× the diameter of a $10 chain — the ring still
+ *  reads even when one wallet dominates. */
+function OrbitalView({
+	chains,
+	balances,
+	cleanBalanceUsd,
+	totalUsd,
+	totalDollars,
+	totalCents,
+	cleanTokenTotal,
+	onSelect,
+}: {
+	chains: ChainDef[]
+	balances: Map<string, ChainBalance>
+	cleanBalanceUsd: Map<string, { usd: number; cleanTokenCount: number }>
+	totalUsd: number
+	totalDollars: number
+	totalCents: string
+	cleanTokenTotal: number
+	onSelect: (c: ChainDef) => void
+}) {
+	const [hover, setHover] = useState<string | null>(null)
+	const [size, setSize] = useState(440)
+
+	useEffect(() => {
+		const compute = () => setSize(Math.min(440, Math.max(280, window.innerWidth - 80)))
+		compute()
+		window.addEventListener('resize', compute)
+		return () => window.removeEventListener('resize', compute)
+	}, [])
+
+	const cx = size / 2
+	const cy = size / 2
+	const orbitR = size * 0.42
+	const ringR  = size * 0.46
+
+	const orbitChains = chains
+		.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
+		.filter(x => x.usd > 0)
+		.slice(0, 8)
+
+	return (
+		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
+			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+				<defs>
+					<radialGradient id="dashboardCoreGlow" cx="50%" cy="50%">
+						<stop offset="0%" stopColor="rgba(233,196,106,0.18)" />
+						<stop offset="55%" stopColor="rgba(139,227,196,0.05)" />
+						<stop offset="100%" stopColor="transparent" />
+					</radialGradient>
+				</defs>
+				<circle cx={cx} cy={cy} r={size * 0.5} fill="url(#dashboardCoreGlow)" />
+				<circle
+					cx={cx}
+					cy={cy}
+					r={ringR}
+					fill="none"
+					stroke="rgba(255,255,255,0.10)"
+					strokeWidth="1"
+					strokeDasharray="2 6"
+					style={{
+						transformOrigin: `${cx}px ${cy}px`,
+						animation: 'v3-spin 90s linear infinite',
+					}}
+				/>
+			</svg>
+
+			{/* Center total */}
+			<Box
+				position="absolute"
+				top="50%"
+				left="50%"
+				transform="translate(-50%, -50%)"
+				textAlign="center"
+				w="60%"
+				pointerEvents="none"
+			>
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.20em"
+					textTransform="uppercase"
+					mb="2"
+					fontWeight="500"
+				>
+					Total
+				</Text>
+				<Flex align="baseline" justify="center" gap="0">
+					<Text
+						fontSize={{ base: "38px", md: "48px" }}
+						fontWeight="500"
+						color="var(--text-0)"
+						letterSpacing="-0.04em"
+						lineHeight="1"
+					>
+						${totalDollars.toLocaleString()}
+					</Text>
+					<Text
+						fontSize={{ base: "20px", md: "24px" }}
+						fontWeight="400"
+						color="var(--text-2)"
+						letterSpacing="-0.02em"
+						lineHeight="1"
+						ml="1"
+					>
+						.{totalCents}
+					</Text>
+				</Flex>
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.14em"
+					textTransform="uppercase"
+					mt="3"
+					fontFamily="mono"
+				>
+					{chains.length} CHAINS
+					{cleanTokenTotal > 0 && ` · ${cleanTokenTotal} ASSETS`}
+				</Text>
+			</Box>
+
+			{/* Satellite chains */}
+			{orbitChains.map(({ chain, usd, bal }, i) => {
+				const angle = (Math.PI * 2 * i) / orbitChains.length - Math.PI / 2
+				const x = cx + Math.cos(angle) * orbitR
+				const y = cy + Math.sin(angle) * orbitR
+				const sat = Math.max(40, Math.min(72, 30 + Math.sqrt(usd) * 1.4))
+				const isHover = hover === chain.id
+				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				return (
+					<Box
+						key={chain.id}
+						as="button"
+						onMouseEnter={() => setHover(chain.id)}
+						onMouseLeave={() => setHover(null)}
+						onClick={() => onSelect(chain)}
+						position="absolute"
+						left={`${x - sat / 2}px`}
+						top={`${y - sat / 2}px`}
+						w={`${sat}px`}
+						h={`${sat}px`}
+						borderRadius="full"
+						bg="transparent"
+						border="0"
+						p={0}
+						display="grid"
+						placeItems="center"
+						transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
+						transform={isHover ? 'scale(1.12)' : 'scale(1)'}
+						filter={isHover
+							? `drop-shadow(0 0 24px ${chain.color})`
+							: 'drop-shadow(0 4px 14px rgba(0,0,0,0.55))'}
+						zIndex={isHover ? 10 : 1}
+						cursor="pointer"
+						aria-label={chain.coin}
+					>
+						<Image
+							src={getAssetIcon(chain.caip)}
+							alt={chain.symbol}
+							w="100%"
+							h="100%"
+							borderRadius="full"
+							bg="var(--ink-2)"
+							boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}`}
+						/>
+						{(bal?.tokens?.length ?? 0) > 0 && (
+							<Box
+								position="absolute"
+								bottom="-4px"
+								right="-4px"
+								w="22px"
+								h="22px"
+								borderRadius="full"
+								bg="var(--ink-3)"
+								border="1px solid var(--line-2)"
+								fontSize="10px"
+								fontFamily="mono"
+								color="var(--text-1)"
+								display="grid"
+								placeItems="center"
+							>
+								+{bal!.tokens!.length}
+							</Box>
+						)}
+						{isHover && (
+							<Box
+								position="absolute"
+								top="-58px"
+								left="50%"
+								transform="translateX(-50%)"
+								bg="var(--ink-3)"
+								border="1px solid rgba(255,255,255,0.10)"
+								px="3"
+								py="1.5"
+								borderRadius="10px"
+								whiteSpace="nowrap"
+								boxShadow="0 8px 24px -8px rgba(0,0,0,0.6)"
+								pointerEvents="none"
+							>
+								<Text fontSize="12px" fontWeight="600" color="var(--text-0)" textAlign="center">
+									{chain.coin}
+								</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" textAlign="center">
+									${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									{totalUsd > 0 && ` · ${pct.toFixed(1)}%`}
+								</Text>
+							</Box>
+						)}
+					</Box>
+				)
+			})}
+		</Box>
+	)
+}
 
 interface PioneerError {
 	message: string
@@ -416,6 +648,27 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	const hasAnyBalance = chartData.length > 0
 
+	/* Portfolio view mode — orbital is the new default per design handoff,
+	 * donut is preserved as a toggle so power users can still get the
+	 * percentage-bar legend. Persisted to localStorage. */
+	const [viewMode, setViewMode] = useState<DashboardView>(readSavedView)
+	useEffect(() => {
+		try { localStorage.setItem(DASHBOARD_VIEW_KEY, viewMode) } catch { /* private mode etc. */ }
+	}, [viewMode])
+
+	/* Splits totalUsd into dollars + cents so the orbital can render the
+	 * cents in a smaller weight (matches handoff layout). */
+	const totalDollars = Math.floor(totalUsd)
+	const totalCents = (totalUsd % 1).toFixed(2).slice(2) || '00'
+
+	/* cleanTokenTotal — sum of non-spam tokens across all chains. Used for
+	 * the "N CHAINS · M ASSETS" subtitle on the orbital. */
+	const cleanTokenTotal = useMemo(() => {
+		let n = 0
+		for (const v of cleanBalanceUsd.values()) n += v.cleanTokenCount
+		return n
+	}, [cleanBalanceUsd])
+
 	const visibleChains = useMemo(() => allChains.filter(c => {
 		if (!isChainSupported(c, firmwareVersion)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
@@ -593,7 +846,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Portfolio Chart — or Welcome placeholder for empty wallets */}
+			{/* Portfolio view — orbital (default) or donut, switchable via the
+			    pill toggle in the top-right of the card. */}
 			{hasAnyBalance ? (
 				<Box
 					w="100%"
@@ -603,23 +857,90 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					bg="kk.cardBg"
 					border="1px solid"
 					borderColor="kk.border"
+					position="relative"
 				>
-					<Flex direction="column" align="center" gap="3">
-						<DonutChart
-							data={chartData}
-							size={160}
-							activeIndex={activeSliceIndex}
-							onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-						/>
-						<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
-							<ChartLegend
-								data={chartData}
-								total={totalUsd}
-								activeIndex={activeSliceIndex}
-								onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-							/>
+					{/* View toggle — orbital / donut. Two-state pill with icon glyphs. */}
+					<Flex
+						position="absolute"
+						top="3"
+						right="3"
+						bg="rgba(255,255,255,0.04)"
+						border="1px solid"
+						borderColor="kk.border"
+						borderRadius="999px"
+						p="1"
+						gap="1"
+						zIndex={2}
+					>
+						<Box
+							as="button"
+							onClick={() => setViewMode('orbital')}
+							w="26px" h="22px"
+							borderRadius="999px"
+							display="flex" alignItems="center" justifyContent="center"
+							bg={viewMode === 'orbital' ? 'rgba(233,196,106,0.18)' : 'transparent'}
+							color={viewMode === 'orbital' ? 'var(--gold)' : 'var(--text-3)'}
+							_hover={{ color: 'var(--text-1)' }}
+							transition="all 0.15s"
+							cursor="pointer"
+							title="Orbital view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9" strokeDasharray="2 3"/>
+								<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
+								<circle cx="21" cy="12" r="2.2" fill="currentColor" stroke="none"/>
+								<circle cx="3" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+							</svg>
+						</Box>
+						<Box
+							as="button"
+							onClick={() => setViewMode('donut')}
+							w="26px" h="22px"
+							borderRadius="999px"
+							display="flex" alignItems="center" justifyContent="center"
+							bg={viewMode === 'donut' ? 'rgba(233,196,106,0.18)' : 'transparent'}
+							color={viewMode === 'donut' ? 'var(--gold)' : 'var(--text-3)'}
+							_hover={{ color: 'var(--text-1)' }}
+							transition="all 0.15s"
+							cursor="pointer"
+							title="Donut view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9"/>
+								<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
+							</svg>
 						</Box>
 					</Flex>
+
+					{viewMode === 'orbital' ? (
+						<OrbitalView
+							chains={visibleChains}
+							balances={balances}
+							cleanBalanceUsd={cleanBalanceUsd}
+							totalUsd={totalUsd}
+							totalDollars={totalDollars}
+							totalCents={totalCents}
+							cleanTokenTotal={cleanTokenTotal}
+							onSelect={(c) => setSelectedChain(c)}
+						/>
+					) : (
+						<Flex direction="column" align="center" gap="3">
+							<DonutChart
+								data={chartData}
+								size={160}
+								activeIndex={activeSliceIndex}
+								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
+							/>
+							<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
+								<ChartLegend
+									data={chartData}
+									total={totalUsd}
+									activeIndex={activeSliceIndex}
+									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
+								/>
+							</Box>
+						</Flex>
+					)}
 				</Box>
 			) : !loadingBalances && initialLoaded && (
 				<Box
