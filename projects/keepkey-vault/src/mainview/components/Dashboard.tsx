@@ -938,11 +938,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 						<Flex direction="column" gap="2.5" mt="2" maxW="480px">
 							<Flex align="flex-start" gap="3">
-								<Text fontSize="11px" fontFamily="mono" color="var(--gold)" letterSpacing="0.06em" mt="1" w="14px" flexShrink={0}>01</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--gold)" letterSpacing="0.06em" mt="1" minW="20px" flexShrink={0} whiteSpace="nowrap">01</Text>
 								<Text fontSize="13px" color="var(--text-1)" lineHeight="1.5">{t("welcomeTip1")}</Text>
 							</Flex>
 							<Flex align="flex-start" gap="3">
-								<Text fontSize="11px" fontFamily="mono" color="var(--gold)" letterSpacing="0.06em" mt="1" w="14px" flexShrink={0}>02</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--gold)" letterSpacing="0.06em" mt="1" minW="20px" flexShrink={0} whiteSpace="nowrap">02</Text>
 								<Text fontSize="13px" color="var(--text-1)" lineHeight="1.5">{t("welcomeTip2")}</Text>
 							</Flex>
 						</Flex>
