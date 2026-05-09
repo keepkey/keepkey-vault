@@ -487,9 +487,9 @@ export function ZcashPrivacyTab() {
 	}, [orchardAddress])
 
 	// ── Status indicator color ────────────────────────────────────────
-	const statusColor = status === "ready" ? "#4ADE80"
-		: status === "initializing" || status === "checking" ? "#FBBF24"
-		: "#F87171"
+	const statusColor = status === "ready" ? "var(--teal)"
+		: status === "initializing" || status === "checking" ? "var(--gold)"
+		: "var(--rose)"
 
 	const statusText = status === "ready" ? t("sidecarReady")
 		: status === "initializing" || status === "checking" ? t("initializing")
@@ -609,7 +609,7 @@ export function ZcashPrivacyTab() {
 										variant="ghost"
 										color="kk.gold"
 										onClick={() => setShieldAmount(((transparentBalance - 10000) / 1e8).toFixed(8))}
-										_hover={{ bg: "rgba(192,168,96,0.1)" }}
+										_hover={{ bg: "rgba(233,196,106,0.1)" }}
 									>
 										Max
 									</Button>
@@ -622,7 +622,7 @@ export function ZcashPrivacyTab() {
 								fontWeight="600"
 								px="4"
 								py="2"
-								_hover={{ bg: "rgba(192,168,96,0.9)" }}
+								_hover={{ bg: "rgba(233,196,106,0.9)" }}
 								onClick={handleShield}
 								disabled={!shieldAmount || shielding}
 							>
@@ -634,14 +634,14 @@ export function ZcashPrivacyTab() {
 
 					{shieldResult && (
 						<Box mt="2" bg="rgba(72,187,120,0.1)" border="1px solid" borderColor="rgba(72,187,120,0.3)" borderRadius="md" px="3" py="2">
-							<Text fontSize="xs" color="#4ADE80" fontWeight="600" mb="0.5">{t("shielded")}</Text>
+							<Text fontSize="xs" color="var(--teal)" fontWeight="600" mb="0.5">{t("shielded")}</Text>
 							<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">
 								{shieldResult}
 							</Text>
 						</Box>
 					)}
 					{shieldError && (
-						<Text fontSize="xs" color="#F87171" mt="2">{shieldError}</Text>
+						<Text fontSize="xs" color="var(--rose)" mt="2">{shieldError}</Text>
 					)}
 				</Box>
 			)}
@@ -650,8 +650,8 @@ export function ZcashPrivacyTab() {
 			{orchardAddress && balance && balance.confirmed > 0 && (
 				<Box px="3" py="3" bg="rgba(248,113,113,0.04)" border="1px solid" borderColor="rgba(248,113,113,0.15)" borderRadius="lg">
 					<Flex align="center" gap="2" mb="2">
-						<Box as={FaShieldAlt} fontSize="11px" color="#F87171" />
-						<Text fontSize="10px" color="#F87171" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">
+						<Box as={FaShieldAlt} fontSize="11px" color="var(--rose)" />
+						<Text fontSize="10px" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">
 							{t("deshieldToTransparent")}
 						</Text>
 					</Flex>
@@ -661,7 +661,7 @@ export function ZcashPrivacyTab() {
 
 					{deshielding ? (
 						<Flex direction="column" align="center" gap="2" py="3">
-							<Spinner size="sm" color="#F87171" />
+							<Spinner size="sm" color="var(--rose)" />
 							<Text fontSize="12px" color="kk.textSecondary" fontWeight="500">
 								{deshieldStep === "building" ? t("shieldBuilding") :
 								 deshieldStep === "signing" ? t("shieldSigning") :
@@ -682,10 +682,10 @@ export function ZcashPrivacyTab() {
 								fontFamily="mono"
 								fontSize="12px"
 								_hover={{ borderColor: "kk.textMuted" }}
-								_focus={{ borderColor: "#F87171", boxShadow: "none" }}
+								_focus={{ borderColor: "var(--rose)", boxShadow: "none" }}
 							/>
 							{deshieldRecipientValidation && !deshieldRecipientValidation.valid && deshieldRecipientValidation.error && (
-								<Text fontSize="11px" color="#F87171">{t(deshieldRecipientValidation.error)}</Text>
+								<Text fontSize="11px" color="var(--rose)">{t(deshieldRecipientValidation.error)}</Text>
 							)}
 							<Flex gap="2" align="center">
 								<Input
@@ -701,14 +701,14 @@ export function ZcashPrivacyTab() {
 									fontFamily="mono"
 									fontSize="12px"
 									_hover={{ borderColor: "kk.textMuted" }}
-									_focus={{ borderColor: "#F87171", boxShadow: "none" }}
+									_focus={{ borderColor: "var(--rose)", boxShadow: "none" }}
 									flex="1"
 								/>
 								{balance && (balance.spendable_confirmed ?? 0) > 0 && (
 									<Button
 										size="xs"
 										variant="ghost"
-										color="#F87171"
+										color="var(--rose)"
 										onClick={() => {
 											// Use the spendable view (10-conf-filtered) — using `confirmed`
 											// would let Max pick immature notes the builder later rejects.
@@ -731,7 +731,7 @@ export function ZcashPrivacyTab() {
 							</Flex>
 							<Button
 								size="sm"
-								bg="#F87171"
+								bg="var(--rose)"
 								color="white"
 								fontWeight="600"
 								px="4"
@@ -748,14 +748,14 @@ export function ZcashPrivacyTab() {
 
 					{deshieldResult && (
 						<Box mt="2" bg="rgba(72,187,120,0.1)" border="1px solid" borderColor="rgba(72,187,120,0.3)" borderRadius="md" px="3" py="2">
-							<Text fontSize="xs" color="#4ADE80" fontWeight="600" mb="0.5">{t("deshielded")}</Text>
+							<Text fontSize="xs" color="var(--teal)" fontWeight="600" mb="0.5">{t("deshielded")}</Text>
 							<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">
 								{deshieldResult}
 							</Text>
 						</Box>
 					)}
 					{deshieldError && (
-						<Text fontSize="xs" color="#F87171" mt="2">{deshieldError}</Text>
+						<Text fontSize="xs" color="var(--rose)" mt="2">{deshieldError}</Text>
 					)}
 				</Box>
 			)}
@@ -791,7 +791,7 @@ export function ZcashPrivacyTab() {
 									size="xs"
 									variant="outline"
 									borderColor="kk.border"
-									color={verifySucceeded ? "#4ADE80" : "kk.textSecondary"}
+									color={verifySucceeded ? "var(--teal)" : "kk.textSecondary"}
 									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
 									onClick={verifyOnDevice}
 									disabled={verifyingOnDevice || !orchardAddress}
@@ -809,7 +809,7 @@ export function ZcashPrivacyTab() {
 									size="xs"
 									variant="outline"
 									borderColor="kk.border"
-									color={copied ? "#4ADE80" : "kk.textSecondary"}
+									color={copied ? "var(--teal)" : "kk.textSecondary"}
 									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
 									onClick={copyAddress}
 									w="fit-content"
@@ -819,7 +819,7 @@ export function ZcashPrivacyTab() {
 								</Button>
 							</Flex>
 							{verifyError && (
-								<Text fontSize="10px" color="#F87171" mt="1">
+								<Text fontSize="10px" color="var(--rose)" mt="1">
 									{verifyError}
 								</Text>
 							)}
@@ -951,7 +951,7 @@ export function ZcashPrivacyTab() {
 					)}
 
 					{scanResult && (
-						<Text fontSize="xs" color={scanState === "done" ? "#4ADE80" : "kk.textMuted"} mt="2">
+						<Text fontSize="xs" color={scanState === "done" ? "var(--teal)" : "kk.textMuted"} mt="2">
 							{scanResult}
 						</Text>
 					)}
@@ -979,7 +979,7 @@ export function ZcashPrivacyTab() {
 							_focus={{ borderColor: "kk.gold", boxShadow: "none" }}
 						/>
 						{recipientValidation && !recipientValidation.valid && recipientValidation.error && (
-							<Text fontSize="11px" color="#F87171">{t(recipientValidation.error)}</Text>
+							<Text fontSize="11px" color="var(--rose)">{t(recipientValidation.error)}</Text>
 						)}
 						<Flex gap="2">
 							<Input
@@ -1019,7 +1019,7 @@ export function ZcashPrivacyTab() {
 							fontWeight="600"
 							px="4"
 							py="2"
-							_hover={{ bg: "rgba(192,168,96,0.9)" }}
+							_hover={{ bg: "rgba(233,196,106,0.9)" }}
 							onClick={handleSend}
 							disabled={!recipient || !amount || sending || (recipientValidation != null && !recipientValidation.valid)}
 						>
@@ -1031,14 +1031,14 @@ export function ZcashPrivacyTab() {
 						</Button>
 						{sendResult && (
 							<Box bg="rgba(72,187,120,0.1)" border="1px solid" borderColor="rgba(72,187,120,0.3)" borderRadius="md" px="3" py="2">
-								<Text fontSize="xs" color="#4ADE80" fontWeight="600" mb="0.5">{t("txSent")}</Text>
+								<Text fontSize="xs" color="var(--teal)" fontWeight="600" mb="0.5">{t("txSent")}</Text>
 								<Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">
 									{sendResult}
 								</Text>
 							</Box>
 						)}
 						{sendError && (
-							<Text fontSize="xs" color="#F87171">{sendError}</Text>
+							<Text fontSize="xs" color="var(--rose)">{sendError}</Text>
 						)}
 					</Flex>
 				</Box>
@@ -1074,7 +1074,7 @@ export function ZcashPrivacyTab() {
 					</Flex>
 
 					{backfillResult && (
-						<Text fontSize="xs" color="#4ADE80" mb="2">{backfillResult}</Text>
+						<Text fontSize="xs" color="var(--teal)" mb="2">{backfillResult}</Text>
 					)}
 
 					{loadingTxs ? (
@@ -1102,7 +1102,7 @@ export function ZcashPrivacyTab() {
 												fontSize="12px"
 												fontWeight="600"
 												fontFamily="mono"
-												color={tx.is_spent ? "kk.textMuted" : "#4ADE80"}
+												color={tx.is_spent ? "kk.textMuted" : "var(--teal)"}
 											>
 												{tx.is_spent ? "-" : "+"}{formatZec(tx.value)} ZEC
 											</Text>
@@ -1136,7 +1136,7 @@ export function ZcashPrivacyTab() {
 												py="0.5"
 												borderRadius="sm"
 												bg={tx.is_spent ? "rgba(248,113,113,0.1)" : "rgba(72,187,120,0.1)"}
-												color={tx.is_spent ? "#F87171" : "#4ADE80"}
+												color={tx.is_spent ? "var(--rose)" : "var(--teal)"}
 												fontWeight="600"
 											>
 												{tx.is_spent ? t("spent") : t("received")}

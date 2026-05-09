@@ -137,7 +137,7 @@ const ThorchainIcon = ({ size = 14 }: { size?: number }) => (
 )
 
 const CheckIcon = () => (
-  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 6L9 17l-5-5" />
   </svg>
 )
@@ -166,7 +166,7 @@ const ExternalLinkIcon = () => (
 
 // ── Confetti burst (CSS-only, 30 particles) ─────────────────────────
 function ConfettiBurst() {
-  const colors = ['#4ADE80', '#23DCC8', '#FFD700', '#FF6B6B', '#A78BFA', '#3B82F6', '#FB923C', '#F472B6']
+  const colors = ['var(--teal)', '#23DCC8', 'var(--gold)', '#FF6B6B', '#A78BFA', '#3B82F6', '#FB923C', '#F472B6']
   const particles = Array.from({ length: 30 }, (_, i) => {
     const angle = (i / 30) * 360
     const dist = 80 + Math.random() * 100
@@ -226,7 +226,7 @@ function playCompletionSound() {
 }
 
 // ── Green CountUp value ─────────────────────────────────────────────
-function GreenCountUp({ value, prefix = '', suffix = '', color = '#4ADE80', fontSize = 'inherit', duration = 1.2 }: {
+function GreenCountUp({ value, prefix = '', suffix = '', color = 'var(--teal)', fontSize = 'inherit', duration = 1.2 }: {
   value: string | number; prefix?: string; suffix?: string; color?: string; fontSize?: string; duration?: number
 }) {
   const num = typeof value === 'string' ? parseFloat(value) : value
@@ -253,8 +253,8 @@ const DIALOG_CSS = `
     100% { transform: scale(1); opacity: 1; }
   }
   @keyframes kkSwapDevicePulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,0,0.4); transform: scale(1); }
-    50% { box-shadow: 0 0 20px 8px rgba(255,215,0,0.15); transform: scale(1.02); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(233,196,106,0.4); transform: scale(1); }
+    50% { box-shadow: 0 0 20px 8px rgba(233,196,106,0.15); transform: scale(1.02); }
   }
   @keyframes kkSwapFadeIn {
     from { opacity: 0; transform: translateY(8px); }
@@ -278,8 +278,8 @@ const DIALOG_CSS = `
     50% { filter: drop-shadow(0 0 20px rgba(35,220,200,0.5)); }
   }
   @keyframes kkGoldPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,0,0.4); }
-    50% { box-shadow: 0 0 16px 6px rgba(255,215,0,0.15); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(233,196,106,0.4); }
+    50% { box-shadow: 0 0 16px 6px rgba(233,196,106,0.15); }
   }
   @keyframes kkGoldSpin {
     0% { transform: rotate(0deg); }
@@ -364,7 +364,7 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
         px="4" py="5"
         cursor={disabled ? "default" : "pointer"}
         opacity={disabled ? 0.6 : 1}
-        _hover={disabled ? {} : { borderColor: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
+        _hover={disabled ? {} : { borderColor: "kk.gold", bg: "rgba(233,196,106,0.04)" }}
         transition="all 0.2s"
         onClick={() => { if (!disabled) onOpenPicker() }}
       >
@@ -1330,9 +1330,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         position="relative"
         bg="kk.cardBg"
         border="2px solid"
-        borderColor={phase === 'submitted' ? '#23DCC8' : busy ? 'rgba(255,215,0,0.5)' : 'rgba(35,220,200,0.4)'}
+        borderColor={phase === 'submitted' ? '#23DCC8' : busy ? 'rgba(233,196,106,0.5)' : 'rgba(35,220,200,0.4)'}
         borderRadius="xl"
-        boxShadow={phase === 'submitted' ? '0 0 24px rgba(35,220,200,0.25), 0 0 48px rgba(35,220,200,0.1)' : busy ? '0 0 20px rgba(255,215,0,0.15)' : '0 0 20px rgba(35,220,200,0.1), 0 0 40px rgba(35,220,200,0.05)'}
+        boxShadow={phase === 'submitted' ? '0 0 24px rgba(35,220,200,0.25), 0 0 48px rgba(35,220,200,0.1)' : busy ? '0 0 20px rgba(233,196,106,0.15)' : '0 0 20px rgba(35,220,200,0.1), 0 0 40px rgba(35,220,200,0.05)'}
         w="760px"
         maxW="94vw"
         maxH="90vh"
@@ -1368,8 +1368,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           {/* Error state — Pioneer unreachable or no assets */}
           {!loadingAssets && assetLoadError && phase === 'input' && (
             <VStack gap="3" py="6" textAlign="center">
-              <Box w="48px" h="48px" borderRadius="full" bg="rgba(255,165,0,0.1)" display="flex" alignItems="center" justifyContent="center" mx="auto">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFA500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <Box w="48px" h="48px" borderRadius="full" bg="rgba(233,196,106,0.1)" display="flex" alignItems="center" justifyContent="center" mx="auto">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
               </Box>
@@ -1399,12 +1399,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <Box w="40px" h="40px" borderRadius="full" bg="rgba(74,222,128,0.1)" border="2px solid" borderColor="rgba(74,222,128,0.4)"
                     display="flex" alignItems="center" justifyContent="center" flexShrink={0}
                     style={{ animation: 'kkSwapCheckPop 0.4s ease-out' }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4ADE80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                   </Box>
                 ) : isSwapFailed ? (
                   <Box w="40px" h="40px" borderRadius="full" bg="rgba(255,23,68,0.1)" border="2px solid" borderColor="rgba(255,23,68,0.3)"
                     display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF1744" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                   </Box>
                 ) : (
                   <Box w="40px" h="40px" borderRadius="full" bg="rgba(35,220,200,0.08)" border="2px solid" borderColor="rgba(35,220,200,0.3)"
@@ -1416,11 +1416,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   </Box>
                 )}
                 <VStack gap="0" align="flex-start">
-                  <Text fontSize="md" fontWeight="700" color={isSwapComplete ? "#4ADE80" : isSwapFailed ? "#FF1744" : "kk.textPrimary"}>
+                  <Text fontSize="md" fontWeight="700" color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}>
                     {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
                   </Text>
                   {!isSwapComplete && !isSwapFailed && (
-                    <Text fontSize="xs" color="#FBBF24" fontWeight="500">{t("waitingForConfirmations")}</Text>
+                    <Text fontSize="xs" color="var(--gold)" fontWeight="500">{t("waitingForConfirmations")}</Text>
                   )}
                 </VStack>
                 <Box flex="1" />
@@ -1559,7 +1559,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
                   )}
                 </VStack>
-                <Text color="#FFD700" fontSize="md" fontWeight="700">&rarr;</Text>
+                <Text color="var(--gold)" fontSize="md" fontWeight="700">&rarr;</Text>
                 <VStack gap="0.5">
                   <HStack gap="3">
                     <Box style={{ animation: 'kkLogoGlow 3s ease-in-out infinite' }}>
@@ -1621,20 +1621,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <Box w="full" bg="rgba(74,222,128,0.06)" border="1px solid" borderColor="rgba(74,222,128,0.15)" borderRadius="lg" p="3">
                   <Flex justify="space-between" align="center">
                     <HStack gap="1.5" minW="0" flex="1">
-                      <Text fontSize="10px" color="#4ADE80" flexShrink={0}>{t("stageOutput")}</Text>
-                      <Text fontSize="11px" fontFamily="mono" color="#4ADE80" wordBreak="break-all" lineHeight="1.4">
+                      <Text fontSize="10px" color="var(--teal)" flexShrink={0}>{t("stageOutput")}</Text>
+                      <Text fontSize="11px" fontFamily="mono" color="var(--teal)" wordBreak="break-all" lineHeight="1.4">
                         {liveOutboundTxid}
                       </Text>
                     </HStack>
                     <HStack gap="1">
-                      <Button size="xs" variant="ghost" color="#4ADE80" px="1.5" minW="auto"
+                      <Button size="xs" variant="ghost" color="var(--teal)" px="1.5" minW="auto"
                         onClick={() => { navigator.clipboard.writeText(liveOutboundTxid) }}>
                         {t("copy")}
                       </Button>
                       {(() => {
                         const url = getExplorerTxUrl(toAsset.chainId, liveOutboundTxid)
                         return url ? (
-                          <Button size="xs" variant="ghost" color="#4ADE80" px="1.5" minW="auto"
+                          <Button size="xs" variant="ghost" color="var(--teal)" px="1.5" minW="auto"
                             onClick={() => rpcRequest('openUrl', { url }).catch(() => {})} title="View on explorer">
                             <ExternalLinkIcon />
                           </Button>
@@ -1648,7 +1648,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Before / After balance comparison — shown on completion */}
               {isSwapComplete && (beforeFromBal || beforeToBal) && (
                 <Box w="full" bg="rgba(74,222,128,0.04)" border="1px solid" borderColor="rgba(74,222,128,0.12)" borderRadius="lg" p="3">
-                  <Text fontSize="10px" fontWeight="600" color="#4ADE80" mb="2" textTransform="uppercase" letterSpacing="0.05em">
+                  <Text fontSize="10px" fontWeight="600" color="var(--teal)" mb="2" textTransform="uppercase" letterSpacing="0.05em">
                     Balance Changes
                   </Text>
                   <VStack gap="1.5" align="stretch">
@@ -1692,17 +1692,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             {beforeToBal ? formatBalance(beforeToBal) : '-'}
                           </Text>
                           <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
-                          <Text fontSize="11px" fontFamily="mono" color={afterToBal ? '#4ADE80' : 'kk.textMuted'}>
-                            {afterToBal ? <GreenCountUp value={afterToBal} color="#4ADE80" /> : '...'}
+                          <Text fontSize="11px" fontFamily="mono" color={afterToBal ? 'var(--teal)' : 'kk.textMuted'}>
+                            {afterToBal ? <GreenCountUp value={afterToBal} color="var(--teal)" /> : '...'}
                           </Text>
                           {afterToBal && beforeToBal && (
-                            <Text fontSize="10px" fontFamily="mono" color="#4ADE80">
+                            <Text fontSize="10px" fontFamily="mono" color="var(--teal)">
                               (+{formatBalance((parseFloat(afterToBal) - parseFloat(beforeToBal)).toFixed(8))})
                             </Text>
                           )}
                         </HStack>
                         {hasToPrice && afterToBal && beforeToBal && (
-                          <Text fontSize="9px" fontFamily="mono" color="#4ADE80">
+                          <Text fontSize="9px" fontFamily="mono" color="var(--teal)">
                             +{fmtCompact((parseFloat(afterToBal) - parseFloat(beforeToBal)) * toPriceUsd)}
                           </Text>
                         )}
@@ -1720,7 +1720,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   {t("newSwap")}
                 </Button>
                 <Button size="sm" flex="1"
-                  bg={isSwapComplete ? "#4ADE80" : "kk.gold"} color="black" fontWeight="600"
+                  bg={isSwapComplete ? "var(--teal)" : "kk.gold"} color="black" fontWeight="600"
                   px="4" py="2" _hover={{ opacity: 0.9 }}
                   onClick={() => { onClose(); setTimeout(reset, 200) }}>
                   {isSwapComplete ? t("done") : t("close")}
@@ -1737,16 +1737,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <Box
                   w="56px" h="56px"
                   borderRadius="xl"
-                  bg="rgba(255,215,0,0.08)"
+                  bg="rgba(233,196,106,0.08)"
                   border="2px solid"
-                  borderColor="rgba(255,215,0,0.2)"
+                  borderColor="rgba(233,196,106,0.2)"
                   display="flex"
                   alignItems="center"
                   justifyContent="center"
                   flexShrink={0}
                   style={{ animation: 'kkSwapDevicePulse 2s ease-in-out infinite' }}
                 >
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
                     <path d="M12 18h.01" />
                   </svg>
@@ -1768,8 +1768,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     </Text>
                     {/* For ERC-20 swaps: show 1/2 during approval substages, 2/2 during swap substages. */}
                     {fromAsset?.contractAddress && (
-                      <Box bg="rgba(255,215,0,0.12)" border="1px solid" borderColor="rgba(255,215,0,0.3)" px="1.5" borderRadius="sm">
-                        <Text fontSize="9px" fontWeight="700" color="#FFD700">
+                      <Box bg="rgba(233,196,106,0.12)" border="1px solid" borderColor="rgba(233,196,106,0.3)" px="1.5" borderRadius="sm">
+                        <Text fontSize="9px" fontWeight="700" color="var(--gold)">
                           {subStage?.startsWith('approve-') ? '1/2'
                            : subStage?.startsWith('swap-')  ? '2/2'
                            : phase === 'approving'          ? '1/2'
@@ -1821,7 +1821,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
                     )}
                   </Box>
-                  <Box color="#FFD700" flexShrink={0}>
+                  <Box color="var(--gold)" flexShrink={0}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
                     </svg>
@@ -2008,11 +2008,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 if (a.sufficient) {
                   return (
                     <Flex align="center" gap="2" bg="rgba(74,222,128,0.06)" border="1px solid" borderColor="rgba(74,222,128,0.25)" px="3" py="2" borderRadius="lg" w="full">
-                      <Box color="#4ADE80" flexShrink={0}>
+                      <Box color="var(--teal)" flexShrink={0}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                       </Box>
                       <Box flex="1">
-                        <Text fontSize="11px" fontWeight="600" color="#4ADE80">
+                        <Text fontSize="11px" fontWeight="600" color="var(--teal)">
                           Already approved · {fmt(a.current)} {fromAsset.symbol} allowance to router
                         </Text>
                         <Text fontSize="10px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{a.spender}</Text>
@@ -2203,8 +2203,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           )}
                           <Button size="xs" px="2" variant={isMax ? "solid" : "outline"}
                             bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
-                            borderColor={isMax ? "kk.gold" : "rgba(255,215,0,0.3)"} fontWeight="700" fontSize="10px"
-                            borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,215,0,0.1)" }}
+                            borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
+                            borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
                             onClick={() => { setIsMax(!isMax); setAmount(""); setFiatAmount("") }} disabled={busy}>
                             {t("max")}
                           </Button>
@@ -2223,7 +2223,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           borderColor={exceedsBalance ? "kk.error" : "rgba(255,255,255,0.08)"}
                           borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
                           disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
-                          _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(255,215,0,0.3)" }}
+                          _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
                         />
                       </Box>
 
@@ -2268,14 +2268,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <Flex align="center" justify="center" flexShrink={0}>
                   <Box
                     as="button" w="36px" h="36px" display="flex" alignItems="center" justifyContent="center"
-                    borderRadius="full" border="2px solid" borderColor="rgba(255,215,0,0.4)"
-                    bg="linear-gradient(135deg, rgba(255,215,0,0.15) 0%, rgba(255,215,0,0.05) 100%)"
-                    color="#FFD700" cursor="pointer"
-                    _hover={{ borderColor: "#FFD700", bg: "rgba(255,215,0,0.2)", transform: "rotate(180deg) scale(1.1)" }}
+                    borderRadius="full" border="2px solid" borderColor="rgba(233,196,106,0.4)"
+                    bg="linear-gradient(135deg, rgba(233,196,106,0.15) 0%, rgba(233,196,106,0.05) 100%)"
+                    color="var(--gold)" cursor="pointer"
+                    _hover={{ borderColor: "var(--gold)", bg: "rgba(233,196,106,0.2)", transform: "rotate(180deg) scale(1.1)" }}
                     transition="all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)"
                     onClick={handleFlip}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFD700" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
                     </svg>
                   </Box>
@@ -2377,7 +2377,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           color={active ? "black" : "kk.textSecondary"}
                           border="1px solid" borderColor={active ? "kk.gold" : "rgba(255,255,255,0.08)"}
                           fontSize="10px" fontWeight="700" cursor="pointer"
-                          _hover={{ borderColor: active ? "kk.gold" : "rgba(255,215,0,0.4)" }}
+                          _hover={{ borderColor: active ? "kk.gold" : "rgba(233,196,106,0.4)" }}
                           onClick={() => setSlippageBps(bps)}>
                           {(bps / 100).toFixed(bps < 100 ? 1 : 0)}%
                         </Box>
@@ -2389,7 +2389,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       border="1px solid"
                       borderColor={![50, 100, 300].includes(slippageBps) ? "kk.gold" : "rgba(255,255,255,0.08)"}
                       fontSize="10px" fontWeight="700" cursor="pointer"
-                      _hover={{ borderColor: "rgba(255,215,0,0.4)" }}
+                      _hover={{ borderColor: "rgba(233,196,106,0.4)" }}
                       onClick={() => {
                         const raw = prompt(`${t("slippage") || "Slippage"} %`, (slippageBps / 100).toString())
                         if (raw == null) return

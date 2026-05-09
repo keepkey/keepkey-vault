@@ -83,7 +83,7 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice }: Donu
 					cy={cy}
 					r={innerR * 0.88}
 					fill="rgba(0,0,0,0.6)"
-					stroke="#FFD700"
+					stroke="var(--gold)"
 					strokeWidth={1}
 					strokeOpacity={0.3}
 				/>

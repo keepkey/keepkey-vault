@@ -365,8 +365,8 @@ function AvailabilityBadge({ entry, t }: { entry: AssetEntry; t: AssetRowProps["
   }
   if (status === "unknown") {
     return (
-      <Box bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.25)" borderRadius="md" px="2" py="0.5">
-        <Text fontSize="9px" color="#FFD700" fontWeight="600">{t("tryQuote", "try quote")}</Text>
+      <Box bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.25)" borderRadius="md" px="2" py="0.5">
+        <Text fontSize="9px" color="var(--gold)" fontWeight="600">{t("tryQuote", "try quote")}</Text>
       </Box>
     )
   }

@@ -705,8 +705,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 										<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 									</svg>
@@ -725,13 +725,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="rgba(192,168,96,0.12)"
+										bg="rgba(233,196,106,0.12)"
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
 										cursor={changingPin ? "not-allowed" : "pointer"}
 										opacity={changingPin ? 0.5 : 1}
-										_hover={{ bg: "rgba(192,168,96,0.22)" }}
+										_hover={{ bg: "rgba(233,196,106,0.22)" }}
 										transition="all 0.15s"
 										onClick={handleChangePin}
 									>
@@ -794,13 +794,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									px="3"
 									py="1.5"
 									borderRadius="full"
-									bg="rgba(192,168,96,0.12)"
+									bg="rgba(233,196,106,0.12)"
 									color="kk.gold"
 									fontSize="xs"
 									fontWeight="500"
 									cursor={changingPin ? "not-allowed" : "pointer"}
 									opacity={changingPin ? 0.5 : 1}
-									_hover={{ bg: "rgba(192,168,96,0.22)" }}
+									_hover={{ bg: "rgba(233,196,106,0.22)" }}
 									transition="all 0.15s"
 									onClick={handleChangePin}
 								>
@@ -818,8 +818,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<path d="M12 2a5 5 0 0 1 5 5v3H7V7a5 5 0 0 1 5-5z" />
 										<rect x="3" y="10" width="18" height="12" rx="2" />
 										<path d="M12 14v4" />
@@ -848,8 +848,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						<Box py="3">
 							<Flex align="center" justify="space-between">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 											<path d="M9 12l2 2 4-4" />
 										</svg>
@@ -869,13 +869,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									px="3"
 									py="1.5"
 									borderRadius="full"
-									bg="rgba(192,168,96,0.12)"
+									bg="rgba(233,196,106,0.12)"
 									color="kk.gold"
 									fontSize="xs"
 									fontWeight="500"
 									cursor={verifying ? "not-allowed" : "pointer"}
 									opacity={verifying ? 0.5 : 1}
-									_hover={{ bg: "rgba(192,168,96,0.22)" }}
+									_hover={{ bg: "rgba(233,196,106,0.22)" }}
 									transition="all 0.15s"
 									onClick={verifySeed}
 								>
@@ -973,8 +973,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M4 11a9 9 0 0 1 9 9" />
 											<path d="M4 4a16 16 0 0 1 16 16" />
 											<circle cx="5" cy="19" r="1" />
@@ -995,7 +995,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Flex>
 
 							{/* API Bridge status */}
-							<Box bg="rgba(192,168,96,0.08)" borderRadius="lg" px="3" py="3">
+							<Box bg="rgba(233,196,106,0.08)" borderRadius="lg" px="3" py="3">
 								<Flex align="center" justify="space-between">
 									<Flex align="center" gap="2">
 										<Box
@@ -1071,13 +1071,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="rgba(192,168,96,0.12)"
+										bg="rgba(233,196,106,0.12)"
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
 										cursor={deviceState.state !== "ready" ? "not-allowed" : "pointer"}
 										opacity={deviceState.state !== "ready" ? 0.4 : 1}
-										_hover={deviceState.state === "ready" ? { bg: "rgba(192,168,96,0.22)" } : {}}
+										_hover={deviceState.state === "ready" ? { bg: "rgba(233,196,106,0.22)" } : {}}
 										transition="all 0.15s"
 										onClick={() => { if (deviceState.state === "ready") onOpenMobilePairing?.() }}
 									>
@@ -1101,13 +1101,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="rgba(192,168,96,0.12)"
+										bg="rgba(233,196,106,0.12)"
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
 										cursor={checkingUpdate ? "not-allowed" : "pointer"}
 										opacity={checkingUpdate ? 0.5 : 1}
-										_hover={{ bg: "rgba(192,168,96,0.22)" }}
+										_hover={{ bg: "rgba(233,196,106,0.22)" }}
 										transition="all 0.15s"
 										onClick={handleCheckForUpdate}
 									>
@@ -1283,8 +1283,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								return (
 									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
 										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 													<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 												</svg>

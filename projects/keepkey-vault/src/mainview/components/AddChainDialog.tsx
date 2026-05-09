@@ -528,8 +528,8 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 											px="3"
 											py="1.5"
 											cursor="pointer"
-											bg={url === rpcUrl ? "rgba(192,168,96,0.1)" : "transparent"}
-											_hover={{ bg: url === rpcUrl ? "rgba(192,168,96,0.15)" : "#1A1A1A" }}
+											bg={url === rpcUrl ? "rgba(233,196,106,0.1)" : "transparent"}
+											_hover={{ bg: url === rpcUrl ? "rgba(233,196,106,0.15)" : "#1A1A1A" }}
 											borderBottom="1px solid"
 											borderColor="rgba(255,255,255,0.04)"
 											onClick={() => {

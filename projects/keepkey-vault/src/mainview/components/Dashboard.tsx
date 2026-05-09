@@ -65,13 +65,13 @@ class AssetPageErrorBoundary extends Component<
 
 const DASHBOARD_ANIMATIONS = `
 	@keyframes pulseGold {
-		0%, 100% { box-shadow: 0 0 12px rgba(192,168,96,0.4); }
-		50% { box-shadow: 0 0 24px rgba(192,168,96,0.7); }
+		0%, 100% { box-shadow: 0 0 12px rgba(233,196,106,0.4); }
+		50% { box-shadow: 0 0 24px rgba(233,196,106,0.7); }
 	}
 	@keyframes glowCta {
-		0% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
-		50% { box-shadow: 0 0 16px rgba(192,168,96,0.5), 0 0 40px rgba(192,168,96,0.2); }
-		100% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
+		0% { box-shadow: 0 0 8px rgba(233,196,106,0.3), 0 0 20px rgba(233,196,106,0.1); }
+		50% { box-shadow: 0 0 16px rgba(233,196,106,0.5), 0 0 40px rgba(233,196,106,0.2); }
+		100% { box-shadow: 0 0 8px rgba(233,196,106,0.3), 0 0 20px rgba(233,196,106,0.1); }
 	}
 `
 
@@ -464,12 +464,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="3"
 					px="3"
 					py="2"
-					bg="rgba(255,215,0,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					border="1px solid"
-					borderColor="rgba(255,215,0,0.2)"
+					borderColor="rgba(233,196,106,0.2)"
 					borderRadius="lg"
 				>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
 						<circle cx="12" cy="12" r="3" />
 					</svg>
@@ -485,19 +485,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="3"
 					px="4"
 					py="3"
-					bg="rgba(220,53,69,0.08)"
+					bg="rgba(224,140,123,0.08)"
 					border="1px solid"
-					borderColor="rgba(220,53,69,0.3)"
+					borderColor="rgba(224,140,123,0.3)"
 					borderRadius="lg"
 				>
 					<Flex direction="column" gap="2">
 						<Flex align="center" gap="2">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#DC3545" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<circle cx="12" cy="12" r="10" />
 								<line x1="12" y1="8" x2="12" y2="12" />
 								<line x1="12" y1="16" x2="12.01" y2="16" />
 							</svg>
-							<Text fontSize="sm" fontWeight="600" color="#DC3545">
+							<Text fontSize="sm" fontWeight="600" color="var(--rose)">
 								{t("pioneerOfflineTitle")}
 							</Text>
 						</Flex>
@@ -513,12 +513,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									fontSize="xs"
 									fontWeight="600"
 									color="white"
-									bg="rgba(192,168,96,0.2)"
+									bg="rgba(233,196,106,0.2)"
 									border="1px solid"
 									borderColor="kk.gold"
 									borderRadius="md"
 									cursor="pointer"
-									_hover={{ bg: "rgba(192,168,96,0.35)" }}
+									_hover={{ bg: "rgba(233,196,106,0.35)" }}
 									onClick={() => {
 										setPioneerError(null)
 										onOpenSettings()
@@ -572,18 +572,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="3"
 					px="4"
 					py="3"
-					bg="rgba(255,165,0,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					border="1px solid"
-					borderColor="rgba(255,165,0,0.3)"
+					borderColor="rgba(233,196,106,0.3)"
 					borderRadius="lg"
 				>
 					<Flex align="center" gap="2" mb="1">
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFA500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
 							<line x1="12" y1="9" x2="12" y2="13" />
 							<line x1="12" y1="17" x2="12.01" y2="17" />
 						</svg>
-						<Text fontSize="xs" fontWeight="600" color="#FFA500">
+						<Text fontSize="xs" fontWeight="600" color="var(--gold)">
 							{t("tokenWarningTitle")}
 						</Text>
 					</Flex>
@@ -629,7 +629,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					borderRadius="xl"
 					bg="kk.cardBg"
 					border="1px solid"
-					borderColor="rgba(192,168,96,0.2)"
+					borderColor="rgba(233,196,106,0.2)"
 				>
 					<Flex direction="column" align="center" gap="3" textAlign="center">
 						{/* Shield / vault icon */}
@@ -637,12 +637,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							w="56px"
 							h="56px"
 							borderRadius="full"
-							bg="rgba(192,168,96,0.1)"
+							bg="rgba(233,196,106,0.1)"
 							display="flex"
 							alignItems="center"
 							justifyContent="center"
 						>
-							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 								<path d="M9 12l2 2 4-4" />
 							</svg>
@@ -689,7 +689,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						borderRadius="full"
 						cursor="pointer"
 						transition="all 0.2s"
-						_hover={{ color: "white", bg: "rgba(192,168,96,0.12)" }}
+						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
 						onClick={() => setShowReports(true)}
 					>
 						<Flex align="center" gap="1.5">
@@ -716,7 +716,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						transition="all 0.2s"
 						_hover={loadingBalances ? {} : {
 							color: "white",
-							bg: "rgba(192,168,96,0.12)",
+							bg: "rgba(233,196,106,0.12)",
 						}}
 						onClick={loadingBalances ? undefined : refreshBalances}
 						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
@@ -736,9 +736,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									? <>
 										<Text as="span" color={(() => {
 											const age = Date.now() - cacheUpdatedAt
-											if (age < 3_600_000) return "#4ADE80"
-											if (age < 86_400_000) return "#FBBF24"
-											return "#F87171"
+											if (age < 3_600_000) return "var(--teal)"
+											if (age < 86_400_000) return "var(--gold)"
+											return "var(--rose)"
 										})()}>
 											{formatTimeAgo(cacheUpdatedAt, t)}
 										</Text>
@@ -758,18 +758,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="4"
 					px="5"
 					py="4"
-					bg="rgba(192,168,96,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					border="1px solid"
-					borderColor="rgba(192,168,96,0.35)"
+					borderColor="rgba(233,196,106,0.35)"
 					borderRadius="xl"
 					cursor="pointer"
 					transition="all 0.3s ease-out"
 					css={{ animation: "glowCta 3s ease-in-out infinite" }}
 					_hover={{
-						bg: "rgba(192,168,96,0.15)",
+						bg: "rgba(233,196,106,0.15)",
 						borderColor: "kk.gold",
 						transform: "scale(1.02)",
-						boxShadow: "0 0 24px rgba(192,168,96,0.5), 0 0 48px rgba(192,168,96,0.2)",
+						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
 					}}
 					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
 					onClick={refreshBalances}
@@ -779,13 +779,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							w="40px"
 							h="40px"
 							borderRadius="full"
-							bg="rgba(192,168,96,0.15)"
+							bg="rgba(233,196,106,0.15)"
 							display="flex"
 							alignItems="center"
 							justifyContent="center"
 							flexShrink={0}
 						>
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
 								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
 							</svg>
@@ -946,7 +946,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						transition="all 0.15s"
 						_hover={{
 							borderColor: "kk.gold",
-							bg: "rgba(255,215,0,0.05)",
+							bg: "rgba(233,196,106,0.05)",
 						}}
 						onClick={() => setShowAddChain(true)}
 						display="flex"
@@ -998,26 +998,26 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					w="52px"
 					h="52px"
 					borderRadius="full"
-					bg="rgba(192,168,96,0.15)"
+					bg="rgba(233,196,106,0.15)"
 					border="1px solid"
-					borderColor="rgba(192,168,96,0.3)"
+					borderColor="rgba(233,196,106,0.3)"
 					display="flex"
 					alignItems="center"
 					justifyContent="center"
 					cursor="pointer"
 					transition="all 0.2s"
 					_hover={{
-						bg: "rgba(192,168,96,0.25)",
+						bg: "rgba(233,196,106,0.25)",
 						borderColor: "kk.gold",
 						transform: "scale(1.08)",
-						boxShadow: "0 0 20px rgba(192,168,96,0.3)",
+						boxShadow: "0 0 20px rgba(233,196,106,0.3)",
 					}}
 					_active={{ transform: "scale(0.95)" }}
 					onClick={() => setShowBip85(true)}
 					zIndex={10}
 					title="BIP-85 Seed Vault"
 				>
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 					</svg>

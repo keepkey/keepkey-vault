@@ -549,7 +549,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								borderRadius="full"
 								cursor={refreshing ? "default" : "pointer"}
 								transition="all 0.2s"
-								_hover={refreshing ? {} : { color: "white", bg: "rgba(192,168,96,0.12)" }}
+								_hover={refreshing ? {} : { color: "white", bg: "rgba(233,196,106,0.12)" }}
 								onClick={refreshing ? undefined : handleRefresh}
 							>
 								<Flex align="center" gap="1.5">
@@ -583,7 +583,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								size="sm"
 								variant="ghost"
 								color={view === p.id ? "kk.gold" : "kk.textSecondary"}
-								bg={view === p.id ? "rgba(255,215,0,0.1)" : "transparent"}
+								bg={view === p.id ? "rgba(233,196,106,0.1)" : "transparent"}
 								_hover={{ bg: "rgba(255,255,255,0.06)" }}
 								fontWeight={view === p.id ? "600" : "400"}
 								fontSize="13px"

@@ -40,7 +40,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
     const isError = phase === "error"
     const bg = isError ? "rgba(255,23,68,0.12)" : "rgba(251,191,36,0.08)"
     const border = isError ? "rgba(255,23,68,0.25)" : "rgba(251,191,36,0.18)"
-    const accent = isError ? "#FF6B6B" : "#FBBF24"
+    const accent = isError ? "#FF6B6B" : "var(--gold)"
 
     return (
       <Box
@@ -102,11 +102,11 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
   // Actionable phases (available, downloading, ready, applying): full-width top banner
   const bgColor =
     phase === "ready" ? "rgba(34,197,94,0.12)"
-    : "rgba(192,168,96,0.12)"
+    : "rgba(233,196,106,0.12)"
 
   const borderColor =
     phase === "ready" ? "rgba(34,197,94,0.3)"
-    : "rgba(192,168,96,0.3)"
+    : "rgba(233,196,106,0.3)"
 
   const accentColor =
     phase === "ready" ? "#22C55E"
@@ -144,7 +144,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
               <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />

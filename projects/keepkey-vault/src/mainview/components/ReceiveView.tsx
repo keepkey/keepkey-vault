@@ -215,7 +215,7 @@ export function ReceiveView({
 										size="xs"
 										variant="ghost"
 										color={btcChangeIndex === opt.value ? "kk.gold" : "kk.textSecondary"}
-										bg={btcChangeIndex === opt.value ? "rgba(255,215,0,0.1)" : "transparent"}
+										bg={btcChangeIndex === opt.value ? "rgba(233,196,106,0.1)" : "transparent"}
 										_hover={{ bg: "rgba(255,255,255,0.06)" }}
 										fontWeight={btcChangeIndex === opt.value ? "600" : "400"}
 										fontSize="12px"
@@ -293,7 +293,7 @@ export function ReceiveView({
 								<Button
 									size="xs" variant="ghost" fontSize="11px" px="3" py="1" borderRadius="md"
 									color={!tonBounceable ? "kk.gold" : "kk.textSecondary"}
-									bg={!tonBounceable ? "rgba(255,215,0,0.1)" : "transparent"}
+									bg={!tonBounceable ? "rgba(233,196,106,0.1)" : "transparent"}
 									fontWeight={!tonBounceable ? "600" : "400"}
 									_hover={{ bg: "rgba(255,255,255,0.06)" }}
 									onClick={() => onTonBounceableChange(false)}
@@ -303,7 +303,7 @@ export function ReceiveView({
 								<Button
 									size="xs" variant="ghost" fontSize="11px" px="3" py="1" borderRadius="md"
 									color={tonBounceable ? "kk.gold" : "kk.textSecondary"}
-									bg={tonBounceable ? "rgba(255,215,0,0.1)" : "transparent"}
+									bg={tonBounceable ? "rgba(233,196,106,0.1)" : "transparent"}
 									fontWeight={tonBounceable ? "600" : "400"}
 									_hover={{ bg: "rgba(255,255,255,0.06)" }}
 									onClick={() => onTonBounceableChange(true)}

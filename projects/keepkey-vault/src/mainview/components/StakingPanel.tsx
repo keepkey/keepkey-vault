@@ -391,7 +391,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 				)}
 
 				{phase === "broadcast" && (
-					<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.3)" borderRadius="md" mb="3">
+					<Box p="3" bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="md" mb="3">
 						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">{t('delegationSubmitted')}</Text>
 						{txid ? (
 							<Flex justify="space-between" align="center">
@@ -598,7 +598,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 
 				{phase === "input" && (
 					<VStack align="stretch" gap="3">
-						<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.2)" borderRadius="md">
+						<Box p="3" bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.2)" borderRadius="md">
 							<Text fontSize="xs" color="kk.gold" fontWeight="600">{t('unbondingPeriod', { period: t(unbondingPeriodKey) })}</Text>
 							<Text fontSize="xs" color="kk.textMuted">{t('tokensLockedDuringUnbonding')}</Text>
 						</Box>
@@ -726,7 +726,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 				)}
 
 				{phase === "broadcast" && (
-					<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.3)" borderRadius="md" mb="3">
+					<Box p="3" bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="md" mb="3">
 						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">{t('undelegationSubmitted')}</Text>
 						{txid ? (
 							<Flex justify="space-between" align="center">

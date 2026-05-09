@@ -13,7 +13,7 @@ import { validateAddress } from "../../shared/address-validation"
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
 // ── Confetti ────────────────────────────────────────────────────────────────
-const CONFETTI_COLORS = ['#4CAF50', '#FFD700', '#23DCC8', '#3b82f6', '#8b5cf6', '#ec4899']
+const CONFETTI_COLORS = ['#4CAF50', 'var(--gold)', '#23DCC8', '#3b82f6', '#8b5cf6', '#ec4899']
 const confettiPieces = Array.from({ length: 40 }, (_, i) => ({
   id: i,
   color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
@@ -291,7 +291,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		<VStack gap="4" align="stretch" py="2" px="2">
 			{/* Token badge — shown when sending a token */}
 			{isTokenSend && (
-				<Flex align="center" justify="space-between" bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" px="3" py="2" borderRadius="lg">
+				<Flex align="center" justify="space-between" bg="rgba(233,196,106,0.06)" border="1px solid" borderColor="kk.gold" px="3" py="2" borderRadius="lg">
 					<Flex align="center" gap="2">
 						<Text fontSize="xs" color="kk.gold" fontWeight="600">{t("sendingToken")}</Text>
 						<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{token!.symbol}</Text>
@@ -375,7 +375,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								variant="outline"
 								borderColor="kk.border"
 								color="kk.textSecondary"
-								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
 								onClick={() => setShowScanner(true)}
 								px="2"
 								minW="36px"
@@ -516,7 +516,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* Phase: Built — show fee, sign button */}
 			{phase === 'built' && buildResult && (
 				<>
-					<Box bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" borderRadius="lg" p="4">
+					<Box bg="rgba(233,196,106,0.06)" border="1px solid" borderColor="kk.gold" borderRadius="lg" p="4">
 						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>

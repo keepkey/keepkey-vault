@@ -227,10 +227,10 @@ export function FirmwareDropZone() {
 					borderRadius="2xl"
 					border="3px dashed"
 					borderColor="kk.gold"
-					bg="rgba(192,168,96,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					maxW="500px"
 				>
-					<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 						<polyline points="7 10 12 15 17 10" />
 						<line x1="12" y1="15" x2="12" y2="3" />

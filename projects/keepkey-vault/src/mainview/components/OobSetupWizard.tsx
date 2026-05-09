@@ -748,7 +748,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
         borderRadius={{ base: 'none', md: 'xl' }}
         boxShadow={{ base: 'none', md: '0 8px 32px rgba(0,0,0,0.5)' }}
         borderWidth={{ base: '0', md: '2px' }}
-        borderColor="#C0A860"
+        borderColor="var(--gold)"
         overflow="auto"
         display="flex"
         flexDirection="column"
@@ -930,10 +930,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 {welcomeReady ? (
                   <Button
                     size="lg"
-                    bg="#C0A860"
+                    bg="var(--gold)"
                     color="black"
                     fontWeight="700"
-                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                     _active={{ transform: 'scale(0.98)' }}
                     transition="all 0.2s"
                     px={10}
@@ -1004,10 +1004,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       <Button
                         w="100%"
                         size="md"
-                        bg="#C0A860"
+                        bg="var(--gold)"
                         color="black"
                         fontWeight="600"
-                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
                         onClick={() => startBootloaderUpdate()}
@@ -1327,10 +1327,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                     <Button
                       w="100%"
                       size="md"
-                      bg="#C0A860"
+                      bg="var(--gold)"
                       color="black"
                       fontWeight="600"
-                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={() => startFirmwareUpdate(deviceStatus.latestFirmware || undefined)}
@@ -1383,10 +1383,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                             <Button
                               size="xs"
                               variant="outline"
-                              borderColor="rgba(192, 168, 96, 0.3)"
+                              borderColor="rgba(233,196,106, 0.3)"
                               color="gray.300"
                               fontWeight="500"
-                              _hover={{ borderColor: '#C0A860', color: 'white', bg: 'rgba(192, 168, 96, 0.08)' }}
+                              _hover={{ borderColor: 'var(--gold)', color: 'white', bg: 'rgba(233,196,106, 0.08)' }}
                               transition="all 0.15s ease"
                               onClick={(e: React.MouseEvent) => {
                                 e.stopPropagation()
@@ -1559,10 +1559,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         flex={1}
                         size="sm"
                         variant="outline"
-                        borderColor="rgba(192, 168, 96, 0.3)"
+                        borderColor="rgba(233,196,106, 0.3)"
                         color="gray.300"
                         fontWeight="500"
-                        _hover={{ borderColor: '#C0A860', color: 'white', bg: 'rgba(192, 168, 96, 0.08)' }}
+                        _hover={{ borderColor: 'var(--gold)', color: 'white', bg: 'rgba(233,196,106, 0.08)' }}
                         transition="all 0.15s ease"
                         onClick={handleCustomFwReset}
                       >
@@ -1574,7 +1574,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         bg={
                           customFwAnalysis.willWipeDevice ? 'red.600'
                           : (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'orange.600'
-                          : '#C0A860'
+                          : 'var(--gold)'
                         }
                         color={customFwAnalysis.willWipeDevice || (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'white' : 'black'}
                         fontWeight="600"
@@ -1915,10 +1915,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       <Button
                         w="100%"
                         size="md"
-                        bg="#C0A860"
+                        bg="var(--gold)"
                         color="black"
                         fontWeight="600"
-                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
                         onClick={(e: React.MouseEvent) => {
@@ -1994,10 +1994,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       <Button
                         w="100%"
                         size="md"
-                        bg="#C0A860"
+                        bg="var(--gold)"
                         color="black"
                         fontWeight="600"
-                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
                         onClick={(e: React.MouseEvent) => {
@@ -2147,10 +2147,10 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   <Button
                     w="100%"
                     size="md"
-                    bg="#C0A860"
+                    bg="var(--gold)"
                     color="black"
                     fontWeight="600"
-                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                     _active={{ transform: 'scale(0.98)' }}
                     transition="all 0.15s ease"
                     onClick={handleApplyLabel}
@@ -2187,7 +2187,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
               <VStack gap={4} textAlign="center" w="100%" maxW="400px" mx="auto">
                 {verifyingPhase === 'idle' && (
                   <>
-                    <FaKey color="#C0A860" size={36} />
+                    <FaKey color="var(--gold)" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="white">
                         {t('verifySeed.title', { defaultValue: 'Verify Your Recovery Phrase' })}
@@ -2199,8 +2199,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       </Text>
                     </VStack>
                     <Button
-                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
-                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(192, 168, 96, 0.3)' }}
+                      w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
+                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={async () => {
@@ -2243,7 +2243,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 )}
                 {verifyingPhase === 'quiz' && (
                   <>
-                    <FaKey color="#C0A860" size={36} />
+                    <FaKey color="var(--gold)" size={36} />
                     <VStack gap={1}>
                       <Text fontSize="lg" fontWeight="bold" color="white">
                         {t('verifySeed.enterWords', { defaultValue: 'Enter the requested words' })}
@@ -2279,7 +2279,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                               width: '100%',
                               padding: '10px 12px',
                               borderRadius: '8px',
-                              border: '1px solid rgba(192, 168, 96, 0.3)',
+                              border: '1px solid rgba(233,196,106, 0.3)',
                               background: 'rgba(0,0,0,0.3)',
                               color: 'white',
                               fontSize: '14px',
@@ -2290,7 +2290,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       ))}
                     </VStack>
                     <Button
-                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       disabled={quizPositions.some(p => !quizAnswers[p]?.trim())}
                       onClick={async () => {
@@ -2320,7 +2320,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                 )}
                 {verifyingPhase === 'verifying' && (
                   <>
-                    <Spinner size="lg" color="#C0A860" borderWidth="3px" />
+                    <Spinner size="lg" color="var(--gold)" borderWidth="3px" />
                     <VStack gap={1}>
                       <Text fontSize="md" fontWeight="bold" color="white">
                         {t('verifySeed.verifying', { defaultValue: 'Verifying...' })}
@@ -2345,7 +2345,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       </Text>
                     </VStack>
                     <Button
-                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
@@ -2365,7 +2365,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       </Text>
                     </VStack>
                     <Button
-                      w="100%" size="md" bg="#C0A860" color="black" fontWeight="600"
+                      w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
                       _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
@@ -2438,11 +2438,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   </VStack>
                   <Button
                     size="lg"
-                    bg="#C0A860"
+                    bg="var(--gold)"
                     color="black"
                     fontWeight="700"
                     px={10}
-                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 16px rgba(192, 168, 96, 0.35)' }}
+                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 16px rgba(233,196,106, 0.35)' }}
                     _active={{ transform: 'scale(0.98)' }}
                     transition="all 0.2s"
                     onClick={onComplete}
@@ -2456,7 +2456,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
         </Box>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <Box px={5} py={3} borderTopWidth="1px" borderColor="rgba(192, 168, 96, 0.2)">
+        <Box px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
           <HStack justify="space-between">
             <Text fontSize="sm" color="gray.400" fontWeight="500">
               {visibleIndex >= 0
@@ -2473,11 +2473,11 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                   size="sm"
                   variant="outline"
                   onClick={handlePrevious}
-                  borderColor="rgba(192, 168, 96, 0.3)"
+                  borderColor="rgba(233,196,106, 0.3)"
                   color="gray.300"
                   px={5}
                   fontWeight="500"
-                  _hover={{ borderColor: '#C0A860', color: 'white', bg: 'rgba(192, 168, 96, 0.08)' }}
+                  _hover={{ borderColor: 'var(--gold)', color: 'white', bg: 'rgba(233,196,106, 0.08)' }}
                   transition="all 0.15s ease"
                 >
                   {t('footer.previous')}
@@ -2486,7 +2486,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
               {showNext && (
                 <Button
                   size="sm"
-                  bg="#C0A860"
+                  bg="var(--gold)"
                   color="black"
                   px={6}
                   fontWeight="600"

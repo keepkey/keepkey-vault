@@ -29,12 +29,12 @@ const CARD_CSS = `
 function PinGrid() {
   const nums = [7, 4, 1, 8, 2, 6, 3, 9, 5] // scrambled
   return (
-    <Box bg="rgba(192,168,96,0.1)" border="1px solid rgba(192,168,96,0.3)" borderRadius="lg" p={3}>
+    <Box bg="rgba(233,196,106,0.1)" border="1px solid rgba(233,196,106,0.3)" borderRadius="lg" p={3}>
       <Flex wrap="wrap" w="96px" gap="2px" justify="center">
         {nums.map((n, i) => (
-          <Flex key={i} w="30px" h="30px" bg="rgba(192,168,96,0.15)" borderRadius="md"
-            align="center" justify="center" border="1px solid rgba(192,168,96,0.2)">
-            <Text fontSize="xs" fontWeight="700" color="#C0A860">{n}</Text>
+          <Flex key={i} w="30px" h="30px" bg="rgba(233,196,106,0.15)" borderRadius="md"
+            align="center" justify="center" border="1px solid rgba(233,196,106,0.2)">
+            <Text fontSize="xs" fontWeight="700" color="var(--gold)">{n}</Text>
           </Flex>
         ))}
       </Flex>
@@ -135,10 +135,10 @@ const PRE_CARDS: TutorialCard[] = [
   {
     title: 'Your PIN is Scrambled',
     body: 'Your KeepKey shows a randomized number grid. Match positions on screen to numbers on device. The layout changes every time so screen-watchers can\'t steal your PIN.',
-    accent: '#C0A860',
-    icon1: <FaLock size={28} color="#C0A860" />,
+    accent: 'var(--gold)',
+    icon1: <FaLock size={28} color="var(--gold)" />,
     icon2: <PinGrid />,
-    icon3: <FaEyeSlash size={22} color="rgba(192,168,96,0.6)" />,
+    icon3: <FaEyeSlash size={22} color="rgba(233,196,106,0.6)" />,
   },
   {
     title: 'Your Words = Your Wallet',

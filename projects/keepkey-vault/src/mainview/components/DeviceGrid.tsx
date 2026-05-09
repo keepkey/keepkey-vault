@@ -213,7 +213,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 							</Text>
 						)}
 						<Box mt="auto">
-							<CardBtn label="View" color="#C0A860" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
+							<CardBtn label="View" color="var(--gold)" onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')} />
 						</Box>
 					</DeviceCard>
 				)})}
@@ -224,7 +224,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					const isDeleting = confirmDeleteEmu === w.name
 					const displayName = w.label || w.name
 					return (
-						<DeviceCard key={`emu:${w.name}`} active={active} accentColor={active ? undefined : "#C0A860"}>
+						<DeviceCard key={`emu:${w.name}`} active={active} accentColor={active ? undefined : "var(--gold)"}>
 							<Flex align="center" gap="2" mb="1">
 								<EmulatorIcon active={active} />
 								<Box flex="1" minW="0">
@@ -243,7 +243,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 								</Box>
 							</Flex>
 							{(w.totalUsd ?? 0) > 0 && (
-								<Text fontSize="sm" fontWeight="700" color={showValues ? (active ? "#22C55E" : "#C0A860") : "gray.600"} mb="1">
+								<Text fontSize="sm" fontWeight="700" color={showValues ? (active ? "#22C55E" : "var(--gold)") : "gray.600"} mb="1">
 									{showValues ? `$${formatUsd(w.totalUsd ?? 0)}` : "$ ****"}
 								</Text>
 							)}
@@ -389,7 +389,7 @@ function SolidBtn({ label, bg, onClick, loading }: { label: string; bg: string; 
 function CardBtn({ label, color, onClick, loading, small }: {
 	label: string; color: string; onClick: () => void; loading?: boolean; small?: boolean
 }) {
-	const rgb = color === "#EF4444" ? "239,68,68" : color === "#C0A860" ? "192,168,96" : "102,102,102"
+	const rgb = color === "#EF4444" ? "239,68,68" : color === "var(--gold)" ? "192,168,96" : "102,102,102"
 	return (
 		<Box
 			as="button"
@@ -410,10 +410,10 @@ function CardBtn({ label, color, onClick, loading, small }: {
 
 /** Chip icon — emulator device */
 function EmulatorIcon({ active }: { active: boolean }) {
-	const c = active ? "#22C55E" : "#C0A860"
+	const c = active ? "#22C55E" : "var(--gold)"
 	return (
 		<Box w="28px" h="28px" flexShrink={0} display="flex" alignItems="center" justifyContent="center"
-			bg={active ? "rgba(34,197,94,0.12)" : "rgba(192,168,96,0.12)"} borderRadius="lg">
+			bg={active ? "rgba(34,197,94,0.12)" : "rgba(233,196,106,0.12)"} borderRadius="lg">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 				<rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" />
 				<line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />

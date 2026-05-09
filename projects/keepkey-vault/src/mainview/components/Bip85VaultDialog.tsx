@@ -161,8 +161,8 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 				{/* Header */}
 				<Flex px="5" py="4" align="center" justify="space-between" borderBottom="1px solid" borderColor="kk.border" flexShrink={0}>
 					<Flex align="center" gap="2.5">
-						<Box w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.15)" display="flex" alignItems="center" justifyContent="center">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<Box w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.15)" display="flex" alignItems="center" justifyContent="center">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 								<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 							</svg>
@@ -194,8 +194,8 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 								direction="column" align="center" justify="center"
 								p="4" bg="rgba(0,0,0,0.3)" borderRadius="md" gap="3"
 							>
-								<Box w="40px" h="40px" borderRadius="full" bg="rgba(192,168,96,0.15)" display="flex" alignItems="center" justifyContent="center">
-									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<Box w="40px" h="40px" borderRadius="full" bg="rgba(233,196,106,0.15)" display="flex" alignItems="center" justifyContent="center">
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
 										<line x1="8" y1="21" x2="16" y2="21" />
 										<line x1="12" y1="17" x2="12" y2="21" />
@@ -340,7 +340,7 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 											key={key} align="center" justify="space-between"
 											bg={
 												isJustCreated ? "rgba(74,222,128,0.12)"
-												: isActive ? "rgba(192,168,96,0.08)"
+												: isActive ? "rgba(233,196,106,0.08)"
 												: "rgba(255,255,255,0.03)"
 											}
 											border="1px solid"
@@ -351,7 +351,7 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 											}
 											borderRadius="lg" px="3" py="2.5"
 											cursor="pointer"
-											_hover={{ borderColor: "kk.gold", bg: "rgba(192,168,96,0.05)" }}
+											_hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.05)" }}
 											transition="all 0.8s ease-out"
 											boxShadow={isJustCreated ? "0 0 12px rgba(74,222,128,0.25)" : "none"}
 											onClick={() => handleView(seed)}

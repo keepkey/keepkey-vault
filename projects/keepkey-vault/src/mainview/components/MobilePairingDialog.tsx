@@ -97,7 +97,7 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 				{/* Header */}
 				<Flex align="center" justify="space-between" w="100%">
 					<Flex align="center" gap="2">
-						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
 							<line x1="12" y1="18" x2="12.01" y2="18" />
 						</svg>

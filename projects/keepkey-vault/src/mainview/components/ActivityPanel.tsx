@@ -36,7 +36,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   broadcast: { label: 'Broadcast', color: '#23DCC8' },
   signed: { label: 'Signed', color: '#F7931A' },
-  completed: { label: 'Completed', color: '#4ADE80' },
+  completed: { label: 'Completed', color: 'var(--teal)' },
   refunded: { label: 'Refunded', color: '#FB923C' },
   failed: { label: 'Failed', color: '#E53E3E' },
 }
@@ -47,8 +47,8 @@ const SWAP_STATUS_CONFIG: Record<string, { label: string; color: string; dot?: b
   confirming:          { label: 'Confirming',         color: '#627EEA', dot: true },
   output_detected:     { label: 'Output Detected',    color: '#23DCC8', dot: true },
   output_confirming:   { label: 'Confirming Output',  color: '#23DCC8', dot: true },
-  output_confirmed:    { label: 'Output Confirmed',   color: '#4ADE80' },
-  completed:           { label: 'Complete',            color: '#4ADE80' },
+  output_confirmed:    { label: 'Output Confirmed',   color: 'var(--teal)' },
+  completed:           { label: 'Complete',            color: 'var(--teal)' },
   failed:              { label: 'Failed',              color: '#E53E3E' },
   refunded:            { label: 'Refunded',            color: '#FB923C' },
 }
@@ -145,7 +145,7 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
       <HStack gap="1" justify="flex-end" minW="0">
         <Text
           fontSize="11px" color="#23DCC8" fontFamily="mono" cursor="pointer" wordBreak="break-all" textAlign="right"
-          _hover={{ color: '#4ADE80' }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
+          _hover={{ color: 'var(--teal)' }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
         >
           {copied ? 'Copied!' : value}
         </Text>
@@ -347,7 +347,7 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
                 _hover={{ bg: 'rgba(74,222,128,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: outboundUrl }).catch(() => {})}
               >
-                <Text fontSize="xs" fontWeight="600" color="#4ADE80">Outbound Explorer</Text>
+                <Text fontSize="xs" fontWeight="600" color="var(--teal)">Outbound Explorer</Text>
               </Flex>
             )}
           </HStack>
@@ -411,7 +411,7 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
       {activity.type === 'swap' && (activity.amount || activity.outAmount) ? (
         <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="1.5" align="center" flexWrap="wrap">
           {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
-          <Text color="#FFD700">&rarr;</Text>
+          <Text color="var(--gold)">&rarr;</Text>
           {activity.outAmount
             ? <Text truncate color={activity.swapStatus === 'completed' ? '#23DCC8' : 'whiteAlpha.500'}>
                 {activity.swapStatus === 'completed' ? '' : '~'}{activity.outAmount} {activity.outAsset || ''}

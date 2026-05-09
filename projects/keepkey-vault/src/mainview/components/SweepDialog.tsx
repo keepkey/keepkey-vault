@@ -315,7 +315,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             {/* Non-standard section */}
             {nonStandard.length > 0 && (
               <Box>
-                <Box bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.2)" borderRadius="lg" p="3" mb="2">
+                <Box bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.2)" borderRadius="lg" p="3" mb="2">
                   <Text fontSize="sm" fontWeight="600" color="kk.gold">
                     {formatSats(nonStandardSats)} on {nonStandard.length} non-standard path{nonStandard.length > 1 ? 's' : ''}
                   </Text>

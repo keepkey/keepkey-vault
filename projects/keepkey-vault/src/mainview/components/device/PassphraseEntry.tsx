@@ -82,7 +82,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 				p="8"
 				maxW="420px"
 				w="90%"
-				boxShadow="0 4px 24px rgba(192, 168, 96, 0.3), 0 8px 32px rgba(0,0,0,0.6)"
+				boxShadow="0 4px 24px rgba(233,196,106, 0.3), 0 8px 32px rgba(0,0,0,0.6)"
 				position="relative"
 			>
 				{/* Close button — hidden during device-confirm to prevent dismissing */}
