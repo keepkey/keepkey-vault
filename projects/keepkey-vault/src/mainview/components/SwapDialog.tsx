@@ -22,6 +22,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { AssetPickerDialog } from "./AssetPickerDialog"
+import { KeepKeyDevice } from "./v3"
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
@@ -131,8 +132,8 @@ const ChevronDownIcon = () => (
 
 const ThorchainIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <circle cx="12" cy="12" r="10" fill="#23DCC8" fillOpacity="0.15" />
-    <path d="M12 4l-6 8 6 8 6-8-6-8z" fill="#23DCC8" fillOpacity="0.6" />
+    <circle cx="12" cy="12" r="10" fill="var(--teal)" fillOpacity="0.15" />
+    <path d="M12 4l-6 8 6 8 6-8-6-8z" fill="var(--teal)" fillOpacity="0.6" />
   </svg>
 )
 
@@ -143,7 +144,7 @@ const CheckIcon = () => (
 )
 
 const ShieldIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
   </svg>
 )
@@ -166,7 +167,7 @@ const ExternalLinkIcon = () => (
 
 // ── Confetti burst (CSS-only, 30 particles) ─────────────────────────
 function ConfettiBurst() {
-  const colors = ['var(--teal)', '#23DCC8', 'var(--gold)', '#FF6B6B', '#A78BFA', '#3B82F6', '#FB923C', '#F472B6']
+  const colors = ['var(--teal)', 'var(--teal)', 'var(--gold)', 'var(--rose)', '#A78BFA', '#3B82F6', 'var(--gold)', '#F472B6']
   const particles = Array.from({ length: 30 }, (_, i) => {
     const angle = (i / 30) * 360
     const dist = 80 + Math.random() * 100
@@ -244,7 +245,7 @@ function GreenCountUp({ value, prefix = '', suffix = '', color = 'var(--teal)', 
 
 const DIALOG_CSS = `
   @keyframes kkSwapPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(35,220,200,0.5); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(139,227,196,0.5); }
     50% { box-shadow: 0 0 0 8px rgba(35,220,200,0); }
   }
   @keyframes kkSwapCheckPop {
@@ -274,8 +275,8 @@ const DIALOG_CSS = `
     50% { transform: translateY(-4px); }
   }
   @keyframes kkLogoGlow {
-    0%, 100% { filter: drop-shadow(0 0 8px rgba(35,220,200,0.25)); }
-    50% { filter: drop-shadow(0 0 20px rgba(35,220,200,0.5)); }
+    0%, 100% { filter: drop-shadow(0 0 8px rgba(139,227,196,0.28)); }
+    50% { filter: drop-shadow(0 0 20px rgba(139,227,196,0.5)); }
   }
   @keyframes kkGoldPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(233,196,106,0.4); }
@@ -336,7 +337,7 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
               chainCaip={chainBadgeCaip(selected)}
               size={80}
               alt={selected.symbol}
-              ring="rgba(35,220,200,0.25)"
+              ring="rgba(139,227,196,0.28)"
             />
           </Box>
           <VStack gap="0" align="flex-start">
@@ -1312,8 +1313,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={handleClose}>
-        <Box position="absolute" inset="0" bg="blackAlpha.700" />
-        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(35,220,200,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(35,220,200,0.1)" p="6" w="400px" maxW="90vw" onClick={(e) => e.stopPropagation()} textAlign="center">
+        <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
+        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(139,227,196,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(139,227,196,0.12)" p="6" w="400px" maxW="90vw" onClick={(e) => e.stopPropagation()} textAlign="center">
           <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
           <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
           <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
@@ -1325,14 +1326,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={handleClose}>
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="blackAlpha.700" />
+      <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
       <Box
         position="relative"
-        bg="kk.cardBg"
-        border="2px solid"
-        borderColor={phase === 'submitted' ? '#23DCC8' : busy ? 'rgba(233,196,106,0.5)' : 'rgba(35,220,200,0.4)'}
-        borderRadius="xl"
-        boxShadow={phase === 'submitted' ? '0 0 24px rgba(35,220,200,0.25), 0 0 48px rgba(35,220,200,0.1)' : busy ? '0 0 20px rgba(233,196,106,0.15)' : '0 0 20px rgba(35,220,200,0.1), 0 0 40px rgba(35,220,200,0.05)'}
+        bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
+        border="1px solid var(--line-2)"
+        borderRadius="var(--r-xl)"
+        boxShadow="0 20px 80px -20px rgba(139,227,196,0.20), 0 0 0 1px rgba(255,255,255,0.04) inset"
         w="760px"
         maxW="94vw"
         maxH="90vh"
@@ -1342,7 +1342,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       >
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
-          bg="linear-gradient(90deg, rgba(35,220,200,0.03) 0%, transparent 100%)">
+          bg="transparent">
           <HStack gap="2">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration || "thorchain"} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
@@ -1396,21 +1396,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Status icon + title inline */}
               <Flex align="center" gap="3">
                 {isSwapComplete ? (
-                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(74,222,128,0.1)" border="2px solid" borderColor="rgba(74,222,128,0.4)"
+                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(139,227,196,0.10)" border="2px solid" borderColor="rgba(139,227,196,0.4)"
                     display="flex" alignItems="center" justifyContent="center" flexShrink={0}
                     style={{ animation: 'kkSwapCheckPop 0.4s ease-out' }}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                   </Box>
                 ) : isSwapFailed ? (
-                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(255,23,68,0.1)" border="2px solid" borderColor="rgba(255,23,68,0.3)"
+                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(224,140,123,0.12)" border="2px solid" borderColor="rgba(224,140,123,0.32)"
                     display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                   </Box>
                 ) : (
-                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(35,220,200,0.08)" border="2px solid" borderColor="rgba(35,220,200,0.3)"
+                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(139,227,196,0.10)" border="2px solid" borderColor="rgba(139,227,196,0.32)"
                     display="flex" alignItems="center" justifyContent="center" flexShrink={0}
                     style={{ animation: 'kkSwapPulse 2s ease-in-out infinite' }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10" opacity="0.3" /><path d="M12 6v6l4 2" />
                     </svg>
                   </Box>
@@ -1443,13 +1443,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   {/* Filled bar — width based on step progress, animated stripes when in progress */}
                   <Box
                     position="absolute" top="0" left="0" h="6px" borderRadius="full"
-                    bg={isSwapComplete ? 'linear-gradient(90deg, #10B981, #059669)' : undefined}
-                    boxShadow="0 0 8px rgba(35,220,200,0.4)"
+                    bg={isSwapComplete ? 'linear-gradient(90deg, var(--teal-2), var(--teal))' : undefined}
+                    boxShadow="0 0 8px rgba(139,227,196,0.4)"
                     w={isSwapComplete ? '100%' : swapStep === 2 ? '83%' : swapStep === 1 ? '50%' : '17%'}
                     transition="width 0.6s ease-in-out"
                     overflow="hidden"
                     style={!isSwapComplete ? {
-                      backgroundImage: 'linear-gradient(45deg, rgba(35,220,200,0.9) 25%, rgba(16,185,129,0.7) 25%, rgba(16,185,129,0.7) 50%, rgba(35,220,200,0.9) 50%, rgba(35,220,200,0.9) 75%, rgba(16,185,129,0.7) 75%)',
+                      backgroundImage: 'linear-gradient(45deg, rgba(139,227,196,0.9) 25%, rgba(168,239,210,0.7) 25%, rgba(168,239,210,0.7) 50%, rgba(139,227,196,0.9) 50%, rgba(139,227,196,0.9) 75%, rgba(168,239,210,0.7) 75%)',
                       backgroundSize: '40px 40px',
                       animation: 'kkBarStripes 1s linear infinite',
                     } : undefined}
@@ -1458,9 +1458,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   {/* Checkpoint 0: Input — left */}
                   <Flex position="absolute" left="0" top="50%" transform="translate(-50%, -50%)" direction="column" align="center" gap="1">
                     <Box w="32px" h="32px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
-                      bg={swapStep > 0 ? 'linear-gradient(135deg, #10B981, #059669)' : 'linear-gradient(135deg, #14B8A6, #0D9488)'}
-                      border="2px solid" borderColor={swapStep > 0 ? '#10B981' : '#14B8A6'}
-                      boxShadow={swapStep === 0 ? '0 4px 14px rgba(20,184,166,0.5), 0 0 25px 5px rgba(20,184,166,0.3)' : '0 2px 8px rgba(16,185,129,0.4)'}
+                      bg={swapStep > 0 ? 'linear-gradient(135deg, var(--teal-2), var(--teal))' : 'linear-gradient(135deg, var(--teal), var(--teal))'}
+                      border="2px solid" borderColor={swapStep > 0 ? 'var(--teal-2)' : 'var(--teal)'}
+                      boxShadow={swapStep === 0 ? '0 4px 14px rgba(139,227,196,0.5), 0 0 25px 5px rgba(139,227,196,0.32)' : '0 2px 8px rgba(168,239,210,0.4)'}
                       style={swapStep === 0 ? { animation: 'kkSwapPulse 2s ease-in-out infinite' } : {}}>
                       {swapStep > 0 ? (
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
@@ -1473,9 +1473,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   {/* Checkpoint 1: Protocol — center */}
                   <Flex position="absolute" left="50%" top="50%" transform="translate(-50%, -50%)" direction="column" align="center" gap="1">
                     <Box w="32px" h="32px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
-                      bg={swapStep > 1 ? 'linear-gradient(135deg, #10B981, #059669)' : swapStep === 1 ? 'linear-gradient(135deg, #14B8A6, #0D9488)' : 'linear-gradient(135deg, #374151, #1F2937)'}
-                      border="2px solid" borderColor={swapStep > 1 ? '#10B981' : swapStep === 1 ? '#14B8A6' : '#4B5563'}
-                      boxShadow={swapStep === 1 ? '0 4px 14px rgba(20,184,166,0.5), 0 0 25px 5px rgba(20,184,166,0.3)' : swapStep > 1 ? '0 2px 8px rgba(16,185,129,0.4)' : '0 2px 6px rgba(75,85,99,0.3)'}
+                      bg={swapStep > 1 ? 'linear-gradient(135deg, var(--teal-2), var(--teal))' : swapStep === 1 ? 'linear-gradient(135deg, var(--teal), var(--teal))' : 'linear-gradient(135deg, #374151, #1F2937)'}
+                      border="2px solid" borderColor={swapStep > 1 ? 'var(--teal-2)' : swapStep === 1 ? 'var(--teal)' : '#4B5563'}
+                      boxShadow={swapStep === 1 ? '0 4px 14px rgba(139,227,196,0.5), 0 0 25px 5px rgba(139,227,196,0.32)' : swapStep > 1 ? '0 2px 8px rgba(168,239,210,0.4)' : '0 2px 6px rgba(75,85,99,0.3)'}
                       style={swapStep === 1 ? { animation: 'kkSwapPulse 2s ease-in-out infinite' } : {}}>
                       {swapStep > 1 ? (
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
@@ -1488,9 +1488,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   {/* Checkpoint 2: Output — right */}
                   <Flex position="absolute" right="0" top="50%" transform="translate(50%, -50%)" direction="column" align="center" gap="1">
                     <Box w="32px" h="32px" borderRadius="full" display="flex" alignItems="center" justifyContent="center"
-                      bg={swapStep > 2 ? 'linear-gradient(135deg, #10B981, #059669)' : swapStep === 2 ? 'linear-gradient(135deg, #14B8A6, #0D9488)' : 'linear-gradient(135deg, #374151, #1F2937)'}
-                      border="2px solid" borderColor={swapStep > 2 ? '#10B981' : swapStep === 2 ? '#14B8A6' : '#4B5563'}
-                      boxShadow={swapStep === 2 ? '0 4px 14px rgba(20,184,166,0.5), 0 0 25px 5px rgba(20,184,166,0.3)' : swapStep > 2 ? '0 2px 8px rgba(16,185,129,0.4)' : '0 2px 6px rgba(75,85,99,0.3)'}
+                      bg={swapStep > 2 ? 'linear-gradient(135deg, var(--teal-2), var(--teal))' : swapStep === 2 ? 'linear-gradient(135deg, var(--teal), var(--teal))' : 'linear-gradient(135deg, #374151, #1F2937)'}
+                      border="2px solid" borderColor={swapStep > 2 ? 'var(--teal-2)' : swapStep === 2 ? 'var(--teal)' : '#4B5563'}
+                      boxShadow={swapStep === 2 ? '0 4px 14px rgba(139,227,196,0.5), 0 0 25px 5px rgba(139,227,196,0.32)' : swapStep > 2 ? '0 2px 8px rgba(168,239,210,0.4)' : '0 2px 6px rgba(75,85,99,0.3)'}
                       style={swapStep === 2 ? { animation: 'kkSwapPulse 2s ease-in-out infinite' } : {}}>
                       {swapStep > 2 ? (
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
@@ -1506,24 +1506,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <VStack gap="0" align="flex-start" w="80px">
                     <Text fontSize="10px" fontWeight="600" color={swapStep >= 0 ? 'kk.textPrimary' : 'kk.textMuted'}>{t("stageInput")}</Text>
                     {swapStep === 0 && liveConfirmations > 0 && (
-                      <Text fontSize="9px" fontFamily="mono" color="#23DCC8">{liveConfirmations} {t("confirmations")}</Text>
+                      <Text fontSize="9px" fontFamily="mono" color="var(--teal)">{liveConfirmations} {t("confirmations")}</Text>
                     )}
-                    {swapStep > 0 && <Text fontSize="9px" color="#10B981">{t("statusCompleted")}</Text>}
+                    {swapStep > 0 && <Text fontSize="9px" color="var(--teal-2)">{t("statusCompleted")}</Text>}
                   </VStack>
                   <VStack gap="0" align="center" w="80px">
                     <Text fontSize="10px" fontWeight="600" color={swapStep >= 1 ? 'kk.textPrimary' : 'kk.textMuted'}>{t("stageProtocol")}</Text>
-                    {swapStep === 1 && <Text fontSize="9px" color="#23DCC8">{t("statusConfirming")}...</Text>}
-                    {swapStep > 1 && <Text fontSize="9px" color="#10B981">{t("statusCompleted")}</Text>}
+                    {swapStep === 1 && <Text fontSize="9px" color="var(--teal)">{t("statusConfirming")}...</Text>}
+                    {swapStep > 1 && <Text fontSize="9px" color="var(--teal-2)">{t("statusCompleted")}</Text>}
                   </VStack>
                   <VStack gap="0" align="flex-end" w="80px">
                     <Text fontSize="10px" fontWeight="600" color={swapStep >= 2 ? 'kk.textPrimary' : 'kk.textMuted'}>{t("stageOutput")}</Text>
                     {swapStep === 2 && liveOutboundConfirmations !== undefined && (
-                      <Text fontSize="9px" fontFamily="mono" color="#23DCC8">{liveOutboundConfirmations}{liveOutboundRequired ? `/${liveOutboundRequired}` : ''}</Text>
+                      <Text fontSize="9px" fontFamily="mono" color="var(--teal)">{liveOutboundConfirmations}{liveOutboundRequired ? `/${liveOutboundRequired}` : ''}</Text>
                     )}
                     {swapStep === 2 && liveOutboundConfirmations === undefined && (
-                      <Text fontSize="9px" color="#23DCC8">{t("statusOutputDetected")}</Text>
+                      <Text fontSize="9px" color="var(--teal)">{t("statusOutputDetected")}</Text>
                     )}
-                    {swapStep > 2 && <Text fontSize="9px" color="#10B981">{t("statusCompleted")}</Text>}
+                    {swapStep > 2 && <Text fontSize="9px" color="var(--teal-2)">{t("statusCompleted")}</Text>}
                   </VStack>
                 </Flex>
               </Box>
@@ -1531,12 +1531,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Live countdown — only show when not complete */}
               {!isSwapComplete && !isSwapFailed && (countdown > 0 || (quote?.estimatedTime && quote.estimatedTime > 0)) && (
                 <Flex w="full" justify="center" align="center" gap="3"
-                  bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="rgba(35,220,200,0.15)"
+                  bg="rgba(139,227,196,0.08)" border="1px solid" borderColor="rgba(139,227,196,0.18)"
                   borderRadius="lg" px="4" py="2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
                   </svg>
-                  <Text fontSize="sm" fontFamily="mono" fontWeight="700" color="#23DCC8">
+                  <Text fontSize="sm" fontFamily="mono" fontWeight="700" color="var(--teal)">
                     {countdown > 0 ? (
                       <>{Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}</>
                     ) : formatTime(quote?.estimatedTime || 0)}
@@ -1546,7 +1546,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               )}
 
               {/* Amount summary */}
-              <Flex w="full" bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="rgba(35,220,200,0.15)"
+              <Flex w="full" bg="rgba(139,227,196,0.08)" border="1px solid" borderColor="rgba(139,227,196,0.18)"
                 borderRadius="xl" p="4" justify="center" align="center" gap="4">
                 <VStack gap="0.5">
                   <HStack gap="3">
@@ -1565,7 +1565,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     <Box style={{ animation: 'kkLogoGlow 3s ease-in-out infinite' }}>
                       <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={56} alt={toAsset.symbol} />
                     </Box>
-                    <Text fontSize="sm" fontWeight="700" color="#23DCC8">~<GreenCountUp value={quote?.expectedOutput || '0'} color="#23DCC8" suffix={` ${toAsset.symbol}`} /></Text>
+                    <Text fontSize="sm" fontWeight="700" color="var(--teal)">~<GreenCountUp value={quote?.expectedOutput || '0'} color="var(--teal)" suffix={` ${toAsset.symbol}`} /></Text>
                   </HStack>
                   {hasToPrice && quote?.expectedOutput && (
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
@@ -1603,8 +1603,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     const tracker = providerTrackerUrl(protoHint, txid)
                     if (!tracker) return null
                     return (
-                      <Button size="xs" flex="1" variant="outline" borderColor="rgba(35,220,200,0.3)" color="#23DCC8"
-                        _hover={{ bg: "rgba(35,220,200,0.08)", borderColor: "#23DCC8" }}
+                      <Button size="xs" flex="1" variant="outline" borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
+                        _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
                         onClick={() => rpcRequest('openUrl', { url: tracker.url }).catch(() => {})}>
                         <HStack gap="1">
                           {tracker.iconUrl && <Image src={tracker.iconUrl} w="12px" h="12px" borderRadius="full" />}
@@ -1618,7 +1618,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
               {/* Outbound Txid — shown when THORChain sends the output */}
               {liveOutboundTxid && (
-                <Box w="full" bg="rgba(74,222,128,0.06)" border="1px solid" borderColor="rgba(74,222,128,0.15)" borderRadius="lg" p="3">
+                <Box w="full" bg="rgba(74,222,128,0.06)" border="1px solid" borderColor="rgba(139,227,196,0.18)" borderRadius="lg" p="3">
                   <Flex justify="space-between" align="center">
                     <HStack gap="1.5" minW="0" flex="1">
                       <Text fontSize="10px" color="var(--teal)" flexShrink={0}>{t("stageOutput")}</Text>
@@ -1664,17 +1664,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
                           </Text>
                           <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
-                          <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? '#FB923C' : 'kk.textMuted'}>
+                          <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? 'var(--gold)' : 'kk.textMuted'}>
                             {afterFromBal ? formatBalance(afterFromBal) : '...'}
                           </Text>
                           {afterFromBal && beforeFromBal && (
-                            <Text fontSize="10px" fontFamily="mono" color="#EF4444">
+                            <Text fontSize="10px" fontFamily="mono" color="var(--rose)">
                               ({formatBalance((parseFloat(afterFromBal) - parseFloat(beforeFromBal)).toFixed(8))})
                             </Text>
                           )}
                         </HStack>
                         {hasFromPrice && afterFromBal && beforeFromBal && (
-                          <Text fontSize="9px" fontFamily="mono" color="#EF4444">
+                          <Text fontSize="9px" fontFamily="mono" color="var(--rose)">
                             {fmtCompact((parseFloat(afterFromBal) - parseFloat(beforeFromBal)) * fromPriceUsd)}
                           </Text>
                         )}
@@ -1734,22 +1734,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
             <VStack gap="3" py="4" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
               {/* Device icon with label inline */}
               <Flex align="center" gap="4">
-                <Box
-                  w="56px" h="56px"
-                  borderRadius="xl"
-                  bg="rgba(233,196,106,0.08)"
-                  border="2px solid"
-                  borderColor="rgba(233,196,106,0.2)"
-                  display="flex"
-                  alignItems="center"
-                  justifyContent="center"
-                  flexShrink={0}
-                  style={{ animation: 'kkSwapDevicePulse 2s ease-in-out infinite' }}
-                >
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-                    <path d="M12 18h.01" />
-                  </svg>
+                <Box flexShrink={0}>
+                  <KeepKeyDevice
+                    state={
+                      subStage?.endsWith('-broadcasting') || phase === 'broadcasting'
+                        ? 'active'
+                        : 'signing'
+                    }
+                    size={120}
+                    signingLabel={
+                      subStage?.startsWith('approve-') || phase === 'approving'
+                        ? 'APPROVE'
+                        : 'CONFIRM'
+                    }
+                    signingDetail={
+                      fromAsset && toAsset
+                        ? `${fromAsset.symbol} → ${toAsset.symbol}`
+                        : 'SWAP'
+                    }
+                  />
                 </Box>
                 <VStack gap="0" align="flex-start">
                   <HStack gap="1.5">
@@ -1796,7 +1799,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <Flex align="center" gap="2" bg="rgba(255,255,255,0.04)" px="4" py="2" borderRadius="lg">
                   <Text fontSize="sm" color="kk.textSecondary">{displayAmount} {fromAsset.symbol}</Text>
                   <Text color="kk.textMuted">&rarr;</Text>
-                  <Text fontSize="sm" color="#23DCC8">~<GreenCountUp value={quote?.expectedOutput || '0'} color="#23DCC8" suffix={` ${toAsset.symbol}`} /></Text>
+                  <Text fontSize="sm" color="var(--teal)">~<GreenCountUp value={quote?.expectedOutput || '0'} color="var(--teal)" suffix={` ${toAsset.symbol}`} /></Text>
                 </Flex>
                 {hasFromPrice && (
                   <Text fontSize="10px" color="kk.textMuted">
@@ -1827,7 +1830,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     </svg>
                   </Box>
                   <Box flex="1" minW="0" textAlign="right">
-                    <Text fontSize="sm" fontWeight="700" color="#23DCC8" truncate>~<GreenCountUp value={quote.expectedOutput} color="#23DCC8" suffix={` ${toAsset.symbol}`} /></Text>
+                    <Text fontSize="sm" fontWeight="700" color="var(--teal)" truncate>~<GreenCountUp value={quote.expectedOutput} color="var(--teal)" suffix={` ${toAsset.symbol}`} /></Text>
                     {hasToPrice && (
                       <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
                     )}
@@ -1835,7 +1838,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={40} alt={toAsset.symbol} />
                 </Flex>
                 {isNativeEvmMax && (
-                  <Text fontSize="10px" color="#FB923C" mt="1.5">{t("sendMaxGasNote")}</Text>
+                  <Text fontSize="10px" color="var(--gold)" mt="1.5">{t("sendMaxGasNote")}</Text>
                 )}
               </Box>
 
@@ -1882,7 +1885,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     <Text fontSize="11px" color="kk.textSecondary">{formatTime(quote.estimatedTime)}</Text>
                   </Flex>
                   {quote.warning && (
-                    <Text fontSize="10px" color="#FB923C" mt="0.5">{quote.warning}</Text>
+                    <Text fontSize="10px" color="var(--gold)" mt="0.5">{quote.warning}</Text>
                   )}
                 </VStack>
               </Box>
@@ -1953,7 +1956,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
               {/* Preview build error — most likely insufficient gas/balance, surface upfront */}
               {previewError && (
-                <Flex align="center" gap="2" bg="rgba(255,23,68,0.06)" border="1px solid" borderColor="rgba(255,23,68,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
+                <Flex align="center" gap="2" bg="rgba(255,23,68,0.06)" border="1px solid" borderColor="rgba(224,140,123,0.32)" px="3" py="1.5" borderRadius="lg" w="full">
                   <Text fontSize="10px" color="kk.error">
                     {t("previewFailed", "Build preview failed")}: {previewError}
                   </Text>
@@ -1973,7 +1976,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   } catch { return raw }
                 }
                 return (
-                  <Flex align="flex-start" gap="2" bg="rgba(255,23,68,0.08)" border="1px solid" borderColor="kk.error" px="3" py="2" borderRadius="lg" w="full">
+                  <Flex align="flex-start" gap="2" bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" px="3" py="2" borderRadius="lg" w="full">
                     <Box color="kk.error" flexShrink={0} mt="0.5">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
                     </Box>
@@ -2025,11 +2028,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 }
                 return (
                   <Flex align="flex-start" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.35)" px="3" py="2" borderRadius="lg" w="full">
-                    <Box color="#FB923C" flexShrink={0} mt="0.5">
+                    <Box color="var(--gold)" flexShrink={0} mt="0.5">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                     </Box>
                     <Box flex="1">
-                      <Text fontSize="11px" fontWeight="700" color="#FB923C">
+                      <Text fontSize="11px" fontWeight="700" color="var(--gold)">
                         Approval needed: {fmt(a.required)} {fromAsset.symbol}
                       </Text>
                       <Text fontSize="10px" color="kk.textSecondary">
@@ -2048,7 +2051,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   user tolerance — the user's setting is the one that bounds risk. */}
               {shouldWarnHighSlippage(quote.slippageBps, slippageBps) && (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="#FB923C">
+                  <Text fontSize="10px" color="var(--gold)">
                     {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}
                   </Text>
                 </Flex>
@@ -2072,11 +2075,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 const { severe, lossPct, inUsd, lostUsd, recommendedMinUsd } = dust
                 return (
                   <Flex align="center" gap="2"
-                    bg={severe ? "rgba(255,23,68,0.1)" : "rgba(251,146,60,0.08)"}
+                    bg={severe ? "rgba(224,140,123,0.12)" : "rgba(251,146,60,0.08)"}
                     border="1px solid"
                     borderColor={severe ? "rgba(255,23,68,0.4)" : "rgba(251,146,60,0.3)"}
                     px="3" py="2" borderRadius="lg" w="full">
-                    <Text fontSize="10px" color={severe ? "kk.error" : "#FB923C"} lineHeight="1.4">
+                    <Text fontSize="10px" color={severe ? "kk.error" : "var(--gold)"} lineHeight="1.4">
                       {severe
                         ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2), minUsd: recommendedMinUsd })
                         : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2) })}
@@ -2088,19 +2091,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* TRON blind-sign warning OR verify-on-device note */}
               {fromAsset.chainFamily === 'tron' ? (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="#FB923C">
+                  <Text fontSize="10px" color="var(--gold)">
                     {t("tronBlindSignWarning", "Your KeepKey will display a generic Tron transaction prompt — it cannot decode the THORChain swap. Verify the amounts, vault, and memo above before approving on device.")}
                   </Text>
                 </Flex>
               ) : (
                 <Flex align="center" gap="2" bg="rgba(35,220,200,0.04)" px="3" py="1.5" borderRadius="lg" w="full">
                   <ShieldIcon />
-                  <Text fontSize="10px" color="#23DCC8">{t("verifyOnDevice")}</Text>
+                  <Text fontSize="10px" color="var(--teal)">{t("verifyOnDevice")}</Text>
                 </Flex>
               )}
 
               {error && (
-                <Box bg="rgba(255,23,68,0.08)" border="1px solid" borderColor="kk.error" borderRadius="lg" px="3" py="2" w="full">
+                <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" px="3" py="2" w="full">
                   <Flex justify="space-between" align="center" gap="2">
                     <Text fontSize="xs" color="kk.error" flex="1">{error}</Text>
                     <Button size="xs" variant="ghost" color="kk.error" px="1.5" onClick={() => setError(null)}>
@@ -2125,7 +2128,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <Button
                   size="sm" flex="2"
                   px="4" py="2"
-                  bg="#23DCC8"
+                  bg="var(--teal)"
                   color="black"
                   fontWeight="600"
                   _hover={{ opacity: 0.9 }}
@@ -2152,10 +2155,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 {/* FROM column */}
                 <Box
                   flex="1"
-                  bg="linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(35,220,200,0.03) 100%)"
+                  bg="linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(139,227,196,0.04) 100%)"
                   border="1px solid" borderColor="kk.border" borderRadius="xl" p="3"
                   transition="border-color 0.2s"
-                  _hover={{ borderColor: "rgba(35,220,200,0.2)" }}
+                  _hover={{ borderColor: "rgba(139,227,196,0.22)" }}
                 >
                   <AssetSelector
                     label={t("from")}
@@ -2256,7 +2259,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
                   {fromAsset && fromAddress && (
                     <Flex mt="2" px="1" align="center" gap="1">
-                      <Box w="4px" h="4px" borderRadius="full" bg="#23DCC8" flexShrink={0} />
+                      <Box w="4px" h="4px" borderRadius="full" bg="var(--teal)" flexShrink={0} />
                       <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" truncate title={fromAddress}>
                         {fromAddress.slice(0, 10)}...{fromAddress.slice(-6)}
                       </Text>
@@ -2284,10 +2287,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 {/* TO column */}
                 <Box
                   flex="1"
-                  bg="linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(35,220,200,0.03) 100%)"
+                  bg="linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(139,227,196,0.04) 100%)"
                   border="1px solid" borderColor="kk.border" borderRadius="xl" p="3"
                   transition="border-color 0.2s"
-                  _hover={{ borderColor: "rgba(35,220,200,0.2)" }}
+                  _hover={{ borderColor: "rgba(139,227,196,0.22)" }}
                 >
                   <AssetSelector
                     label={t("to")}
@@ -2297,10 +2300,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   />
 
                   {toAsset && quote && (
-                    <Box mt="3" p="2.5" bg="rgba(35,220,200,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(35,220,200,0.15)">
+                    <Box mt="3" p="2.5" bg="rgba(139,227,196,0.08)" borderRadius="lg" border="1px solid" borderColor="rgba(139,227,196,0.18)">
                       <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="1">{t("expectedOutput")}</Text>
-                      <Text fontSize="sm" fontFamily="mono" fontWeight="800" color="#23DCC8">
-                        <GreenCountUp value={quote.expectedOutput} color="#23DCC8" suffix={` ${toAsset.symbol}`} fontSize="sm" />
+                      <Text fontSize="sm" fontFamily="mono" fontWeight="800" color="var(--teal)">
+                        <GreenCountUp value={quote.expectedOutput} color="var(--teal)" suffix={` ${toAsset.symbol}`} fontSize="sm" />
                       </Text>
                       {hasToPrice && (
                         <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="500" mt="0.5">
@@ -2308,7 +2311,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         </Text>
                       )}
                       {isNativeEvmMax && (
-                        <Text fontSize="9px" color="#FB923C" mt="1">{t("sendMaxGasNote")}</Text>
+                        <Text fontSize="9px" color="var(--gold)" mt="1">{t("sendMaxGasNote")}</Text>
                       )}
                     </Box>
                   )}
@@ -2320,14 +2323,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           {!useCustomAddress && (
                             <>
                               <ShieldIcon />
-                              <Text fontSize="9px" color="#23DCC8" fontWeight="600">{t("keepKeyAddress")}</Text>
+                              <Text fontSize="9px" color="var(--teal)" fontWeight="600">{t("keepKeyAddress")}</Text>
                             </>
                           )}
                           {useCustomAddress && (
-                            <Text fontSize="9px" color="#FB923C" fontWeight="600">{t("customAddressWarning")}</Text>
+                            <Text fontSize="9px" color="var(--gold)" fontWeight="600">{t("customAddressWarning")}</Text>
                           )}
                         </HStack>
-                        <Box as="button" fontSize="9px" color={useCustomAddress ? "#23DCC8" : "kk.textMuted"}
+                        <Box as="button" fontSize="9px" color={useCustomAddress ? "var(--teal)" : "kk.textMuted"}
                           fontWeight="500" _hover={{ color: "kk.gold" }} transition="color 0.15s"
                           onClick={() => { setUseCustomAddress(!useCustomAddress); if (useCustomAddress) setCustomToAddress("") }}>
                           {useCustomAddress ? t("useKeepKeyAddress") : t("useCustomAddress")}
@@ -2339,14 +2342,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             placeholder={t("customAddressPlaceholder")} bg="rgba(0,0,0,0.3)" border="1px solid"
                             borderColor={customAddressError ? "rgba(239,68,68,0.6)" : "rgba(251,163,36,0.2)"}
                             borderRadius="lg" color="kk.textPrimary" size="xs" fontFamily="mono" fontSize="10px" px="2"
-                            _focus={{ borderColor: customAddressError ? "#EF4444" : "#FB923C" }} />
+                            _focus={{ borderColor: customAddressError ? "var(--rose)" : "var(--gold)" }} />
                           {customAddressError && (
-                            <Text fontSize="9px" color="#EF4444" mt="1">{customAddressError}</Text>
+                            <Text fontSize="9px" color="var(--rose)" mt="1">{customAddressError}</Text>
                           )}
                         </>
                       ) : keepKeyToAddress ? (
                         <Flex align="center" gap="1" px="1">
-                          <Box w="4px" h="4px" borderRadius="full" bg="#23DCC8" flexShrink={0} />
+                          <Box w="4px" h="4px" borderRadius="full" bg="var(--teal)" flexShrink={0} />
                           <Text fontSize="9px" fontFamily="mono" color="kk.textSecondary" truncate title={keepKeyToAddress}>
                             {keepKeyToAddress.slice(0, 10)}...{keepKeyToAddress.slice(-6)}
                           </Text>
@@ -2415,7 +2418,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
               {/* Review Swap button — only when quote is ready */}
               {phase === 'input' && quote && fromAsset && toAsset && !sameAsset && (
-                <Button w="full" size="sm" bg="#23DCC8" color="black" fontWeight="700" fontSize="xs"
+                <Button w="full" size="sm" bg="var(--teal)" color="black" fontWeight="700" fontSize="xs"
                   borderRadius="lg" _hover={{ opacity: 0.9 }} onClick={() => setPhase('review')}>
                   {t("reviewSwap") || "Review Swap"}
                 </Button>
@@ -2428,7 +2431,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
               {/* Error */}
               {error && (
-                <Box bg="rgba(255,23,68,0.08)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="2">
+                <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="2">
                   <Text fontSize="10px" color="kk.error">{error}</Text>
                 </Box>
               )}
