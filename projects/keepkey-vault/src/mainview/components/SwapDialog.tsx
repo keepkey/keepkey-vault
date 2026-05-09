@@ -23,6 +23,10 @@ import { ProviderBadge, resolveProvider } from "./ProviderBadge"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { KeepKeyDevice } from "./v3"
+import calculatingGif from "../assets/swap/calculating.gif"
+import shiftingGif from "../assets/swap/shifting.gif"
+import completedGif from "../assets/swap/completed.gif"
+import shapeshiftLogo from "../assets/providers/shapeshift.svg"
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
@@ -1393,47 +1397,57 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Confetti burst on completion */}
               {showConfetti && <ConfettiBurst />}
 
-              {/* Status icon + title inline */}
-              <Flex align="center" gap="3">
-                {isSwapComplete ? (
-                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(139,227,196,0.10)" border="2px solid" borderColor="rgba(139,227,196,0.4)"
-                    display="flex" alignItems="center" justifyContent="center" flexShrink={0}
-                    style={{ animation: 'kkSwapCheckPop 0.4s ease-out' }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-                  </Box>
-                ) : isSwapFailed ? (
-                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(224,140,123,0.12)" border="2px solid" borderColor="rgba(224,140,123,0.32)"
-                    display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  </Box>
-                ) : (
-                  <Box w="40px" h="40px" borderRadius="full" bg="rgba(139,227,196,0.10)" border="2px solid" borderColor="rgba(139,227,196,0.32)"
-                    display="flex" alignItems="center" justifyContent="center" flexShrink={0}
-                    style={{ animation: 'kkSwapPulse 2s ease-in-out infinite' }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" opacity="0.3" /><path d="M12 6v6l4 2" />
-                    </svg>
-                  </Box>
-                )}
-                <VStack gap="0" align="flex-start">
-                  <Text fontSize="md" fontWeight="700" color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}>
+              {/* Hero: thorfox swap animation — shifting in-flight, completed on done */}
+              <Box position="relative" w="full" display="flex" justifyContent="center" alignItems="center" pt="1" pb="0.5">
+                <Box
+                  position="relative"
+                  w="200px"
+                  h="200px"
+                  borderRadius="full"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  style={{
+                    background: isSwapComplete
+                      ? 'radial-gradient(circle at 50% 45%, rgba(139,227,196,0.22), transparent 70%)'
+                      : isSwapFailed
+                        ? 'radial-gradient(circle at 50% 45%, rgba(224,140,123,0.18), transparent 70%)'
+                        : 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.18), transparent 70%)',
+                  }}
+                >
+                  <Image
+                    src={isSwapComplete ? completedGif : shiftingGif}
+                    alt=""
+                    w="180px"
+                    h="180px"
+                    style={{
+                      objectFit: 'contain',
+                      filter: isSwapFailed ? 'grayscale(0.6)' : undefined,
+                    }}
+                  />
+                </Box>
+              </Box>
+
+              {/* Title row + provider chip */}
+              <Flex align="center" gap="3" w="full" justify="center" position="relative">
+                <VStack gap="0" align="center">
+                  <Text fontSize="lg" fontWeight="700" letterSpacing="-0.01em"
+                    color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}
+                    fontFamily="serif" fontStyle="italic">
                     {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
                   </Text>
                   {!isSwapComplete && !isSwapFailed && (
-                    <Text fontSize="xs" color="var(--gold)" fontWeight="500">{t("waitingForConfirmations")}</Text>
+                    <Text fontSize="xs" color="var(--gold)" fontWeight="500" mt="0.5">{t("waitingForConfirmations")}</Text>
                   )}
                 </VStack>
-                <Box flex="1" />
-                {/* Provider chip — show user who's actually running this swap.
-                    Prefer liveSwapper (Pioneer's authoritative post-broadcast
-                    value) over the quote-time parse, which can be wrong for
-                    aggregator routes. */}
-                <ProviderBadge
-                  swapper={liveSwapper || quote?.swapper || quote?.integration}
-                  integration={quote?.integration}
-                  size={18}
-                  variant="detailed"
-                />
+                <Box position="absolute" right="0" top="50%" transform="translateY(-50%)">
+                  <ProviderBadge
+                    swapper={liveSwapper || quote?.swapper || quote?.integration}
+                    integration={quote?.integration}
+                    size={18}
+                    variant="detailed"
+                  />
+                </Box>
               </Flex>
 
               {/* ── Progress bar with checkpoints ────────────────────── */}
@@ -2409,10 +2423,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Flex>
               )}
 
-              {/* Quote loading */}
+              {/* Quote loading — thorfox calculating animation */}
               {phase === 'quoting' && (
-                <Flex justify="center" py="1">
-                  <Text fontSize="10px" color="kk.textMuted">{t("gettingQuote")}</Text>
+                <Flex direction="column" justify="center" align="center" py="2" gap="1.5">
+                  <Image
+                    src={calculatingGif}
+                    alt=""
+                    w="80px"
+                    h="80px"
+                    style={{ objectFit: 'contain' }}
+                  />
+                  <Text fontSize="11px" color="kk.textSecondary" letterSpacing="0.04em" fontWeight="500">
+                    {t("gettingQuote")}
+                  </Text>
                 </Flex>
               )}
 
@@ -2441,16 +2464,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
         {/* ── Footer ──────────────────────────────────────────────── */}
         {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && (
-          <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="center"
+          <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="space-between" align="center" gap="3"
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
-            {quote ? (
-              <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={14} variant="detailed" />
-            ) : (
-              <HStack gap="1.5">
-                <ProviderBadge swapper="thorchain" size={14} variant="compact" />
-                <Text fontSize="10px" color="kk.textMuted" fontWeight="500">{t("poweredBy")}</Text>
-              </HStack>
-            )}
+            <Box minW="0" flex="1">
+              {quote ? (
+                <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={14} variant="detailed" />
+              ) : (
+                <HStack gap="1.5">
+                  <ProviderBadge swapper="thorchain" size={14} variant="compact" />
+                  <Text fontSize="10px" color="kk.textMuted" fontWeight="500">{t("poweredBy")}</Text>
+                </HStack>
+              )}
+            </Box>
+            <Box
+              as="a"
+              href="https://api.shapeshift.com/docs#description/introduction"
+              target="_blank"
+              rel="noopener noreferrer"
+              display="flex"
+              alignItems="center"
+              gap="1.5"
+              opacity="0.55"
+              _hover={{ opacity: 1 }}
+              transition="opacity 0.15s"
+              flexShrink={0}
+            >
+              <Image src={shapeshiftLogo} alt="" w="11px" h="11px" />
+              <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.04em">
+                Powered by ShapeShift API
+              </Text>
+            </Box>
           </Flex>
         )}
       </Box>
