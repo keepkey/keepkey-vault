@@ -107,6 +107,226 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
+/** Orbital portfolio view — chain logos arranged around a slowly rotating
+ *  ring with the total in the center. Chains with no balance are kept off
+ *  the orbit; they still appear in the network row list below.
+ *  Click a satellite to dive into that chain (same handler as the row). */
+function OrbitalView({
+	chains,
+	balances,
+	cleanBalanceUsd,
+	totalUsd,
+	totalDollars,
+	totalCents,
+	cleanTokenTotal,
+	onSelect,
+}: {
+	chains: ChainDef[]
+	balances: Map<string, ChainBalance>
+	cleanBalanceUsd: Map<string, { usd: number; cleanTokenCount: number }>
+	totalUsd: number
+	totalDollars: number
+	totalCents: string
+	cleanTokenTotal: number
+	onSelect: (c: ChainDef) => void
+}) {
+	const [hover, setHover] = useState<string | null>(null)
+	const [size, setSize] = useState(440)
+
+	useEffect(() => {
+		const compute = () => setSize(Math.min(440, Math.max(280, window.innerWidth - 80)))
+		compute()
+		window.addEventListener('resize', compute)
+		return () => window.removeEventListener('resize', compute)
+	}, [])
+
+	const cx = size / 2
+	const cy = size / 2
+	const orbitR = size * 0.42
+	const ringR  = size * 0.46
+
+	// Only chains with USD balance go on the orbit (top 8 by value to avoid crowding)
+	const orbitChains = chains
+		.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
+		.filter(x => x.usd > 0)
+		.slice(0, 8)
+
+	return (
+		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
+			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+				<defs>
+					<radialGradient id="dashboardCoreGlow" cx="50%" cy="50%">
+						<stop offset="0%" stopColor="rgba(233,196,106,0.18)" />
+						<stop offset="55%" stopColor="rgba(139,227,196,0.05)" />
+						<stop offset="100%" stopColor="transparent" />
+					</radialGradient>
+				</defs>
+				<circle cx={cx} cy={cy} r={size * 0.5} fill="url(#dashboardCoreGlow)" />
+				{/* dashed orbit ring — slow rotation */}
+				<circle
+					cx={cx}
+					cy={cy}
+					r={ringR}
+					fill="none"
+					stroke="var(--line-2)"
+					strokeWidth="1"
+					strokeDasharray="2 6"
+					style={{
+						transformOrigin: `${cx}px ${cy}px`,
+						animation: 'v3-spin 90s linear infinite',
+					}}
+				/>
+			</svg>
+
+			{/* Center total */}
+			<Box
+				position="absolute"
+				top="50%"
+				left="50%"
+				transform="translate(-50%, -50%)"
+				textAlign="center"
+				w="60%"
+				pointerEvents="none"
+			>
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.20em"
+					textTransform="uppercase"
+					mb="2"
+					fontWeight="500"
+				>
+					Total
+				</Text>
+				<Flex align="baseline" justify="center" gap="0">
+					<Text
+						fontSize={{ base: "38px", md: "48px" }}
+						fontWeight="500"
+						color="var(--text-0)"
+						letterSpacing="-0.04em"
+						lineHeight="1"
+					>
+						${totalDollars.toLocaleString()}
+					</Text>
+					<Text
+						fontSize={{ base: "20px", md: "24px" }}
+						fontWeight="400"
+						color="var(--text-2)"
+						letterSpacing="-0.02em"
+						lineHeight="1"
+						ml="1"
+					>
+						.{totalCents}
+					</Text>
+				</Flex>
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.14em"
+					textTransform="uppercase"
+					mt="3"
+					fontFamily="mono"
+				>
+					{chains.length} CHAINS
+					{cleanTokenTotal > 0 && ` · ${cleanTokenTotal} ASSETS`}
+				</Text>
+			</Box>
+
+			{/* Satellite chains on the orbit */}
+			{orbitChains.map(({ chain, usd, bal }, i) => {
+				const angle = (Math.PI * 2 * i) / orbitChains.length - Math.PI / 2
+				const x = cx + Math.cos(angle) * orbitR
+				const y = cy + Math.sin(angle) * orbitR
+				const sat = Math.max(40, Math.min(72, 30 + Math.sqrt(usd) * 1.4))
+				const isHover = hover === chain.id
+				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				return (
+					<Box
+						key={chain.id}
+						as="button"
+						className="electrobun-webkit-app-region-no-drag"
+						onMouseEnter={() => setHover(chain.id)}
+						onMouseLeave={() => setHover(null)}
+						onClick={() => onSelect(chain)}
+						position="absolute"
+						left={`${x - sat / 2}px`}
+						top={`${y - sat / 2}px`}
+						w={`${sat}px`}
+						h={`${sat}px`}
+						borderRadius="full"
+						bg="transparent"
+						border="0"
+						p={0}
+						display="grid"
+						placeItems="center"
+						transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
+						transform={isHover ? 'scale(1.12)' : 'scale(1)'}
+						filter={isHover
+							? `drop-shadow(0 0 24px ${chain.color})`
+							: 'drop-shadow(0 4px 14px rgba(0,0,0,0.55))'}
+						zIndex={isHover ? 10 : 1}
+						cursor="pointer"
+						aria-label={chain.coin}
+					>
+						<Image
+							src={getAssetIcon(chain.caip)}
+							alt={chain.symbol}
+							w="100%"
+							h="100%"
+							borderRadius="full"
+							bg="var(--ink-2)"
+							boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}`}
+						/>
+						{(bal?.tokens?.length ?? 0) > 0 && (
+							<Box
+								position="absolute"
+								bottom="-4px"
+								right="-4px"
+								w="22px"
+								h="22px"
+								borderRadius="full"
+								bg="var(--ink-3)"
+								border="1px solid var(--line-2)"
+								fontSize="10px"
+								fontFamily="mono"
+								color="var(--text-1)"
+								display="grid"
+								placeItems="center"
+							>
+								+{bal!.tokens!.length}
+							</Box>
+						)}
+						{isHover && (
+							<Box
+								position="absolute"
+								top="-58px"
+								left="50%"
+								transform="translateX(-50%)"
+								bg="var(--ink-3)"
+								border="1px solid var(--line-2)"
+								px="3"
+								py="1.5"
+								borderRadius="10px"
+								whiteSpace="nowrap"
+								boxShadow="var(--shadow-2)"
+								pointerEvents="none"
+							>
+								<Text fontSize="12px" fontWeight="600" color="var(--text-0)" textAlign="center">
+									{chain.coin}
+								</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" textAlign="center">
+									${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									{totalUsd > 0 && ` · ${pct.toFixed(1)}%`}
+								</Text>
+							</Box>
+						)}
+					</Box>
+				)
+			})}
+		</Box>
+	)
+}
+
 export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
@@ -460,62 +680,17 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		<Box w="100%" maxW="880px" mx="auto" pt="6" pb="8" px={{ base: "4", md: "6" }} className="v3-page-enter">
 			<style>{DASHBOARD_ANIMATIONS}</style>
 
-			{/* Hero — Portfolio eyebrow + huge total + chains·assets meta + refresh */}
-			<Flex
-				align={{ base: "flex-start", sm: "flex-end" }}
-				justify="space-between"
-				gap="4"
-				mb="6"
-				direction={{ base: "column", sm: "row" }}
-			>
-				<Box>
-					<Text
-						fontSize="11px"
-						color="var(--text-3)"
-						letterSpacing="0.18em"
-						textTransform="uppercase"
-						fontWeight="500"
-						mb="2"
-					>
-						{watchOnly ? "Watching" : "Portfolio"}
-					</Text>
-					<Flex align="baseline" gap="0">
-						<Text
-							fontSize={{ base: "44px", md: "56px" }}
-							fontWeight="500"
-							color="var(--text-0)"
-							letterSpacing="-0.04em"
-							lineHeight="1"
-							fontFamily="body"
-						>
-							${totalDollars.toLocaleString()}
-						</Text>
-						<Text
-							fontSize={{ base: "22px", md: "28px" }}
-							fontWeight="400"
-							color="var(--text-2)"
-							letterSpacing="-0.02em"
-							lineHeight="1"
-							fontFamily="body"
-							ml="1"
-						>
-							.{totalCents}
-						</Text>
-					</Flex>
-					<Text
-						fontSize="11px"
-						color="var(--text-3)"
-						letterSpacing="0.12em"
-						textTransform="uppercase"
-						mt="3"
-						fontFamily="mono"
-					>
-						{sortedChains.length} CHAINS
-						{cleanTokenTotal > 0 && ` · ${cleanTokenTotal} ASSETS`}
-					</Text>
-				</Box>
-
-				{/* Refresh chip — replaces the bottom-of-card refresh row, lives next to the hero */}
+			{/* Controls strip — Portfolio eyebrow + refresh chip */}
+			<Flex align="center" justify="space-between" mb="2" minH="32px">
+				<Text
+					fontSize="11px"
+					color="var(--text-3)"
+					letterSpacing="0.18em"
+					textTransform="uppercase"
+					fontWeight="500"
+				>
+					{watchOnly ? "Watching" : "Portfolio"}
+				</Text>
 				{!watchOnly && (
 					<Box
 						as="button"
@@ -556,6 +731,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					</Box>
 				)}
 			</Flex>
+
+			{/* Orbital portfolio view — chain logos arranged around a center total */}
+			{hasAnyBalance && (
+				<OrbitalView
+					chains={sortedChains}
+					balances={balances}
+					cleanBalanceUsd={cleanBalanceUsd}
+					totalUsd={totalUsd}
+					totalDollars={totalDollars}
+					totalCents={totalCents}
+					cleanTokenTotal={cleanTokenTotal}
+					onSelect={setSelectedChain}
+				/>
+			)}
 
 			{/* Watch-only banner */}
 			{watchOnly && (
@@ -908,7 +1097,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									</Text>
 									{tokenCount > 0 && (
 										<Text fontSize="11px" fontFamily="mono" color="var(--text-3)">
-											\u00b7 {t("tokensCount", { count: tokenCount })}
+											· {t("tokensCount", { count: tokenCount })}
 										</Text>
 									)}
 								</Flex>
@@ -933,7 +1122,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								) : loadingBalances ? (
 									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.04em" textTransform="uppercase">{t("loading", { ns: "common" })}</Text>
 								) : (
-									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)">\u2014</Text>
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)">—</Text>
 								)}
 							</Box>
 
@@ -953,7 +1142,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										</Box>
 									</>
 								) : bal ? (
-									<Text fontSize="13px" fontFamily="mono" color="var(--text-3)">\u2014</Text>
+									<Text fontSize="13px" fontFamily="mono" color="var(--text-3)">—</Text>
 								) : loadingBalances ? (
 									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.04em" textTransform="uppercase">{t("loading", { ns: "common" })}</Text>
 								) : (
