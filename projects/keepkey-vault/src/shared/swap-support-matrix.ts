@@ -117,6 +117,9 @@ const MAYACHAIN_CHAINS = new Set<string>([
   'cosmos:thorchain-mainnet-v1',                       // RUNE
   'cosmos:kaiyo-1',                                    // KUJI
   'bip122:000007d91d1254d60e2dd1ae58038307',           // DASH
+  // ZEC pool on Maya — verified live 2026-05-09. Transparent (t1...) inbound only;
+  // shielded deposits are not accepted by the protocol vault.
+  'bip122:00040fe8ec8471911baa1db1266ea15d',           // ZEC
 ])
 
 /** Relay (Reservoir solver network) — EVM cross-chain. Coverage list verified

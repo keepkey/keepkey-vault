@@ -144,6 +144,7 @@ const DEFAULT_OUTPUT: Record<string, string> = {
   dogecoin: 'BTC.BTC',
   bitcoincash: 'BTC.BTC',
   dash: 'BTC.BTC',
+  zcash: 'ETH.ETH',         // ZEC.ZEC pool is on Mayachain; ETH outbound is the most-used
   cosmos: 'ETH.ETH',
   thorchain: 'ETH.ETH',
   mayachain: 'ETH.ETH',
@@ -1411,7 +1412,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
           bg="transparent">
           <HStack gap="2">
-            <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration || "thorchain"} size={22} variant="compact" />
+            <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
               {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : t("title")}
             </Text>
@@ -2667,12 +2668,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
             <Box minW="0" flex="1">
               {quote ? (
                 <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={14} variant="detailed" />
-              ) : (
-                <HStack gap="1.5">
-                  <ProviderBadge swapper="thorchain" size={14} variant="compact" />
-                  <Text fontSize="10px" color="kk.textMuted" fontWeight="500">{t("poweredBy")}</Text>
-                </HStack>
-              )}
+              ) : null /* don't claim a provider before we have a quote — was hardcoding THORChain even for Maya-only pairs (e.g. ZEC) */}
             </Box>
             <Box
               as="a"
