@@ -11,58 +11,74 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
       left="50%"
       transform="translate(-50%, -50%)"
       mt="60px"
-      bg="rgba(0, 0, 0, 0.95)"
-      border="2px solid"
-      borderColor="#D4A017"
-      borderRadius="xl"
+      bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
+      border="1px solid var(--line-2)"
+      borderRadius="var(--r-lg)"
       px={8}
       py={7}
       maxW="460px"
       w="90%"
-      boxShadow="0 0 40px rgba(212, 160, 23, 0.3)"
+      boxShadow="var(--shadow-2)"
     >
       <VStack gap={4} align="stretch">
         <Flex align="center" gap={2}>
-          <Text fontSize="xl" fontWeight="bold" color="#F5D060">
+          <Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
+          <Text fontSize="lg" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">
             {t("claimed.title")}
           </Text>
         </Flex>
 
-        <Text fontSize="md" color="gray.100" lineHeight="tall" fontWeight="medium">
+        <Text fontSize="14px" color="var(--text-1)" lineHeight="1.55">
           {t("claimed.description")}
         </Text>
 
-        <Box bg="rgba(212, 160, 23, 0.1)" border="1px solid" borderColor="rgba(212, 160, 23, 0.35)" borderRadius="md" px={4} py={3}>
-          <Text fontSize="sm" color="yellow.200" fontFamily="mono" wordBreak="break-word">
+        <Box
+          bg="var(--ink-0)"
+          border="1px solid var(--line)"
+          borderRadius="var(--r-md)"
+          px={4}
+          py={3}
+        >
+          <Text fontSize="12px" color="var(--text-2)" fontFamily="mono" wordBreak="break-word">
             {error}
           </Text>
         </Box>
 
         <Flex justify="center" py={3}>
-          <Box w="90px" h="90px" dangerouslySetInnerHTML={{ __html: connectSvgRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
+          <Box
+            w="90px"
+            h="90px"
+            opacity="0.85"
+            dangerouslySetInnerHTML={{ __html: connectSvgRaw }}
+            sx={{ '& svg': { width: '100%', height: '100%' } }}
+          />
         </Flex>
 
-        <Text fontSize="md" color="#F5D060" fontWeight="bold">
+        <Text fontSize="13px" color="var(--gold)" fontWeight="600" letterSpacing="0.04em" textTransform="uppercase">
           {t("claimed.toConnect")}
         </Text>
         <VStack gap={2} align="stretch" pl={2}>
-          <Text fontSize="md" color="gray.200" fontWeight="medium">{t("claimed.step1")}</Text>
-          <Text fontSize="md" color="gray.200" fontWeight="medium">{t("claimed.step2")}</Text>
-          <Text fontSize="md" color="gray.200" fontWeight="medium">{t("claimed.step3")}</Text>
+          <Text fontSize="14px" color="var(--text-1)" lineHeight="1.5">{t("claimed.step1")}</Text>
+          <Text fontSize="14px" color="var(--text-1)" lineHeight="1.5">{t("claimed.step2")}</Text>
+          <Text fontSize="14px" color="var(--text-1)" lineHeight="1.5">{t("claimed.step3")}</Text>
         </VStack>
 
-        <Text fontSize="sm" color="yellow.300" textAlign="center" mt={2} fontWeight="semibold">
-          {t("claimed.waiting")}
-        </Text>
+        <Flex align="center" justify="center" gap="2" mt={2}>
+          <Box w="6px" h="6px" borderRadius="full" bg="var(--teal)" style={{ animation: "splashPulse 1.5s infinite" }} />
+          <Text fontSize="12px" color="var(--text-2)" letterSpacing="-0.005em">
+            {t("claimed.waiting")}
+          </Text>
+        </Flex>
 
         <Link
           href="https://support.keepkey.com"
           target="_blank"
-          fontSize="sm"
-          color="blue.300"
+          fontSize="12px"
+          color="var(--text-3)"
           textAlign="center"
-          fontWeight="medium"
-          _hover={{ color: "blue.200", textDecoration: "underline" }}
+          fontWeight="500"
+          letterSpacing="0.04em"
+          _hover={{ color: "var(--teal)", textDecoration: "underline" }}
         >
           {t("claimed.supportLink")}
         </Link>

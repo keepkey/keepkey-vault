@@ -41,35 +41,52 @@ export function LinuxUdevWarning() {
 			left="50%"
 			transform="translate(-50%, -50%)"
 			mt="60px"
-			bg="rgba(0, 0, 0, 0.95)"
-			border="2px solid"
-			borderColor="#D4A017"
-			borderRadius="xl"
+			bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
+			border="1px solid var(--line-2)"
+			borderRadius="var(--r-lg)"
 			px={8}
 			py={7}
 			maxW="540px"
 			w="90%"
-			boxShadow="0 0 40px rgba(212, 160, 23, 0.3)"
+			boxShadow="var(--shadow-2)"
 		>
 			<VStack gap={4} align="stretch">
-				<Text fontSize="xl" fontWeight="bold" color="#F5D060">
-					KeepKey detected, but Linux is blocking access
-				</Text>
+				<Flex align="center" gap={2}>
+					<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
+					<Text fontSize="lg" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">
+						KeepKey detected, but Linux is blocking access
+					</Text>
+				</Flex>
 
-				<Text fontSize="md" color="gray.100" lineHeight="tall">
+				<Text fontSize="14px" color="var(--text-1)" lineHeight="1.55">
 					Your KeepKey is plugged in, but this user account doesn't have permission to talk to it.
 					Linux requires a one-time udev rule to grant USB access to the device.
 				</Text>
 
 				{phase === "success" ? (
-					<Box bg="rgba(74, 222, 128, 0.12)" border="1px solid" borderColor="rgba(74, 222, 128, 0.4)" borderRadius="md" px={4} py={3}>
-						<Text fontSize="sm" color="green.200" fontWeight="medium">
-							Rules installed. Unplug and re-plug your KeepKey if it doesn't reconnect automatically in a few seconds.
-						</Text>
+					<Box
+						bg="rgba(139,227,196,0.08)"
+						border="1px solid rgba(139,227,196,0.25)"
+						borderRadius="var(--r-md)"
+						px={4}
+						py={3}
+					>
+						<Flex align="center" gap="2">
+							<Box w="6px" h="6px" borderRadius="full" bg="var(--teal)" />
+							<Text fontSize="13px" color="var(--teal-2)" fontWeight="500" letterSpacing="-0.005em">
+								Rules installed. Unplug and re-plug your KeepKey if it doesn't reconnect automatically in a few seconds.
+							</Text>
+						</Flex>
 					</Box>
 				) : phase === "error" ? (
-					<Box bg="rgba(239, 68, 68, 0.12)" border="1px solid" borderColor="rgba(239, 68, 68, 0.4)" borderRadius="md" px={4} py={3}>
-						<Text fontSize="sm" color="red.200" fontFamily="mono" wordBreak="break-word">
+					<Box
+						bg="rgba(224,140,123,0.08)"
+						border="1px solid rgba(224,140,123,0.25)"
+						borderRadius="var(--r-md)"
+						px={4}
+						py={3}
+					>
+						<Text fontSize="12px" color="var(--rose)" fontFamily="mono" wordBreak="break-word">
 							{error}
 						</Text>
 					</Box>
@@ -81,10 +98,10 @@ export function LinuxUdevWarning() {
 							onClick={handleFix}
 							loading={phase === "running"}
 							loadingText="Installing..."
-							bg="#D4A017"
-							color="black"
-							fontWeight="bold"
-							_hover={{ bg: "#F5D060" }}
+							bg="var(--gold)"
+							color="var(--ink-0)"
+							fontWeight="600"
+							_hover={{ bg: "var(--gold-2)" }}
 							className="electrobun-webkit-app-region-no-drag"
 						>
 							Fix it for me
@@ -92,8 +109,8 @@ export function LinuxUdevWarning() {
 						<Button
 							onClick={() => setShowManual((s) => !s)}
 							variant="ghost"
-							color="gray.300"
-							_hover={{ color: "white", bg: "rgba(255,255,255,0.06)" }}
+							color="var(--text-2)"
+							_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
 							className="electrobun-webkit-app-region-no-drag"
 						>
 							{showManual ? "Hide manual steps" : "Manual install"}
@@ -102,26 +119,26 @@ export function LinuxUdevWarning() {
 				)}
 
 				{phase === "running" && (
-					<Text fontSize="xs" color="gray.400" textAlign="center">
+					<Text fontSize="11px" color="var(--text-3)" textAlign="center" letterSpacing="-0.005em">
 						Look for the system password prompt — it may be behind this window.
 					</Text>
 				)}
 
 				{showManual && (
 					<VStack gap={2} align="stretch">
-						<Text fontSize="sm" color="gray.300">
+						<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">
 							Run this in a terminal, then unplug and re-plug your KeepKey:
 						</Text>
 						<Code
 							display="block"
 							whiteSpace="pre"
-							bg="rgba(255,255,255,0.04)"
-							border="1px solid"
-							borderColor="rgba(255,255,255,0.08)"
-							borderRadius="md"
+							bg="var(--ink-0)"
+							border="1px solid var(--line)"
+							borderRadius="var(--r-md)"
 							p={3}
-							fontSize="xs"
-							color="gray.200"
+							fontSize="11px"
+							color="var(--text-1)"
+							fontFamily="mono"
 							overflowX="auto"
 						>
 							{MANUAL_CMD}
@@ -132,11 +149,12 @@ export function LinuxUdevWarning() {
 				<Link
 					href="https://support.keepkey.com"
 					target="_blank"
-					fontSize="sm"
-					color="blue.300"
+					fontSize="12px"
+					color="var(--text-3)"
 					textAlign="center"
-					fontWeight="medium"
-					_hover={{ color: "blue.200", textDecoration: "underline" }}
+					fontWeight="500"
+					letterSpacing="0.04em"
+					_hover={{ color: "var(--teal)", textDecoration: "underline" }}
 					className="electrobun-webkit-app-region-no-drag"
 				>
 					Need help? support.keepkey.com
