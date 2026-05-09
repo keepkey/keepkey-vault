@@ -9,6 +9,7 @@ import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
 // Pioneer SDK instance is passed as parameter to buildTx()
 
 export type { BuildTxParams }
@@ -488,10 +489,71 @@ export async function signTx(
     case 'xrp':
       return wallet.rippleSignTx(unsignedTx)
     case 'solana': {
-      console.debug(`[signTx:solana] signing tx`)
-      const solResult = await wallet.solanaSignTx(unsignedTx)
-      console.debug(`[signTx:solana] result: hasSig=${!!solResult?.signature} hasSerializedTx=${!!solResult?.serializedTx}`)
-      return solResult
+      // KeepKey firmware message type 752 (SolanaSignTx) parses LEGACY messages
+      // only. For versioned (v0) messages we route the exact message bytes
+      // through type 754 (SolanaSignMessage), preserving the 0x80 prefix and
+      // payload. Same logic as the solanaSignTx RPC handler in bun/index.ts —
+      // duplicated here because the swap path calls hdwallet directly and
+      // bypasses the RPC wrapper. Without this, Pioneer-built v0 swap txs
+      // (Solana inbound to THORChain etc.) hit "Malformed Solana transaction"
+      // from the device.
+      const fullTx = Buffer.from(
+        typeof unsignedTx.rawTx === 'string'
+          ? unsignedTx.rawTx
+          : Buffer.from(unsignedTx.rawTx).toString('base64'),
+        'base64',
+      )
+      let parsed
+      try {
+        parsed = parseSolanaTx(fullTx)
+      } catch (err) {
+        if (err instanceof SolanaTxParseError) throw new Error(`[signTx:solana] ${err.message}`)
+        throw err
+      }
+      console.debug(`[signTx:solana] signing tx versioned=${parsed.isVersioned} sigCount=${parsed.sigCount} fullTx=${fullTx.length}B`)
+
+      let sigBytes: Uint8Array
+      if (parsed.isVersioned) {
+        const messageBytes = solanaMessageSlice(fullTx, parsed)
+        console.debug(`[signTx:solana] v0 — routing through solanaSignMessage (${messageBytes.length}B incl. 0x80 prefix)`)
+        const msgRes = await wallet.solanaSignMessage({
+          addressNList: unsignedTx.addressNList,
+          message: messageBytes,
+          showDisplay: true,
+        })
+        const sig = msgRes?.signature
+        if (!sig) throw new Error('[signTx:solana] v0: device returned no signature')
+        sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+      } else {
+        // Legacy: hdwallet expects the message bytes (no sig section), not the full tx.
+        const deviceParams = {
+          ...unsignedTx,
+          rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
+        }
+        const result = await wallet.solanaSignTx(deviceParams)
+        if (!result?.signature) {
+          // Device returned a non-signature result — pass through (preserves
+          // the existing legacy behaviour for callers expecting that shape).
+          console.debug(`[signTx:solana] legacy result has no signature, passing through`)
+          return result
+        }
+        sigBytes = result.signature instanceof Uint8Array
+          ? result.signature
+          : Buffer.from(result.signature, 'base64')
+      }
+
+      if (sigBytes.length !== 64) {
+        throw new Error(`[signTx:solana] Unexpected signature length ${sigBytes.length}`)
+      }
+      // Splice the signature into the first sig slot of the original wire-format tx.
+      const rawBytes = Buffer.from(fullTx)
+      if (rawBytes.length < parsed.sigStart + 64) {
+        throw new Error('[signTx:solana] Raw tx too short to hold signature')
+      }
+      for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
+      const serializedTx = rawBytes.toString('base64')
+      console.debug(`[signTx:solana] assembled signed tx ${rawBytes.length}B (versioned=${parsed.isVersioned})`)
+      return { signature: sigBytes, serializedTx }
     }
     case 'tron': {
       // hdwallet returns { signature, serializedTx, ... } but does NOT echo
