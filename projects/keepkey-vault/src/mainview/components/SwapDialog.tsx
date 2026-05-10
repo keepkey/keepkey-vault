@@ -2343,30 +2343,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                               </Box>
                             </Flex>
                           )}
+                          {/* MAX is a set-action, not a toggle. The auto-default
+                              useEffect can pre-enable MAX (small-balance case),
+                              and a toggle here would silently flip that off when
+                              the user clicked MAX expecting it to "do something".
+                              To exit MAX mode, the user types — the input's
+                              onChange already calls setIsMax(false). */}
                           <Button size="xs" px="2" variant={isMax ? "solid" : "outline"}
                             bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
                             borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
                             borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => {
-                              const willBe = !isMax
-                              const projected = willBe ? (nativeEvmMaxAmount ?? (fromBalance || '0')) : amount
-                              const cb = balances.find(b => b.chainId === fromAsset?.chainId)
-                              console.log(
-                                `[swap-max-debug] wasMax=${isMax} willBeMax=${willBe}` +
-                                ` | fromAsset.chainId=${fromAsset?.chainId} symbol=${fromAsset?.symbol} family=${fromAsset?.chainFamily} contract=${fromAsset?.contractAddress || 'none'}` +
-                                ` | fromBalance=${JSON.stringify(fromBalance)} (typeof=${typeof fromBalance})` +
-                                ` | nativeEvmMaxAmount=${JSON.stringify(nativeEvmMaxAmount)}` +
-                                ` | sendAmount_projected=${JSON.stringify(projected)}` +
-                                ` | inputMode=${inputMode} amount=${JSON.stringify(amount)}` +
-                                ` | balances.find(chainId===fromAsset.chainId).balance=${JSON.stringify(cb?.balance)}` +
-                                ` | balancesLen=${balances.length}`
-                              )
-                              setIsMax(!isMax); setAmount(""); setFiatAmount("")
-                              requestAnimationFrame(() => {
-                                const input = document.querySelector<HTMLInputElement>('input[placeholder="0.0"], input[placeholder="0.00"]')
-                                console.log(`[swap-max-debug] post-click input.value="${input?.value ?? '<not found>'}"`)
-                              })
-                            }} disabled={busy}>
+                            onClick={() => { setIsMax(true); setAmount(""); setFiatAmount("") }} disabled={busy}>
                             {t("max")}
                           </Button>
                         </Flex>
