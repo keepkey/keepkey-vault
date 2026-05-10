@@ -16,7 +16,7 @@ import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
+import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
@@ -399,6 +399,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null)
   const [balances, setBalances] = useState<ChainBalance[]>([])
+  // User-added custom tokens, refetched whenever the asset picker opens so a
+  // freshly-added contract shows up on the next open without restarting.
+  const [customTokens, setCustomTokens] = useState<CustomToken[]>([])
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
@@ -643,6 +646,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       })
       .catch(() => {})
   }, [open])
+
+  // ── Load user-added custom tokens ─────────────────────────────────
+  // Refetch each time the picker is opened so a token added in the previous
+  // picker session (via the paste-contract Add lane) is visible immediately.
+  useEffect(() => {
+    if (!open) return
+    rpcRequest<CustomToken[]>('getCustomTokens', undefined, 5000)
+      .then((result) => { if (Array.isArray(result)) setCustomTokens(result) })
+      .catch(() => {})
+  }, [open, pickerSide])
 
   // ── Load swap assets ──────────────────────────────────────────────
   useEffect(() => {
@@ -2458,6 +2471,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         onClose={() => setPickerSide(null)}
         swappable={assets}
         balances={balances}
+        customTokens={customTokens}
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
         side={pickerSide || 'from'}
         onSelect={(a) => {

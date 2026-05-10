@@ -15,7 +15,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { AssetIcon } from "./AssetIcon"
-import type { SwapAsset, ChainBalance } from "../../shared/types"
+import type { SwapAsset, ChainBalance, CustomToken } from "../../shared/types"
 import {
   buildAssetEntries,
   buildSearchIndex,
@@ -47,6 +47,9 @@ interface AssetPickerDialogProps {
   swappable: SwapAsset[]
   /** Connected wallet's per-chain balances. */
   balances: ChainBalance[]
+  /** User-added custom tokens (gnars on Base etc.) — surfaced in the picker
+   *  even when neither discovery nor Pioneer's swappable list contains them. */
+  customTokens?: CustomToken[]
   /** CAIP-19 of the asset on the OPPOSITE side of the swap — excluded so the
    *  user can't pick the same asset on both legs. */
   excludeCaip?: string
@@ -112,7 +115,7 @@ function humanReason(entry: AssetEntry): string | null {
 }
 
 export function AssetPickerDialog({
-  open, onClose, swappable, balances, excludeCaip, onSelect, side,
+  open, onClose, swappable, balances, customTokens, excludeCaip, onSelect, side,
 }: AssetPickerDialogProps) {
   const { t } = useTranslation("swap")
   const { fmtCompact } = useFiat()
@@ -143,7 +146,7 @@ export function AssetPickerDialog({
     if (!open) return
     let cancelled = false
     setLoading(true)
-    buildAssetEntries({ swappable, balances })
+    buildAssetEntries({ swappable, balances, customTokens })
       .then(list => { if (!cancelled) { setEntries(list); setLoading(false) } })
       .catch(e => {
         if (cancelled) return
@@ -151,7 +154,7 @@ export function AssetPickerDialog({
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [open, swappable, balances])
+  }, [open, swappable, balances, customTokens])
 
   // Reset query and focus search input on each open
   useEffect(() => {

@@ -1628,9 +1628,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw new Error('Pioneer client not available')
+					const extraContracts = getCustomTokens().map(ct => ({
+						networkId: ct.networkId,
+						contractAddress: ct.contractAddress,
+						decimals: ct.decimals,
+						symbol: ct.symbol,
+						name: ct.name,
+						icon: ct.iconUrl,
+					}))
 					const resp = await withTimeout(
 						pioneer.GetPortfolioBalances(
-							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{
+								pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })),
+								extraContracts: extraContracts.length > 0 ? extraContracts : undefined,
+							},
 							{ forceRefresh: true }
 						),
 						PIONEER_TIMEOUT_MS,
@@ -1732,22 +1743,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
-
-					// Merge user-added custom tokens as placeholders
-					try {
-						const customTokens = getCustomTokens()
-						for (const ct of customTokens) {
-							const existing = tokensByChainId.get(ct.chainId) || []
-							// Skip if Pioneer already returned this token
-							if (existing.some(t => t.contractAddress?.toLowerCase() === ct.contractAddress.toLowerCase())) continue
-							existing.push({
-								symbol: ct.symbol, name: ct.name, balance: '0', balanceUsd: 0, priceUsd: 0,
-								caip: `${ct.networkId}/erc20:${ct.contractAddress}`,
-								contractAddress: ct.contractAddress, networkId: ct.networkId, decimals: ct.decimals, type: 'token',
-							})
-							tokensByChainId.set(ct.chainId, existing)
-						}
-					} catch { /* custom tokens lookup failed, non-fatal */ }
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
@@ -2057,9 +2052,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (isEvm) evmAddresses.resetBalances()
 
 				try {
+					const extraContracts = getCustomTokens()
+						.filter(ct => ct.chainId === chain.id)
+						.map(ct => ({
+							networkId: ct.networkId,
+							contractAddress: ct.contractAddress,
+							decimals: ct.decimals,
+							symbol: ct.symbol,
+							name: ct.name,
+							icon: ct.iconUrl,
+						}))
 					const resp = await withTimeout(
 						pioneer.GetPortfolioBalances(
-							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{
+								pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })),
+								extraContracts: extraContracts.length > 0 ? extraContracts : undefined,
+							},
 							{ forceRefresh: true }
 						),
 						PIONEER_TIMEOUT_MS,
@@ -2181,19 +2189,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								dataSource: tok.dataSource,
 							})
 						}
-
-						// Merge user-added custom tokens as placeholders
-						try {
-							const customTokens = getCustomTokens().filter(ct => ct.chainId === chain.id)
-							for (const ct of customTokens) {
-								if (parsedTokens.some(t => t.contractAddress?.toLowerCase() === ct.contractAddress.toLowerCase())) continue
-								parsedTokens.push({
-									symbol: ct.symbol, name: ct.name, balance: '0', balanceUsd: 0, priceUsd: 0,
-									caip: `${ct.networkId}/erc20:${ct.contractAddress}`,
-									contractAddress: ct.contractAddress, networkId: ct.networkId, decimals: ct.decimals, type: 'token',
-								})
-							}
-						} catch { /* custom tokens lookup failed, non-fatal */ }
 
 						if (parsedTokens.length > 0) {
 							tokens = parsedTokens

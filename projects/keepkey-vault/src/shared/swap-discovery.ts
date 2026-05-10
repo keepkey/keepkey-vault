@@ -10,7 +10,7 @@
  * happen unless the dialog actually opens. After that it's cached for the
  * session.
  */
-import type { SwapAsset, ChainBalance } from './types'
+import type { SwapAsset, ChainBalance, CustomToken } from './types'
 import { CHAINS } from './chains'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, type AvailabilityAssessment } from './swap-support-matrix'
@@ -307,6 +307,10 @@ export interface BuildEntriesInput {
   swappable: SwapAsset[]
   /** Connected wallet's per-chain balances (with optional token sub-arrays). */
   balances: ChainBalance[]
+  /** User-added contract tokens that aren't in pioneer-discovery or Pioneer's
+   *  swappable list. Without these, freshly-added long-tail tokens (e.g. a
+   *  meme on Base) wouldn't appear in the picker even after persistence. */
+  customTokens?: CustomToken[]
 }
 
 /** Build the unified, sorted asset list. Async to allow lazy import of
@@ -396,6 +400,30 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       balance: balanceByCaip.get(caip),
       swappable: s,
       swappableAsset: s.asset,
+      availability: assessAvailability(caip),
+    })
+  }
+
+  // User-added custom tokens — fall through here when neither discovery nor
+  // Pioneer's swappable list cover them (long-tail meme/community tokens).
+  // The aggregator routing matrix (assessAvailability) still gates whether
+  // they're swappable; we just make them visible + selectable in the picker.
+  for (const ct of input.customTokens || []) {
+    const rawCaip = `${ct.networkId}/erc20:${ct.contractAddress}`
+    const caip = canonicalizeCaip(rawCaip)
+    if (seen.has(caip)) continue
+    seen.add(caip)
+    entries.push({
+      caip,
+      symbol: ct.symbol,
+      name: ct.name || ct.symbol,
+      chainId: canonicalizeChainCaip2(ct.networkId),
+      decimals: ct.decimals,
+      iconUrl: ct.iconUrl,
+      isNative: false,
+      balance: balanceByCaip.get(caip),
+      swappable: undefined,
+      swappableAsset: undefined,
       availability: assessAvailability(caip),
     })
   }
