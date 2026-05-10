@@ -215,8 +215,12 @@ export function AssetPickerDialog({
         .then(res => {
           if (cancelled) return
           setContractLooking(false)
-          if (res.hits && res.hits.length > 0) setContractHits(res.hits)
-          else setContractError(res.reason || 'no-token-found')
+          // Distinguish "lookup succeeded with zero hits" (set [] so the
+          // 'No ERC20 found on any supported chain' branch fires) from
+          // "lookup couldn't even reach Pioneer" (leave contractHits null
+          // so the rpc-error branch fires).
+          if (Array.isArray(res?.hits)) setContractHits(res.hits)
+          else setContractError(res?.reason || 'lookup-failed')
         })
         .catch(e => {
           if (cancelled) return
