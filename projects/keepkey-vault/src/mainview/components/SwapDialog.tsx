@@ -20,6 +20,7 @@ import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTracking
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
+import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { KeepKeyDevice, RouteMap } from "./v3"
@@ -1949,6 +1950,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       from={{ iconUrl: fromAsset.icon, color: fromColor, glyph: fromAsset.symbol.slice(0, 1) }}
                       to={{ iconUrl: toAsset.icon, color: toColor, glyph: toAsset.symbol.slice(0, 1) }}
                       integration={typeof integrationName === 'string' ? integrationName : undefined}
+                      centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
                     />
                   </Box>
                 )
