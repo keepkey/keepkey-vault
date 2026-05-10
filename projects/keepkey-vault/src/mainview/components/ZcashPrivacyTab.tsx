@@ -142,6 +142,12 @@ export function ZcashPrivacyTab() {
 	const [shieldStep, setShieldStep] = useState<string | null>(null)
 
 	const [deshieldRecipient, setDeshieldRecipient] = useState("")
+	// User's own transparent ZEC address (m/44'/133'/0'/0/0). Lazily fetched
+	// once the sidecar is ready so the Unshield form can prefill the recipient
+	// — the common case is users moving funds back to their own t-addr, not
+	// sending to a third party. They can still paste a different address.
+	const [myTransparentAddr, setMyTransparentAddr] = useState<string | null>(null)
+	const tAddrPrefilledRef = useRef(false)
 	const [deshieldAmount, setDeshieldAmount] = useState("")
 	const [deshielding, setDeshielding] = useState(false)
 	const [deshieldResult, setDeshieldResult] = useState<string | null>(null)
@@ -249,6 +255,43 @@ export function ZcashPrivacyTab() {
 		})()
 		return () => { cancelled = true }
 	}, [refreshBalance, loadTransactions])
+
+	// First time the user lands on the Shield page, prefill the Unshield "To"
+	// field with their own t-addr. Most users unshield back to themselves; the
+	// field stays editable for the third-party case.
+	useEffect(() => {
+		if (page !== "shield") return
+		if (tAddrPrefilledRef.current) return
+		if (!myTransparentAddr) return
+		if (deshieldRecipient) return
+		setDeshieldRecipient(myTransparentAddr)
+		tAddrPrefilledRef.current = true
+	}, [page, myTransparentAddr, deshieldRecipient])
+
+	// Lazily fetch the user's transparent ZEC address once the privacy engine
+	// is ready. Uses btcGetAddress (no display) — same path the shield builder
+	// derives from. Cached for the session; UI prefills the Unshield "To" field
+	// the first time the user opens the Shield page.
+	useEffect(() => {
+		if (status !== "ready" || myTransparentAddr) return
+		let cancelled = false
+		;(async () => {
+			try {
+				const result = await rpcRequest<{ address?: string } | string>("btcGetAddress", {
+					addressNList: [0x80000000 + 44, 0x80000000 + 133, 0x80000000, 0, 0],
+					coin: "Zcash",
+					scriptType: "p2pkh",
+					showDisplay: false,
+				}, 30000)
+				if (cancelled) return
+				const addr = typeof result === "string" ? result : result?.address
+				if (addr) setMyTransparentAddr(addr)
+			} catch (e) {
+				console.warn("[ZcashPrivacyTab] failed to derive own t-addr:", e)
+			}
+		})()
+		return () => { cancelled = true }
+	}, [status, myTransparentAddr])
 
 	const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
 	const smoothPercent = useRef(0)
@@ -696,7 +739,17 @@ export function ZcashPrivacyTab() {
 											value={deshieldRecipient}
 											onChange={e => setDeshieldRecipient(e.target.value)}
 										/>
+										{myTransparentAddr && deshieldRecipient !== myTransparentAddr && (
+											<button
+												className="max"
+												onClick={() => setDeshieldRecipient(myTransparentAddr)}
+												title={`Use your own t-addr: ${myTransparentAddr}`}
+											>My t-addr</button>
+										)}
 									</div>
+									{myTransparentAddr && deshieldRecipient === myTransparentAddr && (
+										<div className="field-hint">Sending to your own t-addr (m/44'/133'/0'/0/0)</div>
+									)}
 									{deshieldRecipientValidation && !deshieldRecipientValidation.valid && deshieldRecipientValidation.error && (
 										<div className="field-err">{t(deshieldRecipientValidation.error)}</div>
 									)}

@@ -255,6 +255,15 @@ export const ZCASH_V2_CSS = `
 	font-family: var(--zk-font-display); font-size: 12px;
 	color: var(--zk-copper); padding: 0 2px;
 }
+.zcash-v2 .field-hint {
+	font-family: var(--zk-font-display); font-size: 11.5px;
+	color: var(--zk-fg-mute); padding: 0 2px;
+	display: inline-flex; align-items: center; gap: 6px;
+}
+.zcash-v2 .field-hint::before {
+	content: ""; width: 4px; height: 4px; border-radius: 50%;
+	background: var(--zk-green);
+}
 .zcash-v2 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .zcash-v2 .field-grid { display: grid; gap: 12px; }
 
