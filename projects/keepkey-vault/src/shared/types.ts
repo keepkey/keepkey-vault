@@ -227,6 +227,7 @@ export interface CustomToken {
   name: string
   decimals: number
   networkId: string       // CAIP-2 (e.g. 'eip155:137')
+  iconUrl?: string        // resolved logo (TrustWallet/CoinGecko); undefined when neither matched
 }
 
 export interface CustomChain {

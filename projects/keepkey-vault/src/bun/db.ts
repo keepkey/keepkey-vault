@@ -77,9 +77,17 @@ export function initDb() {
         name             TEXT NOT NULL,
         decimals         INTEGER NOT NULL DEFAULT 18,
         network_id       TEXT NOT NULL,
+        icon_url         TEXT,
         PRIMARY KEY (chain_id, contract_address)
       )
     `)
+    // Migration for existing DBs created before icon_url. SQLite throws on
+    // duplicate-column ADD; swallow that and propagate any other failure.
+    try {
+      db.exec(`ALTER TABLE custom_tokens ADD COLUMN icon_url TEXT`)
+    } catch (e: any) {
+      if (!String(e?.message || e).match(/duplicate column/i)) throw e
+    }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS custom_chains (
@@ -413,10 +421,18 @@ export function clearBalances(deviceId?: string) {
 export function getCustomTokens(): CustomToken[] {
   try {
     if (!db) return []
-    const rows = db.query('SELECT chain_id, contract_address, symbol, name, decimals, network_id FROM custom_tokens').all() as Array<{
-      chain_id: string; contract_address: string; symbol: string; name: string; decimals: number; network_id: string
+    const rows = db.query('SELECT chain_id, contract_address, symbol, name, decimals, network_id, icon_url FROM custom_tokens').all() as Array<{
+      chain_id: string; contract_address: string; symbol: string; name: string; decimals: number; network_id: string; icon_url: string | null
     }>
-    return rows.map(r => ({ chainId: r.chain_id, contractAddress: r.contract_address, symbol: r.symbol, name: r.name, decimals: r.decimals, networkId: r.network_id }))
+    return rows.map(r => ({
+      chainId: r.chain_id,
+      contractAddress: r.contract_address,
+      symbol: r.symbol,
+      name: r.name,
+      decimals: r.decimals,
+      networkId: r.network_id,
+      iconUrl: r.icon_url || undefined,
+    }))
   } catch (e: any) {
     console.warn('[db] getCustomTokens failed:', e.message)
     return []
@@ -427,8 +443,8 @@ export function addCustomToken(token: CustomToken) {
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO custom_tokens (chain_id, contract_address, symbol, name, decimals, network_id) VALUES (?, ?, ?, ?, ?, ?)`,
-      [token.chainId, token.contractAddress, token.symbol, token.name, token.decimals, token.networkId]
+      `INSERT OR REPLACE INTO custom_tokens (chain_id, contract_address, symbol, name, decimals, network_id, icon_url) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [token.chainId, token.contractAddress, token.symbol, token.name, token.decimals, token.networkId, token.iconUrl ?? null]
     )
   } catch (e: any) {
     console.warn('[db] addCustomToken failed:', e.message)

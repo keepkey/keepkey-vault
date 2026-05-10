@@ -243,11 +243,109 @@ export function AssetPickerDialog({
           )}
           {!loading && visible.length === 0 && (
             <Box p="6" textAlign="center">
-              <Text fontSize="xs" color="kk.textMuted">
-                {search.trim()
-                  ? t("noAssetsMatchSearch", "No assets match your search.")
-                  : t("noAssetsAvailable", "No swappable assets available.")}
-              </Text>
+              {/* Paste-contract auto-add lane.
+               *  Triggers when the user types/pastes a 0x..40-char address
+               *  and discovery has no entry for it. We probe every EVM RPC
+               *  in parallel and surface every chain that returned valid
+               *  ERC20 metadata as a one-click "Add as custom token" row. */}
+              {EVM_CONTRACT_RE.test(search.trim()) ? (
+                <>
+                  {contractLooking && (
+                    <Text fontSize="xs" color="kk.textMuted">
+                      {t("contractLookingUp", "Looking up contract on every chain…")}
+                    </Text>
+                  )}
+                  {!contractLooking && contractHits && contractHits.length > 0 && (
+                    <Box>
+                      <Text fontSize="11px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" mb="2.5">
+                        {t("contractFoundOn", "Found on", { count: contractHits.length })}
+                      </Text>
+                      <Flex direction="column" gap="2">
+                        {contractHits.map(hit => (
+                          <Flex
+                            key={hit.caip}
+                            as="button"
+                            align="center"
+                            gap="3"
+                            px="3" py="2.5"
+                            bg="rgba(233,196,106,0.06)"
+                            border="1px solid"
+                            borderColor="rgba(233,196,106,0.30)"
+                            borderRadius="lg"
+                            _hover={{ bg: "rgba(233,196,106,0.14)", borderColor: "rgba(233,196,106,0.55)" }}
+                            cursor="pointer"
+                            textAlign="left"
+                            onClick={async () => {
+                              // Persist before selecting so the next session's
+                              // discovery merge picks the token up — otherwise
+                              // each open of the picker forces a fresh paste.
+                              // Server-side handler also resolves a logo
+                              // (TrustWallet → CoinGecko); use the returned
+                              // record if it came back richer than `hit`.
+                              try {
+                                const persisted = await rpcRequest<any>('addCustomToken', {
+                                  chainId: hit.chainId,
+                                  contractAddress: hit.contractAddress!,
+                                }, 15000)
+                                if (persisted?.iconUrl) {
+                                  onSelect({ ...hit, icon: persisted.iconUrl })
+                                } else {
+                                  onSelect(hit)
+                                }
+                              } catch (e: any) {
+                                // Persistence is best-effort — if the device
+                                // is busy or the chain RPC times out, still
+                                // let the user proceed with this swap.
+                                console.warn('[AssetPickerDialog] addCustomToken failed:', e?.message || e)
+                                onSelect(hit)
+                              }
+                              onClose()
+                            }}
+                          >
+                            <AssetIcon
+                              caip={hit.caip}
+                              chainCaip={`${hit.chainId}/slip44:60`}
+                              size={32}
+                              alt={hit.symbol}
+                            />
+                            <Box flex="1" minW="0">
+                              <Flex align="center" gap="2">
+                                <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">{hit.symbol}</Text>
+                                <Text fontSize="9px" color="var(--gold)" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
+                                  {nd(hit.chainId)}
+                                </Text>
+                              </Flex>
+                              <Text fontSize="10px" color="kk.textMuted" truncate>{hit.name}</Text>
+                            </Box>
+                            <Text fontSize="9px" color="var(--gold)" fontWeight="700" letterSpacing="0.05em" textTransform="uppercase" flexShrink={0}>
+                              {t("addCustomToken", "Add")}
+                            </Text>
+                          </Flex>
+                        ))}
+                      </Flex>
+                      <Text fontSize="10px" color="kk.textMuted" mt="3" lineHeight="1.5">
+                        {t("contractSafetyNote", "Custom tokens skip Vault's verified list. Verify the symbol matches the project before swapping.")}
+                      </Text>
+                    </Box>
+                  )}
+                  {!contractLooking && contractHits && contractHits.length === 0 && (
+                    <Text fontSize="xs" color="kk.textMuted">
+                      {t("contractNotFoundOnAnyChain", "No ERC20 found at this address on any supported chain.")}
+                    </Text>
+                  )}
+                  {!contractLooking && !contractHits && contractError && (
+                    <Text fontSize="xs" color="kk.error">
+                      {t("contractLookupFailed", "Couldn't reach a chain RPC to look up this contract. Try again.")}
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <Text fontSize="xs" color="kk.textMuted">
+                  {search.trim()
+                    ? t("noAssetsMatchSearch", "No assets match your search.")
+                    : t("noAssetsAvailable", "No swappable assets available.")}
+                </Text>
+              )}
             </Box>
           )}
           {!loading && visible.map(e => <AssetRow key={e.caip} entry={e} onSelect={handleSelect} fmtCompact={fmtCompact} t={t} />)}

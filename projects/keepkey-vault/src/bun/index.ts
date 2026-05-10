@@ -2628,6 +2628,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const addr = params.contractAddress.trim()
 				if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) throw new Error('Invalid contract address')
 				const meta = await getTokenMetadata(rpcUrl, addr)
+				// Best-effort logo resolve. Don't block persistence on a slow CDN
+				// or rate-limited CoinGecko response — fail open to no icon.
+				const { resolveTokenIcon } = await import('./evm-token-icons')
+				let iconUrl: string | undefined
+				try {
+					iconUrl = (await resolveTokenIcon(params.chainId, addr)) || undefined
+				} catch (e: any) {
+					console.warn(`[addCustomToken] icon resolve threw, persisting without:`, e?.message || e)
+				}
 				const token: CustomToken = {
 					chainId: params.chainId,
 					contractAddress: addr,
@@ -2635,6 +2644,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					name: meta.name,
 					decimals: meta.decimals,
 					networkId: chain.networkId,
+					iconUrl,
 				}
 				dbAddCustomToken(token)
 				return token
