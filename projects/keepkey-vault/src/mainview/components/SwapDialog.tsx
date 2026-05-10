@@ -2347,7 +2347,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
                             borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
                             borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => { setIsMax(!isMax); setAmount(""); setFiatAmount("") }} disabled={busy}>
+                            onClick={() => {
+                              console.log('[swap-max-debug]', {
+                                wasMax: isMax,
+                                willBeMax: !isMax,
+                                fromAsset: fromAsset ? { chainId: fromAsset.chainId, symbol: fromAsset.symbol, chainFamily: fromAsset.chainFamily, contractAddress: fromAsset.contractAddress } : null,
+                                fromBalance,
+                                nativeEvmMaxAmount,
+                                sendAmount_at_click: isMax ? amount : (nativeEvmMaxAmount ?? (fromBalance || '0')),
+                                inputMode,
+                                balancesLen: balances.length,
+                                btcCacheRaw: balances.find(b => b.chainId === 'bitcoin'),
+                              })
+                              setIsMax(!isMax); setAmount(""); setFiatAmount("")
+                            }} disabled={busy}>
                             {t("max")}
                           </Button>
                         </Flex>
