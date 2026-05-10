@@ -91,6 +91,25 @@ let shieldInProgress = false
 export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
 export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
 
+/** Convert a sidecar-returned txid to explorer/display order.
+ *
+ *  The sidecar (modules/keepkey-zcash) emits txids in the raw blake2b
+ *  internal byte order — Zcash explorers (Blockchair, ZecRocks, etc.)
+ *  show the byte-reversed form, like Bitcoin. There's an upstream fix
+ *  in keepkey-zcash that reverses inside the Rust code before hex-encoding,
+ *  but that lives in a separate repo with its own release cycle. Until
+ *  every shipping vault has a sidecar with the fix baked in, we reverse
+ *  here as the single defensive choke point. Once we can guarantee the
+ *  sidecar emits display order, drop this helper and the call sites. */
+export function txidToDisplayOrder(internalHex: string): string {
+	if (!internalHex || internalHex.length !== 64 || !/^[0-9a-f]+$/i.test(internalHex)) {
+		// Don't silently mangle — surface bad input rather than producing a plausible-looking wrong txid
+		return internalHex
+	}
+	const bytes = internalHex.match(/.{2}/g)!
+	return bytes.reverse().join("").toLowerCase()
+}
+
 export async function shieldZec(
 	wallet: any,
 	pioneer: any,
@@ -416,6 +435,7 @@ async function _shieldZecInner(
 	opts?.onProgress?.("broadcasting")
 	await sendCommand("broadcast", { raw_tx })
 
-	console.log(`[zcash-shield] Shield transaction sent: ${txid}`)
-	return { txid }
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-shield] Shield transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }

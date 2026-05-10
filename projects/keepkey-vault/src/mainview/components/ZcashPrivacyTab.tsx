@@ -1195,7 +1195,9 @@ function TxFlowStatus({ step, kind, intent }: {
 }
 
 function ResultBox({ kind, title, txid, message }: { kind: "ok" | "err"; title: string; txid?: string; message?: string }) {
-	const explorerUrl = txid ? `https://mainnet.zcashexplorer.app/transactions/${txid}` : null
+	// Blockchair indexes Zcash transactions reliably; mainnet.zcashexplorer.app
+	// has been hit-or-miss with newly-broadcast txs.
+	const explorerUrl = txid ? `https://blockchair.com/zcash/transaction/${txid}` : null
 	const [copied, setCopied] = useState(false)
 	const openExplorer = useCallback(async () => {
 		if (!explorerUrl) return

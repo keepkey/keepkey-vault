@@ -341,8 +341,10 @@ async function _sendShieldedInner(
 	opts?.onProgress?.("broadcasting")
 	await broadcastShieldedTx(raw_tx)
 
-	console.log(`[zcash-shielded] Transaction sent: ${txid}`)
-	return { txid }
+	const { txidToDisplayOrder } = await import("./zcash-shield")
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-shielded] Transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }
 
 /**

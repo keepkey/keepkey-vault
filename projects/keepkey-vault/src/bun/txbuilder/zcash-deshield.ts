@@ -137,6 +137,8 @@ async function _deshieldZecInner(
 	opts?.onProgress?.("broadcasting")
 	await sendCommand("broadcast", { raw_tx })
 
-	console.log(`[zcash-deshield] Deshield transaction sent: ${txid}`)
-	return { txid }
+	const { txidToDisplayOrder } = await import("./zcash-shield")
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-deshield] Deshield transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }
