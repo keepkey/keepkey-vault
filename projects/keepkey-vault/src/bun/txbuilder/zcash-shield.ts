@@ -88,11 +88,14 @@ interface ShieldBuildResult {
  */
 let shieldInProgress = false
 
+export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
+export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
+
 export async function shieldZec(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
 ): Promise<{ txid: string }> {
 	if (shieldInProgress) {
 		throw new Error("A shield transaction is already in progress")
@@ -109,7 +112,7 @@ async function _shieldZecInner(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
@@ -354,6 +357,7 @@ async function _shieldZecInner(
 	// requires firmware support that may not be present. Check first and
 	// fall back to Orchard-only signing with a clear error for transparent.
 	console.log("[zcash-shield] Requesting device signatures...")
+	opts?.onProgress?.("signing")
 
 	const hasTransparentInputs = buildResult.transparent_inputs.length > 0
 

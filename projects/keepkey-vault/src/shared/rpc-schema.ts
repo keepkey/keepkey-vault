@@ -39,6 +39,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Wallet operations (hdwallet pass-through) ─────────────────
       getFeatures: { params: void; response: any }
       ping: { params: { msg?: string }; response: any }
+      // Open a URL in the user's default browser (escapes the WebView).
+      // The system WebView blocks target=_blank, so explorer/docs links
+      // route through here instead. Bun shells out to the OS-native opener.
+      openExternal: { params: { url: string }; response: { ok: true } }
       wipeDevice: { params: void; response: any }
       // Types defined in types.ts: GetPublicKeysParams, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams
       getPublicKeys: { params: any; response: any }

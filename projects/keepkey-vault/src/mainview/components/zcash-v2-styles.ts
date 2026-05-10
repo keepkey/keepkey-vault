@@ -359,11 +359,38 @@ export const ZCASH_V2_CSS = `
 .zcash-v2 .result-box.ok .result-title { color: var(--zk-green); }
 .zcash-v2 .result-box.err .result-title { color: var(--zk-copper); }
 .zcash-v2 .result-txid {
+	display: flex; flex-direction: column; gap: 8px;
 	font-family: var(--zk-font-mono); font-size: 11.5px;
-	color: var(--zk-fg-dim); word-break: break-all; line-height: 1.5;
+	color: var(--zk-fg-dim); line-height: 1.5;
 }
-.zcash-v2 .result-txid a { display: inline-block; margin-top: 6px; color: var(--zk-gold); text-decoration: none; font-family: var(--zk-font-display); font-size: 12px; }
-.zcash-v2 .result-txid a:hover { text-decoration: underline; }
+.zcash-v2 .result-txid .txid-hash {
+	display: block;
+	word-break: break-all;
+	padding: 8px 10px;
+	border-radius: 4px;
+	background: rgba(255,255,255,0.03);
+	border: 1px solid var(--zk-line-soft);
+	user-select: all;
+}
+.zcash-v2 .result-txid .txid-actions {
+	display: flex; gap: 6px; flex-wrap: wrap;
+}
+.zcash-v2 .result-txid button {
+	display: inline-flex; align-items: center; gap: 4px;
+	color: var(--zk-gold);
+	font-family: var(--zk-font-display); font-size: 12px; font-weight: 500;
+	padding: 5px 10px; border-radius: 4px;
+	border: 1px solid var(--zk-gold-line); background: var(--zk-gold-soft);
+	cursor: pointer;
+}
+.zcash-v2 .result-txid button:hover { background: rgba(201,163,104,0.22); }
+.zcash-v2 .result-txid button.txid-copy {
+	color: var(--zk-fg-dim);
+	border-color: var(--zk-line); background: var(--zk-bg);
+}
+.zcash-v2 .result-txid button.txid-copy:hover {
+	color: var(--zk-fg); background: var(--zk-bg-2); border-color: var(--zk-fg-faint);
+}
 .zcash-v2 .result-msg { color: var(--zk-fg-dim); font-size: 12.5px; line-height: 1.5; }
 
 /* ---- OVERVIEW ---- */

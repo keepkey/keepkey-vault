@@ -1116,6 +1116,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.ping({ msg: params.msg || 'pong', passphrase: false })
 			},
+			openExternal: async (params) => {
+				// Validate up front — only open http(s) URLs, never local file://
+				// or javascript: schemes. The WebView passes user-visible URLs
+				// (explorer / docs links) so this is more defense-in-depth than
+				// hardening against the user.
+				const url = String(params?.url || "")
+				if (!/^https?:\/\//i.test(url)) {
+					throw new Error("openExternal: only http(s) URLs are allowed")
+				}
+				const cmd = process.platform === "win32" ? ["cmd", "/c", "start", "", url]
+					: process.platform === "darwin" ? ["open", url]
+					: ["xdg-open", url]
+				try {
+					Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] })
+				} catch (e: any) {
+					throw new Error(`Failed to open URL: ${e?.message || e}`)
+				}
+				return { ok: true as const }
+			},
 			wipeDevice: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				// Cancel any pending PIN/passphrase request before wiping —

@@ -1112,15 +1112,37 @@ export function ZcashPrivacyTab() {
 
 function ResultBox({ kind, title, txid, message }: { kind: "ok" | "err"; title: string; txid?: string; message?: string }) {
 	const explorerUrl = txid ? `https://mainnet.zcashexplorer.app/transactions/${txid}` : null
+	const [copied, setCopied] = useState(false)
+	const openExplorer = useCallback(async () => {
+		if (!explorerUrl) return
+		try {
+			// System WebView blocks target=_blank — route through Bun, which
+			// shells out to the OS-native opener (open / xdg-open / cmd start).
+			await rpcRequest("openExternal", { url: explorerUrl }, 5000)
+		} catch (e) {
+			console.error("[ResultBox] failed to open explorer:", e)
+		}
+	}, [explorerUrl])
+	const copyTxid = useCallback(() => {
+		if (!txid) return
+		navigator.clipboard.writeText(txid)
+		setCopied(true)
+		setTimeout(() => setCopied(false), 1800)
+	}, [txid])
 	return (
 		<div className={`result-box ${kind}`}>
 			<div className="result-title">{title}</div>
 			{txid && (
 				<div className="result-txid">
-					{txid}
-					{explorerUrl && (
-						<a href={explorerUrl} target="_blank" rel="noopener noreferrer">View on explorer ↗</a>
-					)}
+					<span className="txid-hash">{txid}</span>
+					<div className="txid-actions">
+						{explorerUrl && (
+							<button type="button" onClick={openExplorer}>View on explorer ↗</button>
+						)}
+						<button type="button" className="txid-copy" onClick={copyTxid}>
+							{copied ? "✓ Copied" : "Copy txid"}
+						</button>
+					</div>
 				</div>
 			)}
 			{message && <div className="result-msg">{message}</div>}
