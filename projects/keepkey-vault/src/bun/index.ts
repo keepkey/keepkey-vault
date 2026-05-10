@@ -2840,6 +2840,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},
+			zcashTransparentBalance: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				const account = params?.account ?? 0
+				const wallet = engine.wallet
+				const path = [0x80000000 + 44, 0x80000000 + 133, 0x80000000 + account, 0, 0]
+				const addressResult = await wallet.btcGetAddress({
+					addressNList: path, coin: "Zcash", scriptType: "p2pkh", showDisplay: false,
+				})
+				const address = typeof addressResult === 'string' ? addressResult : addressResult?.address
+				if (!address) throw new Error("Failed to derive transparent ZEC address from device")
+				const { getShieldableTransparentBalance } = await import("./txbuilder/zcash-shield")
+				const pioneer = await getPioneer()
+				const balanceZat = await getShieldableTransparentBalance(pioneer, address)
+				return { address, balanceZat }
+			},
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')

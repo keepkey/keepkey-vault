@@ -91,6 +91,32 @@ let shieldInProgress = false
 export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
 export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
 
+/** Sum of confirmed UTXOs at a single transparent ZEC address (zatoshis).
+ *  Uses Pioneer ListUnspent — same source the shield builder will see — so
+ *  the Shield page's "Available" / Max stays in sync with what shieldZec
+ *  can actually spend. The chain-level getBalance returns the *xpub* total
+ *  across every derived address, which is misleading here because the
+ *  shield builder only sweeps m/44'/133'/0'/0/0. */
+export async function getShieldableTransparentBalance(
+	pioneer: any,
+	transparentAddress: string,
+): Promise<number> {
+	const result = await pioneer.ListUnspent({ network: "ZEC", xpub: transparentAddress })
+	const utxoArray = Array.isArray(result) ? result
+		: Array.isArray(result?.data) ? result.data
+		: Array.isArray(result?.utxos) ? result.utxos
+		: []
+	let total = 0
+	for (const u of utxoArray) {
+		const raw = String(u.value ?? u.amount ?? "0")
+		const value = raw.includes(".")
+			? Math.round(parseFloat(raw) * 1e8)
+			: parseInt(raw, 10)
+		if (!isNaN(value) && value > 0) total += value
+	}
+	return total
+}
+
 /** Convert a sidecar-returned txid to explorer/display order.
  *
  *  The sidecar (modules/keepkey-zcash) emits txids in the raw blake2b

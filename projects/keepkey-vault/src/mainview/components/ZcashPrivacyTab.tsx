@@ -331,26 +331,24 @@ export function ZcashPrivacyTab() {
 		return () => { cancelled = true }
 	}, [status, myTransparentAddr])
 
-	// Refresh transparent ZEC balance — re-fetched on Shield-page open and after
-	// a successful shield/deshield so the Max button + "available" line stay
-	// honest. Backend's getBalance({ chainId: 'zcash' }) returns the native
-	// (transparent-only) balance as a decimal string.
+	// Refresh transparent ZEC balance using zcashTransparentBalance — same
+	// Pioneer ListUnspent the shield builder uses, scoped to the single
+	// m/44'/133'/0'/0/0 t-addr it sweeps. Chain-level getBalance sums the whole
+	// xpub (every derived address), which produced an inflated Max that the
+	// shield call then rejected with "Insufficient transparent balance".
 	const refreshTransparentBalance = useCallback(async () => {
 		setTransparentBalanceLoading(true)
 		try {
-			const r = await rpcRequest<{ balance: string }>("getBalance", { chainId: "zcash" }, 15000)
-			const zec = parseFloat(r?.balance ?? "0")
-			if (!Number.isFinite(zec) || zec < 0) {
-				setTransparentBalanceZat(0)
-			} else {
-				setTransparentBalanceZat(Math.round(zec * 1e8))
-			}
+			const r = await rpcRequest<{ address: string; balanceZat: number }>(
+				"zcashTransparentBalance", undefined, 20000)
+			setTransparentBalanceZat(Number.isFinite(r.balanceZat) && r.balanceZat >= 0 ? r.balanceZat : 0)
+			if (r.address && !myTransparentAddr) setMyTransparentAddr(r.address)
 		} catch (e) {
-			console.warn("[ZcashPrivacyTab] failed to fetch t-addr balance:", e)
+			console.warn("[ZcashPrivacyTab] failed to fetch shieldable t-addr balance:", e)
 			setTransparentBalanceZat(null)
 		}
 		setTransparentBalanceLoading(false)
-	}, [])
+	}, [myTransparentAddr])
 
 	useEffect(() => {
 		if (status !== "ready") return
