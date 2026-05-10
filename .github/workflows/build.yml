@@ -427,7 +427,7 @@ jobs:
           #        and the substitute step above runs successfully.
           # Set to 2.38 for now; ratchet to 2.35 after the first successful publish run.
           LINUX_GLIBC_FLOOR: '2.38'
-        shell: bash
+        shell: bash {0}  # disable -e + pipefail; we manage exit code ourselves
         run: |
           cd projects/keepkey-vault/artifacts
           TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
@@ -438,40 +438,80 @@ jobs:
           zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
           tar xf "$WORK/app.tar" -C "$WORK/"
 
-          floor="${LINUX_GLIBC_FLOOR}"
-          floor_major="${floor%.*}"; floor_minor="${floor#*.}"
+          FLOOR="${LINUX_GLIBC_FLOOR}"
 
-          fail=0
+          # version_gt A B  -> exit 0 if A > B (semver-ish, two components)
+          version_gt() {
+            [ "$1" = "$2" ] && return 1
+            [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
+          }
+
+          REPORT=$(mktemp)
+          ERRORS=$(mktemp)
           {
-            echo "## Linux glibc footprint (floor: $floor)"
+            echo "## Linux glibc footprint (floor: $FLOOR)"
             echo ""
             echo "| File | Max GLIBC | Status |"
             echo "|------|-----------|--------|"
-            while IFS= read -r f; do
-              # ELF check
-              head -c 4 "$f" 2>/dev/null | od -An -c 2>/dev/null | grep -q 'E   L   F' || continue
-              max=$(strings "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1)
-              max="${max#GLIBC_}"
-              rel="${f#$WORK/}"
-              if [ -z "$max" ]; then
-                echo "| \`$rel\` | (none) | OK |"
-              else
-                m_major="${max%.*}"; m_minor="${max#*.}"
-                if [ "$m_major" -gt "$floor_major" ] || { [ "$m_major" -eq "$floor_major" ] && [ "$m_minor" -gt "$floor_minor" ]; }; then
-                  echo "| \`$rel\` | $max | EXCEEDS FLOOR |"
-                  echo "::error::$rel requires GLIBC_$max (floor: $floor)" >&2
-                  fail=1
-                else
-                  echo "| \`$rel\` | $max | OK |"
-                fi
-              fi
-            done < <(find "$WORK" -type f \( -name '*.so*' -o -name '*.node' -o -perm -u+x \) ! -name '*.js' ! -name '*.json' ! -name '*.ts' ! -name '*.png' ! -name '*.html' 2>/dev/null | sort)
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } >> "$REPORT"
+
+          # Find candidate ELF files: shared libs, .node addons, and executables.
+          # Use null-delimited list to handle any path; never let find errors abort.
+          find "$WORK" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.node' -o -perm /u+x \) \
+            ! -name '*.js' ! -name '*.json' ! -name '*.ts' ! -name '*.tsx' \
+            ! -name '*.png' ! -name '*.html' ! -name '*.css' ! -name '*.md' \
+            ! -name '*.txt' ! -name '*.svg' ! -name '*.ico' ! -name '*.icns' \
+            -print0 2>/dev/null | sort -z > /tmp/candidates.lst
+
+          fail=0
+          examined=0
+          while IFS= read -r -d '' f; do
+            # ELF magic = 0x7F 'E' 'L' 'F' as the first 4 bytes
+            magic=$(head -c 4 "$f" 2>/dev/null | xxd -p 2>/dev/null)
+            [ "$magic" = "7f454c46" ] || continue
+
+            examined=$((examined + 1))
+            rel="${f#$WORK/}"
+
+            # Extract numeric GLIBC versions only — skip GLIBC_PRIVATE etc.
+            max=$(strings "$f" 2>/dev/null \
+                    | grep -oE 'GLIBC_[0-9]+\.[0-9]+' \
+                    | sed 's/^GLIBC_//' \
+                    | sort -V \
+                    | tail -1)
+
+            if [ -z "$max" ]; then
+              echo "| \`$rel\` | (none) | OK |" >> "$REPORT"
+              continue
+            fi
+
+            if version_gt "$max" "$FLOOR"; then
+              echo "| \`$rel\` | $max | **EXCEEDS FLOOR** |" >> "$REPORT"
+              echo "$rel requires GLIBC_$max (floor: $FLOOR)" >> "$ERRORS"
+              fail=1
+            else
+              echo "| \`$rel\` | $max | OK |" >> "$REPORT"
+            fi
+          done < /tmp/candidates.lst
+
+          echo "" >> "$REPORT"
+          echo "_Examined $examined ELF files._" >> "$REPORT"
+
+          # Emit report to both job log and GitHub step summary
+          cat "$REPORT"
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$fail" = "1" ]; then
-            echo "::error::Linux glibc audit failed — one or more ELFs exceed the floor of $floor"
+            echo ""
+            echo "Files exceeding the floor:"
+            sed 's/^/  - /' "$ERRORS"
+            while IFS= read -r line; do
+              echo "::error::$line"
+            done < "$ERRORS"
+            echo "::error::Linux glibc audit failed — one or more ELFs exceed the floor of $FLOOR"
             exit 1
           fi
+          echo "All $examined ELF files within glibc floor of $FLOOR."
 
       - name: Package AppImage (Linux)
         if: runner.os == 'Linux'
