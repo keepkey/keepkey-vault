@@ -456,6 +456,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     inboundAddress: record.inboundAddress,
                     router: record.router,
                     integration: record.integration,
+                    swapper: record.swapper,
                     status: record.status,
                     confirmations: 0,
                     outboundTxid: record.outboundTxid,
@@ -463,6 +464,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     updatedAt: record.updatedAt,
                     estimatedTime: record.estimatedTimeSeconds,
                     error: record.error,
+                    relayRequestId: record.relayRequestId,
                   })
                 }}
               >

@@ -3828,6 +3828,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					completedAt: record.completedAt,
 					estimatedTime: record.estimatedTimeSeconds,
 					slippageBps: record.slippageBps,
+					relayRequestId: live?.relayRequestId ?? record.relayRequestId,
 				}
 			},
 			refreshSwap: async (params) => {
@@ -3837,9 +3838,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return await refreshSwap(params.txid)
 			},
 			debugSwapLookup: async (params) => {
-				// Read-only diagnostic — Pioneer GetPendingSwap + rescan + local
-				// state, with protocol divergence flagged. Safe in passphrase mode
-				// (returns local=null when the swap was never persisted).
+				// PRIVACY: Mirror getSwapByTxid / refreshSwap — passphrase sessions
+				// must not see standard-wallet diagnostic data. The function-level
+				// noPersistSwaps gate inside debugSwapLookup catches passphrase-
+				// tagged txids regardless of caller; this is the session-level
+				// gate that refuses the call entirely from a hidden session.
+				if (engine.isPassphraseWallet) return null
 				const { debugSwapLookup } = await import('./swap-tracker')
 				return await debugSwapLookup(params.txid)
 			},

@@ -192,6 +192,7 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
           completedAt: r.completedAt,
           estimatedTime: r.estimatedTimeSeconds,
           slippageBps: r.slippageBps,
+          relayRequestId: r.relayRequestId,
         }
         pendingSwaps.set(r.txid, swap)
       }
@@ -551,6 +552,10 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
   // extracted from calldata at trackSwap time; older rows (or any swap whose
   // selector we don't recognize) are resolved against api.relay.link. Cheap
   // (one HTTP call) and only fires for relay-ish integrations missing the id.
+  // After the local backfill we re-register with Pioneer so its
+  // checkRelaySwap monitor can finally key on relayData.requestId — without
+  // this, Pioneer stays on the confirmation-only watcher that never reaches
+  // a terminal status for Relay's off-chain settlement.
   if (!swap.relayRequestId && shouldBackfillRelayRequestId(swap)) {
     const id = await fetchRelayRequestIdByHash(swap.txid)
     if (id) {
@@ -558,6 +563,14 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
       try { setSwapRelayRequestId(swap.txid, id) } catch { /* best-effort */ }
       pushUpdate(swap)
       swapLog(`${TAG} Relay requestId backfilled for ${swap.txid.slice(0, 10)}...: ${id.slice(0, 12)}...`)
+      // Re-post CreatePendingSwap so Pioneer picks up relayData.requestId.
+      // Best-effort: if Pioneer 409s on the duplicate hash that's fine — it
+      // means the row already exists; the new field will only land if Pioneer
+      // accepts upserts. We log either outcome so PRs can flag if Pioneer
+      // needs an explicit "set requestId" endpoint instead.
+      registerWithPioneer(swap).catch((e) => {
+        console.warn(`${TAG} Pioneer re-registration after Relay backfill failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
+      })
     }
   }
 
@@ -596,7 +609,13 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
  *  Pioneer rescan result, with raw responses preserved. Surfaced via the
  *  `debugSwapLookup` RPC so the user can introspect why a swap is stuck
  *  without flipping the SWAP_DEBUG flag and re-broadcasting. Read-only —
- *  does not mutate the in-memory or persisted swap state. */
+ *  does not mutate the in-memory or persisted swap state.
+ *
+ *  PRIVACY: refuses to operate on passphrase-wallet swaps (txids tagged in
+ *  noPersistSwaps). A passphrase swap stays in `pendingSwaps` for in-session
+ *  UI but must never leak through any read RPC — including from a later
+ *  standard-wallet session in the same vault process. Returns null with no
+ *  Pioneer query so we don't even confirm the txid's existence. */
 export async function debugSwapLookup(txid: string): Promise<{
   txid: string
   pioneerBaseUrl: string | undefined
@@ -604,7 +623,8 @@ export async function debugSwapLookup(txid: string): Promise<{
   pioneer: { ok: boolean; status: number | null; raw: any; error?: string }
   pioneerRescan: { ok: boolean; status: number | null; raw: any; error?: string }
   divergence?: { vaultProtocol: string; pioneerProtocol: string }
-}> {
+} | null> {
+  if (noPersistSwaps.has(txid)) return null
   const local = pendingSwaps.get(txid) || hydrateFromDb(txid)
   let pioneerBaseUrl: string | undefined
   try {

@@ -30,8 +30,10 @@ import {
 import { PROVIDER_LABEL, type AvailabilityStatus } from "../../shared/swap-support-matrix"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
+import { rpcRequest } from "../lib/rpc"
 
 const MAX_RENDER = 200
+const EVM_CONTRACT_RE = /^0x[a-fA-F0-9]{40}$/
 
 const SearchIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -195,6 +197,35 @@ export function AssetPickerDialog({
     if (!search.trim()) list = list.filter(e => bucketFor(e) <= 5)
     return list.slice(0, MAX_RENDER)
   }, [searchIndex, search, excludeCaip])
+
+  /* Probe the chain RPCs when the user pastes a contract that doesn't match
+   * anything in discovery. Debounced 350ms so a fast-typed address doesn't
+   * fire 40 lookups. Reset on close / query change. */
+  useEffect(() => {
+    setContractHits(null)
+    setContractError(null)
+    if (!open) return
+    const q = search.trim()
+    if (!EVM_CONTRACT_RE.test(q)) return
+    if (visible.length > 0) return /* discovery already had it — skip lookup */
+    let cancelled = false
+    setContractLooking(true)
+    const timer = setTimeout(() => {
+      rpcRequest<{ hits: SwapAsset[]; reason?: string }>('lookupTokenContract', { contractAddress: q }, 12000)
+        .then(res => {
+          if (cancelled) return
+          setContractLooking(false)
+          if (res.hits && res.hits.length > 0) setContractHits(res.hits)
+          else setContractError(res.reason || 'no-token-found')
+        })
+        .catch(e => {
+          if (cancelled) return
+          setContractLooking(false)
+          setContractError(e?.message || 'lookup-failed')
+        })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [open, search, visible.length])
 
   const handleSelect = useCallback((entry: AssetEntry) => {
     if (!isRowSelectable(entry)) return
@@ -401,7 +432,7 @@ export function AssetPickerDialog({
                               <Flex align="center" gap="2">
                                 <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">{hit.symbol}</Text>
                                 <Text fontSize="9px" color="var(--gold)" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
-                                  {nd(hit.chainId)}
+                                  {networkDisplayName(hit.chainId)}
                                 </Text>
                               </Flex>
                               <Text fontSize="10px" color="kk.textMuted" truncate>{hit.name}</Text>

@@ -199,7 +199,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       refreshSwap: { params: { txid: string }; response: PendingSwap | null }
       /** Read-only diagnostic for a single swap: local state + raw Pioneer
        *  response + rescan response, with protocol divergence flagged. Used
-       *  by the SwapDialog "Debug" affordance and dev-tools introspection. */
+       *  by the SwapDialog "Debug" affordance and dev-tools introspection.
+       *  Returns null when called from a passphrase-wallet session, or for
+       *  any txid tagged as a passphrase swap. */
       debugSwapLookup: { params: { txid: string }; response: {
         txid: string
         pioneerBaseUrl: string | undefined
@@ -207,7 +209,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         pioneer: { ok: boolean; status: number | null; raw: any; error?: string }
         pioneerRescan: { ok: boolean; status: number | null; raw: any; error?: string }
         divergence?: { vaultProtocol: string; pioneerProtocol: string }
-      } }
+      } | null }
       getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
       getSwapHistoryStats: { params: void; response: SwapHistoryStats }
       exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
