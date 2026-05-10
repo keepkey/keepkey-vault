@@ -4886,6 +4886,9 @@ engine.on('character-request', (req) => {
 engine.on('passphrase-request', () => {
 	try { rpc.send['passphrase-request']({}) } catch { /* webview not ready yet */ }
 })
+engine.on('button-request', () => {
+	try { rpc.send['device-button-request']({}) } catch { /* webview not ready yet */ }
+})
 engine.on('recovery-error', (err) => {
 	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }
 })

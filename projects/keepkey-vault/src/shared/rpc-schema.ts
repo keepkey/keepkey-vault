@@ -339,6 +339,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }
       'send-progress': { step: string; detail?: string }
+      // Fires whenever the device emits a ButtonRequest (any flow). UI flows
+      // that are mid-signing use this to switch from "device computing" to
+      // "press the button on your KeepKey".
+      'device-button-request': {}
       'emulator-status': EmulatorStatus
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */

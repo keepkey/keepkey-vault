@@ -417,14 +417,27 @@ export const ZCASH_V2_CSS = `
 .zcash-v2 .tx-flow-device {
 	color: var(--zk-gold);
 	margin-bottom: 14px;
-	animation: zk-pulse 1.6s ease-in-out infinite;
+	animation: zk-pulse 2.4s ease-in-out infinite;
+}
+.zcash-v2 .tx-flow-device.tx-flow-device-active {
+	animation: zk-pulse-strong 0.9s ease-in-out infinite;
 }
 .zcash-v2 .tx-flow-copper .tx-flow-device { color: var(--zk-copper); }
 .zcash-v2 .tx-flow-blue   .tx-flow-device { color: #7aa6f0; }
 @keyframes zk-pulse {
-	0%, 100% { opacity: 0.7; transform: translateY(0); }
-	50%      { opacity: 1; transform: translateY(-2px); }
+	0%, 100% { opacity: 0.55; transform: translateY(0); }
+	50%      { opacity: 0.9; transform: translateY(-1px); }
 }
+@keyframes zk-pulse-strong {
+	0%, 100% { opacity: 0.85; transform: translateY(0) scale(1); }
+	50%      { opacity: 1;    transform: translateY(-3px) scale(1.04); }
+}
+/* "Press the button" variant — slightly brighter background to signal urgency */
+.zcash-v2 .tx-flow-press {
+	background: rgba(201,163,104,0.08);
+}
+.zcash-v2 .tx-flow-copper .tx-flow-press { background: rgba(217,119,87,0.07); }
+.zcash-v2 .tx-flow-blue   .tx-flow-press { background: rgba(122,166,240,0.07); }
 
 /* ---- result box ---- */
 .zcash-v2 .result-box {

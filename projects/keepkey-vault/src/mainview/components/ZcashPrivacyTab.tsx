@@ -135,6 +135,13 @@ export function ZcashPrivacyTab() {
 	const [sendResult, setSendResult] = useState<string | null>(null)
 	const [sendError, setSendError] = useState<string | null>(null)
 	const [sendStep, setSendStep] = useState<string | null>(null)
+	// Fires true whenever the device emits a ButtonRequest mid-signing —
+	// flips the TxFlowStatus headline from "Signing on device" to
+	// "Press the button on your KeepKey". Auto-clears 6s after the last
+	// request (we don't get an explicit "button pressed" event from
+	// hdwallet, so we assume the user has pressed if no new request lands).
+	const [awaitingButton, setAwaitingButton] = useState(false)
+	const awaitingButtonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const [shieldAmount, setShieldAmount] = useState("")
 	const [shielding, setShielding] = useState(false)
@@ -203,6 +210,24 @@ export function ZcashPrivacyTab() {
 			setSendResult(payload.detail); setSending(false); setSendStep(null)
 		}
 	}), [])
+
+	useEffect(() => onRpcMessage("device-button-request", () => {
+		setAwaitingButton(true)
+		if (awaitingButtonTimeoutRef.current) clearTimeout(awaitingButtonTimeoutRef.current)
+		awaitingButtonTimeoutRef.current = setTimeout(() => setAwaitingButton(false), 6000)
+	}), [])
+
+	// Clear awaitingButton whenever any tx phase transitions — keeps the state
+	// honest after a flow finishes or moves into broadcasting.
+	useEffect(() => {
+		if (sendStep !== "signing" && shieldStep !== "signing" && deshieldStep !== "signing") {
+			setAwaitingButton(false)
+			if (awaitingButtonTimeoutRef.current) {
+				clearTimeout(awaitingButtonTimeoutRef.current)
+				awaitingButtonTimeoutRef.current = null
+			}
+		}
+	}, [sendStep, shieldStep, deshieldStep])
 
 	const [needsScan, setNeedsScan] = useState(false)
 	const [scanInFlight, setScanInFlight] = useState(false)
@@ -692,7 +717,7 @@ export function ZcashPrivacyTab() {
 									</div>
 								</div>
 
-								<TxFlowStatus step={sendStep} kind="send" intent="shielded send" />
+								<TxFlowStatus step={sendStep} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
 
 								{!sending && (
 									<div className="submit-row">
@@ -778,7 +803,7 @@ export function ZcashPrivacyTab() {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={shieldStep} kind="shield" intent="shield transaction" />
+								<TxFlowStatus step={shieldStep} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
 
 								{!shielding && (
 									<div className="submit-row">
@@ -854,7 +879,7 @@ export function ZcashPrivacyTab() {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={deshieldStep} kind="unshield" intent="unshield transaction" />
+								<TxFlowStatus step={deshieldStep} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
 
 								{!deshielding && (
 									<div className="submit-row">
@@ -1129,8 +1154,11 @@ export function ZcashPrivacyTab() {
  *  state is the one users actually need to act on, so it gets the loudest
  *  treatment: full-card takeover with the device illustration and an explicit
  *  "Look at your KeepKey" call. */
-function TxFlowStatus({ step, kind, intent }: {
+function TxFlowStatus({ step, awaitingButton, kind, intent }: {
 	step: string | null
+	/** True when the device just emitted a ButtonRequest — user must press it now.
+	 *  False when the device is computing silently (proof gen / Orchard sig). */
+	awaitingButton: boolean
 	/** Visual accent — gold for shield, copper for unshield, blue for send */
 	kind: "shield" | "unshield" | "send"
 	/** Plain-English description of what the user is doing — used in the title */
@@ -1167,7 +1195,28 @@ function TxFlowStatus({ step, kind, intent }: {
 				</div>
 			)}
 
-			{step === "signing" && (
+			{step === "signing" && awaitingButton && (
+				<div className="tx-flow-body tx-flow-signing tx-flow-press">
+					<div className="tx-flow-device tx-flow-device-active">
+						<svg viewBox="0 0 64 96" width="56" height="84">
+							<rect x="6" y="4" width="52" height="88" rx="8" fill="#1a1a1d" stroke="currentColor" strokeWidth="2"/>
+							<rect x="12" y="14" width="40" height="50" rx="2" fill="#0b0b0c" stroke="currentColor" strokeWidth="1"/>
+							<rect x="14" y="20" width="36" height="3" fill="currentColor" opacity="0.4"/>
+							<rect x="14" y="28" width="28" height="3" fill="currentColor" opacity="0.7"/>
+							<rect x="14" y="36" width="32" height="3" fill="currentColor" opacity="0.7"/>
+							<circle cx="32" cy="78" r="6" fill="none" stroke="currentColor" strokeWidth="2"/>
+							<circle cx="32" cy="78" r="9" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5">
+								<animate attributeName="r" values="6;14;6" dur="1.2s" repeatCount="indefinite"/>
+								<animate attributeName="opacity" values="0.7;0;0.7" dur="1.2s" repeatCount="indefinite"/>
+							</circle>
+						</svg>
+					</div>
+					<div className="tx-flow-headline">Press the button on your KeepKey →</div>
+					<p>Confirm the {intent} on the device screen, then press the round button.</p>
+				</div>
+			)}
+
+			{step === "signing" && !awaitingButton && (
 				<div className="tx-flow-body tx-flow-signing">
 					<div className="tx-flow-device">
 						<svg viewBox="0 0 64 96" width="56" height="84">
@@ -1179,8 +1228,8 @@ function TxFlowStatus({ step, kind, intent }: {
 							<circle cx="32" cy="78" r="6" fill="none" stroke="currentColor" strokeWidth="1.5"/>
 						</svg>
 					</div>
-					<div className="tx-flow-headline">Look at your KeepKey →</div>
-					<p>Approve the transaction on the device. <strong>This may take 60+ seconds</strong> as the device computes the Orchard signature.</p>
+					<div className="tx-flow-headline">Signing on device…</div>
+					<p>Your KeepKey is computing the Orchard signature. <strong>This may take 60+ seconds</strong> — no input needed yet, just wait.</p>
 				</div>
 			)}
 
