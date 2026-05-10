@@ -413,6 +413,7 @@ async function _shieldZecInner(
 	console.log(`[zcash-shield] raw_tx (first 200): ${raw_tx?.slice(0, 200)}`)
 	console.log(`[zcash-shield] raw_tx length: ${raw_tx?.length / 2} bytes`)
 	console.log("[zcash-shield] Broadcasting...")
+	opts?.onProgress?.("broadcasting")
 	await sendCommand("broadcast", { raw_tx })
 
 	console.log(`[zcash-shield] Shield transaction sent: ${txid}`)

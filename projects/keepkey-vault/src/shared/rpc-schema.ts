@@ -338,6 +338,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }
+      'send-progress': { step: string; detail?: string }
       'emulator-status': EmulatorStatus
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */

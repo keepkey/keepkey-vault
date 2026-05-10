@@ -2828,11 +2828,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						to: params.recipient, value: String(params.amount), memo: params.memo,
 					}) as Promise<T>
 					: undefined
-				return await sendShielded(engine.wallet as any, {
+				try { rpc.send['send-progress']({ step: 'building' }) } catch { /* webview not ready */ }
+				const onProgress = (step: string) => {
+					try { rpc.send['send-progress']({ step }) } catch { /* webview not ready */ }
+				}
+				const result = await sendShielded(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
 					memo: params.memo,
-				}, { signWrap })
+				}, { signWrap, onProgress })
+				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				return result
 			},
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
@@ -2854,10 +2860,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						operation: 'zcashShieldZec', chain: 'Zcash', value: String(params.amount),
 					}) as Promise<T>
 					: undefined
+				const onProgress = (step: string) => {
+					try { rpc.send['shield-progress']({ step }) } catch { /* webview not ready */ }
+				}
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
 					account: params.account,
-				}, { signWrap })
+				}, { signWrap, onProgress })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},
@@ -2875,11 +2884,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						to: params.recipient, value: String(params.amount),
 					}) as Promise<T>
 					: undefined
+				const onProgress = (step: string) => {
+					try { rpc.send['deshield-progress']({ step }) } catch { /* webview not ready */ }
+				}
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
 					account: params.account,
-				}, { signWrap })
+				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
 			},

@@ -336,6 +336,96 @@ export const ZCASH_V2_CSS = `
 	letter-spacing: -0.04em; flex-shrink: 0;
 }
 
+/* ---- tx flow status (in-form takeover during signing) ---- */
+.zcash-v2 .tx-flow {
+	margin-top: 12px;
+	border: 1px solid var(--zk-line);
+	border-radius: 10px;
+	background: var(--zk-bg);
+	overflow: hidden;
+}
+.zcash-v2 .tx-flow-gold     { border-color: var(--zk-gold-line); background: linear-gradient(180deg, rgba(201,163,104,0.06), transparent); }
+.zcash-v2 .tx-flow-copper   { border-color: rgba(217,119,87,0.3); background: linear-gradient(180deg, rgba(217,119,87,0.05), transparent); }
+.zcash-v2 .tx-flow-blue     { border-color: rgba(122,166,240,0.35); background: linear-gradient(180deg, rgba(122,166,240,0.05), transparent); }
+
+.zcash-v2 .tx-flow-stepper {
+	display: grid; grid-template-columns: repeat(3, 1fr);
+	padding: 14px 18px;
+	gap: 10px;
+	border-bottom: 1px solid var(--zk-line-soft);
+	position: relative;
+}
+.zcash-v2 .tx-flow-step {
+	display: flex; align-items: center; gap: 10px;
+	font-family: var(--zk-font-display); font-size: 12px;
+	color: var(--zk-fg-faint);
+	min-width: 0;
+}
+.zcash-v2 .tx-flow-step.done   { color: var(--zk-fg-mute); }
+.zcash-v2 .tx-flow-step.active { color: var(--zk-fg); font-weight: 600; }
+.zcash-v2 .tx-flow-dot {
+	width: 22px; height: 22px; flex-shrink: 0;
+	border-radius: 50%;
+	border: 1.5px solid currentColor;
+	display: grid; place-items: center;
+	font-family: var(--zk-font-mono); font-size: 11px; font-weight: 600;
+}
+.zcash-v2 .tx-flow-step.done .tx-flow-dot {
+	color: var(--zk-green); border-color: var(--zk-green);
+	background: var(--zk-green-soft);
+}
+.zcash-v2 .tx-flow-step.active .tx-flow-dot {
+	border-style: dashed;
+}
+.zcash-v2 .tx-flow-gold   .tx-flow-step.active .tx-flow-dot { color: var(--zk-gold);   background: var(--zk-gold-soft); }
+.zcash-v2 .tx-flow-copper .tx-flow-step.active .tx-flow-dot { color: var(--zk-copper); background: var(--zk-copper-soft); }
+.zcash-v2 .tx-flow-blue   .tx-flow-step.active .tx-flow-dot { color: #7aa6f0;          background: rgba(122,166,240,0.12); }
+.zcash-v2 .tx-flow-spin {
+	width: 10px; height: 10px;
+	border-radius: 50%;
+	border: 1.5px solid currentColor;
+	border-top-color: transparent;
+	animation: zk-spin 0.9s linear infinite;
+}
+@keyframes zk-spin { to { transform: rotate(360deg); } }
+.zcash-v2 .tx-flow-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.zcash-v2 .tx-flow-body {
+	padding: 18px 22px;
+	display: flex; flex-direction: column; align-items: center;
+	text-align: center;
+}
+.zcash-v2 .tx-flow-headline {
+	font-family: var(--zk-font-display); font-size: 16px; font-weight: 600;
+	color: var(--zk-fg); margin-bottom: 6px;
+}
+.zcash-v2 .tx-flow-body p {
+	margin: 0; font-size: 12.5px; color: var(--zk-fg-dim);
+	line-height: 1.55; max-width: 56ch;
+}
+.zcash-v2 .tx-flow-body p strong { color: var(--zk-fg); }
+
+/* "Look at your KeepKey" — the loudest variant */
+.zcash-v2 .tx-flow-signing { padding: 26px 22px 24px; }
+.zcash-v2 .tx-flow-signing .tx-flow-headline {
+	font-size: 22px; margin-bottom: 8px;
+	color: var(--zk-gold);
+	letter-spacing: -0.015em;
+}
+.zcash-v2 .tx-flow-copper .tx-flow-signing .tx-flow-headline { color: var(--zk-copper); }
+.zcash-v2 .tx-flow-blue   .tx-flow-signing .tx-flow-headline { color: #7aa6f0; }
+.zcash-v2 .tx-flow-device {
+	color: var(--zk-gold);
+	margin-bottom: 14px;
+	animation: zk-pulse 1.6s ease-in-out infinite;
+}
+.zcash-v2 .tx-flow-copper .tx-flow-device { color: var(--zk-copper); }
+.zcash-v2 .tx-flow-blue   .tx-flow-device { color: #7aa6f0; }
+@keyframes zk-pulse {
+	0%, 100% { opacity: 0.7; transform: translateY(0); }
+	50%      { opacity: 1; transform: translateY(-2px); }
+}
+
 /* ---- result box ---- */
 .zcash-v2 .result-box {
 	margin-top: 14px;

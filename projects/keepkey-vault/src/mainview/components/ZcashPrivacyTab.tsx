@@ -134,6 +134,7 @@ export function ZcashPrivacyTab() {
 	const [sending, setSending] = useState(false)
 	const [sendResult, setSendResult] = useState<string | null>(null)
 	const [sendError, setSendError] = useState<string | null>(null)
+	const [sendStep, setSendStep] = useState<string | null>(null)
 
 	const [shieldAmount, setShieldAmount] = useState("")
 	const [shielding, setShielding] = useState(false)
@@ -193,6 +194,13 @@ export function ZcashPrivacyTab() {
 		setDeshieldStep(payload.step)
 		if (payload.step === "complete" && payload.detail) {
 			setDeshieldResult(payload.detail); setDeshielding(false); setDeshieldStep(null)
+		}
+	}), [])
+
+	useEffect(() => onRpcMessage("send-progress", (payload: { step: string; detail?: string }) => {
+		setSendStep(payload.step)
+		if (payload.step === "complete" && payload.detail) {
+			setSendResult(payload.detail); setSending(false); setSendStep(null)
 		}
 	}), [])
 
@@ -415,17 +423,18 @@ export function ZcashPrivacyTab() {
 			setSendError(recipientValidation.error ? t(recipientValidation.error) : t("invalidZcashRecipient"))
 			return
 		}
-		setSending(true); setSendError(null); setSendResult(null)
+		setSending(true); setSendError(null); setSendResult(null); setSendStep("building")
 		try {
 			const zatoshis = parseZatoshis(amount)
 			if (memo && new TextEncoder().encode(memo).length > 512) throw new Error(t("memoTooLong"))
+			// 10-min timeout — Halo 2 proof + on-device Orchard signing can run >60s
 			const result = await rpcRequest<{ txid: string }>("zcashShieldedSend",
-				{ recipient, amount: zatoshis, memo: memo || undefined }, 120000)
+				{ recipient, amount: zatoshis, memo: memo || undefined }, 600000)
 			setSendResult(result.txid)
 			setRecipient(""); setAmount(""); setMemo("")
 			refreshBalance()
 		} catch (e: any) { setSendError(e.message || "Send failed") }
-		setSending(false)
+		setSending(false); setSendStep(null)
 	}, [recipient, amount, memo, recipientValidation, refreshBalance, t])
 
 	const handleShield = useCallback(async () => {
@@ -683,19 +692,21 @@ export function ZcashPrivacyTab() {
 									</div>
 								</div>
 
-								<div className="submit-row">
-									<div className="submit-hint">
-										<div className="kk-glyph">kk</div>
-										Confirm on your KeepKey when prompted
+								<TxFlowStatus step={sendStep} kind="send" intent="shielded send" />
+
+								{!sending && (
+									<div className="submit-row">
+										<div className="submit-hint">
+											<div className="kk-glyph">kk</div>
+											Verify the recipient and amount on your KeepKey
+										</div>
+										<button
+											className="submit"
+											onClick={handleSend}
+											disabled={!recipient || !amount || (recipientValidation != null && !recipientValidation.valid)}
+										>Send</button>
 									</div>
-									<button
-										className="submit"
-										onClick={handleSend}
-										disabled={!recipient || !amount || sending || (recipientValidation != null && !recipientValidation.valid)}
-									>
-										{sending ? "Sending…" : "Send"}
-									</button>
-								</div>
+								)}
 
 								{sendResult && <ResultBox kind="ok" title="Sent" txid={sendResult} />}
 								{sendError && <ResultBox kind="err" title="Send failed" message={sendError} />}
@@ -767,22 +778,21 @@ export function ZcashPrivacyTab() {
 										>Max</button>
 									</div>
 								</div>
-								<div className="submit-row">
-									<div className="submit-hint">
-										<div className="kk-glyph">kk</div>
-										{shielding
-											? shieldStep === "building" ? "Building transaction…"
-											: shieldStep === "signing" ? "Signing on device…"
-											: shieldStep === "broadcasting" ? "Broadcasting…"
-											: "Working…"
-											: "Confirm on your KeepKey"}
+								<TxFlowStatus step={shieldStep} kind="shield" intent="shield transaction" />
+
+								{!shielding && (
+									<div className="submit-row">
+										<div className="submit-hint">
+											<div className="kk-glyph">kk</div>
+											Confirm the shield on your KeepKey
+										</div>
+										<button
+											className="submit"
+											onClick={handleShield}
+											disabled={!shieldAmount}
+										>Shield</button>
 									</div>
-									<button
-										className="submit"
-										onClick={handleShield}
-										disabled={!shieldAmount || shielding}
-									>{shielding ? "Shielding…" : "Shield"}</button>
-								</div>
+								)}
 								{shieldResult && <ResultBox kind="ok" title="Shielded" txid={shieldResult} />}
 								{shieldError && <ResultBox kind="err" title="Shield failed" message={shieldError} />}
 							</div>
@@ -844,21 +854,20 @@ export function ZcashPrivacyTab() {
 										>Max</button>
 									</div>
 								</div>
-								<div className="submit-row">
-									<div className="submit-hint" style={{ color: "var(--zk-copper)" }}>
-										{deshielding
-											? deshieldStep === "building" ? "Building transaction…"
-											: deshieldStep === "signing" ? "Signing on device…"
-											: deshieldStep === "broadcasting" ? "Broadcasting…"
-											: "Working…"
-											: "This will be publicly visible on chain"}
+								<TxFlowStatus step={deshieldStep} kind="unshield" intent="unshield transaction" />
+
+								{!deshielding && (
+									<div className="submit-row">
+										<div className="submit-hint" style={{ color: "var(--zk-copper)" }}>
+											⚠ This will be publicly visible on chain
+										</div>
+										<button
+											className="submit warn"
+											onClick={handleDeshield}
+											disabled={!deshieldRecipient || !deshieldAmount || (deshieldRecipientValidation != null && !deshieldRecipientValidation.valid)}
+										>Unshield</button>
 									</div>
-									<button
-										className="submit warn"
-										onClick={handleDeshield}
-										disabled={!deshieldRecipient || !deshieldAmount || deshielding || (deshieldRecipientValidation != null && !deshieldRecipientValidation.valid)}
-									>{deshielding ? "Unshielding…" : "Unshield"}</button>
-								</div>
+								)}
 								{deshieldResult && <ResultBox kind="ok" title="Unshielded" txid={deshieldResult} />}
 								{deshieldError && <ResultBox kind="err" title="Unshield failed" message={deshieldError} />}
 							</div>
@@ -1105,6 +1114,81 @@ export function ZcashPrivacyTab() {
 						</table>
 					</div>
 				</section>
+			)}
+		</div>
+	)
+}
+
+/** Prominent in-form status panel shown while a Zcash tx is in flight.
+ *
+ *   building     — sidecar building PCZT + Halo 2 proof (~5–30s)
+ *   signing      — sent to KeepKey, awaiting user approval (USER MUST LOOK AT DEVICE)
+ *   broadcasting — pushing raw_tx to lightwalletd
+ *
+ *  Replaces the tiny "submit-hint" mid-form text the old UI used. The "signing"
+ *  state is the one users actually need to act on, so it gets the loudest
+ *  treatment: full-card takeover with the device illustration and an explicit
+ *  "Look at your KeepKey" call. */
+function TxFlowStatus({ step, kind, intent }: {
+	step: string | null
+	/** Visual accent — gold for shield, copper for unshield, blue for send */
+	kind: "shield" | "unshield" | "send"
+	/** Plain-English description of what the user is doing — used in the title */
+	intent: string
+}) {
+	if (!step || step === "complete") return null
+	const accent = kind === "unshield" ? "copper" : kind === "send" ? "blue" : "gold"
+	const steps: Array<{ id: string; label: string }> = [
+		{ id: "building",     label: "Building proof" },
+		{ id: "signing",      label: "Sign on KeepKey" },
+		{ id: "broadcasting", label: "Broadcasting" },
+	]
+	const activeIdx = steps.findIndex(s => s.id === step)
+	return (
+		<div className={`tx-flow tx-flow-${accent}`}>
+			<div className="tx-flow-stepper">
+				{steps.map((s, i) => {
+					const state = i < activeIdx ? "done" : i === activeIdx ? "active" : "pending"
+					return (
+						<div key={s.id} className={`tx-flow-step ${state}`}>
+							<div className="tx-flow-dot">
+								{state === "done" ? "✓" : state === "active" ? <span className="tx-flow-spin" /> : i + 1}
+							</div>
+							<div className="tx-flow-label">{s.label}</div>
+						</div>
+					)
+				})}
+			</div>
+
+			{step === "building" && (
+				<div className="tx-flow-body">
+					<div className="tx-flow-headline">Building your {intent}…</div>
+					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. This is normal cryptographic work — typically 5–30 seconds.</p>
+				</div>
+			)}
+
+			{step === "signing" && (
+				<div className="tx-flow-body tx-flow-signing">
+					<div className="tx-flow-device">
+						<svg viewBox="0 0 64 96" width="56" height="84">
+							<rect x="6" y="4" width="52" height="88" rx="8" fill="#1a1a1d" stroke="currentColor" strokeWidth="2"/>
+							<rect x="12" y="14" width="40" height="50" rx="2" fill="#0b0b0c" stroke="currentColor" strokeWidth="1"/>
+							<rect x="14" y="20" width="36" height="3" fill="currentColor" opacity="0.4"/>
+							<rect x="14" y="28" width="28" height="3" fill="currentColor" opacity="0.7"/>
+							<rect x="14" y="36" width="32" height="3" fill="currentColor" opacity="0.7"/>
+							<circle cx="32" cy="78" r="6" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+						</svg>
+					</div>
+					<div className="tx-flow-headline">Look at your KeepKey →</div>
+					<p>Approve the transaction on the device. <strong>This may take 60+ seconds</strong> as the device computes the Orchard signature.</p>
+				</div>
+			)}
+
+			{step === "broadcasting" && (
+				<div className="tx-flow-body">
+					<div className="tx-flow-headline">Broadcasting to the network…</div>
+					<p>Almost done. Just pushing the signed transaction to a Zcash node.</p>
+				</div>
 			)}
 		</div>
 	)
