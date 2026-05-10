@@ -15,10 +15,11 @@
  */
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
-import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid } from './db'
+import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid, setSwapRelayRequestId } from './db'
 import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
+import { extractRelayRequestId } from '../shared/relay-utils'
 
 /** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
  *  layer accepts; symbols / asset names / display names are derived here for
@@ -220,6 +221,11 @@ export function trackSwap(
   const fromDisplay = resolveDisplayFromCaip(params.fromCaip)
   const toDisplay = resolveDisplayFromCaip(params.toCaip)
 
+  // Relay deposits embed the request id as the trailing bytes32 of the
+  // prebuilt calldata. Extract once at sign-time so the resume path / tracker
+  // link doesn't need a round-trip to api.relay.link for new swaps.
+  const relayRequestId = extractRelayRequestId(params.relayTx?.data)
+
   const swap: PendingSwap = {
     txid: result.txid,
     fromAsset: fromDisplay.asset,
@@ -243,6 +249,7 @@ export function trackSwap(
     updatedAt: now,
     estimatedTime: quote.estimatedTime,
     slippageBps: quote.slippageBps,
+    relayRequestId,
   }
 
   pendingSwaps.set(result.txid, swap)
@@ -277,6 +284,7 @@ export function trackSwap(
     updatedAt: now,
     estimatedTimeSeconds: quote.estimatedTime || 0,
     approvalTxid: result.approvalTxid,
+    relayRequestId,
   }
   // PRIVACY: Skip DB write for passphrase wallets — swap still tracked in-memory for UI.
   if (opts?.skipPersist) {
@@ -334,7 +342,7 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
 
   const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
 
-  const body = {
+  const body: Record<string, any> = {
     txHash: swap.txid,
     addresses: [],
     sellAsset: {
@@ -364,6 +372,13 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
     },
     integration,
     swapper: swap.swapper,
+  }
+  // Forward the Relay request id when we have one. Pioneer's swap-monitor
+  // (checkRelaySwap) keys on relayData.requestId; without it Pioneer falls
+  // back to a confirmation-only watcher that never reaches a terminal status
+  // for Relay's off-chain settlement model.
+  if (swap.relayRequestId) {
+    body.relayData = { requestId: swap.relayRequestId }
   }
 
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
@@ -466,6 +481,7 @@ function hydrateFromDb(txid: string): PendingSwap | null {
     estimatedTime: r.estimatedTimeSeconds,
     slippageBps: r.slippageBps,
     error: r.error,
+    relayRequestId: r.relayRequestId,
   }
   pendingSwaps.set(txid, swap)
   return swap
@@ -531,6 +547,20 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
   // the heat-death of the universe.
   if (await detectEvmRevert(swap)) return swap
 
+  // Lazy Relay request-id backfill for legacy rows. New swaps get the id
+  // extracted from calldata at trackSwap time; older rows (or any swap whose
+  // selector we don't recognize) are resolved against api.relay.link. Cheap
+  // (one HTTP call) and only fires for relay-ish integrations missing the id.
+  if (!swap.relayRequestId && shouldBackfillRelayRequestId(swap)) {
+    const id = await fetchRelayRequestIdByHash(swap.txid)
+    if (id) {
+      swap.relayRequestId = id
+      try { setSwapRelayRequestId(swap.txid, id) } catch { /* best-effort */ }
+      pushUpdate(swap)
+      swapLog(`${TAG} Relay requestId backfilled for ${swap.txid.slice(0, 10)}...: ${id.slice(0, 12)}...`)
+    }
+  }
+
   const pioneer = await getPioneer()
   try {
     const resp = await pioneer.GetPendingSwap({ txHash: txid })
@@ -560,6 +590,95 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
     }
   }
   return swap
+}
+
+/** Diagnostic snapshot for a single swap: local state + Pioneer state +
+ *  Pioneer rescan result, with raw responses preserved. Surfaced via the
+ *  `debugSwapLookup` RPC so the user can introspect why a swap is stuck
+ *  without flipping the SWAP_DEBUG flag and re-broadcasting. Read-only —
+ *  does not mutate the in-memory or persisted swap state. */
+export async function debugSwapLookup(txid: string): Promise<{
+  txid: string
+  pioneerBaseUrl: string | undefined
+  local: PendingSwap | null
+  pioneer: { ok: boolean; status: number | null; raw: any; error?: string }
+  pioneerRescan: { ok: boolean; status: number | null; raw: any; error?: string }
+  divergence?: { vaultProtocol: string; pioneerProtocol: string }
+}> {
+  const local = pendingSwaps.get(txid) || hydrateFromDb(txid)
+  let pioneerBaseUrl: string | undefined
+  try {
+    const { getPioneerApiBase } = await import('./pioneer')
+    pioneerBaseUrl = getPioneerApiBase()
+  } catch { /* best-effort */ }
+
+  const pioneer = await getPioneer()
+  const tryCall = async (rescan: boolean) => {
+    try {
+      const resp = await pioneer.GetPendingSwap({ txHash: txid, ...(rescan ? { rescan: true } : {}) })
+      const raw = resp?.data || resp
+      return { ok: true, status: 200, raw }
+    } catch (e: any) {
+      return { ok: false, status: e?.status ?? e?.statusCode ?? null, raw: null, error: e?.message || String(e) }
+    }
+  }
+  const [p1, p2] = await Promise.all([tryCall(false), tryCall(true)])
+
+  // Surface the protocol-tracking divergence loudly so the user sees the
+  // exact failure mode: vault registered as X, Pioneer is monitoring as Y.
+  const detectedProtocol = p1.raw?.details?.protocol?.protocol || p1.raw?.integration
+  const localProto = (local?.swapper || local?.integration || '').toLowerCase()
+  const remoteProto = (detectedProtocol || '').toLowerCase()
+  const divergence = (localProto && remoteProto && !localProto.includes(remoteProto) && !remoteProto.includes(localProto))
+    ? { vaultProtocol: localProto, pioneerProtocol: remoteProto }
+    : undefined
+
+  return { txid, pioneerBaseUrl, local, pioneer: p1, pioneerRescan: p2, divergence }
+}
+
+// ── Relay request-id backfill ───────────────────────────────────────
+//
+// Relay's request id (bytes32) keys their public status page and our tracker
+// link. trackSwap extracts it from the prebuilt calldata for new swaps; this
+// fallback covers legacy rows persisted before that extractor existed and any
+// future Relay deposit selector we haven't taught the extractor about yet.
+//
+// We only attempt it for integrations that route through Relay (relay native,
+// or shapeshift's Relay sub-route) and only when the id isn't already on the
+// swap. The /requests/v2?hash=... endpoint matches against the inbound tx
+// hash directly — no sender lookup or quote-shape parsing needed.
+
+function shouldBackfillRelayRequestId(swap: PendingSwap): boolean {
+  const integration = (swap.integration || '').toLowerCase()
+  // shapeshift may or may not be routing through Relay — the API call is cheap
+  // and returns nothing for non-Relay swaps, so we let the lookup decide.
+  if (integration === 'relay' || integration === 'shapeshift' || integration === 'shapeshiftswap') return true
+  const swapper = (swap.swapper || '').toLowerCase().replace(/[\s_.-]/g, '')
+  return swapper === 'relay' || swapper === 'relaylink' || swapper === 'relayexchange'
+}
+
+async function fetchRelayRequestIdByHash(txid: string): Promise<string | undefined> {
+  try {
+    const resp = await fetch(
+      `https://api.relay.link/requests/v2?hash=${encodeURIComponent(txid)}`,
+      { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } },
+    )
+    if (!resp.ok) {
+      swapLog(`${TAG} Relay backfill: HTTP ${resp.status} for ${txid.slice(0, 10)}...`)
+      return undefined
+    }
+    const data = await resp.json() as { requests?: Array<{ id?: string; data?: { inTxs?: Array<{ hash?: string }> } }> }
+    // Prefer the request whose inTx hash matches exactly — Relay can return
+    // siblings for the same user when the hash query is partial.
+    const target = txid.toLowerCase()
+    const match = (data.requests || []).find(r =>
+      (r.data?.inTxs || []).some(t => (t.hash || '').toLowerCase() === target)
+    ) || data.requests?.[0]
+    return match?.id?.toLowerCase() || undefined
+  } catch (e: any) {
+    swapLog(`${TAG} Relay backfill failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
+    return undefined
+  }
 }
 
 function mapPioneerStatus(status: string): SwapTrackingStatus {
@@ -592,6 +711,7 @@ function pushUpdate(swap: PendingSwap): void {
     outboundTxid: swap.outboundTxid,
     error: swap.error,
     swapper: swap.swapper,
+    relayRequestId: swap.relayRequestId,
   }
   swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)

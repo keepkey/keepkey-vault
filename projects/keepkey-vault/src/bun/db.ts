@@ -288,6 +288,10 @@ export function initDb() {
     for (const col of ['from_caip TEXT', 'to_caip TEXT']) {
       try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    // Relay's bytes32 request id — drives the "Relay Track" external link.
+    // Filled at trackSwap time via on-chain calldata, or lazily backfilled
+    // by refreshSwap via api.relay.link for legacy rows.
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN relay_request_id TEXT`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
@@ -1244,8 +1248,9 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
         (id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
          from_caip, to_caip, from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
          fee_outbound, integration, swapper, memo, inbound_address, router, status, outbound_txid,
-         error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid,
+         relay_request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id, record.txid, record.fromAsset, record.toAsset,
         record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
@@ -1258,6 +1263,7 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
         record.error || null, record.createdAt, record.updatedAt,
         record.completedAt || null, record.estimatedTimeSeconds,
         record.actualTimeSeconds || null, record.approvalTxid || null,
+        record.relayRequestId || null,
       ]
     )
   } catch (e: any) {
@@ -1422,6 +1428,18 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     estimatedTimeSeconds: r.estimated_time_secs,
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
+    relayRequestId: r.relay_request_id || undefined,
+  }
+}
+
+/** Backfill the Relay request id on an existing row (called when refreshSwap
+ *  resolves it lazily via api.relay.link for a legacy swap). */
+export function setSwapRelayRequestId(txid: string, relayRequestId: string) {
+  try {
+    if (!db) return
+    db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ?', [relayRequestId, txid])
+  } catch (e: any) {
+    console.warn('[db] setSwapRelayRequestId failed:', e.message)
   }
 }
 

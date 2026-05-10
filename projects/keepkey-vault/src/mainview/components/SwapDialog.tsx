@@ -468,6 +468,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [liveOutboundRequired, setLiveOutboundRequired] = useState<number | undefined>()
   const [liveOutboundTxid, setLiveOutboundTxid] = useState<string | undefined>()
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
+  const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
 
   // ── Countdown timer ───────────────────────────────────────────────
   const [countdown, setCountdown] = useState(0)
@@ -533,6 +534,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (update.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(update.outboundRequiredConfirmations)
       if (update.outboundTxid) setLiveOutboundTxid(update.outboundTxid)
       if (update.swapper) setLiveSwapper(update.swapper)
+      if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -571,6 +573,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setLiveOutboundRequired(undefined)
       setLiveOutboundTxid(undefined)
       setLiveSwapper(undefined)
+      setLiveRelayRequestId(undefined)
       setAfterFromBal(null)
       setAfterToBal(null)
       setShowConfetti(false)
@@ -746,6 +749,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
     if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
     if (resumeSwap.swapper) setLiveSwapper(resumeSwap.swapper)
+    if (resumeSwap.relayRequestId) setLiveRelayRequestId(resumeSwap.relayRequestId)
     // If resuming a terminal swap, suppress confetti/sound
     const isTerminal = resumeSwap.status === 'completed' || resumeSwap.status === 'failed' || resumeSwap.status === 'refunded'
     if (isTerminal) completionFiredRef.current = true
@@ -1613,7 +1617,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     // post-broadcast value) over the quote-time parse, which often
                     // misses `swapper` for aggregator routes.
                     const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                    const tracker = providerTrackerUrl(protoHint, txid)
+                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
                     if (!tracker) return null
                     return (
                       <Button size="xs" flex="1" variant="outline" borderColor="rgba(35,220,200,0.3)" color="#23DCC8"

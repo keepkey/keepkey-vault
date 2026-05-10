@@ -3836,6 +3836,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { refreshSwap } = await import('./swap-tracker')
 				return await refreshSwap(params.txid)
 			},
+			debugSwapLookup: async (params) => {
+				// Read-only diagnostic — Pioneer GetPendingSwap + rescan + local
+				// state, with protocol divergence flagged. Safe in passphrase mode
+				// (returns local=null when the swap was never persisted).
+				const { debugSwapLookup } = await import('./swap-tracker')
+				return await debugSwapLookup(params.txid)
+			},
 			getSwapHistory: async (params) => {
 				if (engine.isPassphraseWallet) return []
 				return getSwapHistory(params || undefined)
