@@ -469,21 +469,19 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // ping-pong loop status had.
   const acceptOutboundTxid = !swap.midgardClassified
 
+  // Stale-swapper cleanup MUST be evaluated as a "change" before the changed
+  // boolean is computed. Otherwise the cleanup runs but no push/persist
+  // fires, leaving the DB record (and the resume-render path that seeds
+  // liveSwapper from it) stuck on "thorchain" forever.
+  const shouldClearSwapper = isNativeVaultRoute && !!swap.swapper
+
   const changed =
     newStatus !== swap.status ||
     confirmations !== swap.confirmations ||
     (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
     (acceptOutboundTxid && outboundTxid && outboundTxid !== swap.outboundTxid) ||
-    (detectedSwapper && detectedSwapper !== swap.swapper)
-
-  // One-shot cleanup: native-vault routes (mayachain/thorchain) IS the
-  // swapper. Earlier code populated `swap.swapper` from Pioneer's
-  // `details.protocol.protocol` which mis-reports Maya as "thorchain"
-  // (Maya forks Thor's protocol naming) — clear it so the badge falls
-  // back to integration. Self-heals existing in-flight swaps.
-  if (isNativeVaultRoute && swap.swapper) {
-    swap.swapper = undefined
-  }
+    (detectedSwapper && detectedSwapper !== swap.swapper) ||
+    shouldClearSwapper
 
   if (changed) {
     swap.status = newStatus
@@ -492,6 +490,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     if (outboundConfirmations !== undefined) swap.outboundConfirmations = outboundConfirmations
     if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
     if (acceptOutboundTxid && outboundTxid) swap.outboundTxid = outboundTxid
+    if (shouldClearSwapper) swap.swapper = undefined
     if (errorMsg) swap.error = errorMsg
     if (detectedSwapper && !swap.swapper) swap.swapper = detectedSwapper
 
@@ -510,16 +509,21 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
 
     swapLog(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
 
-    // Persist status change to SQLite (skip for passphrase wallet swaps)
+    // Persist status change to SQLite (skip for passphrase wallet swaps).
+    // Use `swap.outboundTxid` (post-lock truth) NOT the local `outboundTxid`
+    // extracted from Pioneer — when midgardClassified is set Pioneer's view
+    // is stale and would otherwise overwrite the DB on the next refresh.
+    // Same rationale for swapper: pass `null` (not undefined) when we just
+    // cleared a stale value so the DB column actually clears.
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
     const now = Date.now()
     if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, newStatus, {
       deviceId: swap.deviceId,
       walletId: swap.walletId,
-      outboundTxid: outboundTxid || undefined,
+      outboundTxid: swap.outboundTxid || undefined,
       error: errorMsg || undefined,
       receivedOutput,
-      swapper: swap.swapper,
+      swapper: shouldClearSwapper ? null : swap.swapper,
       completedAt: isFinal ? now : undefined,
       actualTimeSeconds: isFinal ? Math.round((now - swap.createdAt) / 1000) : undefined,
     })
@@ -558,6 +562,13 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     slippageBps: r.slippageBps,
     error: r.error,
     relayRequestId: r.relayRequestId,
+    // Carry the classifier output across resumes so the UI's explorer link
+    // and refund reason render correctly without waiting for the next poll.
+    // Implies `midgardClassified=true` if either is set, locking Pioneer's
+    // status mapping out from regression on the first refresh.
+    outboundChainId: r.outboundChainId,
+    refundReason: r.refundReason,
+    midgardClassified: !!(r.outboundChainId || r.refundReason),
   }
 }
 
@@ -719,6 +730,8 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         const isFinal = swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded'
         if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, {
           outboundTxid: swap.outboundTxid,
+          outboundChainId: swap.outboundChainId,
+          refundReason: swap.refundReason,
           error: swap.error,
           completedAt: isFinal ? Date.now() : undefined,
         })

@@ -861,6 +861,13 @@ export interface SwapHistoryRecord {
   /** Relay request id (bytes32 hex, lowercase). Persisted so the resume path
    *  can render the "Relay Track" external link without re-querying. */
   relayRequestId?: string
+  /** Chain id of the actual outbound. For refunds this is the source chain
+   *  (Maya returns the inbound asset on the inbound chain), so the explorer
+   *  link must use this — not toChainId. Populated by the Maya midgard
+   *  classifier in swap-tracker; falls back to toChainId when absent. */
+  outboundChainId?: string
+  /** Refund reason from Midgard when status='refunded'. */
+  refundReason?: string
 }
 
 /** Filter params for getSwapHistory RPC */

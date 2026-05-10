@@ -298,6 +298,13 @@ export function initDb() {
     // Filled at trackSwap time via on-chain calldata, or lazily backfilled
     // by refreshSwap via api.relay.link for legacy rows.
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN relay_request_id TEXT`) } catch { /* already exists */ }
+    // Outbound chain truth from Maya midgard classifier — refunds outbound on
+    // source chain, not destination. Without this column, history+activity
+    // panels still resolve explorer URLs against toChainId and a refunded
+    // ETH→ZEC opens a Zcash explorer for an ETH refund tx.
+    for (const col of ['outbound_chain_id TEXT', 'refund_reason TEXT']) {
+      try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_device_ts ON api_log(device_id, timestamp DESC)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_wallet_ts ON api_log(wallet_id, timestamp DESC)`) } catch { /* already exists */ }
@@ -1385,17 +1392,29 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
   }
 }
 
-/** Update swap status and related fields (called on every status change) */
+/** Update swap status and related fields (called on every status change).
+ *
+ *  Field semantics:
+ *  - Truthy values UPDATE the column.
+ *  - `null` values explicitly CLEAR the column (UPDATE … SET col = NULL).
+ *  - `undefined` (or field absent) leaves the column unchanged.
+ *  This three-state distinction matters for `swapper` — once the tracker has
+ *  identified a swap as native-vault (mayachain/thorchain) it needs to wipe
+ *  any stale "thorchain" value Pioneer wrote earlier; an undefined-skip
+ *  pattern would silently fail and leave the badge mis-rendering.
+ */
 export function updateSwapHistoryStatus(
   txid: string,
   status: SwapTrackingStatus,
   extra?: {
     deviceId?: string
     walletId?: string
-    outboundTxid?: string
+    outboundTxid?: string | null
+    outboundChainId?: string | null
+    refundReason?: string | null
     error?: string
     receivedOutput?: string
-    swapper?: string
+    swapper?: string | null
     completedAt?: number
     actualTimeSeconds?: number
   }
@@ -1411,10 +1430,17 @@ export function updateSwapHistoryStatus(
       { col: 'updated_at', value: now },
     ]
 
-    if (extra?.outboundTxid) setClauses.push({ col: 'outbound_txid', value: extra.outboundTxid })
+    // Three-state writers: truthy → set, null → clear, undefined → skip.
+    const writeNullable = (col: string, val: string | null | undefined) => {
+      if (val === undefined) return
+      setClauses.push({ col, value: val ?? null })
+    }
+    writeNullable('outbound_txid', extra?.outboundTxid)
+    writeNullable('outbound_chain_id', extra?.outboundChainId)
+    writeNullable('refund_reason', extra?.refundReason)
+    writeNullable('swapper', extra?.swapper)
     if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
     if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
-    if (extra?.swapper) setClauses.push({ col: 'swapper', value: extra.swapper })
     if (isFinal) {
       setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
       if (extra?.actualTimeSeconds !== undefined) {
@@ -1567,6 +1593,8 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
     relayRequestId: r.relay_request_id || undefined,
+    outboundChainId: r.outbound_chain_id || undefined,
+    refundReason: r.refund_reason || undefined,
   }
 }
 

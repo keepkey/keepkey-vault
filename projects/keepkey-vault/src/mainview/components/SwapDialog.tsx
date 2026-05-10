@@ -800,7 +800,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [txid, phase])
 
-  // Reset live tracking when phase changes away from submitted
+  // Reset live tracking when phase changes away from submitted.
+  // ALL live-* fields must clear here; otherwise values from a prior
+  // submitted swap leak into the next one. Specifically: a refunded
+  // Maya ETH→ZEC sets liveOutboundChainId='ethereum'; if that survives
+  // into a subsequent THORChain ETH→BTC swap the explorer link uses
+  // ethereum for what is actually a bitcoin outbound.
   useEffect(() => {
     if (phase !== 'submitted') {
       setLiveStatus('pending')
@@ -808,6 +813,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setLiveOutboundConfirmations(undefined)
       setLiveOutboundRequired(undefined)
       setLiveOutboundTxid(undefined)
+      setLiveOutboundChainId(undefined)
+      setLiveRefundReason(undefined)
       setLiveSwapper(undefined)
       setLiveRelayRequestId(undefined)
       setAfterFromBal(null)
@@ -984,8 +991,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
     if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
-    if (resumeSwap.swapper) setLiveSwapper(resumeSwap.swapper)
     if (resumeSwap.relayRequestId) setLiveRelayRequestId(resumeSwap.relayRequestId)
+    // Seed outbound chain + refund reason from the persisted record so a
+    // refund's explorer link points at the source chain on first render —
+    // without this, the explorer falls back to toAsset.chainId until the
+    // next refresh push, and refunded ETH→ZEC briefly opens a Zcash explorer
+    // for what is actually an ETH refund tx.
+    if (resumeSwap.outboundChainId) setLiveOutboundChainId(resumeSwap.outboundChainId)
+    if (resumeSwap.refundReason) setLiveRefundReason(resumeSwap.refundReason)
+    // Skip stale `swapper` for native-vault integrations — Maya forks Thor's
+    // protocol naming and Pioneer historically wrote `swapper='thorchain'`
+    // even for Maya pools. The badge would then render "THORChain via Maya".
+    // The tracker now actively clears this in the DB on the next refresh,
+    // but pre-existing rows still need this UI guard until they're touched.
+    const isNativeVaultIntegration = resumeSwap.integration === 'mayachain' || resumeSwap.integration === 'thorchain'
+    if (resumeSwap.swapper && !isNativeVaultIntegration) setLiveSwapper(resumeSwap.swapper)
     // If resuming a terminal swap, suppress confetti/sound
     const isTerminal = resumeSwap.status === 'completed' || resumeSwap.status === 'failed' || resumeSwap.status === 'refunded'
     if (isTerminal) completionFiredRef.current = true
