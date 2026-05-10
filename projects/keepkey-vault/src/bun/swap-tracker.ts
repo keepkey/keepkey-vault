@@ -755,40 +755,42 @@ async function fetchRelayRequestIdByHash(txid: string): Promise<string | undefin
 
 /** Push the resolved Relay request id into Pioneer's existing pending-swap row.
  *
- *  Tries the upsert/update methods first if Pioneer's swagger spec ships one
- *  (UpdatePendingSwap / PatchPendingSwap / SetPendingSwapRelayData — checked
- *  by name at runtime since the client is dynamically generated). If Pioneer
- *  doesn't expose one, falls back to CreatePendingSwap with the full body —
- *  which will work today only if pioneer-server happens to upsert on
- *  duplicate txHash. If Pioneer rejects the duplicate (409 / "already
- *  exists"), we mark the txid as "no point retrying" so the caller's bounded
- *  loop stops immediately instead of burning four more attempts on the same
- *  hopeless 409. The user-visible relay tracker link still works because
- *  relayRequestId is stored locally.
+ *  Pioneer ships PUT /swaps/pending/{txHash} (operationId UpdatePendingSwap)
+ *  which accepts { relayData: { requestId } }. Caller convention follows
+ *  pioneer-client@>=11.1.0: body is the first arg, path/query the second.
  *
- *  Returns true if the call completed without throwing (which doesn't prove
- *  Pioneer accepted the field — verification happens by re-reading
- *  GetPendingSwap.relayData.requestId in refreshSwap and comparing to
- *  swap.relayRequestId). Returns false on a thrown error. */
+ *  Falls back to CreatePendingSwap when the live client doesn't expose
+ *  UpdatePendingSwap (pioneer-client < 11.1.0 silently dropped PUT bodies,
+ *  so older deploys never made the method usable even though the server
+ *  endpoint existed). On the fallback path Pioneer may 409 on the duplicate
+ *  txHash; we detect that and burn the caller's remaining attempts so the
+ *  bounded loop stops instead of spinning on a permanent rejection.
+ *
+ *  Returns true if the call completed without throwing (verification happens
+ *  by re-reading GetPendingSwap.relayData.requestId in refreshSwap); false
+ *  on a thrown error. The user-visible relay tracker link works in either
+ *  case since relayRequestId is stored locally first. */
 async function setRelayRequestIdOnPioneer(swap: PendingSwap): Promise<boolean> {
   if (!swap.relayRequestId) return false
   try {
     const pioneer = await getPioneer()
-    // Prefer a real update endpoint when Pioneer ships one (forward-compat —
-    // pioneer-server PR thread tracks this on the review of vault PR #152).
+    // Prefer the explicit update endpoint when the loaded swagger exposes
+    // it. Spec confirmed shipping at api.keepkey.info; method also surfaces
+    // on PatchPendingSwap and SetPendingSwapRelayData if pioneer-server
+    // adds aliases later. Forward-compat at zero cost.
     const updateMethod = ['UpdatePendingSwap', 'PatchPendingSwap', 'SetPendingSwapRelayData']
       .find(name => typeof (pioneer as any)?.[name] === 'function')
     if (updateMethod) {
-      await (pioneer as any)[updateMethod]({
-        txHash: swap.txid,
-        relayData: { requestId: swap.relayRequestId },
-      })
+      await (pioneer as any)[updateMethod](
+        { relayData: { requestId: swap.relayRequestId } },
+        { txHash: swap.txid },
+      )
       swapLog(`${TAG} Pioneer ${updateMethod} succeeded for ${swap.txid.slice(0, 10)}...`)
       return true
     }
-    // Fallback: re-post CreatePendingSwap. Whether Pioneer treats this as a
-    // no-op or an upsert is server-side; the verification check after
-    // applyRemoteSwapData decides whether the loop has converged.
+    // Fallback: re-post CreatePendingSwap with the full body. This works
+    // only if pioneer-server happens to upsert on duplicate txHash; if it
+    // 409s the catch below burns remaining retries.
     await registerWithPioneer(swap)
     return true
   } catch (e: any) {
