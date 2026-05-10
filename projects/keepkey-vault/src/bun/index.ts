@@ -3566,25 +3566,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					? [params.chainId.replace(/^eip155:/, '')]
 					: Object.keys(EVM_RPC_URLS)
 
+				const allChains = getAllChains()
 				const hits = (await Promise.all(chainsToProbe.map(async (numericId) => {
 					const rpcUrl = EVM_RPC_URLS[numericId]
 					if (!rpcUrl) return null
+					// Resolve vault's internal chain id (e.g. 'base') from the EIP-155
+					// network id. SwapAsset.chainId per types.ts is the vault id, NOT
+					// CAIP-2 — every downstream consumer (balance lookup, addCustomToken
+					// handler, swap-discovery merge) keys on it. Returning the CAIP-2
+					// form here previously silently broke the picker's add flow:
+					// keepKeyToAddress/balances find returned undefined, canQuote was
+					// false, and no quote ever fired.
+					const networkId = `eip155:${numericId}`
+					const vaultChain = allChains.find(c => c.networkId === networkId)
+					if (!vaultChain) return null
 					try {
 						const meta = await withTimeout(
 							getTokenMetadata(rpcUrl, lower),
 							8000,
 							`getTokenMetadata(${numericId})`,
 						)
-						/* Reject empty responses — RPCs sometimes return zero-length
-						 * strings for EOA addresses or bogus contracts. We need a real
-						 * symbol + decimals to safely build a swap. */
 						if (!meta.symbol || typeof meta.decimals !== 'number') return null
-						const chainId = `eip155:${numericId}`
-						const caip = `${chainId}/erc20:${lower}`
+						const caip = `${networkId}/erc20:${lower}`
 						return {
 							asset: meta.symbol,
 							caip,
-							chainId,
+							chainId: vaultChain.id,
 							chainFamily: 'evm',
 							contractAddress: lower,
 							decimals: meta.decimals,
