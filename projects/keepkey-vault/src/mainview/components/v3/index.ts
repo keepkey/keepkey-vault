@@ -6,5 +6,7 @@ export { NetworkRow } from './NetworkRow';
 export { PillTabs } from './PillTabs';
 export { SidePanel } from './SidePanel';
 export { RouteMap } from './RouteMap';
+export { SpinningDevice } from './SpinningDevice';
 export type { TokenLike, NetworkLike, DeviceState, IconName } from './types';
 export type { PillTabItem } from './PillTabs';
+export type { SpinningDeviceProps } from './SpinningDevice';
