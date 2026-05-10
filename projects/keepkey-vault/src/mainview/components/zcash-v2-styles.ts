@@ -120,11 +120,66 @@ export const ZCASH_V2_CSS = `
 	border-bottom: 2px solid transparent;
 	margin-bottom: -1px;
 	flex-shrink: 0;
-	transition: color 120ms;
+	transition: color 120ms, background 120ms;
 	white-space: nowrap;
+	display: inline-flex; align-items: center; gap: 8px;
+}
+.zcash-v2 .page-nav button .ico {
+	display: inline-flex; align-items: center;
+	opacity: 0.55;
+	transition: opacity 120ms, transform 120ms;
 }
 .zcash-v2 .page-nav button:hover { color: var(--zk-fg-dim); }
-.zcash-v2 .page-nav button[data-active="1"] { color: var(--zk-fg); border-bottom-color: var(--zk-gold); }
+.zcash-v2 .page-nav button:hover .ico { opacity: 0.95; }
+.zcash-v2 .page-nav button[data-active="1"] { color: var(--zk-fg); border-bottom-color: currentColor; }
+.zcash-v2 .page-nav button[data-active="1"] .ico { opacity: 1; }
+/* Active tab adopts the icon's accent color for the underline + label hint. */
+.zcash-v2 .page-nav button[data-active="1"]:nth-child(1) { color: #c9a368; border-bottom-color: #c9a368; }
+.zcash-v2 .page-nav button[data-active="1"]:nth-child(2) { color: #d97757; border-bottom-color: #d97757; }
+.zcash-v2 .page-nav button[data-active="1"]:nth-child(3) { color: #6ee787; border-bottom-color: #6ee787; }
+.zcash-v2 .page-nav button[data-active="1"]:nth-child(4) { color: #7aa6f0; border-bottom-color: #7aa6f0; }
+.zcash-v2 .page-nav button[data-active="1"]:nth-child(5) { color: #b794f4; border-bottom-color: #b794f4; }
+.zcash-v2 .page-nav button[data-active="1"]:nth-child(6) { color: #56d4d4; border-bottom-color: #56d4d4; }
+
+/* ---- verify-on-device card (Receive page) ---- */
+.zcash-v2 .verify-card {
+	margin-top: 16px;
+	padding: 20px 22px;
+	border: 1px solid var(--zk-gold-line);
+	background: linear-gradient(180deg, rgba(201,163,104,0.06), transparent);
+	border-radius: 10px;
+}
+.zcash-v2 .verify-head { display: flex; gap: 14px; margin-bottom: 16px; }
+.zcash-v2 .verify-ico {
+	width: 36px; height: 36px; flex-shrink: 0;
+	border-radius: 9px;
+	background: linear-gradient(180deg, var(--zk-gold), var(--zk-gold-deep));
+	color: #1a1408;
+	display: grid; place-items: center;
+}
+.zcash-v2 .verify-ico svg { width: 18px; height: 18px; }
+.zcash-v2 .verify-title {
+	font-family: var(--zk-font-display); font-size: 14px; font-weight: 600;
+	color: var(--zk-fg); margin-bottom: 4px;
+}
+.zcash-v2 .verify-sub {
+	font-family: var(--zk-font-display); font-size: 12.5px;
+	color: var(--zk-fg-dim); line-height: 1.55;
+}
+.zcash-v2 .verify-btn { font-size: 15px; padding: 16px 24px; }
+.zcash-v2 .verify-btn-ico { display: inline-flex; align-items: center; }
+.zcash-v2 .verify-btn-ico svg { width: 16px; height: 16px; }
+.zcash-v2 .verify-card .verify-note {
+	margin-top: 10px;
+	padding: 10px 14px;
+	border-radius: 6px;
+	background: var(--zk-bg);
+	border: 1px solid var(--zk-line);
+	font-family: var(--zk-font-display); font-size: 12px;
+	color: var(--zk-fg-mute); line-height: 1.5;
+	display: block; text-transform: none; letter-spacing: 0;
+}
+.zcash-v2 .verify-card .verify-note strong { color: var(--zk-gold); }
 
 /* ---- card primitives ---- */
 .zcash-v2 .card {

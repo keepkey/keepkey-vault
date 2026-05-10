@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
@@ -47,6 +48,51 @@ function formatEta(seconds: number): string {
 function formatZec(zatoshis: number): string {
 	return (zatoshis / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "") || "0"
 }
+
+// Each tab gets a small SVG glyph + accent color so the nav reads at a glance.
+// Colors are pulled from the design palette: gold = primary, green = inbound,
+// copper = outbound, blue/violet/teal for navigation actions.
+const ICO_OVERVIEW = (
+	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
+		<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/>
+		<rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>
+	</svg>
+)
+const ICO_SEND = (
+	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+		<path d="M14 2 L7 9"/><path d="M14 2 L9 14 L7 9 L2 7 Z"/>
+	</svg>
+)
+const ICO_SHIELD = (
+	<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+		<path d="M8 1.5 L13 3.5 V8 C13 11 10.5 13.5 8 14.5 C5.5 13.5 3 11 3 8 V3.5 Z"/>
+	</svg>
+)
+const ICO_RECEIVE = (
+	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+		<path d="M8 2 V11"/><path d="M4 7 L8 11 L12 7"/><path d="M3 14 H13"/>
+	</svg>
+)
+const ICO_SYNC = (
+	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+		<path d="M2 8 A6 6 0 0 1 13 5"/><path d="M13 2 V5 H10"/>
+		<path d="M14 8 A6 6 0 0 1 3 11"/><path d="M3 14 V11 H6"/>
+	</svg>
+)
+const ICO_HISTORY = (
+	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+		<circle cx="8" cy="8" r="6"/><path d="M8 4 V8 L11 10"/>
+	</svg>
+)
+
+const NAV_TABS: Array<{ id: Page; label: string; icon: ReactNode; color: string }> = [
+	{ id: "overview", label: "Overview", icon: ICO_OVERVIEW, color: "#c9a368" /* gold */ },
+	{ id: "send",     label: "Send",     icon: ICO_SEND,     color: "#d97757" /* copper */ },
+	{ id: "shield",   label: "Shield",   icon: ICO_SHIELD,   color: "#6ee787" /* green */ },
+	{ id: "receive",  label: "Receive",  icon: ICO_RECEIVE,  color: "#7aa6f0" /* blue */ },
+	{ id: "scan",     label: "Sync",     icon: ICO_SYNC,     color: "#b794f4" /* violet */ },
+	{ id: "history",  label: "History",  icon: ICO_HISTORY,  color: "#56d4d4" /* teal */ },
+]
 
 let stylesInjected = false
 function ensureStylesInjected() {
@@ -439,18 +485,14 @@ export function ZcashPrivacyTab() {
 
 			{/* page nav */}
 			<nav className="page-nav">
-				{[
-					{ id: "overview", label: "Overview" },
-					{ id: "send", label: "Send" },
-					{ id: "shield", label: "Shield" },
-					{ id: "receive", label: "Receive" },
-					{ id: "scan", label: "Sync" },
-					{ id: "history", label: "History" },
-				].map(tab => (
+				{NAV_TABS.map(tab => (
 					<button key={tab.id}
 						data-active={page === tab.id ? "1" : undefined}
 						onClick={() => setPage(tab.id as Page)}
-					>{tab.label}</button>
+					>
+						<span className="ico" style={{ color: tab.color }}>{tab.icon}</span>
+						{tab.label}
+					</button>
 				))}
 			</nav>
 
@@ -714,22 +756,49 @@ export function ZcashPrivacyTab() {
 								<div>
 									<div className="addr-eyebrow">Your Zcash address (Unified)</div>
 									<div className="addr-box">{orchardAddress}</div>
-									<div className="addr-actions">
-										<button className="ghost-btn" onClick={copyAddress}>
-											{copied ? "✓ Copied" : "Copy"}
-										</button>
-										<button
-											className="ghost-btn"
-											onClick={verifyOnDevice}
-											disabled={verifyingOnDevice || !orchardAddress}
-										>
-											{verifyingOnDevice ? "Check device…" : verifySucceeded ? "✓ Verified" : "Verify on KeepKey"}
-										</button>
-									</div>
-									{verifyError && <div className="field-err" style={{ marginTop: 8 }}>{verifyError}</div>}
+									<button className="ghost-btn" onClick={copyAddress}>
+										{copied ? "✓ Copied" : "Copy address"}
+									</button>
 								</div>
 							</div>
 						</div>
+					</div>
+
+					{/* Show on device — promoted to a big primary action because verifying
+					    the address on the hardware screen is the only way a user can be sure
+					    the address shown here wasn't swapped by a compromised host. */}
+					<div className="verify-card">
+						<div className="verify-head">
+							<div className="verify-ico">{ICO_SHIELD}</div>
+							<div>
+								<div className="verify-title">Always verify before receiving large amounts</div>
+								<div className="verify-sub">
+									Compare the full address on your KeepKey screen to the one shown above.
+									This is the only defense against a compromised computer swapping the address.
+									For Zcash, also check the address on the sender's screen — once funds arrive,
+									the on-chain trail is private to you.
+								</div>
+							</div>
+						</div>
+						<button
+							className="submit lg verify-btn"
+							onClick={verifyOnDevice}
+							disabled={verifyingOnDevice || !orchardAddress}
+						>
+							<span className="verify-btn-ico">{ICO_SHIELD}</span>
+							{verifyingOnDevice
+								? "Check your KeepKey screen…"
+								: verifySucceeded
+									? "✓ Verified on device"
+									: "Show address on KeepKey"}
+						</button>
+						<div className="verify-note">
+							⏱ Takes <strong>over 60 seconds</strong> — deriving a Zcash address on the
+							KeepKey requires heavy cryptographic computation (Orchard / Halo 2). The
+							device will appear busy; this is normal. The full address shows on screen
+							when the computation completes.
+						</div>
+						{verifyError && <div className="field-err" style={{ marginTop: 10 }}>{verifyError}</div>}
 					</div>
 				</section>
 			)}
