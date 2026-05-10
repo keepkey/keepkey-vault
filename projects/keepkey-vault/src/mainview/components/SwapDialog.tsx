@@ -1462,29 +1462,49 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Confetti burst on completion */}
               {showConfetti && <ConfettiBurst />}
 
-              {/* Hero: thorfox swap animation — shifting in-flight, completed on done */}
+              {/* Hero animation. State mapping:
+                  - swapStep 0/1 (pending input / protocol confirming): calculatingGif
+                    so the in-flight screen reads as "still working" and matches
+                    the quote-loading screen's visual language.
+                  - swapStep 2 (output detected): shiftingGif — the moment the
+                    swap is actually moving value to the destination chain.
+                  - completed: completedGif (chest).
+                  Container clips with overflow:hidden so the round halo isn't
+                  fighting the gif's square frame. */}
               <Box position="relative" w="full" display="flex" justifyContent="center" alignItems="center" pt="1" pb="0.5">
                 <Box
                   position="relative"
                   w="200px"
                   h="200px"
                   borderRadius="full"
+                  overflow="hidden"
                   display="flex"
                   alignItems="center"
                   justifyContent="center"
                   style={{
                     background: isSwapComplete
-                      ? 'radial-gradient(circle at 50% 45%, rgba(139,227,196,0.22), transparent 70%)'
+                      ? 'radial-gradient(circle at 50% 45%, rgba(139,227,196,0.28), rgba(139,227,196,0.06) 70%)'
                       : isSwapFailed
-                        ? 'radial-gradient(circle at 50% 45%, rgba(224,140,123,0.18), transparent 70%)'
-                        : 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.18), transparent 70%)',
+                        ? 'radial-gradient(circle at 50% 45%, rgba(224,140,123,0.22), rgba(224,140,123,0.05) 70%)'
+                        : 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.24), rgba(233,196,106,0.05) 70%)',
+                    boxShadow: isSwapComplete
+                      ? '0 0 0 1px rgba(139,227,196,0.30), 0 8px 28px -10px rgba(139,227,196,0.35)'
+                      : isSwapFailed
+                        ? '0 0 0 1px rgba(224,140,123,0.30)'
+                        : '0 0 0 1px rgba(233,196,106,0.28), 0 8px 28px -10px rgba(233,196,106,0.30)',
                   }}
                 >
                   <Image
-                    src={isSwapComplete ? completedGif : shiftingGif}
+                    src={
+                      isSwapComplete
+                        ? completedGif
+                        : swapStep >= 2
+                          ? shiftingGif
+                          : calculatingGif
+                    }
                     alt=""
-                    w="180px"
-                    h="180px"
+                    w={isSwapComplete ? "172px" : "184px"}
+                    h={isSwapComplete ? "172px" : "184px"}
                     style={{
                       objectFit: 'contain',
                       filter: isSwapFailed ? 'grayscale(0.6)' : undefined,
