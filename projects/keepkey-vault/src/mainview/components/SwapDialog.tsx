@@ -2601,18 +2601,39 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Flex>
               )}
 
-              {/* Quote loading — thorfox calculating animation */}
+              {/* Quote loading — thorfox calculating animation, hero treatment
+                  matches the in-flight swap animation: circular gold halo with
+                  the gif as the focal piece. */}
               {phase === 'quoting' && (
-                <Flex direction="column" justify="center" align="center" py="2" gap="1.5">
-                  <Image
-                    src={calculatingGif}
-                    alt=""
-                    w="80px"
-                    h="80px"
-                    style={{ objectFit: 'contain' }}
-                  />
-                  <Text fontSize="11px" color="kk.textSecondary" letterSpacing="0.04em" fontWeight="500">
+                <Flex direction="column" justify="center" align="center" py="2" gap="2" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+                  <Box position="relative" w="full" display="flex" justifyContent="center" alignItems="center">
+                    <Box
+                      position="relative"
+                      w="200px"
+                      h="200px"
+                      borderRadius="full"
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      style={{
+                        background: 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.18), transparent 70%)',
+                      }}
+                    >
+                      <Image
+                        src={calculatingGif}
+                        alt=""
+                        w="180px"
+                        h="180px"
+                        style={{ objectFit: 'contain' }}
+                      />
+                    </Box>
+                  </Box>
+                  <Text fontSize="sm" fontWeight="700" letterSpacing="-0.01em"
+                    color="kk.textPrimary" fontFamily="serif" fontStyle="italic">
                     {t("gettingQuote")}
+                  </Text>
+                  <Text fontSize="xs" color="var(--gold)" fontWeight="500">
+                    {t("findingBestRoute") || "Finding best route..."}
                   </Text>
                 </Flex>
               )}
