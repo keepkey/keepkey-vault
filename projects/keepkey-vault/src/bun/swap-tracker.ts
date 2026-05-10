@@ -113,6 +113,14 @@ const noPersistSwaps = new Set<string>()
 // to carry our relayRequestId. Used to stop the lazy re-registration loop —
 // without this, every refreshSwap retries CreatePendingSwap forever.
 const relayPioneerVerified = new Set<string>()
+// Per-txid count of register-relay-id attempts. Caps the retry loop at
+// MAX_RELAY_REGISTER_ATTEMPTS so a permanent Pioneer-side rejection (e.g.
+// 409 on duplicate txHash with no upsert) doesn't spin forever each time
+// the user reopens the dialog. Once the cap is hit, we log loudly and stop
+// — the user-visible tracker link still works (it's local), only Pioneer's
+// monitor side stays missing the id.
+const relayRegisterAttempts = new Map<string, number>()
+const MAX_RELAY_REGISTER_ATTEMPTS = 5
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 let initPromise: Promise<void> | null = null
@@ -584,11 +592,21 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
       }
     }
     if (swap.relayRequestId && !relayPioneerVerified.has(swap.txid)) {
-      try {
-        await registerWithPioneer(swap)
-        swapLog(`${TAG} Pioneer (re-)registered with relayRequestId for ${swap.txid.slice(0, 10)}... — awaiting verification`)
-      } catch (e: any) {
-        console.warn(`${TAG} Pioneer re-registration with Relay id failed for ${swap.txid.slice(0, 10)}...: ${e.message} — will retry on next refresh`)
+      const attempts = relayRegisterAttempts.get(swap.txid) || 0
+      if (attempts >= MAX_RELAY_REGISTER_ATTEMPTS) {
+        // Loud one-time log per refresh after we've given up. The local
+        // tracker link still works; only Pioneer's checkRelaySwap monitor
+        // is left without the id, which means stuck-status detection on
+        // the Pioneer side won't resolve until pioneer-server ships an
+        // explicit UpdatePendingSwap / PATCH endpoint.
+        if (attempts === MAX_RELAY_REGISTER_ATTEMPTS) {
+          console.warn(`${TAG} Giving up Pioneer re-registration with Relay id for ${swap.txid.slice(0, 10)}... after ${attempts} attempts — needs a Pioneer-side update endpoint, see PR #152 review thread`)
+          relayRegisterAttempts.set(swap.txid, attempts + 1) // bump past so this log only fires once
+        }
+      } else {
+        relayRegisterAttempts.set(swap.txid, attempts + 1)
+        const ok = await setRelayRequestIdOnPioneer(swap)
+        if (ok) swapLog(`${TAG} Pioneer (re-)registered with relayRequestId for ${swap.txid.slice(0, 10)}... attempt=${attempts + 1} — awaiting verification`)
       }
     }
   }
@@ -732,6 +750,62 @@ async function fetchRelayRequestIdByHash(txid: string): Promise<string | undefin
   } catch (e: any) {
     swapLog(`${TAG} Relay backfill failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
     return undefined
+  }
+}
+
+/** Push the resolved Relay request id into Pioneer's existing pending-swap row.
+ *
+ *  Tries the upsert/update methods first if Pioneer's swagger spec ships one
+ *  (UpdatePendingSwap / PatchPendingSwap / SetPendingSwapRelayData — checked
+ *  by name at runtime since the client is dynamically generated). If Pioneer
+ *  doesn't expose one, falls back to CreatePendingSwap with the full body —
+ *  which will work today only if pioneer-server happens to upsert on
+ *  duplicate txHash. If Pioneer rejects the duplicate (409 / "already
+ *  exists"), we mark the txid as "no point retrying" so the caller's bounded
+ *  loop stops immediately instead of burning four more attempts on the same
+ *  hopeless 409. The user-visible relay tracker link still works because
+ *  relayRequestId is stored locally.
+ *
+ *  Returns true if the call completed without throwing (which doesn't prove
+ *  Pioneer accepted the field — verification happens by re-reading
+ *  GetPendingSwap.relayData.requestId in refreshSwap and comparing to
+ *  swap.relayRequestId). Returns false on a thrown error. */
+async function setRelayRequestIdOnPioneer(swap: PendingSwap): Promise<boolean> {
+  if (!swap.relayRequestId) return false
+  try {
+    const pioneer = await getPioneer()
+    // Prefer a real update endpoint when Pioneer ships one (forward-compat —
+    // pioneer-server PR thread tracks this on the review of vault PR #152).
+    const updateMethod = ['UpdatePendingSwap', 'PatchPendingSwap', 'SetPendingSwapRelayData']
+      .find(name => typeof (pioneer as any)?.[name] === 'function')
+    if (updateMethod) {
+      await (pioneer as any)[updateMethod]({
+        txHash: swap.txid,
+        relayData: { requestId: swap.relayRequestId },
+      })
+      swapLog(`${TAG} Pioneer ${updateMethod} succeeded for ${swap.txid.slice(0, 10)}...`)
+      return true
+    }
+    // Fallback: re-post CreatePendingSwap. Whether Pioneer treats this as a
+    // no-op or an upsert is server-side; the verification check after
+    // applyRemoteSwapData decides whether the loop has converged.
+    await registerWithPioneer(swap)
+    return true
+  } catch (e: any) {
+    const msg = String(e?.message || e || '')
+    const isDuplicate = e?.status === 409
+      || e?.statusCode === 409
+      || /already exists|duplicate|409/i.test(msg)
+    if (isDuplicate) {
+      console.warn(`${TAG} Pioneer rejected Relay-id (re-)registration for ${swap.txid.slice(0, 10)}... as duplicate (${msg.slice(0, 80)}). Pioneer needs an UpdatePendingSwap endpoint — opening a tracking issue on pioneer-server.`)
+      // Burn the remaining attempts so the caller's bounded loop stops on
+      // the next refresh — there's no recovery from a permanent 409 without
+      // a Pioneer-side change.
+      relayRegisterAttempts.set(swap.txid, MAX_RELAY_REGISTER_ATTEMPTS)
+    } else {
+      console.warn(`${TAG} Pioneer Relay-id registration call failed for ${swap.txid.slice(0, 10)}...: ${msg.slice(0, 200)}`)
+    }
+    return false
   }
 }
 
