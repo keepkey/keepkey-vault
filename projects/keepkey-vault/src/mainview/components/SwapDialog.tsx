@@ -2474,15 +2474,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
                         {t("expectedOutput")}
                       </Text>
-                      <Flex align="center" gap="2.5">
-                        <Image
-                          src={calculatingGif}
-                          alt=""
-                          w="48px"
-                          h="48px"
+                      <Flex align="center" gap="3">
+                        <Box
+                          w="68px"
+                          h="68px"
+                          borderRadius="full"
                           flexShrink={0}
-                          style={{ objectFit: 'contain' }}
-                        />
+                          overflow="hidden"
+                          display="flex"
+                          alignItems="center"
+                          justifyContent="center"
+                          style={{
+                            background: 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.22), rgba(233,196,106,0.06) 70%)',
+                            boxShadow: '0 0 0 1px rgba(233,196,106,0.25), 0 4px 14px -6px rgba(233,196,106,0.35)',
+                          }}
+                        >
+                          <Image
+                            src={calculatingGif}
+                            alt=""
+                            w="60px"
+                            h="60px"
+                            style={{ objectFit: 'contain' }}
+                          />
+                        </Box>
                         <VStack gap="0" align="flex-start" minW="0">
                           <Text fontSize="xs" color="var(--gold)" fontWeight="700" letterSpacing="-0.005em">
                             {t("findingBestRoute") || "Finding best route…"}
