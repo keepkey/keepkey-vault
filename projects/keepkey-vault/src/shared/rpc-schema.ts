@@ -131,7 +131,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // Confirmed UTXO total at the user's first-receive t-addr — the only address
       // shieldZec sweeps. Use this (not chain-level getBalance, which sums the
       // whole xpub) to power the Shield page's Available / Max button.
-      zcashTransparentBalance: { params: { account?: number } | void; response: { address: string; balanceZat: number } }
+      // - balanceZat = mature only (≥10 conf, what shieldZec can actually spend)
+      // - pendingZat = under 10 conf, surfaced so the UI can explain a
+      //   discrepancy between the chain-level balance and what's shieldable
+      zcashTransparentBalance: {
+        params: { account?: number } | void
+        response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
+      }
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }

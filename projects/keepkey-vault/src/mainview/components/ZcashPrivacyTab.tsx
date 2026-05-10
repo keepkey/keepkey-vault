@@ -156,10 +156,13 @@ export function ZcashPrivacyTab() {
 	// sending to a third party. They can still paste a different address.
 	const [myTransparentAddr, setMyTransparentAddr] = useState<string | null>(null)
 	const tAddrPrefilledRef = useRef(false)
-	// Confirmed transparent ZEC balance (zatoshis). Drives the Shield card's
-	// "available" line + Max button; without this the page is unusable —
-	// users can't tell how much t-addr ZEC they have to shield.
+	// Confirmed-mature transparent ZEC balance (≥10 conf, in zatoshis) — what
+	// the shield builder can actually spend. Drives the Shield card's
+	// "Available" line + Max button. `pending` covers UTXOs still under the
+	// 10-conf gate (e.g. fresh deshield-back); shown separately so users can
+	// see why the chain-level balance differs from what's shieldable now.
 	const [transparentBalanceZat, setTransparentBalanceZat] = useState<number | null>(null)
+	const [transparentPendingZat, setTransparentPendingZat] = useState<number>(0)
 	const [transparentBalanceLoading, setTransparentBalanceLoading] = useState(false)
 	const [deshieldAmount, setDeshieldAmount] = useState("")
 	const [deshielding, setDeshielding] = useState(false)
@@ -339,13 +342,17 @@ export function ZcashPrivacyTab() {
 	const refreshTransparentBalance = useCallback(async () => {
 		setTransparentBalanceLoading(true)
 		try {
-			const r = await rpcRequest<{ address: string; balanceZat: number }>(
-				"zcashTransparentBalance", undefined, 20000)
+			const r = await rpcRequest<{
+				address: string; balanceZat: number; pendingZat: number
+				matureCount: number; pendingCount: number
+			}>("zcashTransparentBalance", undefined, 20000)
 			setTransparentBalanceZat(Number.isFinite(r.balanceZat) && r.balanceZat >= 0 ? r.balanceZat : 0)
+			setTransparentPendingZat(Number.isFinite(r.pendingZat) && r.pendingZat >= 0 ? r.pendingZat : 0)
 			if (r.address && !myTransparentAddr) setMyTransparentAddr(r.address)
 		} catch (e) {
 			console.warn("[ZcashPrivacyTab] failed to fetch shieldable t-addr balance:", e)
 			setTransparentBalanceZat(null)
+			setTransparentPendingZat(0)
 		}
 		setTransparentBalanceLoading(false)
 	}, [myTransparentAddr])
@@ -771,7 +778,7 @@ export function ZcashPrivacyTab() {
 							</div>
 							<div className="card-body">
 								<div className="balance-row">
-									<span>Available on t-addr</span>
+									<span>Available to shield</span>
 									<strong>
 										{transparentBalanceLoading
 											? "loading…"
@@ -783,6 +790,11 @@ export function ZcashPrivacyTab() {
 										<button className="ghost-btn" onClick={refreshTransparentBalance} title="Refresh">↻</button>
 									)}
 								</div>
+								{transparentPendingZat > 0 && (
+									<div className="pending-note">
+										+{formatZec(transparentPendingZat)} ZEC pending — UTXOs need 10 confirmations before they can be shielded (reorg safety). Refresh in a few minutes.
+									</div>
+								)}
 								<div className="field-grid">
 									<div className="field">
 										<span className="lbl">Amount</span>

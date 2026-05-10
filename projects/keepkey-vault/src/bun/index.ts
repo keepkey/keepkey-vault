@@ -2853,8 +2853,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!address) throw new Error("Failed to derive transparent ZEC address from device")
 				const { getShieldableTransparentBalance } = await import("./txbuilder/zcash-shield")
 				const pioneer = await getPioneer()
-				const balanceZat = await getShieldableTransparentBalance(pioneer, address)
-				return { address, balanceZat }
+				const tipHeight = getScanState().syncedTo
+				const totals = await getShieldableTransparentBalance(pioneer, address, tipHeight)
+				return {
+					address,
+					balanceZat: totals.matureZat,
+					pendingZat: totals.pendingZat,
+					matureCount: totals.matureCount,
+					pendingCount: totals.pendingCount,
+				}
 			},
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')

@@ -284,6 +284,15 @@ export const ZCASH_V2_CSS = `
 	margin-left: auto;
 }
 .zcash-v2 .balance-row .ghost-btn { padding: 3px 8px; font-size: 12px; margin-left: auto; }
+.zcash-v2 .pending-note {
+	margin-top: -6px; margin-bottom: 12px;
+	padding: 8px 12px;
+	border-left: 3px solid var(--zk-gold);
+	background: rgba(201,163,104,0.06);
+	border-radius: 0 6px 6px 0;
+	font-family: var(--zk-font-display); font-size: 11.5px;
+	color: var(--zk-fg-dim); line-height: 1.5;
+}
 .zcash-v2 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .zcash-v2 .field-grid { display: grid; gap: 12px; }
 
