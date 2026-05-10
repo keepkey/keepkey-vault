@@ -1595,6 +1595,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setTimeout(reset, 200)
   }, [phase, onClose, reset])
 
+  // Cancel a confirm-on-device prompt and back out to review. Sends a Cancel
+  // message to the device (frees the transport lock + dismisses the on-screen
+  // prompt), then resets the dialog to 'review' so the user can change inputs
+  // or just close. Broadcasting can NOT be cancelled — the signed tx is
+  // already on its way to the network and there's no unwind.
+  const handleCancelSigning = useCallback(async () => {
+    if (phase !== 'signing' && phase !== 'approving') return
+    try { await rpcRequest<{ ok: boolean }>('cancelDeviceSigning', undefined, 5000) } catch (e: any) {
+      console.warn('[SwapDialog] cancelDeviceSigning failed:', e?.message || e)
+    }
+    setPhase('review')
+    setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
+  }, [phase, t])
+
   const copyTxid = useCallback(() => {
     if (!txid) return
     navigator.clipboard.writeText(txid)
@@ -2586,7 +2600,31 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               substage detail moves into the chip area as small mono text
               instead of competing with the device illustration. */}
           {busy && fromAsset && toAsset && (
-            <VStack gap="6" py="6" align="center" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+            <VStack gap="6" py="6" align="center" position="relative" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+              {/* Cancel/X — only meaningful while the device is awaiting a
+                  button press (signing/approving). Once the user has confirmed
+                  on device and we're broadcasting, the tx is already going
+                  to the network and there's no unwind. */}
+              {(phase === 'signing' || phase === 'approving') && (
+                <Box position="absolute" top="0" right="0">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    color="kk.textMuted"
+                    px="2"
+                    minW="auto"
+                    aria-label={t('cancel', 'Cancel')}
+                    title={t('cancelSwapDevice', 'Cancel - release device prompt')}
+                    onClick={handleCancelSigning}
+                    _hover={{ color: 'kk.textPrimary' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </Button>
+                </Box>
+              )}
+
               {/* Big device illustration — 6-face CSS-3D KeepKey rotating
                   around its Y axis. The OLED face mirrors the swap pair the
                   user is being asked to confirm so the device shown matches

@@ -44,6 +44,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // route through here instead. Bun shells out to the OS-native opener.
       openExternal: { params: { url: string }; response: { ok: true } }
       wipeDevice: { params: void; response: any }
+      // Sends a Cancel message to the device — aborts whatever confirm/PIN/
+      // passphrase prompt is on screen and frees the transport lock so the
+      // user can back out of an in-flight signing flow without unplugging.
+      cancelDeviceSigning: { params: void; response: { ok: boolean } }
       // Types defined in types.ts: GetPublicKeysParams, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams
       getPublicKeys: { params: any; response: any }
 

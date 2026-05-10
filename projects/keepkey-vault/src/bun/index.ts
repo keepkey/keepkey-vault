@@ -1178,6 +1178,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return { ok: true as const }
 			},
+			cancelDeviceSigning: async () => {
+				// User backed out of an in-flight confirm/PIN/passphrase prompt.
+				// Sends a Cancel message to the device, which dismisses the on-
+				// screen prompt and releases the transport lock. The pending
+				// signing promise inside hdwallet rejects with a "Cancelled"
+				// error — the swap dialog catches it and resets to 'review'.
+				if (!engine.wallet) return { ok: false }
+				await engine.wallet.cancel().catch(() => {})
+				return { ok: true }
+			},
 			wipeDevice: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				// Cancel any pending PIN/passphrase request before wiping —
