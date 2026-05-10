@@ -24,6 +24,14 @@ import { parseQuoteResponse, parseAssetsResponse } from './swap-parsing'
 
 const TAG = '[swap]'
 
+// CAIP-2 of Bitcoin mainnet (genesis-hash-keyed, canonical, immutable).
+// Used to gate BTC-only behavior — the cached btc-account-manager and the
+// per-scriptType lazy derive only apply to BTC. Comparing against this
+// constant is durable across renames of `ChainDef.id`; matches the same
+// constant defined in sweep-engine.ts and rest-sweep.ts.
+const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
+const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
+
 // CAIP-19 of native THORChain (RUNE) and Mayachain (CACAO) — the only assets
 // that route via MsgDeposit instead of a vault inbound address. CAIP is the
 // canonical identifier; symbols and THOR-style asset strings are derived
@@ -460,7 +468,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     let accountPath: number[] | undefined
     let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
-    if (fromChain.id === 'bitcoin') {
+    if (isBitcoin(fromChain)) {
       // BTC: aggregate UTXOs from ALL funded xpubs (p2pkh + p2sh-p2wpkh + p2wpkh)
       try {
         allXpubs = getAllBtcXpubs()
@@ -688,7 +696,7 @@ export async function previewSwapBuild(
     let xpub: string | undefined
     let accountPath: number[] | undefined
     let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
-    if (fromChain.id === 'bitcoin') {
+    if (isBitcoin(fromChain)) {
       try {
         allXpubs = getAllBtcXpubs()
         if (allXpubs.length > 0) {
@@ -697,12 +705,18 @@ export async function previewSwapBuild(
           accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
         }
       } catch { /* BTC account manager not ready */ }
+      // The cached btc-account-manager fallback ONLY applies to BTC. Without
+      // this gate the preview path picked up the user's BTC zpub
+      // (m/84'/0'/0', p2wpkh) and queried Pioneer for ZEC unspents under the
+      // Bitcoin native-segwit account — Pioneer naturally returned 0 UTXOs.
+      // Symptom: "Build preview failed: No UTXOs found for Zcash" while
+      // standalone ZEC sends worked because they take a different code path.
+      if (!xpub) {
+        const btcInfo = (() => { try { return getBtcXpub() } catch { return undefined } })()
+        if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+      }
     }
-    if (!xpub) {
-      const btcInfo = (() => { try { return getBtcXpub() } catch { return undefined } })()
-      if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
-    }
-    if (!xpub && fromChain.id === 'bitcoin') {
+    if (!xpub && isBitcoin(fromChain)) {
       // Lazy-init: same as executeSwap — derive all 3 BTC scriptTypes when
       // btcAccountManager is empty. See executeSwap path for rationale.
       const paths = BTC_SCRIPT_TYPES.map(st => ({
