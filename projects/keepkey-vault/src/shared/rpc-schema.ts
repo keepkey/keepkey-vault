@@ -108,6 +108,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       addCustomToken: { params: { chainId: string; contractAddress: string }; response: CustomToken }
       removeCustomToken: { params: { chainId: string; contractAddress: string }; response: void }
       getCustomTokens: { params: void; response: CustomToken[] }
+      setCustomTokenIcon: { params: { chainId: string; contractAddress: string; iconUrl: string }; response: CustomToken }
       addCustomChain: { params: CustomChain; response: void }
       removeCustomChain: { params: { chainId: number }; response: void }
       getCustomChains: { params: void; response: CustomChain[] }

@@ -460,6 +460,18 @@ export function removeCustomToken(chainId: string, contractAddress: string) {
   }
 }
 
+export function setCustomTokenIcon(chainId: string, contractAddress: string, iconUrl: string): boolean {
+  try {
+    if (!db) return false
+    const res = db.run('UPDATE custom_tokens SET icon_url = ? WHERE chain_id = ? AND contract_address = ?', [iconUrl, chainId, contractAddress])
+    // bun:sqlite returns { changes } on .run(); guard for 0 changes (token row missing)
+    return Boolean((res as any)?.changes)
+  } catch (e: any) {
+    console.warn('[db] setCustomTokenIcon failed:', e.message)
+    return false
+  }
+}
+
 // ── Custom Chains ────────────────────────────────────────────────────
 
 export function getCustomChains(): CustomChain[] {

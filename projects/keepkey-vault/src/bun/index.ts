@@ -115,7 +115,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -2654,6 +2654,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getCustomTokens: async () => {
 				return getCustomTokens()
+			},
+			setCustomTokenIcon: async (params) => {
+				// User-supplied icon (data URL or http(s) URL). Cap at ~256KB raw bytes
+				// so a long-tail upload doesn't bloat sqlite or the in-memory token list.
+				// 256KB ≈ 350K base64 chars. Reject schemes other than data: / http(s):
+				// to keep the value renderable from the WebView and to avoid storing
+				// random arbitrary protocols.
+				const u = (params.iconUrl || '').trim()
+				if (!u) throw new Error('iconUrl required')
+				if (!/^(data:image\/(png|jpe?g|webp|svg\+xml|gif);base64,|https?:\/\/)/i.test(u)) {
+					throw new Error('iconUrl must be a data:image/* (base64) or http(s) URL')
+				}
+				if (u.length > 350_000) throw new Error('Icon too large (max ~256KB)')
+				const ok = dbSetCustomTokenIcon(params.chainId, params.contractAddress, u)
+				if (!ok) throw new Error('Token row not found — Add it first')
+				const found = getCustomTokens().find(t => t.chainId === params.chainId && t.contractAddress.toLowerCase() === params.contractAddress.toLowerCase())
+				if (!found) throw new Error('Token row not found after update')
+				return found
 			},
 
 			// ── Chain discovery (Pioneer catalog) ────────────────────

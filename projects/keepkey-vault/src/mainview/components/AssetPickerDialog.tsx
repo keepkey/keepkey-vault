@@ -121,6 +121,22 @@ export function AssetPickerDialog({
   const [loading, setLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  /* Paste-contract auto-add: when the search query is a valid EVM address
+   * and the discovery universe has no matches, we offer to fetch the
+   * token's metadata directly from the chain RPC and add it as a custom
+   * swap asset. The lookup is debounced so we don't fire it on every
+   * keystroke while pasting. */
+  const [contractHits, setContractHits] = useState<SwapAsset[] | null>(null)
+  const [contractLooking, setContractLooking] = useState(false)
+  const [contractError, setContractError] = useState<string | null>(null)
+  // After a successful Add for which the resolver couldn't find a logo,
+  // we surface an Upload-or-Skip prompt instead of immediately closing.
+  // Keyed by `${chainId}:${contractAddress}` so it survives re-renders.
+  const [pendingIcon, setPendingIcon] = useState<{ key: string; hit: SwapAsset } | null>(null)
+  const [iconUploading, setIconUploading] = useState(false)
+  const [iconError, setIconError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   // Lazy-build the unified entry list on first open. Recompute when swappable
   // or balances change so newly-detected tokens show up.
   useEffect(() => {
@@ -141,6 +157,9 @@ export function AssetPickerDialog({
   useEffect(() => {
     if (!open) return
     setSearch("")
+    setPendingIcon(null)
+    setIconError(null)
+    setIconUploading(false)
     const id = setTimeout(() => inputRef.current?.focus(), 50)
     return () => clearTimeout(id)
   }, [open])
@@ -250,12 +269,79 @@ export function AssetPickerDialog({
                *  ERC20 metadata as a one-click "Add as custom token" row. */}
               {EVM_CONTRACT_RE.test(search.trim()) ? (
                 <>
-                  {contractLooking && (
+                  {pendingIcon ? (
+                    <Box>
+                      <Text fontSize="11px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" mb="2.5">
+                        {t("iconNoneFoundTitle", "No logo on file")}
+                      </Text>
+                      <Text fontSize="xs" color="kk.textSecondary" mb="3" lineHeight="1.5">
+                        {t("iconNoneFoundBody",
+                          "We couldn't find a logo for {{symbol}} on CoinGecko. Upload one (PNG/SVG, ≤256KB), or skip and we'll show a letter avatar.",
+                          { symbol: pendingIcon.hit.symbol })}
+                      </Text>
+                      {iconError && (
+                        <Text fontSize="11px" color="var(--rose)" mb="2">{iconError}</Text>
+                      )}
+                      <Flex gap="2">
+                        <Button
+                          size="sm" flex="1"
+                          bg="rgba(233,196,106,0.18)" color="var(--gold)" border="1px solid" borderColor="rgba(233,196,106,0.45)"
+                          _hover={{ bg: "rgba(233,196,106,0.26)" }}
+                          loading={iconUploading}
+                          onClick={() => fileInputRef.current?.click()}
+                        >{t("iconUploadButton", "Upload logo")}</Button>
+                        <Button
+                          size="sm" flex="1" variant="ghost" color="kk.textSecondary"
+                          disabled={iconUploading}
+                          onClick={() => { onSelect(pendingIcon.hit); onClose() }}
+                        >{t("iconSkipButton", "Skip")}</Button>
+                      </Flex>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                        style={{ display: 'none' }}
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0]
+                          if (!f) return
+                          // Reset value so re-selecting the same file fires onChange again.
+                          e.target.value = ''
+                          if (f.size > 256 * 1024) {
+                            setIconError(t("iconTooBig", "Image is over 256KB — try a smaller file"))
+                            return
+                          }
+                          setIconError(null)
+                          setIconUploading(true)
+                          try {
+                            const dataUrl: string = await new Promise((resolve, reject) => {
+                              const r = new FileReader()
+                              r.onload = () => resolve(String(r.result || ''))
+                              r.onerror = () => reject(r.error || new Error('read failed'))
+                              r.readAsDataURL(f)
+                            })
+                            const persisted = await rpcRequest<any>('setCustomTokenIcon', {
+                              chainId: pendingIcon.hit.chainId,
+                              contractAddress: pendingIcon.hit.contractAddress!,
+                              iconUrl: dataUrl,
+                            }, 10000)
+                            const finalIcon = persisted?.iconUrl || dataUrl
+                            onSelect({ ...pendingIcon.hit, icon: finalIcon })
+                            onClose()
+                          } catch (err: any) {
+                            setIconError(err?.message || 'Upload failed')
+                          } finally {
+                            setIconUploading(false)
+                          }
+                        }}
+                      />
+                    </Box>
+                  ) : <>{null}</>}
+                  {!pendingIcon && contractLooking && (
                     <Text fontSize="xs" color="kk.textMuted">
                       {t("contractLookingUp", "Looking up contract on every chain…")}
                     </Text>
                   )}
-                  {!contractLooking && contractHits && contractHits.length > 0 && (
+                  {!pendingIcon && !contractLooking && contractHits && contractHits.length > 0 && (
                     <Box>
                       <Text fontSize="11px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" mb="2.5">
                         {t("contractFoundOn", "Found on", { count: contractHits.length })}
@@ -279,9 +365,9 @@ export function AssetPickerDialog({
                               // Persist before selecting so the next session's
                               // discovery merge picks the token up — otherwise
                               // each open of the picker forces a fresh paste.
-                              // Server-side handler also resolves a logo
-                              // (TrustWallet → CoinGecko); use the returned
-                              // record if it came back richer than `hit`.
+                              // The handler also tries CoinGecko for a logo;
+                              // when it misses we transition into an Upload-or-Skip
+                              // prompt instead of immediately closing.
                               try {
                                 const persisted = await rpcRequest<any>('addCustomToken', {
                                   chainId: hit.chainId,
@@ -289,17 +375,17 @@ export function AssetPickerDialog({
                                 }, 15000)
                                 if (persisted?.iconUrl) {
                                   onSelect({ ...hit, icon: persisted.iconUrl })
-                                } else {
-                                  onSelect(hit)
+                                  onClose()
+                                  return
                                 }
+                                // No logo resolved — let the user upload one or skip.
+                                setIconError(null)
+                                setPendingIcon({ key: `${hit.chainId}:${hit.contractAddress}`, hit })
                               } catch (e: any) {
-                                // Persistence is best-effort — if the device
-                                // is busy or the chain RPC times out, still
-                                // let the user proceed with this swap.
                                 console.warn('[AssetPickerDialog] addCustomToken failed:', e?.message || e)
                                 onSelect(hit)
+                                onClose()
                               }
-                              onClose()
                             }}
                           >
                             <AssetIcon
@@ -328,12 +414,12 @@ export function AssetPickerDialog({
                       </Text>
                     </Box>
                   )}
-                  {!contractLooking && contractHits && contractHits.length === 0 && (
+                  {!pendingIcon && !contractLooking && contractHits && contractHits.length === 0 && (
                     <Text fontSize="xs" color="kk.textMuted">
                       {t("contractNotFoundOnAnyChain", "No ERC20 found at this address on any supported chain.")}
                     </Text>
                   )}
-                  {!contractLooking && !contractHits && contractError && (
+                  {!pendingIcon && !contractLooking && !contractHits && contractError && (
                     <Text fontSize="xs" color="kk.error">
                       {t("contractLookupFailed", "Couldn't reach a chain RPC to look up this contract. Try again.")}
                     </Text>
