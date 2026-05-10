@@ -2465,6 +2465,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     </Box>
                   )}
 
+                  {/* Quoting placeholder — sits in the same slot the price will
+                      occupy. Reads as "your number is computing here", not as
+                      a separate loading screen tacked on below the form. */}
+                  {toAsset && !quote && phase === 'quoting' && (
+                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
+                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
+                      <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
+                        {t("expectedOutput")}
+                      </Text>
+                      <Flex align="center" gap="2.5">
+                        <Image
+                          src={calculatingGif}
+                          alt=""
+                          w="48px"
+                          h="48px"
+                          flexShrink={0}
+                          style={{ objectFit: 'contain' }}
+                        />
+                        <VStack gap="0" align="flex-start" minW="0">
+                          <Text fontSize="xs" color="var(--gold)" fontWeight="700" letterSpacing="-0.005em">
+                            {t("findingBestRoute") || "Finding best route…"}
+                          </Text>
+                          <Text fontSize="10px" color="kk.textMuted" fontWeight="500">
+                            {t("gettingQuote")}
+                          </Text>
+                        </VStack>
+                      </Flex>
+                    </Box>
+                  )}
+
                   {toAsset && (
                     <Box mt="2">
                       <Flex justify="space-between" align="center" mb="1">
@@ -2598,43 +2628,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       {![50, 100, 300].includes(slippageBps) ? `${(slippageBps / 100).toFixed(2)}%` : (t("custom") || "Custom")}
                     </Box>
                   </HStack>
-                </Flex>
-              )}
-
-              {/* Quote loading — thorfox calculating animation, hero treatment
-                  matches the in-flight swap animation: circular gold halo with
-                  the gif as the focal piece. */}
-              {phase === 'quoting' && (
-                <Flex direction="column" justify="center" align="center" py="2" gap="2" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
-                  <Box position="relative" w="full" display="flex" justifyContent="center" alignItems="center">
-                    <Box
-                      position="relative"
-                      w="200px"
-                      h="200px"
-                      borderRadius="full"
-                      display="flex"
-                      alignItems="center"
-                      justifyContent="center"
-                      style={{
-                        background: 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.18), transparent 70%)',
-                      }}
-                    >
-                      <Image
-                        src={calculatingGif}
-                        alt=""
-                        w="180px"
-                        h="180px"
-                        style={{ objectFit: 'contain' }}
-                      />
-                    </Box>
-                  </Box>
-                  <Text fontSize="sm" fontWeight="700" letterSpacing="-0.01em"
-                    color="kk.textPrimary" fontFamily="serif" fontStyle="italic">
-                    {t("gettingQuote")}
-                  </Text>
-                  <Text fontSize="xs" color="var(--gold)" fontWeight="500">
-                    {t("findingBestRoute") || "Finding best route..."}
-                  </Text>
                 </Flex>
               )}
 
