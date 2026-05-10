@@ -588,7 +588,9 @@ jobs:
 
           WORK=$(mktemp -d)
           trap 'rm -rf "$WORK"' EXIT
-          ROOT="$WORK/$PKG"
+          # The bundle's tar extracts to $WORK/keepkey-vault, so stage the .deb
+          # under a different name to avoid the cp recursing into itself.
+          ROOT="$WORK/deb-root"
 
           # Extract bundle
           zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
