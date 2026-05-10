@@ -1702,7 +1702,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (cmd.kind === 'confirm') {
         // Click "Confirm Swap" — kicks off executeSwap. The TxReview gate
         // and the physical device button press still happen normally.
-        if (phase === 'review' && quote && fromAsset && toAsset) {
+        // Mirror the on-screen button's preflight gate: refuse to advance
+        // unless the preview build succeeded and balance is sufficient,
+        // so REST callers can't bypass the UI's "preview failed" lock and
+        // sign a tx the chain will reject.
+        const insufficientBalance = !!(previewBuild?.balance && !previewBuild.balance.sufficient)
+        const previewBlocked = previewLoading || !!previewError || !previewBuild?.unsignedTx || insufficientBalance
+        if (phase === 'review' && quote && fromAsset && toAsset && !previewBlocked) {
           handleExecuteSwap()
         }
         return
@@ -1729,7 +1735,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if ('slippageBps' in fields && fields.slippageBps !== undefined) setSlippageBps(fields.slippageBps)
     }
     return onRpcMessage('swap-cmd', apply)
-  }, [open, assets, onClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey])
+  }, [open, assets, onClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
 
   // Drain any seed keys that arrived before the asset list finished loading.
   // Without this, REST `/swap/open` silently lost fromAsset/toAsset on first
@@ -3146,6 +3152,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     : { transform: "translateY(-1px)" }}
                   onClick={() => { if (!reviewConfirmLocked) handleExecuteSwap() }}
                   disabled={reviewConfirmLocked}
+                  aria-disabled={reviewConfirmLocked}
                 >
                   {reviewConfirmLockLabel ||
                     ((previewBuild?.allowance && !previewBuild.allowance.sufficient)
