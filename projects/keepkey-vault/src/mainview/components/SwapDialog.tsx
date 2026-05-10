@@ -2348,18 +2348,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
                             borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
                             onClick={() => {
-                              console.log('[swap-max-debug]', {
-                                wasMax: isMax,
-                                willBeMax: !isMax,
-                                fromAsset: fromAsset ? { chainId: fromAsset.chainId, symbol: fromAsset.symbol, chainFamily: fromAsset.chainFamily, contractAddress: fromAsset.contractAddress } : null,
-                                fromBalance,
-                                nativeEvmMaxAmount,
-                                sendAmount_at_click: isMax ? amount : (nativeEvmMaxAmount ?? (fromBalance || '0')),
-                                inputMode,
-                                balancesLen: balances.length,
-                                btcCacheRaw: balances.find(b => b.chainId === 'bitcoin'),
-                              })
+                              const willBe = !isMax
+                              const projected = willBe ? (nativeEvmMaxAmount ?? (fromBalance || '0')) : amount
+                              const cb = balances.find(b => b.chainId === fromAsset?.chainId)
+                              console.log(
+                                `[swap-max-debug] wasMax=${isMax} willBeMax=${willBe}` +
+                                ` | fromAsset.chainId=${fromAsset?.chainId} symbol=${fromAsset?.symbol} family=${fromAsset?.chainFamily} contract=${fromAsset?.contractAddress || 'none'}` +
+                                ` | fromBalance=${JSON.stringify(fromBalance)} (typeof=${typeof fromBalance})` +
+                                ` | nativeEvmMaxAmount=${JSON.stringify(nativeEvmMaxAmount)}` +
+                                ` | sendAmount_projected=${JSON.stringify(projected)}` +
+                                ` | inputMode=${inputMode} amount=${JSON.stringify(amount)}` +
+                                ` | balances.find(chainId===fromAsset.chainId).balance=${JSON.stringify(cb?.balance)}` +
+                                ` | balancesLen=${balances.length}`
+                              )
                               setIsMax(!isMax); setAmount(""); setFiatAmount("")
+                              requestAnimationFrame(() => {
+                                const input = document.querySelector<HTMLInputElement>('input[placeholder="0.0"], input[placeholder="0.00"]')
+                                console.log(`[swap-max-debug] post-click input.value="${input?.value ?? '<not found>'}"`)
+                              })
                             }} disabled={busy}>
                             {t("max")}
                           </Button>
