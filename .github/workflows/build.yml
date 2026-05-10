@@ -607,11 +607,15 @@ jobs:
 
           cp -a "$APP_SRC"/. "$ROOT/opt/keepkey-vault/"
 
+          # All file content is written via printf below to avoid YAML-indented
+          # heredoc whitespace bleed (a 10-space prefix in dpkg control == invalid).
+          # Each block is one printf with explicit \n line breaks.
+
           # /usr/bin shim
-          cat > "$ROOT/usr/bin/keepkey-vault" <<'SHIM'
-          #!/bin/sh
-          exec /opt/keepkey-vault/bin/launcher "$@"
-          SHIM
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'exec /opt/keepkey-vault/bin/launcher "$@"' \
+            > "$ROOT/usr/bin/keepkey-vault"
           chmod 0755 "$ROOT/usr/bin/keepkey-vault"
 
           # Icon
@@ -621,88 +625,94 @@ jobs:
           fi
 
           # .desktop
-          cat > "$ROOT/usr/share/applications/keepkey-vault.desktop" <<DESKTOP
-          [Desktop Entry]
-          Name=KeepKey Vault
-          Exec=/usr/bin/keepkey-vault %U
-          Icon=keepkey-vault
-          Type=Application
-          Categories=Finance;Utility;
-          Comment=Desktop companion for KeepKey hardware wallet
-          Terminal=false
-          DESKTOP
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Name=KeepKey Vault' \
+            'Exec=/usr/bin/keepkey-vault %U' \
+            'Icon=keepkey-vault' \
+            'Type=Application' \
+            'Categories=Finance;Utility;' \
+            'Comment=Desktop companion for KeepKey hardware wallet' \
+            'Terminal=false' \
+            > "$ROOT/usr/share/applications/keepkey-vault.desktop"
 
           # udev rules — let regular users access KeepKey USB without root
-          cat > "$ROOT/lib/udev/rules.d/51-keepkey.rules" <<'UDEV'
-          # KeepKey hardware wallet
-          # Vendor 0x2B24, PIDs: 0x0001 (HID legacy), 0x0002 (USB/WebUSB modern)
-          SUBSYSTEM=="usb", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"
-          KERNEL=="hidraw*", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"
-          UDEV
+          printf '%s\n' \
+            '# KeepKey hardware wallet' \
+            '# Vendor 0x2B24, PIDs: 0x0001 (HID legacy), 0x0002 (USB/WebUSB modern)' \
+            'SUBSYSTEM=="usb", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"' \
+            'KERNEL=="hidraw*", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"' \
+            > "$ROOT/lib/udev/rules.d/51-keepkey.rules"
 
           # Copyright stub (lintian wants one)
-          cat > "$ROOT/usr/share/doc/$PKG/copyright" <<'COPYRIGHT'
-          Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-          Upstream-Name: KeepKey Vault
-          Source: https://github.com/keepkey/keepkey-vault
+          printf '%s\n' \
+            'Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/' \
+            'Upstream-Name: KeepKey Vault' \
+            'Source: https://github.com/keepkey/keepkey-vault' \
+            '' \
+            'Files: *' \
+            'Copyright: KEY HODLERS LLC' \
+            'License: Proprietary' \
+            > "$ROOT/usr/share/doc/$PKG/copyright"
 
-          Files: *
-          Copyright: KEY HODLERS LLC
-          License: Proprietary
-          COPYRIGHT
-
-          # Compute installed size
+          # Compute installed size in KB (excluding DEBIAN dir)
           SIZE_KB=$(du -sk "$ROOT" --exclude=DEBIAN | cut -f1)
 
-          # control file
-          cat > "$ROOT/DEBIAN/control" <<CONTROL
-          Package: $PKG
-          Version: $VERSION
-          Section: utils
-          Priority: optional
-          Architecture: $ARCH
-          Installed-Size: $SIZE_KB
-          Depends: libc6 (>= 2.38), libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libayatana-appindicator3-1 | libappindicator3-1
-          Recommends: udev
-          Maintainer: KEY HODLERS LLC <support@keepkey.com>
-          Homepage: https://keepkey.com
-          Description: Desktop companion for KeepKey hardware wallet
-           KeepKey Vault is the official desktop application for managing your
-           KeepKey hardware wallet. Send and receive crypto, manage assets across
-           multiple chains, and swap between supported tokens.
-          CONTROL
+          # DEBIAN/control — printf so no leading whitespace creeps in
+          {
+            printf 'Package: %s\n' "$PKG"
+            printf 'Version: %s\n' "$VERSION"
+            printf 'Section: utils\n'
+            printf 'Priority: optional\n'
+            printf 'Architecture: %s\n' "$ARCH"
+            printf 'Installed-Size: %s\n' "$SIZE_KB"
+            printf 'Depends: libc6 (>= 2.38), libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libayatana-appindicator3-1 | libappindicator3-1\n'
+            printf 'Recommends: udev\n'
+            printf 'Maintainer: KEY HODLERS LLC <support@keepkey.com>\n'
+            printf 'Homepage: https://keepkey.com\n'
+            printf 'Description: Desktop companion for KeepKey hardware wallet\n'
+            printf ' KeepKey Vault is the official desktop application for managing your\n'
+            printf ' KeepKey hardware wallet. Send and receive crypto, manage assets across\n'
+            printf ' multiple chains, and swap between supported tokens.\n'
+          } > "$ROOT/DEBIAN/control"
 
           # postinst — refresh icon + udev caches
-          cat > "$ROOT/DEBIAN/postinst" <<'POSTINST'
-          #!/bin/sh
-          set -e
-          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
-          fi
-          if command -v update-desktop-database >/dev/null 2>&1; then
-            update-desktop-database -q /usr/share/applications || true
-          fi
-          if command -v udevadm >/dev/null 2>&1; then
-            udevadm control --reload-rules || true
-            udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || true
-          fi
-          exit 0
-          POSTINST
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'set -e' \
+            'if command -v gtk-update-icon-cache >/dev/null 2>&1; then' \
+            '  gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true' \
+            'fi' \
+            'if command -v update-desktop-database >/dev/null 2>&1; then' \
+            '  update-desktop-database -q /usr/share/applications || true' \
+            'fi' \
+            'if command -v udevadm >/dev/null 2>&1; then' \
+            '  udevadm control --reload-rules || true' \
+            '  udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || true' \
+            'fi' \
+            'exit 0' \
+            > "$ROOT/DEBIAN/postinst"
           chmod 0755 "$ROOT/DEBIAN/postinst"
 
           # postrm — refresh icon cache after removal
-          cat > "$ROOT/DEBIAN/postrm" <<'POSTRM'
-          #!/bin/sh
-          set -e
-          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
-          fi
-          if command -v update-desktop-database >/dev/null 2>&1; then
-            update-desktop-database -q /usr/share/applications || true
-          fi
-          exit 0
-          POSTRM
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'set -e' \
+            'if command -v gtk-update-icon-cache >/dev/null 2>&1; then' \
+            '  gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true' \
+            'fi' \
+            'if command -v update-desktop-database >/dev/null 2>&1; then' \
+            '  update-desktop-database -q /usr/share/applications || true' \
+            'fi' \
+            'exit 0' \
+            > "$ROOT/DEBIAN/postrm"
           chmod 0755 "$ROOT/DEBIAN/postrm"
+
+          # Sanity-print the control file before building
+          echo "=== DEBIAN/control ==="
+          cat "$ROOT/DEBIAN/control"
+          echo "=== layout (sample) ==="
+          find "$ROOT" -maxdepth 3 -type d | sort
 
           # Build .deb (xz compression for size; fakeroot so ownership is root:root)
           fakeroot dpkg-deb --build -Zxz "$ROOT" "$DEB_NAME"
