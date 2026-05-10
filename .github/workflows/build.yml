@@ -154,6 +154,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install protobuf
 
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot lintian dpkg-dev
+
       - name: Build zcash-cli sidecar (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -345,6 +349,130 @@ jobs:
           echo "=== After cleanup ==="
           ls -la
 
+      - name: Substitute Electrobun Linux core (lower glibc floor)
+        if: runner.os == 'Linux'
+        env:
+          # Tag of our self-built Electrobun core on this repo. Built on
+          # ubuntu-22.04 against glibc 2.35 so Vault works on Debian 12,
+          # Ubuntu 22.04, RHEL/Rocky 9, Mint 21, etc. — distros that the
+          # upstream-shipped libNativeWrapper.so (glibc 2.38) excludes.
+          # Republish via: make publish-electrobun-linux-x64-core
+          ELECTROBUN_LINUX_CORE_TAG: 'electrobun-linux-x64-core-v1'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "No Linux tar.zst found, skipping core substitution"; exit 0; fi
+
+          # Try to download our self-built core. If the release doesn't exist
+          # yet, don't fail — the audit step downstream will still catch the
+          # high-glibc upstream binary. This makes the first push to a fresh
+          # branch land cleanly even before the publish workflow has run.
+          CORE_URL="https://github.com/${{ github.repository }}/releases/download/${ELECTROBUN_LINUX_CORE_TAG}/electrobun-core-linux-x64.tar.gz"
+          CORE_TGZ=$(mktemp --suffix=.tar.gz)
+          if ! curl -fsSL -o "$CORE_TGZ" "$CORE_URL"; then
+            echo "::warning::Could not fetch $CORE_URL — using upstream-shipped libNativeWrapper.so (glibc 2.38)."
+            echo "::warning::Run 'make publish-electrobun-linux-x64-core' to build + publish a glibc 2.35 core."
+            rm -f "$CORE_TGZ"
+            exit 0
+          fi
+
+          echo "Fetched $(du -h "$CORE_TGZ" | cut -f1) of Electrobun Linux core"
+
+          WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK" "$CORE_TGZ"' EXIT
+          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
+          tar xf "$WORK/app.tar" -C "$WORK/"
+          APP_DIR=$(find "$WORK" -maxdepth 1 -type d -name "keepkey-vault" | head -1)
+          [ -n "$APP_DIR" ] || { echo "::error::no keepkey-vault dir in tar.zst"; exit 1; }
+
+          BIN_DIR="$APP_DIR/bin"
+          [ -d "$BIN_DIR" ] || { echo "::error::no bin/ dir at $BIN_DIR"; exit 1; }
+
+          # Extract core tarball into a staging dir so we can preview what's there.
+          STAGE="$WORK/core"
+          mkdir -p "$STAGE"
+          tar xzf "$CORE_TGZ" -C "$STAGE"
+          echo "Core tarball contents:"
+          ls -la "$STAGE"
+
+          # Substitute every file from the core into bin/ (overwrite). Preserve
+          # mode + ownership of the original layout. Files we expect:
+          #   launcher, extractor, libNativeWrapper.so, libNativeWrapper_cef.so,
+          #   libasar.so, (optionally) bun
+          for src in "$STAGE"/*; do
+            name=$(basename "$src")
+            dst="$BIN_DIR/$name"
+            if [ -e "$dst" ]; then
+              echo "  replace bin/$name"
+            else
+              echo "  add     bin/$name"
+            fi
+            install -m 0755 "$src" "$dst"
+          done
+
+          # Repack tar.zst — same name, original location.
+          (cd "$WORK" && tar cf "$WORK/app.tar" "$(basename "$APP_DIR")")
+          zstd -19 -o "$TAR_ZST" --force "$WORK/app.tar"
+          echo "Repacked $TAR_ZST ($(du -h "$TAR_ZST" | cut -f1))"
+
+      - name: Audit Linux glibc footprint
+        if: runner.os == 'Linux'
+        env:
+          # Highest GLIBC_ symbol allowed in any ELF inside the bundle.
+          # 2.38 = upstream Electrobun libNativeWrapper.so floor (excludes Debian 12 etc).
+          # 2.35 = ubuntu-22.04 floor; reachable once electrobun-linux-x64-core-v1 is published
+          #        and the substitute step above runs successfully.
+          # Set to 2.38 for now; ratchet to 2.35 after the first successful publish run.
+          LINUX_GLIBC_FLOOR: '2.38'
+        shell: bash
+        run: |
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "No Linux tar.zst found, skipping audit"; exit 0; fi
+
+          WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK"' EXIT
+          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
+          tar xf "$WORK/app.tar" -C "$WORK/"
+
+          floor="${LINUX_GLIBC_FLOOR}"
+          floor_major="${floor%.*}"; floor_minor="${floor#*.}"
+
+          fail=0
+          {
+            echo "## Linux glibc footprint (floor: $floor)"
+            echo ""
+            echo "| File | Max GLIBC | Status |"
+            echo "|------|-----------|--------|"
+            while IFS= read -r f; do
+              # ELF check
+              head -c 4 "$f" 2>/dev/null | od -An -c 2>/dev/null | grep -q 'E   L   F' || continue
+              max=$(strings "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1)
+              max="${max#GLIBC_}"
+              rel="${f#$WORK/}"
+              if [ -z "$max" ]; then
+                echo "| \`$rel\` | (none) | OK |"
+              else
+                m_major="${max%.*}"; m_minor="${max#*.}"
+                if [ "$m_major" -gt "$floor_major" ] || { [ "$m_major" -eq "$floor_major" ] && [ "$m_minor" -gt "$floor_minor" ]; }; then
+                  echo "| \`$rel\` | $max | EXCEEDS FLOOR |"
+                  echo "::error::$rel requires GLIBC_$max (floor: $floor)" >&2
+                  fail=1
+                else
+                  echo "| \`$rel\` | $max | OK |"
+                fi
+              fi
+            done < <(find "$WORK" -type f \( -name '*.so*' -o -name '*.node' -o -perm -u+x \) ! -name '*.js' ! -name '*.json' ! -name '*.ts' ! -name '*.png' ! -name '*.html' 2>/dev/null | sort)
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          if [ "$fail" = "1" ]; then
+            echo "::error::Linux glibc audit failed — one or more ELFs exceed the floor of $floor"
+            exit 1
+          fi
+
       - name: Package AppImage (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -404,6 +532,147 @@ jobs:
           # Cleanup
           rm -rf "$WORK"
 
+      - name: Package .deb (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/keepkey-vault/artifacts
+          TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
+          if [ -z "$TAR_ZST" ]; then echo "No Linux tar.zst found, skipping .deb"; exit 0; fi
+
+          VERSION=$(node -p "require('../package.json').version")
+          PKG="keepkey-vault"
+          ARCH="amd64"
+          DEB_NAME="${PKG}_${VERSION}_${ARCH}.deb"
+
+          WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK"' EXIT
+          ROOT="$WORK/$PKG"
+
+          # Extract bundle
+          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
+          tar xf "$WORK/app.tar" -C "$WORK/"
+          APP_SRC=$(find "$WORK" -maxdepth 1 -type d -name "keepkey-vault" | head -1)
+          [ -n "$APP_SRC" ] || { echo "::error::No keepkey-vault dir in tarball"; exit 1; }
+
+          # /opt/keepkey-vault/<bundle> + /usr/bin shim + .desktop + icon + udev
+          mkdir -p "$ROOT/opt/keepkey-vault" \
+                   "$ROOT/usr/bin" \
+                   "$ROOT/usr/share/applications" \
+                   "$ROOT/usr/share/icons/hicolor/256x256/apps" \
+                   "$ROOT/usr/share/doc/$PKG" \
+                   "$ROOT/lib/udev/rules.d" \
+                   "$ROOT/DEBIAN"
+
+          cp -a "$APP_SRC"/. "$ROOT/opt/keepkey-vault/"
+
+          # /usr/bin shim
+          cat > "$ROOT/usr/bin/keepkey-vault" <<'SHIM'
+          #!/bin/sh
+          exec /opt/keepkey-vault/bin/launcher "$@"
+          SHIM
+          chmod 0755 "$ROOT/usr/bin/keepkey-vault"
+
+          # Icon
+          if [ -f "$ROOT/opt/keepkey-vault/Resources/appIcon.png" ]; then
+            cp "$ROOT/opt/keepkey-vault/Resources/appIcon.png" \
+               "$ROOT/usr/share/icons/hicolor/256x256/apps/keepkey-vault.png"
+          fi
+
+          # .desktop
+          cat > "$ROOT/usr/share/applications/keepkey-vault.desktop" <<DESKTOP
+          [Desktop Entry]
+          Name=KeepKey Vault
+          Exec=/usr/bin/keepkey-vault %U
+          Icon=keepkey-vault
+          Type=Application
+          Categories=Finance;Utility;
+          Comment=Desktop companion for KeepKey hardware wallet
+          Terminal=false
+          DESKTOP
+
+          # udev rules — let regular users access KeepKey USB without root
+          cat > "$ROOT/lib/udev/rules.d/51-keepkey.rules" <<'UDEV'
+          # KeepKey hardware wallet
+          # Vendor 0x2B24, PIDs: 0x0001 (HID legacy), 0x0002 (USB/WebUSB modern)
+          SUBSYSTEM=="usb", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"
+          KERNEL=="hidraw*", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"
+          UDEV
+
+          # Copyright stub (lintian wants one)
+          cat > "$ROOT/usr/share/doc/$PKG/copyright" <<'COPYRIGHT'
+          Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+          Upstream-Name: KeepKey Vault
+          Source: https://github.com/keepkey/keepkey-vault
+
+          Files: *
+          Copyright: KEY HODLERS LLC
+          License: Proprietary
+          COPYRIGHT
+
+          # Compute installed size
+          SIZE_KB=$(du -sk "$ROOT" --exclude=DEBIAN | cut -f1)
+
+          # control file
+          cat > "$ROOT/DEBIAN/control" <<CONTROL
+          Package: $PKG
+          Version: $VERSION
+          Section: utils
+          Priority: optional
+          Architecture: $ARCH
+          Installed-Size: $SIZE_KB
+          Depends: libc6 (>= 2.38), libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libayatana-appindicator3-1 | libappindicator3-1
+          Recommends: udev
+          Maintainer: KEY HODLERS LLC <support@keepkey.com>
+          Homepage: https://keepkey.com
+          Description: Desktop companion for KeepKey hardware wallet
+           KeepKey Vault is the official desktop application for managing your
+           KeepKey hardware wallet. Send and receive crypto, manage assets across
+           multiple chains, and swap between supported tokens.
+          CONTROL
+
+          # postinst — refresh icon + udev caches
+          cat > "$ROOT/DEBIAN/postinst" <<'POSTINST'
+          #!/bin/sh
+          set -e
+          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
+          fi
+          if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+          fi
+          if command -v udevadm >/dev/null 2>&1; then
+            udevadm control --reload-rules || true
+            udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || true
+          fi
+          exit 0
+          POSTINST
+          chmod 0755 "$ROOT/DEBIAN/postinst"
+
+          # postrm — refresh icon cache after removal
+          cat > "$ROOT/DEBIAN/postrm" <<'POSTRM'
+          #!/bin/sh
+          set -e
+          if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
+          fi
+          if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+          fi
+          exit 0
+          POSTRM
+          chmod 0755 "$ROOT/DEBIAN/postrm"
+
+          # Build .deb (xz compression for size; fakeroot so ownership is root:root)
+          fakeroot dpkg-deb --build -Zxz "$ROOT" "$DEB_NAME"
+          ls -lh "$DEB_NAME"
+
+          # Sanity-check with lintian (warnings only — don't fail the build)
+          if command -v lintian >/dev/null 2>&1; then
+            lintian --suppress-tags binary-without-manpage,no-changelog "$DEB_NAME" || true
+          fi
+
       - name: Generate checksums
         run: |
           cd projects/keepkey-vault/artifacts
@@ -456,7 +725,7 @@ jobs:
           # Remove per-platform checksum files (will regenerate combined)
           rm -f SHA256SUMS-*.txt SHA256SUMS.txt
           # Generate checksums for release-worthy files only
-          shasum -a 256 *.dmg *.AppImage *.exe *.tar.zst 2>/dev/null > SHA256SUMS.txt || true
+          shasum -a 256 *.dmg *.AppImage *.deb *.exe *.tar.zst 2>/dev/null > SHA256SUMS.txt || true
           echo "=== Release checksums ==="
           cat SHA256SUMS.txt
 
