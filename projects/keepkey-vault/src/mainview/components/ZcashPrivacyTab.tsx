@@ -148,6 +148,11 @@ export function ZcashPrivacyTab() {
 	// sending to a third party. They can still paste a different address.
 	const [myTransparentAddr, setMyTransparentAddr] = useState<string | null>(null)
 	const tAddrPrefilledRef = useRef(false)
+	// Confirmed transparent ZEC balance (zatoshis). Drives the Shield card's
+	// "available" line + Max button; without this the page is unusable —
+	// users can't tell how much t-addr ZEC they have to shield.
+	const [transparentBalanceZat, setTransparentBalanceZat] = useState<number | null>(null)
+	const [transparentBalanceLoading, setTransparentBalanceLoading] = useState(false)
 	const [deshieldAmount, setDeshieldAmount] = useState("")
 	const [deshielding, setDeshielding] = useState(false)
 	const [deshieldResult, setDeshieldResult] = useState<string | null>(null)
@@ -293,6 +298,34 @@ export function ZcashPrivacyTab() {
 		return () => { cancelled = true }
 	}, [status, myTransparentAddr])
 
+	// Refresh transparent ZEC balance — re-fetched on Shield-page open and after
+	// a successful shield/deshield so the Max button + "available" line stay
+	// honest. Backend's getBalance({ chainId: 'zcash' }) returns the native
+	// (transparent-only) balance as a decimal string.
+	const refreshTransparentBalance = useCallback(async () => {
+		setTransparentBalanceLoading(true)
+		try {
+			const r = await rpcRequest<{ balance: string }>("getBalance", { chainId: "zcash" }, 15000)
+			const zec = parseFloat(r?.balance ?? "0")
+			if (!Number.isFinite(zec) || zec < 0) {
+				setTransparentBalanceZat(0)
+			} else {
+				setTransparentBalanceZat(Math.round(zec * 1e8))
+			}
+		} catch (e) {
+			console.warn("[ZcashPrivacyTab] failed to fetch t-addr balance:", e)
+			setTransparentBalanceZat(null)
+		}
+		setTransparentBalanceLoading(false)
+	}, [])
+
+	useEffect(() => {
+		if (status !== "ready") return
+		if (page !== "shield") return
+		if (transparentBalanceZat != null) return
+		refreshTransparentBalance()
+	}, [status, page, transparentBalanceZat, refreshTransparentBalance])
+
 	const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
 	const smoothPercent = useRef(0)
 	const [displayPercent, setDisplayPercent] = useState(0)
@@ -402,10 +435,11 @@ export function ZcashPrivacyTab() {
 			const zatoshis = parseZatoshis(shieldAmount)
 			const result = await rpcRequest<{ txid: string }>("zcashShieldZec",
 				{ amount: zatoshis }, 600000)
-			setShieldResult(result.txid); setShieldAmount(""); refreshBalance()
+			setShieldResult(result.txid); setShieldAmount("")
+			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
 		setShielding(false); setShieldStep(null)
-	}, [shieldAmount, refreshBalance])
+	}, [shieldAmount, refreshBalance, refreshTransparentBalance])
 
 	const handleDeshield = useCallback(async () => {
 		if (!deshieldRecipient || !deshieldAmount) return
@@ -419,10 +453,11 @@ export function ZcashPrivacyTab() {
 			const result = await rpcRequest<{ txid: string }>("zcashDeshieldZec",
 				{ recipient: deshieldRecipient, amount: zatoshis }, 600000)
 			setDeshieldResult(result.txid)
-			setDeshieldRecipient(""); setDeshieldAmount(""); refreshBalance()
+			setDeshieldRecipient(""); setDeshieldAmount("")
+			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setDeshieldError(e.message || "Deshield failed") }
 		setDeshielding(false); setDeshieldStep(null)
-	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, t])
+	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, refreshTransparentBalance, t])
 
 	const copyAddress = useCallback(() => {
 		if (!orchardAddress) return
@@ -453,6 +488,16 @@ export function ZcashPrivacyTab() {
 		const fee = 5000 * Math.max(2, orchardActions + 1)
 		return Math.max(0, spendable - fee)
 	}, [balance])
+
+	// Shield max — transparent balance minus the ZIP-317 fee for shielding.
+	// Shield is one transparent input → 2 padded Orchard outputs (logical
+	// actions = 2 transparent + 2 orchard = 4); fee = 5000 * max(2, 4) = 20000.
+	// We round up to 25000 zat (~0.00025 ZEC) for safety against UTXO-set growth.
+	const SHIELD_FEE_ZAT = 25_000
+	const shieldMaxZatoshis = useMemo(() => {
+		if (transparentBalanceZat == null) return 0
+		return Math.max(0, transparentBalanceZat - SHIELD_FEE_ZAT)
+	}, [transparentBalanceZat])
 
 	const filteredTxs = useMemo(() => {
 		switch (historyFilter) {
@@ -691,6 +736,19 @@ export function ZcashPrivacyTab() {
 								<span className="meta">From your t-addr</span>
 							</div>
 							<div className="card-body">
+								<div className="balance-row">
+									<span>Available on t-addr</span>
+									<strong>
+										{transparentBalanceLoading
+											? "loading…"
+											: transparentBalanceZat == null
+												? "—"
+												: `${formatZec(transparentBalanceZat)} ZEC`}
+									</strong>
+									{transparentBalanceZat != null && !transparentBalanceLoading && (
+										<button className="ghost-btn" onClick={refreshTransparentBalance} title="Refresh">↻</button>
+									)}
+								</div>
 								<div className="field-grid">
 									<div className="field">
 										<span className="lbl">Amount</span>
@@ -701,6 +759,12 @@ export function ZcashPrivacyTab() {
 											onChange={e => setShieldAmount(e.target.value)}
 										/>
 										<span className="suffix">ZEC</span>
+										<button
+											className="max"
+											onClick={() => setShieldAmount(formatZec(shieldMaxZatoshis))}
+											disabled={shieldMaxZatoshis === 0}
+											title={`Reserves ${formatZec(SHIELD_FEE_ZAT)} ZEC for the network fee`}
+										>Max</button>
 									</div>
 								</div>
 								<div className="submit-row">
@@ -730,6 +794,17 @@ export function ZcashPrivacyTab() {
 								<span className="meta">Visible on chain</span>
 							</div>
 							<div className="card-body">
+								<div className="balance-row">
+									<span>Available shielded</span>
+									<strong>
+										{balance ? `${formatZec(spendableMaxZatoshis)} ZEC` : "—"}
+									</strong>
+									{balance && (
+										<span className="balance-hint">
+											after fee · {balance.spendable_notes_count ?? 0} spendable notes
+										</span>
+									)}
+								</div>
 								<div className="field-grid">
 									<div className="field">
 										<span className="lbl">To</span>

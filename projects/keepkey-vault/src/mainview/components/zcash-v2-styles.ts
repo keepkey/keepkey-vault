@@ -264,6 +264,26 @@ export const ZCASH_V2_CSS = `
 	content: ""; width: 4px; height: 4px; border-radius: 50%;
 	background: var(--zk-green);
 }
+.zcash-v2 .balance-row {
+	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+	padding: 10px 12px;
+	margin-bottom: 12px;
+	border: 1px solid var(--zk-line);
+	border-radius: 6px;
+	background: var(--zk-bg);
+	font-family: var(--zk-font-display); font-size: 12px;
+	color: var(--zk-fg-mute);
+}
+.zcash-v2 .balance-row strong {
+	font-family: var(--zk-font-mono); font-weight: 500;
+	font-size: 13.5px; color: var(--zk-gold);
+	font-variant-numeric: tabular-nums;
+}
+.zcash-v2 .balance-row .balance-hint {
+	color: var(--zk-fg-faint); font-size: 11px;
+	margin-left: auto;
+}
+.zcash-v2 .balance-row .ghost-btn { padding: 3px 8px; font-size: 12px; margin-left: auto; }
 .zcash-v2 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .zcash-v2 .field-grid { display: grid; gap: 12px; }
 
