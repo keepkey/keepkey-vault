@@ -342,7 +342,7 @@ export const ZCASH_V2_CSS = `
 }
 .zcash-v2 .form-page.with-aside {
 	/* minmax(0,...) lets each column actually shrink to its share. Without it,
-	   the implicit `auto` minimum keeps a column at min-content width and
+	   the implicit auto minimum keeps a column at min-content width and
 	   pushes input suffixes / Max button / char counters out of view. */
 	grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
 	align-items: start;
