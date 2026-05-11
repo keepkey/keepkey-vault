@@ -4,7 +4,7 @@
  * Phases: input → review → approving/signing/broadcasting → success
  * Replaces the old inline SwapView with a proper modal experience.
  */
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-ui/react"
 import CountUp from "react-countup"
@@ -125,6 +125,167 @@ function spenderHint(addr: string | undefined): string | null {
   if (a === '0xdef1c0ded9bec7f1a1670819833240f027b25eff') return '0x ExchangeProxy'
   if (a === '0x9008d19f58aabd9ed0d60971565aa8510560ab41') return 'CoW Vault Relayer'
   return null
+}
+
+type SwapPreviewBuild = {
+  approveTx?: any
+  unsignedTx: any
+  allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
+  balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
+}
+
+const EVM_METHOD_LABELS: Record<string, string> = {
+  '0x095ea7b3': 'ERC-20 approve',
+  '0x44bc937b': 'THORChain depositWithExpiry',
+}
+
+function toBigIntValue(value: unknown): bigint | null {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'bigint') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null
+    return BigInt(Math.trunc(value))
+  }
+  if (typeof value === 'string') {
+    try { return BigInt(value) } catch { return null }
+  }
+  return null
+}
+
+function formatUnitsBigInt(value: bigint, decimals: number, maxFraction = 8): string {
+  if (decimals <= 0) return value.toString()
+  const scale = 10n ** BigInt(decimals)
+  const whole = value / scale
+  const fraction = value % scale
+  if (fraction === 0n || maxFraction <= 0) return whole.toString()
+  const frac = fraction.toString().padStart(decimals, '0').slice(0, maxFraction).replace(/0+$/, '')
+  return frac ? `${whole.toString()}.${frac}` : whole.toString()
+}
+
+function formatNativeUnits(value: bigint | null, decimals: number, symbol: string, maxFraction = 8): string {
+  if (value === null) return '-'
+  return `${formatUnitsBigInt(value, decimals, maxFraction)} ${symbol}`
+}
+
+function formatQuoteAssetAmount(raw: string | number | undefined, asset: SwapAsset, referenceAmount?: string): string {
+  const value = raw == null ? '0' : String(raw)
+  if (!/^\d+$/.test(value) || asset.decimals <= 0) return formatBalance(value)
+  const reference = referenceAmount ? parseFloat(referenceAmount) : 0
+  const asNumber = Number(value)
+  const looksLikeBaseUnits =
+    value.length > Math.min(4, asset.decimals) ||
+    (Number.isFinite(asNumber) && reference > 0 && asNumber > reference * 10)
+  return looksLikeBaseUnits ? formatUnitsBigInt(BigInt(value), asset.decimals, 8) : formatBalance(value)
+}
+
+function formatGwei(value: bigint | null): string {
+  if (value === null) return '-'
+  return `${formatUnitsBigInt(value, 9, 4)} gwei`
+}
+
+function evmSelector(data: unknown): string | null {
+  if (typeof data !== 'string') return null
+  const hex = data.toLowerCase()
+  if (!hex.startsWith('0x') || hex.length < 10) return null
+  return hex.slice(0, 10)
+}
+
+function evmDataBytes(data: unknown): number {
+  if (typeof data !== 'string' || !data.startsWith('0x')) return 0
+  return Math.max(0, Math.floor((data.length - 2) / 2))
+}
+
+function evmMethodLabel(data: unknown): string {
+  const selector = evmSelector(data)
+  if (!selector) return 'No calldata'
+  return EVM_METHOD_LABELS[selector] ? `${EVM_METHOD_LABELS[selector]} (${selector})` : `Unknown method (${selector})`
+}
+
+function ellipsizeMiddle(value: unknown, start = 10, end = 8): string {
+  if (typeof value !== 'string') return value == null ? '-' : String(value)
+  if (value.length <= start + end + 1) return value
+  return `${value.slice(0, start)}...${value.slice(-end)}`
+}
+
+function ReviewRow({ label, children, accent = false }: { label: ReactNode; children: ReactNode; accent?: boolean }) {
+  return (
+    <Flex justify="space-between" align="flex-start" gap="3">
+      <Text fontSize="11px" color="kk.textMuted" flexShrink={0}>{label}</Text>
+      <Text
+        fontSize="11px"
+        fontFamily="mono"
+        fontWeight={accent ? "700" : "500"}
+        color={accent ? "var(--teal)" : "kk.textSecondary"}
+        textAlign="right"
+        wordBreak="break-word"
+      >
+        {children}
+      </Text>
+    </Flex>
+  )
+}
+
+function EvmTxSummaryCard({
+  title,
+  tx,
+  chain,
+  asset,
+  isApproval = false,
+}: {
+  title: string
+  tx: any
+  chain?: ChainDef
+  asset?: SwapAsset
+  isApproval?: boolean
+}) {
+  const nativeDecimals = chain?.decimals ?? 18
+  const nativeSymbol = chain?.symbol || 'ETH'
+  const gasLimit = toBigIntValue(tx?.gasLimit)
+  const gasPrice = toBigIntValue(tx?.gasPrice)
+  const maxFeePerGas = toBigIntValue(tx?.maxFeePerGas)
+  const maxPriorityFeePerGas = toBigIntValue(tx?.maxPriorityFeePerGas)
+  const feePerGas = maxFeePerGas ?? gasPrice
+  const maxNetworkFee = gasLimit !== null && feePerGas !== null ? gasLimit * feePerGas : null
+  const nonce = toBigIntValue(tx?.nonce)
+  const value = toBigIntValue(tx?.value)
+  const selector = evmSelector(tx?.data)
+  const approve = isApproval ? parseApproveCalldata(tx?.data) : null
+  const spenderName = spenderHint(approve?.spender)
+
+  return (
+    <Box bg="rgba(0,0,0,0.20)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
+      <Flex align="center" justify="space-between" mb="2" gap="2">
+        <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">{title}</Text>
+        <Text fontSize="10px" color="var(--teal)" fontFamily="mono">payload ready</Text>
+      </Flex>
+      <VStack gap="1" align="stretch">
+        <ReviewRow label="Chain">{chain?.id || 'EVM'} ({tx?.chainId ?? '-'})</ReviewRow>
+        <ReviewRow label="Contract">{ellipsizeMiddle(tx?.to)}</ReviewRow>
+        {isApproval && approve && (
+          <>
+            <ReviewRow label="Spender">{spenderName ? `${spenderName} - ${ellipsizeMiddle(approve.spender)}` : ellipsizeMiddle(approve.spender)}</ReviewRow>
+            <ReviewRow label="Approval amount" accent>
+              {asset ? `${formatUnitsBigInt(approve.amount, asset.decimals, 8)} ${asset.symbol}` : approve.amount.toString()}
+            </ReviewRow>
+          </>
+        )}
+        {!isApproval && (
+          <ReviewRow label="Value" accent>{formatNativeUnits(value, nativeDecimals, nativeSymbol)}</ReviewRow>
+        )}
+        <ReviewRow label="Max network fee" accent>{formatNativeUnits(maxNetworkFee, nativeDecimals, nativeSymbol, 8)}</ReviewRow>
+        {maxFeePerGas !== null ? (
+          <ReviewRow label="Fee data">
+            max {formatGwei(maxFeePerGas)} / priority {formatGwei(maxPriorityFeePerGas)}
+          </ReviewRow>
+        ) : (
+          <ReviewRow label="Fee data">{formatGwei(gasPrice)}</ReviewRow>
+        )}
+        <ReviewRow label="Gas / nonce">{gasLimit?.toString() || '-'} / {nonce?.toString() || '-'}</ReviewRow>
+        <ReviewRow label="Method">{evmMethodLabel(tx?.data)}</ReviewRow>
+        <ReviewRow label="Calldata">{evmDataBytes(tx?.data)} bytes{selector ? ` - ${selector}` : ''}</ReviewRow>
+      </VStack>
+    </Box>
+  )
 }
 
 const ETHERSCAN_BY_CHAIN: Record<string, string> = {
@@ -546,12 +707,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // ── Pre-confirm payload preview ──
   // Built silently when the user enters the Confirm Quote screen so the full
   // hdwallet payload is visible in the Details expand BEFORE signing starts.
-  const [previewBuild, setPreviewBuild] = useState<{
-    approveTx?: any
-    unsignedTx: any
-    allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
-    balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
-  } | null>(null)
+  const [previewBuild, setPreviewBuild] = useState<SwapPreviewBuild | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
@@ -1034,6 +1190,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return keepKeyToAddress
   }, [useCustomAddress, customToAddress, keepKeyToAddress])
 
+  const fromChainDef = useMemo(() => (
+    fromAsset ? CHAINS.find(c => c.id === fromAsset.chainId) : undefined
+  ), [fromAsset])
+
   const validAmount = (isMax && !nativeMaxInsufficient) || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
   const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !exceedsBalance && !customAddressError
 
@@ -1047,8 +1207,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       return
     }
     let cancelled = false
-    setPreviewLoading(true); setPreviewError(null)
-    rpcRequest<{ approveTx?: any; unsignedTx: any }>('previewSwapBuild', {
+    setPreviewLoading(true); setPreviewError(null); setPreviewBuild(null)
+    rpcRequest<SwapPreviewBuild>('previewSwapBuild', {
       fromChainId: fromAsset.chainId,
       toChainId: toAsset.chainId,
       fromCaip: fromAsset.caip!,
@@ -1068,6 +1228,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
   }, [phase, quote, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress])
+
+  const auditPayloadReady = !!previewBuild?.unsignedTx
+  const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
+  const reviewConfirmLocked =
+    phase === 'review' && (
+      refreshingQuote ||
+      previewLoading ||
+      !!previewError ||
+      !auditPayloadReady ||
+      previewBalanceBlocked
+    )
+  const reviewConfirmLockLabel =
+    refreshingQuote ? t("refreshingQuote", "Refreshing quote...") :
+    previewLoading ? t("buildingPayload", "Building payload...") :
+    previewError ? t("payloadUnavailableButton", "Payload unavailable") :
+    !auditPayloadReady ? t("payloadRequiredButton", "Waiting for payload") :
+    previewBalanceBlocked ? t("insufficientBalanceButton", "Insufficient balance") :
+    null
 
   // ── Quote fetching ────────────────────────────────────────────────
   const quoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1160,6 +1338,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
     if (!quote || !fromAsset || !toAsset) return
+    if (phase === 'review') {
+      if (previewLoading) {
+        setError(t("payloadStillBuilding", "Transaction payload is still building. Review it before confirming."))
+        return
+      }
+      if (previewError) {
+        setError(t("payloadBuildFailed", "Transaction payload is not available: {{error}}", { error: previewError }))
+        return
+      }
+      if (!previewBuild?.unsignedTx) {
+        setError(t("payloadRequired", "Transaction payload is required before confirming."))
+        return
+      }
+      if (previewBuild.balance && !previewBuild.balance.sufficient) {
+        setError(t("insufficientBalanceButton", "Insufficient balance"))
+        return
+      }
+    }
     const isErc20 = !!fromAsset.contractAddress
 
     // Refresh stale quote (>60s old) before signing — protects against price drift
@@ -1187,9 +1383,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           setError(t("quoteShiftedReReview", "Quote refreshed and dropped {{pct}}% — please review the new numbers and confirm again", { pct: dropPct }))
           return
         }
-        liveQuote = refreshed
         setQuote(refreshed)
         setQuoteFetchedAt(Date.now())
+        setRefreshingQuote(false)
+        setPreviewBuild(null)
+        setError(t("quoteRefreshedReviewPayload", "Quote refreshed. Review the rebuilt payload before confirming."))
+        return
       } catch (e: any) {
         setRefreshingQuote(false)
         setError(`Failed to refresh stale quote: ${e?.message || 'unknown error'}`)
@@ -1264,7 +1463,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress, slippageBps, balances])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2424,33 +2623,73 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Key quote numbers — always visible, condensed */}
               <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
                 <VStack gap="1" align="stretch">
-                  <Flex justify="space-between">
-                    <Text fontSize="11px" color="kk.textMuted">{t("rate")}</Text>
-                    <Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">
-                      1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
-                    </Text>
-                  </Flex>
-                  <Flex justify="space-between">
-                    <Text fontSize="11px" color="kk.textMuted">{t("minimumReceived")}</Text>
-                    <Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">
-                      {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
-                    </Text>
-                  </Flex>
-                  <Flex justify="space-between">
-                    <Text fontSize="11px" color="kk.textMuted">{t("networkFee")} / {t("slippage")}</Text>
-                    <Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">
-                      {formatBalance(quote.fees.outbound)} {toAsset.symbol} / {(quote.slippageBps / 100).toFixed(2)}%
-                    </Text>
-                  </Flex>
-                  <Flex justify="space-between">
-                    <Text fontSize="11px" color="kk.textMuted">{t("estimatedTime")}</Text>
-                    <Text fontSize="11px" color="kk.textSecondary">{formatTime(quote.estimatedTime)}</Text>
-                  </Flex>
-                  {quote.warning && (
-                    <Text fontSize="10px" color="var(--gold)" mt="0.5">{quote.warning}</Text>
-                  )}
+                  <ReviewRow label={t("rate")}>
+                    1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
+                  </ReviewRow>
+                  <ReviewRow label={t("expectedAfterFees", "Expected after fees")}>
+                    {formatBalance(quote.expectedOutput)} {toAsset.symbol}{hasToPrice ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
+                  </ReviewRow>
+                  <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
+                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
+                  </ReviewRow>
+                  <ReviewRow label={t("protocolFee", "Protocol fee")}>
+                    {formatQuoteAssetAmount(quote.fees.outbound, toAsset, quote.expectedOutput)} {toAsset.symbol} ({(quote.fees.totalBps / 100).toFixed(2)}%)
+                  </ReviewRow>
+                  <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
+                    {(slippageBps / 100).toFixed(2)}% max
+                  </ReviewRow>
+                  <ReviewRow label={t("quoteSlippage", "Quote slippage")}>
+                    {(quote.slippageBps / 100).toFixed(2)}%
+                  </ReviewRow>
+                  <ReviewRow label={t("estimatedTime")}>
+                    {formatTime(quote.estimatedTime)}
+                  </ReviewRow>
                 </VStack>
               </Box>
+
+              {fromAsset.chainFamily === 'evm' && (
+                <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" px="3" py="2">
+                  <Flex align="center" justify="space-between" mb="2" gap="2">
+                    <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">
+                      {t("evmSummary", "EVM summary")}
+                    </Text>
+                    <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
+                      {previewLoading
+                        ? t("payloadBuilding", "building payload")
+                        : previewError
+                          ? t("payloadFailed", "payload failed")
+                          : auditPayloadReady
+                            ? t("payloadReady", "payload ready")
+                            : t("payloadRequiredShort", "payload required")}
+                    </Text>
+                  </Flex>
+                  <VStack gap="2" align="stretch">
+                    {previewLoading && (
+                      <Text fontSize="10px" color="kk.textMuted">{t("buildingPayloadDetail", "Building the exact transaction payload for review...")}</Text>
+                    )}
+                    {previewError && (
+                      <Text fontSize="10px" color="kk.error">{t("previewFailed", "Build preview failed")}: {previewError}</Text>
+                    )}
+                    {previewBuild?.approveTx && (
+                      <EvmTxSummaryCard
+                        title={t("approvalTx", "Approval transaction")}
+                        tx={previewBuild.approveTx}
+                        chain={fromChainDef}
+                        asset={fromAsset}
+                        isApproval
+                      />
+                    )}
+                    {previewBuild?.unsignedTx && (
+                      <EvmTxSummaryCard
+                        title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
+                        tx={previewBuild.unsignedTx}
+                        chain={fromChainDef}
+                        asset={fromAsset}
+                      />
+                    )}
+                  </VStack>
+                </Box>
+              )}
 
               {/* Collapsible details: vault/router/memo + hdwallet payload audit */}
               <Box w="full">
@@ -2725,26 +2964,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   fontWeight="600"
                   color="var(--ink-0)"
                   border="0"
-                  cursor={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient) ? "default" : "pointer"}
-                  opacity={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient) ? 0.5 : 1}
+                  cursor={reviewConfirmLocked ? "default" : "pointer"}
+                  opacity={reviewConfirmLocked ? 0.5 : 1}
                   style={{
                     background: 'linear-gradient(180deg, var(--teal-2), var(--teal))',
                     boxShadow: '0 8px 24px -8px rgba(139,227,196,0.5)',
                     transition: 'transform 0.15s, box-shadow 0.15s',
                   }}
-                  _hover={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient)
+                  _hover={reviewConfirmLocked
                     ? {}
                     : { transform: "translateY(-1px)" }}
-                  onClick={() => { if (!refreshingQuote && !(previewBuild?.balance && !previewBuild.balance.sufficient)) handleExecuteSwap() }}
-                  disabled={refreshingQuote || (previewBuild?.balance && !previewBuild.balance.sufficient)}
+                  onClick={() => { if (!reviewConfirmLocked) handleExecuteSwap() }}
+                  disabled={reviewConfirmLocked}
                 >
-                  {refreshingQuote
-                    ? t("refreshingQuote", "Refreshing quote...")
-                    : (previewBuild?.balance && !previewBuild.balance.sufficient)
-                      ? t("insufficientBalanceButton", "Insufficient balance")
-                      : (previewBuild?.allowance && !previewBuild.allowance.sufficient)
-                        ? t("approveAndSwap", "Approve & Swap")
-                        : t("confirmSwap")}
+                  {reviewConfirmLockLabel ||
+                    ((previewBuild?.allowance && !previewBuild.allowance.sufficient)
+                      ? t("approveAndSwap", "Approve & Swap")
+                      : t("confirmSwap"))}
                 </Box>
               </Flex>
             </VStack>

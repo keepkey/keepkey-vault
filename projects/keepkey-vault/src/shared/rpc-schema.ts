@@ -202,7 +202,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Build the unsigned swap tx(s) without signing — used to surface the
        *  hdwallet payload on the Confirm Quote screen for auditing. Returns
        *  `approveTx` only when an ERC-20 allowance bump is required. */
-      previewSwapBuild: { params: ExecuteSwapParams; response: { approveTx?: any; unsignedTx: any } }
+      previewSwapBuild: { params: ExecuteSwapParams; response: {
+        approveTx?: any
+        unsignedTx: any
+        allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
+        balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
+      } }
       getPendingSwaps: { params: void; response: PendingSwap[] }
       dismissSwap: { params: { txid: string }; response: void }
 
