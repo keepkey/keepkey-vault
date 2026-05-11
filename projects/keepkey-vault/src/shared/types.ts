@@ -434,6 +434,8 @@ export interface SolanaTxDecodedInfo {
 
 export interface ApiLogEntry {
   id?: number            // SQLite rowid (set after DB insert)
+  deviceId?: string      // active hardware device id at the time of the log
+  walletId?: string      // device+seed scope at the time of the log
   method: string
   route: string
   timestamp: number
@@ -749,6 +751,8 @@ export interface SwapResult {
 export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
 
 export interface PendingSwap {
+  deviceId?: string      // active hardware device id when the swap was submitted
+  walletId?: string      // device+seed scope when the swap was submitted
   txid: string
   fromAsset: string       // THORChain asset id (e.g. "BASE.ETH")
   toAsset: string         // THORChain asset id (e.g. "ETH.ETH")
@@ -805,6 +809,8 @@ export interface SwapStatusUpdate {
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
 export interface SwapHistoryRecord {
   id: string                     // unique row id (UUID)
+  deviceId?: string              // active hardware device id when the swap was submitted
+  walletId?: string              // device+seed scope when the swap was submitted
   txid: string                   // inbound transaction hash
   fromAsset: string              // THORChain asset id
   toAsset: string
@@ -842,6 +848,8 @@ export interface SwapHistoryRecord {
 
 /** Filter params for getSwapHistory RPC */
 export interface SwapHistoryFilter {
+  deviceId?: string
+  walletId?: string
   status?: SwapTrackingStatus | 'all'
   fromDate?: number       // unix ms
   toDate?: number         // unix ms
@@ -913,6 +921,8 @@ export type ActivitySource = 'app' | 'api' | 'scan'
 
 export interface RecentActivity {
   id: string
+  deviceId?: string
+  walletId?: string
   txid?: string              // blockchain txid (may be absent for sign-only before broadcast)
   chain: string              // chain symbol (BTC, ETH, ATOM, etc.)
   chainId?: string           // internal chain id (bitcoin, ethereum, etc.) — for explorer links

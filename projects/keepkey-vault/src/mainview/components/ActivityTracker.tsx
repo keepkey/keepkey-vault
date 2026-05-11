@@ -10,7 +10,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { ActivityPanel } from "./ActivityPanel"
 import { SwapDialog } from "./SwapDialog"
-import type { RecentActivity, PendingSwap, SwapStatusUpdate, ApiLogEntry } from "../../shared/types"
+import type { RecentActivity, PendingSwap, SwapStatusUpdate, ApiLogEntry, DeviceStateInfo } from "../../shared/types"
 
 const TRACKER_CSS = `
   @keyframes kkActivityPulse {
@@ -59,6 +59,21 @@ export function ActivityTracker() {
 
   // Fetch on mount
   useEffect(() => { fetchActivities(); fetchSwaps() }, [fetchActivities, fetchSwaps])
+
+  // Device and seed changes can happen without remounting this component.
+  // Clear first so the previous wallet's activity is never displayed while
+  // the scoped backend query is catching up.
+  useEffect(() => {
+    const unsub = onRpcMessage('device-state', (state: DeviceStateInfo) => {
+      setActivities([])
+      setPendingSwaps([])
+      if (state.state === 'ready' && state.deviceId && !state.isHiddenWallet) {
+        fetchActivities()
+        fetchSwaps()
+      }
+    })
+    return unsub
+  }, [fetchActivities, fetchSwaps])
 
   // Listen for new api-log entries — re-fetch if it's a sign/broadcast
   useEffect(() => {

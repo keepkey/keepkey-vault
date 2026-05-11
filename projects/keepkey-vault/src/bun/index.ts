@@ -319,7 +319,7 @@ function deferredInit() {
 				} catch (e: any) {
 					console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 				}
-			})
+			}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
 		}).catch((e) => {
 			console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
 		})
@@ -650,13 +650,23 @@ function getAppSettings() {
 	}
 }
 
+function getWalletDbScope(): { deviceId: string; walletId: string } | null {
+	const deviceId = engine.getDeviceState().deviceId
+	if (!deviceId) return null
+	const seedId = engine.currentSeedEthAddress?.toLowerCase()
+	if (!seedId) return null
+	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
-		try { rpc.send['api-log'](entry) } catch { /* webview not ready */ }
+		const scope = getWalletDbScope()
+		const scopedEntry = scope ? { ...entry, ...scope } : entry
+		try { rpc.send['api-log'](scopedEntry) } catch { /* webview not ready */ }
 		// PRIVACY: Don't persist API activity from passphrase wallets to disk.
-		if (!engine.isPassphraseWallet) {
-			try { insertApiLog(entry) } catch { /* db not ready */ }
+		if (!engine.isPassphraseWallet && scope) {
+			try { insertApiLog(scopedEntry) } catch { /* db not ready */ }
 		}
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
@@ -2437,8 +2447,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Track broadcast in api_log + notify frontend.
 				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
-				const logEntry: ApiLogEntry = { method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
-				if (!engine.isPassphraseWallet) insertApiLog(logEntry)
+				const scope = getWalletDbScope()
+				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
+				if (!engine.isPassphraseWallet && scope) insertApiLog(logEntry)
 				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
 				return result
@@ -3217,11 +3228,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							try {
 								if (msg === 'swap-update') rpc.send['swap-update'](data)
 								else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-											else console.error(`[swap-tracker] Unknown message: ${msg}`)
+								else console.error(`[swap-tracker] Unknown message: ${msg}`)
 							} catch (e: any) {
 								console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 							}
-						})
+						}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
 					}).catch((e) => {
 						console.error('[swap-tracker] Failed to initialize swap tracker:', e.message || e)
 					})
@@ -3394,10 +3405,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getApiLogs: async (params) => {
 				// PRIVACY: Don't expose standard-wallet activity logs during hidden sessions.
 				if (engine.isPassphraseWallet) return []
-				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0)
+				const scope = getWalletDbScope()
+				if (!scope) return []
+				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0, scope.deviceId, scope.walletId)
 			},
 			clearApiLogs: async () => {
-				clearApiLogs()
+				const scope = getWalletDbScope()
+				if (scope) clearApiLogs(scope.deviceId, scope.walletId)
 			},
 
 			// ── Reports ─────────────────────────────────────────────
@@ -3737,10 +3751,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						try {
 							if (msg === 'swap-update') rpc.send['swap-update'](data)
 							else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-								} catch (e: any) {
+							else console.error(`[swap-tracker] Unknown message: ${msg}`)
+						} catch (e: any) {
 							console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 						}
-					})
+					}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
 				}
 				const result = await executeSwap(params, {
 					wallet: engine.wallet,
@@ -3777,6 +3792,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
+				const scope = getWalletDbScope()
 				// Register swap for tracking (non-blocking)
 				try {
 					trackSwap(result, params, {
@@ -3791,14 +3807,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						slippageBps: cachedQuote?.slippageBps || 300,
 						integration: cachedQuote?.integration || 'thorchain',
 						swapper: cachedQuote?.swapper,
-					}, { skipPersist: engine.isPassphraseWallet })
+					}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
 				}
 				// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
-				if (!engine.isPassphraseWallet) {
+				if (!engine.isPassphraseWallet && scope) {
 					const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-					insertApiLog({ method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+					insertApiLog({ ...scope, method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
 				}
 				return result
 			},
@@ -3806,7 +3822,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) return []
 				if (engine.isPassphraseWallet) return []
 				const { getPendingSwaps } = await import('./swap-tracker')
-				return getPendingSwaps()
+				const scope = getWalletDbScope()
+				if (!scope) return []
+				return getPendingSwaps(scope.deviceId, scope.walletId)
 			},
 			dismissSwap: async (params) => {
 				const { dismissSwap } = await import('./swap-tracker')
@@ -3840,13 +3858,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getSwapByTxid: async (params) => {
 				// PRIVACY: Don't expose standard-wallet swap records during hidden sessions.
 				if (engine.isPassphraseWallet) return null
-				const record = getSwapHistoryByTxid(params.txid)
+				const scope = getWalletDbScope()
+				if (!scope) return null
+				const record = getSwapHistoryByTxid(params.txid, scope.deviceId, scope.walletId)
 				if (!record) return null
 				const { inferConfirmationsFromStatus, getPendingSwaps } = await import('./swap-tracker')
 				// Prefer the in-memory tracker copy when present — it has live
 				// outboundConfirmations / required / swapper that the DB row doesn't
 				// store. Falls back to the persisted record otherwise.
-				const live = getPendingSwaps().find(s => s.txid === record.txid)
+				const live = getPendingSwaps(scope.deviceId, scope.walletId).find(s => s.txid === record.txid)
 				// Lazy CAIP backfill for swaps inserted before the from_caip/to_caip
 				// columns existed — derive on the fly from the THORChain asset id.
 				let fromCaip = record.fromCaip
@@ -3857,6 +3877,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!toCaip) try { toCaip = assetToCaip(record.toAsset) } catch { /* unknown chain */ }
 				}
 				return {
+					deviceId: record.deviceId,
+					walletId: record.walletId,
 					txid: record.txid,
 					fromAsset: record.fromAsset,
 					toAsset: record.toAsset,
@@ -3892,7 +3914,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// PRIVACY: Standard-wallet swaps are not refreshable from a hidden session.
 				if (engine.isPassphraseWallet) return null
 				const { refreshSwap } = await import('./swap-tracker')
-				return await refreshSwap(params.txid)
+				const scope = getWalletDbScope()
+				if (!scope) return null
+				return await refreshSwap(params.txid, scope.deviceId, scope.walletId)
 			},
 			debugSwapLookup: async (params) => {
 				// PRIVACY: Mirror getSwapByTxid / refreshSwap — passphrase sessions
@@ -3902,15 +3926,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// gate that refuses the call entirely from a hidden session.
 				if (engine.isPassphraseWallet) return null
 				const { debugSwapLookup } = await import('./swap-tracker')
-				return await debugSwapLookup(params.txid)
+				const scope = getWalletDbScope()
+				if (!scope) return null
+				return await debugSwapLookup(params.txid, scope.deviceId, scope.walletId)
 			},
 			getSwapHistory: async (params) => {
 				if (engine.isPassphraseWallet) return []
-				return getSwapHistory(params || undefined)
+				const scope = getWalletDbScope()
+				if (!scope) return []
+				return getSwapHistory({ ...(params || {}), ...scope })
 			},
 			getSwapHistoryStats: async () => {
-				if (engine.isPassphraseWallet) return { total: 0, completed: 0, failed: 0, pending: 0, totalVolumeUsd: 0 }
-				return getSwapHistoryStats()
+				if (engine.isPassphraseWallet) return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+				const scope = getWalletDbScope()
+				if (!scope) return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+				return getSwapHistoryStats(scope.deviceId, scope.walletId)
 			},
 			// Fire-and-forget mirror — SwapDialog calls this on every state change
 			// so Bun (and REST) can observe what the user sees. Phase 'closed' on
@@ -3922,7 +3952,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			exportSwapReport: async (params) => {
 				if (engine.isPassphraseWallet) throw new Error('Swap reports are not available for passphrase-protected wallets (privacy).')
+				const scope = getWalletDbScope()
+				if (!scope) throw new Error('No device connected')
 				const records = getSwapHistory({
+					...scope,
 					fromDate: params.fromDate,
 					toDate: params.toDate,
 					limit: 10000,
@@ -3952,7 +3985,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getRecentActivity: async (params) => {
 				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
 				if (engine.isPassphraseWallet) return []
-				return getRecentActivityFromLog(params?.limit || 50, params?.chainId)
+				const scope = getWalletDbScope()
+				if (!scope) return []
+				return getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId)
 			},
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
@@ -3990,7 +4025,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					return { count: 0 }
 				}
 
-					// Insert new txs, update confirmations on existing ones
+				// Insert new txs, update confirmations on existing ones
 				let inserted = 0
 				let updated = 0
 				for (const tx of txs) {
@@ -4012,13 +4047,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// the RPC handler already throws before reaching here).
 					if (engine.isPassphraseWallet) continue
 
-					if (apiLogTxidExists(txid)) {
+					const scope = getWalletDbScope()
+					if (!scope) continue
+
+					if (apiLogTxidExists(txid, scope.deviceId, scope.walletId)) {
 						// Update confirmation count on existing entry
-						updateApiLogTxMeta(txid, meta)
+						updateApiLogTxMeta(txid, meta, scope.deviceId, scope.walletId)
 						updated++
 					} else {
 						// New tx — insert
 						insertApiLog({
+							...scope,
 							method: 'SCAN',
 							route: `history/${params.chainId}`,
 							timestamp: ts,

@@ -129,6 +129,8 @@ export function initDb() {
     db.exec(`
       CREATE TABLE IF NOT EXISTS api_log (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id     TEXT,
+        wallet_id     TEXT,
         method        TEXT NOT NULL,
         route         TEXT NOT NULL,
         timestamp     INTEGER NOT NULL,
@@ -193,6 +195,8 @@ export function initDb() {
     db.exec(`
       CREATE TABLE IF NOT EXISTS swap_history (
         id                  TEXT PRIMARY KEY,
+        device_id           TEXT,
+        wallet_id           TEXT,
         txid                TEXT NOT NULL,
         from_asset          TEXT NOT NULL,
         to_asset            TEXT NOT NULL,
@@ -278,9 +282,11 @@ export function initDb() {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     // Activity tracking columns on api_log (sign/broadcast ops)
-    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT']) {
+    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT', 'device_id TEXT', 'wallet_id TEXT']) {
       try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN device_id TEXT`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN wallet_id TEXT`) } catch { /* already exists */ }
     // Underlying protocol when integration is an aggregator (e.g. Relay, 0x via ShapeShift)
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN swapper TEXT`) } catch { /* already exists */ }
     // CAIPs for both sides — needed so the SwapDialog resume path can render
@@ -293,6 +299,12 @@ export function initDb() {
     // by refreshSwap via api.relay.link for legacy rows.
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN relay_request_id TEXT`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_device_ts ON api_log(device_id, timestamp DESC)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_wallet_ts ON api_log(wallet_id, timestamp DESC)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_device_created ON swap_history(device_id, created_at DESC)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_device_txid ON swap_history(device_id, txid)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_wallet_created ON swap_history(wallet_id, created_at DESC)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_wallet_txid ON swap_history(wallet_id, txid)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
@@ -700,9 +712,11 @@ export function insertApiLog(entry: ApiLogEntry) {
   try {
     if (!db) return
     db.run(
-      `INSERT INTO api_log (method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body, txid, chain, activity_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO api_log (device_id, wallet_id, method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body, txid, chain, activity_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        entry.deviceId || null,
+        entry.walletId || null,
         entry.method,
         entry.route,
         entry.timestamp,
@@ -727,18 +741,23 @@ export function insertApiLog(entry: ApiLogEntry) {
 }
 
 /** Get recent API log entries (newest first) */
-export function getApiLogs(limit = 200, offset = 0): ApiLogEntry[] {
+export function getApiLogs(limit = 200, offset = 0, deviceId?: string, walletId?: string): ApiLogEntry[] {
   try {
     if (!db) return []
+    const whereSql = walletId ? 'WHERE wallet_id = ?' : deviceId ? 'WHERE device_id = ?' : ''
+    const scopeArgs = walletId ? [walletId] : deviceId ? [deviceId] : []
+    const args = [...scopeArgs, limit, offset]
     const rows = db.query(
-      'SELECT id, method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body FROM api_log ORDER BY timestamp DESC LIMIT ? OFFSET ?'
-    ).all(limit, offset) as Array<{
-      id: number; method: string; route: string; timestamp: number; duration_ms: number;
+      `SELECT id, device_id, wallet_id, method, route, timestamp, duration_ms, status, app_name, image_url, request_body, response_body FROM api_log ${whereSql} ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(...args) as Array<{
+      id: number; device_id: string | null; wallet_id: string | null; method: string; route: string; timestamp: number; duration_ms: number;
       status: number; app_name: string; image_url: string | null;
       request_body: string | null; response_body: string | null
     }>
     return rows.map(r => ({
       id: r.id,
+      deviceId: r.device_id || undefined,
+      walletId: r.wallet_id || undefined,
       method: r.method,
       route: r.route,
       timestamp: r.timestamp,
@@ -756,16 +775,20 @@ export function getApiLogs(limit = 200, offset = 0): ApiLogEntry[] {
 }
 
 /** Clear all API logs */
-export function clearApiLogs() {
+export function clearApiLogs(deviceId?: string, walletId?: string) {
   try {
     if (!db) return
-    db.run('DELETE FROM api_log')
+    if (walletId) db.run('DELETE FROM api_log WHERE wallet_id = ?', [walletId])
+    else if (deviceId) db.run('DELETE FROM api_log WHERE device_id = ?', [deviceId])
+    else db.run('DELETE FROM api_log')
   } catch (e: any) {
     console.warn('[db] clearApiLogs failed:', e.message)
   }
 }
 
 export interface ApiLogFilter {
+  deviceId?: string
+  walletId?: string
   route?: string
   activityType?: string
   txid?: string
@@ -782,6 +805,8 @@ export function findApiLogs(filter: ApiLogFilter = {}): ApiLogEntry[] {
     if (!db) return []
     const where: string[] = []
     const args: any[] = []
+    if (filter.walletId)     { where.push('wallet_id = ?');     args.push(filter.walletId) }
+    if (filter.deviceId)     { where.push('device_id = ?');     args.push(filter.deviceId) }
     if (filter.route)        { where.push('route = ?');         args.push(filter.route) }
     if (filter.activityType) { where.push('activity_type = ?'); args.push(filter.activityType) }
     if (filter.txid)         { where.push('txid = ?');          args.push(filter.txid) }
@@ -793,12 +818,14 @@ export function findApiLogs(filter: ApiLogFilter = {}): ApiLogEntry[] {
     const offset = Math.max(filter.offset ?? 0, 0)
     const rows = db.query(
       `SELECT id, method, route, timestamp, duration_ms, status, app_name, image_url,
-              request_body, response_body, txid, chain, activity_type
+              request_body, response_body, txid, chain, activity_type, device_id, wallet_id
        FROM api_log ${whereSql}
        ORDER BY timestamp DESC LIMIT ? OFFSET ?`
     ).all(...args, limit, offset) as Array<any>
     return rows.map(r => ({
       id: r.id,
+      deviceId: r.device_id || undefined,
+      walletId: r.wallet_id || undefined,
       method: r.method,
       route: r.route,
       timestamp: r.timestamp,
@@ -819,17 +846,21 @@ export function findApiLogs(filter: ApiLogFilter = {}): ApiLogEntry[] {
 }
 
 /** Single api_log entry by id with full bodies. */
-export function getApiLogById(id: number): ApiLogEntry | null {
+export function getApiLogById(id: number, deviceId?: string, walletId?: string): ApiLogEntry | null {
   try {
     if (!db) return null
+    const whereSql = walletId ? 'id = ? AND wallet_id = ?' : deviceId ? 'id = ? AND device_id = ?' : 'id = ?'
+    const args = walletId ? [id, walletId] : deviceId ? [id, deviceId] : [id]
     const r: any = db.query(
       `SELECT id, method, route, timestamp, duration_ms, status, app_name, image_url,
-              request_body, response_body, txid, chain, activity_type
-       FROM api_log WHERE id = ? LIMIT 1`
-    ).get(id)
+              request_body, response_body, txid, chain, activity_type, device_id, wallet_id
+       FROM api_log WHERE ${whereSql} LIMIT 1`
+    ).get(...args)
     if (!r) return null
     return {
       id: r.id,
+      deviceId: r.device_id || undefined,
+      walletId: r.wallet_id || undefined,
       method: r.method,
       route: r.route,
       timestamp: r.timestamp,
@@ -855,19 +886,25 @@ export function getApiLogById(id: number): ApiLogEntry | null {
 import type { RecentActivity, ActivityType, ActivitySource } from '../shared/types'
 
 /** Check if a txid already exists in api_log */
-export function apiLogTxidExists(txid: string): boolean {
+export function apiLogTxidExists(txid: string, deviceId?: string, walletId?: string): boolean {
   try {
     if (!db) return false
-    const row = db.query('SELECT 1 FROM api_log WHERE txid = ? LIMIT 1').get(txid)
+    const row = walletId
+      ? db.query('SELECT 1 FROM api_log WHERE txid = ? AND wallet_id = ? LIMIT 1').get(txid, walletId)
+      : deviceId
+      ? db.query('SELECT 1 FROM api_log WHERE txid = ? AND device_id = ? LIMIT 1').get(txid, deviceId)
+      : db.query('SELECT 1 FROM api_log WHERE txid = ? LIMIT 1').get(txid)
     return !!row
   } catch { return false }
 }
 
 /** Update response_body metadata for an existing api_log entry by txid (used to refresh confirmation counts) */
-export function updateApiLogTxMeta(txid: string, meta: Record<string, any>) {
+export function updateApiLogTxMeta(txid: string, meta: Record<string, any>, deviceId?: string, walletId?: string) {
   try {
     if (!db) return
-    db.run('UPDATE api_log SET response_body = ? WHERE txid = ?', [JSON.stringify(meta), txid])
+    if (walletId) db.run('UPDATE api_log SET response_body = ? WHERE txid = ? AND wallet_id = ?', [JSON.stringify(meta), txid, walletId])
+    else if (deviceId) db.run('UPDATE api_log SET response_body = ? WHERE txid = ? AND device_id = ?', [JSON.stringify(meta), txid, deviceId])
+    else db.run('UPDATE api_log SET response_body = ? WHERE txid = ?', [JSON.stringify(meta), txid])
   } catch (e: any) {
     console.warn('[db] updateApiLogTxMeta failed:', e.message)
   }
@@ -876,14 +913,22 @@ export function updateApiLogTxMeta(txid: string, meta: Record<string, any>) {
 const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
-export function getRecentActivityFromLog(limit = 50, chainFilter?: string): RecentActivity[] {
+export function getRecentActivityFromLog(limit = 50, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
 
     // Build query with optional chain filter
-    let logSql = `SELECT id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
+    let logSql = `SELECT id, device_id, wallet_id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
        FROM api_log WHERE activity_type IS NOT NULL`
     const logParams: any[] = []
+    if (walletId) {
+      logSql += ` AND wallet_id = ?`
+      logParams.push(walletId)
+    }
+    if (deviceId) {
+      logSql += ` AND device_id = ?`
+      logParams.push(deviceId)
+    }
     if (chainFilter) {
       logSql += ` AND chain = ?`
       logParams.push(chainFilter)
@@ -892,7 +937,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
     logParams.push(limit)
 
     const logRows = db.query(logSql).all(...logParams) as Array<{
-      id: number; txid: string | null; chain: string | null; activity_type: string;
+      id: number; device_id: string | null; wallet_id: string | null; txid: string | null; chain: string | null; activity_type: string;
       app_name: string; timestamp: number; route: string; method: string; response_body: string | null
     }>
 
@@ -903,6 +948,8 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
       const isScan = r.method === 'SCAN'
       return {
         id: String(r.id),
+        deviceId: r.device_id || undefined,
+        walletId: r.wallet_id || undefined,
         txid: r.txid || undefined,
         chain: r.chain || '?',
         type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
@@ -918,20 +965,30 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
     })
 
     // Swap history entries (dedupe by txid against logActivities)
-    let swapSql = `SELECT id, txid, from_symbol, to_symbol, from_chain_id, to_chain_id,
+    let swapSql = `SELECT id, device_id, wallet_id, txid, from_symbol, to_symbol, from_chain_id, to_chain_id,
        from_caip, to_caip, from_amount, quoted_output, received_output, status, created_at
        FROM swap_history`
     const swapParams: any[] = []
+    const swapWhere: string[] = []
+    if (walletId) {
+      swapWhere.push(`wallet_id = ?`)
+      swapParams.push(walletId)
+    }
+    if (deviceId) {
+      swapWhere.push(`device_id = ?`)
+      swapParams.push(deviceId)
+    }
     if (chainFilter) {
       // Match swap by either source or destination chain (e.g. ETH->BTC visible under both ETH and BTC)
-      swapSql += ` WHERE from_symbol = ? OR to_symbol = ?`
+      swapWhere.push(`(from_symbol = ? OR to_symbol = ?)`)
       swapParams.push(chainFilter, chainFilter)
     }
+    if (swapWhere.length) swapSql += ` WHERE ${swapWhere.join(' AND ')}`
     swapSql += ` ORDER BY created_at DESC LIMIT ?`
     swapParams.push(limit)
 
     const swapRows = db.query(swapSql).all(...swapParams) as Array<{
-      id: string; txid: string; from_symbol: string; to_symbol: string;
+      id: string; device_id: string | null; wallet_id: string | null; txid: string; from_symbol: string; to_symbol: string;
       from_chain_id: string; to_chain_id: string;
       from_caip: string | null; to_caip: string | null;
       from_amount: string; quoted_output: string; received_output: string | null;
@@ -943,6 +1000,8 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string): Rece
       .filter(r => !logTxids.has(r.txid))
       .map(r => ({
         id: r.id,
+        deviceId: r.device_id || undefined,
+        walletId: r.wallet_id || undefined,
         txid: r.txid,
         chain: r.from_symbol,
         chainId: r.from_chain_id,
@@ -1036,6 +1095,8 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM balances WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM reports WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM api_log WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM swap_history WHERE device_id = ?', [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
   }
@@ -1245,14 +1306,14 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
     if (!db) return
     db.run(
       `INSERT OR REPLACE INTO swap_history
-        (id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
+        (id, device_id, wallet_id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
          from_caip, to_caip, from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
          fee_outbound, integration, swapper, memo, inbound_address, router, status, outbound_txid,
          error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid,
          relay_request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        record.id, record.txid, record.fromAsset, record.toAsset,
+        record.id, record.deviceId || null, record.walletId || null, record.txid, record.fromAsset, record.toAsset,
         record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
         record.fromCaip || null, record.toCaip || null,
         record.fromAmount, record.quotedOutput, record.minimumOutput,
@@ -1276,6 +1337,8 @@ export function updateSwapHistoryStatus(
   txid: string,
   status: SwapTrackingStatus,
   extra?: {
+    deviceId?: string
+    walletId?: string
     outboundTxid?: string
     error?: string
     receivedOutput?: string
@@ -1306,8 +1369,13 @@ export function updateSwapHistoryStatus(
       }
     }
 
-    const sql = `UPDATE swap_history SET ${setClauses.map(c => `${c.col} = ?`).join(', ')} WHERE txid = ?`
-    const params = [...setClauses.map(c => c.value), txid]
+    const where = extra?.walletId ? 'txid = ? AND wallet_id = ?' : extra?.deviceId ? 'txid = ? AND device_id = ?' : 'txid = ?'
+    const params = extra?.walletId
+      ? [...setClauses.map(c => c.value), txid, extra.walletId]
+      : extra?.deviceId
+        ? [...setClauses.map(c => c.value), txid, extra.deviceId]
+        : [...setClauses.map(c => c.value), txid]
+    const sql = `UPDATE swap_history SET ${setClauses.map(c => `${c.col} = ?`).join(', ')} WHERE ${where}`
 
     db.run(sql, params)
   } catch (e: any) {
@@ -1326,6 +1394,14 @@ export function getSwapHistory(filter?: SwapHistoryFilter): SwapHistoryRecord[] 
     if (filter?.status && filter.status !== 'all') {
       sql += ` AND status = ?`
       params.push(filter.status)
+    }
+    if (filter?.deviceId) {
+      sql += ` AND device_id = ?`
+      params.push(filter.deviceId)
+    }
+    if (filter?.walletId) {
+      sql += ` AND wallet_id = ?`
+      params.push(filter.walletId)
     }
     if (filter?.fromDate) {
       sql += ` AND created_at >= ?`
@@ -1358,10 +1434,14 @@ export function getSwapHistory(filter?: SwapHistoryFilter): SwapHistoryRecord[] 
 }
 
 /** Get a single swap history record by txid */
-export function getSwapHistoryByTxid(txid: string): SwapHistoryRecord | null {
+export function getSwapHistoryByTxid(txid: string, deviceId?: string, walletId?: string): SwapHistoryRecord | null {
   try {
     if (!db) return null
-    const row = db.query('SELECT * FROM swap_history WHERE txid = ?').get(txid) as any
+    const row = walletId
+      ? db.query('SELECT * FROM swap_history WHERE txid = ? AND wallet_id = ?').get(txid, walletId) as any
+      : deviceId
+      ? db.query('SELECT * FROM swap_history WHERE txid = ? AND device_id = ?').get(txid, deviceId) as any
+      : db.query('SELECT * FROM swap_history WHERE txid = ?').get(txid) as any
     return row ? mapSwapRow(row) : null
   } catch (e: any) {
     console.warn('[db] getSwapHistoryByTxid failed:', e.message)
@@ -1370,9 +1450,11 @@ export function getSwapHistoryByTxid(txid: string): SwapHistoryRecord | null {
 }
 
 /** Get aggregate stats for swap history */
-export function getSwapHistoryStats(): SwapHistoryStats {
+export function getSwapHistoryStats(deviceId?: string, walletId?: string): SwapHistoryStats {
   try {
     if (!db) return { totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 }
+    const whereSql = walletId ? 'WHERE wallet_id = ?' : deviceId ? 'WHERE device_id = ?' : ''
+    const args = walletId ? [walletId] : deviceId ? [deviceId] : []
     const row = db.query(`
       SELECT
         COUNT(*) as total,
@@ -1381,7 +1463,8 @@ export function getSwapHistoryStats(): SwapHistoryStats {
         SUM(CASE WHEN status = 'refunded' THEN 1 ELSE 0 END) as refunded,
         SUM(CASE WHEN status NOT IN ('completed', 'failed', 'refunded') THEN 1 ELSE 0 END) as pending
       FROM swap_history
-    `).get() as any
+      ${whereSql}
+    `).get(...args) as any
     return {
       totalSwaps: row?.total || 0,
       completed: row?.completed || 0,
@@ -1398,6 +1481,8 @@ export function getSwapHistoryStats(): SwapHistoryStats {
 function mapSwapRow(r: any): SwapHistoryRecord {
   return {
     id: r.id,
+    deviceId: r.device_id || undefined,
+    walletId: r.wallet_id || undefined,
     txid: r.txid,
     fromAsset: r.from_asset,
     toAsset: r.to_asset,
@@ -1434,10 +1519,12 @@ function mapSwapRow(r: any): SwapHistoryRecord {
 
 /** Backfill the Relay request id on an existing row (called when refreshSwap
  *  resolves it lazily via api.relay.link for a legacy swap). */
-export function setSwapRelayRequestId(txid: string, relayRequestId: string) {
+export function setSwapRelayRequestId(txid: string, relayRequestId: string, deviceId?: string, walletId?: string) {
   try {
     if (!db) return
-    db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ?', [relayRequestId, txid])
+    if (walletId) db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ? AND wallet_id = ?', [relayRequestId, txid, walletId])
+    else if (deviceId) db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ? AND device_id = ?', [relayRequestId, txid, deviceId])
+    else db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ?', [relayRequestId, txid])
   } catch (e: any) {
     console.warn('[db] setSwapRelayRequestId failed:', e.message)
   }
@@ -1511,4 +1598,3 @@ export function deleteBip85Seed(wordCount: number, index: number, fingerprint?: 
     console.warn('[db] deleteBip85Seed failed:', e.message)
   }
 }
-

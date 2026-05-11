@@ -1032,6 +1032,14 @@ function requiredSigningFields(path: string): string[] | null {
 }
 
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
+  const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
+    const deviceId = engine.getDeviceState().deviceId
+    if (!deviceId) return null
+    const seedId = engine.currentSeedEthAddress?.toLowerCase()
+    if (!seedId) return null
+    return { deviceId, walletId: `${deviceId}:${seedId}` }
+  }
+
   // Device-swap detection: if deviceId changes between two `ready` states,
   // pubkey/address caches must be flushed or the old device's xpubs will
   // leak. (lastDeviceId is also flushed on disconnect so a re-connect of the
@@ -2745,6 +2753,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/v1/activity' && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
           const url = new URL(req.url)
           const q = url.searchParams
           const parseNumParam = (name: string): number | undefined => {
@@ -2757,6 +2767,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return n
           }
           const entries = findApiLogs({
+            ...scope,
             route:        q.get('route')         || undefined,
             activityType: q.get('activityType')  || undefined,
             txid:         q.get('txid')          || undefined,
@@ -2772,12 +2783,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path.startsWith('/api/v1/activity/') && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const scope = getWalletDbScope()
+          if (!scope) return json({ error: 'Not found' }, 404)
           const tail = path.split('/').pop() || ''
           const id = Number(tail)
           if (!Number.isFinite(id) || !Number.isInteger(id)) {
             return json({ error: 'Invalid id' }, 400)
           }
-          const entry = getApiLogById(id)
+          const entry = getApiLogById(id, scope.deviceId, scope.walletId)
           if (!entry) return json({ error: 'Not found' }, 404)
           return json(entry)
         }
@@ -2793,12 +2806,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (engine.isPassphraseWallet) {
             return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
           }
-          return json(getSwapHistoryStats())
+          const scope = getWalletDbScope()
+          if (!scope) return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
+          return json(getSwapHistoryStats(scope.deviceId, scope.walletId))
         }
 
         if (path === '/api/v1/swaps' && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
           const url = new URL(req.url)
           const q = url.searchParams
           const parseNumParam = (name: string): number | undefined => {
@@ -2824,6 +2841,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status = rawStatus as SwapTrackingStatus | 'all'
           }
           const entries = getSwapHistory({
+            ...scope,
             status,
             asset:    q.get('asset')   || undefined,
             fromDate: parseNumParam('fromDate'),
@@ -2837,9 +2855,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path.startsWith('/api/v1/swaps/') && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const scope = getWalletDbScope()
+          if (!scope) return json({ error: 'Not found' }, 404)
           const tail = path.split('/').pop() || ''
           if (!tail) return json({ error: 'Invalid txid' }, 400)
-          const record = getSwapHistoryByTxid(tail)
+          const record = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
           if (!record) return json({ error: 'Not found' }, 404)
           return json(record)
         }

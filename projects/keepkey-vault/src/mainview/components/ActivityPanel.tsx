@@ -112,6 +112,15 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400_000)}d ago`
 }
 
+function recentTimestamp(item: { createdAt: number }): number {
+  const timestamp = Number(item.createdAt)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function recentFirst<T extends { createdAt: number }>(items: T[]): T[] {
+  return [...items].sort((a, b) => recentTimestamp(b) - recentTimestamp(a))
+}
+
 // ── Detail types for the TX detail dialog ───────────────────────────
 type TxDetail = {
   kind: 'activity'
@@ -120,6 +129,10 @@ type TxDetail = {
   kind: 'swap'
   swap: PendingSwap
 }
+
+type ActivityTimelineItem =
+  | { kind: 'activity'; id: string; createdAt: number; activity: RecentActivity }
+  | { kind: 'swap'; id: string; createdAt: number; swap: PendingSwap }
 
 function formatFullDate(ts: number): string {
   const d = new Date(ts)
@@ -371,69 +384,62 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
   const explorerUrl = activity.txid ? getExplorerUrl(activity.chain, activity.txid) : null
 
   const isUnconfirmed = activity.confirmations !== undefined && activity.confirmations === 0
+  const chainLabel = `${chainDef?.coin || activity.chain} (${activity.chain})`
+  const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
+    ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' \u2192 ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
+    : activity.amount || activity.fee
+      ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount && activity.fee ? '  ' : ''}${activity.fee ? `fee: ${activity.fee}` : ''}`
+      : null
 
   return (
     <Box
       bg="rgba(255,255,255,0.03)"
       border="1px solid"
       borderColor={isUnconfirmed ? 'rgba(229,62,62,0.3)' : 'rgba(255,255,255,0.06)'}
-      borderRadius="lg" p="3"
+      borderRadius="lg" px="3" py="2.5"
       cursor="pointer"
       _hover={{ bg: "rgba(255,255,255,0.06)", borderColor: 'rgba(35,220,200,0.25)' }}
       transition="all 0.15s"
       onClick={() => onSelect(activity)}
     >
-      {/* Chain badge */}
-      <Flex align="center" gap="2" mb="1.5">
-        {chainDef ? (
-          <Image src={caipToIcon(chainDef.caip)} w="16px" h="16px" borderRadius="full" flexShrink={0}
-            fallback={<Box w="16px" h="16px" borderRadius="full" bg={chainDef.color} flexShrink={0} />}
-          />
-        ) : (
-          <Box w="16px" h="16px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
-        )}
-        <Text fontSize="xs" fontWeight="600" color="white">{chainDef?.coin || activity.chain} ({activity.chain})</Text>
-      </Flex>
-      <Flex justify="space-between" align="center" mb="1">
-        <HStack gap="2">
-          <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
-          {activity.source === 'api' && (
-            <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>
+      <Flex justify="space-between" align="flex-start" gap="2">
+        <HStack gap="2" minW="0" flex="1" align="flex-start">
+          {chainDef ? (
+            <Image src={caipToIcon(chainDef.caip)} w="16px" h="16px" mt="1px" borderRadius="full" flexShrink={0}
+              fallback={<Box w="16px" h="16px" mt="1px" borderRadius="full" bg={chainDef.color} flexShrink={0} />}
+            />
+          ) : (
+            <Box w="16px" h="16px" mt="1px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
           )}
+          <Box minW="0" flex="1">
+            <HStack gap="1.5" minW="0">
+              <Text fontSize="xs" fontWeight="700" color="white" truncate>{chainLabel}</Text>
+              <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeConf.label}</Box>
+              {activity.source === 'api' && (
+                <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(130,71,229,0.15)" color="#8247E5" flexShrink={0}>API</Box>
+              )}
+            </HStack>
+            {amountLine && <Text fontSize="2xs" color="whiteAlpha.500" mt="0.5" truncate>{amountLine}</Text>}
+          </Box>
+        </HStack>
+        <VStack gap="0.5" align="flex-end" flexShrink={0}>
           {activity.type === 'swap' && activity.swapStatus ? (
             <SwapStatusBadge status={activity.swapStatus} />
           ) : (
             <ConfBadge confirmations={activity.confirmations} chain={activity.chain} />
           )}
-        </HStack>
-        <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
+          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
+        </VStack>
       </Flex>
-      {activity.type === 'swap' && (activity.amount || activity.outAmount) ? (
-        <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="1.5" align="center" flexWrap="wrap">
-          {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
-          <Text color="var(--gold)">&rarr;</Text>
-          {activity.outAmount
-            ? <Text truncate color={activity.swapStatus === 'completed' ? '#23DCC8' : 'whiteAlpha.500'}>
-                {activity.swapStatus === 'completed' ? '' : '~'}{activity.outAmount} {activity.outAsset || ''}
-              </Text>
-            : <Text color="whiteAlpha.300" fontStyle="italic">{activity.outAsset || '?'}</Text>
-          }
-        </Flex>
-      ) : (activity.amount || activity.fee) && (
-        <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="2">
-          {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
-          {activity.fee && <Text color="whiteAlpha.300">fee: {activity.fee}</Text>}
-        </Flex>
-      )}
-      <Flex justify="space-between" align="center">
+      <Flex justify="space-between" align="center" gap="2" mt="1.5">
         {activity.txid ? (
-          <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
             {copied ? 'Copied!' : truncateTxid(activity.txid)}
           </Text>
         ) : (
-          <Text fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
         )}
-        <HStack gap="2">
+        <HStack gap="2" flexShrink={0}>
           {activity.blockHeight ? <Text fontSize="9px" color="whiteAlpha.200" fontFamily="mono">blk {activity.blockHeight}</Text> : null}
           {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
         </HStack>
@@ -446,29 +452,36 @@ function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingS
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
+  const amountLine = swap.fromAmount
+    ? `${swap.fromAmount} ${swap.fromSymbol}${swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}`
+    : null
 
   return (
-    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3"
+    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" px="3" py="2.5"
       cursor="pointer"
       _hover={{ bg: "rgba(255,255,255,0.06)", borderColor: 'rgba(35,220,200,0.25)' }}
       transition="all 0.15s"
       onClick={() => onSelect(swap)}
     >
-      <Flex justify="space-between" align="center" mb="1">
-        <HStack gap="2">
-          <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
-          <Text fontSize="xs" fontWeight="600" color="white">{swap.fromSymbol} {'\u2192'} {swap.toSymbol}</Text>
-        </HStack>
-        <SwapStatusBadge status={swap.status} />
+      <Flex justify="space-between" align="flex-start" gap="2">
+        <Box minW="0" flex="1">
+          <HStack gap="1.5" minW="0">
+            <Text fontSize="xs" fontWeight="700" color="white" truncate>{swap.fromSymbol} {'\u2192'} {swap.toSymbol}</Text>
+            <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(247,147,26,0.15)" color="#F7931A" flexShrink={0}>Swap</Box>
+          </HStack>
+          {amountLine && <Text fontSize="2xs" color="whiteAlpha.500" mt="0.5" truncate>{amountLine}</Text>}
+        </Box>
+        <VStack gap="0.5" align="flex-end" flexShrink={0}>
+          <SwapStatusBadge status={swap.status} />
+          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
+        </VStack>
       </Flex>
-      {swap.fromAmount && <Text fontSize="2xs" color="whiteAlpha.500" mb="1">{swap.fromAmount} {swap.fromSymbol}{swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}</Text>}
-      <Flex justify="space-between" align="center">
-        <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
+      <Flex justify="space-between" align="center" gap="2" mt="1.5">
+        <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
           {copied ? 'Copied!' : truncateTxid(swap.txid)}
         </Text>
-        <HStack gap="2">
+        <HStack gap="2" flexShrink={0}>
           {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
-          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
         </HStack>
       </Flex>
     </Box>
@@ -497,7 +510,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   return (
-    <Flex px="4" pb="3" gap="2" align="center" flexShrink={0} position="relative">
+    <Flex px="3" pb="2.5" gap="2" align="center" flexShrink={0} position="relative">
       {/* Trigger */}
       <Flex
         flex="1" align="center" gap="2" cursor="pointer"
@@ -641,24 +654,37 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
   // Filter activities to selected chain (empty = all)
   const filteredActivities = useMemo(() => {
-    if (!selectedDef) return activities
-    return activities.filter(a => a.chain === selectedDef.symbol)
+    const next = selectedDef
+      ? activities.filter(a => a.chain === selectedDef.symbol || a.chain === selectedDef.id || a.chainId === selectedDef.id)
+      : activities
+    return recentFirst(next)
   }, [activities, selectedDef])
 
   const activeSwaps = useMemo(() =>
-    pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'),
+    recentFirst(pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded')),
     [pendingSwaps]
   )
 
   const filteredSwaps = useMemo(() => {
-    if (!selectedDef) return activeSwaps
-    return activeSwaps.filter(s => s.fromSymbol === selectedDef.symbol || s.toSymbol === selectedDef.symbol)
+    const next = selectedDef
+      ? activeSwaps.filter(s => s.fromSymbol === selectedDef.symbol || s.toSymbol === selectedDef.symbol || s.fromChainId === selectedDef.id || s.toChainId === selectedDef.id)
+      : activeSwaps
+    return recentFirst(next)
   }, [activeSwaps, selectedDef])
 
   const nonSwapActivities = useMemo(() => {
     const swapTxids = new Set(pendingSwaps.map(s => s.txid))
-    return filteredActivities.filter(a => !(a.type === 'swap' && a.txid && swapTxids.has(a.txid)))
+    return recentFirst(filteredActivities.filter(a => !(a.type === 'swap' && a.txid && swapTxids.has(a.txid))))
   }, [filteredActivities, pendingSwaps])
+
+  const activityTimeline = useMemo<ActivityTimelineItem[]>(() => {
+    return recentFirst([
+      ...filteredSwaps.map(swap => ({ kind: 'swap' as const, id: `swap-${swap.txid}`, createdAt: swap.createdAt, swap })),
+      ...nonSwapActivities.map(activity => ({ kind: 'activity' as const, id: `activity-${activity.id}`, createdAt: activity.createdAt, activity })),
+    ])
+  }, [filteredSwaps, nonSwapActivities])
+
+  const recentPendingSwaps = useMemo(() => recentFirst(pendingSwaps), [pendingSwaps])
 
   const fetchingSwapRef = useRef(false)
   const scanningRef = useRef(false)
@@ -693,7 +719,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
       <Box
         position="fixed" bottom="0" left="0"
-        w="380px" maxW="100vw" h="55vh" maxH="480px"
+        w="min(100vw, 430px)" h="min(72vh, 680px)" maxH="calc(100vh - 20px)"
         bg="kk.bg" border="1px solid" borderColor="kk.border" borderTopRightRadius="xl"
         zIndex={Z.drawerPanel} display="flex" flexDirection="column" overflow="hidden"
       >
@@ -741,15 +767,14 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
         )}
 
         {/* Content */}
-        <Box flex="1" overflowY="auto" px="4" pb="4">
-          <VStack gap="2" align="stretch">
+        <Box flex="1" overflowY="auto" px="3" pb="3">
+          <VStack gap="1.5" align="stretch">
             {tab === 'activity' && (
               <>
-                {filteredSwaps.map(swap => (
-                  <SwapRow key={`swap-${swap.txid}`} swap={swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
-                ))}
-                {nonSwapActivities.map(activity => (
-                  <ActivityRow key={activity.id} activity={activity} onSelect={a => {
+                {activityTimeline.map(item => item.kind === 'swap' ? (
+                  <SwapRow key={item.id} swap={item.swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
+                ) : (
+                  <ActivityRow key={item.id} activity={item.activity} onSelect={a => {
                     if (a.type === 'swap' && a.txid && onResumeSwap) {
                       if (fetchingSwapRef.current) return
                       fetchingSwapRef.current = true
@@ -762,7 +787,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                     }
                   }} />
                 ))}
-                {nonSwapActivities.length === 0 && filteredSwaps.length === 0 && (
+                {activityTimeline.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
                     {selectedDef ? `No activity for ${selectedDef.symbol} — hit refresh to scan` : 'No activity yet — select a chain and hit refresh to scan'}
                   </Text>
@@ -771,10 +796,10 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
             )}
             {tab === 'swaps' && (
               <>
-                {pendingSwaps.map(swap => (
+                {recentPendingSwaps.map(swap => (
                   <SwapRow key={`swap-${swap.txid}`} swap={swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
                 ))}
-                {pendingSwaps.length === 0 && (
+                {recentPendingSwaps.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">No swaps</Text>
                 )}
               </>
