@@ -334,6 +334,17 @@ const DIALOG_CSS = `
     0% { background-position: 0 0; }
     100% { background-position: 40px 0; }
   }
+  /* Pulsing concentric halo rings behind the completed-swap mascot. */
+  @keyframes kkPulseRing {
+    0%, 100% { transform: scale(1);    opacity: 0.9; }
+    50%      { transform: scale(1.04); opacity: 0.55; }
+  }
+  /* Native <details> open/close — fade the body in. */
+  .kk-acc[open] > .kk-acc-body { animation: kkSwapFadeIn 0.22s ease-out; }
+  .kk-acc summary { list-style: none; cursor: pointer; user-select: none; }
+  .kk-acc summary::-webkit-details-marker { display: none; }
+  .kk-acc[open] .kk-acc-chev { transform: rotate(180deg); }
+  .kk-acc-chev { transition: transform 180ms ease-out; }
 `
 
 // ── Asset Selector ──────────────────────────────────────────────────
@@ -1419,7 +1430,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         border="1px solid var(--line-2)"
         borderRadius="var(--r-xl)"
         boxShadow="0 20px 80px -20px rgba(139,227,196,0.20), 0 0 0 1px rgba(255,255,255,0.04) inset"
-        w="760px"
+        w={isSwapComplete && phase === 'submitted' ? "1040px" : "760px"}
         maxW="94vw"
         maxH="90vh"
         overflow="auto"
@@ -1443,7 +1454,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
-        <Box px="5" py="3">
+        {/* Padding zeroed on the complete-swap view so the 2-column hero/details
+            layout reaches the modal edges and the footer can span full width. */}
+        <Box
+          px={isSwapComplete && phase === 'submitted' ? "0" : "5"}
+          py={isSwapComplete && phase === 'submitted' ? "0" : "3"}
+        >
           {/* Loading state */}
           {loadingAssets && (
             <Box py="8" textAlign="center">
@@ -1475,6 +1491,384 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
           {/* ── SUBMITTED — live tracking with step progress ──── */}
           {phase === 'submitted' && txid && fromAsset && toAsset && (
+            isSwapComplete ? (
+              /* ── COMPLETE: wide 2-column hero/details layout ─────
+                 Modal widens to 1040px (see outer Box). Hero on the left
+                 anchors the mascot at 248px inside three concentric pulse
+                 rings; details on the right surface the headline result
+                 and tuck tx hashes + balance deltas into collapsible
+                 accordions so the screen reads at a glance but every
+                 number from the old layout is still one click away. */
+              <Box style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }} position="relative">
+                {showConfetti && <ConfettiBurst />}
+
+                <Box display="grid"
+                  gridTemplateColumns={{ base: "1fr", md: "minmax(0, 0.95fr) minmax(0, 1.25fr)" }}>
+
+                  {/* ── HERO (mascot + title + slim stepper) ── */}
+                  <Box position="relative" px="6" pt="7" pb="6"
+                    display="flex" flexDirection="column" alignItems="center" justifyContent="center" gap="4"
+                    borderRight={{ base: "0", md: "1px solid" }}
+                    borderBottom={{ base: "1px solid", md: "0" }}
+                    borderColor="kk.border"
+                    overflow="hidden"
+                    style={{
+                      background:
+                        'radial-gradient(circle at 50% 42%, rgba(233,196,106,0.10), transparent 55%),' +
+                        ' radial-gradient(circle at 50% 42%, rgba(139,227,196,0.08), transparent 60%),' +
+                        ' #050706',
+                    }}>
+                    {/* Mascot stage — 300px frame holds rings + 248px slot */}
+                    <Box position="relative" w="300px" h="300px" display="grid" style={{ placeItems: 'center' }}>
+                      {/* concentric pulse rings — staggered animation delays */}
+                      <Box position="absolute" top="0" left="0" right="0" bottom="0"
+                        borderRadius="full" border="1px solid rgba(139,227,196,0.10)"
+                        style={{ animation: 'kkPulseRing 3.6s ease-in-out infinite' }} />
+                      <Box position="absolute" top="18px" left="18px" right="18px" bottom="18px"
+                        borderRadius="full" border="1px solid rgba(139,227,196,0.16)"
+                        style={{ animation: 'kkPulseRing 3.6s ease-in-out -1.2s infinite' }} />
+                      <Box position="absolute" top="36px" left="36px" right="36px" bottom="36px"
+                        borderRadius="full" border="1px solid rgba(139,227,196,0.22)"
+                        style={{ animation: 'kkPulseRing 3.6s ease-in-out -2.4s infinite' }} />
+                      {/* Mascot slot — clipped to a circle so the chest gif fills cleanly */}
+                      <Box w="248px" h="248px" borderRadius="full" overflow="hidden" position="relative" bg="#0a0c0b"
+                        style={{
+                          boxShadow:
+                            '0 18px 50px rgba(0,0,0,0.55),' +
+                            ' 0 0 0 1px rgba(255,255,255,0.04) inset,' +
+                            ' 0 0 60px rgba(139,227,196,0.18)',
+                        }}>
+                        <Image src={completedGif} alt="" w="248px" h="248px" style={{ objectFit: 'cover' }} />
+                      </Box>
+                    </Box>
+
+                    {/* Title */}
+                    <Text fontSize="24px" fontWeight="700" color="kk.textPrimary"
+                      letterSpacing="-0.03em" textAlign="center" lineHeight="1.1">
+                      {t("swap", "Swap")}{" "}
+                      <Text as="span" color="var(--gold)"
+                        fontFamily="serif" fontStyle="italic" fontWeight={400} fontSize="1.2em">
+                        {t("completed", "completed").toLowerCase()}
+                      </Text>
+                    </Text>
+
+                    {/* Slim stepper pill */}
+                    <Flex align="center" justify="center" gap="2"
+                      px="3.5" py="1.5"
+                      bg="rgba(139,227,196,0.06)"
+                      border="1px solid rgba(139,227,196,0.16)"
+                      borderRadius="full"
+                      fontSize="11px" color="kk.textSecondary">
+                      {[t("stageInput"), t("stageProtocol"), t("stageOutput")].map((name, i, arr) => (
+                        <Box as="span" key={name} display="inline-flex" alignItems="center" gap="2">
+                          <Box display="inline-flex" alignItems="center" gap="1.5">
+                            <Box w="14px" h="14px" borderRadius="full" bg="var(--teal)"
+                              display="grid" placeItems="center"
+                              style={{ boxShadow: '0 0 8px rgba(139,227,196,0.30)' }}>
+                              <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
+                                <path d="M3.5 8.5L6.5 11.5L12.5 5" stroke="#062018" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </Box>
+                            <Text as="span">{name}</Text>
+                          </Box>
+                          {i < arr.length - 1 && (
+                            <Text as="span" color="var(--teal)" opacity={0.6} fontSize="10px">›</Text>
+                          )}
+                        </Box>
+                      ))}
+                    </Flex>
+                  </Box>
+
+                  {/* ── DETAILS (result card + accordions) ── */}
+                  <Box p="6" display="flex" flexDirection="column" gap="2.5" minW="0">
+                    {/* Headline result card */}
+                    <Box position="relative" bg="rgba(255,255,255,0.03)"
+                      border="1px solid" borderColor="kk.border" borderRadius="lg" p="4" overflow="hidden">
+                      <Box position="absolute" top="0" left="0" right="0" bottom="0" pointerEvents="none"
+                        style={{ background: 'radial-gradient(120% 80% at 0% 0%, rgba(233,196,106,0.07), transparent 50%)' }} />
+                      <Flex position="relative" align="center" gap="2" mb="1.5"
+                        fontSize="10px" color="var(--teal)" fontWeight="600"
+                        textTransform="uppercase" letterSpacing="0.10em">
+                        <Box w="6px" h="6px" borderRadius="full" bg="var(--teal)"
+                          style={{ boxShadow: '0 0 8px rgba(139,227,196,0.30)' }} />
+                        <Text>{t("youReceived", "You received")}</Text>
+                      </Flex>
+                      <Flex position="relative" align="baseline" gap="2.5">
+                        <Text fontFamily="mono" fontSize="30px" fontWeight={600} color="var(--gold)"
+                          letterSpacing="-0.02em" lineHeight="1.05">
+                          ~{quote?.expectedOutput ? formatBalance(quote.expectedOutput) : '—'}
+                        </Text>
+                        <Text fontSize="16px" color="kk.textSecondary" fontWeight={500}>{toAsset.symbol}</Text>
+                      </Flex>
+                      {hasToPrice && quote?.expectedOutput && (
+                        <Text position="relative" mt="1" fontSize="12px" color="kk.textMuted" fontFamily="mono">
+                          ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
+                          {hasFromPrice && (() => {
+                            const sentUsd = parseFloat(displayAmount || '0') * fromPriceUsd
+                            const recvUsd = parseFloat(quote.expectedOutput) * toPriceUsd
+                            const net = recvUsd - sentUsd
+                            if (!Number.isFinite(net) || Math.abs(net) < 0.005) return null
+                            return ` · ${t("netVsSend", "net")} ${net >= 0 ? '+' : '−'}${fmtCompact(Math.abs(net))} ${t("vsSend", "vs send")}`
+                          })()}
+                        </Text>
+                      )}
+
+                      {/* Sent row */}
+                      <Flex position="relative" mt="3" pt="3" align="center" gap="2.5" fontSize="12px"
+                        style={{ borderTop: '1px dashed var(--line-1, rgba(255,255,255,0.08))' }}>
+                        <Text color="kk.textMuted" fontSize="11px" textTransform="uppercase" letterSpacing="0.06em" minW="44px">
+                          {t("sent", "Sent")}
+                        </Text>
+                        <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon}
+                          chainCaip={chainBadgeCaip(fromAsset)} size={22} alt={fromAsset.symbol} />
+                        <Text fontFamily="mono" color="kk.textPrimary" fontWeight={500}>
+                          {displayAmount} {fromAsset.symbol}
+                        </Text>
+                        <Text color="kk.textMuted" fontSize="11px">→ {toAsset.symbol}</Text>
+                        <Box flex="1" />
+                        {hasFromPrice && (
+                          <Text color="kk.textMuted" fontFamily="mono" fontSize="11px">
+                            {fmtCompact(parseFloat(displayAmount || '0') * fromPriceUsd)}
+                          </Text>
+                        )}
+                      </Flex>
+                    </Box>
+
+                    {/* Transaction details accordion */}
+                    <Box as="details" className="kk-acc"
+                      bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border"
+                      borderRadius="lg" overflow="hidden">
+                      <Box as="summary" px="3.5" py="2.5"
+                        display="flex" alignItems="center" justifyContent="space-between" gap="3"
+                        _hover={{ bg: "rgba(255,255,255,0.03)" }}
+                        style={{ transition: 'background 120ms ease-out' }}>
+                        <Text fontSize="12px" fontWeight={500} color="kk.textPrimary" letterSpacing="-0.01em">
+                          {t("transactionDetails", "Transaction details")}
+                        </Text>
+                        <Flex align="center" gap="2" fontSize="11px" color="kk.textMuted" fontFamily="mono">
+                          <Text>{liveOutboundTxid ? '2 hashes' : '1 hash'}</Text>
+                          {(() => {
+                            const protoHint = liveSwapper || quote?.swapper || quote?.integration
+                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                            return tracker ? <Text>· tracker</Text> : null
+                          })()}
+                          <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </Flex>
+                      </Box>
+                      <Box className="kk-acc-body" px="3.5" pt="1" pb="3"
+                        style={{ borderTop: '1px dashed var(--line-1, rgba(255,255,255,0.08))' }}>
+                        {/* Input tx */}
+                        <Flex align="center" gap="2.5" py="2" minW="0">
+                          <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                            letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                            {t("inputTx", "Input Tx")}
+                          </Text>
+                          <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary"
+                            overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" flex="1">
+                            {txid}
+                          </Text>
+                          <HStack gap="1.5" flexShrink={0}>
+                            <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                              px="2" h="26px" fontSize="11px" onClick={copyTxid}>
+                              {copied ? t("copied") : t("copy")}
+                            </Button>
+                            {(() => {
+                              const url = getExplorerTxUrl(fromAsset.chainId, txid)
+                              return url ? (
+                                <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                                  px="2" h="26px" fontSize="11px"
+                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
+                                  Explorer
+                                </Button>
+                              ) : null
+                            })()}
+                          </HStack>
+                        </Flex>
+                        {/* Output tx */}
+                        {liveOutboundTxid && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="var(--teal)" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("outputTx", "Output Tx")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary"
+                              overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" flex="1">
+                              {liveOutboundTxid}
+                            </Text>
+                            <HStack gap="1.5" flexShrink={0}>
+                              <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                                px="2" h="26px" fontSize="11px"
+                                onClick={() => navigator.clipboard.writeText(liveOutboundTxid)}>
+                                {t("copy")}
+                              </Button>
+                              {(() => {
+                                const url = getExplorerTxUrl(toAsset.chainId, liveOutboundTxid)
+                                return url ? (
+                                  <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                                    px="2" h="26px" fontSize="11px"
+                                    onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
+                                    Explorer
+                                  </Button>
+                                ) : null
+                              })()}
+                            </HStack>
+                          </Flex>
+                        )}
+                        {/* Tracker row */}
+                        {(() => {
+                          const protoHint = liveSwapper || quote?.swapper || quote?.integration
+                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                          return tracker ? (
+                            <Flex align="center" gap="2.5" py="2" minW="0"
+                              style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                              <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                                letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                                {t("tracker", "Tracker")}
+                              </Text>
+                              <Text fontSize="11px" color="kk.textMuted" flex="1"
+                                overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                                {t("trackerHint", "End-to-end status & quote breakdown")}
+                              </Text>
+                              <Button size="xs" variant="outline" flexShrink={0}
+                                borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
+                                px="2" h="26px" fontSize="11px"
+                                onClick={() => rpcRequest('openUrl', { url: tracker.url }).catch(() => { })}>
+                                <HStack gap="1">
+                                  {tracker.iconUrl && <Image src={tracker.iconUrl} w="12px" h="12px" borderRadius="full" />}
+                                  <Text>{tracker.label}</Text>
+                                </HStack>
+                              </Button>
+                            </Flex>
+                          ) : null
+                        })()}
+                      </Box>
+                    </Box>
+
+                    {/* Balance changes accordion */}
+                    {(beforeFromBal || beforeToBal) && (
+                      <Box as="details" className="kk-acc"
+                        bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border"
+                        borderRadius="lg" overflow="hidden">
+                        <Box as="summary" px="3.5" py="2.5"
+                          display="flex" alignItems="center" justifyContent="space-between" gap="3"
+                          _hover={{ bg: "rgba(255,255,255,0.03)" }}
+                          style={{ transition: 'background 120ms ease-out' }}>
+                          <Text fontSize="12px" fontWeight={500} color="kk.textPrimary" letterSpacing="-0.01em">
+                            {t("balanceChanges", "Balance changes")}
+                          </Text>
+                          <Flex align="center" gap="2" fontSize="11px" color="kk.textMuted" fontFamily="mono">
+                            {hasFromPrice && afterFromBal && beforeFromBal && (() => {
+                              const d = (parseFloat(afterFromBal) - parseFloat(beforeFromBal)) * fromPriceUsd
+                              return (
+                                <>
+                                  <Text>{fromAsset.symbol}</Text>
+                                  <Text color={d < 0 ? "var(--rose)" : "var(--teal)"}>
+                                    {d >= 0 ? '+' : '−'}{fmtCompact(Math.abs(d))}
+                                  </Text>
+                                  {hasToPrice && afterToBal && beforeToBal && (
+                                    <Text color="rgba(255,255,255,0.18)">·</Text>
+                                  )}
+                                </>
+                              )
+                            })()}
+                            {hasToPrice && afterToBal && beforeToBal && (() => {
+                              const d = (parseFloat(afterToBal) - parseFloat(beforeToBal)) * toPriceUsd
+                              return (
+                                <>
+                                  <Text>{toAsset.symbol}</Text>
+                                  <Text color={d < 0 ? "var(--rose)" : "var(--teal)"}>
+                                    {d >= 0 ? '+' : '−'}{fmtCompact(Math.abs(d))}
+                                  </Text>
+                                </>
+                              )
+                            })()}
+                            <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                              <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </Flex>
+                        </Box>
+                        <Box className="kk-acc-body" px="3.5" pt="1" pb="3"
+                          style={{ borderTop: '1px dashed var(--line-1, rgba(255,255,255,0.08))' }}>
+                          {/* From asset balance row */}
+                          <Box display="grid" gridTemplateColumns="84px 1fr auto" alignItems="center"
+                            fontFamily="mono" fontSize="12px" py="1.5">
+                            <HStack gap="2" style={{ fontFamily: 'var(--font-body, inherit)' }}>
+                              <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} size={16} alt={fromAsset.symbol} />
+                              <Text color="kk.textPrimary" fontWeight={500}>{fromAsset.symbol}</Text>
+                            </HStack>
+                            <HStack gap="2" color="kk.textMuted" justify="center" minW="0">
+                              <Text>{beforeFromBal ? formatBalance(beforeFromBal) : '—'}</Text>
+                              <Text color="kk.textMuted">→</Text>
+                              <Text color="kk.textPrimary">{afterFromBal ? formatBalance(afterFromBal) : '…'}</Text>
+                            </HStack>
+                            <VStack gap="0" align="flex-end">
+                              {afterFromBal && beforeFromBal && (
+                                <Text color="var(--rose)" fontWeight={500}>
+                                  {formatBalance((parseFloat(afterFromBal) - parseFloat(beforeFromBal)).toFixed(8))}
+                                </Text>
+                              )}
+                              {hasFromPrice && afterFromBal && beforeFromBal && (
+                                <Text color="var(--rose)" fontSize="11px">
+                                  {fmtCompact((parseFloat(afterFromBal) - parseFloat(beforeFromBal)) * fromPriceUsd)}
+                                </Text>
+                              )}
+                            </VStack>
+                          </Box>
+                          {/* To asset balance row */}
+                          <Box display="grid" gridTemplateColumns="84px 1fr auto" alignItems="center"
+                            fontFamily="mono" fontSize="12px" py="1.5"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <HStack gap="2" style={{ fontFamily: 'var(--font-body, inherit)' }}>
+                              <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} size={16} alt={toAsset.symbol} />
+                              <Text color="kk.textPrimary" fontWeight={500}>{toAsset.symbol}</Text>
+                            </HStack>
+                            <HStack gap="2" color="kk.textMuted" justify="center" minW="0">
+                              <Text>{beforeToBal ? formatBalance(beforeToBal) : '—'}</Text>
+                              <Text color="kk.textMuted">→</Text>
+                              <Text color="var(--teal)">{afterToBal ? formatBalance(afterToBal) : '…'}</Text>
+                            </HStack>
+                            <VStack gap="0" align="flex-end">
+                              {afterToBal && beforeToBal && (
+                                <Text color="var(--teal)" fontWeight={500}>
+                                  +{formatBalance((parseFloat(afterToBal) - parseFloat(beforeToBal)).toFixed(8))}
+                                </Text>
+                              )}
+                              {hasToPrice && afterToBal && beforeToBal && (
+                                <Text color="var(--teal)" fontSize="11px">
+                                  +{fmtCompact((parseFloat(afterToBal) - parseFloat(beforeToBal)) * toPriceUsd)}
+                                </Text>
+                              )}
+                            </VStack>
+                          </Box>
+                        </Box>
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Footer — spans full modal width */}
+                <Flex px="5" py="3.5" gap="2.5" borderTop="1px solid" borderColor="kk.border"
+                  bg="rgba(255,255,255,0.012)">
+                  <Button flex="1" h="42px"
+                    variant="outline" borderColor="kk.border" color="kk.textPrimary"
+                    borderRadius="md" fontSize="14px" fontWeight={500} letterSpacing="-0.01em"
+                    _hover={{ borderColor: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.04)" }}
+                    onClick={() => { reset(); }}>
+                    {t("newSwap")}
+                  </Button>
+                  <Button flex="1.4" h="42px"
+                    bg="var(--gold)" color="#1a1305" border="0"
+                    borderRadius="md" fontSize="14px" fontWeight={600} letterSpacing="-0.01em"
+                    _hover={{ bg: "var(--gold-2)", boxShadow: '0 0 24px rgba(233,196,106,0.30)' }}
+                    onClick={() => { onClose(); setTimeout(reset, 200) }}>
+                    {t("done")}
+                  </Button>
+                </Flex>
+              </Box>
+            ) : (
             <VStack gap="3" py="1" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }} position="relative">
               {/* Confetti burst on completion */}
               {showConfetti && <ConfettiBurst />}
@@ -1833,6 +2227,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Button>
               </Flex>
             </VStack>
+            )
           )}
 
           {/* ── SIGNING / APPROVING / BROADCASTING ───────────────── */}
