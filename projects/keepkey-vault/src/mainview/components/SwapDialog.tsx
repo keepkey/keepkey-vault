@@ -23,7 +23,7 @@ import { ProviderBadge, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { AssetPickerDialog } from "./AssetPickerDialog"
-import { KeepKeyDevice, RouteMap } from "./v3"
+import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
@@ -1479,57 +1479,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {/* Confetti burst on completion */}
               {showConfetti && <ConfettiBurst />}
 
-              {/* Hero animation. State mapping:
-                  - swapStep 0/1 (pending input / protocol confirming): calculatingGif
-                    so the in-flight screen reads as "still working" and matches
-                    the quote-loading screen's visual language.
-                  - swapStep 2 (output detected): shiftingGif — the moment the
-                    swap is actually moving value to the destination chain.
-                  - completed: completedGif (chest).
-                  Container clips with overflow:hidden so the round halo isn't
-                  fighting the gif's square frame. */}
-              <Box position="relative" w="full" display="flex" justifyContent="center" alignItems="center" pt="1" pb="0.5">
-                <Box
-                  position="relative"
-                  w="200px"
-                  h="200px"
-                  borderRadius="full"
-                  overflow="hidden"
-                  display="flex"
-                  alignItems="center"
-                  justifyContent="center"
-                  style={{
-                    background: isSwapComplete
-                      ? 'radial-gradient(circle at 50% 45%, rgba(139,227,196,0.28), rgba(139,227,196,0.06) 70%)'
-                      : isSwapFailed
-                        ? 'radial-gradient(circle at 50% 45%, rgba(224,140,123,0.22), rgba(224,140,123,0.05) 70%)'
-                        : 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.24), rgba(233,196,106,0.05) 70%)',
-                    boxShadow: isSwapComplete
-                      ? '0 0 0 1px rgba(139,227,196,0.30), 0 8px 28px -10px rgba(139,227,196,0.35)'
-                      : isSwapFailed
-                        ? '0 0 0 1px rgba(224,140,123,0.30)'
-                        : '0 0 0 1px rgba(233,196,106,0.28), 0 8px 28px -10px rgba(233,196,106,0.30)',
-                  }}
-                >
-                  <Image
-                    src={
-                      isSwapComplete
-                        ? completedGif
-                        : swapStep >= 2
-                          ? shiftingGif
-                          : calculatingGif
-                    }
-                    alt=""
-                    w={isSwapComplete ? "172px" : "184px"}
-                    h={isSwapComplete ? "172px" : "184px"}
-                    style={{
-                      objectFit: 'contain',
-                      filter: isSwapFailed ? 'grayscale(0.6)' : undefined,
-                    }}
-                  />
-                </Box>
-              </Box>
-
               {/* Title row + provider chip */}
               <Flex align="center" gap="3" w="full" justify="center" position="relative">
                 <VStack gap="0" align="center">
@@ -1552,8 +1501,49 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 </Box>
               </Flex>
 
-              {/* ── Progress bar with checkpoints ────────────────────── */}
-              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="5" py="4">
+              {/* ── Progress bar with hero animation + checkpoints ──── */}
+              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="5" pt="4" pb="4">
+                {/* Hero animation — embedded inside the bar component so the
+                    submitted view stays compact and the bar isn't clipped by
+                    a large halo above. shiftingGif covers all in-flight steps
+                    (input pending, protocol confirming, output detecting);
+                    completedGif takes over only when the swap settles. */}
+                <Box display="flex" justifyContent="center" mb="3">
+                  <Box
+                    position="relative"
+                    w="120px"
+                    h="120px"
+                    borderRadius="full"
+                    overflow="hidden"
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    style={{
+                      background: isSwapComplete
+                        ? 'radial-gradient(circle at 50% 45%, rgba(139,227,196,0.28), rgba(139,227,196,0.06) 70%)'
+                        : isSwapFailed
+                          ? 'radial-gradient(circle at 50% 45%, rgba(224,140,123,0.22), rgba(224,140,123,0.05) 70%)'
+                          : 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.24), rgba(233,196,106,0.05) 70%)',
+                      boxShadow: isSwapComplete
+                        ? '0 0 0 1px rgba(139,227,196,0.30), 0 8px 28px -10px rgba(139,227,196,0.35)'
+                        : isSwapFailed
+                          ? '0 0 0 1px rgba(224,140,123,0.30)'
+                          : '0 0 0 1px rgba(233,196,106,0.28), 0 8px 28px -10px rgba(233,196,106,0.30)',
+                    }}
+                  >
+                    <Image
+                      src={isSwapComplete ? completedGif : shiftingGif}
+                      alt=""
+                      w="120px"
+                      h="120px"
+                      style={{
+                        objectFit: 'cover',
+                        filter: isSwapFailed ? 'grayscale(0.6)' : undefined,
+                      }}
+                    />
+                  </Box>
+                </Box>
+
                 {/* Bar track + filled portion */}
                 <Box position="relative" h="6px" bg="rgba(255,255,255,0.08)" borderRadius="full" mb="3">
                   {/* Filled bar — width based on step progress, animated stripes when in progress */}
@@ -1853,11 +1843,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               instead of competing with the device illustration. */}
           {busy && fromAsset && toAsset && (
             <VStack gap="6" py="6" align="center" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
-              {/* Big device illustration — 220px gif drives the whole screen */}
-              <Box flexShrink={0}>
-                <KeepKeyDevice
-                  state={subStage?.endsWith('-broadcasting') || phase === 'broadcasting' ? 'active' : 'signing'}
-                  size={220}
+              {/* Big device illustration — 6-face CSS-3D KeepKey rotating
+                  around its Y axis. The OLED face mirrors the swap pair the
+                  user is being asked to confirm so the device shown matches
+                  the action requested. */}
+              <Box flexShrink={0} w="380px" maxW="100%">
+                <SpinningDevice
+                  durationSeconds={subStage?.endsWith('-broadcasting') || phase === 'broadcasting' ? 8 : 14}
+                  screen={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, opacity: 0.55, letterSpacing: 2, marginBottom: 4 }}>
+                          {(subStage === 'approve-signing' || phase === 'approving') ? 'APPROVE' : 'CONFIRM SWAP'}
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 0.5, lineHeight: 1 }}>
+                          {displayAmount} {fromAsset.symbol}
+                        </div>
+                        <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 0.5, marginTop: 6 }}>
+                          → ~{quote?.expectedOutput ? formatBalance(quote.expectedOutput) : '—'} {toAsset.symbol}
+                        </div>
+                        <div style={{ fontSize: 9, opacity: 0.4, letterSpacing: 1, marginTop: 4 }}>
+                          {(quote?.swapper || quote?.integration || '').toString().toUpperCase()}
+                        </div>
+                      </div>
+                      <div style={{ width: 38, height: 38, borderRadius: '50%',
+                                    border: '1.5px solid rgba(232,230,220,0.85)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
+                        ▶
+                      </div>
+                    </div>
+                  }
                 />
               </Box>
 
