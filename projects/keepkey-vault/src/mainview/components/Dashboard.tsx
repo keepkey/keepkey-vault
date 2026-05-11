@@ -97,6 +97,15 @@ const DASHBOARD_ANIMATIONS = `
 /* localStorage key for user's preferred portfolio view. */
 const DASHBOARD_VIEW_KEY = 'keepkey.dashboard.view'
 type DashboardView = 'orbit' | 'grid'
+type GridCardTier = 'small' | 'medium' | 'large'
+type PortfolioChainItem = {
+	chain: ChainDef
+	usd: number
+	bal: ChainBalance | undefined
+	hasValue: boolean
+	originalIndex: number
+}
+
 function readSavedView(): DashboardView {
 	try {
 		const v = localStorage.getItem(DASHBOARD_VIEW_KEY)
@@ -114,9 +123,8 @@ function readSavedView(): DashboardView {
  *    2. Logos alternate between two concentric radii (inner / outer) so
  *       the layout reads as a constellation rather than a perfect ring.
  *       The largest chain anchors top-inner; smaller chains zigzag outward.
- *    3. Up to 10 chains visible (was 8) — extra slots cost little when
- *       sizes vary, and the per-chain "+N tokens" badge becomes useful
- *       on more rows. */
+ *    3. All supported chains stay visible — funded chains lead, then
+ *       zero-balance chains fill the rest of the view for complete coverage. */
 function OrbitalView({
 	chains,
 	balances,
@@ -172,18 +180,18 @@ function OrbitalView({
 	useEffect(() => {
 		const compute = () => {
 			const wAvail = window.innerWidth - 64
-			const hAvail = window.innerHeight - 260
-			// Width: up to 1280px on a wide monitor (icons + spacing still
-			// look balanced beyond that, but the page starts feeling empty).
-			// Height: capped tighter so the chain list below stays on-screen.
-			const w = Math.min(1280, Math.max(280, wAvail))
-			const h = Math.min(820,  Math.max(280, hAvail))
+			const hAvail = window.innerHeight - (mode === 'grid' ? 230 : 260)
+			// Grid needs more canvas than Orbit because it now shows complete
+			// chain coverage with readable cards, not small icon bodies.
+			const w = Math.min(mode === 'grid' ? 1740 : 1280, Math.max(280, wAvail))
+			const minH = mode === 'grid' ? (wAvail < 760 ? 2200 : wAvail < 1200 ? 1500 : 1060) : 280
+			const h = Math.min(mode === 'grid' ? 2400 : 820, Math.max(minH, hAvail))
 			setDims({ w, h })
 		}
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
-	}, [])
+	}, [mode])
 
 	const { w: width, h: height } = dims
 	const cx = width / 2
@@ -195,21 +203,37 @@ function OrbitalView({
 	// we don't want icons ballooning past what looks balanced.
 	const sizeRef = Math.min(width, height)
 
-	// Build the chain set once per data change. Up to 10 visible, sorted by
-	// USD desc so the biggest gets index 0 (anchored top).
-	const orbitChains = useMemo(
+	// Build the complete chain set once per data change. Funded chains sort
+	// first by USD value; unfunded chains remain visible afterward in config
+	// order so Grid and Orbit are complete portfolio views, not just balance
+	// summaries.
+	const viewChains = useMemo<PortfolioChainItem[]>(
 		() => chains
-			.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
-			.filter(x => x.usd > 0)
-			.sort((a, b) => b.usd - a.usd)
-			.slice(0, 10),
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chains.map(c => c.id).join('|'), Array.from(cleanBalanceUsd.entries()).map(([k, v]) => `${k}:${v.usd}`).join('|')]
+			.map((chain, originalIndex) => {
+				const clean = cleanBalanceUsd.get(chain.id)
+				const bal = balances.get(chain.id)
+				const usd = clean?.usd || 0
+				const nativeAmount = parseFloat(bal?.balance || '0')
+				const cleanTokenCount = clean?.cleanTokenCount || 0
+				return {
+					chain,
+					usd,
+					bal,
+					hasValue: usd > 0 || nativeAmount > 0 || cleanTokenCount > 0,
+					originalIndex,
+				}
+			})
+			.sort((a, b) => {
+				if (a.hasValue !== b.hasValue) return a.hasValue ? -1 : 1
+				if (a.hasValue && b.usd !== a.usd) return b.usd - a.usd
+				return a.originalIndex - b.originalIndex
+			}),
+		[chains, balances, cleanBalanceUsd]
 	)
 
 	// Max USD across the visible set — drives the size scale. Falls back to
 	// 1 so a single-chain wallet still produces a sensible size, not a NaN.
-	const maxOrbitUsd = orbitChains.reduce((m, x) => Math.max(m, x.usd), 0) || 1
+	const maxOrbitUsd = viewChains.reduce((m, x) => Math.max(m, x.usd), 0) || 1
 
 	// ── Layout: square-aware radial, big-outside / small-inside ─────────
 	// Each chain gets a size proportional to its USD share (56→144px) and
@@ -223,40 +247,34 @@ function OrbitalView({
 	//   sits at the edge, smallest sits well inside.
 	//   Phase B — force relaxation. Iteratively repulse overlapping
 	//   neighbours and push any chain whose box intersects the center
-	//   totals out along the smaller-overlap axis. 60 iterations is
-	//   enough for 10 nodes to settle stably.
+	//   totals out along the smaller-overlap axis. 80 iterations is
+	//   enough for the complete supported-chain set to settle stably.
 	// Net effect: corners of the square fill with the biggest holdings;
 	// smaller chains pull inward toward the center text but never overlap
 	// it or each other. Looks like a portfolio bento, not a clock face.
 	const layout = useMemo(() => {
-		if (orbitChains.length === 0) return [] as Array<{
+		if (viewChains.length === 0) return [] as Array<{
 			chain: ChainDef; usd: number; bal: ChainBalance | undefined;
-			x: number; y: number; sat: number
+			x: number; y: number; sat: number; cardW: number; cardH: number; cardTier: GridCardTier
 		}>
-		const N = orbitChains.length
+		const N = viewChains.length
 		// Scale icon sizes against the smaller container dimension — 440 was
 		// the old fixed cap so its constants encoded an unstated "1.0 at 440".
 		// Tracking the smaller dim keeps icons sane on portrait windows.
 		const k = sizeRef / 440
 		// Orbit mode varies icon size by USD share (the "constellation").
-		// Grid mode renders fixed-size chain cards on a tile ring around a
-		// hollow center, so size is uniform per the redesign — biggest
-		// chains just land in the best (top-left-first reading-order) slots,
-		// not bigger tiles.
-		const modeScale = mode === 'orbit' ? 0.8 : 1.0
-		const GRID_TILE = Math.round(170 * Math.min(1.1, k))
-		const items = orbitChains.map((c, i) => {
-			if (mode === 'grid') {
-				return { ...c, sat: GRID_TILE }
-			}
+		const modeScale = 0.8
+		const orbitCrowdScale = mode === 'orbit' ? Math.max(0.68, Math.min(1, Math.sqrt(12 / Math.max(1, N)))) : 1
+		const items = viewChains.map((c, i) => {
 			const share = c.usd / maxOrbitUsd
 			// Two-axis sizing — bigger USD share AND a higher slot rank both
 			// inflate the icon. Slot rank pushes corner chains (i<4) toward
 			// the top end so the four corners always feel anchored; share
 			// carries the rest of the hierarchy.
 			const rankBoost = i < 4 ? 1.0 : i < 8 ? 0.5 : 0.25
-			const sat = Math.round((56 + share * 96 * rankBoost + rankBoost * 24) * k * modeScale)
-			return { ...c, sat }
+			const zeroFloor = c.hasValue ? 56 : 44
+			const sat = Math.round((zeroFloor + share * 96 * rankBoost + rankBoost * 24) * k * modeScale * orbitCrowdScale)
+			return { ...c, sat, cardW: sat, cardH: sat, cardTier: 'small' as GridCardTier }
 		})
 		// Center totals rectangle — chains must clear this region.
 		const textHalfW = Math.max(96, width * 0.18)
@@ -264,64 +282,119 @@ function OrbitalView({
 		const gap = 8
 		// Phase A — deterministic corner-first slots. Forces the four biggest
 		// chains into the four corners of the container, the next four into
-		// the four edge midpoints, and the remaining two inward on the
-		// diagonal. Layout reads as a filled rectangle (corners visible)
-		// rather than a circle.
+		// the four edge midpoints, and the rest onto staggered inner rings.
+		// Layout reads as a filled rectangle (corners visible) rather than a
+		// circle.
 		// Reserve the top-left corner for the Grid/Orbit toggle so the TL chain
 		// icon doesn't slide under it. Toggle is ~150×40 + 14px inset; pad an
 		// extra 12px so the icon clears the toggle's drop shadow.
 		const TOGGLE_RESERVE_X = 170
 		const TOGGLE_RESERVE_Y = 66
-		/** Grid-mode slot positions — uniform-size tiles arranged on a ring,
-		 *  reading order (TL → TR → BR → BL etc.). Center is left open for
-		 *  the USD total / Reports / Refresh. */
-		const gridSlots = (): { x: number; y: number }[] => {
-			const tile = GRID_TILE
+
+		const gridPlan = (() => {
+			if (mode !== 'grid') return null
+			type GridSpan = { cols: number; rows: number; tier: GridCardTier }
+			type GridDim = { w: number; h: number; tier: GridCardTier }
 			const pad = 14
-			const cellW = tile + pad
-			const cellH = tile + pad
-			const cols = Math.max(3, Math.floor((width - pad) / cellW))
-			const rows = Math.max(3, Math.floor((height - pad) / cellH))
-			const gridW = cols * cellW
-			const gridH = rows * cellH
-			const offX = (width - gridW) / 2 + cellW / 2
-			const offY = (height - gridH) / 2 + cellH / 2
-			// Center hole — any cell whose center falls inside the inscribed
-			// ellipse (factor 0.34 of the canvas) is skipped, keeping the
-			// price + Reports/Refresh area uncluttered.
-			const holeRX = width * 0.34
-			const holeRY = height * 0.34
-			const cells: { x: number; y: number; priority: number }[] = []
-			for (let r = 0; r < rows; r++) {
-				for (let c = 0; c < cols; c++) {
-					const cx_ = offX + c * cellW
-					const cy_ = offY + r * cellH
-					// Skip cells inside the hollow center.
-					const dxC = (cx_ - cx) / holeRX
-					const dyC = (cy_ - cy) / holeRY
-					if (dxC * dxC + dyC * dyC < 1) continue
-					// Reading-order priority: top row before bottom, left
-					// before right. TL is highest priority (lowest number).
-					const priority = r * 1000 + c
-					cells.push({ x: cx_, y: cy_, priority })
+			const gap = Math.round(Math.max(12, Math.min(18, width / 100)))
+			const cols = width >= 1500 ? 12 : width >= 1180 ? 10 : width >= 760 ? 6 : 4
+			const colW = Math.floor((width - pad * 2 - gap * (cols - 1)) / cols)
+			const rowH = Math.round(Math.max(104, Math.min(126, colW * 0.86)))
+			const rows = Math.max(8, Math.floor((height - pad * 2 + gap) / (rowH + gap)))
+			const tierSpans: Record<GridCardTier, GridSpan> = {
+				large: { cols: cols >= 8 ? 3 : 2, rows: 2, tier: 'large' },
+				medium: { cols: 2, rows: 2, tier: 'medium' },
+				small: { cols: 2, rows: 1, tier: 'small' },
+			}
+			const spans = items.map((it, i): GridSpan => {
+				const share = it.usd / maxOrbitUsd
+				const tier: GridCardTier = it.hasValue && (share >= 0.45 || (i === 0 && it.usd > 0))
+					? 'large'
+					: it.hasValue && (i < 8 || share >= 0.04)
+						? 'medium'
+						: 'small'
+				return tierSpans[tier]
+			})
+			const dims = spans.map((span): GridDim => ({
+				w: span.cols * colW + (span.cols - 1) * gap,
+				h: span.rows * rowH + (span.rows - 1) * gap,
+				tier: span.tier,
+			}))
+			const occupied = Array.from({ length: rows }, () => Array.from({ length: cols }, () => false))
+			const mark = (col: number, row: number, colSpan: number, rowSpan: number) => {
+				for (let r = row; r < row + rowSpan; r++) {
+					for (let c = col; c < col + colSpan; c++) {
+						if (occupied[r]?.[c] != null) occupied[r][c] = true
+					}
 				}
 			}
-			// Bias TL away from the Grid/Orbit toggle if it lands inside the
-			// reserved area. The first eligible cell south of the toggle wins.
-			cells.sort((a, b) => a.priority - b.priority)
-			while (cells.length > 0 && cells[0].x < TOGGLE_RESERVE_X && cells[0].y < TOGGLE_RESERVE_Y) {
-				cells.shift()
+			const canPlace = (col: number, row: number, colSpan: number, rowSpan: number) => {
+				if (col + colSpan > cols || row + rowSpan > rows) return false
+				for (let r = row; r < row + rowSpan; r++) {
+					for (let c = col; c < col + colSpan; c++) {
+						if (occupied[r][c]) return false
+					}
+				}
+				return true
 			}
-			return cells
-		}
-		const gridSlotList = mode === 'grid' ? gridSlots() : []
+			const cellCenter = (col: number, row: number, colSpan: number, rowSpan: number) => ({
+				x: pad + col * (colW + gap) + (colSpan * colW + (colSpan - 1) * gap) / 2,
+				y: pad + row * (rowH + gap) + (rowSpan * rowH + (rowSpan - 1) * gap) / 2,
+			})
+			const toggleCols = Math.min(cols, Math.ceil((TOGGLE_RESERVE_X + 150) / (colW + gap)))
+			const toggleRows = Math.min(rows, Math.ceil((TOGGLE_RESERVE_Y + 22) / (rowH + gap)))
+			mark(0, 0, toggleCols, toggleRows)
+			const centerCols = cols >= 10 ? 4 : cols >= 6 ? 2 : 0
+			const centerRows = cols >= 10 ? 3 : cols >= 6 ? 3 : 0
+			if (centerCols > 0 && centerRows > 0) {
+				mark(Math.floor((cols - centerCols) / 2), Math.max(1, Math.floor((rows - centerRows) / 2)), centerCols, centerRows)
+			}
+			const slotDims: GridDim[] = []
+			const slots = spans.map((span) => {
+				let placed: { col: number; row: number; span: GridSpan } | null = null
+				for (let row = 0; row <= rows - span.rows && !placed; row++) {
+					for (let col = 0; col <= cols - span.cols; col++) {
+						if (canPlace(col, row, span.cols, span.rows)) {
+							placed = { col, row, span }
+							break
+						}
+					}
+				}
+				const fallbackSpan: GridSpan = { cols: Math.min(2, cols), rows: 1, tier: 'small' }
+				if (!placed) {
+					for (let row = 0; row <= rows - fallbackSpan.rows && !placed; row++) {
+						for (let col = 0; col <= cols - fallbackSpan.cols; col++) {
+							if (canPlace(col, row, fallbackSpan.cols, fallbackSpan.rows)) {
+								placed = { col, row, span: fallbackSpan }
+								break
+							}
+						}
+					}
+				}
+				const final = placed ?? { col: Math.max(0, cols - fallbackSpan.cols), row: Math.max(0, rows - 1), span: fallbackSpan }
+				mark(final.col, final.row, final.span.cols, final.span.rows)
+				slotDims.push({
+					w: final.span.cols * colW + (final.span.cols - 1) * gap,
+					h: final.span.rows * rowH + (final.span.rows - 1) * gap,
+					tier: final.span.tier,
+				})
+				return cellCenter(final.col, final.row, final.span.cols, final.span.rows)
+			})
+			return { slots, dims: slotDims.length === spans.length ? slotDims : dims }
+		})()
+		const gridSlotList = gridPlan?.slots ?? []
+		const gridDims = gridPlan?.dims ?? []
 
 		const slot = (rank: number, sat: number): { x: number; y: number } => {
 			if (mode === 'grid') {
 				// Grid mode: use the precomputed ring-tile list. Fall back to
-				// canvas center if rank exceeds available cells (unlikely for
-				// the 10-chain cap, but defensive).
-				return gridSlotList[rank] ?? { x: cx, y: cy }
+				// an outer ellipse if rank exceeds available cells.
+				if (gridSlotList[rank]) return gridSlotList[rank]
+				const angle = -Math.PI / 2 + rank * Math.PI * (3 - Math.sqrt(5))
+				return {
+					x: cx + Math.cos(angle) * width * 0.44,
+					y: cy + Math.sin(angle) * height * 0.44,
+				}
 			}
 			const half = sat / 2 + 6
 			const innerOffX = width * 0.22
@@ -341,7 +414,19 @@ function OrbitalView({
 				case 7: return { x: half, y: cy }                              // Left edge mid
 				case 8: return { x: cx - innerOffX, y: cy - innerOffY }        // TL inner
 				case 9: return { x: cx + innerOffX, y: cy + innerOffY }        // BR inner
-				default: return { x: cx, y: cy }
+				default: {
+					const innerRank = rank - 10
+					const ring = Math.floor(innerRank / 8)
+					const posInRing = innerRank % 8
+					const angle = -Math.PI / 2 + posInRing * (Math.PI * 2 / 8) + ring * (Math.PI / 8)
+					const ringFrac = Math.max(0.36, 0.72 - ring * 0.14)
+					const rX = Math.max(half, width / 2 - half - 8)
+					const rY = Math.max(half, height / 2 - half - 22)
+					return {
+						x: cx + Math.cos(angle) * rX * ringFrac,
+						y: cy + Math.sin(angle) * rY * ringFrac,
+					}
+				}
 			}
 		}
 		const pos = items.map((it, i) => slot(i, it.sat))
@@ -393,9 +478,20 @@ function OrbitalView({
 				pos[i].y = Math.max(halfY, Math.min(height - halfY, pos[i].y))
 			}
 		}
-		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
+		return items.map((it, i) => {
+			const dim = mode === 'grid' ? gridDims[i] : undefined
+			return {
+				...it,
+				x: pos[i].x,
+				y: pos[i].y,
+				sat: mode === 'grid' ? Math.max(dim?.w ?? it.cardW, dim?.h ?? it.cardH) : it.sat,
+				cardW: dim?.w ?? it.cardW,
+				cardH: dim?.h ?? it.cardH,
+				cardTier: dim?.tier ?? it.cardTier,
+			}
+		})
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), width, height, cx, cy, maxOrbitUsd, sizeRef, mode])
+	}, [viewChains.map(c => `${c.chain.id}:${c.usd}:${c.hasValue ? 1 : 0}`).join('|'), width, height, cx, cy, maxOrbitUsd, sizeRef, mode])
 
 	/* Token-bubble layout — computed when a chain has its +N badge expanded.
 	 *
@@ -1006,133 +1102,160 @@ function OrbitalView({
 					}
 				}}
 			>
-			{layout.map(({ chain, usd, bal, x: slotX, y: slotY, sat }) => {
-				const isHover = hover === chain.id
-				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				{layout.map(({ chain, usd, bal, x: slotX, y: slotY, sat, cardW, cardH, cardTier }) => {
+					const isHover = hover === chain.id
+					const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
 
-				// ─────────────────────────────────────────────────────────────
-				// GRID MODE — rectangular chain card (the old SimpleGrid card
-				// adapted for absolute positioning on the ring layout). All
-				// tiles same size; no physics, no tokens; only the cards.
-				// ─────────────────────────────────────────────────────────────
-				if (mode === 'grid') {
-					const cellSize = sat // uniform GRID_TILE from layout pass
-					const balNum = parseFloat(bal?.balance || '0')
-					const hasBalance = balNum > 0 || usd > 0
-					const tokenCount = bal?.tokens?.length ?? 0
-					const initialTx = Math.round(slotX - cellSize / 2)
-					const initialTy = Math.round(slotY - cellSize / 2)
-					return (
-						<Box
-							key={chain.id}
-							as="button"
-							onMouseEnter={() => setHover(chain.id)}
-							onMouseLeave={() => setHover(null)}
-							onClick={() => onSelect(chain)}
-							position="absolute"
-							left="0"
-							top="0"
-							style={{
-								transform: `translate3d(${initialTx}px, ${initialTy}px, 0)`,
-							}}
-							w={`${cellSize}px`}
-							h={`${cellSize}px`}
-							borderRadius="14px"
-							bg="kk.cardBg"
-							border="1px solid"
-							borderColor={hasBalance ? `${chain.color}55` : "kk.border"}
-							p="3"
-							display="flex"
-							flexDirection="column"
-							gap="2"
-							cursor="pointer"
-							overflow="hidden"
-							transition="all 0.18s cubic-bezier(0.2,0.8,0.2,1)"
-							_hover={{
-								borderColor: chain.color,
-								bg: `${chain.color}10`,
-								transform: `translate3d(${initialTx}px, ${initialTy - 2}px, 0)`,
-								boxShadow: `0 8px 22px -10px ${chain.color}, 0 0 0 1px ${chain.color}44`,
-							}}
-							aria-label={chain.coin}
-						>
-							{/* Color glow in the top-right corner — same visual
-							    cue the old SimpleGrid card had. */}
-							{hasBalance && (
-								<Box
-									position="absolute"
-									top="-24px" right="-24px"
-									w="72px" h="72px"
-									borderRadius="full"
-									bg={chain.color}
-									opacity={0.08}
-									pointerEvents="none"
-								/>
-							)}
-							{/* Header row: icon + name + symbol */}
-							<Flex align="center" gap="2.5" position="relative">
-								<Image
-									src={getAssetIcon(chain.caip)}
-									alt={chain.symbol}
-									w="32px" h="32px"
-									borderRadius="full"
-									flexShrink={0}
-									bg={chain.color}
-									boxShadow={`0 0 0 1px var(--line), 0 4px 12px -4px ${chain.color}`}
-								/>
-								<Box overflow="hidden" flex="1" minW="0">
-									<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.15" truncate>
-										{chain.coin}
-									</Text>
-									<Text fontSize="10px" color="var(--text-3)" lineHeight="1.15" letterSpacing="0.04em">
-										{chain.symbol}
-									</Text>
-								</Box>
-								{tokenCount > 0 && (
+					// ─────────────────────────────────────────────────────────────
+					// GRID MODE — rectangular chain card (the old SimpleGrid card
+					// adapted for absolute positioning). Cards use three dramatic
+					// USD-value tiers: small, medium, large. No physics, no token
+					// bubbles, only readable cards.
+					// ─────────────────────────────────────────────────────────────
+					if (mode === 'grid') {
+						const tileW = cardW
+						const tileH = cardH
+						const isLarge = cardTier === 'large'
+						const isMedium = cardTier === 'medium'
+						const iconSize = isLarge ? 54 : isMedium ? 42 : 34
+						const nameSize = isLarge ? "19px" : isMedium ? "16px" : "14px"
+						const symbolSize = isLarge ? "12px" : isMedium ? "11px" : "10px"
+						const balanceSize = isLarge ? "13px" : isMedium ? "12px" : "11px"
+						const usdSize = isLarge ? "26px" : isMedium ? "20px" : "16px"
+						const balNum = parseFloat(bal?.balance || '0')
+						const hasBalance = balNum > 0 || usd > 0
+						const tokenCount = bal?.tokens?.length ?? 0
+						const balanceDigits = balNum > 0 && balNum < 1
+							? (isLarge ? 6 : isMedium ? 5 : 4)
+							: (isLarge ? 4 : isMedium ? 3 : 2)
+						const nativeText = hasBalance
+							? `${balNum.toLocaleString('en-US', { maximumFractionDigits: balanceDigits })} ${chain.symbol}`
+							: "No balance"
+						const initialTx = Math.round(slotX - tileW / 2)
+						const initialTy = Math.round(slotY - tileH / 2)
+						return (
+							<Box
+								key={chain.id}
+								as="button"
+								onMouseEnter={() => setHover(chain.id)}
+								onMouseLeave={() => setHover(null)}
+								onClick={() => onSelect(chain)}
+								position="absolute"
+								left="0"
+								top="0"
+								style={{
+									transform: `translate3d(${initialTx}px, ${initialTy}px, 0)`,
+								}}
+								w={`${tileW}px`}
+								h={`${tileH}px`}
+								borderRadius="10px"
+								bg="kk.cardBg"
+								border="1px solid"
+								borderColor={hasBalance ? `${chain.color}55` : "kk.border"}
+								p={isLarge ? "4" : isMedium ? "3.5" : "3"}
+								display="flex"
+								flexDirection="column"
+								gap={isLarge ? "3" : "2"}
+								cursor="pointer"
+								overflow="hidden"
+								transition="all 0.18s cubic-bezier(0.2,0.8,0.2,1)"
+								_hover={{
+									borderColor: chain.color,
+									bg: `${chain.color}10`,
+									transform: `translate3d(${initialTx}px, ${initialTy - 2}px, 0)`,
+									boxShadow: `0 8px 22px -10px ${chain.color}, 0 0 0 1px ${chain.color}44`,
+								}}
+								aria-label={chain.coin}
+							>
+								{/* Color glow in the top-right corner — same visual
+								    cue the old SimpleGrid card had. */}
+								{hasBalance && (
 									<Box
-										fontSize="9px"
-										fontFamily="var(--font-mono, monospace)"
-										fontWeight="700"
-										color="var(--gold)"
-										bg="rgba(233,196,106,0.12)"
-										border="1px solid rgba(233,196,106,0.35)"
-										px="1.5"
-										py="0.5"
+										position="absolute"
+										top="-24px" right="-24px"
+										w="72px" h="72px"
+										borderRadius="full"
+										bg={chain.color}
+										opacity={0.08}
+										pointerEvents="none"
+									/>
+								)}
+								{/* Header row: icon + name + symbol */}
+								<Flex align="flex-start" gap={isLarge ? "3" : "2.5"} position="relative">
+									<Image
+										src={getAssetIcon(chain.caip)}
+										alt={chain.symbol}
+										w={`${iconSize}px`} h={`${iconSize}px`}
 										borderRadius="full"
 										flexShrink={0}
-									>
-										+{tokenCount}
-									</Box>
-								)}
-							</Flex>
-
-							{/* Bottom — native balance + USD */}
-							<Box position="relative" mt="auto">
-								<Text
-									fontSize="11px"
-									fontFamily="var(--font-mono, monospace)"
-									color="var(--text-2)"
-									lineHeight="1.2"
-									truncate
-								>
-									{hasBalance
-										? `${balNum.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${chain.symbol}`
-										: <Box as="span" color="var(--text-3)">—</Box>}
-								</Text>
-								<Box mt="1">
-									<AnimatedUsd
-										value={usd}
-										fontSize="15px"
-										fontWeight="600"
-										fontFamily="mono"
-										style={{ letterSpacing: '-0.01em' }}
-										decimals={usd >= 100 ? 0 : 2}
+										bg={chain.color}
+										boxShadow={`0 0 0 1px var(--line), 0 4px 12px -4px ${chain.color}`}
 									/>
+									<Box flex="1" minW="0" pr={tokenCount > 0 ? "10" : "0"}>
+										<Text
+											fontSize={nameSize}
+											fontWeight="700"
+											color="var(--text-0)"
+											lineHeight="1.08"
+											whiteSpace="normal"
+										>
+											{chain.coin}
+										</Text>
+										<Text fontSize={symbolSize} color="var(--text-3)" lineHeight="1.15" letterSpacing="0.04em" mt="0.5">
+											{chain.symbol}
+										</Text>
+									</Box>
+									{tokenCount > 0 && (
+										<Box
+											position="absolute"
+											top="0"
+											right="0"
+											fontSize={isLarge ? "11px" : isMedium ? "10px" : "9px"}
+											fontFamily="var(--font-mono, monospace)"
+											fontWeight="700"
+											color="var(--gold)"
+											bg="rgba(233,196,106,0.12)"
+											border="1px solid rgba(233,196,106,0.35)"
+											px="1.5"
+											py="0.5"
+											borderRadius="full"
+											flexShrink={0}
+											maxW={isLarge ? "58px" : "48px"}
+											overflow="hidden"
+											textOverflow="ellipsis"
+											whiteSpace="nowrap"
+										>
+											+{tokenCount}
+										</Box>
+									)}
+								</Flex>
+
+								{/* Bottom — native balance + USD */}
+								<Box position="relative" mt="auto">
+									<Text
+										fontSize={balanceSize}
+										fontFamily="var(--font-mono, monospace)"
+										color="var(--text-2)"
+										lineHeight="1.2"
+										whiteSpace="nowrap"
+									>
+										{nativeText}
+									</Text>
+									<Box mt={isLarge ? "1.5" : "1"}>
+										<AnimatedUsd
+											value={usd}
+											fontSize={usdSize}
+											fontWeight="700"
+											fontFamily="mono"
+											color={hasBalance ? undefined : "var(--text-3)"}
+											style={{ letterSpacing: '-0.01em' }}
+											decimals={usd >= 100 ? 0 : 2}
+										/>
+									</Box>
 								</Box>
 							</Box>
-						</Box>
-					)
-				}
+						)
+					}
 
 				// ─────────────────────────────────────────────────────────────
 				// ORBIT MODE — round chain icon, physics-driven, with the
@@ -1987,9 +2110,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    parent 600px maxW into a viewport-wide canvas. Reports +
 			    Refresh fold into the center column inside the view, so this
 			    card is essentially the whole dashboard. */}
-			{hasAnyBalance ? (
-				<Box
-					w="min(98vw, 1360px)"
+				{hasAnyBalance ? (
+					<Box
+						w={viewMode === 'grid' ? "min(98vw, 1800px)" : "min(98vw, 1360px)"}
 					p="4"
 					mb="2"
 					borderRadius="xl"
