@@ -128,23 +128,36 @@ export async function getEvmGasPrice(rpcUrl: string): Promise<bigint> {
 }
 
 /** EIP-1559 fee data — uses eth_feeHistory to derive maxFeePerGas + priority fee.
- *  Falls back to null on chains that don't support it; caller uses legacy gasPrice. */
+ *  Falls back to null on chains that don't support it; caller uses legacy gasPrice.
+ *
+ *  Buffer policy: maxFeePerGas = nextBaseFee * 3 + priorityFee, with the priority
+ *  fee floored at 1.5 gwei and sampled at the 60th percentile of recent blocks.
+ *
+ *  The 3x base-fee multiplier covers ~9 blocks of 12.5% growth (1.125^9 ≈ 2.88),
+ *  vs ~6 blocks at 2x. Important because of a reflexive failure mode: if every
+ *  wallet ships 2x and a wave of txs broadcasts together, the next-block base
+ *  fee jumps and the whole wave becomes non-includable simultaneously — every
+ *  user gets stuck for hours waiting for base fee to come back down. 3x leaves
+ *  enough headroom for the network to absorb its own demand without orphaning
+ *  the txs that triggered it. Real-world incident: 2026-05-11, network base
+ *  fee climbed from ~1.3 to 4.5 gwei within minutes, all 2x-buffer txs stalled. */
 export async function getEvmFeeData(rpcUrl: string): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
   try {
-    // Pull recent base fees + percentile-based priority fees
-    const hist = await ethRpc(rpcUrl, 'eth_feeHistory', ['0x4', 'latest', [50]])
+    const hist = await ethRpc(rpcUrl, 'eth_feeHistory', ['0x4', 'latest', [60]])
     const baseFees = (hist?.baseFeePerGas || []).map((h: string) => BigInt(h))
     const priorityFees = (hist?.reward || []).map((blk: string[]) => BigInt(blk?.[0] || '0x0'))
     if (baseFees.length === 0) return null
-    // Use the next-block base fee (last entry is the predicted next block)
+    // Next-block base fee — last feeHistory entry is the predicted next block.
     const nextBaseFee = baseFees[baseFees.length - 1]
-    // Median priority fee from the sample, with a 1 gwei minimum
+    // 60th-percentile priority fee, floored at 1.5 gwei. 1.5 gwei is the typical
+    // ETH-mainnet inclusion tip in normal conditions; 1 gwei was leaving us
+    // behind faster txs whenever the mempool warmed up.
     const sortedPriority = [...priorityFees].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-    const medianPriority = sortedPriority[Math.floor(sortedPriority.length / 2)] ?? 0n
-    const minPriority = BigInt(1e9) // 1 gwei
-    const maxPriorityFeePerGas = medianPriority > minPriority ? medianPriority : minPriority
-    // 2x the next base fee to absorb base-fee growth across blocks
-    const maxFeePerGas = nextBaseFee * 2n + maxPriorityFeePerGas
+    const p60 = sortedPriority[Math.floor(sortedPriority.length * 0.6)] ?? 0n
+    const minPriority = BigInt(1_500_000_000) // 1.5 gwei
+    const maxPriorityFeePerGas = p60 > minPriority ? p60 : minPriority
+    // 3x next base fee — see policy note above.
+    const maxFeePerGas = nextBaseFee * 3n + maxPriorityFeePerGas
     return { maxFeePerGas, maxPriorityFeePerGas }
   } catch {
     return null

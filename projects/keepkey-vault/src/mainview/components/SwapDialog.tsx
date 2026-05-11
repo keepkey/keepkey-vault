@@ -1505,9 +1505,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                 <Box display="grid"
                   gridTemplateColumns={{ base: "1fr", md: "minmax(0, 0.95fr) minmax(0, 1.25fr)" }}>
 
-                  {/* ── HERO (mascot + title + slim stepper) ── */}
-                  <Box position="relative" px="6" pt="7" pb="6"
-                    display="flex" flexDirection="column" alignItems="center" justifyContent="center" gap="4"
+                  {/* ── HERO (mascot + title + slim stepper) ──
+                      Grid with three rows (1fr auto 1fr) so the auto-row
+                      containing mascot+title+stepper is pinned to the vertical
+                      center regardless of right-column height. Plain flex
+                      `justify-content: center` was visually off because the
+                      mascot's gravity pulled the eye above the column midpoint. */}
+                  <Box position="relative" px="6" py="6"
+                    display="grid"
+                    gridTemplateRows="1fr auto 1fr"
+                    justifyItems="center"
                     borderRight={{ base: "0", md: "1px solid" }}
                     borderBottom={{ base: "1px solid", md: "0" }}
                     borderColor="kk.border"
@@ -1518,6 +1525,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         ' radial-gradient(circle at 50% 42%, rgba(139,227,196,0.08), transparent 60%),' +
                         ' #050706',
                     }}>
+                  {/* Top spacer */}
+                  <Box />
+                  {/* Centered content stack */}
+                  <Box display="flex" flexDirection="column" alignItems="center" gap="4">
                     {/* Mascot stage — 300px frame holds rings + 248px slot */}
                     <Box position="relative" w="300px" h="300px" display="grid" style={{ placeItems: 'center' }}>
                       {/* concentric pulse rings — staggered animation delays */}
@@ -1530,7 +1541,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       <Box position="absolute" top="36px" left="36px" right="36px" bottom="36px"
                         borderRadius="full" border="1px solid rgba(139,227,196,0.22)"
                         style={{ animation: 'kkPulseRing 3.6s ease-in-out -2.4s infinite' }} />
-                      {/* Mascot slot — clipped to a circle so the chest gif fills cleanly */}
+                      {/* Mascot slot — clipped to a circle. Gif is sized larger than
+                          the container and scale-zoomed so its black square margins fall
+                          outside the round clip-path, giving a clean edge-to-edge fill. */}
                       <Box w="248px" h="248px" borderRadius="full" overflow="hidden" position="relative" bg="#0a0c0b"
                         style={{
                           boxShadow:
@@ -1538,7 +1551,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             ' 0 0 0 1px rgba(255,255,255,0.04) inset,' +
                             ' 0 0 60px rgba(139,227,196,0.18)',
                         }}>
-                        <Image src={completedGif} alt="" w="248px" h="248px" style={{ objectFit: 'cover' }} />
+                        <Image src={completedGif} alt=""
+                          position="absolute" top="50%" left="50%"
+                          w="320px" h="320px"
+                          style={{ objectFit: 'cover', transform: 'translate(-50%, -50%)' }} />
                       </Box>
                     </Box>
 
@@ -1577,6 +1593,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         </Box>
                       ))}
                     </Flex>
+                  </Box>
+                  {/* Bottom spacer */}
+                  <Box />
                   </Box>
 
                   {/* ── DETAILS (result card + accordions) ── */}
@@ -1635,7 +1654,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     </Box>
 
                     {/* Transaction details accordion */}
-                    <Box as="details" className="kk-acc"
+                    <Box as="details" open className="kk-acc"
                       bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border"
                       borderRadius="lg" overflow="hidden">
                       <Box as="summary" px="3.5" py="2.5"
@@ -1749,7 +1768,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
                     {/* Balance changes accordion */}
                     {(beforeFromBal || beforeToBal) && (
-                      <Box as="details" className="kk-acc"
+                      <Box as="details" open className="kk-acc"
                         bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border"
                         borderRadius="lg" overflow="hidden">
                         <Box as="summary" px="3.5" py="2.5"

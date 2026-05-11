@@ -810,9 +810,29 @@ async function buildRelaySwapTx(
   let maxPriorityFeePerGas: string | undefined
 
   if (relay.maxFeePerGas) {
-    // EIP-1559 tx — use quote values
-    maxFeePerGas = relay.maxFeePerGas
-    maxPriorityFeePerGas = relay.maxPriorityFeePerGas || '1000000' // 0.001 gwei fallback
+    // EIP-1559 tx — start from Relay's quote, but cross-check against our own
+    // locally-computed buffer (nextBaseFee * 3 + 1.5 gwei priority floor). Relay
+    // can ship a maxFeePerGas that was current at quote time but stale by
+    // broadcast; if local says higher, we use local so the tx isn't stranded
+    // when base fee spikes between quote and signing.
+    const relayMaxFee = BigInt(relay.maxFeePerGas)
+    const relayPrio = relay.maxPriorityFeePerGas
+      ? BigInt(relay.maxPriorityFeePerGas)
+      : BigInt(1_500_000_000) // 1.5 gwei — typical ETH-mainnet inclusion tip
+    let chosenMaxFee = relayMaxFee
+    let chosenPrio = relayPrio
+    if (rpcUrl) {
+      const liveFee = await getEvmFeeData(rpcUrl).catch(() => null)
+      if (liveFee) {
+        if (liveFee.maxFeePerGas > chosenMaxFee) {
+          swapLog(`${TAG} Relay tx: bumping maxFeePerGas ${chosenMaxFee} → ${liveFee.maxFeePerGas} (local 3x buffer beats Relay quote)`)
+          chosenMaxFee = liveFee.maxFeePerGas
+        }
+        if (liveFee.maxPriorityFeePerGas > chosenPrio) chosenPrio = liveFee.maxPriorityFeePerGas
+      }
+    }
+    maxFeePerGas = toHex(chosenMaxFee)
+    maxPriorityFeePerGas = toHex(chosenPrio)
   } else if (rpcUrl) {
     // Quote shipped only legacy gasPrice (or nothing) — prefer EIP-1559 from RPC
     // since legacy gasPrice on EIP-1559 chains often comes back below base fee.
