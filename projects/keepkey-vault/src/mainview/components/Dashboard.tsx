@@ -127,27 +127,39 @@ function OrbitalView({
 	onSelect: (c: ChainDef) => void
 }) {
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(440)
+	// Rectangular canvas — width and height are independent so the orbital
+	// can actually fill widescreen layouts instead of being clamped to a
+	// square that leaves big empty bands on either side. The icon hierarchy
+	// scales against the *smaller* dimension (so portrait windows still
+	// produce sensible sizing); slot positions use whichever dimension
+	// applies (corners at (half, half), edge mids at (cx, half), etc.).
+	const [dims, setDims] = useState({ w: 440, h: 440 })
 
-	// Orbital is the visual hero of the dashboard — let it actually use the
-	// available viewport instead of clamping at 440px. We cap at 920px so a
-	// 27" monitor doesn't produce icons the size of someone's head; floor at
-	// 280px for narrow phone widths; and reserve ~280px of vertical room for
-	// the topbar + chain list/cards that sit underneath.
 	useEffect(() => {
 		const compute = () => {
 			const wAvail = window.innerWidth - 64
-			const hAvail = window.innerHeight - 280
-			setSize(Math.min(920, Math.max(280, Math.min(wAvail, hAvail))))
+			const hAvail = window.innerHeight - 260
+			// Width: up to 1280px on a wide monitor (icons + spacing still
+			// look balanced beyond that, but the page starts feeling empty).
+			// Height: capped tighter so the chain list below stays on-screen.
+			const w = Math.min(1280, Math.max(280, wAvail))
+			const h = Math.min(820,  Math.max(280, hAvail))
+			setDims({ w, h })
 		}
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
 	}, [])
 
-	const cx = size / 2
-	const cy = size / 2
-	const ringR = size * 0.46
+	const { w: width, h: height } = dims
+	const cx = width / 2
+	const cy = height / 2
+	// Decorative dashed ring stays an inscribed circle so it's always
+	// fully visible regardless of aspect ratio.
+	const ringR = Math.min(width, height) * 0.46
+	// Icon scale tracks the smaller dimension — at very wide aspect ratios
+	// we don't want icons ballooning past what looks balanced.
+	const sizeRef = Math.min(width, height)
 
 	// Build the chain set once per data change. Up to 10 visible, sorted by
 	// USD desc so the biggest gets index 0 (anchored top).
@@ -188,10 +200,10 @@ function OrbitalView({
 			x: number; y: number; sat: number
 		}>
 		const N = orbitChains.length
-		// Scale icon sizes against the actual container — 440 was the old fixed
-		// cap so its constants encoded an unstated "1.0 at 440". Now the canvas
-		// can be 920, and at that width the old 56→152 range looks dinky.
-		const k = size / 440
+		// Scale icon sizes against the smaller container dimension — 440 was
+		// the old fixed cap so its constants encoded an unstated "1.0 at 440".
+		// Tracking the smaller dim keeps icons sane on portrait windows.
+		const k = sizeRef / 440
 		const items = orbitChains.map((c, i) => {
 			const share = c.usd / maxOrbitUsd
 			// Two-axis sizing — bigger USD share AND a higher slot rank both
@@ -203,28 +215,29 @@ function OrbitalView({
 			return { ...c, sat }
 		})
 		// Center totals rectangle — chains must clear this region.
-		const textHalfW = Math.max(96, size * 0.22)
-		const textHalfH = Math.max(60, size * 0.14)
+		const textHalfW = Math.max(96, width * 0.18)
+		const textHalfH = Math.max(60, height * 0.14)
 		const gap = 8
 		// Phase A — deterministic corner-first slots. Forces the four biggest
 		// chains into the four corners of the container, the next four into
 		// the four edge midpoints, and the remaining two inward on the
-		// diagonal. Layout reads as a filled square (corners visible) rather
-		// than a circle.
+		// diagonal. Layout reads as a filled rectangle (corners visible)
+		// rather than a circle.
 		const slot = (rank: number, sat: number): { x: number; y: number } => {
 			const half = sat / 2 + 6
-			const innerOff = size * 0.22
+			const innerOffX = width * 0.22
+			const innerOffY = height * 0.22
 			switch (rank) {
 				case 0: return { x: half, y: half }                            // TL corner
-				case 1: return { x: size - half, y: half }                     // TR corner
-				case 2: return { x: size - half, y: size - half }              // BR corner
-				case 3: return { x: half, y: size - half }                     // BL corner
+				case 1: return { x: width - half, y: half }                    // TR corner
+				case 2: return { x: width - half, y: height - half }           // BR corner
+				case 3: return { x: half, y: height - half }                   // BL corner
 				case 4: return { x: cx, y: half }                              // Top edge mid
-				case 5: return { x: size - half, y: cy }                       // Right edge mid
-				case 6: return { x: cx, y: size - half }                       // Bottom edge mid
+				case 5: return { x: width - half, y: cy }                      // Right edge mid
+				case 6: return { x: cx, y: height - half }                     // Bottom edge mid
 				case 7: return { x: half, y: cy }                              // Left edge mid
-				case 8: return { x: cx - innerOff, y: cy - innerOff }          // TL inner
-				case 9: return { x: cx + innerOff, y: cy + innerOff }          // BR inner
+				case 8: return { x: cx - innerOffX, y: cy - innerOffY }        // TL inner
+				case 9: return { x: cx + innerOffX, y: cy + innerOffY }        // BR inner
 				default: return { x: cx, y: cy }
 			}
 		}
@@ -269,13 +282,13 @@ function OrbitalView({
 				// Clamp to container, accounting for the USD label band.
 				const halfX = items[i].sat / 2 + 2
 				const halfY = items[i].sat / 2 + 18 // ~18px label below
-				pos[i].x = Math.max(halfX, Math.min(size - halfX, pos[i].x))
-				pos[i].y = Math.max(halfY, Math.min(size - halfY, pos[i].y))
+				pos[i].x = Math.max(halfX, Math.min(width - halfX, pos[i].x))
+				pos[i].y = Math.max(halfY, Math.min(height - halfY, pos[i].y))
 			}
 		}
 		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), size, cx, cy, maxOrbitUsd])
+	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), width, height, cx, cy, maxOrbitUsd, sizeRef])
 
 	// Preload all visible chain icons before we paint the cluster.
 	const iconUrls = useMemo(
@@ -286,8 +299,8 @@ function OrbitalView({
 	const iconsReady = useImagePreload(iconUrls)
 
 	return (
-		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
-			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+		<Box position="relative" w={`${width}px`} h={`${height}px`} mx="auto" my="2">
+			<svg width={width} height={height} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
 				<defs>
 					<radialGradient id="dashboardCoreGlow" cx="50%" cy="50%">
 						<stop offset="0%" stopColor="rgba(233,196,106,0.18)" />
@@ -295,7 +308,7 @@ function OrbitalView({
 						<stop offset="100%" stopColor="transparent" />
 					</radialGradient>
 				</defs>
-				<circle cx={cx} cy={cy} r={size * 0.5} fill="url(#dashboardCoreGlow)" />
+				<circle cx={cx} cy={cy} r={sizeRef * 0.5} fill="url(#dashboardCoreGlow)" />
 				<circle
 					cx={cx}
 					cy={cy}
@@ -345,7 +358,7 @@ function OrbitalView({
 				>
 					<AnimatedUsd
 						value={totalUsd}
-						fontSize={size > 720 ? "72px" : size > 540 ? "56px" : size > 380 ? "44px" : "36px"}
+						fontSize={sizeRef > 720 ? "72px" : sizeRef > 540 ? "56px" : sizeRef > 380 ? "44px" : "36px"}
 						fontWeight="500"
 						letterSpacing="-0.04em"
 						lineHeight="1"
@@ -1044,7 +1057,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    feel unmoored. */}
 			{hasAnyBalance ? (
 				<Box
-					w={viewMode === 'orbital' ? "min(96vw, 1024px)" : "100%"}
+					w={viewMode === 'orbital' ? "min(98vw, 1360px)" : "100%"}
 					p="4"
 					mb="2"
 					borderRadius="xl"
