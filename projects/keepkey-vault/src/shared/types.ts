@@ -227,6 +227,7 @@ export interface CustomToken {
   name: string
   decimals: number
   networkId: string       // CAIP-2 (e.g. 'eip155:137')
+  iconUrl?: string        // resolved logo (TrustWallet/CoinGecko); undefined when neither matched
 }
 
 export interface CustomChain {
@@ -776,6 +777,11 @@ export interface PendingSwap {
   estimatedTime: number   // seconds
   error?: string
   slippageBps?: number    // slippage tolerance used at quote time (preserved across resumes)
+  /** Relay's bytes32 request id (lowercase, 0x-prefixed). Extracted from the
+   *  inbound deposit calldata at trackSwap time, or backfilled lazily by
+   *  refreshSwap via api.relay.link. Drives the "Relay Track" external link
+   *  on relay/shapeshift integrations. */
+  relayRequestId?: string
 }
 
 export interface SwapStatusUpdate {
@@ -790,6 +796,10 @@ export interface SwapStatusUpdate {
    *  "Relay"). Pioneer surfaces this in `details.protocol.protocol` even when
    *  the original quote response didn't include it — most reliable post-broadcast. */
   swapper?: string
+  /** Relay request id (bytes32 hex). Set when the lazy backfill in refreshSwap
+   *  resolves it via api.relay.link, so the UI can render the tracker link
+   *  without a full re-fetch. */
+  relayRequestId?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
@@ -825,6 +835,9 @@ export interface SwapHistoryRecord {
   estimatedTimeSeconds: number   // estimated time at quote time
   actualTimeSeconds?: number     // actual duration (completedAt - createdAt)
   approvalTxid?: string          // ERC-20 approval tx (if applicable)
+  /** Relay request id (bytes32 hex, lowercase). Persisted so the resume path
+   *  can render the "Relay Track" external link without re-querying. */
+  relayRequestId?: string
 }
 
 /** Filter params for getSwapHistory RPC */

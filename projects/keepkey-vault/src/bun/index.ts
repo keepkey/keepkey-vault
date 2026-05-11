@@ -115,7 +115,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -1647,9 +1647,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw new Error('Pioneer client not available')
+					const extraContracts = getCustomTokens().map(ct => ({
+						networkId: ct.networkId,
+						contractAddress: ct.contractAddress,
+						decimals: ct.decimals,
+						symbol: ct.symbol,
+						name: ct.name,
+						icon: ct.iconUrl,
+					}))
 					const resp = await withTimeout(
 						pioneer.GetPortfolioBalances(
-							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{
+								pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })),
+								extraContracts: extraContracts.length > 0 ? extraContracts : undefined,
+							},
 							{ forceRefresh: true }
 						),
 						PIONEER_TIMEOUT_MS,
@@ -1751,22 +1762,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
-
-					// Merge user-added custom tokens as placeholders
-					try {
-						const customTokens = getCustomTokens()
-						for (const ct of customTokens) {
-							const existing = tokensByChainId.get(ct.chainId) || []
-							// Skip if Pioneer already returned this token
-							if (existing.some(t => t.contractAddress?.toLowerCase() === ct.contractAddress.toLowerCase())) continue
-							existing.push({
-								symbol: ct.symbol, name: ct.name, balance: '0', balanceUsd: 0, priceUsd: 0,
-								caip: `${ct.networkId}/erc20:${ct.contractAddress}`,
-								contractAddress: ct.contractAddress, networkId: ct.networkId, decimals: ct.decimals, type: 'token',
-							})
-							tokensByChainId.set(ct.chainId, existing)
-						}
-					} catch { /* custom tokens lookup failed, non-fatal */ }
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
@@ -2076,9 +2071,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (isEvm) evmAddresses.resetBalances()
 
 				try {
+					const extraContracts = getCustomTokens()
+						.filter(ct => ct.chainId === chain.id)
+						.map(ct => ({
+							networkId: ct.networkId,
+							contractAddress: ct.contractAddress,
+							decimals: ct.decimals,
+							symbol: ct.symbol,
+							name: ct.name,
+							icon: ct.iconUrl,
+						}))
 					const resp = await withTimeout(
 						pioneer.GetPortfolioBalances(
-							{ pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) },
+							{
+								pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })),
+								extraContracts: extraContracts.length > 0 ? extraContracts : undefined,
+							},
 							{ forceRefresh: true }
 						),
 						PIONEER_TIMEOUT_MS,
@@ -2200,19 +2208,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								dataSource: tok.dataSource,
 							})
 						}
-
-						// Merge user-added custom tokens as placeholders
-						try {
-							const customTokens = getCustomTokens().filter(ct => ct.chainId === chain.id)
-							for (const ct of customTokens) {
-								if (parsedTokens.some(t => t.contractAddress?.toLowerCase() === ct.contractAddress.toLowerCase())) continue
-								parsedTokens.push({
-									symbol: ct.symbol, name: ct.name, balance: '0', balanceUsd: 0, priceUsd: 0,
-									caip: `${ct.networkId}/erc20:${ct.contractAddress}`,
-									contractAddress: ct.contractAddress, networkId: ct.networkId, decimals: ct.decimals, type: 'token',
-								})
-							}
-						} catch { /* custom tokens lookup failed, non-fatal */ }
 
 						if (parsedTokens.length > 0) {
 							tokens = parsedTokens
@@ -2647,6 +2642,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const addr = params.contractAddress.trim()
 				if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) throw new Error('Invalid contract address')
 				const meta = await getTokenMetadata(rpcUrl, addr)
+				// Best-effort logo resolve. Don't block persistence on a slow CDN
+				// or rate-limited CoinGecko response — fail open to no icon.
+				const { resolveTokenIcon } = await import('./evm-token-icons')
+				let iconUrl: string | undefined
+				try {
+					iconUrl = (await resolveTokenIcon(params.chainId, addr)) || undefined
+				} catch (e: any) {
+					console.warn(`[addCustomToken] icon resolve threw, persisting without:`, e?.message || e)
+				}
 				const token: CustomToken = {
 					chainId: params.chainId,
 					contractAddress: addr,
@@ -2654,6 +2658,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					name: meta.name,
 					decimals: meta.decimals,
 					networkId: chain.networkId,
+					iconUrl,
 				}
 				dbAddCustomToken(token)
 				return token
@@ -2663,6 +2668,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getCustomTokens: async () => {
 				return getCustomTokens()
+			},
+			setCustomTokenIcon: async (params) => {
+				// User-supplied icon (data URL or http(s) URL). Cap at ~256KB raw bytes
+				// so a long-tail upload doesn't bloat sqlite or the in-memory token list.
+				// 256KB ≈ 350K base64 chars. Reject schemes other than data: / http(s):
+				// to keep the value renderable from the WebView and to avoid storing
+				// random arbitrary protocols.
+				const u = (params.iconUrl || '').trim()
+				if (!u) throw new Error('iconUrl required')
+				if (!/^(data:image\/(png|jpe?g|webp|svg\+xml|gif);base64,|https?:\/\/)/i.test(u)) {
+					throw new Error('iconUrl must be a data:image/* (base64) or http(s) URL')
+				}
+				if (u.length > 350_000) throw new Error('Icon too large (max ~256KB)')
+				const ok = dbSetCustomTokenIcon(params.chainId, params.contractAddress, u)
+				if (!ok) throw new Error('Token row not found — Add it first')
+				const found = getCustomTokens().find(t => t.chainId === params.chainId && t.contractAddress.toLowerCase() === params.contractAddress.toLowerCase())
+				if (!found) throw new Error('Token row not found after update')
+				return found
 			},
 
 			// ── Chain discovery (Pioneer catalog) ────────────────────
@@ -3592,9 +3615,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					? [params.chainId.replace(/^eip155:/, '')]
 					: Object.keys(EVM_RPC_URLS)
 
+				const allChains = getAllChains()
 				const hits = (await Promise.all(chainsToProbe.map(async (numericId) => {
 					const rpcUrl = EVM_RPC_URLS[numericId]
 					if (!rpcUrl) return null
+					// Resolve vault's internal chain id (e.g. 'base') from the EIP-155
+					// network id. SwapAsset.chainId per types.ts is the vault id, NOT
+					// CAIP-2 — every downstream consumer (balance lookup, addCustomToken
+					// handler, swap-discovery merge) keys on it. Returning the CAIP-2
+					// form here previously silently broke the picker's add flow:
+					// keepKeyToAddress/balances find returned undefined, canQuote was
+					// false, and no quote ever fired.
+					const networkId = `eip155:${numericId}`
+					const vaultChain = allChains.find(c => c.networkId === networkId)
+					if (!vaultChain) return null
 					try {
 						const meta = await withTimeout(
 							getTokenMetadata(rpcUrl, lower),
@@ -3605,12 +3639,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						 * strings for EOA addresses or bogus contracts. We need a real
 						 * symbol + decimals to safely build a swap. */
 						if (!meta.symbol || typeof meta.decimals !== 'number') return null
-						const chainId = `eip155:${numericId}`
-						const caip = `${chainId}/erc20:${lower}`
+						const caip = `${networkId}/erc20:${lower}`
 						return {
 							asset: meta.symbol,
 							caip,
-							chainId,
+							chainId: vaultChain.id,
 							chainFamily: 'evm',
 							contractAddress: lower,
 							decimals: meta.decimals,
@@ -3852,6 +3885,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					completedAt: record.completedAt,
 					estimatedTime: record.estimatedTimeSeconds,
 					slippageBps: record.slippageBps,
+					relayRequestId: live?.relayRequestId ?? record.relayRequestId,
 				}
 			},
 			refreshSwap: async (params) => {
@@ -3859,6 +3893,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) return null
 				const { refreshSwap } = await import('./swap-tracker')
 				return await refreshSwap(params.txid)
+			},
+			debugSwapLookup: async (params) => {
+				// PRIVACY: Mirror getSwapByTxid / refreshSwap — passphrase sessions
+				// must not see standard-wallet diagnostic data. The function-level
+				// noPersistSwaps gate inside debugSwapLookup catches passphrase-
+				// tagged txids regardless of caller; this is the session-level
+				// gate that refuses the call entirely from a hidden session.
+				if (engine.isPassphraseWallet) return null
+				const { debugSwapLookup } = await import('./swap-tracker')
+				return await debugSwapLookup(params.txid)
 			},
 			getSwapHistory: async (params) => {
 				if (engine.isPassphraseWallet) return []

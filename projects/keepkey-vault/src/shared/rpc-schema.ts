@@ -112,6 +112,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       addCustomToken: { params: { chainId: string; contractAddress: string }; response: CustomToken }
       removeCustomToken: { params: { chainId: string; contractAddress: string }; response: void }
       getCustomTokens: { params: void; response: CustomToken[] }
+      setCustomTokenIcon: { params: { chainId: string; contractAddress: string; iconUrl: string }; response: CustomToken }
       addCustomChain: { params: CustomChain; response: void }
       removeCustomChain: { params: { chainId: number }; response: void }
       getCustomChains: { params: void; response: CustomChain[] }
@@ -210,6 +211,19 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
        *  open — there is no background polling timer (by design). */
       refreshSwap: { params: { txid: string }; response: PendingSwap | null }
+      /** Read-only diagnostic for a single swap: local state + raw Pioneer
+       *  response + rescan response, with protocol divergence flagged. Used
+       *  by the SwapDialog "Debug" affordance and dev-tools introspection.
+       *  Returns null when called from a passphrase-wallet session, or for
+       *  any txid tagged as a passphrase swap. */
+      debugSwapLookup: { params: { txid: string }; response: {
+        txid: string
+        pioneerBaseUrl: string | undefined
+        local: PendingSwap | null
+        pioneer: { ok: boolean; status: number | null; raw: any; error?: string }
+        pioneerRescan: { ok: boolean; status: number | null; raw: any; error?: string }
+        divergence?: { vaultProtocol: string; pioneerProtocol: string }
+      } | null }
       getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
       getSwapHistoryStats: { params: void; response: SwapHistoryStats }
       exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }

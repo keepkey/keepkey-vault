@@ -16,7 +16,7 @@ import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import type { SwapAsset, SwapQuote, ChainBalance, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
+import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
@@ -444,6 +444,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null)
   const [balances, setBalances] = useState<ChainBalance[]>([])
+  // User-added custom tokens, refetched whenever the asset picker opens so a
+  // freshly-added contract shows up on the next open without restarting.
+  const [customTokens, setCustomTokens] = useState<CustomToken[]>([])
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
@@ -510,6 +513,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [liveOutboundRequired, setLiveOutboundRequired] = useState<number | undefined>()
   const [liveOutboundTxid, setLiveOutboundTxid] = useState<string | undefined>()
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
+  const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
 
   // ── Countdown timer ───────────────────────────────────────────────
   const [countdown, setCountdown] = useState(0)
@@ -575,6 +579,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (update.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(update.outboundRequiredConfirmations)
       if (update.outboundTxid) setLiveOutboundTxid(update.outboundTxid)
       if (update.swapper) setLiveSwapper(update.swapper)
+      if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -613,6 +618,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setLiveOutboundRequired(undefined)
       setLiveOutboundTxid(undefined)
       setLiveSwapper(undefined)
+      setLiveRelayRequestId(undefined)
       setAfterFromBal(null)
       setAfterToBal(null)
       setShowConfetti(false)
@@ -688,6 +694,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       })
       .catch(() => {})
   }, [open])
+
+  // ── Load user-added custom tokens ─────────────────────────────────
+  // Refetch each time the picker is opened so a token added in the previous
+  // picker session (via the paste-contract Add lane) is visible immediately.
+  useEffect(() => {
+    if (!open) return
+    rpcRequest<CustomToken[]>('getCustomTokens', undefined, 5000)
+      .then((result) => { if (Array.isArray(result)) setCustomTokens(result) })
+      .catch(() => {})
+  }, [open, pickerSide])
 
   // ── Load swap assets ──────────────────────────────────────────────
   useEffect(() => {
@@ -778,6 +794,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
     if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
     if (resumeSwap.swapper) setLiveSwapper(resumeSwap.swapper)
+    if (resumeSwap.relayRequestId) setLiveRelayRequestId(resumeSwap.relayRequestId)
     // If resuming a terminal swap, suppress confetti/sound
     const isTerminal = resumeSwap.status === 'completed' || resumeSwap.status === 'failed' || resumeSwap.status === 'refunded'
     if (isTerminal) completionFiredRef.current = true
@@ -1699,7 +1716,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     // post-broadcast value) over the quote-time parse, which often
                     // misses `swapper` for aggregator routes.
                     const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                    const tracker = providerTrackerUrl(protoHint, txid)
+                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
                     if (!tracker) return null
                     return (
                       <Button size="xs" flex="1" variant="outline" borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
@@ -2754,6 +2771,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         onClose={() => setPickerSide(null)}
         swappable={assets}
         balances={balances}
+        customTokens={customTokens}
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
         side={pickerSide || 'from'}
         onSelect={(a) => {
