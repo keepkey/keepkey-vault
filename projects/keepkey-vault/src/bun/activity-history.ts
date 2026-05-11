@@ -85,18 +85,19 @@ function normalizeTimestamp(tx: any): number {
 
 function normalizeActivityType(tx: any): ActivityType {
   const direction = String(tx.direction || '').toLowerCase()
-  if (direction.includes('send') || direction.includes('out')) return 'send'
-  if (direction.includes('receive') || direction.includes('in')) return 'receive'
-  return Number(tx.value) < 0 ? 'send' : 'receive'
+  if (/(send|sent|out|outgoing|debit|withdraw)/.test(direction)) return 'send'
+  if (/(receive|received|in|incoming|credit|deposit)/.test(direction)) return 'receive'
+  const value = Number(tx.value)
+  return Number.isFinite(value) && value < 0 ? 'send' : 'receive'
 }
 
-function normalizeMeta(tx: any) {
+function normalizeMeta(tx: any, activityType = normalizeActivityType(tx)) {
   return {
     confirmations: typeof tx.confirmations === 'number' ? tx.confirmations : 0,
     blockHeight: tx.blockHeight || tx.block_height || tx.height || 0,
     value: tx.value != null ? String(tx.value) : undefined,
     fee: tx.fee != null ? String(tx.fee) : undefined,
-    direction: normalizeActivityType(tx) === 'send' ? 'sent' : 'received',
+    direction: activityType === 'send' ? 'sent' : 'received',
   }
 }
 
@@ -265,23 +266,36 @@ export async function rebuildActivityHistory(params: {
           }
           seenTxids.add(txid)
 
-          const meta = { ...normalizeMeta(tx), chainId: chain.id, networkId: chain.networkId }
+          const activityType = normalizeActivityType(tx)
+          const timestamp = normalizeTimestamp(tx)
+          const route = `history/${chain.id}`
+          const meta = {
+            ...normalizeMeta(tx, activityType),
+            chainId: chain.id,
+            chainSymbol: chain.symbol,
+            networkId: chain.networkId,
+          }
           const exists = apiLogTxidExists(txid, params.scope.deviceId, params.scope.walletId)
           if (!dryRun) {
             if (exists) {
-              updateApiLogTxMeta(txid, meta, params.scope.deviceId, params.scope.walletId)
+              updateApiLogTxMeta(txid, meta, params.scope.deviceId, params.scope.walletId, {
+                activityType,
+                chain: chain.symbol,
+                route,
+                timestamp,
+              })
             } else {
               insertApiLog({
                 ...params.scope,
                 method: 'SCAN',
-                route: `history/${chain.id}`,
-                timestamp: normalizeTimestamp(tx),
+                route,
+                timestamp,
                 durationMs: 0,
                 status: 200,
                 appName: 'vault',
                 txid,
                 chain: chain.symbol,
-                activityType: normalizeActivityType(tx),
+                activityType,
                 responseBody: meta,
               })
             }

@@ -182,10 +182,11 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
     const a = detail.activity
     const typeConf = TYPE_CONFIG[a.type] || TYPE_CONFIG.sign
     const statusConf = STATUS_CONFIG[a.status] || STATUS_CONFIG.signed
-    const chainDef = CHAINS.find(c => c.symbol === a.chain || c.id === a.chain)
+    const chainDef = CHAINS.find(c => a.chainId && c.id === a.chainId) || CHAINS.find(c => c.symbol === a.chain || c.id === a.chain)
+    const chainSymbol = chainDef?.symbol || a.chain
     const explorerUrl = a.txid && chainDef ? getExplorerTxUrl(chainDef.id, a.txid) : null
     const explorerAddrUrl = a.to && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.to) : null
-    const required = getRequiredConfs(a.chain)
+    const required = getRequiredConfs(chainSymbol)
 
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
@@ -222,7 +223,7 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
                     fallback={<Box w="16px" h="16px" borderRadius="full" bg={chainDef.color} />}
                   />
                 )}
-                <Text fontSize="11px" color="white" fontWeight="600">{chainDef?.coin || a.chain} ({a.chain})</Text>
+                <Text fontSize="11px" color="white" fontWeight="600">{chainDef?.coin || a.chain} ({chainSymbol})</Text>
               </HStack>
             </Flex>
 
@@ -373,7 +374,8 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
 function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void }) {
   const [copied, setCopied] = useState(false)
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
-  const chainDef = CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
+  const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
+  const chainSymbol = chainDef?.symbol || activity.chain
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -381,10 +383,10 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const explorerUrl = activity.txid ? getExplorerUrl(activity.chain, activity.txid) : null
+  const explorerUrl = activity.txid ? getExplorerUrl(activity.chainId || activity.chain, activity.txid) : null
 
   const isUnconfirmed = activity.confirmations !== undefined && activity.confirmations === 0
-  const chainLabel = `${chainDef?.coin || activity.chain} (${activity.chain})`
+  const chainLabel = `${chainDef?.coin || activity.chain} (${chainSymbol})`
   const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
     ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' \u2192 ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
     : activity.amount || activity.fee
@@ -426,7 +428,7 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
           {activity.type === 'swap' && activity.swapStatus ? (
             <SwapStatusBadge status={activity.swapStatus} />
           ) : (
-            <ConfBadge confirmations={activity.confirmations} chain={activity.chain} />
+            <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
           )}
           <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
         </VStack>
@@ -655,7 +657,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
   // Filter activities to selected chain (empty = all)
   const filteredActivities = useMemo(() => {
     const next = selectedDef
-      ? activities.filter(a => a.chain === selectedDef.symbol || a.chain === selectedDef.id || a.chainId === selectedDef.id)
+      ? activities.filter(a => a.chainId ? a.chainId === selectedDef.id : (a.chain === selectedDef.symbol || a.chain === selectedDef.id))
       : activities
     return recentFirst(next)
   }, [activities, selectedDef])

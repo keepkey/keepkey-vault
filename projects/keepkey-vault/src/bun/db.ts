@@ -898,13 +898,26 @@ export function apiLogTxidExists(txid: string, deviceId?: string, walletId?: str
   } catch { return false }
 }
 
-/** Update response_body metadata for an existing api_log entry by txid (used to refresh confirmation counts) */
-export function updateApiLogTxMeta(txid: string, meta: Record<string, any>, deviceId?: string, walletId?: string) {
+/** Update metadata for an existing api_log tx row (used by history rebuild refreshes). */
+export function updateApiLogTxMeta(
+  txid: string,
+  meta: Record<string, any>,
+  deviceId?: string,
+  walletId?: string,
+  activity?: { activityType?: string; chain?: string; route?: string; timestamp?: number },
+) {
   try {
     if (!db) return
-    if (walletId) db.run('UPDATE api_log SET response_body = ? WHERE txid = ? AND wallet_id = ?', [JSON.stringify(meta), txid, walletId])
-    else if (deviceId) db.run('UPDATE api_log SET response_body = ? WHERE txid = ? AND device_id = ?', [JSON.stringify(meta), txid, deviceId])
-    else db.run('UPDATE api_log SET response_body = ? WHERE txid = ?', [JSON.stringify(meta), txid])
+    const setSql: string[] = ['response_body = ?']
+    const args: any[] = [JSON.stringify(meta)]
+    if (activity?.activityType) { setSql.push('activity_type = ?'); args.push(activity.activityType) }
+    if (activity?.chain) { setSql.push('chain = ?'); args.push(activity.chain) }
+    if (activity?.route) { setSql.push('route = ?'); args.push(activity.route) }
+    if (activity?.timestamp) { setSql.push('timestamp = ?'); args.push(activity.timestamp) }
+
+    if (walletId) db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND wallet_id = ?`, [...args, txid, walletId])
+    else if (deviceId) db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND device_id = ?`, [...args, txid, deviceId])
+    else db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ?`, [...args, txid])
   } catch (e: any) {
     console.warn('[db] updateApiLogTxMeta failed:', e.message)
   }
@@ -930,8 +943,8 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
       logParams.push(deviceId)
     }
     if (chainFilter) {
-      logSql += ` AND chain = ?`
-      logParams.push(chainFilter)
+      logSql += ` AND (chain = ? OR route = ? OR response_body LIKE ?)`
+      logParams.push(chainFilter, `history/${chainFilter}`, `%"chainId":"${chainFilter}"%`)
     }
     logSql += ` ORDER BY timestamp DESC LIMIT ?`
     logParams.push(limit)
@@ -951,7 +964,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
         deviceId: r.device_id || undefined,
         walletId: r.wallet_id || undefined,
         txid: r.txid || undefined,
-        chain: r.chain || '?',
+        chain: meta?.chainSymbol || r.chain || '?',
         chainId: meta?.chainId ?? undefined,
         type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
         source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
@@ -981,8 +994,8 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
     }
     if (chainFilter) {
       // Match swap by either source or destination chain (e.g. ETH->BTC visible under both ETH and BTC)
-      swapWhere.push(`(from_symbol = ? OR to_symbol = ?)`)
-      swapParams.push(chainFilter, chainFilter)
+      swapWhere.push(`(from_symbol = ? OR to_symbol = ? OR from_chain_id = ? OR to_chain_id = ?)`)
+      swapParams.push(chainFilter, chainFilter, chainFilter, chainFilter)
     }
     if (swapWhere.length) swapSql += ` WHERE ${swapWhere.join(' AND ')}`
     swapSql += ` ORDER BY created_at DESC LIMIT ?`
