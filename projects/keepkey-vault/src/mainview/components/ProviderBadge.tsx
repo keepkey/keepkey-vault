@@ -107,11 +107,22 @@ export function ProviderBadge({
   variant = "detailed",
   showVia = true,
 }: ProviderBadgeProps) {
+  // Native vault routes (mayachain, thorchain) ARE the swapper — there is no
+  // underlying executor to discover. Pioneer historically wrote
+  // swapper='thorchain' even on Maya pools (Maya forks Thor's protocol naming),
+  // and stale DB rows can still carry it. Prefer integration in that case so
+  // the badge stays truthful without depending on the upstream cleanup landing.
+  const integrationKey = integration?.toLowerCase().replace(/[\s_.-]/g, "")
+  const isNativeVaultIntegration = integrationKey === "mayachain" || integrationKey === "thorchain"
+
   // Prefer swapper (the actual executor); fall back to integration so we still
   // render *something* on legacy quote shapes that only carry one of the two.
-  const primary = resolveProvider(swapper || integration)
+  const primary = isNativeVaultIntegration
+    ? resolveProvider(integration)
+    : resolveProvider(swapper || integration)
   const integrationInfo = integration ? resolveProvider(integration) : null
   const showIntegrationSuffix =
+    !isNativeVaultIntegration &&
     showVia &&
     integrationInfo &&
     integrationInfo.key !== primary.key &&

@@ -20,6 +20,7 @@ import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 import { extractRelayRequestId } from '../shared/relay-utils'
+import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
 
 /** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
  *  layer accepts; symbols / asset names / display names are derived here for
@@ -428,9 +429,17 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
 
 // ── On-demand Pioneer fetch ────────────────────────────────────────
 
-/** Apply remote swap data to local swap, push updates if changed */
+/** Apply remote swap data to local swap, push updates if changed.
+ *
+ * If `swap.midgardClassified` is true, Pioneer's status is non-authoritative
+ * (it cannot tell a refund apart from a completion) and gets ignored — we
+ * still consume confirmations / timing / fees from Pioneer, but status is
+ * frozen at whatever Midgard ruled. Without this gate the two sources
+ * ping-pong on every refresh and burn through Pioneer rate limits. */
 function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
-  const newStatus = mapPioneerStatus(remoteSwap.status)
+  // Pioneer's mapped status only takes effect when Midgard hasn't ruled yet.
+  const pioneerStatus = mapPioneerStatus(remoteSwap.status)
+  const newStatus = swap.midgardClassified ? swap.status : pioneerStatus
   const confirmations = remoteSwap.confirmations ?? swap.confirmations
   const outboundConfirmations = remoteSwap.outboundConfirmations
   const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
@@ -440,17 +449,39 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Pioneer surfaces the detected underlying protocol in `details.protocol.protocol`.
   // If the quote-time parse missed `swapper` (common for aggregator routes where
   // ShapeShift's response shape varies), this is the authoritative value.
-  const detectedSwapper: string | undefined = remoteSwap.details?.protocol?.protocol || remoteSwap.swapper || undefined
+  //
+  // EXCEPTION: native vault routes (mayachain, thorchain) ARE the swapper —
+  // there's no underlying aggregator to discover. Maya forked THORChain's code
+  // and Pioneer's `details.protocol.protocol` reports "thorchain" even for
+  // Maya pools, which would mis-render as "THORChain via Maya" in the badge.
+  // Suppress the override so the badge falls back to `integration`.
+  const isNativeVaultRoute = swap.integration === 'mayachain' || swap.integration === 'thorchain'
+  const detectedSwapper: string | undefined = isNativeVaultRoute
+    ? undefined
+    : (remoteSwap.details?.protocol?.protocol || remoteSwap.swapper || undefined)
   const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
     || (remoteSwap.error ? String(remoteSwap.error) : undefined)
   const timeEstimate = remoteSwap.timeEstimate
+
+  // When Midgard has ruled, Pioneer's outboundTxid is also non-authoritative —
+  // Pioneer may carry a stale "expected outbound" hash that disagrees with
+  // the actual on-chain refund/delivery. Locking it here prevents the same
+  // ping-pong loop status had.
+  const acceptOutboundTxid = !swap.midgardClassified
+
+  // Stale-swapper cleanup MUST be evaluated as a "change" before the changed
+  // boolean is computed. Otherwise the cleanup runs but no push/persist
+  // fires, leaving the DB record (and the resume-render path that seeds
+  // liveSwapper from it) stuck on "thorchain" forever.
+  const shouldClearSwapper = isNativeVaultRoute && !!swap.swapper
 
   const changed =
     newStatus !== swap.status ||
     confirmations !== swap.confirmations ||
     (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
-    (outboundTxid && outboundTxid !== swap.outboundTxid) ||
-    (detectedSwapper && detectedSwapper !== swap.swapper)
+    (acceptOutboundTxid && outboundTxid && outboundTxid !== swap.outboundTxid) ||
+    (detectedSwapper && detectedSwapper !== swap.swapper) ||
+    shouldClearSwapper
 
   if (changed) {
     swap.status = newStatus
@@ -458,7 +489,8 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     swap.confirmations = confirmations
     if (outboundConfirmations !== undefined) swap.outboundConfirmations = outboundConfirmations
     if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
-    if (outboundTxid) swap.outboundTxid = outboundTxid
+    if (acceptOutboundTxid && outboundTxid) swap.outboundTxid = outboundTxid
+    if (shouldClearSwapper) swap.swapper = undefined
     if (errorMsg) swap.error = errorMsg
     if (detectedSwapper && !swap.swapper) swap.swapper = detectedSwapper
 
@@ -477,16 +509,21 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
 
     swapLog(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
 
-    // Persist status change to SQLite (skip for passphrase wallet swaps)
+    // Persist status change to SQLite (skip for passphrase wallet swaps).
+    // Use `swap.outboundTxid` (post-lock truth) NOT the local `outboundTxid`
+    // extracted from Pioneer — when midgardClassified is set Pioneer's view
+    // is stale and would otherwise overwrite the DB on the next refresh.
+    // Same rationale for swapper: pass `null` (not undefined) when we just
+    // cleared a stale value so the DB column actually clears.
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
     const now = Date.now()
     if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, newStatus, {
       deviceId: swap.deviceId,
       walletId: swap.walletId,
-      outboundTxid: outboundTxid || undefined,
+      outboundTxid: swap.outboundTxid || undefined,
       error: errorMsg || undefined,
       receivedOutput,
-      swapper: swap.swapper,
+      swapper: shouldClearSwapper ? null : swap.swapper,
       completedAt: isFinal ? now : undefined,
       actualTimeSeconds: isFinal ? Math.round((now - swap.createdAt) / 1000) : undefined,
     })
@@ -525,6 +562,13 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     slippageBps: r.slippageBps,
     error: r.error,
     relayRequestId: r.relayRequestId,
+    // Carry the classifier output across resumes so the UI's explorer link
+    // and refund reason render correctly without waiting for the next poll.
+    // Implies `midgardClassified=true` if either is set, locking Pioneer's
+    // status mapping out from regression on the first refresh.
+    outboundChainId: r.outboundChainId,
+    refundReason: r.refundReason,
+    midgardClassified: !!(r.outboundChainId || r.refundReason),
   }
 }
 
@@ -675,6 +719,25 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         console.warn(`${TAG} refreshSwap rescan failed for ${txid.slice(0, 10)}...: ${e.message}`)
       }
     }
+
+    // ── Midgard truth pass (Maya only — Thor has no public midgard) ──
+    // Pioneer maps refunds → 'completed' and uses toAsset.chainId for the
+    // explorer link. Both are wrong for the failure path. Hit Midgard
+    // directly and let classifySwapOutcome correct the record.
+    if (swap.integration === 'mayachain') {
+      const midgard = await fetchMayaMidgardActions(txid)
+      if (applyClassifiedOutcome(swap, midgard)) {
+        const isFinal = swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded'
+        if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, {
+          outboundTxid: swap.outboundTxid,
+          outboundChainId: swap.outboundChainId,
+          refundReason: swap.refundReason,
+          error: swap.error,
+          completedAt: isFinal ? Date.now() : undefined,
+        })
+        pushUpdate(swap)
+      }
+    }
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
@@ -683,6 +746,68 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     }
   }
   return swap
+}
+
+// ── Midgard fallback: source-of-truth for Maya/Thor swap outcomes ──
+//
+// Pioneer's normalized status maps refunds -> 'completed', and we previously
+// keyed the explorer URL on toAsset.chainId. Both are wrong for refunds, where
+// the outbound is on the source chain. Midgard's action.type='refund' is
+// unambiguous; it also tells us the actual outbound chain via the action.out
+// asset. Maya has a working public Midgard at midgard.mayachain.info; Thor's
+// Midgard has no live public mirror at the moment so this only covers Maya.
+//
+// We fetch on every refreshSwap for Maya integrations. Failure to reach
+// Midgard is non-fatal: we fall back to Pioneer's view.
+const MAYA_MIDGARD_BASE = 'https://midgard.mayachain.info'
+
+async function fetchMayaMidgardActions(txid: string): Promise<MidgardActionsResponse | null> {
+  const normalized = txid.replace(/^0x/i, '').toUpperCase()
+  const url = `${MAYA_MIDGARD_BASE}/v2/actions?txid=${normalized}`
+  try {
+    const resp = await fetch(url, { headers: { accept: 'application/json' } })
+    if (!resp.ok) {
+      swapLog(`${TAG} Maya midgard fetch ${resp.status} for ${txid.slice(0, 10)}...`)
+      return null
+    }
+    return await resp.json() as MidgardActionsResponse
+  } catch (e: any) {
+    console.warn(`${TAG} Maya midgard fetch failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
+    return null
+  }
+}
+
+function applyClassifiedOutcome(swap: PendingSwap, midgard: MidgardActionsResponse | null): boolean {
+  if (!midgard) return false
+  const outcome = classifySwapOutcome(midgard)
+  if (outcome.status === 'unknown') return false
+
+  let changed = false
+  if (outcome.status !== swap.status) {
+    swap.status = outcome.status
+    changed = true
+  }
+  if (outcome.outboundTxid && outcome.outboundTxid !== swap.outboundTxid) {
+    swap.outboundTxid = outcome.outboundTxid
+    changed = true
+  }
+  if (outcome.outboundChainId && outcome.outboundChainId !== swap.outboundChainId) {
+    swap.outboundChainId = outcome.outboundChainId
+    changed = true
+  }
+  if (outcome.refundReason && outcome.refundReason !== swap.refundReason) {
+    swap.refundReason = outcome.refundReason
+    changed = true
+  }
+  if (!swap.midgardClassified) {
+    swap.midgardClassified = true
+    changed = true
+  }
+  if (changed) {
+    swap.updatedAt = Date.now()
+    swapLog(`${TAG} Midgard reclassified ${swap.txid.slice(0, 10)}... -> status=${outcome.status} outChain=${outcome.outboundChainId || 'n/a'}`)
+  }
+  return changed
 }
 
 /** Diagnostic snapshot for a single swap: local state + Pioneer state +
@@ -874,6 +999,8 @@ function pushUpdate(swap: PendingSwap): void {
     error: swap.error,
     swapper: swap.swapper,
     relayRequestId: swap.relayRequestId,
+    outboundChainId: swap.outboundChainId,
+    refundReason: swap.refundReason,
   }
   swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)

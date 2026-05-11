@@ -225,7 +225,10 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
             ) : null
           })()}
           {swap.outboundTxid && (() => {
-            const url = getExplorerTxUrl(swap.toChainId, swap.outboundTxid)
+            // Refunds outbound on the SOURCE chain (Maya returns the inbound
+            // asset). Use outboundChainId from the classifier when present
+            // so the explorer link doesn't 404 on a non-existent ZEC tx hash.
+            const url = getExplorerTxUrl(swap.outboundChainId || swap.toChainId, swap.outboundTxid)
             return url ? (
               <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                 onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View outbound on explorer">
@@ -394,7 +397,10 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     {copied === 'outbound' ? 'Copied!' : record.outboundTxid.slice(0, 10) + '...' + record.outboundTxid.slice(-6)}
                   </Button>
                   {(() => {
-                    const url = getExplorerTxUrl(record.toChainId, record.outboundTxid)
+                    // Refunded swaps deliver outbound on the source chain.
+                    // outboundChainId from the Maya midgard classifier is the
+                    // truth; fall back to toChainId for legacy records.
+                    const url = getExplorerTxUrl(record.outboundChainId || record.toChainId, record.outboundTxid)
                     return url ? (
                       <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                         onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">

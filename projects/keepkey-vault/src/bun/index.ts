@@ -418,6 +418,22 @@ let swapUiUpdatedAt = 0
 export function getSwapUiState(): { state: import('../shared/types').SwapUiState; updatedAt: number } {
 	return { state: swapUiState, updatedAt: swapUiUpdatedAt }
 }
+// Force the cached snapshot back to a clean 'closed' state. Called by REST
+// `/api/v2/swap/close` so a stale 'submitted' snapshot from a prior failed
+// swap doesn't survive into the next REST-driven session if no SwapDialog
+// instance happens to be mounted (and therefore no unmount publishes 'closed').
+export function resetSwapUiState(): void {
+	swapUiState = {
+		phase: 'closed',
+		fromAsset: null, toAsset: null,
+		amount: '', fiatAmount: '',
+		inputMode: 'crypto', isMax: false, slippageBps: 100,
+		fromAddress: '', toAddress: '',
+		useCustomAddress: false, customToAddress: '',
+		quote: null, previewBuild: null, error: null, txid: null,
+	}
+	swapUiUpdatedAt = Date.now()
+}
 
 // Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
 // approval, device pairing approval) can independently want the window
@@ -1161,6 +1177,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error(`Failed to open URL: ${e?.message || e}`)
 				}
 				return { ok: true as const }
+			},
+			cancelDeviceSigning: async () => {
+				// User backed out of an in-flight confirm/PIN/passphrase prompt.
+				// Sends a Cancel message to the device, which dismisses the on-
+				// screen prompt and releases the transport lock. The pending
+				// signing promise inside hdwallet rejects with a "Cancelled"
+				// error — the swap dialog catches it and resets to 'review'.
+				if (!engine.wallet) return { ok: false }
+				await engine.wallet.cancel().catch(() => {})
+				return { ok: true }
 			},
 			wipeDevice: async () => {
 				if (!engine.wallet) throw new Error('No device connected')

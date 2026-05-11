@@ -359,7 +359,10 @@ function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; o
   // ── Swap detail ───────────────────────────────────────────────────
   const s = detail.swap
   const inboundUrl = getExplorerTxUrl(s.fromChainId, s.txid)
-  const outboundUrl = s.outboundTxid ? getExplorerTxUrl(s.toChainId, s.outboundTxid) : null
+  // Refunds outbound on source chain (Maya returns inbound asset). Prefer the
+  // classifier-populated outboundChainId so refunded ETH→ZEC opens Etherscan,
+  // not a Zcash explorer pointed at a non-existent hash.
+  const outboundUrl = s.outboundTxid ? getExplorerTxUrl(s.outboundChainId || s.toChainId, s.outboundTxid) : null
   const isFinal = s.status === 'completed' || s.status === 'failed' || s.status === 'refunded'
 
   return (

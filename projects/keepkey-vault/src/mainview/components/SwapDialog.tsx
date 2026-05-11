@@ -87,6 +87,13 @@ function maxSpendableAmount(asset: SwapAsset, balance: string): string {
   return spendable.toFixed(8).replace(/\.?0+$/, '')
 }
 
+// Extended-pubkey prefix regex. Used in two places: (1) the UTXO destination
+// resolver, to decide whether the cached balance address is actually an xpub
+// that needs re-derivation; (2) canQuote, to refuse to send an xpub to Pioneer
+// as a `toAddress` — Pioneer will silently substitute a derived destination,
+// and the swap.ts:374 in-memo guard fires too late to protect funds.
+const XPUB_RE = /^(?:xpub|ypub|zpub|tpub|upub|vpub|dgub|Ltub|Mtub|drkp|drks)[a-zA-Z0-9]{20,}$/i
+
 function parseApproveCalldata(data?: string | null): { spender: string; amount: bigint } | null {
   if (!data || typeof data !== 'string') return null
   const hex = data.toLowerCase()
@@ -684,6 +691,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [liveOutboundConfirmations, setLiveOutboundConfirmations] = useState<number | undefined>()
   const [liveOutboundRequired, setLiveOutboundRequired] = useState<number | undefined>()
   const [liveOutboundTxid, setLiveOutboundTxid] = useState<string | undefined>()
+  // Outbound chain may differ from toAsset.chainId — for refunds the outbound
+  // is on the SOURCE chain. Populated from the Midgard classifier in the
+  // tracker; falls back to toAsset.chainId when null.
+  const [liveOutboundChainId, setLiveOutboundChainId] = useState<string | undefined>()
+  const [liveRefundReason, setLiveRefundReason] = useState<string | undefined>()
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
   const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
 
@@ -747,6 +759,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (update.outboundTxid) setLiveOutboundTxid(update.outboundTxid)
       if (update.swapper) setLiveSwapper(update.swapper)
       if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
+      if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
+      if (update.refundReason) setLiveRefundReason(update.refundReason)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -758,8 +772,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   }, [txid, phase])
 
   // ── On-demand Pioneer polling — only while the dialog is open on this swap.
-  // Pull immediately, then on a 10s tick. Stops when the swap reaches a terminal
-  // state, when the user closes the dialog, or when the phase moves away.
+  // Pull immediately on mount, then on a 10s tick. Stops when the swap
+  // reaches a terminal state, when the user closes the dialog, or when the
+  // phase moves away.
+  //
+  // NOTE: deps are deliberately [txid, phase] — NOT liveStatus. Including
+  // liveStatus here causes a runaway loop: every status push from the
+  // tracker re-runs the effect, the cleanup cancels the in-flight tick,
+  // a new tick fires immediately, hits Pioneer/Midgard, gets a different
+  // status, pushes again, infinitely. The tick reads the latest status
+  // through a ref instead.
+  const liveStatusRef = useRef(liveStatus)
+  useEffect(() => { liveStatusRef.current = liveStatus }, [liveStatus])
   useEffect(() => {
     if (!txid || phase !== 'submitted') return
     let cancelled = false
@@ -768,15 +792,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (cancelled) return
       try { await rpcRequest('refreshSwap', { txid }) } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
-      // Stop once we have a terminal status (the swap-update listener has already updated state)
-      if (liveStatus === 'completed' || liveStatus === 'failed' || liveStatus === 'refunded') return
+      const s = liveStatusRef.current
+      if (s === 'completed' || s === 'failed' || s === 'refunded') return
       timer = setTimeout(tick, 10_000)
     }
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [txid, phase, liveStatus])
+  }, [txid, phase])
 
-  // Reset live tracking when phase changes away from submitted
+  // Reset live tracking when phase changes away from submitted.
+  // ALL live-* fields must clear here; otherwise values from a prior
+  // submitted swap leak into the next one. Specifically: a refunded
+  // Maya ETH→ZEC sets liveOutboundChainId='ethereum'; if that survives
+  // into a subsequent THORChain ETH→BTC swap the explorer link uses
+  // ethereum for what is actually a bitcoin outbound.
   useEffect(() => {
     if (phase !== 'submitted') {
       setLiveStatus('pending')
@@ -784,6 +813,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setLiveOutboundConfirmations(undefined)
       setLiveOutboundRequired(undefined)
       setLiveOutboundTxid(undefined)
+      setLiveOutboundChainId(undefined)
+      setLiveRefundReason(undefined)
       setLiveSwapper(undefined)
       setLiveRelayRequestId(undefined)
       setAfterFromBal(null)
@@ -960,8 +991,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
     if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
-    if (resumeSwap.swapper) setLiveSwapper(resumeSwap.swapper)
     if (resumeSwap.relayRequestId) setLiveRelayRequestId(resumeSwap.relayRequestId)
+    // Seed outbound chain + refund reason from the persisted record so a
+    // refund's explorer link points at the source chain on first render —
+    // without this, the explorer falls back to toAsset.chainId until the
+    // next refresh push, and refunded ETH→ZEC briefly opens a Zcash explorer
+    // for what is actually an ETH refund tx.
+    if (resumeSwap.outboundChainId) setLiveOutboundChainId(resumeSwap.outboundChainId)
+    if (resumeSwap.refundReason) setLiveRefundReason(resumeSwap.refundReason)
+    // Skip stale `swapper` for native-vault integrations — Maya forks Thor's
+    // protocol naming and Pioneer historically wrote `swapper='thorchain'`
+    // even for Maya pools. The badge would then render "THORChain via Maya".
+    // The tracker now actively clears this in the DB on the next refresh,
+    // but pre-existing rows still need this UI guard until they're touched.
+    const isNativeVaultIntegration = resumeSwap.integration === 'mayachain' || resumeSwap.integration === 'thorchain'
+    if (resumeSwap.swapper && !isNativeVaultIntegration) setLiveSwapper(resumeSwap.swapper)
     // If resuming a terminal swap, suppress confetti/sound
     const isTerminal = resumeSwap.status === 'completed' || resumeSwap.status === 'failed' || resumeSwap.status === 'refunded'
     if (isTerminal) completionFiredRef.current = true
@@ -1179,11 +1223,55 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return cb?.address || ''
   }, [fromAsset, address, chain, balances])
 
-  const keepKeyToAddress = useMemo(() => {
+  // Cached/balance-pipe address — for UTXO chains other than BTC this is often
+  // the xpub itself (see comment in AssetPage.tsx:246: "balance.address may be
+  // empty (xpub is not an address)"). We use it as the initial value, then
+  // re-derive a real receive address via the chain's rpcMethod below for the
+  // display. The resolved address also flows into `toAddress` so the swap
+  // memo encodes a real destination, not an extended pubkey.
+  const cachedToAddress = useMemo(() => {
     if (!toAsset) return ''
     const cb = balances.find(b => b.chainId === toAsset.chainId)
     return cb?.address || ''
   }, [toAsset, balances])
+
+  // For UTXO destinations, ensure we display (and use) a real receive address
+  // rather than an xpub. Mirrors the re-derive effect AssetPage runs on mount.
+  const [resolvedToAddress, setResolvedToAddress] = useState<string>('')
+  const [destAddressError, setDestAddressError] = useState<string | null>(null)
+  useEffect(() => {
+    setResolvedToAddress('')
+    setDestAddressError(null)
+    if (!toAsset) return
+    const toChain = CHAINS.find(c => c.id === toAsset.chainId)
+    if (!toChain) return
+    if (toChain.chainFamily !== 'utxo') return
+    // Fast path: cached address already looks like a real address (not an xpub).
+    if (cachedToAddress && !XPUB_RE.test(cachedToAddress)) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const params: any = {
+          addressNList: toChain.defaultPath,
+          showDisplay: false,
+          coin: toChain.coin,
+        }
+        if (toChain.scriptType) params.scriptType = toChain.scriptType
+        const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
+        if (cancelled) return
+        const addr = typeof result === 'string' ? result : (result?.address || '')
+        if (addr) setResolvedToAddress(addr)
+        else setDestAddressError(`Could not derive ${toChain.coin} destination address`)
+      } catch (e: any) {
+        if (cancelled) return
+        console.warn(`[SwapDialog] Failed to derive ${toChain.coin} receive address:`, e?.message || e)
+        setDestAddressError(`Failed to derive ${toChain.coin} destination address: ${e?.message || 'unknown error'}`)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [toAsset, cachedToAddress])
+
+  const keepKeyToAddress = resolvedToAddress || cachedToAddress
 
   const toAddress = useMemo(() => {
     if (useCustomAddress && customToAddress.trim()) return customToAddress.trim()
@@ -1195,7 +1283,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   ), [fromAsset])
 
   const validAmount = (isMax && !nativeMaxInsufficient) || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
-  const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !exceedsBalance && !customAddressError
+  // SAFETY: never quote with an xpub as the destination. Pioneer will accept
+  // it and substitute a self-derived address, but funds would land at an
+  // address that didn't come from the user's wallet. Wait for the UTXO
+  // resolver to populate a real receive address.
+  const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
+  const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !customAddressError
 
   // ── Preview-build the unsigned tx(s) when entering Confirm Quote ──
   // Fires once per quote — gives the user the exact payload to audit before
@@ -1261,6 +1354,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
     if (!canQuote) {
       if (phase === 'quoting') setPhase('input')
+      // Surface the two non-obvious reasons canQuote can be false so the user
+      // doesn't sit staring at a frozen quote panel.
+      if (destAddressError) setError(destAddressError)
+      else if (toAddressIsXpub) setError('Resolving destination address from device…')
       return
     }
 
@@ -1320,7 +1417,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.asset, toAsset?.asset, amount, isMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick])
+  }, [fromAsset?.asset, toAsset?.asset, amount, isMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -1498,6 +1595,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setTimeout(reset, 200)
   }, [phase, onClose, reset])
 
+  // Cancel a confirm-on-device prompt and back out to review. Sends a Cancel
+  // message to the device (frees the transport lock + dismisses the on-screen
+  // prompt), then resets the dialog to 'review' so the user can change inputs
+  // or just close. Broadcasting can NOT be cancelled — the signed tx is
+  // already on its way to the network and there's no unwind.
+  const handleCancelSigning = useCallback(async () => {
+    if (phase !== 'signing' && phase !== 'approving') return
+    try { await rpcRequest<{ ok: boolean }>('cancelDeviceSigning', undefined, 5000) } catch (e: any) {
+      console.warn('[SwapDialog] cancelDeviceSigning failed:', e?.message || e)
+    }
+    setPhase('review')
+    setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
+  }, [phase, t])
+
   const copyTxid = useCallback(() => {
     if (!txid) return
     navigator.clipboard.writeText(txid)
@@ -1565,6 +1676,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // ── Listen for swap-cmd messages (REST → UI control) ───────────────
   // 'open' is handled by SwapRpcMount before we mount; here we just treat
   // it as additional setters in case a second open arrives while we're up.
+  //
+  // Asset lookups (fromAsset/toAsset) accept either the THORChain-style
+  // string ("ETH.ETH") or the CAIP ("eip155:1/slip44:60"). Pending lookups
+  // race against the async asset list load — buffer them in a ref and drain
+  // on the assets-loaded effect below so REST seeds don't get silently
+  // dropped on first mount.
+  const pendingFromAssetKeyRef = useRef<string | null>(null)
+  const pendingToAssetKeyRef = useRef<string | null>(null)
+
+  const findAssetByKey = useCallback((key: string) => {
+    return assets.find(x => x.asset === key || x.caip === key)
+  }, [assets])
+
   useEffect(() => {
     if (!open) return
     const apply = (cmd: SwapUiCommand) => {
@@ -1578,7 +1702,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (cmd.kind === 'confirm') {
         // Click "Confirm Swap" — kicks off executeSwap. The TxReview gate
         // and the physical device button press still happen normally.
-        if (phase === 'review' && quote && fromAsset && toAsset) {
+        // Mirror the on-screen button's preflight gate: refuse to advance
+        // unless the preview build succeeded and balance is sufficient,
+        // so REST callers can't bypass the UI's "preview failed" lock and
+        // sign a tx the chain will reject.
+        const insufficientBalance = !!(previewBuild?.balance && !previewBuild.balance.sufficient)
+        const previewBlocked = previewLoading || !!previewError || !previewBuild?.unsignedTx || insufficientBalance
+        if (phase === 'review' && quote && fromAsset && toAsset && !previewBlocked) {
           handleExecuteSwap()
         }
         return
@@ -1586,12 +1716,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       // Both 'open' and 'set' carry the same partial-update fields below.
       const fields = cmd
       if ('fromAsset' in fields && fields.fromAsset !== undefined) {
-        const a = assets.find(x => x.asset === fields.fromAsset)
+        const a = findAssetByKey(fields.fromAsset)
         if (a) setFromAsset(a)
+        else pendingFromAssetKeyRef.current = fields.fromAsset
       }
       if ('toAsset' in fields && fields.toAsset !== undefined) {
-        const a = assets.find(x => x.asset === fields.toAsset)
+        const a = findAssetByKey(fields.toAsset)
         if (a) setToAsset(a)
+        else pendingToAssetKeyRef.current = fields.toAsset
       }
       if ('amount' in fields && fields.amount !== undefined) {
         setAmount(fields.amount); setIsMax(false)
@@ -1603,7 +1735,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if ('slippageBps' in fields && fields.slippageBps !== undefined) setSlippageBps(fields.slippageBps)
     }
     return onRpcMessage('swap-cmd', apply)
-  }, [open, assets, onClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap])
+  }, [open, assets, onClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
+
+  // Drain any seed keys that arrived before the asset list finished loading.
+  // Without this, REST `/swap/open` silently lost fromAsset/toAsset on first
+  // mount because the async assets fetch hadn't populated yet.
+  useEffect(() => {
+    if (assets.length === 0) return
+    if (pendingFromAssetKeyRef.current) {
+      const a = findAssetByKey(pendingFromAssetKeyRef.current)
+      if (a) { setFromAsset(a); pendingFromAssetKeyRef.current = null }
+    }
+    if (pendingToAssetKeyRef.current) {
+      const a = findAssetByKey(pendingToAssetKeyRef.current)
+      if (a) { setToAsset(a); pendingToAssetKeyRef.current = null }
+    }
+  }, [assets, findAssetByKey])
 
   if (!open) return null
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
@@ -2349,7 +2496,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         {t("copy")}
                       </Button>
                       {(() => {
-                        const url = getExplorerTxUrl(toAsset.chainId, liveOutboundTxid)
+                        // For refunds the outbound is on the SOURCE chain — the
+                        // tracker fills `liveOutboundChainId` from Midgard's
+                        // action.out asset. Fall back to toAsset only when the
+                        // classifier hasn't run yet (older history records).
+                        const outChainId = liveOutboundChainId || toAsset.chainId
+                        const url = getExplorerTxUrl(outChainId, liveOutboundTxid)
                         return url ? (
                           <Button size="xs" variant="ghost" color="var(--teal)" px="1.5" minW="auto"
                             onClick={() => rpcRequest('openUrl', { url }).catch(() => {})} title="View on explorer">
@@ -2454,7 +2606,31 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               substage detail moves into the chip area as small mono text
               instead of competing with the device illustration. */}
           {busy && fromAsset && toAsset && (
-            <VStack gap="6" py="6" align="center" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+            <VStack gap="6" py="6" align="center" position="relative" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+              {/* Cancel/X — only meaningful while the device is awaiting a
+                  button press (signing/approving). Once the user has confirmed
+                  on device and we're broadcasting, the tx is already going
+                  to the network and there's no unwind. */}
+              {(phase === 'signing' || phase === 'approving') && (
+                <Box position="absolute" top="0" right="0">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    color="kk.textMuted"
+                    px="2"
+                    minW="auto"
+                    aria-label={t('cancel', 'Cancel')}
+                    title={t('cancelSwapDevice', 'Cancel - release device prompt')}
+                    onClick={handleCancelSigning}
+                    _hover={{ color: 'kk.textPrimary' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </Button>
+                </Box>
+              )}
+
               {/* Big device illustration — 6-face CSS-3D KeepKey rotating
                   around its Y axis. The OLED face mirrors the swap pair the
                   user is being asked to confirm so the device shown matches
@@ -2976,6 +3152,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     : { transform: "translateY(-1px)" }}
                   onClick={() => { if (!reviewConfirmLocked) handleExecuteSwap() }}
                   disabled={reviewConfirmLocked}
+                  aria-disabled={reviewConfirmLocked}
                 >
                   {reviewConfirmLockLabel ||
                     ((previewBuild?.allowance && !previewBuild.allowance.sufficient)
