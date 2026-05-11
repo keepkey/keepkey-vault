@@ -41,6 +41,7 @@ export function ActivityTracker() {
   const [hasNew, setHasNew] = useState(false)
   const [bouncing, setBouncing] = useState(false)
   const lastCountRef = useRef(0)
+  const lastDeviceStateKeyRef = useRef<string>('')
   const bounceTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
 
   // Fetch recent activities from api_log + swap_history (unified query)
@@ -65,8 +66,12 @@ export function ActivityTracker() {
   // the scoped backend query is catching up.
   useEffect(() => {
     const unsub = onRpcMessage('device-state', (state: DeviceStateInfo) => {
-      setActivities([])
-      setPendingSwaps([])
+      const stateKey = `${state.state}:${state.deviceId || ''}:${state.isHiddenWallet ? 'hidden' : 'standard'}`
+      if (stateKey !== lastDeviceStateKeyRef.current) {
+        lastDeviceStateKeyRef.current = stateKey
+        setActivities([])
+        setPendingSwaps([])
+      }
       if (state.state === 'ready' && state.deviceId && !state.isHiddenWallet) {
         fetchActivities()
         fetchSwaps()
@@ -141,9 +146,22 @@ export function ActivityTracker() {
     lastCountRef.current = totalCount
   }, [totalCount])
 
+  useEffect(() => {
+    if (!panelOpen || activities.length > 0 || pendingSwaps.length > 0) return
+    fetchActivities()
+    fetchSwaps()
+    const interval = setInterval(() => {
+      fetchActivities()
+      fetchSwaps()
+    }, 2500)
+    return () => clearInterval(interval)
+  }, [panelOpen, activities.length, pendingSwaps.length, fetchActivities, fetchSwaps])
+
   const handleOpen = () => {
     setPanelOpen(true)
     setHasNew(false)
+    fetchActivities()
+    fetchSwaps()
   }
 
   // Label
