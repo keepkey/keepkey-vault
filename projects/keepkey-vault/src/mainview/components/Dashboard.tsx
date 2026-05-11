@@ -14,7 +14,7 @@ import { Bip85VaultDialog } from "./Bip85VaultDialog"
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
-import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
 import { useImagePreload } from "../lib/use-image-preload"
 
@@ -83,6 +83,15 @@ const DASHBOARD_ANIMATIONS = `
 		60%  { opacity: 1; transform: translateY(-3px) scale(1.02); }
 		100% { opacity: 1; transform: translateY(0) scale(1); }
 	}
+	@keyframes kkBubbleIn {
+		0%   { opacity: 0; transform: scale(0.3); }
+		70%  { opacity: 1; transform: scale(1.08); }
+		100% { opacity: 1; transform: scale(1); }
+	}
+	@keyframes kkBubbleLine {
+		0%   { stroke-dashoffset: 24; opacity: 0; }
+		100% { stroke-dashoffset: 0;  opacity: 0.28; }
+	}
 `
 
 /* localStorage key for user's preferred portfolio view. */
@@ -142,6 +151,16 @@ function OrbitalView({
 	t: (key: string, opts?: any) => string
 }) {
 	const [hover, setHover] = useState<string | null>(null)
+	// Which chain (if any) has its +N tokens badge expanded into child bubbles.
+	// One-at-a-time so the layout stays legible. Click the badge again, the
+	// chain icon, or anywhere on the canvas backdrop to collapse.
+	const [expandedChainId, setExpandedChainId] = useState<string | null>(null)
+	useEffect(() => {
+		if (!expandedChainId) return
+		const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpandedChainId(null) }
+		window.addEventListener('keydown', onKey)
+		return () => window.removeEventListener('keydown', onKey)
+	}, [expandedChainId])
 	// Rectangular canvas — width and height are independent so the orbital
 	// can actually fill widescreen layouts instead of being clamped to a
 	// square that leaves big empty bands on either side. The icon hierarchy
@@ -312,6 +331,113 @@ function OrbitalView({
 		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), width, height, cx, cy, maxOrbitUsd, sizeRef, mode])
+
+	/* Token-bubble layout — computed when a chain has its +N badge expanded.
+	 *
+	 * Each token gets a bubble sized by its USD share of the parent chain's
+	 * token total. Bubbles seed in a ring around the chain icon at golden-angle
+	 * offsets, then 50 iterations of relaxation push them away from every
+	 * existing body (chains, center text region, other tokens) and clamp
+	 * inside the canvas. Net effect: bubbles "tree" out from their chain icon
+	 * without overlapping anything else on the canvas. */
+	const tokenLayout = useMemo(() => {
+		if (!expandedChainId) return [] as Array<{
+			tok: TokenBalance; x: number; y: number; sat: number; pct: number
+		}>
+		const parent = layout.find(c => c.chain.id === expandedChainId)
+		if (!parent) return []
+		const tokens = parent.bal?.tokens ?? []
+		if (tokens.length === 0) return []
+
+		// Sort by USD desc — biggest tokens lay out first so they get the best
+		// slots; tiny dust tokens fill in afterward.
+		const sorted = [...tokens].sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0))
+		const tokenTotal = sorted.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 1
+		const maxTok = Math.max(...sorted.map(t => t.balanceUsd || 0)) || 1
+
+		// Size: 28→64 across USD share. Tracks sizeRef too so on tiny
+		// containers the bubbles don't dominate.
+		const tokenScale = Math.min(1, sizeRef / 440)
+		const items = sorted.map(tok => {
+			const share = (tok.balanceUsd || 0) / maxTok
+			const sat = Math.max(28, Math.round((28 + share * 36) * tokenScale))
+			return { tok, sat, pct: ((tok.balanceUsd || 0) / tokenTotal) * 100 }
+		})
+
+		// Seed positions on a ring around the parent chain icon.
+		const N = items.length
+		const seedR = parent.sat / 2 + 28
+		const GOLDEN = Math.PI * (3 - Math.sqrt(5))
+		const pos = items.map((_, i) => {
+			const a = i * GOLDEN
+			return {
+				x: parent.x + Math.cos(a) * seedR,
+				y: parent.y + Math.sin(a) * seedR,
+			}
+		})
+
+		// Build the obstacle list — chains + center text region.
+		const textHalfW = Math.max(96, width * 0.18)
+		const textHalfH = Math.max(60, height * 0.14)
+		const gap = 6
+		const ITER = 50
+		for (let k = 0; k < ITER; k++) {
+			for (let i = 0; i < N; i++) {
+				// Repel from every chain icon (always non-overlap).
+				for (const c of layout) {
+					let dx = pos[i].x - c.x
+					let dy = pos[i].y - c.y
+					let d = Math.sqrt(dx * dx + dy * dy)
+					if (d < 0.001) { d = 0.001; dx = 0.001; dy = 0 }
+					const minD = items[i].sat / 2 + c.sat / 2 + gap
+					if (d < minD) {
+						const push = (minD - d)
+						pos[i].x += (dx / d) * push
+						pos[i].y += (dy / d) * push
+					}
+				}
+				// Repel from sibling tokens.
+				for (let j = 0; j < N; j++) {
+					if (i === j) continue
+					let dx = pos[i].x - pos[j].x
+					let dy = pos[i].y - pos[j].y
+					let d = Math.sqrt(dx * dx + dy * dy)
+					if (d < 0.001) { d = 0.001; dx = 0.001; dy = 0 }
+					const minD = items[i].sat / 2 + items[j].sat / 2 + gap
+					if (d < minD) {
+						const push = (minD - d) / 2
+						const ux = dx / d, uy = dy / d
+						pos[i].x += ux * push
+						pos[i].y += uy * push
+						pos[j].x -= ux * push
+						pos[j].y -= uy * push
+					}
+				}
+				// Clear center totals rectangle.
+				const dxC = pos[i].x - cx
+				const dyC = pos[i].y - cy
+				const clearX = textHalfW + items[i].sat / 2 + gap
+				const clearY = textHalfH + items[i].sat / 2 + gap
+				if (Math.abs(dxC) < clearX && Math.abs(dyC) < clearY) {
+					const overlapX = clearX - Math.abs(dxC)
+					const overlapY = clearY - Math.abs(dyC)
+					if (overlapX < overlapY) pos[i].x += Math.sign(dxC || 1) * overlapX
+					else                     pos[i].y += Math.sign(dyC || 1) * overlapY
+				}
+				// Clamp to container.
+				const halfX = items[i].sat / 2 + 2
+				const halfY = items[i].sat / 2 + 16
+				pos[i].x = Math.max(halfX, Math.min(width - halfX, pos[i].x))
+				pos[i].y = Math.max(halfY, Math.min(height - halfY, pos[i].y))
+			}
+		}
+		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		expandedChainId,
+		layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}`).join('|'),
+		width, height, cx, cy, sizeRef,
+	])
 
 	// Preload all visible chain icons before we paint the cluster.
 	const iconUrls = useMemo(
@@ -489,6 +615,15 @@ function OrbitalView({
 					opacity: iconsReady ? 1 : 0,
 					transition: 'opacity 220ms ease-out',
 				}}
+				onClick={(e: React.MouseEvent) => {
+					// Click on empty constellation canvas (not on a chain icon
+					// or token bubble) collapses any expanded chain. Children
+					// don't need stopPropagation because we only act when the
+					// click landed directly on this Box.
+					if (expandedChainId && e.target === e.currentTarget) {
+						setExpandedChainId(null)
+					}
+				}}
 			>
 			{layout.map(({ chain, usd, bal, x, y, sat }) => {
 				const isHover = hover === chain.id
@@ -535,25 +670,59 @@ function OrbitalView({
 							bg="var(--ink-2)"
 							boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}`}
 						/>
-						{(bal?.tokens?.length ?? 0) > 0 && (
-							<Box
-								position="absolute"
-								bottom="-4px"
-								right="-4px"
-								w="22px"
-								h="22px"
-								borderRadius="full"
-								bg="var(--ink-3)"
-								border="1px solid var(--line-2)"
-								fontSize="10px"
-								fontFamily="mono"
-								color="var(--text-1)"
-								display="grid"
-								placeItems="center"
-							>
-								+{bal!.tokens!.length}
-							</Box>
-						)}
+						{(bal?.tokens?.length ?? 0) > 0 && (() => {
+							const isExpanded = expandedChainId === chain.id
+							// Badge size grows with chain icon size — keeps the
+							// "this is clearly a button" feel on big and small
+							// icons alike. Floor 26 / ceiling 40.
+							const badgeSize = Math.max(26, Math.min(40, Math.round(sat * 0.32)))
+							return (
+								<Box
+									as="div"
+									role="button"
+									aria-label={`Expand ${bal!.tokens!.length} tokens on ${chain.coin}`}
+									aria-pressed={isExpanded}
+									tabIndex={0}
+									position="absolute"
+									bottom={`-${Math.round(badgeSize * 0.2)}px`}
+									right={`-${Math.round(badgeSize * 0.2)}px`}
+									w={`${badgeSize}px`}
+									h={`${badgeSize}px`}
+									borderRadius="full"
+									bg={isExpanded ? 'var(--gold)' : 'var(--ink-3)'}
+									color={isExpanded ? '#1a1408' : 'var(--text-1)'}
+									border="2px solid"
+									borderColor={isExpanded ? 'var(--gold-hi, #e0bb7e)' : 'rgba(233,196,106,0.55)'}
+									fontSize={`${Math.round(badgeSize * 0.38)}px`}
+									fontFamily="var(--font-display, inherit)"
+									fontWeight="700"
+									display="grid"
+									placeItems="center"
+									cursor="pointer"
+									transition="transform 0.15s, background 0.15s, box-shadow 0.15s"
+									boxShadow={isExpanded
+										? '0 0 0 4px rgba(233,196,106,0.18), 0 6px 18px -4px rgba(233,196,106,0.55)'
+										: '0 0 0 0 rgba(233,196,106,0), 0 4px 12px -4px rgba(0,0,0,0.6)'}
+									_hover={{
+										transform: 'scale(1.1)',
+										boxShadow: '0 0 0 4px rgba(233,196,106,0.16), 0 4px 14px -4px rgba(233,196,106,0.5)',
+									}}
+									onClick={(e: React.MouseEvent) => {
+										e.stopPropagation()
+										setExpandedChainId(prev => prev === chain.id ? null : chain.id)
+									}}
+									onKeyDown={(e: React.KeyboardEvent) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault()
+											e.stopPropagation()
+											setExpandedChainId(prev => prev === chain.id ? null : chain.id)
+										}
+									}}
+								>
+									{isExpanded ? '×' : `+${bal!.tokens!.length}`}
+								</Box>
+							)
+						})()}
 						{/* Persistent USD label under the icon. AnimatedUsd
 						    handles smooth count-up between updates; the
 						    kkBounceUp key re-fires whenever the value
@@ -611,7 +780,98 @@ function OrbitalView({
 					</Box>
 				)
 			})}
+
+			{/* Token bubbles — rendered after chain icons so they sit on top of
+			    chain shadows but below the +N badge (which has higher z-index
+			    when expanded). Staggered scale-in animation per index gives
+			    the "tree expanding" cue. */}
+			{tokenLayout.length > 0 && expandedChainId && (() => {
+				const parent = layout.find(c => c.chain.id === expandedChainId)
+				if (!parent) return null
+				return (
+					<>
+						{/* SVG connector lines from chain icon → each bubble. Drawn
+						    in a single SVG layered behind the bubble buttons. */}
+						<Box position="absolute" inset="0" pointerEvents="none">
+							<svg width={width} height={height} style={{ position: 'absolute', inset: 0 }}>
+								{tokenLayout.map((t, i) => (
+									<line
+										key={`line-${t.tok.caip}-${i}`}
+										x1={parent.x} y1={parent.y}
+										x2={t.x} y2={t.y}
+										stroke={parent.chain.color}
+										strokeOpacity="0.28"
+										strokeWidth="1"
+										strokeDasharray="2 4"
+										style={{
+											animation: `kkBubbleLine 0.5s ${i * 25}ms ease-out both`,
+										}}
+									/>
+								))}
+							</svg>
+						</Box>
+						{tokenLayout.map((t, i) => {
+							const symbol = t.tok.symbol || '?'
+							const labelUsd = t.tok.balanceUsd > 0
+								? `$${t.tok.balanceUsd < 1
+									? t.tok.balanceUsd.toFixed(2)
+									: t.tok.balanceUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+								: ''
+							return (
+								<Box
+									key={`tok-${t.tok.caip}-${i}`}
+									as="button"
+									position="absolute"
+									left={`${t.x - t.sat / 2}px`}
+									top={`${t.y - t.sat / 2}px`}
+									w={`${t.sat}px`}
+									h={`${t.sat}px`}
+									borderRadius="full"
+									border="1px solid var(--line-2)"
+									bg="var(--ink-2)"
+									color="var(--text-1)"
+									fontFamily="var(--font-mono, monospace)"
+									fontWeight="600"
+									fontSize={`${Math.max(9, Math.round(t.sat * 0.22))}px`}
+									display="grid"
+									placeItems="center"
+									cursor="pointer"
+									p={0}
+									transition="transform 0.15s, box-shadow 0.15s"
+									boxShadow={`0 4px 14px -4px ${parent.chain.color}, 0 0 0 1px rgba(255,255,255,0.04)`}
+									_hover={{
+										transform: 'scale(1.12)',
+										boxShadow: `0 0 0 2px ${parent.chain.color}, 0 6px 18px -4px ${parent.chain.color}`,
+										zIndex: 11,
+									}}
+									style={{
+										animation: `kkBubbleIn 0.4s ${i * 28}ms cubic-bezier(0.34, 1.56, 0.64, 1) both`,
+									}}
+									title={`${t.tok.symbol} · ${t.tok.balance} · ${labelUsd}`}
+									onClick={(e: React.MouseEvent) => {
+										e.stopPropagation()
+										onSelect(parent.chain)
+									}}
+								>
+									<Box textAlign="center" lineHeight="1">
+										<Box>{symbol.slice(0, 4).toUpperCase()}</Box>
+										{labelUsd && t.sat >= 36 && (
+											<Box
+												fontSize={`${Math.max(8, Math.round(t.sat * 0.16))}px`}
+												color="var(--text-3)"
+												fontWeight="500"
+												mt="2px"
+											>{labelUsd}</Box>
+										)}
+									</Box>
+								</Box>
+							)
+						})}
+					</>
+				)
+			})()}
 			</Box>
+
 		</Box>
 	)
 }
