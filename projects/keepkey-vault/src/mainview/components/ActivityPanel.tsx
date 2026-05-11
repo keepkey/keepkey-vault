@@ -121,6 +121,72 @@ function recentFirst<T extends { createdAt: number }>(items: T[]): T[] {
   return [...items].sort((a, b) => recentTimestamp(b) - recentTimestamp(a))
 }
 
+const USD_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+function formatUsd(value: number | null | undefined): string | null {
+  if (!Number.isFinite(value ?? NaN)) return null
+  const n = Number(value)
+  if (n > 0 && n < 0.01) return '<$0.01'
+  return USD_FORMATTER.format(n)
+}
+
+function commifyInteger(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function formatBaseUnits(raw: string | undefined, decimals: number, maxFraction = 8): string | null {
+  const value = String(raw ?? '').trim()
+  if (!value) return null
+  if (!/^-?\d+$/.test(value)) return value
+  const negative = value.startsWith('-')
+  const abs = BigInt(negative ? value.slice(1) : value)
+  const denom = 10n ** BigInt(decimals)
+  const whole = abs / denom
+  const fraction = abs % denom
+  let fractionText = decimals > 0
+    ? fraction.toString().padStart(decimals, '0').slice(0, maxFraction).replace(/0+$/, '')
+    : ''
+  if (whole === 0n && fraction > 0n && !fractionText) {
+    fractionText = `${'0'.repeat(Math.max(maxFraction - 1, 0))}1`
+    return `${negative ? '-' : ''}<0.${fractionText}`
+  }
+  return `${negative ? '-' : ''}${commifyInteger(whole.toString())}${fractionText ? `.${fractionText}` : ''}`
+}
+
+function numericDisplayValue(display: string | null): number | null {
+  if (!display || display.startsWith('<')) return null
+  const n = Number(display.replace(/,/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+function formatNativeValue(raw: string | undefined, chainDef: { decimals: number; symbol: string } | undefined, source: string, priceUsd?: number) {
+  if (!raw) return null
+  const amount = source === 'scan' && chainDef
+    ? formatBaseUnits(raw, chainDef.decimals)
+    : raw
+  if (!amount) return null
+  const usd = priceUsd ? formatUsd((numericDisplayValue(amount) ?? 0) * priceUsd) : null
+  return { amount, usd }
+}
+
+function nativePriceByChain(balances: ChainBalance[]): Record<string, number> {
+  const prices: Record<string, number> = {}
+  for (const b of balances) {
+    const balance = Number(b.balance)
+    const tokenUsd = b.tokens?.reduce((sum, t) => sum + (t.balanceUsd || 0), 0) || 0
+    const nativeUsd = Number(b.nativeBalanceUsd ?? Math.max((b.balanceUsd || 0) - tokenUsd, 0))
+    if (Number.isFinite(balance) && balance > 0 && Number.isFinite(nativeUsd) && nativeUsd > 0) {
+      prices[b.chainId] = nativeUsd / balance
+    }
+  }
+  return prices
+}
+
 // ── Detail types for the TX detail dialog ───────────────────────────
 type TxDetail = {
   kind: 'activity'
@@ -177,13 +243,16 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
   )
 }
 
-function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => void }) {
+function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; onClose: () => void; nativePrices: Record<string, number> }) {
   if (detail.kind === 'activity') {
     const a = detail.activity
     const typeConf = TYPE_CONFIG[a.type] || TYPE_CONFIG.sign
     const statusConf = STATUS_CONFIG[a.status] || STATUS_CONFIG.signed
     const chainDef = CHAINS.find(c => a.chainId && c.id === a.chainId) || CHAINS.find(c => c.symbol === a.chain || c.id === a.chain)
     const chainSymbol = chainDef?.symbol || a.chain
+    const nativePrice = chainDef ? nativePrices[chainDef.id] : undefined
+    const amountValue = formatNativeValue(a.amount, chainDef, a.source, nativePrice)
+    const feeValue = formatNativeValue(a.fee, chainDef, a.source, nativePrice)
     const explorerUrl = a.txid && chainDef ? getExplorerTxUrl(chainDef.id, a.txid) : null
     const explorerAddrUrl = a.to && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.to) : null
     const required = getRequiredConfs(chainSymbol)
@@ -228,10 +297,10 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
             </Flex>
 
             {/* Amount */}
-            {a.amount && <TxDetailRow label="Amount" value={`${a.amount} ${a.asset || a.chain}`} />}
+            {amountValue && <TxDetailRow label="Amount" value={`${amountValue.amount} ${a.asset || chainSymbol}${amountValue.usd ? ` (${amountValue.usd})` : ''}`} />}
 
             {/* Fee */}
-            {a.fee && <TxDetailRow label="Fee" value={a.fee} />}
+            {feeValue && <TxDetailRow label="Fee" value={`${feeValue.amount} ${chainSymbol}${feeValue.usd ? ` (${feeValue.usd})` : ''}`} />}
 
             {/* Separator */}
             <Box h="1px" bg="rgba(255,255,255,0.06)" my="2" />
@@ -371,11 +440,12 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
   )
 }
 
-function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void }) {
+function ActivityRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
   const [copied, setCopied] = useState(false)
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
   const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
   const chainSymbol = chainDef?.symbol || activity.chain
+  const nativePrice = chainDef ? nativePrices[chainDef.id] : undefined
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -387,10 +457,12 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
 
   const isUnconfirmed = activity.confirmations !== undefined && activity.confirmations === 0
   const chainLabel = `${chainDef?.coin || activity.chain} (${chainSymbol})`
+  const nativeAmount = formatNativeValue(activity.amount, chainDef, activity.source, nativePrice)
+  const nativeFee = formatNativeValue(activity.fee, chainDef, activity.source, nativePrice)
   const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
     ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' \u2192 ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
-    : activity.amount || activity.fee
-      ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount && activity.fee ? '  ' : ''}${activity.fee ? `fee: ${activity.fee}` : ''}`
+    : nativeAmount || nativeFee
+      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? `fee: ${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` : ''}`
       : null
 
   return (
@@ -651,6 +723,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       .filter((c): c is NonNullable<typeof c> => c !== null)
       .sort((a, b) => b.balanceUsd - a.balanceUsd)
   }, [availableChains, chainMap])
+  const nativePrices = useMemo(() => nativePriceByChain(availableChains), [availableChains])
 
   const selectedDef = useMemo(() => CHAINS.find(c => c.id === selectedChain), [selectedChain])
 
@@ -776,7 +849,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                 {activityTimeline.map(item => item.kind === 'swap' ? (
                   <SwapRow key={item.id} swap={item.swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
                 ) : (
-                  <ActivityRow key={item.id} activity={item.activity} onSelect={a => {
+                  <ActivityRow key={item.id} activity={item.activity} nativePrices={nativePrices} onSelect={a => {
                     if (a.type === 'swap' && a.txid && onResumeSwap) {
                       if (fetchingSwapRef.current) return
                       fetchingSwapRef.current = true
@@ -812,7 +885,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
       {/* TX Detail Dialog */}
       {selectedDetail && (
-        <TxDetailDialog detail={selectedDetail} onClose={() => setSelectedDetail(null)} />
+        <TxDetailDialog detail={selectedDetail} nativePrices={nativePrices} onClose={() => setSelectedDetail(null)} />
       )}
     </>
   )
