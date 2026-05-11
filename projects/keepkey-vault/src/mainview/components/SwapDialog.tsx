@@ -1515,7 +1515,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     display="grid"
                     gridTemplateRows="1fr auto 1fr"
                     justifyItems="center"
-                    borderRight={{ base: "0", md: "1px solid" }}
                     borderBottom={{ base: "1px solid", md: "0" }}
                     borderColor="kk.border"
                     overflow="hidden"
