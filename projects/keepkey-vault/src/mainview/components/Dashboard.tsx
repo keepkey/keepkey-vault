@@ -238,11 +238,17 @@ function OrbitalView({
 		// the old fixed cap so its constants encoded an unstated "1.0 at 440".
 		// Tracking the smaller dim keeps icons sane on portrait windows.
 		const k = sizeRef / 440
-		// Orbit mode runs ~20% smaller per the redesign — icons that big felt
-		// shouty against the new card frame; grid mode keeps the full size
-		// since each tile gets a visible background that has to read at scale.
+		// Orbit mode varies icon size by USD share (the "constellation").
+		// Grid mode renders fixed-size chain cards on a tile ring around a
+		// hollow center, so size is uniform per the redesign — biggest
+		// chains just land in the best (top-left-first reading-order) slots,
+		// not bigger tiles.
 		const modeScale = mode === 'orbit' ? 0.8 : 1.0
+		const GRID_TILE = Math.round(170 * Math.min(1.1, k))
 		const items = orbitChains.map((c, i) => {
+			if (mode === 'grid') {
+				return { ...c, sat: GRID_TILE }
+			}
 			const share = c.usd / maxOrbitUsd
 			// Two-axis sizing — bigger USD share AND a higher slot rank both
 			// inflate the icon. Slot rank pushes corner chains (i<4) toward
@@ -266,7 +272,57 @@ function OrbitalView({
 		// extra 12px so the icon clears the toggle's drop shadow.
 		const TOGGLE_RESERVE_X = 170
 		const TOGGLE_RESERVE_Y = 66
+		/** Grid-mode slot positions — uniform-size tiles arranged on a ring,
+		 *  reading order (TL → TR → BR → BL etc.). Center is left open for
+		 *  the USD total / Reports / Refresh. */
+		const gridSlots = (): { x: number; y: number }[] => {
+			const tile = GRID_TILE
+			const pad = 14
+			const cellW = tile + pad
+			const cellH = tile + pad
+			const cols = Math.max(3, Math.floor((width - pad) / cellW))
+			const rows = Math.max(3, Math.floor((height - pad) / cellH))
+			const gridW = cols * cellW
+			const gridH = rows * cellH
+			const offX = (width - gridW) / 2 + cellW / 2
+			const offY = (height - gridH) / 2 + cellH / 2
+			// Center hole — any cell whose center falls inside the inscribed
+			// ellipse (factor 0.34 of the canvas) is skipped, keeping the
+			// price + Reports/Refresh area uncluttered.
+			const holeRX = width * 0.34
+			const holeRY = height * 0.34
+			const cells: { x: number; y: number; priority: number }[] = []
+			for (let r = 0; r < rows; r++) {
+				for (let c = 0; c < cols; c++) {
+					const cx_ = offX + c * cellW
+					const cy_ = offY + r * cellH
+					// Skip cells inside the hollow center.
+					const dxC = (cx_ - cx) / holeRX
+					const dyC = (cy_ - cy) / holeRY
+					if (dxC * dxC + dyC * dyC < 1) continue
+					// Reading-order priority: top row before bottom, left
+					// before right. TL is highest priority (lowest number).
+					const priority = r * 1000 + c
+					cells.push({ x: cx_, y: cy_, priority })
+				}
+			}
+			// Bias TL away from the Grid/Orbit toggle if it lands inside the
+			// reserved area. The first eligible cell south of the toggle wins.
+			cells.sort((a, b) => a.priority - b.priority)
+			while (cells.length > 0 && cells[0].x < TOGGLE_RESERVE_X && cells[0].y < TOGGLE_RESERVE_Y) {
+				cells.shift()
+			}
+			return cells
+		}
+		const gridSlotList = mode === 'grid' ? gridSlots() : []
+
 		const slot = (rank: number, sat: number): { x: number; y: number } => {
+			if (mode === 'grid') {
+				// Grid mode: use the precomputed ring-tile list. Fall back to
+				// canvas center if rank exceeds available cells (unlikely for
+				// the 10-chain cap, but defensive).
+				return gridSlotList[rank] ?? { x: cx, y: cy }
+			}
 			const half = sat / 2 + 6
 			const innerOffX = width * 0.22
 			const innerOffY = height * 0.22
@@ -371,6 +427,9 @@ function OrbitalView({
 		px: number; py: number; x: number; y: number; sat: number; pct: number
 	}
 	const tokenLayout = useMemo<TokenItem[]>(() => {
+		// Tokens only render in orbit mode. Grid mode keeps the card view
+		// uncluttered — each card already shows its token count badge.
+		if (mode !== 'orbit') return []
 		// Gather all tokens across all chains.
 		const tokenScale = Math.min(1, sizeRef / 440)
 		const allItems: Array<{
@@ -475,6 +534,7 @@ function OrbitalView({
 		return allItems
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
+		mode,
 		layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}:${(c.bal?.tokens?.length ?? 0)}`).join('|'),
 		width, height, cx, cy, sizeRef,
 	])
@@ -949,12 +1009,136 @@ function OrbitalView({
 			{layout.map(({ chain, usd, bal, x: slotX, y: slotY, sat }) => {
 				const isHover = hover === chain.id
 				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
-				// Grid mode wraps the icon in a square tile bg so the layout
-				// reads as a wall mosaic. Tile is slightly larger than the icon
-				// so the round logo nests inside a rounded square — Apple
-				// app-icon-on-springboard feel.
-				const tilePad = mode === 'grid' ? Math.round(sat * 0.15) : 0
-				const cellSize = sat + tilePad * 2
+
+				// ─────────────────────────────────────────────────────────────
+				// GRID MODE — rectangular chain card (the old SimpleGrid card
+				// adapted for absolute positioning on the ring layout). All
+				// tiles same size; no physics, no tokens; only the cards.
+				// ─────────────────────────────────────────────────────────────
+				if (mode === 'grid') {
+					const cellSize = sat // uniform GRID_TILE from layout pass
+					const balNum = parseFloat(bal?.balance || '0')
+					const hasBalance = balNum > 0 || usd > 0
+					const tokenCount = bal?.tokens?.length ?? 0
+					const initialTx = Math.round(slotX - cellSize / 2)
+					const initialTy = Math.round(slotY - cellSize / 2)
+					return (
+						<Box
+							key={chain.id}
+							as="button"
+							onMouseEnter={() => setHover(chain.id)}
+							onMouseLeave={() => setHover(null)}
+							onClick={() => onSelect(chain)}
+							position="absolute"
+							left="0"
+							top="0"
+							style={{
+								transform: `translate3d(${initialTx}px, ${initialTy}px, 0)`,
+							}}
+							w={`${cellSize}px`}
+							h={`${cellSize}px`}
+							borderRadius="14px"
+							bg="kk.cardBg"
+							border="1px solid"
+							borderColor={hasBalance ? `${chain.color}55` : "kk.border"}
+							p="3"
+							display="flex"
+							flexDirection="column"
+							gap="2"
+							cursor="pointer"
+							overflow="hidden"
+							transition="all 0.18s cubic-bezier(0.2,0.8,0.2,1)"
+							_hover={{
+								borderColor: chain.color,
+								bg: `${chain.color}10`,
+								transform: `translate3d(${initialTx}px, ${initialTy - 2}px, 0)`,
+								boxShadow: `0 8px 22px -10px ${chain.color}, 0 0 0 1px ${chain.color}44`,
+							}}
+							aria-label={chain.coin}
+						>
+							{/* Color glow in the top-right corner — same visual
+							    cue the old SimpleGrid card had. */}
+							{hasBalance && (
+								<Box
+									position="absolute"
+									top="-24px" right="-24px"
+									w="72px" h="72px"
+									borderRadius="full"
+									bg={chain.color}
+									opacity={0.08}
+									pointerEvents="none"
+								/>
+							)}
+							{/* Header row: icon + name + symbol */}
+							<Flex align="center" gap="2.5" position="relative">
+								<Image
+									src={getAssetIcon(chain.caip)}
+									alt={chain.symbol}
+									w="32px" h="32px"
+									borderRadius="full"
+									flexShrink={0}
+									bg={chain.color}
+									boxShadow={`0 0 0 1px var(--line), 0 4px 12px -4px ${chain.color}`}
+								/>
+								<Box overflow="hidden" flex="1" minW="0">
+									<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.15" truncate>
+										{chain.coin}
+									</Text>
+									<Text fontSize="10px" color="var(--text-3)" lineHeight="1.15" letterSpacing="0.04em">
+										{chain.symbol}
+									</Text>
+								</Box>
+								{tokenCount > 0 && (
+									<Box
+										fontSize="9px"
+										fontFamily="var(--font-mono, monospace)"
+										fontWeight="700"
+										color="var(--gold)"
+										bg="rgba(233,196,106,0.12)"
+										border="1px solid rgba(233,196,106,0.35)"
+										px="1.5"
+										py="0.5"
+										borderRadius="full"
+										flexShrink={0}
+									>
+										+{tokenCount}
+									</Box>
+								)}
+							</Flex>
+
+							{/* Bottom — native balance + USD */}
+							<Box position="relative" mt="auto">
+								<Text
+									fontSize="11px"
+									fontFamily="var(--font-mono, monospace)"
+									color="var(--text-2)"
+									lineHeight="1.2"
+									truncate
+								>
+									{hasBalance
+										? `${balNum.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${chain.symbol}`
+										: <Box as="span" color="var(--text-3)">—</Box>}
+								</Text>
+								<Box mt="1">
+									<AnimatedUsd
+										value={usd}
+										fontSize="15px"
+										fontWeight="600"
+										fontFamily="mono"
+										style={{ letterSpacing: '-0.01em' }}
+										decimals={usd >= 100 ? 0 : 2}
+									/>
+								</Box>
+							</Box>
+						</Box>
+					)
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// ORBIT MODE — round chain icon, physics-driven, with the
+				// token bubble system around it.
+				// ─────────────────────────────────────────────────────────────
+				const cellSize = sat
 				// In orbit mode the RAF loop writes element.style.transform
 				// directly per frame; the initial slot position seeds the
 				// transform so before physics initializes the body is in the
@@ -965,8 +1149,7 @@ function OrbitalView({
 					<Box
 						key={chain.id}
 						ref={(el: HTMLDivElement | null) => {
-							if (mode === 'orbit') chainElRefs.current.set(chain.id, el)
-							else chainElRefs.current.delete(chain.id)
+							chainElRefs.current.set(chain.id, el)
 						}}
 						as="button"
 						onMouseEnter={() => setHover(chain.id)}
@@ -984,24 +1167,24 @@ function OrbitalView({
 						top="0"
 						style={{
 							transform: `translate3d(${initialTx}px, ${initialTy}px, 0)`,
-							willChange: physicsEnabled ? 'transform' : undefined,
+							willChange: 'transform',
 							// Hidden until the RAF loop flips opacity after the
 							// body lands in the world. The staggered spawn means
 							// each chain reveals as it rains in.
-							opacity: physicsEnabled ? 0 : 1,
-							transition: physicsEnabled ? 'opacity 220ms ease-out' : undefined,
+							opacity: 0,
+							transition: 'opacity 220ms ease-out',
 						}}
 						w={`${cellSize}px`}
 						h={`${cellSize}px`}
-						borderRadius={mode === 'grid' ? '20%' : 'full'}
-						bg={mode === 'grid' ? `linear-gradient(155deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))` : 'transparent'}
-						border={mode === 'grid' ? '1px solid var(--line)' : '0'}
-						p={`${tilePad}px`}
+						borderRadius="full"
+						bg="transparent"
+						border="0"
+						p="0"
 						display="grid"
 						placeItems="center"
 						// Limit transition to filter/box-shadow — animating
 						// transform would fight the per-frame physics writes.
-						transition={physicsEnabled ? "filter 0.3s, box-shadow 0.3s" : "all 0.3s cubic-bezier(0.2,0.8,0.2,1)"}
+						transition="filter 0.3s, box-shadow 0.3s"
 						filter={isHover
 							? `drop-shadow(0 0 24px ${chain.color})`
 							: 'drop-shadow(0 4px 14px rgba(0,0,0,0.55))'}
