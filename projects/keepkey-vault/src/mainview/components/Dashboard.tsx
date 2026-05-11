@@ -439,6 +439,192 @@ function OrbitalView({
 		width, height, cx, cy, sizeRef,
 	])
 
+	/* Force-directed physics — orbit mode only.
+	 *
+	 *  Each chain icon is a body with position, velocity, and mass derived
+	 *  from its size. Three forces act each frame:
+	 *    - Soft spring toward the deterministic layout slot (k = 0.018)
+	 *    - Coulomb-like repulsion between every pair of bodies
+	 *    - Hard repulsion from the center text region + canvas edges
+	 *
+	 *  Velocities damp by 0.92 per frame, so the cluster settles after a
+	 *  burst of motion. requestAnimationFrame drives the loop; bodies are
+	 *  stored in a ref to avoid React re-rendering on every velocity tweak,
+	 *  with a single setState per frame to commit the positions for paint.
+	 *
+	 *  Mouse-drag pulls a body off its spring temporarily so the user can
+	 *  fling chains around and watch them resettle.
+	 */
+	const physicsState = useRef<{
+		bodies: Array<{ id: string; x: number; y: number; vx: number; vy: number; tx: number; ty: number; r: number }>
+		dragId: string | null
+		dragOffsetX: number
+		dragOffsetY: number
+		raf: number | null
+	}>({ bodies: [], dragId: null, dragOffsetX: 0, dragOffsetY: 0, raf: null })
+	const [physicsTick, setPhysicsTick] = useState(0) // bumped each frame to trigger paint
+	const physicsEnabled = mode === 'orbit'
+
+	// Re-seed bodies whenever the layout slots change (chain set or container
+	// resize). New bodies inherit their slot position; existing bodies keep
+	// their current position so the sim doesn't snap on a re-seed.
+	useEffect(() => {
+		if (!physicsEnabled) {
+			physicsState.current.bodies = []
+			return
+		}
+		const prev = new Map(physicsState.current.bodies.map(b => [b.id, b]))
+		physicsState.current.bodies = layout.map(c => {
+			const old = prev.get(c.chain.id)
+			return {
+				id: c.chain.id,
+				x: old?.x ?? c.x,
+				y: old?.y ?? c.y,
+				vx: old?.vx ?? 0,
+				vy: old?.vy ?? 0,
+				tx: c.x,
+				ty: c.y,
+				r: c.sat / 2,
+			}
+		})
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [physicsEnabled, layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}`).join('|')])
+
+	// Drive the simulation loop while orbit mode is active.
+	useEffect(() => {
+		if (!physicsEnabled) return
+		let mounted = true
+		const SPRING = 0.018
+		const REPEL = 1400
+		const DAMPING = 0.92
+		const CENTER_REPEL = 800
+		const textHalfW = Math.max(96, width * 0.18)
+		const textHalfH = Math.max(60, height * 0.14)
+
+		const step = () => {
+			if (!mounted) return
+			const s = physicsState.current
+			const bodies = s.bodies
+			const N = bodies.length
+			// Pause the sim while a chain is expanded — token bubbles tree
+			// from the parent's static slot, and we don't want it drifting
+			// out from under the tree while the user is reading.
+			if (expandedChainId) {
+				// Glide each body back to its slot so when the user closes
+				// the expansion the cluster is already settled.
+				for (const b of bodies) {
+					b.x += (b.tx - b.x) * 0.18
+					b.y += (b.ty - b.y) * 0.18
+					b.vx = 0; b.vy = 0
+				}
+				setPhysicsTick(t => (t + 1) % 1_000_000)
+				s.raf = requestAnimationFrame(step)
+				return
+			}
+			for (let i = 0; i < N; i++) {
+				const b = bodies[i]
+				if (b.id === s.dragId) continue
+				let fx = 0, fy = 0
+				// Spring toward target slot.
+				fx += (b.tx - b.x) * SPRING
+				fy += (b.ty - b.y) * SPRING
+				// Repulsion from other bodies.
+				for (let j = 0; j < N; j++) {
+					if (i === j) continue
+					const o = bodies[j]
+					const dx = b.x - o.x
+					const dy = b.y - o.y
+					const d2 = dx * dx + dy * dy + 0.5
+					const d = Math.sqrt(d2)
+					const minD = b.r + o.r + 8
+					// Inverse-square push, capped near surface contact so it
+					// doesn't blow up when two bodies overlap on a re-seed.
+					const force = REPEL / Math.max(d2, minD * minD * 0.25)
+					fx += (dx / d) * force
+					fy += (dy / d) * force
+				}
+				// Center text region — repel out along the smaller-overlap axis.
+				const dxC = b.x - width / 2
+				const dyC = b.y - height / 2
+				const clearX = textHalfW + b.r + 8
+				const clearY = textHalfH + b.r + 8
+				if (Math.abs(dxC) < clearX && Math.abs(dyC) < clearY) {
+					const overlapX = clearX - Math.abs(dxC)
+					const overlapY = clearY - Math.abs(dyC)
+					if (overlapX < overlapY) fx += Math.sign(dxC || 1) * CENTER_REPEL * (overlapX / clearX)
+					else                     fy += Math.sign(dyC || 1) * CENTER_REPEL * (overlapY / clearY)
+				}
+				// Integrate.
+				b.vx = (b.vx + fx) * DAMPING
+				b.vy = (b.vy + fy) * DAMPING
+				b.x += b.vx
+				b.y += b.vy
+				// Clamp inside container.
+				if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx) * 0.4 }
+				if (b.x > width - b.r) { b.x = width - b.r; b.vx = -Math.abs(b.vx) * 0.4 }
+				if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy) * 0.4 }
+				if (b.y > height - b.r) { b.y = height - b.r; b.vy = -Math.abs(b.vy) * 0.4 }
+			}
+			setPhysicsTick(t => (t + 1) % 1_000_000)
+			s.raf = requestAnimationFrame(step)
+		}
+		physicsState.current.raf = requestAnimationFrame(step)
+		return () => {
+			mounted = false
+			if (physicsState.current.raf != null) cancelAnimationFrame(physicsState.current.raf)
+			physicsState.current.raf = null
+		}
+	}, [physicsEnabled, width, height, expandedChainId])
+
+	// Pull current body positions into a Map for fast lookup at render time.
+	// Falls back to the static layout positions when physics is disabled
+	// (grid mode) or before the first frame runs.
+	const positionFor = (chainId: string, fallbackX: number, fallbackY: number) => {
+		if (!physicsEnabled) return { x: fallbackX, y: fallbackY }
+		const b = physicsState.current.bodies.find(b => b.id === chainId)
+		return b ? { x: b.x, y: b.y } : { x: fallbackX, y: fallbackY }
+	}
+
+	// Mouse-drag handlers. We attach pointermove/pointerup to window so a
+	// drag continues even if the cursor leaves the icon body. A click that
+	// followed real motion is suppressed via the suppressClickRef one-shot.
+	const suppressClickRef = useRef(false)
+	const onBodyPointerDown = useCallback((chainId: string, ev: React.PointerEvent) => {
+		if (!physicsEnabled) return
+		const b = physicsState.current.bodies.find(b => b.id === chainId)
+		if (!b) return
+		physicsState.current.dragId = chainId
+		physicsState.current.dragOffsetX = b.x - ev.clientX
+		physicsState.current.dragOffsetY = b.y - ev.clientY
+		const startX = ev.clientX, startY = ev.clientY
+		let moved = false
+		const onMove = (mv: PointerEvent) => {
+			const s = physicsState.current
+			const body = s.bodies.find(x => x.id === s.dragId)
+			if (!body) return
+			if (!moved && Math.hypot(mv.clientX - startX, mv.clientY - startY) > 4) moved = true
+			body.x = mv.clientX + s.dragOffsetX
+			body.y = mv.clientY + s.dragOffsetY
+			body.vx = 0; body.vy = 0
+		}
+		const onUp = (up: PointerEvent) => {
+			physicsState.current.dragId = null
+			if (moved) suppressClickRef.current = true
+			// Give the body a little parting velocity so it doesn't slam
+			// to a halt — looks more alive.
+			const s = physicsState.current
+			const body = s.bodies.find(b => b.id === chainId)
+			if (body && moved) {
+				body.vx = (up.clientX - startX) * 0.0
+				body.vy = (up.clientY - startY) * 0.0
+			}
+			window.removeEventListener('pointermove', onMove)
+			window.removeEventListener('pointerup', onUp)
+		}
+		window.addEventListener('pointermove', onMove)
+		window.addEventListener('pointerup', onUp)
+	}, [physicsEnabled])
+
 	// Preload all visible chain icons before we paint the cluster.
 	const iconUrls = useMemo(
 		() => layout.map((c) => getAssetIcon(c.chain.caip)),
@@ -625,9 +811,15 @@ function OrbitalView({
 					}
 				}}
 			>
-			{layout.map(({ chain, usd, bal, x, y, sat }) => {
+			{layout.map(({ chain, usd, bal, x: slotX, y: slotY, sat }) => {
 				const isHover = hover === chain.id
 				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				// Read live physics position when orbit mode is active; fall
+				// back to the deterministic slot otherwise. The physicsTick
+				// dep on this render keeps it cheap-ish (one positionFor
+				// call per body per frame).
+				const _ = physicsTick // touch so React tracks the dep
+				const { x, y } = positionFor(chain.id, slotX, slotY)
 				// Grid mode wraps the icon in a square tile bg so the layout
 				// reads as a wall mosaic. Tile is slightly larger than the icon
 				// so the round logo nests inside a rounded square — Apple
@@ -640,7 +832,14 @@ function OrbitalView({
 						as="button"
 						onMouseEnter={() => setHover(chain.id)}
 						onMouseLeave={() => setHover(null)}
-						onClick={() => onSelect(chain)}
+						onClick={() => {
+							if (suppressClickRef.current) {
+								suppressClickRef.current = false
+								return
+							}
+							onSelect(chain)
+						}}
+						onPointerDown={(e: React.PointerEvent) => onBodyPointerDown(chain.id, e)}
 						position="absolute"
 						left={`${x - cellSize / 2}px`}
 						top={`${y - cellSize / 2}px`}
