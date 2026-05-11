@@ -1252,7 +1252,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* Swaps toggle */}
+							{/* Swaps toggle — graduated to default-on in v1.3.0 */}
+							{/*
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
 									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
@@ -1276,6 +1277,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingSwaps}
 								/>
 							</Flex>
+							*/}
 
 							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.15.0 */}
 							{(() => {

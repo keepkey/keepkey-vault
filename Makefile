@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulator clean-emulator test-emu-python
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -209,6 +209,36 @@ publish-electrobun-x64-core: build-electrobun-x64-core
 	echo "Published: https://github.com/$(ELECTROBUN_X64_REPO)/releases/tag/$(ELECTROBUN_X64_TAG)"; \
 	echo ""; \
 	echo "NEXT: Update .github/workflows/build.yml X64_CORE_TAG to $(ELECTROBUN_X64_TAG)"
+
+# --- Electrobun Linux x64 Core (glibc 2.35 floor) ---
+# Builds Electrobun's libNativeWrapper.so + friends on Ubuntu 22.04 so the
+# resulting Linux Vault bundle works on Debian 12, Ubuntu 22.04, RHEL 9, etc.
+# Upstream's prebuilt core ships against glibc 2.38, which excludes those.
+#
+# Local invocation only works on an actual Ubuntu 22.04 host (or via
+# `make publish-electrobun-linux-x64-core` which runs the GH workflow).
+
+ELECTROBUN_LINUX_REPO ?= keepkey/keepkey-vault
+ELECTROBUN_LINUX_TAG ?= electrobun-linux-x64-core-v1
+# Pin to the upstream electrobun ref that matches the npm runtime version.
+ELECTROBUN_LINUX_REF ?= v1.13.1
+
+build-electrobun-linux-x64-core:
+	@echo "Building Electrobun Linux x64 core (must run on ubuntu-22.04)..."
+	ELECTROBUN_REF=$(ELECTROBUN_LINUX_REF) ./scripts/build-electrobun-linux-x64-core.sh
+
+# Triggers the GitHub workflow that builds + publishes on ubuntu-22.04.
+# Direct local publish isn't supported because the .so must be built on Linux.
+publish-electrobun-linux-x64-core:
+	@echo "Dispatching publish-electrobun-linux-x64-core.yml on $(ELECTROBUN_LINUX_REPO)..."
+	gh workflow run publish-electrobun-linux-x64-core.yml \
+		--repo $(ELECTROBUN_LINUX_REPO) \
+		--field electrobun_ref=$(ELECTROBUN_LINUX_REF) \
+		--field release_tag=$(ELECTROBUN_LINUX_TAG)
+	@echo "Watch progress: https://github.com/$(ELECTROBUN_LINUX_REPO)/actions/workflows/publish-electrobun-linux-x64-core.yml"
+	@echo ""
+	@echo "Once published, the main build workflow will pick it up automatically"
+	@echo "(see ELECTROBUN_LINUX_CORE_TAG in .github/workflows/build.yml)."
 
 # --- Vault ---
 
