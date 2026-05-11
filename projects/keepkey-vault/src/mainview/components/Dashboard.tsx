@@ -349,102 +349,133 @@ function OrbitalView({
 	 * existing body (chains, center text region, other tokens) and clamp
 	 * inside the canvas. Net effect: bubbles "tree" out from their chain icon
 	 * without overlapping anything else on the canvas. */
-	const tokenLayout = useMemo(() => {
-		if (!expandedChainId) return [] as Array<{
-			tok: TokenBalance; x: number; y: number; sat: number; pct: number
-		}>
-		const parent = layout.find(c => c.chain.id === expandedChainId)
-		if (!parent) return []
-		const tokens = parent.bal?.tokens ?? []
-		if (tokens.length === 0) return []
-
-		// Sort by USD desc — biggest tokens lay out first so they get the best
-		// slots; tiny dust tokens fill in afterward.
-		const sorted = [...tokens].sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0))
-		const tokenTotal = sorted.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 1
-		const maxTok = Math.max(...sorted.map(t => t.balanceUsd || 0)) || 1
-
-		// Size: 28→64 across USD share. Tracks sizeRef too so on tiny
-		// containers the bubbles don't dominate.
+	/* Token bubble layout — global pass over EVERY chain with tokens.
+	 *
+	 *  Tokens are always rendered (no per-chain expansion gate). Each
+	 *  bubble seeds on a small ring around its parent chain icon, sized
+	 *  by USD share within the parent. Then a global relaxation pass
+	 *  pushes every token away from:
+	 *    - every chain icon (so tokens never sit under a chain)
+	 *    - every other token (across all chains — the "no overlap from
+	 *      other tokens" constraint)
+	 *    - the center USD totals rectangle
+	 *    - the canvas edges
+	 *
+	 *  Because tokens from neighbouring chains share airspace, the per-
+	 *  chain ring seed often overlaps badly — relaxation does the actual
+	 *  arrangement work. 80 iterations is enough for ~30 bubbles to
+	 *  settle stably.
+	 */
+	type TokenItem = {
+		tok: TokenBalance; parentId: string; parentColor: string;
+		px: number; py: number; x: number; y: number; sat: number; pct: number
+	}
+	const tokenLayout = useMemo<TokenItem[]>(() => {
+		// Gather all tokens across all chains.
 		const tokenScale = Math.min(1, sizeRef / 440)
-		const items = sorted.map(tok => {
-			const share = (tok.balanceUsd || 0) / maxTok
-			const sat = Math.max(28, Math.round((28 + share * 36) * tokenScale))
-			return { tok, sat, pct: ((tok.balanceUsd || 0) / tokenTotal) * 100 }
-		})
-
-		// Seed positions on a ring around the parent chain icon.
-		const N = items.length
-		const seedR = parent.sat / 2 + 28
+		const allItems: Array<{
+			tok: TokenBalance; parentId: string; parentColor: string;
+			px: number; py: number; x: number; y: number; sat: number; pct: number
+		}> = []
 		const GOLDEN = Math.PI * (3 - Math.sqrt(5))
-		const pos = items.map((_, i) => {
-			const a = i * GOLDEN
-			return {
-				x: parent.x + Math.cos(a) * seedR,
-				y: parent.y + Math.sin(a) * seedR,
-			}
-		})
+		for (const parent of layout) {
+			const tokens = parent.bal?.tokens ?? []
+			if (tokens.length === 0) continue
+			const sorted = [...tokens]
+				.filter(t => (t.balanceUsd || 0) > 0)
+				.sort((a, b) => (b.balanceUsd || 0) - (a.balanceUsd || 0))
+			if (sorted.length === 0) continue
+			const total = sorted.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 1
+			const maxTok = Math.max(...sorted.map(t => t.balanceUsd || 0)) || 1
+			// Seed each token on a ring around its parent chain icon.
+			const seedR = parent.sat / 2 + 30
+			sorted.forEach((tok, i) => {
+				const share = (tok.balanceUsd || 0) / maxTok
+				const sat = Math.max(28, Math.round((28 + share * 36) * tokenScale))
+				const a = i * GOLDEN
+				allItems.push({
+					tok, parentId: parent.chain.id, parentColor: parent.chain.color,
+					px: parent.x, py: parent.y,                 // anchor for connector line
+					x: parent.x + Math.cos(a) * seedR,
+					y: parent.y + Math.sin(a) * seedR,
+					sat, pct: ((tok.balanceUsd || 0) / total) * 100,
+				})
+			})
+		}
+		if (allItems.length === 0) return []
 
-		// Build the obstacle list — chains + center text region.
+		// Build the obstacle list once.
 		const textHalfW = Math.max(96, width * 0.18)
 		const textHalfH = Math.max(60, height * 0.14)
-		const gap = 6
-		const ITER = 50
+		const gap = 5
+		const ITER = 80
+		const N = allItems.length
 		for (let k = 0; k < ITER; k++) {
 			for (let i = 0; i < N; i++) {
-				// Repel from every chain icon (always non-overlap).
+				// Soft pull toward the parent's ring (keeps tokens visually
+				// "near" their chain even after relaxation shuffles them).
+				const px = allItems[i].px, py = allItems[i].py
+				const dxP = allItems[i].x - px
+				const dyP = allItems[i].y - py
+				const dP = Math.sqrt(dxP * dxP + dyP * dyP)
+				// Outer cap so tokens don't drift too far from parent.
+				const cap = 110 + allItems[i].sat
+				if (dP > cap) {
+					allItems[i].x = px + (dxP / dP) * cap
+					allItems[i].y = py + (dyP / dP) * cap
+				}
+				// Repel from every chain icon.
 				for (const c of layout) {
-					let dx = pos[i].x - c.x
-					let dy = pos[i].y - c.y
+					let dx = allItems[i].x - c.x
+					let dy = allItems[i].y - c.y
 					let d = Math.sqrt(dx * dx + dy * dy)
 					if (d < 0.001) { d = 0.001; dx = 0.001; dy = 0 }
-					const minD = items[i].sat / 2 + c.sat / 2 + gap
+					const minD = allItems[i].sat / 2 + c.sat / 2 + gap
 					if (d < minD) {
 						const push = (minD - d)
-						pos[i].x += (dx / d) * push
-						pos[i].y += (dy / d) * push
+						allItems[i].x += (dx / d) * push
+						allItems[i].y += (dy / d) * push
 					}
 				}
-				// Repel from sibling tokens.
+				// Repel from every other token (cross-chain too).
 				for (let j = 0; j < N; j++) {
 					if (i === j) continue
-					let dx = pos[i].x - pos[j].x
-					let dy = pos[i].y - pos[j].y
+					let dx = allItems[i].x - allItems[j].x
+					let dy = allItems[i].y - allItems[j].y
 					let d = Math.sqrt(dx * dx + dy * dy)
 					if (d < 0.001) { d = 0.001; dx = 0.001; dy = 0 }
-					const minD = items[i].sat / 2 + items[j].sat / 2 + gap
+					const minD = allItems[i].sat / 2 + allItems[j].sat / 2 + gap
 					if (d < minD) {
 						const push = (minD - d) / 2
 						const ux = dx / d, uy = dy / d
-						pos[i].x += ux * push
-						pos[i].y += uy * push
-						pos[j].x -= ux * push
-						pos[j].y -= uy * push
+						allItems[i].x += ux * push
+						allItems[i].y += uy * push
+						allItems[j].x -= ux * push
+						allItems[j].y -= uy * push
 					}
 				}
 				// Clear center totals rectangle.
-				const dxC = pos[i].x - cx
-				const dyC = pos[i].y - cy
-				const clearX = textHalfW + items[i].sat / 2 + gap
-				const clearY = textHalfH + items[i].sat / 2 + gap
+				const dxC = allItems[i].x - cx
+				const dyC = allItems[i].y - cy
+				const clearX = textHalfW + allItems[i].sat / 2 + gap
+				const clearY = textHalfH + allItems[i].sat / 2 + gap
 				if (Math.abs(dxC) < clearX && Math.abs(dyC) < clearY) {
 					const overlapX = clearX - Math.abs(dxC)
 					const overlapY = clearY - Math.abs(dyC)
-					if (overlapX < overlapY) pos[i].x += Math.sign(dxC || 1) * overlapX
-					else                     pos[i].y += Math.sign(dyC || 1) * overlapY
+					if (overlapX < overlapY) allItems[i].x += Math.sign(dxC || 1) * overlapX
+					else                     allItems[i].y += Math.sign(dyC || 1) * overlapY
 				}
 				// Clamp to container.
-				const halfX = items[i].sat / 2 + 2
-				const halfY = items[i].sat / 2 + 16
-				pos[i].x = Math.max(halfX, Math.min(width - halfX, pos[i].x))
-				pos[i].y = Math.max(halfY, Math.min(height - halfY, pos[i].y))
+				const halfX = allItems[i].sat / 2 + 2
+				const halfY = allItems[i].sat / 2 + 18
+				allItems[i].x = Math.max(halfX, Math.min(width - halfX, allItems[i].x))
+				allItems[i].y = Math.max(halfY, Math.min(height - halfY, allItems[i].y))
 			}
 		}
-		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
+		return allItems
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
-		expandedChainId,
-		layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}`).join('|'),
+		layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}:${(c.bal?.tokens?.length ?? 0)}`).join('|'),
 		width, height, cx, cy, sizeRef,
 	])
 
@@ -992,55 +1023,34 @@ function OrbitalView({
 							}}
 						/>
 						{(bal?.tokens?.length ?? 0) > 0 && (() => {
-							const isExpanded = expandedChainId === chain.id
-							// Badge size grows with chain icon size — keeps the
-							// "this is clearly a button" feel on big and small
-							// icons alike. Floor 26 / ceiling 40.
-							const badgeSize = Math.max(26, Math.min(40, Math.round(sat * 0.32)))
+							// Tokens are always rendered as their own bubbles
+							// now, so this is a static count chip — not a toggle.
+							// Keeps the "this chain has N more assets" cue
+							// without an interaction users would expect to do
+							// something but doesn't.
+							const badgeSize = Math.max(24, Math.min(36, Math.round(sat * 0.28)))
 							return (
 								<Box
-									as="div"
-									role="button"
-									aria-label={`Expand ${bal!.tokens!.length} tokens on ${chain.coin}`}
-									aria-pressed={isExpanded}
-									tabIndex={0}
 									position="absolute"
-									bottom={`-${Math.round(badgeSize * 0.2)}px`}
-									right={`-${Math.round(badgeSize * 0.2)}px`}
+									bottom={`-${Math.round(badgeSize * 0.15)}px`}
+									right={`-${Math.round(badgeSize * 0.15)}px`}
 									w={`${badgeSize}px`}
 									h={`${badgeSize}px`}
 									borderRadius="full"
-									bg={isExpanded ? 'var(--gold)' : 'var(--ink-3)'}
-									color={isExpanded ? '#1a1408' : 'var(--text-1)'}
+									bg="var(--ink-3)"
+									color="var(--text-2)"
 									border="2px solid"
-									borderColor={isExpanded ? 'var(--gold-hi, #e0bb7e)' : 'rgba(233,196,106,0.55)'}
-									fontSize={`${Math.round(badgeSize * 0.38)}px`}
+									borderColor="rgba(233,196,106,0.45)"
+									fontSize={`${Math.round(badgeSize * 0.36)}px`}
 									fontFamily="var(--font-display, inherit)"
 									fontWeight="700"
 									display="grid"
 									placeItems="center"
-									cursor="pointer"
-									transition="transform 0.15s, background 0.15s, box-shadow 0.15s"
-									boxShadow={isExpanded
-										? '0 0 0 4px rgba(233,196,106,0.18), 0 6px 18px -4px rgba(233,196,106,0.55)'
-										: '0 0 0 0 rgba(233,196,106,0), 0 4px 12px -4px rgba(0,0,0,0.6)'}
-									_hover={{
-										transform: 'scale(1.1)',
-										boxShadow: '0 0 0 4px rgba(233,196,106,0.16), 0 4px 14px -4px rgba(233,196,106,0.5)',
-									}}
-									onClick={(e: React.MouseEvent) => {
-										e.stopPropagation()
-										setExpandedChainId(prev => prev === chain.id ? null : chain.id)
-									}}
-									onKeyDown={(e: React.KeyboardEvent) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											e.preventDefault()
-											e.stopPropagation()
-											setExpandedChainId(prev => prev === chain.id ? null : chain.id)
-										}
-									}}
+									pointerEvents="none"
+									boxShadow="0 2px 6px -2px rgba(0,0,0,0.5)"
+									aria-label={`${bal!.tokens!.length} more tokens on ${chain.coin}`}
 								>
-									{isExpanded ? '×' : `+${bal!.tokens!.length}`}
+									{`+${bal!.tokens!.length}`}
 								</Box>
 							)
 						})()}
@@ -1106,32 +1116,35 @@ function OrbitalView({
 			    chain shadows but below the +N badge (which has higher z-index
 			    when expanded). Staggered scale-in animation per index gives
 			    the "tree expanding" cue. */}
-			{tokenLayout.length > 0 && expandedChainId && (() => {
-				const parent = layout.find(c => c.chain.id === expandedChainId)
-				if (!parent) return null
+			{tokenLayout.length > 0 && (() => {
 				return (
 					<>
-						{/* SVG connector lines from chain icon → each bubble. Drawn
-						    in a single SVG layered behind the bubble buttons. */}
+						{/* Connector lines from each token to its parent chain.
+						    One <line> per token, tinted by the parent chain's
+						    color — the eye can trace which tokens belong where
+						    when the cluster is busy. */}
 						<Box position="absolute" inset="0" pointerEvents="none">
 							<svg width={width} height={height} style={{ position: 'absolute', inset: 0 }}>
 								{tokenLayout.map((t, i) => (
 									<line
 										key={`line-${t.tok.caip}-${i}`}
-										x1={parent.x} y1={parent.y}
+										x1={t.px} y1={t.py}
 										x2={t.x} y2={t.y}
-										stroke={parent.chain.color}
-										strokeOpacity="0.28"
+										stroke={t.parentColor}
+										strokeOpacity="0.22"
 										strokeWidth="1"
 										strokeDasharray="2 4"
 										style={{
-											animation: `kkBubbleLine 0.5s ${i * 25}ms ease-out both`,
+											animation: `kkBubbleLine 0.6s ${300 + i * 18}ms ease-out both`,
 										}}
 									/>
 								))}
 							</svg>
 						</Box>
 						{tokenLayout.map((t, i) => {
+							// onSelect needs the full ChainDef; look it up by parentId.
+							const parentChain = chains.find(c => c.id === t.parentId)
+							const parent = { chain: { color: t.parentColor } }
 							const symbol = t.tok.symbol || '?'
 							const labelUsd = t.tok.balanceUsd > 0
 								? `$${t.tok.balanceUsd < 1
@@ -1167,12 +1180,15 @@ function OrbitalView({
 										filter: `drop-shadow(0 0 14px ${parent.chain.color})`,
 									}}
 									style={{
-										animation: `kkBubbleIn 0.4s ${i * 28}ms cubic-bezier(0.34, 1.56, 0.64, 1) both`,
+										// Delayed past the chain-icon coin-drop entrance (~1100ms)
+										// then a tight 12ms global stagger so even 30 tokens finish
+										// settling under a second.
+										animation: `kkBubbleIn 0.4s ${1100 + i * 12}ms cubic-bezier(0.34, 1.56, 0.64, 1) both`,
 									}}
 									title={`${t.tok.symbol} · ${t.tok.balance} · ${labelUsd}`}
 									onClick={(e: React.MouseEvent) => {
 										e.stopPropagation()
-										onSelect(parent.chain)
+										if (parentChain) onSelect(parentChain)
 									}}
 								>
 									<Image
