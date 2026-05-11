@@ -438,11 +438,13 @@ export function ZcashPrivacyTab() {
 	}, [t, loadTransactions])
 
 	const parseZatoshis = (s: string): number => {
-		const parts = s.split(".")
-		const whole = BigInt(parts[0] || "0") * 100_000_000n
-		const fracStr = (parts[1] || "").padEnd(8, "0").slice(0, 8)
-		const frac = BigInt(fracStr)
-		const big = whole + frac
+		// Strict shape — reject "1.2.3", "abc", "" and >8 fractional digits up
+		// front so silent truncation can't fund a different amount than the
+		// user typed. Zec is 8-decimal; anything finer is a typo, not "round
+		// it for me".
+		if (!/^\d+(\.\d{1,8})?$/.test(s)) throw new Error("Invalid amount")
+		const [whole, frac = ""] = s.split(".")
+		const big = BigInt(whole) * 100_000_000n + BigInt(frac.padEnd(8, "0"))
 		if (big <= 0n || big > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Invalid amount")
 		return Number(big)
 	}
