@@ -831,6 +831,10 @@ async function buildRelaySwapTx(
         if (liveFee.maxPriorityFeePerGas > chosenPrio) chosenPrio = liveFee.maxPriorityFeePerGas
       }
     }
+    if (chosenPrio > chosenMaxFee) {
+      swapLog(`${TAG} Relay tx: bumping maxFeePerGas ${chosenMaxFee} → ${chosenPrio} to cover maxPriorityFeePerGas`)
+      chosenMaxFee = chosenPrio
+    }
     maxFeePerGas = toHex(chosenMaxFee)
     maxPriorityFeePerGas = toHex(chosenPrio)
   } else if (rpcUrl) {
@@ -868,6 +872,50 @@ async function buildRelaySwapTx(
       console.warn(`${TAG} Pioneer gas price failed for relay tx, using ${fallbackGwei} gwei floor: ${e.message}`)
       gasPrice = toHex(fallbackGasPrice)
     }
+  }
+
+  const relayValue = BigInt(relay.value)
+  const relayGasLimit = BigInt(gasLimit)
+  const relayFeePerGas = maxFeePerGas || gasPrice
+  if (!relayFeePerGas) {
+    throw new Error(`Unable to determine gas fee for Relay transaction on ${fromChain.id} — refusing to sign. Try refreshing the quote.`)
+  }
+  const effectiveRelayFeePerGas = BigInt(relayFeePerGas)
+  const relayGasReserve = relayGasLimit * effectiveRelayFeePerGas
+  const relayNativeRequired = relayValue + relayGasReserve
+  let nativeBalance: bigint | undefined
+  if (rpcUrl) {
+    try {
+      nativeBalance = await getEvmBalance(rpcUrl, fromAddress)
+    } catch (e: any) {
+      console.warn(`${TAG} Failed to fetch native balance via RPC for relay tx: ${e.message}`)
+    }
+  }
+  if (nativeBalance === undefined) {
+    try {
+      const pioneer = await getPioneer()
+      const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
+      const balStr = String(bd?.data?.nativeBalance || bd?.data?.balance || '0')
+      nativeBalance = parseUnits(balStr, fromChain.decimals)
+    } catch (e: any) {
+      console.warn(`${TAG} Failed to fetch native balance via Pioneer for relay tx: ${e.message}`)
+    }
+  }
+  if (nativeBalance === undefined) {
+    throw new Error(`Unable to verify ${fromChain.symbol} balance for Relay transaction — refusing to sign. Try refreshing the quote.`)
+  }
+  if (nativeBalance < relayNativeRequired) {
+    if (params.isMax && !isErc20Source) {
+      throw new Error(
+        `Relay quote is stale: updated gas fees require ${formatWei(relayNativeRequired, fromChain.decimals)} ${fromChain.symbol} ` +
+        `but the wallet has ${formatWei(nativeBalance, fromChain.decimals)}. Refresh the quote so the max send amount can reserve gas before signing.`
+      )
+    }
+    throw new Error(
+      `Insufficient ${fromChain.symbol} for Relay transaction: need ${formatWei(relayNativeRequired, fromChain.decimals)} ` +
+      `(${formatWei(relayValue, fromChain.decimals)} value + ${formatWei(relayGasReserve, fromChain.decimals)} gas), ` +
+      `have ${formatWei(nativeBalance, fromChain.decimals)}.`
+    )
   }
 
   // ── ERC-20 allowance check & approve generation ────────────────────
@@ -955,7 +1003,7 @@ async function buildRelaySwapTx(
     nonce: toHex(BigInt(nonce)),
     gasLimit: toHex(BigInt(gasLimit)),
     to: relay.to,
-    value: toHex(BigInt(relay.value)),
+    value: toHex(relayValue),
     data: relay.data,
   }
 
