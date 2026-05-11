@@ -439,190 +439,285 @@ function OrbitalView({
 		width, height, cx, cy, sizeRef,
 	])
 
-	/* Force-directed physics — orbit mode only.
+	/* Matter.js physics — orbit mode only.
 	 *
-	 *  Each chain icon is a body with position, velocity, and mass derived
-	 *  from its size. Three forces act each frame:
-	 *    - Soft spring toward the deterministic layout slot (k = 0.018)
-	 *    - Coulomb-like repulsion between every pair of bodies
-	 *    - Hard repulsion from the center text region + canvas edges
+	 *  Each chain icon is a circle body. Bodies are bound softly to their
+	 *  deterministic slot via spring constraints (stiffness 0.01, damping
+	 *  0.1) — they wander on disturbance but always come home. Built-in
+	 *  Matter collisions handle non-overlap with realistic bounce.
 	 *
-	 *  Velocities damp by 0.92 per frame, so the cluster settles after a
-	 *  burst of motion. requestAnimationFrame drives the loop; bodies are
-	 *  stored in a ref to avoid React re-rendering on every velocity tweak,
-	 *  with a single setState per frame to commit the positions for paint.
+	 *  Mouse drag uses Matter's MouseConstraint so dragging a body has
+	 *  proper feel — it follows the cursor, and on release retains the
+	 *  swipe velocity for momentum throws.
 	 *
-	 *  Mouse-drag pulls a body off its spring temporarily so the user can
-	 *  fling chains around and watch them resettle.
+	 *  Loading entrance: bodies spawn well above the canvas with a small
+	 *  random downward velocity. Their slot springs yank them into
+	 *  formation, where they bounce off each other before settling — the
+	 *  "coins dropping into a tray" sequence the user wanted.
+	 *
+	 *  Rendering: we DO NOT use React state per frame. A RAF loop reads
+	 *  body.position and writes directly to each chain's DOM transform.
+	 *  That keeps the engine running at 60fps independently of the React
+	 *  tree (which only updates on hover, expansion, etc.).
 	 */
-	const physicsState = useRef<{
-		bodies: Array<{ id: string; x: number; y: number; vx: number; vy: number; tx: number; ty: number; r: number }>
-		dragId: string | null
-		dragOffsetX: number
-		dragOffsetY: number
-		raf: number | null
-	}>({ bodies: [], dragId: null, dragOffsetX: 0, dragOffsetY: 0, raf: null })
-	const [physicsTick, setPhysicsTick] = useState(0) // bumped each frame to trigger paint
 	const physicsEnabled = mode === 'orbit'
-
-	// Re-seed bodies whenever the layout slots change (chain set or container
-	// resize). New bodies inherit their slot position; existing bodies keep
-	// their current position so the sim doesn't snap on a re-seed.
-	useEffect(() => {
-		if (!physicsEnabled) {
-			physicsState.current.bodies = []
-			return
-		}
-		const prev = new Map(physicsState.current.bodies.map(b => [b.id, b]))
-		physicsState.current.bodies = layout.map(c => {
-			const old = prev.get(c.chain.id)
-			return {
-				id: c.chain.id,
-				x: old?.x ?? c.x,
-				y: old?.y ?? c.y,
-				vx: old?.vx ?? 0,
-				vy: old?.vy ?? 0,
-				tx: c.x,
-				ty: c.y,
-				r: c.sat / 2,
-			}
-		})
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [physicsEnabled, layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}`).join('|')])
-
-	// Drive the simulation loop while orbit mode is active.
-	useEffect(() => {
-		if (!physicsEnabled) return
-		let mounted = true
-		const SPRING = 0.018
-		const REPEL = 1400
-		const DAMPING = 0.92
-		const CENTER_REPEL = 800
-		const textHalfW = Math.max(96, width * 0.18)
-		const textHalfH = Math.max(60, height * 0.14)
-
-		const step = () => {
-			if (!mounted) return
-			const s = physicsState.current
-			const bodies = s.bodies
-			const N = bodies.length
-			// Pause the sim while a chain is expanded — token bubbles tree
-			// from the parent's static slot, and we don't want it drifting
-			// out from under the tree while the user is reading.
-			if (expandedChainId) {
-				// Glide each body back to its slot so when the user closes
-				// the expansion the cluster is already settled.
-				for (const b of bodies) {
-					b.x += (b.tx - b.x) * 0.18
-					b.y += (b.ty - b.y) * 0.18
-					b.vx = 0; b.vy = 0
-				}
-				setPhysicsTick(t => (t + 1) % 1_000_000)
-				s.raf = requestAnimationFrame(step)
-				return
-			}
-			for (let i = 0; i < N; i++) {
-				const b = bodies[i]
-				if (b.id === s.dragId) continue
-				let fx = 0, fy = 0
-				// Spring toward target slot.
-				fx += (b.tx - b.x) * SPRING
-				fy += (b.ty - b.y) * SPRING
-				// Repulsion from other bodies.
-				for (let j = 0; j < N; j++) {
-					if (i === j) continue
-					const o = bodies[j]
-					const dx = b.x - o.x
-					const dy = b.y - o.y
-					const d2 = dx * dx + dy * dy + 0.5
-					const d = Math.sqrt(d2)
-					const minD = b.r + o.r + 8
-					// Inverse-square push, capped near surface contact so it
-					// doesn't blow up when two bodies overlap on a re-seed.
-					const force = REPEL / Math.max(d2, minD * minD * 0.25)
-					fx += (dx / d) * force
-					fy += (dy / d) * force
-				}
-				// Center text region — repel out along the smaller-overlap axis.
-				const dxC = b.x - width / 2
-				const dyC = b.y - height / 2
-				const clearX = textHalfW + b.r + 8
-				const clearY = textHalfH + b.r + 8
-				if (Math.abs(dxC) < clearX && Math.abs(dyC) < clearY) {
-					const overlapX = clearX - Math.abs(dxC)
-					const overlapY = clearY - Math.abs(dyC)
-					if (overlapX < overlapY) fx += Math.sign(dxC || 1) * CENTER_REPEL * (overlapX / clearX)
-					else                     fy += Math.sign(dyC || 1) * CENTER_REPEL * (overlapY / clearY)
-				}
-				// Integrate.
-				b.vx = (b.vx + fx) * DAMPING
-				b.vy = (b.vy + fy) * DAMPING
-				b.x += b.vx
-				b.y += b.vy
-				// Clamp inside container.
-				if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx) * 0.4 }
-				if (b.x > width - b.r) { b.x = width - b.r; b.vx = -Math.abs(b.vx) * 0.4 }
-				if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy) * 0.4 }
-				if (b.y > height - b.r) { b.y = height - b.r; b.vy = -Math.abs(b.vy) * 0.4 }
-			}
-			setPhysicsTick(t => (t + 1) % 1_000_000)
-			s.raf = requestAnimationFrame(step)
-		}
-		physicsState.current.raf = requestAnimationFrame(step)
-		return () => {
-			mounted = false
-			if (physicsState.current.raf != null) cancelAnimationFrame(physicsState.current.raf)
-			physicsState.current.raf = null
-		}
-	}, [physicsEnabled, width, height, expandedChainId])
-
-	// Pull current body positions into a Map for fast lookup at render time.
-	// Falls back to the static layout positions when physics is disabled
-	// (grid mode) or before the first frame runs.
-	const positionFor = (chainId: string, fallbackX: number, fallbackY: number) => {
-		if (!physicsEnabled) return { x: fallbackX, y: fallbackY }
-		const b = physicsState.current.bodies.find(b => b.id === chainId)
-		return b ? { x: b.x, y: b.y } : { x: fallbackX, y: fallbackY }
-	}
-
-	// Mouse-drag handlers. We attach pointermove/pointerup to window so a
-	// drag continues even if the cursor leaves the icon body. A click that
-	// followed real motion is suppressed via the suppressClickRef one-shot.
+	const chainElRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
+	const physicsRef = useRef<{
+		engine: any | null
+		bodies: Map<string, any>     // chainId → Matter.Body
+		halfSizes: Map<string, number>
+		raf: number | null
+		dragMoved: boolean
+	}>({ engine: null, bodies: new Map(), halfSizes: new Map(), raf: null, dragMoved: false })
 	const suppressClickRef = useRef(false)
+
+	useEffect(() => {
+		if (!physicsEnabled || layout.length === 0 || width < 100 || height < 100) return
+		// Matter is moderately large; import on demand so users who never
+		// touch Orbit mode don't pay for it.
+		let cancelled = false
+		let cleanup: (() => void) | null = null
+		;(async () => {
+			const Matter = await import('matter-js')
+			if (cancelled) return
+			const { Engine, World, Bodies, Body, Constraint, Composite } = Matter
+			const engine = Engine.create({
+				gravity: { x: 0, y: 0, scale: 0 },        // no falling — springs do the work
+				enableSleeping: false,
+				positionIterations: 8,
+				velocityIterations: 8,
+			})
+			const world = engine.world
+
+			// Canvas-edge walls. Static, slightly elastic so bodies bounce
+			// instead of sticking. Wall thickness 100 keeps them off-screen.
+			const wallOpts = { isStatic: true, restitution: 0.6, friction: 0.05 }
+			Composite.add(world, [
+				Bodies.rectangle(width / 2, -50,         width + 200, 100, wallOpts),
+				Bodies.rectangle(width / 2, height + 50, width + 200, 100, wallOpts),
+				Bodies.rectangle(-50,         height / 2, 100, height + 200, wallOpts),
+				Bodies.rectangle(width + 50,  height / 2, 100, height + 200, wallOpts),
+			])
+			// Center text region — an invisible static rectangle so bodies
+			// physically can't land on the price label.
+			const textHalfW = Math.max(96, width * 0.18)
+			const textHalfH = Math.max(60, height * 0.14)
+			Composite.add(world, Bodies.rectangle(
+				width / 2, height / 2,
+				textHalfW * 2, textHalfH * 2,
+				{ isStatic: true, restitution: 0.7, friction: 0.04, render: { visible: false } },
+			))
+
+			const bodies = new Map<string, any>()
+			const halfSizes = new Map<string, number>()
+			// Tracks which bodies have actually been added to the world (the
+			// spawn loop stages them on a stagger). The RAF loop only paints
+			// — and reveals — bodies in this set, so the entrance reads as
+			// staggered drops rather than 10 icons appearing at once.
+			const spawned = new Set<string>()
+
+			// Brief gravity pulse for the entrance — bodies feel real weight
+			// as they fall in. The pulse turns off after 1.4s so the cluster
+			// then floats on its springs alone.
+			engine.gravity.x = 0
+			engine.gravity.y = 1.0
+			engine.gravity.scale = 0.0007
+			const gravityTimer = setTimeout(() => {
+				if (cancelled) return
+				engine.gravity.scale = 0  // springs take over
+			}, 1400)
+
+			// Sort by USD desc so the heaviest chain falls first — the eye
+			// lands on the biggest holding before the smaller ones rain in.
+			const orderedLayout = [...layout].sort((a, b) => b.usd - a.usd)
+
+			const spawnTimers: ReturnType<typeof setTimeout>[] = []
+			orderedLayout.forEach((c, i) => {
+				const radius = c.sat / 2
+				// Above the canvas with horizontal spread. The further away
+				// from the slot's x, the more dramatic the trajectory.
+				const startX = c.x + (Math.random() - 0.5) * width * 0.25
+				const startY = -140 - Math.random() * 220
+				const body = Bodies.circle(startX, startY, radius, {
+					restitution: 0.6,
+					friction: 0.015,
+					frictionAir: 0.035,            // global drag — eventually settles
+					density: 0.0012 + (radius / 200) * 0.0015, // bigger = heavier
+					slop: 0.5,
+					label: c.chain.id,
+				})
+
+				// Soft spring constraint to the slot. Stiffness ~0.014
+				// produces a noticeably bouncy "snap into place" without
+				// turning the cluster into oscillating spaghetti. Damping
+				// kills residual oscillation in 1–2 seconds.
+				const constraint = Constraint.create({
+					bodyA: body,
+					pointB: { x: c.x, y: c.y },
+					stiffness: 0.014,
+					damping: 0.08,
+					length: 0,
+					render: { visible: false },
+				})
+
+				bodies.set(c.chain.id, body)
+				halfSizes.set(c.chain.id, radius)
+
+				// Stagger: heaviest in immediately, each next ~90ms later.
+				// 10 chains × 90ms = 900ms before the last body enters,
+				// which dovetails nicely with the 1.4s gravity pulse.
+				const delay = i * 90
+				const enter = () => {
+					if (cancelled || !physicsRef.current.engine) return
+					Composite.add(world, [body, constraint])
+					Body.setVelocity(body, { x: (Math.random() - 0.5) * 3, y: 4 + Math.random() * 3 })
+					// Slight angular kick — coins tumble. The SVG icon
+					// itself doesn't rotate (we'd distort the wordmark)
+					// but body momentum reads as motion under collision.
+					Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.2)
+					spawned.add(c.chain.id)
+				}
+				if (delay === 0) enter()
+				else spawnTimers.push(setTimeout(enter, delay))
+			})
+
+			physicsRef.current.engine = engine
+			physicsRef.current.bodies = bodies
+			physicsRef.current.halfSizes = halfSizes
+
+			// Render loop — read body positions and write DOM transforms
+			// directly. setTransform on a Map of pre-cached HTMLElements
+			// keeps every frame O(N) with no React reconciliation.
+			let last = performance.now()
+			const tick = (now: number) => {
+				if (cancelled) return
+				const dt = Math.min(32, now - last)
+				last = now
+				// Step the physics engine. We don't pass time accuracy because
+				// the slot springs are forgiving — a couple of dropped frames
+				// won't cause weird simulation drift.
+				Engine.update(engine, dt)
+				for (const [id, body] of bodies) {
+					if (!spawned.has(id)) continue
+					const el = chainElRefs.current.get(id)
+					if (!el) continue
+					const half = halfSizes.get(id)!
+					// Math.round avoids subpixel antialiasing fuzz on icons.
+					const tx = Math.round(body.position.x - half)
+					const ty = Math.round(body.position.y - half)
+					el.style.transform = `translate3d(${tx}px, ${ty}px, 0)`
+					if (el.style.opacity !== '1') el.style.opacity = '1'
+				}
+				physicsRef.current.raf = requestAnimationFrame(tick)
+			}
+			physicsRef.current.raf = requestAnimationFrame(tick)
+
+			cleanup = () => {
+				clearTimeout(gravityTimer)
+				for (const t of spawnTimers) clearTimeout(t)
+				if (physicsRef.current.raf != null) cancelAnimationFrame(physicsRef.current.raf)
+				physicsRef.current.raf = null
+				World.clear(world, false)
+				Engine.clear(engine)
+				physicsRef.current.engine = null
+				physicsRef.current.bodies = new Map()
+				physicsRef.current.halfSizes = new Map()
+			}
+		})()
+		return () => {
+			cancelled = true
+			cleanup?.()
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		physicsEnabled,
+		width,
+		height,
+		layout.map(c => `${c.chain.id}:${c.x.toFixed(0)}:${c.y.toFixed(0)}:${c.sat}`).join('|'),
+	])
+
+	// While a chain is expanded, freeze the engine and snap the expanded
+	// body back to its layout slot so token bubbles tree from a stable,
+	// known anchor. On collapse, restore time scale and let physics
+	// resettle the cluster.
+	useEffect(() => {
+		const engine = physicsRef.current.engine
+		if (!engine) return
+		if (expandedChainId) {
+			engine.timing.timeScale = 0
+			const body = physicsRef.current.bodies.get(expandedChainId)
+			const slot = layout.find(c => c.chain.id === expandedChainId)
+			if (body && slot) {
+				import('matter-js').then(Matter => {
+					Matter.Body.setPosition(body, { x: slot.x, y: slot.y })
+					Matter.Body.setVelocity(body, { x: 0, y: 0 })
+					Matter.Body.setAngularVelocity(body, 0)
+					// Also paint the DOM at the snapped position immediately —
+					// otherwise the icon stays mid-flight visually until RAF
+					// next runs, which it won't while timeScale=0.
+					const el = chainElRefs.current.get(expandedChainId)
+					const half = physicsRef.current.halfSizes.get(expandedChainId)
+					if (el && half != null) {
+						el.style.transform = `translate3d(${Math.round(slot.x - half)}px, ${Math.round(slot.y - half)}px, 0)`
+					}
+				})
+			}
+		} else {
+			engine.timing.timeScale = 1
+		}
+	}, [expandedChainId, layout])
+
+	// Mouse-drag — pointer-down on an icon hands the body to a transient
+	// pointer-follow handler. Built-in Matter MouseConstraint would also
+	// work, but we want to suppress the trailing click ONLY when the user
+	// actually moved (so a quick tap still opens AssetPage).
 	const onBodyPointerDown = useCallback((chainId: string, ev: React.PointerEvent) => {
 		if (!physicsEnabled) return
-		const b = physicsState.current.bodies.find(b => b.id === chainId)
-		if (!b) return
-		physicsState.current.dragId = chainId
-		physicsState.current.dragOffsetX = b.x - ev.clientX
-		physicsState.current.dragOffsetY = b.y - ev.clientY
-		const startX = ev.clientX, startY = ev.clientY
+		const body = physicsRef.current.bodies.get(chainId)
+		if (!body) return
+		const rect = (ev.currentTarget as HTMLElement).parentElement!.getBoundingClientRect()
+		const toLocal = (cx: number, cy: number) => ({
+			x: cx - rect.left,
+			y: cy - rect.top,
+		})
+		const start = toLocal(ev.clientX, ev.clientY)
+		const grabOffX = body.position.x - start.x
+		const grabOffY = body.position.y - start.y
+		let lastX = start.x, lastY = start.y, lastT = performance.now()
+		let velX = 0, velY = 0
 		let moved = false
-		const onMove = (mv: PointerEvent) => {
-			const s = physicsState.current
-			const body = s.bodies.find(x => x.id === s.dragId)
-			if (!body) return
-			if (!moved && Math.hypot(mv.clientX - startX, mv.clientY - startY) > 4) moved = true
-			body.x = mv.clientX + s.dragOffsetX
-			body.y = mv.clientY + s.dragOffsetY
-			body.vx = 0; body.vy = 0
-		}
-		const onUp = (up: PointerEvent) => {
-			physicsState.current.dragId = null
-			if (moved) suppressClickRef.current = true
-			// Give the body a little parting velocity so it doesn't slam
-			// to a halt — looks more alive.
-			const s = physicsState.current
-			const body = s.bodies.find(b => b.id === chainId)
-			if (body && moved) {
-				body.vx = (up.clientX - startX) * 0.0
-				body.vy = (up.clientY - startY) * 0.0
+		physicsRef.current.dragMoved = false
+
+		// Park the body — zero velocity, no gravity contribution. We'll
+		// set its position by hand each pointermove.
+		;(async () => {
+			const Matter = await import('matter-js')
+			Matter.Body.setStatic(body, true)
+			const onMove = (mv: PointerEvent) => {
+				const p = toLocal(mv.clientX, mv.clientY)
+				const now = performance.now()
+				const dt = Math.max(8, now - lastT)
+				velX = (p.x - lastX) / dt * 16  // px / frame
+				velY = (p.y - lastY) / dt * 16
+				lastX = p.x; lastY = p.y; lastT = now
+				if (!moved && Math.hypot(p.x - start.x, p.y - start.y) > 4) {
+					moved = true
+					physicsRef.current.dragMoved = true
+				}
+				Matter.Body.setPosition(body, { x: p.x + grabOffX, y: p.y + grabOffY })
 			}
-			window.removeEventListener('pointermove', onMove)
-			window.removeEventListener('pointerup', onUp)
-		}
-		window.addEventListener('pointermove', onMove)
-		window.addEventListener('pointerup', onUp)
+			const onUp = () => {
+				Matter.Body.setStatic(body, false)
+				// Hand the swipe velocity back to physics so the body keeps
+				// going after release — momentum throw.
+				Matter.Body.setVelocity(body, { x: velX, y: velY })
+				if (moved) suppressClickRef.current = true
+				window.removeEventListener('pointermove', onMove)
+				window.removeEventListener('pointerup', onUp)
+			}
+			window.addEventListener('pointermove', onMove)
+			window.addEventListener('pointerup', onUp)
+		})()
 	}, [physicsEnabled])
 
 	// Preload all visible chain icons before we paint the cluster.
@@ -814,21 +909,25 @@ function OrbitalView({
 			{layout.map(({ chain, usd, bal, x: slotX, y: slotY, sat }) => {
 				const isHover = hover === chain.id
 				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
-				// Read live physics position when orbit mode is active; fall
-				// back to the deterministic slot otherwise. The physicsTick
-				// dep on this render keeps it cheap-ish (one positionFor
-				// call per body per frame).
-				const _ = physicsTick // touch so React tracks the dep
-				const { x, y } = positionFor(chain.id, slotX, slotY)
 				// Grid mode wraps the icon in a square tile bg so the layout
 				// reads as a wall mosaic. Tile is slightly larger than the icon
 				// so the round logo nests inside a rounded square — Apple
 				// app-icon-on-springboard feel.
 				const tilePad = mode === 'grid' ? Math.round(sat * 0.15) : 0
 				const cellSize = sat + tilePad * 2
+				// In orbit mode the RAF loop writes element.style.transform
+				// directly per frame; the initial slot position seeds the
+				// transform so before physics initializes the body is in the
+				// right place. Grid mode uses static transform — no physics.
+				const initialTx = Math.round(slotX - cellSize / 2)
+				const initialTy = Math.round(slotY - cellSize / 2)
 				return (
 					<Box
 						key={chain.id}
+						ref={(el: HTMLDivElement | null) => {
+							if (mode === 'orbit') chainElRefs.current.set(chain.id, el)
+							else chainElRefs.current.delete(chain.id)
+						}}
 						as="button"
 						onMouseEnter={() => setHover(chain.id)}
 						onMouseLeave={() => setHover(null)}
@@ -841,8 +940,17 @@ function OrbitalView({
 						}}
 						onPointerDown={(e: React.PointerEvent) => onBodyPointerDown(chain.id, e)}
 						position="absolute"
-						left={`${x - cellSize / 2}px`}
-						top={`${y - cellSize / 2}px`}
+						left="0"
+						top="0"
+						style={{
+							transform: `translate3d(${initialTx}px, ${initialTy}px, 0)`,
+							willChange: physicsEnabled ? 'transform' : undefined,
+							// Hidden until the RAF loop flips opacity after the
+							// body lands in the world. The staggered spawn means
+							// each chain reveals as it rains in.
+							opacity: physicsEnabled ? 0 : 1,
+							transition: physicsEnabled ? 'opacity 220ms ease-out' : undefined,
+						}}
 						w={`${cellSize}px`}
 						h={`${cellSize}px`}
 						borderRadius={mode === 'grid' ? '20%' : 'full'}
@@ -851,8 +959,9 @@ function OrbitalView({
 						p={`${tilePad}px`}
 						display="grid"
 						placeItems="center"
-						transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
-						transform={isHover ? 'scale(1.12)' : 'scale(1)'}
+						// Limit transition to filter/box-shadow — animating
+						// transform would fight the per-frame physics writes.
+						transition={physicsEnabled ? "filter 0.3s, box-shadow 0.3s" : "all 0.3s cubic-bezier(0.2,0.8,0.2,1)"}
 						filter={isHover
 							? `drop-shadow(0 0 24px ${chain.color})`
 							: 'drop-shadow(0 4px 14px rgba(0,0,0,0.55))'}
@@ -868,6 +977,10 @@ function OrbitalView({
 							borderRadius="full"
 							bg="var(--ink-2)"
 							boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}`}
+							style={{
+								transform: isHover ? 'scale(1.12)' : 'scale(1)',
+								transition: 'transform 0.25s cubic-bezier(0.2,0.8,0.2,1)',
+							}}
 						/>
 						{(bal?.tokens?.length ?? 0) > 0 && (() => {
 							const isExpanded = expandedChainId === chain.id
