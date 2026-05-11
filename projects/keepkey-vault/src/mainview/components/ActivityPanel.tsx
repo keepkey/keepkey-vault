@@ -112,6 +112,81 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400_000)}d ago`
 }
 
+function recentTimestamp(item: { createdAt: number }): number {
+  const timestamp = Number(item.createdAt)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function recentFirst<T extends { createdAt: number }>(items: T[]): T[] {
+  return [...items].sort((a, b) => recentTimestamp(b) - recentTimestamp(a))
+}
+
+const USD_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+function formatUsd(value: number | null | undefined): string | null {
+  if (!Number.isFinite(value ?? NaN)) return null
+  const n = Number(value)
+  if (n > 0 && n < 0.01) return '<$0.01'
+  return USD_FORMATTER.format(n)
+}
+
+function commifyInteger(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function formatBaseUnits(raw: string | undefined, decimals: number, maxFraction = 8): string | null {
+  const value = String(raw ?? '').trim()
+  if (!value) return null
+  if (!/^-?\d+$/.test(value)) return value
+  const negative = value.startsWith('-')
+  const abs = BigInt(negative ? value.slice(1) : value)
+  const denom = 10n ** BigInt(decimals)
+  const whole = abs / denom
+  const fraction = abs % denom
+  let fractionText = decimals > 0
+    ? fraction.toString().padStart(decimals, '0').slice(0, maxFraction).replace(/0+$/, '')
+    : ''
+  if (whole === 0n && fraction > 0n && !fractionText) {
+    fractionText = `${'0'.repeat(Math.max(maxFraction - 1, 0))}1`
+    return `${negative ? '-' : ''}<0.${fractionText}`
+  }
+  return `${negative ? '-' : ''}${commifyInteger(whole.toString())}${fractionText ? `.${fractionText}` : ''}`
+}
+
+function numericDisplayValue(display: string | null): number | null {
+  if (!display || display.startsWith('<')) return null
+  const n = Number(display.replace(/,/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+function formatNativeValue(raw: string | undefined, chainDef: { decimals: number; symbol: string } | undefined, source: string, priceUsd?: number) {
+  if (!raw) return null
+  const amount = source === 'scan' && chainDef
+    ? formatBaseUnits(raw, chainDef.decimals)
+    : raw
+  if (!amount) return null
+  const usd = priceUsd ? formatUsd((numericDisplayValue(amount) ?? 0) * priceUsd) : null
+  return { amount, usd }
+}
+
+function nativePriceByChain(balances: ChainBalance[]): Record<string, number> {
+  const prices: Record<string, number> = {}
+  for (const b of balances) {
+    const balance = Number(b.balance)
+    const tokenUsd = b.tokens?.reduce((sum, t) => sum + (t.balanceUsd || 0), 0) || 0
+    const nativeUsd = Number(b.nativeBalanceUsd ?? Math.max((b.balanceUsd || 0) - tokenUsd, 0))
+    if (Number.isFinite(balance) && balance > 0 && Number.isFinite(nativeUsd) && nativeUsd > 0) {
+      prices[b.chainId] = nativeUsd / balance
+    }
+  }
+  return prices
+}
+
 // ── Detail types for the TX detail dialog ───────────────────────────
 type TxDetail = {
   kind: 'activity'
@@ -120,6 +195,10 @@ type TxDetail = {
   kind: 'swap'
   swap: PendingSwap
 }
+
+type ActivityTimelineItem =
+  | { kind: 'activity'; id: string; createdAt: number; activity: RecentActivity }
+  | { kind: 'swap'; id: string; createdAt: number; swap: PendingSwap }
 
 function formatFullDate(ts: number): string {
   const d = new Date(ts)
@@ -164,15 +243,19 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
   )
 }
 
-function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => void }) {
+function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; onClose: () => void; nativePrices: Record<string, number> }) {
   if (detail.kind === 'activity') {
     const a = detail.activity
     const typeConf = TYPE_CONFIG[a.type] || TYPE_CONFIG.sign
     const statusConf = STATUS_CONFIG[a.status] || STATUS_CONFIG.signed
-    const chainDef = CHAINS.find(c => c.symbol === a.chain || c.id === a.chain)
+    const chainDef = CHAINS.find(c => a.chainId && c.id === a.chainId) || CHAINS.find(c => c.symbol === a.chain || c.id === a.chain)
+    const chainSymbol = chainDef?.symbol || a.chain
+    const nativePrice = chainDef ? nativePrices[chainDef.id] : undefined
+    const amountValue = formatNativeValue(a.amount, chainDef, a.source, nativePrice)
+    const feeValue = formatNativeValue(a.fee, chainDef, a.source, nativePrice)
     const explorerUrl = a.txid && chainDef ? getExplorerTxUrl(chainDef.id, a.txid) : null
     const explorerAddrUrl = a.to && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.to) : null
-    const required = getRequiredConfs(a.chain)
+    const required = getRequiredConfs(chainSymbol)
 
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
@@ -209,15 +292,15 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
                     fallback={<Box w="16px" h="16px" borderRadius="full" bg={chainDef.color} />}
                   />
                 )}
-                <Text fontSize="11px" color="white" fontWeight="600">{chainDef?.coin || a.chain} ({a.chain})</Text>
+                <Text fontSize="11px" color="white" fontWeight="600">{chainDef?.coin || a.chain} ({chainSymbol})</Text>
               </HStack>
             </Flex>
 
             {/* Amount */}
-            {a.amount && <TxDetailRow label="Amount" value={`${a.amount} ${a.asset || a.chain}`} />}
+            {amountValue && <TxDetailRow label="Amount" value={`${amountValue.amount} ${a.asset || chainSymbol}${amountValue.usd ? ` (${amountValue.usd})` : ''}`} />}
 
             {/* Fee */}
-            {a.fee && <TxDetailRow label="Fee" value={a.fee} />}
+            {feeValue && <TxDetailRow label="Fee" value={`${feeValue.amount} ${chainSymbol}${feeValue.usd ? ` (${feeValue.usd})` : ''}`} />}
 
             {/* Separator */}
             <Box h="1px" bg="rgba(255,255,255,0.06)" my="2" />
@@ -357,10 +440,12 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
   )
 }
 
-function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void }) {
+function ActivityRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
   const [copied, setCopied] = useState(false)
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
-  const chainDef = CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
+  const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
+  const chainSymbol = chainDef?.symbol || activity.chain
+  const nativePrice = chainDef ? nativePrices[chainDef.id] : undefined
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -368,72 +453,67 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const explorerUrl = activity.txid ? getExplorerUrl(activity.chain, activity.txid) : null
+  const explorerUrl = activity.txid ? getExplorerUrl(activity.chainId || activity.chain, activity.txid) : null
 
   const isUnconfirmed = activity.confirmations !== undefined && activity.confirmations === 0
+  const chainLabel = `${chainDef?.coin || activity.chain} (${chainSymbol})`
+  const nativeAmount = formatNativeValue(activity.amount, chainDef, activity.source, nativePrice)
+  const nativeFee = formatNativeValue(activity.fee, chainDef, activity.source, nativePrice)
+  const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
+    ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' \u2192 ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
+    : nativeAmount || nativeFee
+      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? `fee: ${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` : ''}`
+      : null
 
   return (
     <Box
       bg="rgba(255,255,255,0.03)"
       border="1px solid"
       borderColor={isUnconfirmed ? 'rgba(229,62,62,0.3)' : 'rgba(255,255,255,0.06)'}
-      borderRadius="lg" p="3"
+      borderRadius="lg" px="3" py="2.5"
       cursor="pointer"
       _hover={{ bg: "rgba(255,255,255,0.06)", borderColor: 'rgba(35,220,200,0.25)' }}
       transition="all 0.15s"
       onClick={() => onSelect(activity)}
     >
-      {/* Chain badge */}
-      <Flex align="center" gap="2" mb="1.5">
-        {chainDef ? (
-          <Image src={caipToIcon(chainDef.caip)} w="16px" h="16px" borderRadius="full" flexShrink={0}
-            fallback={<Box w="16px" h="16px" borderRadius="full" bg={chainDef.color} flexShrink={0} />}
-          />
-        ) : (
-          <Box w="16px" h="16px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
-        )}
-        <Text fontSize="xs" fontWeight="600" color="white">{chainDef?.coin || activity.chain} ({activity.chain})</Text>
-      </Flex>
-      <Flex justify="space-between" align="center" mb="1">
-        <HStack gap="2">
-          <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
-          {activity.source === 'api' && (
-            <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>
+      <Flex justify="space-between" align="flex-start" gap="2">
+        <HStack gap="2" minW="0" flex="1" align="flex-start">
+          {chainDef ? (
+            <Image src={caipToIcon(chainDef.caip)} w="16px" h="16px" mt="1px" borderRadius="full" flexShrink={0}
+              fallback={<Box w="16px" h="16px" mt="1px" borderRadius="full" bg={chainDef.color} flexShrink={0} />}
+            />
+          ) : (
+            <Box w="16px" h="16px" mt="1px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
           )}
+          <Box minW="0" flex="1">
+            <HStack gap="1.5" minW="0">
+              <Text fontSize="xs" fontWeight="700" color="white" truncate>{chainLabel}</Text>
+              <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeConf.label}</Box>
+              {activity.source === 'api' && (
+                <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(130,71,229,0.15)" color="#8247E5" flexShrink={0}>API</Box>
+              )}
+            </HStack>
+            {amountLine && <Text fontSize="2xs" color="whiteAlpha.500" mt="0.5" truncate>{amountLine}</Text>}
+          </Box>
+        </HStack>
+        <VStack gap="0.5" align="flex-end" flexShrink={0}>
           {activity.type === 'swap' && activity.swapStatus ? (
             <SwapStatusBadge status={activity.swapStatus} />
           ) : (
-            <ConfBadge confirmations={activity.confirmations} chain={activity.chain} />
+            <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
           )}
-        </HStack>
-        <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
+          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
+        </VStack>
       </Flex>
-      {activity.type === 'swap' && (activity.amount || activity.outAmount) ? (
-        <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="1.5" align="center" flexWrap="wrap">
-          {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
-          <Text color="var(--gold)">&rarr;</Text>
-          {activity.outAmount
-            ? <Text truncate color={activity.swapStatus === 'completed' ? '#23DCC8' : 'whiteAlpha.500'}>
-                {activity.swapStatus === 'completed' ? '' : '~'}{activity.outAmount} {activity.outAsset || ''}
-              </Text>
-            : <Text color="whiteAlpha.300" fontStyle="italic">{activity.outAsset || '?'}</Text>
-          }
-        </Flex>
-      ) : (activity.amount || activity.fee) && (
-        <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="2">
-          {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
-          {activity.fee && <Text color="whiteAlpha.300">fee: {activity.fee}</Text>}
-        </Flex>
-      )}
-      <Flex justify="space-between" align="center">
+      <Flex justify="space-between" align="center" gap="2" mt="1.5">
         {activity.txid ? (
-          <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
             {copied ? 'Copied!' : truncateTxid(activity.txid)}
           </Text>
         ) : (
-          <Text fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
         )}
-        <HStack gap="2">
+        <HStack gap="2" flexShrink={0}>
           {activity.blockHeight ? <Text fontSize="9px" color="whiteAlpha.200" fontFamily="mono">blk {activity.blockHeight}</Text> : null}
           {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
         </HStack>
@@ -446,29 +526,36 @@ function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingS
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
+  const amountLine = swap.fromAmount
+    ? `${swap.fromAmount} ${swap.fromSymbol}${swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}`
+    : null
 
   return (
-    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" p="3"
+    <Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.06)" borderRadius="lg" px="3" py="2.5"
       cursor="pointer"
       _hover={{ bg: "rgba(255,255,255,0.06)", borderColor: 'rgba(35,220,200,0.25)' }}
       transition="all 0.15s"
       onClick={() => onSelect(swap)}
     >
-      <Flex justify="space-between" align="center" mb="1">
-        <HStack gap="2">
-          <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" fontWeight="600" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
-          <Text fontSize="xs" fontWeight="600" color="white">{swap.fromSymbol} {'\u2192'} {swap.toSymbol}</Text>
-        </HStack>
-        <SwapStatusBadge status={swap.status} />
+      <Flex justify="space-between" align="flex-start" gap="2">
+        <Box minW="0" flex="1">
+          <HStack gap="1.5" minW="0">
+            <Text fontSize="xs" fontWeight="700" color="white" truncate>{swap.fromSymbol} {'\u2192'} {swap.toSymbol}</Text>
+            <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(247,147,26,0.15)" color="#F7931A" flexShrink={0}>Swap</Box>
+          </HStack>
+          {amountLine && <Text fontSize="2xs" color="whiteAlpha.500" mt="0.5" truncate>{amountLine}</Text>}
+        </Box>
+        <VStack gap="0.5" align="flex-end" flexShrink={0}>
+          <SwapStatusBadge status={swap.status} />
+          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
+        </VStack>
       </Flex>
-      {swap.fromAmount && <Text fontSize="2xs" color="whiteAlpha.500" mb="1">{swap.fromAmount} {swap.fromSymbol}{swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}</Text>}
-      <Flex justify="space-between" align="center">
-        <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
+      <Flex justify="space-between" align="center" gap="2" mt="1.5">
+        <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
           {copied ? 'Copied!' : truncateTxid(swap.txid)}
         </Text>
-        <HStack gap="2">
+        <HStack gap="2" flexShrink={0}>
           {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
-          <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
         </HStack>
       </Flex>
     </Box>
@@ -497,7 +584,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   return (
-    <Flex px="4" pb="3" gap="2" align="center" flexShrink={0} position="relative">
+    <Flex px="3" pb="2.5" gap="2" align="center" flexShrink={0} position="relative">
       {/* Trigger */}
       <Flex
         flex="1" align="center" gap="2" cursor="pointer"
@@ -636,29 +723,43 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       .filter((c): c is NonNullable<typeof c> => c !== null)
       .sort((a, b) => b.balanceUsd - a.balanceUsd)
   }, [availableChains, chainMap])
+  const nativePrices = useMemo(() => nativePriceByChain(availableChains), [availableChains])
 
   const selectedDef = useMemo(() => CHAINS.find(c => c.id === selectedChain), [selectedChain])
 
   // Filter activities to selected chain (empty = all)
   const filteredActivities = useMemo(() => {
-    if (!selectedDef) return activities
-    return activities.filter(a => a.chain === selectedDef.symbol)
+    const next = selectedDef
+      ? activities.filter(a => a.chainId ? a.chainId === selectedDef.id : (a.chain === selectedDef.symbol || a.chain === selectedDef.id))
+      : activities
+    return recentFirst(next)
   }, [activities, selectedDef])
 
   const activeSwaps = useMemo(() =>
-    pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'),
+    recentFirst(pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded')),
     [pendingSwaps]
   )
 
   const filteredSwaps = useMemo(() => {
-    if (!selectedDef) return activeSwaps
-    return activeSwaps.filter(s => s.fromSymbol === selectedDef.symbol || s.toSymbol === selectedDef.symbol)
+    const next = selectedDef
+      ? activeSwaps.filter(s => s.fromSymbol === selectedDef.symbol || s.toSymbol === selectedDef.symbol || s.fromChainId === selectedDef.id || s.toChainId === selectedDef.id)
+      : activeSwaps
+    return recentFirst(next)
   }, [activeSwaps, selectedDef])
 
   const nonSwapActivities = useMemo(() => {
     const swapTxids = new Set(pendingSwaps.map(s => s.txid))
-    return filteredActivities.filter(a => !(a.type === 'swap' && a.txid && swapTxids.has(a.txid)))
+    return recentFirst(filteredActivities.filter(a => !(a.type === 'swap' && a.txid && swapTxids.has(a.txid))))
   }, [filteredActivities, pendingSwaps])
+
+  const activityTimeline = useMemo<ActivityTimelineItem[]>(() => {
+    return recentFirst([
+      ...filteredSwaps.map(swap => ({ kind: 'swap' as const, id: `swap-${swap.txid}`, createdAt: swap.createdAt, swap })),
+      ...nonSwapActivities.map(activity => ({ kind: 'activity' as const, id: `activity-${activity.id}`, createdAt: activity.createdAt, activity })),
+    ])
+  }, [filteredSwaps, nonSwapActivities])
+
+  const recentPendingSwaps = useMemo(() => recentFirst(pendingSwaps), [pendingSwaps])
 
   const fetchingSwapRef = useRef(false)
   const scanningRef = useRef(false)
@@ -693,7 +794,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
       <Box
         position="fixed" bottom="0" left="0"
-        w="380px" maxW="100vw" h="55vh" maxH="480px"
+        w="min(100vw, 430px)" h="min(72vh, 680px)" maxH="calc(100vh - 20px)"
         bg="kk.bg" border="1px solid" borderColor="kk.border" borderTopRightRadius="xl"
         zIndex={Z.drawerPanel} display="flex" flexDirection="column" overflow="hidden"
       >
@@ -741,15 +842,14 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
         )}
 
         {/* Content */}
-        <Box flex="1" overflowY="auto" px="4" pb="4">
-          <VStack gap="2" align="stretch">
+        <Box flex="1" overflowY="auto" px="3" pb="3">
+          <VStack gap="1.5" align="stretch">
             {tab === 'activity' && (
               <>
-                {filteredSwaps.map(swap => (
-                  <SwapRow key={`swap-${swap.txid}`} swap={swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
-                ))}
-                {nonSwapActivities.map(activity => (
-                  <ActivityRow key={activity.id} activity={activity} onSelect={a => {
+                {activityTimeline.map(item => item.kind === 'swap' ? (
+                  <SwapRow key={item.id} swap={item.swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
+                ) : (
+                  <ActivityRow key={item.id} activity={item.activity} nativePrices={nativePrices} onSelect={a => {
                     if (a.type === 'swap' && a.txid && onResumeSwap) {
                       if (fetchingSwapRef.current) return
                       fetchingSwapRef.current = true
@@ -762,19 +862,19 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                     }
                   }} />
                 ))}
-                {nonSwapActivities.length === 0 && filteredSwaps.length === 0 && (
+                {activityTimeline.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
-                    {selectedDef ? `No activity for ${selectedDef.symbol} — hit refresh to scan` : 'No activity yet — select a chain and hit refresh to scan'}
+                    {selectedDef ? `No indexed ${selectedDef.symbol} activity. Refresh to scan.` : 'No indexed activity loaded. Choose a network to scan.'}
                   </Text>
                 )}
               </>
             )}
             {tab === 'swaps' && (
               <>
-                {pendingSwaps.map(swap => (
+                {recentPendingSwaps.map(swap => (
                   <SwapRow key={`swap-${swap.txid}`} swap={swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
                 ))}
-                {pendingSwaps.length === 0 && (
+                {recentPendingSwaps.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">No swaps</Text>
                 )}
               </>
@@ -785,7 +885,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
 
       {/* TX Detail Dialog */}
       {selectedDetail && (
-        <TxDetailDialog detail={selectedDetail} onClose={() => setSelectedDetail(null)} />
+        <TxDetailDialog detail={selectedDetail} nativePrices={nativePrices} onClose={() => setSelectedDetail(null)} />
       )}
     </>
   )

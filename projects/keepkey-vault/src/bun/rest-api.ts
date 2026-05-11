@@ -18,7 +18,8 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting, findApiLogs, getApiLogById, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats } from './db'
+import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -628,7 +629,8 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign Solana tx</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/zcash/shielded/display-address</code></td><td>Display device-derived Orchard UA</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
-          <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Signing history (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity/recent</code></td><td>Wallet-facing recent activity (auth) — rebuilt tx history + swaps, current wallet scope only</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Raw signing/API audit log (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/activity/:id</code></td><td>Single audit entry with full request/response bodies (auth)</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/swaps</code></td><td>Swap history (auth) — filter by status/asset/fromDate/toDate/limit/offset</td><td>5s</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/v1/swaps/stats</code></td><td>Aggregate counts: total/completed/failed/refunded/pending (auth)</td><td>5s</td></tr>
@@ -1032,6 +1034,14 @@ function requiredSigningFields(path: string): string[] | null {
 }
 
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
+  const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
+    const deviceId = engine.getDeviceState().deviceId
+    if (!deviceId) return null
+    const seedId = engine.currentSeedEthAddress?.toLowerCase()
+    if (!seedId) return null
+    return { deviceId, walletId: `${deviceId}:${seedId}` }
+  }
+
   // Device-swap detection: if deviceId changes between two `ready` states,
   // pubkey/address caches must be flushed or the old device's xpubs will
   // leak. (lastDeviceId is also flushed on disconnect so a re-connect of the
@@ -1110,7 +1120,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
         // ballooning response_body across repeated reads.
-        const skipAuditLog = path.startsWith('/api/v1/activity')
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
@@ -1127,11 +1137,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // and the audit log is the only place to retrieve a prior signature for
           // regression debugging (recover-and-compare) without re-issuing the sign.
           const SENSITIVE_OUTPUT_KEYS = new Set([
-            'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
+            'apiKey', 'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
           ])
           const trimOutputs = (obj: any, depth = 0): any => {
             if (!obj || typeof obj !== 'object' || depth > 8) return obj
-            if (Array.isArray(obj)) return obj.map(v => trimOutputs(v, depth + 1))
+            if (Array.isArray(obj)) {
+              if (obj.length > 50) return `[trimmed ${obj.length} items]`
+              return obj.map(v => trimOutputs(v, depth + 1))
+            }
             const out: any = {}
             for (const [k, v] of Object.entries(obj)) {
               if (SENSITIVE_OUTPUT_KEYS.has(k)) { out[k] = '[trimmed]'; continue }
@@ -1139,15 +1152,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
             return out
           }
-          const isSigning = SIGNING_ROUTES.has(path)
           callbacks.onApiLog({
             method, route: path, timestamp: requestStart,
             durationMs: Date.now() - requestStart,
             status, appName, imageUrl: imageUrl || undefined,
             // Request body kept as-is so the user can see what they signed.
             requestBody: reqBody,
-            // Response body trims large signature blobs but leaves everything else.
-            responseBody: isSigning ? trimOutputs(data) : data,
+            // Response body trims large or sensitive output blobs but leaves compact
+            // fields intact for local debugging.
+            responseBody: trimOutputs(data),
             ...resolvedActivity,
           })
         }
@@ -2742,9 +2755,32 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // PRIVACY: standard-wallet history is hidden during passphrase sessions,
         // matching the RPC `getApiLogs` / `getRecentActivity` behavior.
         // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/activity/recent' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const limitRaw = q.get('limit')
+          const limit = limitRaw === null ? 50 : Number(limitRaw)
+          if (!Number.isFinite(limit)) {
+            throw new HttpError(400, 'Invalid limit: must be a number')
+          }
+          const entries = getRecentActivityFromLog(
+            Math.min(Math.max(limit, 1), 500),
+            q.get('chainId') || q.get('chain') || undefined,
+            scope.deviceId,
+            scope.walletId,
+          )
+          return json({ entries, count: entries.length })
+        }
+
         if (path === '/api/v1/activity' && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
           const url = new URL(req.url)
           const q = url.searchParams
           const parseNumParam = (name: string): number | undefined => {
@@ -2757,6 +2793,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return n
           }
           const entries = findApiLogs({
+            ...scope,
             route:        q.get('route')         || undefined,
             activityType: q.get('activityType')  || undefined,
             txid:         q.get('txid')          || undefined,
@@ -2769,15 +2806,47 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ entries, count: entries.length })
         }
 
+        if (path === '/api/v1/activity/rebuild' && method === 'POST') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) {
+            return json({ error: 'Activity rebuild is not available for passphrase-protected wallets' }, 403)
+          }
+          const scope = getWalletDbScope()
+          if (!scope) {
+            return json({ error: 'Wallet scope is not ready. Unlock the device and wait for seed identity.' }, 409)
+          }
+          const wallet = requireWallet(engine)
+          reqBody = await req.json().catch(() => ({}))
+          const body = (reqBody && typeof reqBody === 'object') ? reqBody as ActivityHistoryRebuildOptions : {}
+          const chainIds = [
+            ...(Array.isArray(body.chainIds) ? body.chainIds : []),
+            ...(typeof body.chainId === 'string' ? [body.chainId] : []),
+          ]
+          const unknown = chainIds.filter(id => !CHAINS.some(c => c.id === id || c.symbol === id))
+          if (unknown.length > 0) {
+            return json({ error: `Unknown chain id(s): ${unknown.join(', ')}` }, 400)
+          }
+          const result = await rebuildActivityHistory({
+            wallet,
+            scope,
+            chains: CHAINS,
+            firmwareVersion: engine.getDeviceState().firmwareVersion,
+            options: body,
+          })
+          return json(result)
+        }
+
         if (path.startsWith('/api/v1/activity/') && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const scope = getWalletDbScope()
+          if (!scope) return json({ error: 'Not found' }, 404)
           const tail = path.split('/').pop() || ''
           const id = Number(tail)
           if (!Number.isFinite(id) || !Number.isInteger(id)) {
             return json({ error: 'Invalid id' }, 400)
           }
-          const entry = getApiLogById(id)
+          const entry = getApiLogById(id, scope.deviceId, scope.walletId)
           if (!entry) return json({ error: 'Not found' }, 404)
           return json(entry)
         }
@@ -2793,12 +2862,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (engine.isPassphraseWallet) {
             return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
           }
-          return json(getSwapHistoryStats())
+          const scope = getWalletDbScope()
+          if (!scope) return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
+          return json(getSwapHistoryStats(scope.deviceId, scope.walletId))
         }
 
         if (path === '/api/v1/swaps' && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
           const url = new URL(req.url)
           const q = url.searchParams
           const parseNumParam = (name: string): number | undefined => {
@@ -2824,6 +2897,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status = rawStatus as SwapTrackingStatus | 'all'
           }
           const entries = getSwapHistory({
+            ...scope,
             status,
             asset:    q.get('asset')   || undefined,
             fromDate: parseNumParam('fromDate'),
@@ -2837,9 +2911,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path.startsWith('/api/v1/swaps/') && method === 'GET') {
           auth.requireAuth(req)
           if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const scope = getWalletDbScope()
+          if (!scope) return json({ error: 'Not found' }, 404)
           const tail = path.split('/').pop() || ''
           if (!tail) return json({ error: 'Invalid txid' }, 400)
-          const record = getSwapHistoryByTxid(tail)
+          const record = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
           if (!record) return json({ error: 'Not found' }, 404)
           return json(record)
         }

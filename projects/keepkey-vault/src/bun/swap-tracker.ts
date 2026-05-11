@@ -124,6 +124,9 @@ const MAX_RELAY_REGISTER_ATTEMPTS = 5
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 let initPromise: Promise<void> | null = null
+let getActiveDeviceId: () => string | undefined = () => undefined
+let getActiveWalletId: () => string | undefined = () => undefined
+const rehydratedWalletIds = new Set<string>()
 
 // Required Pioneer SDK methods — app MUST NOT start without these
 const REQUIRED_METHODS = ['CreatePendingSwap', 'GetPendingSwap'] as const
@@ -135,50 +138,19 @@ export function isTrackerInitialized(): boolean {
   return sendMessage !== null
 }
 
-/** Initialize the tracker — verifies Pioneer SDK has required methods. Idempotent: safe to call multiple times. */
-export async function initSwapTracker(messageSender: (msg: string, data: any) => void): Promise<void> {
-  // Always update the message sender (supports re-init after failure)
-  sendMessage = messageSender
+function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
+  const scopeId = walletId || deviceId
+  if (!scopeId || rehydratedWalletIds.has(scopeId)) return
 
-  // If already verified, just update the sender and return
-  if (pioneerVerified) return
-
-  // Deduplicate concurrent init calls
-  if (initPromise) return initPromise
-  initPromise = (async () => {
-    // FAIL FAST: Verify Pioneer SDK exposes the swap tracking methods
-    const pioneer = await getPioneer()
-    const missing: string[] = []
-    for (const method of REQUIRED_METHODS) {
-      if (typeof pioneer[method] !== 'function') {
-        missing.push(method)
-      }
-    }
-    if (missing.length > 0) {
-      const available = Object.keys(pioneer).filter(k => typeof pioneer[k] === 'function')
-      console.error(`${TAG} FATAL: Pioneer SDK missing required methods: ${missing.join(', ')}`)
-      console.error(`${TAG} Available methods: ${available.join(', ')}`)
-      throw new Error(`Pioneer SDK missing swap tracking methods: ${missing.join(', ')}. Cannot track swaps.`)
-    }
-
-    pioneerVerified = true
-    swapLog(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
-  })()
-
-  try {
-    await initPromise
-  } finally {
-    initPromise = null
-  }
-
-  // Rehydrate active swaps from SQLite (survives app restart)
   try {
     const activeStatuses: SwapTrackingStatus[] = ['pending', 'confirming', 'output_detected', 'output_confirming', 'output_confirmed']
     for (const status of activeStatuses) {
-      const records = getSwapHistory({ status, limit: 50 })
+      const records = getSwapHistory({ status, limit: 50, deviceId, walletId })
       for (const r of records) {
         if (pendingSwaps.has(r.txid)) continue
         const swap: PendingSwap = {
+          deviceId: r.deviceId,
+          walletId: r.walletId,
           txid: r.txid,
           fromAsset: r.fromAsset,
           toAsset: r.toAsset,
@@ -209,14 +181,59 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
         pendingSwaps.set(r.txid, swap)
       }
     }
+    rehydratedWalletIds.add(scopeId)
     if (pendingSwaps.size > 0) {
-      swapLog(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
-      // No polling at boot — refreshSwap() drives status updates only when the
-      // user opens that specific swap in the dialog.
+      swapLog(`${TAG} Rehydrated active swap(s) for scope ${scopeId}`)
     }
   } catch (e: any) {
     console.warn(`${TAG} Failed to rehydrate swaps from SQLite: ${e.message}`)
   }
+}
+
+/** Initialize the tracker — verifies Pioneer SDK has required methods. Idempotent: safe to call multiple times. */
+export async function initSwapTracker(messageSender: (msg: string, data: any) => void, opts?: { getDeviceId?: () => string | undefined; getWalletId?: () => string | undefined }): Promise<void> {
+  // Always update the message sender (supports re-init after failure)
+  sendMessage = messageSender
+  if (opts?.getDeviceId) getActiveDeviceId = opts.getDeviceId
+  if (opts?.getWalletId) getActiveWalletId = opts.getWalletId
+
+  // If already verified, just update the sender and return
+  if (pioneerVerified) {
+    rehydrateActiveSwaps(getActiveDeviceId(), getActiveWalletId())
+    return
+  }
+
+  // Deduplicate concurrent init calls
+  if (initPromise) return initPromise
+  initPromise = (async () => {
+    // FAIL FAST: Verify Pioneer SDK exposes the swap tracking methods
+    const pioneer = await getPioneer()
+    const missing: string[] = []
+    for (const method of REQUIRED_METHODS) {
+      if (typeof pioneer[method] !== 'function') {
+        missing.push(method)
+      }
+    }
+    if (missing.length > 0) {
+      const available = Object.keys(pioneer).filter(k => typeof pioneer[k] === 'function')
+      console.error(`${TAG} FATAL: Pioneer SDK missing required methods: ${missing.join(', ')}`)
+      console.error(`${TAG} Available methods: ${available.join(', ')}`)
+      throw new Error(`Pioneer SDK missing swap tracking methods: ${missing.join(', ')}. Cannot track swaps.`)
+    }
+
+    pioneerVerified = true
+    swapLog(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+  })()
+
+  try {
+    await initPromise
+  } finally {
+    initPromise = null
+  }
+
+  // Rehydrate active swaps for the connected device only. No polling at boot —
+  // refreshSwap() drives status updates only when the user opens a swap dialog.
+  rehydrateActiveSwaps(getActiveDeviceId(), getActiveWalletId())
 }
 
 /** Register a newly broadcast swap for tracking.
@@ -225,9 +242,11 @@ export function trackSwap(
   result: SwapResult,
   params: ExecuteSwapParams,
   quote: SwapQuote,
-  opts?: { skipPersist?: boolean },
+  opts?: { skipPersist?: boolean; deviceId?: string; walletId?: string },
 ): void {
   const now = Date.now()
+  const deviceId = opts?.deviceId
+  const walletId = opts?.walletId
   // CAIP is the only identifier the caller provides. Display strings
   // (symbol, name, THORChain-style asset) are derived here so UI/history
   // can render without a Pioneer round-trip — never used for routing.
@@ -240,6 +259,8 @@ export function trackSwap(
   const relayRequestId = extractRelayRequestId(params.relayTx?.data)
 
   const swap: PendingSwap = {
+    deviceId,
+    walletId,
     txid: result.txid,
     fromAsset: fromDisplay.asset,
     toAsset: toDisplay.asset,
@@ -272,6 +293,8 @@ export function trackSwap(
   // derived display fields, populated from the CAIP. CAIP is canonical.
   const historyRecord: SwapHistoryRecord = {
     id: crypto.randomUUID(),
+    deviceId,
+    walletId,
     txid: result.txid,
     fromAsset: fromDisplay.asset,
     toAsset: toDisplay.asset,
@@ -320,8 +343,10 @@ export function trackSwap(
 }
 
 /** Get all pending swaps (for getPendingSwaps RPC) */
-export function getPendingSwaps(): PendingSwap[] {
+export function getPendingSwaps(deviceId?: string, walletId?: string): PendingSwap[] {
+  rehydrateActiveSwaps(deviceId, walletId)
   return Array.from(pendingSwaps.values())
+    .filter(s => walletId ? s.walletId === walletId : !deviceId || s.deviceId === deviceId)
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
@@ -456,6 +481,8 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
     const now = Date.now()
     if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, newStatus, {
+      deviceId: swap.deviceId,
+      walletId: swap.walletId,
       outboundTxid: outboundTxid || undefined,
       error: errorMsg || undefined,
       receivedOutput,
@@ -475,10 +502,12 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
 /** Build an in-memory PendingSwap from a persisted history row. Pure read —
  *  no side effects. Use this anywhere the caller wants to inspect a stored
  *  swap without "reactivating" it in the live tracker registry. */
-function readSwapFromDb(txid: string): PendingSwap | null {
-  const r = getSwapHistoryByTxid(txid)
+function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): PendingSwap | null {
+  const r = getSwapHistoryByTxid(txid, deviceId, walletId)
   if (!r) return null
   return {
+    deviceId: r.deviceId,
+    walletId: r.walletId,
     txid: r.txid,
     fromAsset: r.fromAsset, toAsset: r.toAsset,
     fromSymbol: r.fromSymbol, toSymbol: r.toSymbol,
@@ -504,8 +533,8 @@ function readSwapFromDb(txid: string): PendingSwap | null {
  *  push updates for the swap going forward (refreshSwap, getPendingSwaps).
  *  For diagnostic / read-only paths, call readSwapFromDb directly so the
  *  tracker registry isn't polluted by an idle history lookup. */
-function hydrateFromDb(txid: string): PendingSwap | null {
-  const swap = readSwapFromDb(txid)
+function hydrateFromDb(txid: string, deviceId?: string, walletId?: string): PendingSwap | null {
+  const swap = readSwapFromDb(txid, deviceId, walletId)
   if (swap) pendingSwaps.set(txid, swap)
   return swap
 }
@@ -545,7 +574,7 @@ async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
     swap.status = decision.status
     swap.error = decision.error
     swap.updatedAt = Date.now()
-    try { updateSwapHistoryStatus(swap.txid, 'failed') } catch { /* ignore */ }
+    try { updateSwapHistoryStatus(swap.txid, 'failed', { deviceId: swap.deviceId, walletId: swap.walletId }) } catch { /* ignore */ }
     pushUpdate(swap)
     return true
   } catch (e: any) {
@@ -557,8 +586,9 @@ async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
 /** Single on-demand Pioneer poll for one swap.
  *  Called by the SwapDialog while the user has it open (there is no background
  *  timer). Returns the latest in-memory swap state, or null if unknown. */
-export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
-  let swap = pendingSwaps.get(txid) || hydrateFromDb(txid)
+export async function refreshSwap(txid: string, deviceId?: string, walletId?: string): Promise<PendingSwap | null> {
+  const live = pendingSwaps.get(txid)
+  let swap = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : hydrateFromDb(txid, deviceId, walletId)
   if (!swap) {
     swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
     return null
@@ -586,7 +616,7 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
       const id = await fetchRelayRequestIdByHash(swap.txid)
       if (id) {
         swap.relayRequestId = id
-        try { setSwapRelayRequestId(swap.txid, id) } catch { /* best-effort */ }
+        try { setSwapRelayRequestId(swap.txid, id, swap.deviceId, swap.walletId) } catch { /* best-effort */ }
         pushUpdate(swap)
         swapLog(`${TAG} Relay requestId backfilled for ${swap.txid.slice(0, 10)}...: ${id.slice(0, 12)}...`)
       }
@@ -666,7 +696,7 @@ export async function refreshSwap(txid: string): Promise<PendingSwap | null> {
  *  UI but must never leak through any read RPC — including from a later
  *  standard-wallet session in the same vault process. Returns null with no
  *  Pioneer query so we don't even confirm the txid's existence. */
-export async function debugSwapLookup(txid: string): Promise<{
+export async function debugSwapLookup(txid: string, deviceId?: string, walletId?: string): Promise<{
   txid: string
   pioneerBaseUrl: string | undefined
   local: PendingSwap | null
@@ -677,7 +707,9 @@ export async function debugSwapLookup(txid: string): Promise<{
   if (noPersistSwaps.has(txid)) return null
   // readSwapFromDb (not hydrateFromDb) — debugSwapLookup is read-only and
   // must not promote an idle history row back into the active tracker registry.
-  const local = pendingSwaps.get(txid) || readSwapFromDb(txid)
+  const live = pendingSwaps.get(txid)
+  const local = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : readSwapFromDb(txid, deviceId, walletId)
+  if ((walletId || deviceId) && !local) return null
   let pioneerBaseUrl: string | undefined
   try {
     const { getPioneerApiBase } = await import('./pioneer')

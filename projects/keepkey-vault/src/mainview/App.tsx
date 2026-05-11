@@ -33,6 +33,9 @@ import { SwapRpcMount } from "./components/SwapRpcMount"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
+type SigningPhase = "approve" | "sending-payload" | "device-confirm"
+
+const SIGNING_PAYLOAD_MIN_MS = 15000
 
 function App() {
 	const { t } = useTranslation()
@@ -239,41 +242,95 @@ function App() {
 
 	// ── Signing approval overlay ────────────────────────────────────
 	const [signingRequest, setSigningRequest] = useState<SigningRequestInfo | null>(null)
-	const [signingPhase, setSigningPhase] = useState<'approve' | 'device-confirm'>('approve')
+	const [signingPhase, setSigningPhase] = useState<SigningPhase>('approve')
+	const signingRequestRef = useRef<SigningRequestInfo | null>(null)
+	const signingPhaseRef = useRef<SigningPhase>('approve')
+	const signingPayloadStartedAt = useRef<number | null>(null)
+	const signingConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const setSigningPhaseTracked = useCallback((phase: SigningPhase) => {
+		signingPhaseRef.current = phase
+		setSigningPhase(phase)
+	}, [])
+
+	const clearSigningConfirmTimer = useCallback(() => {
+		if (signingConfirmTimer.current) {
+			clearTimeout(signingConfirmTimer.current)
+			signingConfirmTimer.current = null
+		}
+	}, [])
 
 	useEffect(() => {
 		const unsub1 = onRpcMessage("signing-request", (payload) => {
-			setSigningPhase('approve')
-			setSigningRequest(payload as SigningRequestInfo)
+			clearSigningConfirmTimer()
+			signingPayloadStartedAt.current = null
+			const request = payload as SigningRequestInfo
+			signingRequestRef.current = request
+			setSigningPhaseTracked('approve')
+			setSigningRequest(request)
 		})
 		const unsub2 = onRpcMessage("signing-dismissed", () => {
+			clearSigningConfirmTimer()
+			signingPayloadStartedAt.current = null
+			signingRequestRef.current = null
 			setSigningRequest(null)
-			setSigningPhase('approve')
+			setSigningPhaseTracked('approve')
 		})
 		return () => { unsub1(); unsub2() }
-	}, [])
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked])
+
+	useEffect(() => {
+		return () => clearSigningConfirmTimer()
+	}, [clearSigningConfirmTimer])
+
+	useEffect(() => {
+		return onRpcMessage("device-button-request", () => {
+			if (!signingRequestRef.current || signingPhaseRef.current !== 'sending-payload') return
+
+			const startedAt = signingPayloadStartedAt.current ?? Date.now()
+			const elapsedMs = Date.now() - startedAt
+			const delayMs = Math.max(0, SIGNING_PAYLOAD_MIN_MS - elapsedMs)
+
+			clearSigningConfirmTimer()
+			signingConfirmTimer.current = setTimeout(() => {
+				signingConfirmTimer.current = null
+				if (signingPhaseRef.current === 'sending-payload') {
+					setSigningPhaseTracked('device-confirm')
+				}
+			}, delayMs)
+		})
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked])
 
 	const handleApproveSign = useCallback(async () => {
 		if (!signingRequest) return
-		// Transition overlay to "confirm on device" — don't dismiss yet
-		setSigningPhase('device-confirm')
+		clearSigningConfirmTimer()
+		signingPayloadStartedAt.current = Date.now()
+		// The backend is now unblocked and can start writing the request to the
+		// device. Wait for the real device ButtonRequest before asking the user
+		// to press the physical button.
+		setSigningPhaseTracked('sending-payload')
 		try {
 			await rpcRequest("approveSigningRequest", { id: signingRequest.id })
 		} catch (e) {
 			console.error("approveSign:", e)
+			clearSigningConfirmTimer()
+			signingPayloadStartedAt.current = null
 			// RPC failed (device disconnected, timeout, etc.) — revert to actionable
 			// approve/reject state so the user isn't stuck on a dead "confirm on device" overlay.
-			setSigningPhase('approve')
+			setSigningPhaseTracked('approve')
 		}
 		// On success, overlay stays open until 'signing-dismissed' RPC arrives from bun side
-	}, [signingRequest])
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked, signingRequest])
 
 	const handleRejectSign = useCallback(async () => {
 		if (!signingRequest) return
 		try { await rpcRequest("rejectSigningRequest", { id: signingRequest.id }) } catch (e) { console.error("rejectSign:", e) }
+		clearSigningConfirmTimer()
+		signingPayloadStartedAt.current = null
+		signingRequestRef.current = null
 		setSigningRequest(null)
-		setSigningPhase('approve')
-	}, [signingRequest])
+		setSigningPhaseTracked('approve')
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked, signingRequest])
 
 	// ── Paired Apps panel ───────────────────────────────────────────
 	const [pairedAppsOpen, setPairedAppsOpen] = useState(false)
