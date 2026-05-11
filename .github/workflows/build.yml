@@ -422,11 +422,11 @@ jobs:
         if: runner.os == 'Linux'
         env:
           # Highest GLIBC_ symbol allowed in any ELF inside the bundle.
-          # 2.38 = upstream Electrobun libNativeWrapper.so floor (excludes Debian 12 etc).
-          # 2.35 = ubuntu-22.04 floor; reachable once electrobun-linux-x64-core-v1 is published
-          #        and the substitute step above runs successfully.
-          # Set to 2.38 for now; ratchet to 2.35 after the first successful publish run.
-          LINUX_GLIBC_FLOOR: '2.38'
+          # 2.35 = ubuntu-22.04 floor, reached via our self-built Electrobun
+          #        core (electrobun-linux-x64-core-v1) substituted in above.
+          #        Covers Debian 12, Ubuntu 22.04 LTS, RHEL/Rocky 9, Mint 21,
+          #        Pop!_OS 22.04. Republish via `make publish-electrobun-linux-x64-core`.
+          LINUX_GLIBC_FLOOR: '2.35'
         shell: bash {0}  # disable -e + pipefail; we manage exit code ourselves
         run: |
           cd projects/keepkey-vault/artifacts
@@ -668,7 +668,7 @@ jobs:
             printf 'Priority: optional\n'
             printf 'Architecture: %s\n' "$ARCH"
             printf 'Installed-Size: %s\n' "$SIZE_KB"
-            printf 'Depends: libc6 (>= 2.38), libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libayatana-appindicator3-1 | libappindicator3-1\n'
+            printf 'Depends: libc6 (>= 2.35), libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libayatana-appindicator3-1 | libappindicator3-1\n'
             printf 'Recommends: udev\n'
             printf 'Maintainer: KEY HODLERS LLC <support@keepkey.com>\n'
             printf 'Homepage: https://keepkey.com\n'
