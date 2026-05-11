@@ -731,9 +731,21 @@ export function insertApiLog(entry: ApiLogEntry) {
         entry.activityType || null,
       ]
     )
-    // Periodic prune (every ~100 inserts, check if over limit)
+    // Periodic prune (every ~100 inserts). Keep rebuilt chain-history rows;
+    // cap only generic API audit noise so a full wallet rebuild cannot be
+    // hollowed out by /docs, balance, or address polling entries.
     if (Math.random() < 0.01) {
-      db.run(`DELETE FROM api_log WHERE id NOT IN (SELECT id FROM api_log ORDER BY timestamp DESC LIMIT ?)`, [MAX_API_LOG_ROWS])
+      db.run(
+        `DELETE FROM api_log
+          WHERE method <> 'SCAN'
+            AND id NOT IN (
+              SELECT id FROM api_log
+              WHERE method <> 'SCAN'
+              ORDER BY timestamp DESC
+              LIMIT ?
+            )`,
+        [MAX_API_LOG_ROWS],
+      )
     }
   } catch (e: any) {
     console.warn('[db] insertApiLog failed:', e.message)
