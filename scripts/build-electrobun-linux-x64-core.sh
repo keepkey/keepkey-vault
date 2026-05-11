@@ -97,7 +97,11 @@ for f in launcher extractor libNativeWrapper.so libNativeWrapper_cef.so libasar.
     fail=1
     continue
   fi
-  max=$(strings "$src" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1)
+  # `|| true` because grep returns 1 when a binary has no GLIBC_ symbols
+  # (e.g. statically linked Zig binaries like `launcher`/`extractor`), and
+  # the script-level `set -euo pipefail` would otherwise kill us before we
+  # could finish reporting. Empty max is the legitimate "none" case.
+  max=$(strings "$src" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1 || true)
   printf "  %-30s %s\n" "$f" "${max:-(none)}"
 done
 [ "$fail" = "0" ] || exit 1
@@ -126,6 +130,6 @@ echo ""
 echo "=== Final glibc audit of tarball contents ==="
 for f in "$STAGING"/*; do
   bn=$(basename "$f")
-  max=$(strings "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1)
+  max=$(strings "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1 || true)
   printf "  %-30s %s\n" "$bn" "${max:-(none)}"
 done
