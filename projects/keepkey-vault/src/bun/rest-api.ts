@@ -19,6 +19,7 @@ import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
 import { getSetting, findApiLogs, getApiLogById, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats } from './db'
+import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -2778,6 +2779,36 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             offset:       parseNumParam('offset'),
           })
           return json({ entries, count: entries.length })
+        }
+
+        if (path === '/api/v1/activity/rebuild' && method === 'POST') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) {
+            return json({ error: 'Activity rebuild is not available for passphrase-protected wallets' }, 403)
+          }
+          const scope = getWalletDbScope()
+          if (!scope) {
+            return json({ error: 'Wallet scope is not ready. Unlock the device and wait for seed identity.' }, 409)
+          }
+          const wallet = requireWallet(engine)
+          reqBody = await req.json().catch(() => ({}))
+          const body = (reqBody && typeof reqBody === 'object') ? reqBody as ActivityHistoryRebuildOptions : {}
+          const chainIds = [
+            ...(Array.isArray(body.chainIds) ? body.chainIds : []),
+            ...(typeof body.chainId === 'string' ? [body.chainId] : []),
+          ]
+          const unknown = chainIds.filter(id => !CHAINS.some(c => c.id === id || c.symbol === id))
+          if (unknown.length > 0) {
+            return json({ error: `Unknown chain id(s): ${unknown.join(', ')}` }, 400)
+          }
+          const result = await rebuildActivityHistory({
+            wallet,
+            scope,
+            chains: CHAINS,
+            firmwareVersion: engine.getDeviceState().firmwareVersion,
+            options: body,
+          })
+          return json(result)
         }
 
         if (path.startsWith('/api/v1/activity/') && method === 'GET') {

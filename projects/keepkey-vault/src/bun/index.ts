@@ -105,6 +105,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
+import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
@@ -115,7 +116,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, apiLogTxidExists, updateApiLogTxMeta, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -3998,83 +3999,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) {
 					throw new Error('Chain history scanning is not available for passphrase-protected wallets (privacy).')
 				}
+				if (!engine.wallet) throw new Error('No device connected')
+				const scope = getWalletDbScope()
+				if (!scope) throw new Error('Wallet scope is not ready. Unlock the device and wait for seed identity.')
 
-				// Get the address/xpub for this chain from cached balances
-				// UTXO chains store xpub, account-based chains store address
-				const deviceId = engine.getDeviceState().deviceId
-				if (!deviceId) throw new Error('No device connected')
-				const cachedBalances = getCachedBalances(deviceId)
-				const chainBalance = cachedBalances?.balances?.find(b => b.chainId === params.chainId)
-				const pubkey = chainBalance?.address
-				if (!pubkey) throw new Error(`No cached address for ${chain.symbol} — load balances first`)
+				const result = await rebuildActivityHistory({
+					wallet: engine.wallet,
+					scope,
+					chains: getAllChains(),
+					firmwareVersion: engine.getDeviceState().firmwareVersion,
+					options: { chainId: params.chainId },
+				})
+				const chainResult = result.chains.find(c => c.chainId === params.chainId)
+				if (chainResult?.error) throw new Error(chainResult.error)
 
-				const pioneer = await getPioneer()
-				console.log(`[activity] Scanning ${chain.symbol} history for ${chain.chainFamily === 'utxo' ? 'xpub' : 'address'}: ${pubkey.slice(0, 16)}...`)
-
-				const resp = await withTimeout(
-					pioneer.GetTransactionHistory({ queries: [{ pubkey, caip: chain.caip }] }),
-					PIONEER_TIMEOUT_MS,
-					`GetTransactionHistory(${chain.symbol})`
-				)
-				const data = resp?.data || resp
-				const histories = data?.histories || data?.data?.histories || []
-				const txs: any[] = histories[0]?.transactions || []
-
-				if (txs.length === 0) {
-					console.log(`[activity] No transactions found for ${chain.symbol}`)
-					return { count: 0 }
-				}
-
-				// Insert new txs, update confirmations on existing ones
-				let inserted = 0
-				let updated = 0
-				for (const tx of txs) {
-					const txid = tx.txid || tx.hash || tx.txHash
-					if (!txid) continue
-
-					const direction = tx.direction || (tx.value < 0 ? 'sent' : 'received')
-					const activityType = direction === 'sent' ? 'send' : 'receive'
-					const ts = tx.timestamp ? tx.timestamp * 1000 : tx.blockTime ? tx.blockTime * 1000 : Date.now()
-					const confirmations = typeof tx.confirmations === 'number' ? tx.confirmations : 0
-					const blockHeight = tx.blockHeight || tx.block_height || tx.height || 0
-					const value = tx.value != null ? String(tx.value) : undefined
-					const fee = tx.fee != null ? String(tx.fee) : undefined
-
-					// Tx metadata stored in response_body
-					const meta = { confirmations, blockHeight, value, fee, direction }
-
-					// PRIVACY: Skip DB writes for passphrase wallets (defense in depth —
-					// the RPC handler already throws before reaching here).
-					if (engine.isPassphraseWallet) continue
-
-					const scope = getWalletDbScope()
-					if (!scope) continue
-
-					if (apiLogTxidExists(txid, scope.deviceId, scope.walletId)) {
-						// Update confirmation count on existing entry
-						updateApiLogTxMeta(txid, meta, scope.deviceId, scope.walletId)
-						updated++
-					} else {
-						// New tx — insert
-						insertApiLog({
-							...scope,
-							method: 'SCAN',
-							route: `history/${params.chainId}`,
-							timestamp: ts,
-							durationMs: 0,
-							status: 200,
-							appName: 'vault',
-							txid,
-							chain: chain.symbol,
-							activityType,
-							responseBody: meta,
-						})
-						inserted++
-					}
-				}
-
-				console.log(`[activity] Scanned ${chain.symbol}: ${txs.length} txs, ${inserted} new, ${updated} updated`)
-				return { count: inserted }
+				console.log(`[activity] Scanned ${chain.symbol}: ${chainResult?.txs || 0} txs, ${chainResult?.inserted || 0} new, ${chainResult?.updated || 0} updated`)
+				return { count: chainResult?.inserted || 0 }
 			},
 			dismissActivity: async (_params) => {
 				// No-op: api_log entries are audit records, not dismissible

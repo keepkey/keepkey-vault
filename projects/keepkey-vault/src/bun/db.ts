@@ -952,6 +952,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
         walletId: r.wallet_id || undefined,
         txid: r.txid || undefined,
         chain: r.chain || '?',
+        chainId: meta?.chainId ?? undefined,
         type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
         source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
         appName: r.method === 'RPC' ? undefined : (isScan ? undefined : r.app_name),

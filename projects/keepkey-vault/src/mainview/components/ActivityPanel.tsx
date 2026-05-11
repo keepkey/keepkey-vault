@@ -789,7 +789,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                 ))}
                 {activityTimeline.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
-                    {selectedDef ? `No activity for ${selectedDef.symbol}. Refresh to scan this wallet.` : 'No activity for this wallet yet. Choose a network to scan.'}
+                    {selectedDef ? `No indexed ${selectedDef.symbol} activity. Refresh to scan.` : 'No indexed activity loaded. Choose a network to scan.'}
                   </Text>
                 )}
               </>
