@@ -261,12 +261,21 @@ function OrbitalView({
 		// the four edge midpoints, and the remaining two inward on the
 		// diagonal. Layout reads as a filled rectangle (corners visible)
 		// rather than a circle.
+		// Reserve the top-left corner for the Grid/Orbit toggle so the TL chain
+		// icon doesn't slide under it. Toggle is ~150×40 + 14px inset; pad an
+		// extra 12px so the icon clears the toggle's drop shadow.
+		const TOGGLE_RESERVE_X = 170
+		const TOGGLE_RESERVE_Y = 66
 		const slot = (rank: number, sat: number): { x: number; y: number } => {
 			const half = sat / 2 + 6
 			const innerOffX = width * 0.22
 			const innerOffY = height * 0.22
+			// Push slot 0 down/right enough to clear the toggle. The other
+			// corners are far from the toggle so their `half` value is fine.
+			const tlX = Math.max(half, TOGGLE_RESERVE_X)
+			const tlY = Math.max(half, TOGGLE_RESERVE_Y)
 			switch (rank) {
-				case 0: return { x: half, y: half }                            // TL corner
+				case 0: return { x: tlX, y: tlY }                              // TL corner
 				case 1: return { x: width - half, y: half }                    // TR corner
 				case 2: return { x: width - half, y: height - half }           // BR corner
 				case 3: return { x: half, y: height - half }                   // BL corner
@@ -1129,6 +1138,11 @@ function OrbitalView({
 									? t.tok.balanceUsd.toFixed(2)
 									: t.tok.balanceUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 								: ''
+							// Prefer the token's bundled icon URL; fall back
+							// to getAssetIcon resolution against the token's
+							// caip. Last resort: a generated initial-letter
+							// avatar so the bubble never reads as broken.
+							const iconUrl = t.tok.icon || getAssetIcon(t.tok.caip)
 							return (
 								<Box
 									key={`tok-${t.tok.caip}-${i}`}
@@ -1139,22 +1153,18 @@ function OrbitalView({
 									w={`${t.sat}px`}
 									h={`${t.sat}px`}
 									borderRadius="full"
-									border="1px solid var(--line-2)"
-									bg="var(--ink-2)"
+									border="0"
+									bg="transparent"
 									color="var(--text-1)"
-									fontFamily="var(--font-mono, monospace)"
-									fontWeight="600"
-									fontSize={`${Math.max(9, Math.round(t.sat * 0.22))}px`}
 									display="grid"
 									placeItems="center"
 									cursor="pointer"
 									p={0}
-									transition="transform 0.15s, box-shadow 0.15s"
-									boxShadow={`0 4px 14px -4px ${parent.chain.color}, 0 0 0 1px rgba(255,255,255,0.04)`}
+									transition="transform 0.15s, box-shadow 0.15s, filter 0.15s"
 									_hover={{
-										transform: 'scale(1.12)',
-										boxShadow: `0 0 0 2px ${parent.chain.color}, 0 6px 18px -4px ${parent.chain.color}`,
+										transform: 'scale(1.14)',
 										zIndex: 11,
+										filter: `drop-shadow(0 0 14px ${parent.chain.color})`,
 									}}
 									style={{
 										animation: `kkBubbleIn 0.4s ${i * 28}ms cubic-bezier(0.34, 1.56, 0.64, 1) both`,
@@ -1165,17 +1175,63 @@ function OrbitalView({
 										onSelect(parent.chain)
 									}}
 								>
-									<Box textAlign="center" lineHeight="1">
-										<Box>{symbol.slice(0, 4).toUpperCase()}</Box>
-										{labelUsd && t.sat >= 36 && (
-											<Box
-												fontSize={`${Math.max(8, Math.round(t.sat * 0.16))}px`}
-												color="var(--text-3)"
-												fontWeight="500"
-												mt="2px"
-											>{labelUsd}</Box>
-										)}
+									<Image
+										src={iconUrl}
+										alt={symbol}
+										w="100%"
+										h="100%"
+										borderRadius="full"
+										bg="var(--ink-2)"
+										boxShadow={`0 0 0 1px var(--line-2), 0 4px 14px -4px ${parent.chain.color}`}
+										// Fallback when the icon URL 404s or
+										// the network's slow — show the ticker
+										// as a generated initial bubble.
+										onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+											const img = e.currentTarget
+											if (img.dataset.fallback) return
+											img.dataset.fallback = '1'
+											img.style.display = 'none'
+										}}
+									/>
+									{/* Always-on text overlay: shows the ticker
+									    in a small chip if the icon hasn't
+									    loaded yet, or sticks to the bottom of
+									    the bubble as a label if the icon did
+									    load and the bubble is big enough. */}
+									<Box
+										position="absolute"
+										inset="0"
+										display="grid"
+										placeItems="center"
+										pointerEvents="none"
+										fontFamily="var(--font-mono, monospace)"
+										fontWeight="700"
+										fontSize={`${Math.max(9, Math.round(t.sat * 0.22))}px`}
+										color="rgba(255,255,255,0.9)"
+										textShadow="0 1px 2px rgba(0,0,0,0.7)"
+										opacity={iconUrl ? 0 : 1}
+										_groupHover={{ opacity: 1 }}
+									>
+										{symbol.slice(0, 4).toUpperCase()}
 									</Box>
+									{labelUsd && (
+										<Box
+											position="absolute"
+											top="100%"
+											left="50%"
+											mt="3px"
+											style={{ transform: 'translateX(-50%)' }}
+											pointerEvents="none"
+											fontFamily="var(--font-mono, monospace)"
+											fontSize={`${Math.max(9, Math.round(t.sat * 0.18))}px`}
+											fontWeight="600"
+											color="var(--text-2)"
+											whiteSpace="nowrap"
+										>
+											<Box as="span" color="var(--text-3)" mr="3px">{symbol.toUpperCase()}</Box>
+											{labelUsd}
+										</Box>
+									)}
 								</Box>
 							)
 						})}
@@ -1758,7 +1814,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						borderRadius="999px"
 						p="3px"
 						gap="2px"
-						zIndex={3}
+						zIndex={50}
+						style={{ backdropFilter: 'blur(8px)' }}
 					>
 						<Box
 							as="button"
