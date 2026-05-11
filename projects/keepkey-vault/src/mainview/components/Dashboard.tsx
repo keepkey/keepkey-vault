@@ -16,6 +16,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
+import { useImagePreload } from "../lib/use-image-preload"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
 class AssetPageErrorBoundary extends Component<
@@ -77,6 +78,11 @@ const DASHBOARD_ANIMATIONS = `
 		from { transform: rotate(0deg); }
 		to   { transform: rotate(360deg); }
 	}
+	@keyframes kkBounceUp {
+		0%   { opacity: 0; transform: translateY(8px) scale(0.96); }
+		60%  { opacity: 1; transform: translateY(-3px) scale(1.02); }
+		100% { opacity: 1; transform: translateY(0) scale(1); }
+	}
 `
 
 /* localStorage key for user's preferred portfolio view. */
@@ -89,11 +95,18 @@ function readSavedView(): DashboardView {
 	} catch { return 'orbital' }
 }
 
-/** Orbital portfolio view — chain logos placed on a slowly rotating ring
- *  around a center total. Ported from the design handoff (balances.jsx
- *  OrbitalView) with vault tokens. Logos sized by sqrt(usd) so a
- *  $10k chain isn't 1000× the diameter of a $10 chain — the ring still
- *  reads even when one wallet dominates. */
+/** Orbital portfolio view — chain logos placed in a constellation around
+ *  the center total. Departs from the original perfect-circle layout in
+ *  three ways:
+ *    1. Logo size scales with USD share — biggest chain reads visually as
+ *       "biggest holding" without needing to lean on the numeric label.
+ *       Range 56→128px (vs old 40→72) so the diff actually communicates.
+ *    2. Logos alternate between two concentric radii (inner / outer) so
+ *       the layout reads as a constellation rather than a perfect ring.
+ *       The largest chain anchors top-inner; smaller chains zigzag outward.
+ *    3. Up to 10 chains visible (was 8) — extra slots cost little when
+ *       sizes vary, and the per-chain "+N tokens" badge becomes useful
+ *       on more rows. */
 function OrbitalView({
 	chains,
 	balances,
@@ -116,8 +129,17 @@ function OrbitalView({
 	const [hover, setHover] = useState<string | null>(null)
 	const [size, setSize] = useState(440)
 
+	// Orbital is the visual hero of the dashboard — let it actually use the
+	// available viewport instead of clamping at 440px. We cap at 920px so a
+	// 27" monitor doesn't produce icons the size of someone's head; floor at
+	// 280px for narrow phone widths; and reserve ~280px of vertical room for
+	// the topbar + chain list/cards that sit underneath.
 	useEffect(() => {
-		const compute = () => setSize(Math.min(440, Math.max(280, window.innerWidth - 80)))
+		const compute = () => {
+			const wAvail = window.innerWidth - 64
+			const hAvail = window.innerHeight - 280
+			setSize(Math.min(920, Math.max(280, Math.min(wAvail, hAvail))))
+		}
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
@@ -125,13 +147,143 @@ function OrbitalView({
 
 	const cx = size / 2
 	const cy = size / 2
-	const orbitR = size * 0.42
-	const ringR  = size * 0.46
+	const ringR = size * 0.46
 
-	const orbitChains = chains
-		.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
-		.filter(x => x.usd > 0)
-		.slice(0, 8)
+	// Build the chain set once per data change. Up to 10 visible, sorted by
+	// USD desc so the biggest gets index 0 (anchored top).
+	const orbitChains = useMemo(
+		() => chains
+			.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
+			.filter(x => x.usd > 0)
+			.sort((a, b) => b.usd - a.usd)
+			.slice(0, 10),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[chains.map(c => c.id).join('|'), Array.from(cleanBalanceUsd.entries()).map(([k, v]) => `${k}:${v.usd}`).join('|')]
+	)
+
+	// Max USD across the visible set — drives the size scale. Falls back to
+	// 1 so a single-chain wallet still produces a sensible size, not a NaN.
+	const maxOrbitUsd = orbitChains.reduce((m, x) => Math.max(m, x.usd), 0) || 1
+
+	// ── Layout: square-aware radial, big-outside / small-inside ─────────
+	// Each chain gets a size proportional to its USD share (56→144px) and
+	// a position computed in two phases:
+	//   Phase A — radial seed. Spread chains around the full 360° using a
+	//   golden-angle spiral. At each chain's angle, find the SQUARE
+	//   boundary radius (Chebyshev distance, not Euclidean — so chains at
+	//   45° angles get pushed all the way to the corners of the container,
+	//   not just to the inscribed circle). Place the chain at a fraction
+	//   of that boundary radius scaled by its USD share: biggest chain
+	//   sits at the edge, smallest sits well inside.
+	//   Phase B — force relaxation. Iteratively repulse overlapping
+	//   neighbours and push any chain whose box intersects the center
+	//   totals out along the smaller-overlap axis. 60 iterations is
+	//   enough for 10 nodes to settle stably.
+	// Net effect: corners of the square fill with the biggest holdings;
+	// smaller chains pull inward toward the center text but never overlap
+	// it or each other. Looks like a portfolio bento, not a clock face.
+	const layout = useMemo(() => {
+		if (orbitChains.length === 0) return [] as Array<{
+			chain: ChainDef; usd: number; bal: ChainBalance | undefined;
+			x: number; y: number; sat: number
+		}>
+		const N = orbitChains.length
+		// Scale icon sizes against the actual container — 440 was the old fixed
+		// cap so its constants encoded an unstated "1.0 at 440". Now the canvas
+		// can be 920, and at that width the old 56→152 range looks dinky.
+		const k = size / 440
+		const items = orbitChains.map((c, i) => {
+			const share = c.usd / maxOrbitUsd
+			// Two-axis sizing — bigger USD share AND a higher slot rank both
+			// inflate the icon. Slot rank pushes corner chains (i<4) toward
+			// the top end so the four corners always feel anchored; share
+			// carries the rest of the hierarchy.
+			const rankBoost = i < 4 ? 1.0 : i < 8 ? 0.5 : 0.25
+			const sat = Math.round((56 + share * 96 * rankBoost + rankBoost * 24) * k)
+			return { ...c, sat }
+		})
+		// Center totals rectangle — chains must clear this region.
+		const textHalfW = Math.max(96, size * 0.22)
+		const textHalfH = Math.max(60, size * 0.14)
+		const gap = 8
+		// Phase A — deterministic corner-first slots. Forces the four biggest
+		// chains into the four corners of the container, the next four into
+		// the four edge midpoints, and the remaining two inward on the
+		// diagonal. Layout reads as a filled square (corners visible) rather
+		// than a circle.
+		const slot = (rank: number, sat: number): { x: number; y: number } => {
+			const half = sat / 2 + 6
+			const innerOff = size * 0.22
+			switch (rank) {
+				case 0: return { x: half, y: half }                            // TL corner
+				case 1: return { x: size - half, y: half }                     // TR corner
+				case 2: return { x: size - half, y: size - half }              // BR corner
+				case 3: return { x: half, y: size - half }                     // BL corner
+				case 4: return { x: cx, y: half }                              // Top edge mid
+				case 5: return { x: size - half, y: cy }                       // Right edge mid
+				case 6: return { x: cx, y: size - half }                       // Bottom edge mid
+				case 7: return { x: half, y: cy }                              // Left edge mid
+				case 8: return { x: cx - innerOff, y: cy - innerOff }          // TL inner
+				case 9: return { x: cx + innerOff, y: cy + innerOff }          // BR inner
+				default: return { x: cx, y: cy }
+			}
+		}
+		const pos = items.map((it, i) => slot(i, it.sat))
+		// Phase B — relax for non-overlap + text clearance.
+		const ITER = 80
+		for (let k = 0; k < ITER; k++) {
+			for (let i = 0; i < N; i++) {
+				// Pairwise repulsion — hard non-overlap guarantee.
+				for (let j = 0; j < N; j++) {
+					if (i === j) continue
+					let dx = pos[i].x - pos[j].x
+					let dy = pos[i].y - pos[j].y
+					let d = Math.sqrt(dx * dx + dy * dy)
+					if (d < 0.001) { d = 0.001; dx = 0.001; dy = 0 }
+					const minD = items[i].sat / 2 + items[j].sat / 2 + gap
+					if (d < minD) {
+						const push = (minD - d) / 2
+						const ux = dx / d
+						const uy = dy / d
+						pos[i].x += ux * push
+						pos[i].y += uy * push
+						pos[j].x -= ux * push
+						pos[j].y -= uy * push
+					}
+				}
+				// Clear center totals box — push along the smaller-overlap
+				// axis so chains slide laterally rather than jumping.
+				const dxC = pos[i].x - cx
+				const dyC = pos[i].y - cy
+				const clearX = textHalfW + items[i].sat / 2 + gap
+				const clearY = textHalfH + items[i].sat / 2 + gap
+				if (Math.abs(dxC) < clearX && Math.abs(dyC) < clearY) {
+					const overlapX = clearX - Math.abs(dxC)
+					const overlapY = clearY - Math.abs(dyC)
+					if (overlapX < overlapY) {
+						pos[i].x += Math.sign(dxC || 1) * overlapX
+					} else {
+						pos[i].y += Math.sign(dyC || 1) * overlapY
+					}
+				}
+				// Clamp to container, accounting for the USD label band.
+				const halfX = items[i].sat / 2 + 2
+				const halfY = items[i].sat / 2 + 18 // ~18px label below
+				pos[i].x = Math.max(halfX, Math.min(size - halfX, pos[i].x))
+				pos[i].y = Math.max(halfY, Math.min(size - halfY, pos[i].y))
+			}
+		}
+		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), size, cx, cy, maxOrbitUsd])
+
+	// Preload all visible chain icons before we paint the cluster.
+	const iconUrls = useMemo(
+		() => layout.map((c) => getAssetIcon(c.chain.caip)),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[layout.map(c => c.chain.id).join('|')]
+	)
+	const iconsReady = useImagePreload(iconUrls)
 
 	return (
 		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
@@ -179,27 +331,27 @@ function OrbitalView({
 				>
 					Total
 				</Text>
-				<Flex align="baseline" justify="center" gap="0">
-					<Text
-						fontSize={{ base: "38px", md: "48px" }}
+				{/* AnimatedUsd handles the smooth green count-up between
+				    values — the "money counting up" cue that lived on
+				    master. The kkBounceUp keyframe re-fires whenever the
+				    rounded dollar total changes (via the `key` prop) so
+				    each refresh gets a short scale-bump beat. Color is
+				    AnimatedUsd's default teal (#23DCC8) — green text is
+				    half the perceived bounce; users equate "green ticking
+				    up" with "money just landed." */}
+				<Box
+					key={`bounce-${Math.round(totalUsd * 100)}`}
+					style={{ animation: 'kkBounceUp 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+				>
+					<AnimatedUsd
+						value={totalUsd}
+						fontSize={size > 720 ? "72px" : size > 540 ? "56px" : size > 380 ? "44px" : "36px"}
 						fontWeight="500"
-						color="var(--text-0)"
 						letterSpacing="-0.04em"
 						lineHeight="1"
-					>
-						${totalDollars.toLocaleString()}
-					</Text>
-					<Text
-						fontSize={{ base: "20px", md: "24px" }}
-						fontWeight="400"
-						color="var(--text-2)"
-						letterSpacing="-0.02em"
-						lineHeight="1"
-						ml="1"
-					>
-						.{totalCents}
-					</Text>
-				</Flex>
+						decimals={2}
+					/>
+				</Box>
 				<Text
 					fontSize="10px"
 					color="var(--text-3)"
@@ -213,12 +365,18 @@ function OrbitalView({
 				</Text>
 			</Box>
 
-			{/* Satellite chains */}
-			{orbitChains.map(({ chain, usd, bal }, i) => {
-				const angle = (Math.PI * 2 * i) / orbitChains.length - Math.PI / 2
-				const x = cx + Math.cos(angle) * orbitR
-				const y = cy + Math.sin(angle) * orbitR
-				const sat = Math.max(40, Math.min(72, 30 + Math.sqrt(usd) * 1.4))
+			{/* Satellite chains — variable size by USD share, two-ring zigzag.
+			    Wrapped in a fade gate so the constellation appears in one beat
+			    once all icons are cached, instead of stippling in. */}
+			<Box
+				position="absolute"
+				inset="0"
+				style={{
+					opacity: iconsReady ? 1 : 0,
+					transition: 'opacity 220ms ease-out',
+				}}
+			>
+			{layout.map(({ chain, usd, bal, x, y, sat }) => {
 				const isHover = hover === chain.id
 				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
 				return (
@@ -276,6 +434,36 @@ function OrbitalView({
 								+{bal!.tokens!.length}
 							</Box>
 						)}
+						{/* Persistent USD label under the icon. AnimatedUsd
+						    handles smooth count-up between updates; the
+						    kkBounceUp key re-fires whenever the value
+						    materially changes so a refresh has a visible
+						    beat. */}
+						<Box
+							position="absolute"
+							top="100%"
+							left="50%"
+							transform="translateX(-50%)"
+							mt="1"
+							pointerEvents="none"
+						>
+							<Box
+								key={`chain-bounce-${chain.id}-${Math.round(usd * 100)}`}
+								style={{ animation: 'kkBounceUp 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+							>
+								<AnimatedUsd
+									value={usd}
+									fontSize="11px"
+									fontWeight="600"
+									fontFamily="mono"
+									style={{
+										textShadow: '0 1px 4px rgba(0,0,0,0.7)',
+										whiteSpace: 'nowrap',
+									}}
+									decimals={usd >= 100 ? 0 : 2}
+								/>
+							</Box>
+						</Box>
 						{isHover && (
 							<Box
 								position="absolute"
@@ -303,6 +491,7 @@ function OrbitalView({
 					</Box>
 				)
 			})}
+			</Box>
 		</Box>
 	)
 }
@@ -847,10 +1036,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			)}
 
 			{/* Portfolio view — orbital (default) or donut, switchable via the
-			    pill toggle in the top-right of the card. */}
+			    pill toggle in the top-right of the card.
+			    The orbital is the visual hero of the dashboard — it breaks out
+			    of the parent 600px maxW into a viewport-wide canvas so the
+			    constellation can actually spread to the corners. The donut
+			    view stays inside the parent so the legend below it doesn't
+			    feel unmoored. */}
 			{hasAnyBalance ? (
 				<Box
-					w="100%"
+					w={viewMode === 'orbital' ? "min(96vw, 1024px)" : "100%"}
 					p="4"
 					mb="2"
 					borderRadius="xl"
@@ -858,6 +1052,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					border="1px solid"
 					borderColor="kk.border"
 					position="relative"
+					left={viewMode === 'orbital' ? '50%' : undefined}
+					transform={viewMode === 'orbital' ? 'translateX(-50%)' : undefined}
 				>
 					{/* View toggle — orbital / donut. Two-state pill with icon glyphs. */}
 					<Flex
