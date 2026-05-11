@@ -15,7 +15,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { AssetIcon } from "./AssetIcon"
-import type { SwapAsset, ChainBalance } from "../../shared/types"
+import type { SwapAsset, ChainBalance, CustomToken } from "../../shared/types"
 import {
   buildAssetEntries,
   buildSearchIndex,
@@ -30,6 +30,10 @@ import {
 import { PROVIDER_LABEL, type AvailabilityStatus } from "../../shared/swap-support-matrix"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
+import { rpcRequest } from "../lib/rpc"
+import { networkDisplayName as nd } from "../../shared/swap-discovery"
+
+const EVM_CONTRACT_RE = /^0x[a-fA-F0-9]{40}$/
 
 const MAX_RENDER = 200
 
@@ -47,6 +51,9 @@ interface AssetPickerDialogProps {
   swappable: SwapAsset[]
   /** Connected wallet's per-chain balances. */
   balances: ChainBalance[]
+  /** User-added custom tokens (gnars on Base etc.) — surfaced in the picker
+   *  even when neither discovery nor Pioneer's swappable list contains them. */
+  customTokens?: CustomToken[]
   /** CAIP-19 of the asset on the OPPOSITE side of the swap — excluded so the
    *  user can't pick the same asset on both legs. */
   excludeCaip?: string
@@ -112,7 +119,7 @@ function humanReason(entry: AssetEntry): string | null {
 }
 
 export function AssetPickerDialog({
-  open, onClose, swappable, balances, excludeCaip, onSelect, side,
+  open, onClose, swappable, balances, customTokens, excludeCaip, onSelect, side,
 }: AssetPickerDialogProps) {
   const { t } = useTranslation("swap")
   const { fmtCompact } = useFiat()
@@ -121,13 +128,22 @@ export function AssetPickerDialog({
   const [loading, setLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  /* Paste-contract auto-add: when the search query is a valid EVM address
+   * and the discovery universe has no matches, we offer to fetch the
+   * token's metadata directly from the chain RPC and add it as a custom
+   * swap asset. The lookup is debounced so we don't fire it on every
+   * keystroke while pasting. */
+  const [contractHits, setContractHits] = useState<SwapAsset[] | null>(null)
+  const [contractLooking, setContractLooking] = useState(false)
+  const [contractError, setContractError] = useState<string | null>(null)
+
   // Lazy-build the unified entry list on first open. Recompute when swappable
   // or balances change so newly-detected tokens show up.
   useEffect(() => {
     if (!open) return
     let cancelled = false
     setLoading(true)
-    buildAssetEntries({ swappable, balances })
+    buildAssetEntries({ swappable, balances, customTokens })
       .then(list => { if (!cancelled) { setEntries(list); setLoading(false) } })
       .catch(e => {
         if (cancelled) return
@@ -135,7 +151,7 @@ export function AssetPickerDialog({
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [open, swappable, balances])
+  }, [open, swappable, balances, customTokens])
 
   // Reset query and focus search input on each open
   useEffect(() => {
@@ -174,6 +190,35 @@ export function AssetPickerDialog({
     return list.slice(0, MAX_RENDER)
   }, [searchIndex, search, excludeCaip])
 
+  /* Probe the chain RPCs when the user pastes a contract that doesn't match
+   * anything in discovery. Debounced 350ms so a fast-typed address doesn't
+   * fire 40 lookups. Reset on close / query change. */
+  useEffect(() => {
+    setContractHits(null)
+    setContractError(null)
+    if (!open) return
+    const q = search.trim()
+    if (!EVM_CONTRACT_RE.test(q)) return
+    if (visible.length > 0) return /* discovery already had it — skip lookup */
+    let cancelled = false
+    setContractLooking(true)
+    const timer = setTimeout(() => {
+      rpcRequest<{ hits: SwapAsset[]; reason?: string }>('lookupTokenContract', { contractAddress: q }, 12000)
+        .then(res => {
+          if (cancelled) return
+          setContractLooking(false)
+          if (res.hits && res.hits.length > 0) setContractHits(res.hits)
+          else setContractError(res.reason || 'no-token-found')
+        })
+        .catch(e => {
+          if (cancelled) return
+          setContractLooking(false)
+          setContractError(e?.message || 'lookup-failed')
+        })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [open, search, visible.length])
+
   const handleSelect = useCallback((entry: AssetEntry) => {
     if (!isRowSelectable(entry)) return
     // Prefer Pioneer-listed SwapAsset (canonical asset name + verified routing).
@@ -210,9 +255,9 @@ export function AssetPickerDialog({
         position="relative"
         bg="kk.cardBg"
         border="2px solid"
-        borderColor="rgba(35,220,200,0.4)"
+        borderColor="rgba(139,227,196,0.4)"
         borderRadius="xl"
-        boxShadow="0 0 20px rgba(35,220,200,0.1)"
+        boxShadow="0 0 20px rgba(139,227,196,0.1)"
         w="600px" maxW="92vw" h="640px" maxH="88vh"
         display="flex" flexDirection="column"
         onClick={(e) => e.stopPropagation()}
@@ -243,11 +288,84 @@ export function AssetPickerDialog({
           )}
           {!loading && visible.length === 0 && (
             <Box p="6" textAlign="center">
-              <Text fontSize="xs" color="kk.textMuted">
-                {search.trim()
-                  ? t("noAssetsMatchSearch", "No assets match your search.")
-                  : t("noAssetsAvailable", "No swappable assets available.")}
-              </Text>
+              {/* Paste-contract auto-add lane.
+               *  Triggers when the user types/pastes a 0x..40-char address
+               *  and discovery has no entry for it. We probe every EVM RPC
+               *  in parallel and surface every chain that returned valid
+               *  ERC20 metadata as a one-click "Add as custom token" row. */}
+              {EVM_CONTRACT_RE.test(search.trim()) ? (
+                <>
+                  {contractLooking && (
+                    <Text fontSize="xs" color="kk.textMuted">
+                      {t("contractLookingUp", "Looking up contract on every chain…")}
+                    </Text>
+                  )}
+                  {!contractLooking && contractHits && contractHits.length > 0 && (
+                    <Box>
+                      <Text fontSize="11px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" mb="2.5">
+                        {t("contractFoundOn", "Found on", { count: contractHits.length })}
+                      </Text>
+                      <Flex direction="column" gap="2">
+                        {contractHits.map(hit => (
+                          <Flex
+                            key={hit.caip}
+                            as="button"
+                            align="center"
+                            gap="3"
+                            px="3" py="2.5"
+                            bg="rgba(233,196,106,0.06)"
+                            border="1px solid"
+                            borderColor="rgba(233,196,106,0.30)"
+                            borderRadius="lg"
+                            _hover={{ bg: "rgba(233,196,106,0.14)", borderColor: "rgba(233,196,106,0.55)" }}
+                            cursor="pointer"
+                            textAlign="left"
+                            onClick={() => { onSelect(hit); onClose() }}
+                          >
+                            <AssetIcon
+                              caip={hit.caip}
+                              chainCaip={`${hit.chainId}/slip44:60`}
+                              size={32}
+                              alt={hit.symbol}
+                            />
+                            <Box flex="1" minW="0">
+                              <Flex align="center" gap="2">
+                                <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">{hit.symbol}</Text>
+                                <Text fontSize="9px" color="var(--gold)" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
+                                  {nd(hit.chainId)}
+                                </Text>
+                              </Flex>
+                              <Text fontSize="10px" color="kk.textMuted" truncate>{hit.name}</Text>
+                            </Box>
+                            <Text fontSize="9px" color="var(--gold)" fontWeight="700" letterSpacing="0.05em" textTransform="uppercase" flexShrink={0}>
+                              {t("addCustomToken", "Add")}
+                            </Text>
+                          </Flex>
+                        ))}
+                      </Flex>
+                      <Text fontSize="10px" color="kk.textMuted" mt="3" lineHeight="1.5">
+                        {t("contractSafetyNote", "Custom tokens skip Vault's verified list. Verify the symbol matches the project before swapping.")}
+                      </Text>
+                    </Box>
+                  )}
+                  {!contractLooking && contractHits && contractHits.length === 0 && (
+                    <Text fontSize="xs" color="kk.textMuted">
+                      {t("contractNotFoundOnAnyChain", "No ERC20 found at this address on any supported chain.")}
+                    </Text>
+                  )}
+                  {!contractLooking && !contractHits && contractError && (
+                    <Text fontSize="xs" color="kk.error">
+                      {t("contractLookupFailed", "Couldn't reach a chain RPC to look up this contract. Try again.")}
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <Text fontSize="xs" color="kk.textMuted">
+                  {search.trim()
+                    ? t("noAssetsMatchSearch", "No assets match your search.")
+                    : t("noAssetsAvailable", "No swappable assets available.")}
+                </Text>
+              )}
             </Box>
           )}
           {!loading && visible.map(e => <AssetRow key={e.caip} entry={e} onSelect={handleSelect} fmtCompact={fmtCompact} t={t} />)}
@@ -292,7 +410,7 @@ function AssetRow({ entry, onSelect, fmtCompact, t }: AssetRowProps) {
       px="4" py="2.5" mx="1" borderRadius="lg"
       cursor={selectable ? "pointer" : "not-allowed"}
       opacity={selectable ? 1 : 0.7}
-      _hover={selectable ? { bg: "rgba(35,220,200,0.06)" } : {}}
+      _hover={selectable ? { bg: "rgba(139,227,196,0.06)" } : {}}
       transition="background 0.15s"
       onClick={() => { if (selectable) onSelect(entry) }}
       borderLeft={isUnsupported ? "3px solid rgba(255,99,99,0.35)" : "3px solid transparent"}
@@ -309,7 +427,7 @@ function AssetRow({ entry, onSelect, fmtCompact, t }: AssetRowProps) {
           <Flex align="center" gap="2">
             <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{entry.symbol}</Text>
             {!entry.isNative && (
-              <Text fontSize="9px" color="#23DCC8" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
+              <Text fontSize="9px" color="var(--teal)" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
                 {t("on", "on")} {networkLabel}
               </Text>
             )}
@@ -358,15 +476,15 @@ function AvailabilityBadge({ entry, t }: { entry: AssetEntry; t: AssetRowProps["
       ? PROVIDER_LABEL[providers[0]]
       : `${providers.length} ${t("routes", "routes")}`
     return (
-      <Box bg="rgba(35,220,200,0.12)" border="1px solid" borderColor="rgba(35,220,200,0.3)" borderRadius="md" px="2" py="0.5">
-        <Text fontSize="9px" color="#23DCC8" fontWeight="600">{label}</Text>
+      <Box bg="rgba(139,227,196,0.12)" border="1px solid" borderColor="rgba(139,227,196,0.3)" borderRadius="md" px="2" py="0.5">
+        <Text fontSize="9px" color="var(--teal)" fontWeight="600">{label}</Text>
       </Box>
     )
   }
   if (status === "unknown") {
     return (
-      <Box bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.25)" borderRadius="md" px="2" py="0.5">
-        <Text fontSize="9px" color="#FFD700" fontWeight="600">{t("tryQuote", "try quote")}</Text>
+      <Box bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.25)" borderRadius="md" px="2" py="0.5">
+        <Text fontSize="9px" color="var(--gold)" fontWeight="600">{t("tryQuote", "try quote")}</Text>
       </Box>
     )
   }

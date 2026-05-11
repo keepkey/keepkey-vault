@@ -227,10 +227,10 @@ export function FirmwareDropZone() {
 					borderRadius="2xl"
 					border="3px dashed"
 					borderColor="kk.gold"
-					bg="rgba(192,168,96,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					maxW="500px"
 				>
-					<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 						<polyline points="7 10 12 15 17 10" />
 						<line x1="12" y1="15" x2="12" y2="3" />
@@ -309,11 +309,11 @@ export function FirmwareDropZone() {
 				)}
 				{phase === "emu-installed" && (
 					<Box p="8" textAlign="center">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#48BB78" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
+						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
 							<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
 							<polyline points="22 4 12 14.01 9 11.01" />
 						</svg>
-						<Text fontSize="lg" fontWeight="700" color="#48BB78" mb="2">
+						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">
 							Emulator Updated
 						</Text>
 						<Text fontSize="sm" color="kk.textSecondary" mb="4">
@@ -340,7 +340,7 @@ export function FirmwareDropZone() {
 						{/* Header */}
 						<Box px="6" pt="5" pb="4" borderBottom="1px solid" borderColor="kk.border">
 							<Flex align="center" gap="2" mb="1">
-								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={analysis.isSigned ? "#48BB78" : "#ED8936"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={analysis.isSigned ? "var(--teal)" : "var(--gold)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 									<rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
 									<path d="M16 7V5a4 4 0 0 0-8 0v2" />
 								</svg>
@@ -365,7 +365,7 @@ export function FirmwareDropZone() {
 										fontWeight="700"
 										letterSpacing="0.05em"
 										bg={analysis.isSigned ? "rgba(72,187,120,0.15)" : "rgba(237,137,54,0.15)"}
-										color={analysis.isSigned ? "#48BB78" : "#ED8936"}
+										color={analysis.isSigned ? "var(--teal)" : "var(--gold)"}
 									>
 										{analysis.isSigned ? "SIGNED" : "UNSIGNED"}
 									</Box>
@@ -388,7 +388,7 @@ export function FirmwareDropZone() {
 											<Flex justify="space-between" mb="2">
 												<Text fontSize="xs" color="kk.textSecondary">Device status</Text>
 												<Flex align="center" gap="1.5">
-													<Box px="1.5" py="0.5" borderRadius="sm" bg="rgba(99,179,237,0.15)" fontSize="xs" fontWeight="700" color="#63B3ED">
+													<Box px="1.5" py="0.5" borderRadius="sm" bg="rgba(168,239,210,0.12)" fontSize="xs" fontWeight="700" color="var(--teal-2)">
 														BOOTLOADER
 													</Box>
 													{analysis.deviceBootloaderVersion && (
@@ -407,10 +407,10 @@ export function FirmwareDropZone() {
 													v{analysis.currentFirmwareVersion || "Unknown"}
 												</Text>
 												{analysis.currentFirmwareVerified === true && (
-													<Box as="span" color="#48BB78" fontSize="xs">(verified)</Box>
+													<Box as="span" color="var(--teal)" fontSize="xs">(verified)</Box>
 												)}
 												{analysis.currentFirmwareVerified === false && (
-													<Box as="span" color="#ED8936" fontSize="xs">(unverified)</Box>
+													<Box as="span" color="var(--gold)" fontSize="xs">(unverified)</Box>
 												)}
 											</Flex>
 										</Flex>
@@ -427,7 +427,7 @@ export function FirmwareDropZone() {
 										</Text>
 									)}
 									{analysis.isDowngrade && (
-										<Text fontSize="xs" color="#ED8936" mt="1">
+										<Text fontSize="xs" color="var(--gold)" mt="1">
 											Downgrade — older than current version
 										</Text>
 									)}
@@ -465,20 +465,20 @@ export function FirmwareDropZone() {
 								mx="6" mb="3" p="4"
 								bg="rgba(229,62,62,0.1)"
 								border="2px solid"
-								borderColor="#E53E3E"
+								borderColor="var(--rose)"
 								borderRadius="lg"
 							>
 								<Flex align="center" gap="2" mb="2">
-									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E53E3E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
 										<line x1="12" y1="9" x2="12" y2="13" />
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
-									<Text fontSize="sm" fontWeight="800" color="#E53E3E" textTransform="uppercase" letterSpacing="0.05em">
+									<Text fontSize="sm" fontWeight="800" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em">
 										THIS WILL WIPE THE DEVICE
 									</Text>
 								</Flex>
-								<Text fontSize="sm" color="#FC8181" lineHeight="1.6" mb="3">
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									You are crossing the <Text as="span" fontWeight="700">signed/unsigned firmware boundary</Text>.
 									{analysis.isSigned
 										? <> Flashing <Text as="span" fontWeight="700">signed (official) firmware</Text> onto a device running <Text as="span" fontWeight="700">unsigned (developer) firmware</Text>.</>
@@ -487,7 +487,7 @@ export function FirmwareDropZone() {
 									{' '}This transition requires a full device wipe — <Text as="span" fontWeight="700">all keys and
 									settings will be permanently erased</Text>.
 								</Text>
-								<Text fontSize="sm" color="#FC8181" lineHeight="1.6" mb="3">
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									Make sure you have your recovery seed backed up before proceeding.
 								</Text>
 								<Flex
@@ -502,8 +502,8 @@ export function FirmwareDropZone() {
 										w="18px" h="18px"
 										borderRadius="sm"
 										border="2px solid"
-										borderColor={wipeAcknowledged ? "#E53E3E" : "#FC8181"}
-										bg={wipeAcknowledged ? "#E53E3E" : "transparent"}
+										borderColor={wipeAcknowledged ? "var(--rose)" : "var(--rose)"}
+										bg={wipeAcknowledged ? "var(--rose)" : "transparent"}
 										display="flex"
 										alignItems="center"
 										justifyContent="center"
@@ -515,7 +515,7 @@ export function FirmwareDropZone() {
 											</svg>
 										)}
 									</Box>
-									<Text fontSize="xs" fontWeight="600" color="#FC8181">
+									<Text fontSize="xs" fontWeight="600" color="var(--rose)">
 										I understand this will wipe my device and I have my seed backed up
 									</Text>
 								</Flex>
@@ -528,20 +528,20 @@ export function FirmwareDropZone() {
 								mx="6" mb="3" p="4"
 								bg="rgba(237,137,54,0.1)"
 								border="1px solid"
-								borderColor="#ED8936"
+								borderColor="var(--gold)"
 								borderRadius="lg"
 							>
 								<Flex align="center" gap="2" mb="2">
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ED8936" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
 										<line x1="12" y1="9" x2="12" y2="13" />
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
-									<Text fontSize="sm" fontWeight="700" color="#ED8936">
+									<Text fontSize="sm" fontWeight="700" color="var(--gold)">
 										Developer Firmware
 									</Text>
 								</Flex>
-								<Text fontSize="sm" color="#F6AD55" lineHeight="1.6" mb="3">
+								<Text fontSize="sm" color="var(--gold-2)" lineHeight="1.6" mb="3">
 									This is unsigned firmware intended for developers only.
 									It may result in device state loss or unexpected behavior.
 								</Text>
@@ -557,8 +557,8 @@ export function FirmwareDropZone() {
 										w="18px" h="18px"
 										borderRadius="sm"
 										border="2px solid"
-										borderColor={warningAcknowledged ? "#ED8936" : "#F6AD55"}
-										bg={warningAcknowledged ? "#ED8936" : "transparent"}
+										borderColor={warningAcknowledged ? "var(--gold)" : "var(--gold-2)"}
+										bg={warningAcknowledged ? "var(--gold)" : "transparent"}
 										display="flex"
 										alignItems="center"
 										justifyContent="center"
@@ -570,7 +570,7 @@ export function FirmwareDropZone() {
 											</svg>
 										)}
 									</Box>
-									<Text fontSize="xs" fontWeight="600" color="#F6AD55">
+									<Text fontSize="xs" fontWeight="600" color="var(--gold-2)">
 										I understand this is developer firmware
 									</Text>
 								</Flex>
@@ -597,7 +597,7 @@ export function FirmwareDropZone() {
 							</Button>
 							<Button
 								size="sm"
-								bg={analysis.willWipeDevice ? "#E53E3E" : analysis.isSigned ? "kk.gold" : "#ED8936"}
+								bg={analysis.willWipeDevice ? "var(--rose)" : analysis.isSigned ? "kk.gold" : "var(--gold)"}
 								color={analysis.willWipeDevice ? "white" : "black"}
 								fontWeight="700"
 								px="4" py="2"
@@ -651,12 +651,12 @@ export function FirmwareDropZone() {
 
 				{/* ── Complete ──────────────────────────────── */}
 				{phase === "complete" && (
-					<Box p="8" textAlign="center" border="1px solid" borderColor="#48BB78" borderRadius="xl">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#48BB78" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
+					<Box p="8" textAlign="center" border="1px solid" borderColor="var(--teal)" borderRadius="xl">
+						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
 							<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
 							<polyline points="22 4 12 14.01 9 11.01" />
 						</svg>
-						<Text fontSize="lg" fontWeight="700" color="#48BB78" mb="2">
+						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">
 							Firmware Flash Complete
 						</Text>
 						<Text fontSize="sm" color="kk.textSecondary" mb="4">
@@ -680,12 +680,12 @@ export function FirmwareDropZone() {
 				{/* ── Error ─────────────────────────────────── */}
 				{phase === "error" && (
 					<Box p="8" textAlign="center">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#E53E3E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
+						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px" }}>
 							<circle cx="12" cy="12" r="10" />
 							<line x1="15" y1="9" x2="9" y2="15" />
 							<line x1="9" y1="9" x2="15" y2="15" />
 						</svg>
-						<Text fontSize="lg" fontWeight="700" color="#E53E3E" mb="2">
+						<Text fontSize="lg" fontWeight="700" color="var(--rose)" mb="2">
 							Firmware Flash Failed
 						</Text>
 						<Text fontSize="sm" color="kk.textSecondary" mb="4">

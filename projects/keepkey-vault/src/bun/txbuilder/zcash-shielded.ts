@@ -282,7 +282,7 @@ let sendInProgress = false
 export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
-	opts?: { signWrap?: DeviceSignWrap },
+	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
 ): Promise<{ txid: string }> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
@@ -298,7 +298,7 @@ export async function sendShielded(
 async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
-	opts?: { signWrap?: DeviceSignWrap },
+	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
 ): Promise<{ txid: string }> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
@@ -326,6 +326,7 @@ async function _sendShieldedInner(
 	//   ZcashSignPCZT (digests + metadata) → ZcashPCZTActionAck
 	//   For each action: ZcashPCZTAction (fields) → ZcashPCZTActionAck | ZcashSignedPCZT
 	console.log("[zcash-shielded] Requesting device signatures...")
+	opts?.onProgress?.("signing")
 	const signatures = opts?.signWrap
 		? await opts.signWrap(() => deviceSign(wallet, signing_request))
 		: await deviceSign(wallet, signing_request)
@@ -337,10 +338,13 @@ async function _sendShieldedInner(
 
 	// 4. Broadcast
 	console.log("[zcash-shielded] Broadcasting...")
+	opts?.onProgress?.("broadcasting")
 	await broadcastShieldedTx(raw_tx)
 
-	console.log(`[zcash-shielded] Transaction sent: ${txid}`)
-	return { txid }
+	const { txidToDisplayOrder } = await import("./zcash-shield")
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-shielded] Transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }
 
 /**

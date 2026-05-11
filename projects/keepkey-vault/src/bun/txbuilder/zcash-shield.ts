@@ -88,11 +88,83 @@ interface ShieldBuildResult {
  */
 let shieldInProgress = false
 
+export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
+export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
+
+export const SHIELD_MIN_CONFIRMATIONS = 10
+
+/** UTXO totals at a single transparent ZEC address, split by maturity.
+ *
+ *  - `matureZat` is the only thing shieldZec can actually spend right now;
+ *    the builder enforces the same 10-conf filter (reorgs can move recent
+ *    transparent inputs, so signing against them produces a doomed tx).
+ *  - `pendingZat` covers UTXOs still under 10 conf — exposed so the UI can
+ *    surface "X ZEC pending, available in Y blocks" instead of a silent gap
+ *    between displayed balance and shieldable amount.
+ *
+ *  Uses Pioneer ListUnspent (same source the shield builder uses) scoped to
+ *  one address — chain-level getBalance returns the whole xpub which is the
+ *  wrong frame for the shield flow. */
+export async function getShieldableTransparentBalance(
+	pioneer: any,
+	transparentAddress: string,
+	tipHeight?: number | null,
+): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number }> {
+	const result = await pioneer.ListUnspent({ network: "ZEC", xpub: transparentAddress })
+	const utxoArray = Array.isArray(result) ? result
+		: Array.isArray(result?.data) ? result.data
+		: Array.isArray(result?.utxos) ? result.utxos
+		: []
+
+	let matureZat = 0, pendingZat = 0, matureCount = 0, pendingCount = 0
+	for (const u of utxoArray) {
+		const raw = String(u.value ?? u.amount ?? "0")
+		const value = raw.includes(".")
+			? Math.round(parseFloat(raw) * 1e8)
+			: parseInt(raw, 10)
+		if (isNaN(value) || value <= 0) continue
+
+		// Mirror the shield builder's confirmation gate so Available + Max stay
+		// honest: prefer Pioneer's `confirmations`, fall back to deriving from
+		// `height` against the sidecar's latest scanned tip. If neither is
+		// available, treat as mature (matches the builder's "don't block" rule).
+		let isMature = true
+		if (typeof u.confirmations === "number") {
+			isMature = u.confirmations >= SHIELD_MIN_CONFIRMATIONS
+		} else if (typeof u.height === "number" && tipHeight != null && u.height > 0) {
+			isMature = (tipHeight - u.height + 1) >= SHIELD_MIN_CONFIRMATIONS
+		}
+
+		if (isMature) { matureZat += value; matureCount++ }
+		else          { pendingZat += value; pendingCount++ }
+	}
+	return { matureZat, pendingZat, matureCount, pendingCount }
+}
+
+/** Convert a sidecar-returned txid to explorer/display order.
+ *
+ *  The sidecar (modules/keepkey-zcash) emits txids in the raw blake2b
+ *  internal byte order — Zcash explorers (Blockchair, ZecRocks, etc.)
+ *  show the byte-reversed form, like Bitcoin. There's an upstream fix
+ *  in keepkey-zcash that reverses inside the Rust code before hex-encoding,
+ *  but that lives in a separate repo with its own release cycle. Until
+ *  every shipping vault has a sidecar with the fix baked in, we reverse
+ *  here as the single defensive choke point. Once we can guarantee the
+ *  sidecar emits display order, drop this helper and the call sites. */
+export function txidToDisplayOrder(internalHex: string): string {
+	if (!internalHex || internalHex.length !== 64 || !/^[0-9a-f]+$/i.test(internalHex)) {
+		// Don't silently mangle — surface bad input rather than producing a plausible-looking wrong txid
+		return internalHex
+	}
+	const bytes = internalHex.match(/.{2}/g)!
+	return bytes.reverse().join("").toLowerCase()
+}
+
 export async function shieldZec(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
 ): Promise<{ txid: string }> {
 	if (shieldInProgress) {
 		throw new Error("A shield transaction is already in progress")
@@ -109,7 +181,7 @@ async function _shieldZecInner(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
@@ -354,6 +426,7 @@ async function _shieldZecInner(
 	// requires firmware support that may not be present. Check first and
 	// fall back to Orchard-only signing with a clear error for transparent.
 	console.log("[zcash-shield] Requesting device signatures...")
+	opts?.onProgress?.("signing")
 
 	const hasTransparentInputs = buildResult.transparent_inputs.length > 0
 
@@ -409,8 +482,10 @@ async function _shieldZecInner(
 	console.log(`[zcash-shield] raw_tx (first 200): ${raw_tx?.slice(0, 200)}`)
 	console.log(`[zcash-shield] raw_tx length: ${raw_tx?.length / 2} bytes`)
 	console.log("[zcash-shield] Broadcasting...")
+	opts?.onProgress?.("broadcasting")
 	await sendCommand("broadcast", { raw_tx })
 
-	console.log(`[zcash-shield] Shield transaction sent: ${txid}`)
-	return { txid }
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-shield] Shield transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }

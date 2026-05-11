@@ -208,7 +208,8 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#ECB244',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
-    hidden: true, // Shown only when zcashPrivacyEnabled feature flag is ON
+    explorerTxUrl: 'https://blockchair.com/zcash/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/zcash/address/{{address}}',
     minFirmware: '7.15.0',
   },
   {

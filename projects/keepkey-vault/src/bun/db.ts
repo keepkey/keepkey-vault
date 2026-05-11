@@ -77,9 +77,17 @@ export function initDb() {
         name             TEXT NOT NULL,
         decimals         INTEGER NOT NULL DEFAULT 18,
         network_id       TEXT NOT NULL,
+        icon_url         TEXT,
         PRIMARY KEY (chain_id, contract_address)
       )
     `)
+    // Migration for existing DBs created before icon_url. SQLite throws on
+    // duplicate-column ADD; swallow that and propagate any other failure.
+    try {
+      db.exec(`ALTER TABLE custom_tokens ADD COLUMN icon_url TEXT`)
+    } catch (e: any) {
+      if (!String(e?.message || e).match(/duplicate column/i)) throw e
+    }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS custom_chains (
@@ -280,6 +288,10 @@ export function initDb() {
     for (const col of ['from_caip TEXT', 'to_caip TEXT']) {
       try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    // Relay's bytes32 request id — drives the "Relay Track" external link.
+    // Filled at trackSwap time via on-chain calldata, or lazily backfilled
+    // by refreshSwap via api.relay.link for legacy rows.
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN relay_request_id TEXT`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
@@ -413,10 +425,18 @@ export function clearBalances(deviceId?: string) {
 export function getCustomTokens(): CustomToken[] {
   try {
     if (!db) return []
-    const rows = db.query('SELECT chain_id, contract_address, symbol, name, decimals, network_id FROM custom_tokens').all() as Array<{
-      chain_id: string; contract_address: string; symbol: string; name: string; decimals: number; network_id: string
+    const rows = db.query('SELECT chain_id, contract_address, symbol, name, decimals, network_id, icon_url FROM custom_tokens').all() as Array<{
+      chain_id: string; contract_address: string; symbol: string; name: string; decimals: number; network_id: string; icon_url: string | null
     }>
-    return rows.map(r => ({ chainId: r.chain_id, contractAddress: r.contract_address, symbol: r.symbol, name: r.name, decimals: r.decimals, networkId: r.network_id }))
+    return rows.map(r => ({
+      chainId: r.chain_id,
+      contractAddress: r.contract_address,
+      symbol: r.symbol,
+      name: r.name,
+      decimals: r.decimals,
+      networkId: r.network_id,
+      iconUrl: r.icon_url || undefined,
+    }))
   } catch (e: any) {
     console.warn('[db] getCustomTokens failed:', e.message)
     return []
@@ -427,8 +447,8 @@ export function addCustomToken(token: CustomToken) {
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO custom_tokens (chain_id, contract_address, symbol, name, decimals, network_id) VALUES (?, ?, ?, ?, ?, ?)`,
-      [token.chainId, token.contractAddress, token.symbol, token.name, token.decimals, token.networkId]
+      `INSERT OR REPLACE INTO custom_tokens (chain_id, contract_address, symbol, name, decimals, network_id, icon_url) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [token.chainId, token.contractAddress, token.symbol, token.name, token.decimals, token.networkId, token.iconUrl ?? null]
     )
   } catch (e: any) {
     console.warn('[db] addCustomToken failed:', e.message)
@@ -441,6 +461,18 @@ export function removeCustomToken(chainId: string, contractAddress: string) {
     db.run('DELETE FROM custom_tokens WHERE chain_id = ? AND contract_address = ?', [chainId, contractAddress])
   } catch (e: any) {
     console.warn('[db] removeCustomToken failed:', e.message)
+  }
+}
+
+export function setCustomTokenIcon(chainId: string, contractAddress: string, iconUrl: string): boolean {
+  try {
+    if (!db) return false
+    const res = db.run('UPDATE custom_tokens SET icon_url = ? WHERE chain_id = ? AND contract_address = ?', [iconUrl, chainId, contractAddress])
+    // bun:sqlite returns { changes } on .run(); guard for 0 changes (token row missing)
+    return Boolean((res as any)?.changes)
+  } catch (e: any) {
+    console.warn('[db] setCustomTokenIcon failed:', e.message)
+    return false
   }
 }
 
@@ -1216,8 +1248,9 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
         (id, txid, from_asset, to_asset, from_symbol, to_symbol, from_chain_id, to_chain_id,
          from_caip, to_caip, from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
          fee_outbound, integration, swapper, memo, inbound_address, router, status, outbound_txid,
-         error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid,
+         relay_request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id, record.txid, record.fromAsset, record.toAsset,
         record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
@@ -1230,6 +1263,7 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
         record.error || null, record.createdAt, record.updatedAt,
         record.completedAt || null, record.estimatedTimeSeconds,
         record.actualTimeSeconds || null, record.approvalTxid || null,
+        record.relayRequestId || null,
       ]
     )
   } catch (e: any) {
@@ -1394,6 +1428,18 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     estimatedTimeSeconds: r.estimated_time_secs,
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
+    relayRequestId: r.relay_request_id || undefined,
+  }
+}
+
+/** Backfill the Relay request id on an existing row (called when refreshSwap
+ *  resolves it lazily via api.relay.link for a legacy swap). */
+export function setSwapRelayRequestId(txid: string, relayRequestId: string) {
+  try {
+    if (!db) return
+    db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ?', [relayRequestId, txid])
+  } catch (e: any) {
+    console.warn('[db] setSwapRelayRequestId failed:', e.message)
   }
 }
 

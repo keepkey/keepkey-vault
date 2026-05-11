@@ -13,7 +13,7 @@ interface ApiAuditLogProps {
 }
 
 function StatusBadge({ status }: { status: number }) {
-	const color = status < 300 ? "#4ADE80" : status < 500 ? "#FB923C" : "#FF6B6B"
+	const color = status < 300 ? "var(--teal)" : status < 500 ? "#FB923C" : "#FF6B6B"
 	return (
 		<Text
 			fontSize="9px"
@@ -32,7 +32,7 @@ function StatusBadge({ status }: { status: number }) {
 }
 
 function MethodBadge({ method }: { method: string }) {
-	const color = method === "GET" ? "#60A5FA" : "#4ADE80"
+	const color = method === "GET" ? "#60A5FA" : "var(--teal)"
 	return (
 		<Text
 			fontSize="9px"
@@ -60,12 +60,12 @@ function AppInitial({ name }: { name: string }) {
 			w="18px"
 			h="18px"
 			borderRadius="4px"
-			bg="rgba(192,168,96,0.15)"
+			bg="rgba(233,196,106,0.15)"
 			align="center"
 			justify="center"
 			flexShrink={0}
 		>
-			<Text fontSize="9px" fontWeight="700" color="#C0A860" lineHeight="1">
+			<Text fontSize="9px" fontWeight="700" color="var(--gold)" lineHeight="1">
 				{letter}
 			</Text>
 		</Flex>
@@ -146,9 +146,9 @@ function JsonBlock({ label, data }: { label: string; data: any }) {
 					as="button"
 					fontSize="9px"
 					fontWeight="500"
-					color={copied ? "#4ADE80" : "kk.textMuted"}
+					color={copied ? "var(--teal)" : "kk.textMuted"}
 					cursor="pointer"
-					_hover={{ color: copied ? "#4ADE80" : "kk.textSecondary" }}
+					_hover={{ color: copied ? "var(--teal)" : "kk.textSecondary" }}
 					onClick={handleCopy}
 					transition="color 0.15s"
 				>
@@ -219,7 +219,7 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 				zIndex={1}
 			>
 				<Flex align="center" gap="2">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
 						<polyline points="14 2 14 8 20 8" />
 						<line x1="16" y1="13" x2="8" y2="13" />
@@ -255,7 +255,7 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 					py="2.5"
 					borderBottom="1px solid"
 					borderColor="kk.border"
-					bg="rgba(192,168,96,0.04)"
+					bg="rgba(233,196,106,0.04)"
 				>
 					<Text fontSize="9px" fontWeight="600" color="kk.textMuted" mb="1.5" textTransform="uppercase" letterSpacing="0.05em">
 						{t('auditLogPanel.pairedAppsCount', { count: pairedApps.length })}

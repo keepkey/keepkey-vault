@@ -39,6 +39,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Wallet operations (hdwallet pass-through) ─────────────────
       getFeatures: { params: void; response: any }
       ping: { params: { msg?: string }; response: any }
+      // Open a URL in the user's default browser (escapes the WebView).
+      // The system WebView blocks target=_blank, so explorer/docs links
+      // route through here instead. Bun shells out to the OS-native opener.
+      openExternal: { params: { url: string }; response: { ok: true } }
       wipeDevice: { params: void; response: any }
       // Types defined in types.ts: GetPublicKeysParams, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams
       getPublicKeys: { params: any; response: any }
@@ -108,6 +112,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       addCustomToken: { params: { chainId: string; contractAddress: string }; response: CustomToken }
       removeCustomToken: { params: { chainId: string; contractAddress: string }; response: void }
       getCustomTokens: { params: void; response: CustomToken[] }
+      setCustomTokenIcon: { params: { chainId: string; contractAddress: string; iconUrl: string }; response: CustomToken }
       addCustomChain: { params: CustomChain; response: void }
       removeCustomChain: { params: { chainId: number }; response: void }
       getCustomChains: { params: void; response: CustomChain[] }
@@ -124,6 +129,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
       zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
       zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      // Confirmed UTXO total at the user's first-receive t-addr — the only address
+      // shieldZec sweeps. Use this (not chain-level getBalance, which sums the
+      // whole xpub) to power the Shield page's Available / Max button.
+      // - balanceZat = mature only (≥10 conf, what shieldZec can actually spend)
+      // - pendingZat = under 10 conf, surfaced so the UI can explain a
+      //   discrepancy between the chain-level balance and what's shieldable
+      zcashTransparentBalance: {
+        params: { account?: number } | void
+        response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
+      }
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
@@ -173,6 +188,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }
       getSwapAssets: { params: void; response: SwapAsset[] }
+      /** Look up an unknown token by contract address across common chains.
+       *  When no chainId is provided, candidate EVM chains are queried in
+       *  parallel and any with metadata are returned. The frontend uses this
+       *  to auto-add a token when the user pastes a contract into the asset
+       *  picker search box. */
+      lookupTokenContract: {
+        params: { contractAddress: string; chainId?: string }
+        response: { hits: SwapAsset[]; reason?: string }
+      }
       getSwapQuote: { params: SwapQuoteParams; response: SwapQuote }
       executeSwap: { params: ExecuteSwapParams; response: SwapResult }
       /** Build the unsigned swap tx(s) without signing — used to surface the
@@ -187,6 +211,19 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
        *  open — there is no background polling timer (by design). */
       refreshSwap: { params: { txid: string }; response: PendingSwap | null }
+      /** Read-only diagnostic for a single swap: local state + raw Pioneer
+       *  response + rescan response, with protocol divergence flagged. Used
+       *  by the SwapDialog "Debug" affordance and dev-tools introspection.
+       *  Returns null when called from a passphrase-wallet session, or for
+       *  any txid tagged as a passphrase swap. */
+      debugSwapLookup: { params: { txid: string }; response: {
+        txid: string
+        pioneerBaseUrl: string | undefined
+        local: PendingSwap | null
+        pioneer: { ok: boolean; status: number | null; raw: any; error?: string }
+        pioneerRescan: { ok: boolean; status: number | null; raw: any; error?: string }
+        divergence?: { vaultProtocol: string; pioneerProtocol: string }
+      } | null }
       getSwapHistory: { params: SwapHistoryFilter | void; response: SwapHistoryRecord[] }
       getSwapHistoryStats: { params: void; response: SwapHistoryStats }
       exportSwapReport: { params: { fromDate?: number; toDate?: number; format: 'pdf' | 'csv' }; response: { filePath: string } }
@@ -325,6 +362,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }
+      'send-progress': { step: string; detail?: string }
+      // Fires whenever the device emits a ButtonRequest (any flow). UI flows
+      // that are mid-signing use this to switch from "device computing" to
+      // "press the button on your KeepKey".
+      'device-button-request': {}
       'emulator-status': EmulatorStatus
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */

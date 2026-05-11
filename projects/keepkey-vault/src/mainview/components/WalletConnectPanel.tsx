@@ -291,7 +291,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 					px="4" py="3"
 					borderBottom="1px solid"
 					borderColor={dragOver ? "kk.gold" : "kk.border"}
-					bg={dragOver ? "rgba(255,215,0,0.04)" : "transparent"}
+					bg={dragOver ? "rgba(233,196,106,0.04)" : "transparent"}
 					transition="background 0.15s, border-color 0.15s"
 					onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
 					onDragLeave={() => setDragOver(false)}
@@ -331,7 +331,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 							variant="outline"
 							borderColor="kk.border"
 							color="kk.textPrimary"
-							_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
+							_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(233,196,106,0.04)" }}
 							onClick={handleScanScreen}
 							disabled={pairing || scanning}
 						>
@@ -354,7 +354,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 							variant="outline"
 							borderColor="kk.border"
 							color="kk.textPrimary"
-							_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.04)" }}
+							_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(233,196,106,0.04)" }}
 							onClick={() => fileInputRef.current?.click()}
 							disabled={pairing || scanning}
 						>
@@ -442,14 +442,14 @@ function EmptyState() {
 						<Flex
 							w="22px" h="22px"
 							borderRadius="full"
-							bg="rgba(255,215,0,0.1)"
+							bg="rgba(233,196,106,0.1)"
 							color="kk.gold"
 							align="center"
 							justify="center"
 							flexShrink={0}
 							fontSize="11px"
 							fontWeight="700"
-							border="1px solid rgba(255,215,0,0.25)"
+							border="1px solid rgba(233,196,106,0.25)"
 						>
 							{s.n}
 						</Flex>
@@ -530,9 +530,9 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 								fontSize="10px"
 								fontWeight="600"
 								borderRadius="full"
-								bg="rgba(255,215,0,0.08)"
+								bg="rgba(233,196,106,0.08)"
 								color="kk.gold"
-								border="1px solid rgba(255,215,0,0.2)"
+								border="1px solid rgba(233,196,106,0.2)"
 							>
 								{label}
 							</Box>
@@ -587,7 +587,7 @@ function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisc
 			border="1px solid"
 			borderColor="kk.border"
 			bg="rgba(255,255,255,0.02)"
-			_hover={{ borderColor: "rgba(255,215,0,0.3)" }}
+			_hover={{ borderColor: "rgba(233,196,106,0.3)" }}
 			transition="border-color 0.15s"
 		>
 			<Flex align="flex-start" gap="3">
@@ -635,9 +635,9 @@ function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisc
 						fontSize="10px"
 						fontWeight="600"
 						borderRadius="full"
-						bg="rgba(255,215,0,0.08)"
+						bg="rgba(233,196,106,0.08)"
 						color="kk.gold"
-						border="1px solid rgba(255,215,0,0.2)"
+						border="1px solid rgba(233,196,106,0.2)"
 					>
 						{label}
 					</Box>

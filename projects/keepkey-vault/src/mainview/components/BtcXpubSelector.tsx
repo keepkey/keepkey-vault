@@ -70,7 +70,7 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
               key={st.scriptType}
               as="button"
               onClick={() => onSelectXpub(activeAccount.accountIndex, st.scriptType)}
-              bg={isSelected ? "rgba(255,215,0,0.12)" : "rgba(255,255,255,0.03)"}
+              bg={isSelected ? "rgba(233,196,106,0.12)" : "rgba(255,255,255,0.03)"}
               border="1px solid"
               borderColor={isSelected ? "kk.gold" : "kk.border"}
               borderRadius="lg"
@@ -78,7 +78,7 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
               py="1.5"
               cursor="pointer"
               transition="all 0.15s"
-              _hover={{ borderColor: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+              _hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
               flex="1"
               minW="0"
             >

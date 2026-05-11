@@ -52,7 +52,10 @@ let deshieldInProgress = false
 export async function deshieldZec(
 	wallet: any,
 	params: DeshieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
+	opts?: {
+		signWrap?: import("./zcash-shielded").DeviceSignWrap;
+		onProgress?: import("./zcash-shield").TxProgressFn;
+	},
 ): Promise<{ txid: string }> {
 	if (deshieldInProgress) {
 		throw new Error("A deshield transaction is already in progress")
@@ -68,7 +71,10 @@ export async function deshieldZec(
 async function _deshieldZecInner(
 	wallet: any,
 	params: DeshieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap },
+	opts?: {
+		signWrap?: import("./zcash-shielded").DeviceSignWrap;
+		onProgress?: import("./zcash-shield").TxProgressFn;
+	},
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
@@ -103,6 +109,7 @@ async function _deshieldZecInner(
 
 	// 2. Device signs Orchard actions (same as shielded send — no transparent signing needed)
 	console.log("[zcash-deshield] Requesting device signatures...")
+	opts?.onProgress?.("signing")
 	if (typeof wallet.zcashSignPczt !== "function") {
 		throw new Error("hdwallet does not support zcashSignPczt — ensure Zcash-capable firmware")
 	}
@@ -127,8 +134,11 @@ async function _deshieldZecInner(
 	}
 	console.log(`[zcash-deshield] raw_tx length: ${raw_tx.length / 2} bytes`)
 	console.log("[zcash-deshield] Broadcasting...")
+	opts?.onProgress?.("broadcasting")
 	await sendCommand("broadcast", { raw_tx })
 
-	console.log(`[zcash-deshield] Deshield transaction sent: ${txid}`)
-	return { txid }
+	const { txidToDisplayOrder } = await import("./zcash-shield")
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-deshield] Deshield transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }

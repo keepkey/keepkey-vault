@@ -36,12 +36,12 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 
 const SIGNING_ANIMATIONS = `
 	@keyframes signingPulseGlow {
-		0%, 100% { box-shadow: 0 0 8px 2px rgba(192,168,96,0.4); }
-		50% { box-shadow: 0 0 24px 8px rgba(192,168,96,0.7), 0 0 48px 16px rgba(192,168,96,0.15); }
+		0%, 100% { box-shadow: 0 0 8px 2px rgba(233,196,106,0.4); }
+		50% { box-shadow: 0 0 24px 8px rgba(233,196,106,0.7), 0 0 48px 16px rgba(233,196,106,0.15); }
 	}
 	@keyframes signingFlashBorder {
-		0%, 100% { border-color: rgba(192,168,96,0.5); }
-		50% { border-color: rgba(192,168,96,1); }
+		0%, 100% { border-color: rgba(233,196,106,0.5); }
+		50% { border-color: rgba(233,196,106,1); }
 	}
 	@keyframes signingBadgePulse {
 		0%, 100% { opacity: 1; transform: scale(1); }
@@ -87,10 +87,10 @@ function Row({ label, value, mono = true }: { label: string; value?: string; mon
 
 function TrustBadge({ level, hasSigned, t }: { level: 'verified' | 'known' | 'unknown'; hasSigned?: boolean; t: (k: string, f?: string) => string }) {
 	const cfg = level === 'verified'
-		? { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "#22C55E", label: hasSigned ? t("signing.signedVerified", "Signed & Verified") : t("signing.verified", "Verified Contract") }
+		? { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "var(--teal)", label: hasSigned ? t("signing.signedVerified", "Signed & Verified") : t("signing.verified", "Verified Contract") }
 		: level === 'known'
-			? { bg: "rgba(192,168,96,0.12)", border: "rgba(192,168,96,0.3)", color: "#C0A860", label: t("signing.knownPattern", "Known Pattern") }
-			: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "#EF4444", label: t("signing.unverifiedContract", "Unverified Contract") }
+			? { bg: "rgba(233,196,106,0.12)", border: "rgba(233,196,106,0.3)", color: "var(--gold)", label: t("signing.knownPattern", "Known Pattern") }
+			: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "var(--rose)", label: t("signing.unverifiedContract", "Unverified Contract") }
 
 	return (
 		<Flex
@@ -185,7 +185,7 @@ function SolanaDecodeFailureBanner({
 			bg="rgba(239,68,68,0.1)" border="1px solid rgba(239,68,68,0.4)"
 			borderRadius="lg" px="3" py="2"
 		>
-			<Text fontSize="2xs" fontWeight="600" color="#EF4444">
+			<Text fontSize="2xs" fontWeight="600" color="var(--rose)">
 				{t("signing.solanaDecodeFailedTitle", "Clear-Signing Unavailable")}
 			</Text>
 			<Text fontSize="2xs" color="kk.textSecondary">
@@ -214,7 +214,7 @@ function SolanaBlindSignBanner({ t }: { t: (k: string, f?: string) => string }) 
 			bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)"
 			borderRadius="lg" px="3" py="2"
 		>
-			<Text fontSize="2xs" fontWeight="700" color="#EF4444">
+			<Text fontSize="2xs" fontWeight="700" color="var(--rose)">
 				{t("signing.solanaBlindSignTitle", "⚠ Blind Signing — Versioned Transaction")}
 			</Text>
 			<Text fontSize="2xs" color="kk.textSecondary">
@@ -237,7 +237,7 @@ function SolanaUnsafeMessageBanner({ classification, t }: {
 			bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)"
 			borderRadius="lg" px="3" py="2"
 		>
-			<Text fontSize="2xs" fontWeight="700" color="#EF4444">
+			<Text fontSize="2xs" fontWeight="700" color="var(--rose)">
 				{looksLikeTx
 					? t("signing.solanaMessageLooksLikeTxTitle", "Unsafe Solana Message - Transaction-Like Payload")
 					: t("signing.solanaUnsafeMessageTitle", "Unsafe Solana Message Signing")}
@@ -296,7 +296,7 @@ function CalldataSection({ decoded, t }: { decoded: CalldataDecodedInfo; t: (k: 
 				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
 					{decoded.dappName}
 				</Text>
-				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(233,196,106,0.15)" color="kk.gold" fontWeight="500">
 					{decoded.method}
 				</Text>
 			</Flex>
@@ -335,7 +335,7 @@ function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t:
 				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
 					{t("signing.solanaTx", "Solana Transaction")}
 				</Text>
-				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(233,196,106,0.15)" color="kk.gold" fontWeight="500">
 					{decoded.version}
 				</Text>
 				<Text fontSize="2xs" color="kk.textMuted">
@@ -424,7 +424,7 @@ function SolanaMessageSection({ decoded, t }: {
 				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
 					{t("signing.solanaMessageToSign", "Message to Sign")}
 				</Text>
-				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(233,196,106,0.15)" color="kk.gold" fontWeight="500">
 					{decoded.encoding.toUpperCase()}
 				</Text>
 			</Flex>
@@ -490,7 +490,7 @@ function EthMessageSection({ decoded, t }: {
 				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
 					{t("signing.ethPersonalSign", "Message to Sign")}
 				</Text>
-				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(192,168,96,0.15)" color="kk.gold" fontWeight="500">
+				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(233,196,106,0.15)" color="kk.gold" fontWeight="500">
 					EIP-191
 				</Text>
 			</Flex>
@@ -662,14 +662,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 					<Flex justify="center">
 						<Box
 							w="64px" h="64px" borderRadius="2xl"
-							bg="rgba(192,168,96,0.15)" border="2px solid" borderColor="kk.gold"
+							bg="rgba(233,196,106,0.15)" border="2px solid" borderColor="kk.gold"
 							display="flex" alignItems="center" justifyContent="center"
 							css={{ animation: "signingBadgePulse 1.5s ease-in-out infinite" }}
 						>
 							<svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-								<rect x="6" y="2" width="12" height="20" rx="2" stroke="#C0A860" strokeWidth="2" />
-								<circle cx="12" cy="16" r="2" fill="#C0A860" />
-								<rect x="9" y="5" width="6" height="6" rx="1" fill="rgba(192,168,96,0.3)" />
+								<rect x="6" y="2" width="12" height="20" rx="2" stroke="var(--gold)" strokeWidth="2" />
+								<circle cx="12" cy="16" r="2" fill="var(--gold)" />
+								<rect x="9" y="5" width="6" height="6" rx="1" fill="rgba(233,196,106,0.3)" />
 							</svg>
 						</Box>
 					</Flex>
@@ -681,7 +681,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							{t("signing.confirmOnDeviceDescription", "Check your KeepKey screen and press the button to approve the transaction.")}
 						</Text>
 					</VStack>
-					<Text fontSize="xs" fontWeight="600" px="3" py="1" borderRadius="full" bg="rgba(192,168,96,0.12)" color="kk.gold">
+					<Text fontSize="xs" fontWeight="600" px="3" py="1" borderRadius="full" bg="rgba(233,196,106,0.12)" color="kk.gold">
 						{methodLabel}
 					</Text>
 					<Flex gap="2" justify="center" align="center">
@@ -720,7 +720,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						>
 							{t("signing.actionRequired", "Action Required")}
 						</Text>
-						<Flex bg="rgba(192,168,96,0.12)" px="2" py="0.5" borderRadius="full" align="center" gap="1.5">
+						<Flex bg="rgba(233,196,106,0.12)" px="2" py="0.5" borderRadius="full" align="center" gap="1.5">
 							<Box w="5px" h="5px" borderRadius="full" bg="kk.gold" />
 							<Text fontSize="2xs" fontWeight="500" color="kk.gold">{safeAppName}</Text>
 						</Flex>

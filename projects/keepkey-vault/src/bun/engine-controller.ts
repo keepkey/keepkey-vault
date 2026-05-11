@@ -205,6 +205,10 @@ export class EngineController extends EventEmitter {
 
     transport.on(String(core.Events.BUTTON_REQUEST), () => {
       console.log('[Engine] BUTTON_REQUEST — confirm on device')
+      // Forward to listeners (e.g. Zcash tab's TxFlowStatus) so the UI can
+      // distinguish "device computing silently" from "user must press the
+      // button NOW". Fires globally for any device flow that needs a press.
+      this.emit('button-request')
       // Emulator button presses are handled by prewriteConfirmations() in
       // the RPC handler — NOT here. Sending stale DebugLinkDecision from a
       // setTimeout poisons the ring buffer and causes "Unexpected message".

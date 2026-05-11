@@ -473,7 +473,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 				{mode === 'configure' && selectedChain && (
 					<Box px="5" py="4" display="flex" flexDirection="column" gap="3">
 						{/* Chain identity badge */}
-						<Flex align="center" gap="3" p="3" bg="#161616" borderRadius="lg" border="1px solid" borderColor="kk.border">
+						<Flex align="center" gap="3" p="3" bg="var(--ink-2)" borderRadius="lg" border="1px solid" borderColor="kk.border">
 							<Image
 								src={selectedChain.icon}
 								alt={selectedChain.symbol}
@@ -514,7 +514,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								<Box
 									maxH="140px"
 									overflowY="auto"
-									bg="#111"
+									bg="var(--ink-1)"
 									border="1px solid"
 									borderColor="kk.border"
 									borderRadius="lg"
@@ -528,8 +528,8 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 											px="3"
 											py="1.5"
 											cursor="pointer"
-											bg={url === rpcUrl ? "rgba(192,168,96,0.1)" : "transparent"}
-											_hover={{ bg: url === rpcUrl ? "rgba(192,168,96,0.15)" : "#1A1A1A" }}
+											bg={url === rpcUrl ? "rgba(233,196,106,0.1)" : "transparent"}
+											_hover={{ bg: url === rpcUrl ? "rgba(233,196,106,0.15)" : "#1A1A1A" }}
 											borderBottom="1px solid"
 											borderColor="rgba(255,255,255,0.04)"
 											onClick={() => {
@@ -583,7 +583,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									value={rpcUrl}
 									onChange={(e) => { setRpcUrl(e.target.value); setTested(false); setError(null) }}
 									size="sm"
-									bg="#1A1A1A"
+									bg="var(--ink-2)"
 									border="1px solid"
 									borderColor="kk.border"
 									color="white"
@@ -616,7 +616,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								value={explorerAddressLink}
 								onChange={(e) => setExplorerAddressLink(e.target.value)}
 								size="sm"
-								bg="#1A1A1A"
+								bg="var(--ink-2)"
 								border="1px solid"
 								borderColor="kk.border"
 								color="white"
@@ -632,7 +632,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								value={explorerTxLink}
 								onChange={(e) => setExplorerTxLink(e.target.value)}
 								size="sm"
-								bg="#1A1A1A"
+								bg="var(--ink-2)"
 								border="1px solid"
 								borderColor="kk.border"
 								color="white"
@@ -676,7 +676,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									value={chainId}
 									onChange={(e) => { setChainId(e.target.value.replace(/\D/g, '')); setTested(false); setError(null) }}
 									size="sm"
-									bg="#1A1A1A"
+									bg="var(--ink-2)"
 									border="1px solid"
 									borderColor="kk.border"
 									color="white"
@@ -691,7 +691,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									value={name}
 									onChange={(e) => setName(e.target.value)}
 									size="sm"
-									bg="#1A1A1A"
+									bg="var(--ink-2)"
 									border="1px solid"
 									borderColor="kk.border"
 									color="white"
@@ -706,7 +706,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								value={symbol}
 								onChange={(e) => setSymbol(e.target.value)}
 								size="sm"
-								bg="#1A1A1A"
+								bg="var(--ink-2)"
 								border="1px solid"
 								borderColor="kk.border"
 								color="white"
@@ -721,7 +721,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 									value={rpcUrl}
 									onChange={(e) => { setRpcUrl(e.target.value); setTested(false); setError(null) }}
 									size="sm"
-									bg="#1A1A1A"
+									bg="var(--ink-2)"
 									border="1px solid"
 									borderColor="kk.border"
 									color="white"
@@ -752,7 +752,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								value={explorerAddressLink}
 								onChange={(e) => setExplorerAddressLink(e.target.value)}
 								size="sm"
-								bg="#1A1A1A"
+								bg="var(--ink-2)"
 								border="1px solid"
 								borderColor="kk.border"
 								color="white"
@@ -768,7 +768,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								value={explorerTxLink}
 								onChange={(e) => setExplorerTxLink(e.target.value)}
 								size="sm"
-								bg="#1A1A1A"
+								bg="var(--ink-2)"
 								border="1px solid"
 								borderColor="kk.border"
 								color="white"

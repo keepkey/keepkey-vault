@@ -17,12 +17,12 @@ function AppInitial({ name }: { name: string }) {
 			w="32px"
 			h="32px"
 			borderRadius="8px"
-			bg="rgba(192,168,96,0.15)"
+			bg="rgba(233,196,106,0.15)"
 			align="center"
 			justify="center"
 			flexShrink={0}
 		>
-			<Text fontSize="14px" fontWeight="700" color="#C0A860" lineHeight="1">
+			<Text fontSize="14px" fontWeight="700" color="var(--gold)" lineHeight="1">
 				{letter}
 			</Text>
 		</Flex>
@@ -124,7 +124,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 				zIndex={1}
 			>
 				<Flex align="center" gap="2">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
 						<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
 					</svg>
@@ -198,7 +198,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="#FF4444"
+										bg="var(--rose)"
 										color="white"
 										fontSize="xs"
 										fontWeight="600"
@@ -230,7 +230,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 									py="1.5"
 									borderRadius="full"
 									bg="rgba(255,23,68,0.08)"
-									color="#FF6B6B"
+									color="var(--rose)"
 									fontSize="xs"
 									fontWeight="500"
 									cursor="pointer"

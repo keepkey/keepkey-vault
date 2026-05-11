@@ -14,17 +14,17 @@ interface SplashScreenProps {
   onLogoClick?: () => void
 }
 
-const STATUS_DOT_COLORS: Record<string, string> = {
-  searching: 'gray.500',
-  connecting: '#3B82F6',
-  error: 'red.400',
-  claimed: '#3B82F6',
+const STATUS_DOT_COLORS: Record<NonNullable<SplashScreenProps['variant']>, string> = {
+  searching:  'var(--text-3)',
+  connecting: 'var(--teal)',
+  error:      'var(--rose)',
+  claimed:    'var(--teal)',
 }
 
 const RETRY_HINT_DELAY_MS = 10_000
 
 export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false, onLogoClick }: SplashScreenProps) {
-  const dotColor = STATUS_DOT_COLORS[variant] || 'gray.500'
+  const dotColor = STATUS_DOT_COLORS[variant]
   const [showRetry, setShowRetry] = useState(false)
 
   // Show "Tap to retry" hint after 10s — only when there's a click handler and grid isn't ready
@@ -64,7 +64,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
           <Logo
             width={childrenReady ? "60px" : "100px"}
             style={{
-              filter: 'brightness(1.3)',
+              filter: 'brightness(1.15) drop-shadow(0 6px 24px rgba(233,196,106,0.25))',
               transition: 'all 0.5s ease',
             }}
           />
@@ -72,12 +72,15 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         {showRetry && !childrenReady && (
           <Text
             fontSize="xs"
-            color="gray.500"
+            color="var(--text-3)"
             mt="3"
             style={{ animation: 'fadeIn 0.4s ease' }}
             cursor={onLogoClick ? "pointer" : "default"}
             onClick={onLogoClick}
-            _hover={onLogoClick ? { color: "gray.300" } : undefined}
+            _hover={onLogoClick ? { color: "var(--text-1)" } : undefined}
+            letterSpacing="0.04em"
+            textTransform="uppercase"
+            fontFamily="mono"
           >
             Tap to retry
           </Text>
@@ -109,25 +112,33 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         textAlign="center"
         px={3}
       >
-        <Box display="inline-flex" px={3} py={1} borderRadius="md" bg="rgba(0, 0, 0, 0.5)">
+        <Box
+          display="inline-flex"
+          px="3.5"
+          py="1.5"
+          borderRadius="999px"
+          bg="rgba(11,11,14,0.65)"
+          backdropFilter="blur(12px)"
+          border="1px solid var(--line)"
+        >
           <Flex gap="2" justifyContent="center" alignItems="center">
-            <Box w="8px" h="8px" borderRadius="full" bg={dotColor} flexShrink={0}
-              style={{ animation: (variant === 'searching' || variant === 'connecting') ? 'pulse 1.5s infinite' : undefined }}
+            <Box w="7px" h="7px" borderRadius="full" bg={dotColor} flexShrink={0}
+              style={{ animation: (variant === 'searching' || variant === 'connecting') ? 'splashPulse 1.5s infinite' : undefined }}
             />
-            <Text fontSize="xs" color="gray.300">
+            <Text fontSize="12px" color="var(--text-1)" letterSpacing="-0.005em">
               {statusText}
             </Text>
             {(variant === 'searching' || variant === 'connecting') && <EllipsisDots interval={300} />}
           </Flex>
         </Box>
         {hintText && (
-          <Text fontSize="xs" color="gray.500" mt={2} maxW="340px" textAlign="center" mx="auto">
+          <Text fontSize="11px" color="var(--text-3)" mt={2.5} maxW="340px" textAlign="center" mx="auto" letterSpacing="-0.005em">
             {hintText}
           </Text>
         )}
       </Box>
       <style>{`
-        @keyframes pulse {
+        @keyframes splashPulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
         }

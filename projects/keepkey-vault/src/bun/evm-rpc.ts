@@ -63,11 +63,28 @@ export async function getTokenMetadata(rpcUrl: string, contractAddress: string):
     ethCall(rpcUrl, contractAddress, DECIMALS_SIG),
   ])
 
-  const symbol = decodeString(symbolHex) || 'UNKNOWN'
-  const name = decodeString(nameHex) || symbol
+  // Reject contracts that don't actually implement ERC-20 metadata. The
+  // previous fallbacks (`'UNKNOWN'`, `18`) made every successful eth_call —
+  // even ones returning empty data for an EOA or a non-token contract that
+  // happens to live at this address on this chain — look like a valid token.
+  // The asset picker's multi-chain probe then surfaced an "UNKNOWN/UNKNOWN"
+  // row for every chain that didn't error, even when the contract genuinely
+  // doesn't exist there. Throw on missing data so the caller's per-chain
+  // catch can drop the hit.
+  const symbol = decodeString(symbolHex)
+  if (!symbol) {
+    throw new Error(`No ERC-20 symbol() at ${contractAddress} — not a token here`)
+  }
+  if (!decimalsHex || decimalsHex === '0x') {
+    throw new Error(`No ERC-20 decimals() at ${contractAddress} — not a token here`)
+  }
   const decimals = parseInt(decimalsHex, 16)
+  if (isNaN(decimals)) {
+    throw new Error(`Malformed ERC-20 decimals() at ${contractAddress}`)
+  }
+  const name = decodeString(nameHex) || symbol
 
-  return { symbol, name, decimals: isNaN(decimals) ? 18 : decimals }
+  return { symbol, name, decimals }
 }
 
 /** Check ERC-20 allowance(owner, spender) via eth_call */

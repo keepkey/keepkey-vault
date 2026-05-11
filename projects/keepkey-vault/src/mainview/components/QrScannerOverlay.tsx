@@ -181,7 +181,7 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 								position="absolute" top="50%" left="50%"
 								transform="translate(-50%, -50%)"
 								w="60%" h="60%"
-								border="2px solid rgba(255,215,0,0.5)"
+								border="2px solid rgba(233,196,106,0.5)"
 								borderRadius="md"
 								pointerEvents="none"
 							/>
@@ -222,17 +222,17 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 						border="2px dashed"
 						borderColor={dragOver ? "kk.gold" : "gray.600"}
 						borderRadius="lg"
-						bg={dragOver ? "rgba(255,215,0,0.06)" : "rgba(255,255,255,0.03)"}
+						bg={dragOver ? "rgba(233,196,106,0.06)" : "rgba(255,255,255,0.03)"}
 						cursor="pointer"
 						transition="all 0.15s"
-						_hover={{ borderColor: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+						_hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
 						onClick={() => fileInputRef.current?.click()}
 						onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
 						onDragLeave={() => setDragOver(false)}
 						onDrop={handleDrop}
 					>
 						<Flex direction="column" align="center" justify="center" h="100%" gap="2" px="4">
-							<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={dragOver ? "#FFD700" : "#888"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={dragOver ? "var(--gold)" : "#888"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 								<polyline points="17 8 12 3 7 8" />
 								<line x1="12" y1="3" x2="12" y2="15" />

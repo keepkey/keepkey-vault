@@ -7,9 +7,10 @@
 // Aggregator routes that complete atomically (0x, Uniswap, 1inch, …) have no
 // second leg — the source-chain Explorer link covers them, no provider tracker
 // is shown.
-// Some providers (Relay, CoW, Across) need a provider-side quote/order ID
-// that Pioneer doesn't yet plumb through CreatePendingSwap. Those return null
-// (with a one-time console warn) until the Pioneer side lands.
+// Relay needs its bytes32 request id, which vault now persists at trackSwap
+// time (extracted from the deposit calldata) or backfills via api.relay.link.
+// CoW / Across still return null (with a one-time console warn) until their
+// equivalent IDs are plumbed through.
 
 export type ProviderTracker = {
   url: string
@@ -17,9 +18,23 @@ export type ProviderTracker = {
   iconUrl?: string
 }
 
+export type ProviderTrackerOpts = {
+  /** Relay's bytes32 request id, when available. Required for the relay
+   *  branch — falls through to null when missing so the lazy-backfill path
+   *  in swap-tracker has time to populate it without flashing a dead link. */
+  relayRequestId?: string
+}
+
 const ICON = {
   thor: 'https://pioneers.dev/coins/thorchain.png',
   maya: 'https://pioneers.dev/coins/mayachain.png',
+  // Inline orange "R" badge — keeps the tracker button branded without
+  // depending on Relay's CDN (which is bot-protected and 429s for this client).
+  relay:
+    'data:image/svg+xml;utf8,' +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#ff5b22"/><text x="32" y="42" font-family="-apple-system,system-ui,sans-serif" font-size="32" font-weight="700" text-anchor="middle" fill="#fff">R</text></svg>',
+    ),
 }
 
 const ATOMIC_PROVIDERS = new Set([
@@ -31,11 +46,13 @@ const ATOMIC_PROVIDERS = new Set([
   'sushiswap', 'sushi',
 ])
 
+// Providers that still need a provider-side ID we don't surface yet.
 const ID_BLOCKED_PROVIDERS = new Set([
-  'relay',
   'cow', 'cowswap',
   'across',
 ])
+
+const RELAY_KEYS = new Set(['relay', 'relaylink', 'relayexchange'])
 
 function normalize(swapper: string | undefined | null): string {
   return (swapper || '').toLowerCase().replace(/[\s_.-]/g, '')
@@ -59,6 +76,7 @@ function warnOnce(key: string, msg: string): void {
 export function providerTrackerUrl(
   swapper: string | undefined | null,
   txid: string | undefined | null,
+  opts?: ProviderTrackerOpts,
 ): ProviderTracker | null {
   if (!txid) return null
   const s = normalize(swapper)
@@ -74,6 +92,12 @@ export function providerTrackerUrl(
   }
   if (s === 'lifi') {
     return { url: `https://scan.li.fi/tx/${txid}`, label: 'LI.FI Track' }
+  }
+
+  if (RELAY_KEYS.has(s)) {
+    const id = opts?.relayRequestId
+    if (!id) return null // backfill in flight; UI re-renders when it lands
+    return { url: `https://relay.link/transaction/${id}`, label: 'Relay Track', iconUrl: ICON.relay }
   }
 
   if (ATOMIC_PROVIDERS.has(s)) return null

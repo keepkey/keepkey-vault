@@ -187,13 +187,13 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {/* Header */}
         <Flex align="center" justify="space-between" mb="4">
           <Flex align="center" gap="2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 21h4l-1-3-3 3z" />
               <path d="M6 18L18 6" />
               <path d="M14 6h4v4" />
               <path d="M18 2l4 4-4 4" />
             </svg>
-            <Text fontSize="lg" fontWeight="600" color="#4ade80">BTC Sweep Scanner</Text>
+            <Text fontSize="lg" fontWeight="600" color="var(--teal)">BTC Sweep Scanner</Text>
           </Flex>
           <Box as="button" onClick={handleClose} color="kk.textMuted" _hover={{ color: "white" }} p="1" opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -216,7 +216,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
               Currently tracking accounts 0{currentMaxAccountHint > 0 ? `–${currentMaxAccountHint}` : ''}.
             </Text>
             <Button
-              size="md" bg="#4ade80" color="black" fontWeight="600"
+              size="md" bg="var(--teal)" color="black" fontWeight="600"
               _hover={{ bg: "#22c55e" }}
               onClick={startScan}
             >
@@ -229,14 +229,14 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {phase === 'scanning' && scanStatus && (
           <VStack gap="3" align="stretch">
             <Flex align="center" gap="3">
-              <Spinner size="sm" color="#4ade80" />
+              <Spinner size="sm" color="var(--teal)" />
               <Text fontSize="sm" color="kk.textSecondary">
                 {scanStatus.progress.phase === 'deriving' ? 'Deriving addresses from device...' : 'Checking balances...'}
               </Text>
             </Flex>
             <Box bg="whiteAlpha.100" borderRadius="full" h="6px" overflow="hidden">
               <Box
-                bg="#4ade80" h="100%" borderRadius="full"
+                bg="var(--teal)" h="100%" borderRadius="full"
                 w={`${Math.round((scanStatus.progress.current / Math.max(scanStatus.progress.total, 1)) * 100)}%`}
                 transition="width 0.3s"
               />
@@ -250,7 +250,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
 
         {phase === 'scanning' && !scanStatus && (
           <Flex align="center" gap="3" py="4">
-            <Spinner size="sm" color="#4ade80" />
+            <Spinner size="sm" color="var(--teal)" />
             <Text fontSize="sm" color="kk.textSecondary">Starting scan...</Text>
           </Flex>
         )}
@@ -261,11 +261,11 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             {nothingFound && (
               <>
                 <Flex align="center" gap="2" py="2">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                     <polyline points="22 4 12 14.01 9 11.01" />
                   </svg>
-                  <Text fontSize="sm" color="#4ade80" fontWeight="500">All clear — no funds on non-standard paths or higher accounts</Text>
+                  <Text fontSize="sm" color="var(--teal)" fontWeight="500">All clear — no funds on non-standard paths or higher accounts</Text>
                 </Flex>
                 <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
               </>
@@ -275,7 +275,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             {showHigherSection && (
               <Box>
                 <Box bg="rgba(74,222,128,0.08)" border="1px solid" borderColor="rgba(74,222,128,0.2)" borderRadius="lg" p="3" mb="2">
-                  <Text fontSize="sm" fontWeight="600" color="#4ade80">
+                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">
                     {formatSats(higherSats)} on {discoveredAccountIndices.length} undiscovered account{discoveredAccountIndices.length > 1 ? 's' : ''}
                   </Text>
                   <Text fontSize="xs" color="kk.textMuted" mt="1">
@@ -290,7 +290,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                         <Text fontSize="xs" color="kk.textSecondary">
                           Account #{r.accountIndex} · {r.scriptType}
                         </Text>
-                        <Text fontSize="xs" fontWeight="600" color="#4ade80">{formatSats(r.balanceSats)}</Text>
+                        <Text fontSize="xs" fontWeight="600" color="var(--teal)">{formatSats(r.balanceSats)}</Text>
                       </Flex>
                       <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" truncate maxW="300px">{r.address}</Text>
                     </Box>
@@ -298,7 +298,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                 </VStack>
 
                 <Button
-                  size="sm" w="100%" bg="#4ade80" color="black" fontWeight="600"
+                  size="sm" w="100%" bg="var(--teal)" color="black" fontWeight="600"
                   _hover={{ bg: "#22c55e" }}
                   onClick={handleAddAccounts}
                 >
@@ -315,7 +315,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             {/* Non-standard section */}
             {nonStandard.length > 0 && (
               <Box>
-                <Box bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.2)" borderRadius="lg" p="3" mb="2">
+                <Box bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.2)" borderRadius="lg" p="3" mb="2">
                   <Text fontSize="sm" fontWeight="600" color="kk.gold">
                     {formatSats(nonStandardSats)} on {nonStandard.length} non-standard path{nonStandard.length > 1 ? 's' : ''}
                   </Text>
@@ -364,7 +364,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {/* ── Adding accounts ──────────────────────────────────── */}
         {phase === 'adding' && (
           <Flex align="center" gap="3" py="4">
-            <Spinner size="sm" color="#4ade80" />
+            <Spinner size="sm" color="var(--teal)" />
             <Text fontSize="sm" color="kk.textSecondary">
               Adding account {accountsAdded + 1} of {accountsTarget}...
             </Text>
@@ -385,7 +385,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             {sweepResult ? (
               sweepResult.dryRun ? (
                 <>
-                  <Text fontSize="sm" fontWeight="600" color="#4ade80">Dry Run Complete</Text>
+                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">Dry Run Complete</Text>
                   <Box bg="whiteAlpha.50" borderRadius="md" p="3">
                     <VStack gap="1" align="stretch">
                       <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Inputs</Text><Text fontSize="xs">{sweepResult.inputCount}</Text></Flex>
@@ -405,11 +405,11 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
               ) : (
                 <>
                   <Flex align="center" gap="2">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
                       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                       <polyline points="22 4 12 14.01 9 11.01" />
                     </svg>
-                    <Text fontSize="sm" fontWeight="600" color="#4ade80">Sweep Broadcast</Text>
+                    <Text fontSize="sm" fontWeight="600" color="var(--teal)">Sweep Broadcast</Text>
                   </Flex>
                   <Box bg="whiteAlpha.50" borderRadius="md" p="3">
                     <VStack gap="1" align="stretch">
@@ -426,11 +426,11 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
               /* Accounts-only done state */
               <>
                 <Flex align="center" gap="2">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                     <polyline points="22 4 12 14.01 9 11.01" />
                   </svg>
-                  <Text fontSize="sm" fontWeight="600" color="#4ade80">
+                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">
                     Added {accountsAdded} account{accountsAdded > 1 ? 's' : ''}
                   </Text>
                 </Flex>
@@ -450,7 +450,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             <Text fontSize="sm" color="red.400">{error || 'An error occurred'}</Text>
             <Flex gap="2">
               <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
-              <Button flex="1" size="sm" variant="outline" borderColor="kk.border" color="#4ade80" onClick={startScan}>Retry</Button>
+              <Button flex="1" size="sm" variant="outline" borderColor="kk.border" color="var(--teal)" onClick={startScan}>Retry</Button>
             </Flex>
           </VStack>
         )}

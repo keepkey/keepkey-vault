@@ -36,7 +36,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   broadcast: { label: 'Broadcast', color: '#23DCC8' },
   signed: { label: 'Signed', color: '#F7931A' },
-  completed: { label: 'Completed', color: '#4ADE80' },
+  completed: { label: 'Completed', color: 'var(--teal)' },
   refunded: { label: 'Refunded', color: '#FB923C' },
   failed: { label: 'Failed', color: '#E53E3E' },
 }
@@ -47,8 +47,8 @@ const SWAP_STATUS_CONFIG: Record<string, { label: string; color: string; dot?: b
   confirming:          { label: 'Confirming',         color: '#627EEA', dot: true },
   output_detected:     { label: 'Output Detected',    color: '#23DCC8', dot: true },
   output_confirming:   { label: 'Confirming Output',  color: '#23DCC8', dot: true },
-  output_confirmed:    { label: 'Output Confirmed',   color: '#4ADE80' },
-  completed:           { label: 'Complete',            color: '#4ADE80' },
+  output_confirmed:    { label: 'Output Confirmed',   color: 'var(--teal)' },
+  completed:           { label: 'Complete',            color: 'var(--teal)' },
   failed:              { label: 'Failed',              color: '#E53E3E' },
   refunded:            { label: 'Refunded',            color: '#FB923C' },
 }
@@ -144,8 +144,8 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
       <Text fontSize="11px" color="whiteAlpha.500" minW="100px" flexShrink={0}>{label}</Text>
       <HStack gap="1" justify="flex-end" minW="0">
         <Text
-          fontSize="11px" color="#23DCC8" fontFamily="mono" cursor="pointer" wordBreak="break-all" textAlign="right"
-          _hover={{ color: '#4ADE80' }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
+          fontSize="11px" color="var(--teal)" fontFamily="mono" cursor="pointer" wordBreak="break-all" textAlign="right"
+          _hover={{ color: 'var(--teal)' }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
         >
           {copied ? 'Copied!' : value}
         </Text>
@@ -258,8 +258,8 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
                   _hover={{ bg: 'rgba(35,220,200,0.18)' }} transition="all 0.15s"
                   onClick={() => rpcRequest('openUrl', { url: explorerUrl }).catch(() => {})}
                 >
-                  <Text fontSize="xs" fontWeight="600" color="#23DCC8">View on Explorer</Text>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <Text fontSize="xs" fontWeight="600" color="var(--teal)">View on Explorer</Text>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                     <polyline points="15 3 21 3 21 9" />
                     <line x1="10" y1="14" x2="21" y2="3" />
@@ -321,7 +321,7 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
             <TxDetailRow label="Outbound Confs" value={`${s.outboundConfirmations} / ${s.outboundRequiredConfirmations}`} />
           )}
 
-          {s.error && <TxDetailRow label="Error" value={s.error} color="#EF4444" />}
+          {s.error && <TxDetailRow label="Error" value={s.error} color="var(--rose)" />}
 
           <TxDetailRow label="Started" value={formatFullDate(s.createdAt)} />
           {s.estimatedTime > 0 && <TxDetailRow label="Est. Time" value={`${Math.floor(s.estimatedTime / 60)}m ${s.estimatedTime % 60}s`} />}
@@ -336,7 +336,7 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
                 _hover={{ bg: 'rgba(35,220,200,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: inboundUrl }).catch(() => {})}
               >
-                <Text fontSize="xs" fontWeight="600" color="#23DCC8">Inbound Explorer</Text>
+                <Text fontSize="xs" fontWeight="600" color="var(--teal)">Inbound Explorer</Text>
               </Flex>
             )}
             {outboundUrl && (
@@ -347,7 +347,7 @@ function TxDetailDialog({ detail, onClose }: { detail: TxDetail; onClose: () => 
                 _hover={{ bg: 'rgba(74,222,128,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: outboundUrl }).catch(() => {})}
               >
-                <Text fontSize="xs" fontWeight="600" color="#4ADE80">Outbound Explorer</Text>
+                <Text fontSize="xs" fontWeight="600" color="var(--teal)">Outbound Explorer</Text>
               </Flex>
             )}
           </HStack>
@@ -411,7 +411,7 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
       {activity.type === 'swap' && (activity.amount || activity.outAmount) ? (
         <Flex fontSize="2xs" color="whiteAlpha.500" mb="1" gap="1.5" align="center" flexWrap="wrap">
           {activity.amount && <Text truncate>{activity.amount} {activity.asset || activity.chain}</Text>}
-          <Text color="#FFD700">&rarr;</Text>
+          <Text color="var(--gold)">&rarr;</Text>
           {activity.outAmount
             ? <Text truncate color={activity.swapStatus === 'completed' ? '#23DCC8' : 'whiteAlpha.500'}>
                 {activity.swapStatus === 'completed' ? '' : '~'}{activity.outAmount} {activity.outAsset || ''}
@@ -427,7 +427,7 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
       )}
       <Flex justify="space-between" align="center">
         {activity.txid ? (
-          <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "#23DCC8" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
+          <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
             {copied ? 'Copied!' : truncateTxid(activity.txid)}
           </Text>
         ) : (
@@ -435,7 +435,7 @@ function ActivityRow({ activity, onSelect }: { activity: RecentActivity; onSelec
         )}
         <HStack gap="2">
           {activity.blockHeight ? <Text fontSize="9px" color="whiteAlpha.200" fontFamily="mono">blk {activity.blockHeight}</Text> : null}
-          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
+          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
         </HStack>
       </Flex>
     </Box>
@@ -463,11 +463,11 @@ function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingS
       </Flex>
       {swap.fromAmount && <Text fontSize="2xs" color="whiteAlpha.500" mb="1">{swap.fromAmount} {swap.fromSymbol}{swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}</Text>}
       <Flex justify="space-between" align="center">
-        <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "#23DCC8" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
+        <Text fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
           {copied ? 'Copied!' : truncateTxid(swap.txid)}
         </Text>
         <HStack gap="2">
-          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "#23DCC8" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
+          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
           <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
         </HStack>
       </Flex>
@@ -576,7 +576,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
                 </Box>
                 <Text fontSize="xs" fontWeight="600" color="white">All</Text>
                 <Text fontSize="2xs" color="whiteAlpha.400" flex="1">All Networks</Text>
-                {!selectedChain && <Text fontSize="2xs" color="#23DCC8">{'\u2713'}</Text>}
+                {!selectedChain && <Text fontSize="2xs" color="var(--teal)">{'\u2713'}</Text>}
               </Flex>
               {chainOptions.map(c => (
                 <Flex
@@ -594,7 +594,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
                   <Text fontSize="xs" fontWeight="600" color="white">{c.symbol}</Text>
                   <Text fontSize="2xs" color="whiteAlpha.400" flex="1" truncate>{c.coin}</Text>
                   <Text fontSize="9px" color="whiteAlpha.200" flexShrink={0} truncate maxW="90px" fontFamily="mono">{c.networkId}</Text>
-                  {selectedChain === c.id && <Text fontSize="2xs" color="#23DCC8">{'\u2713'}</Text>}
+                  {selectedChain === c.id && <Text fontSize="2xs" color="var(--teal)">{'\u2713'}</Text>}
                 </Flex>
               ))}
             </Box>
