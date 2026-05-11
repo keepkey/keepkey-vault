@@ -921,20 +921,20 @@ export function getApiLogById(id: number, deviceId?: string, walletId?: string):
 
 import type { RecentActivity, ActivityType, ActivitySource } from '../shared/types'
 
-/** Check if a txid already exists in api_log */
-export function apiLogTxidExists(txid: string, deviceId?: string, walletId?: string): boolean {
+/** Check if a rebuilt scan row already exists in api_log. */
+export function apiLogScanTxidExists(txid: string, deviceId?: string, walletId?: string): boolean {
   try {
     if (!db) return false
     const row = walletId
-      ? db.query('SELECT 1 FROM api_log WHERE txid = ? AND wallet_id = ? LIMIT 1').get(txid, walletId)
+      ? db.query("SELECT 1 FROM api_log WHERE txid = ? AND wallet_id = ? AND method = 'SCAN' LIMIT 1").get(txid, walletId)
       : deviceId
-      ? db.query('SELECT 1 FROM api_log WHERE txid = ? AND device_id = ? LIMIT 1').get(txid, deviceId)
-      : db.query('SELECT 1 FROM api_log WHERE txid = ? LIMIT 1').get(txid)
+      ? db.query("SELECT 1 FROM api_log WHERE txid = ? AND device_id = ? AND method = 'SCAN' LIMIT 1").get(txid, deviceId)
+      : db.query("SELECT 1 FROM api_log WHERE txid = ? AND method = 'SCAN' LIMIT 1").get(txid)
     return !!row
   } catch { return false }
 }
 
-/** Update metadata for an existing api_log tx row (used by history rebuild refreshes). */
+/** Update metadata for an existing rebuilt scan row. */
 export function updateApiLogTxMeta(
   txid: string,
   meta: Record<string, any>,
@@ -951,9 +951,9 @@ export function updateApiLogTxMeta(
     if (activity?.route) { setSql.push('route = ?'); args.push(activity.route) }
     if (activity?.timestamp) { setSql.push('timestamp = ?'); args.push(activity.timestamp) }
 
-    if (walletId) db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND wallet_id = ?`, [...args, txid, walletId])
-    else if (deviceId) db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND device_id = ?`, [...args, txid, deviceId])
-    else db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ?`, [...args, txid])
+    if (walletId) db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND wallet_id = ? AND method = 'SCAN'`, [...args, txid, walletId])
+    else if (deviceId) db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND device_id = ? AND method = 'SCAN'`, [...args, txid, deviceId])
+    else db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND method = 'SCAN'`, [...args, txid])
   } catch (e: any) {
     console.warn('[db] updateApiLogTxMeta failed:', e.message)
   }
@@ -990,7 +990,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
       app_name: string; timestamp: number; route: string; method: string; response_body: string | null
     }>
 
-    const logActivities: RecentActivity[] = logRows.map(r => {
+    const rawLogActivities: RecentActivity[] = logRows.map(r => {
       // Parse tx metadata from response_body (stored by scan)
       let meta: any = null
       if (r.response_body) { try { meta = JSON.parse(r.response_body) } catch {} }
@@ -1045,9 +1045,12 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
       status: string; created_at: number
     }>
 
-    const logTxids = new Set(logActivities.filter(a => a.txid).map(a => a.txid))
+    const swapLogTxids = new Set(rawLogActivities.filter(a => a.type === 'swap' && a.txid).map(a => a.txid))
+    const swapRowTxids = new Set(swapRows.filter(r => r.txid).map(r => r.txid))
+    const allSwapTxids = new Set([...swapLogTxids, ...swapRowTxids])
+    const logActivities = rawLogActivities.filter(a => !(a.txid && a.type !== 'swap' && allSwapTxids.has(a.txid)))
     const swapActivities: RecentActivity[] = swapRows
-      .filter(r => !logTxids.has(r.txid))
+      .filter(r => !swapLogTxids.has(r.txid))
       .map(r => ({
         id: r.id,
         deviceId: r.device_id || undefined,

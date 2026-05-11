@@ -2025,6 +2025,8 @@ export class EngineController extends EventEmitter {
         console.log(`[Engine] Seed identity OK: ${addr.slice(0, 10)}...`)
       }
       setSetting(key, addr)
+      this.emit('wallet-scope-ready', { deviceId, seedAddress: addr })
+      this.emit('state-change', this.getDeviceState())
     } catch (err: any) {
       console.warn('[Engine] checkSeedIdentity failed:', err?.message)
     }

@@ -1,6 +1,6 @@
 import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
-import { apiLogTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
+import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
 import { BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported, type ChainDef } from '../shared/chains'
 import type { ActivityType } from '../shared/types'
 
@@ -275,7 +275,7 @@ export async function rebuildActivityHistory(params: {
             chainSymbol: chain.symbol,
             networkId: chain.networkId,
           }
-          const exists = apiLogTxidExists(txid, params.scope.deviceId, params.scope.walletId)
+          const exists = apiLogScanTxidExists(txid, params.scope.deviceId, params.scope.walletId)
           if (!dryRun) {
             if (exists) {
               updateApiLogTxMeta(txid, meta, params.scope.deviceId, params.scope.walletId, {

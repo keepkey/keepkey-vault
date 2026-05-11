@@ -659,6 +659,19 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
 }
 
+const pendingScopedApiLogs: ApiLogEntry[] = []
+
+function flushPendingScopedApiLogs() {
+	const scope = getWalletDbScope()
+	if (!scope || engine.isPassphraseWallet || pendingScopedApiLogs.length === 0) return
+	const pending = pendingScopedApiLogs.splice(0)
+	for (const entry of pending) {
+		const scopedEntry = { ...entry, ...scope }
+		try { insertApiLog(scopedEntry) } catch { /* db not ready */ }
+		try { rpc.send['api-log'](scopedEntry) } catch { /* webview not ready */ }
+	}
+}
+
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
@@ -668,6 +681,9 @@ const restCallbacks: RestApiCallbacks = {
 		// PRIVACY: Don't persist API activity from passphrase wallets to disk.
 		if (!engine.isPassphraseWallet && scope) {
 			try { insertApiLog(scopedEntry) } catch { /* db not ready */ }
+		} else if (!engine.isPassphraseWallet && !scope) {
+			pendingScopedApiLogs.push(entry)
+			if (pendingScopedApiLogs.length > 100) pendingScopedApiLogs.shift()
 		}
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
@@ -4869,6 +4885,9 @@ engine.on('state-change', (state) => {
 		}
 	}
 	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
+	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
+		pendingScopedApiLogs.splice(0)
+	}
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
 	if (state.state === 'needs_passphrase') {
@@ -4884,6 +4903,10 @@ engine.on('state-change', (state) => {
 		// reaching the DB during the session.
 		console.log('[Vault] Passphrase mode: reset in-memory address managers — will re-derive after passphrase entry')
 	}
+})
+engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
+	console.log(`[Vault] Wallet scope ready on ${deviceId}: ${seedAddress?.slice(0, 10)}...`)
+	flushPendingScopedApiLogs()
 })
 // Seed changed — different mnemonic loaded on the same hardware.
 // Reset in-memory address managers so they re-derive from the new seed.
