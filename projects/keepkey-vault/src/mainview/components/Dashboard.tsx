@@ -87,12 +87,13 @@ const DASHBOARD_ANIMATIONS = `
 
 /* localStorage key for user's preferred portfolio view. */
 const DASHBOARD_VIEW_KEY = 'keepkey.dashboard.view'
-type DashboardView = 'orbital' | 'donut'
+type DashboardView = 'orbit' | 'grid'
 function readSavedView(): DashboardView {
 	try {
 		const v = localStorage.getItem(DASHBOARD_VIEW_KEY)
-		return v === 'donut' ? 'donut' : 'orbital'
-	} catch { return 'orbital' }
+		// Legacy 'orbital' / 'donut' values from the previous toggle map to 'orbit'.
+		return v === 'grid' ? 'grid' : 'orbit'
+	} catch { return 'orbit' }
 }
 
 /** Orbital portfolio view — chain logos placed in a constellation around
@@ -116,6 +117,13 @@ function OrbitalView({
 	totalCents,
 	cleanTokenTotal,
 	onSelect,
+	mode,
+	onShowReports,
+	onRefresh,
+	loadingBalances,
+	cacheUpdatedAt,
+	canShowReports,
+	t,
 }: {
 	chains: ChainDef[]
 	balances: Map<string, ChainBalance>
@@ -125,6 +133,13 @@ function OrbitalView({
 	totalCents: string
 	cleanTokenTotal: number
 	onSelect: (c: ChainDef) => void
+	mode: DashboardView
+	onShowReports: () => void
+	onRefresh: () => void
+	loadingBalances: boolean
+	cacheUpdatedAt: number | null
+	canShowReports: boolean
+	t: (key: string, opts?: any) => string
 }) {
 	const [hover, setHover] = useState<string | null>(null)
 	// Rectangular canvas — width and height are independent so the orbital
@@ -204,6 +219,10 @@ function OrbitalView({
 		// the old fixed cap so its constants encoded an unstated "1.0 at 440".
 		// Tracking the smaller dim keeps icons sane on portrait windows.
 		const k = sizeRef / 440
+		// Orbit mode runs ~20% smaller per the redesign — icons that big felt
+		// shouty against the new card frame; grid mode keeps the full size
+		// since each tile gets a visible background that has to read at scale.
+		const modeScale = mode === 'orbit' ? 0.8 : 1.0
 		const items = orbitChains.map((c, i) => {
 			const share = c.usd / maxOrbitUsd
 			// Two-axis sizing — bigger USD share AND a higher slot rank both
@@ -211,7 +230,7 @@ function OrbitalView({
 			// the top end so the four corners always feel anchored; share
 			// carries the rest of the hierarchy.
 			const rankBoost = i < 4 ? 1.0 : i < 8 ? 0.5 : 0.25
-			const sat = Math.round((56 + share * 96 * rankBoost + rankBoost * 24) * k)
+			const sat = Math.round((56 + share * 96 * rankBoost + rankBoost * 24) * k * modeScale)
 			return { ...c, sat }
 		})
 		// Center totals rectangle — chains must clear this region.
@@ -243,7 +262,11 @@ function OrbitalView({
 		}
 		const pos = items.map((it, i) => slot(i, it.sat))
 		// Phase B — relax for non-overlap + text clearance.
-		const ITER = 80
+		// Grid mode skips relaxation: slots are deterministic, the visual
+		// language is "fixed tiles on a wall mosaic", not a constellation.
+		// Overlaps in grid mode get resolved by the slot function itself
+		// (corner-first / edge-mid layout) since icons there are smaller.
+		const ITER = mode === 'orbit' ? 80 : 0
 		for (let k = 0; k < ITER; k++) {
 			for (let i = 0; i < N; i++) {
 				// Pairwise repulsion — hard non-overlap guarantee.
@@ -288,7 +311,7 @@ function OrbitalView({
 		}
 		return items.map((it, i) => ({ ...it, x: pos[i].x, y: pos[i].y }))
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), width, height, cx, cy, maxOrbitUsd, sizeRef])
+	}, [orbitChains.map(c => `${c.chain.id}:${c.usd}`).join('|'), width, height, cx, cy, maxOrbitUsd, sizeRef, mode])
 
 	// Preload all visible chain icons before we paint the cluster.
 	const iconUrls = useMemo(
@@ -376,6 +399,84 @@ function OrbitalView({
 					{chains.length} CHAINS
 					{cleanTokenTotal > 0 && ` · ${cleanTokenTotal} ASSETS`}
 				</Text>
+
+				{/* Reports + Refresh inline under the center price.
+				    Previously these sat below the orbital card as their own
+				    Flex row; folding them into the center pulls all the
+				    primary controls into one focal point so the constellation
+				    really IS the whole dashboard. */}
+				<Flex justify="center" gap="2" mt="4" pointerEvents="auto">
+					{canShowReports && (
+						<Box
+							as="button"
+							px="2.5"
+							py="1.5"
+							fontSize="11px"
+							fontWeight="600"
+							color="kk.gold"
+							bg="rgba(233,196,106,0.06)"
+							border="1px solid"
+							borderColor="rgba(233,196,106,0.25)"
+							borderRadius="full"
+							cursor="pointer"
+							transition="all 0.15s"
+							_hover={{ color: "white", bg: "rgba(233,196,106,0.18)" }}
+							onClick={onShowReports}
+						>
+							<Flex align="center" gap="1.5">
+								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+									<polyline points="14 2 14 8 20 8" />
+									<line x1="16" y1="13" x2="8" y2="13" />
+									<line x1="16" y1="17" x2="8" y2="17" />
+								</svg>
+								{t("reports")}
+							</Flex>
+						</Box>
+					)}
+					<Box
+						as="button"
+						px="2.5"
+						py="1.5"
+						fontSize="11px"
+						fontWeight="600"
+						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
+						bg="rgba(233,196,106,0.06)"
+						border="1px solid"
+						borderColor="rgba(233,196,106,0.25)"
+						borderRadius="full"
+						cursor={loadingBalances ? "default" : "pointer"}
+						transition="all 0.15s"
+						_hover={loadingBalances ? {} : { color: "white", bg: "rgba(233,196,106,0.18)" }}
+						onClick={loadingBalances ? undefined : onRefresh}
+					>
+						<Flex align="center" gap="1.5">
+							{loadingBalances ? (
+								<Spinner size="xs" color="kk.gold" />
+							) : (
+								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+									<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+								</svg>
+							)}
+							{loadingBalances
+								? t("refreshing")
+								: cacheUpdatedAt
+									? <>
+										<Text as="span" color={(() => {
+											const age = Date.now() - cacheUpdatedAt
+											if (age < 3_600_000) return "var(--teal)"
+											if (age < 86_400_000) return "var(--gold)"
+											return "var(--rose)"
+										})()}>
+											{formatTimeAgo(cacheUpdatedAt, t)}
+										</Text>
+										{" · "}{t("refreshBalances")}
+									</>
+									: t("refreshPrompt")}
+						</Flex>
+					</Box>
+				</Flex>
 			</Box>
 
 			{/* Satellite chains — variable size by USD share, two-ring zigzag.
@@ -392,6 +493,12 @@ function OrbitalView({
 			{layout.map(({ chain, usd, bal, x, y, sat }) => {
 				const isHover = hover === chain.id
 				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				// Grid mode wraps the icon in a square tile bg so the layout
+				// reads as a wall mosaic. Tile is slightly larger than the icon
+				// so the round logo nests inside a rounded square — Apple
+				// app-icon-on-springboard feel.
+				const tilePad = mode === 'grid' ? Math.round(sat * 0.15) : 0
+				const cellSize = sat + tilePad * 2
 				return (
 					<Box
 						key={chain.id}
@@ -400,14 +507,14 @@ function OrbitalView({
 						onMouseLeave={() => setHover(null)}
 						onClick={() => onSelect(chain)}
 						position="absolute"
-						left={`${x - sat / 2}px`}
-						top={`${y - sat / 2}px`}
-						w={`${sat}px`}
-						h={`${sat}px`}
-						borderRadius="full"
-						bg="transparent"
-						border="0"
-						p={0}
+						left={`${x - cellSize / 2}px`}
+						top={`${y - cellSize / 2}px`}
+						w={`${cellSize}px`}
+						h={`${cellSize}px`}
+						borderRadius={mode === 'grid' ? '20%' : 'full'}
+						bg={mode === 'grid' ? `linear-gradient(155deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))` : 'transparent'}
+						border={mode === 'grid' ? '1px solid var(--line)' : '0'}
+						p={`${tilePad}px`}
 						display="grid"
 						placeItems="center"
 						transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
@@ -1048,16 +1155,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Portfolio view — orbital (default) or donut, switchable via the
-			    pill toggle in the top-right of the card.
-			    The orbital is the visual hero of the dashboard — it breaks out
-			    of the parent 600px maxW into a viewport-wide canvas so the
-			    constellation can actually spread to the corners. The donut
-			    view stays inside the parent so the legend below it doesn't
-			    feel unmoored. */}
+			{/* Portfolio view — Grid (square tiles) or Orbit (constellation).
+			    The view is the hero of the dashboard — it breaks out of the
+			    parent 600px maxW into a viewport-wide canvas. Reports +
+			    Refresh fold into the center column inside the view, so this
+			    card is essentially the whole dashboard. */}
 			{hasAnyBalance ? (
 				<Box
-					w={viewMode === 'orbital' ? "min(98vw, 1360px)" : "100%"}
+					w="min(98vw, 1360px)"
 					p="4"
 					mb="2"
 					borderRadius="xl"
@@ -1065,91 +1170,89 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					border="1px solid"
 					borderColor="kk.border"
 					position="relative"
-					left={viewMode === 'orbital' ? '50%' : undefined}
-					transform={viewMode === 'orbital' ? 'translateX(-50%)' : undefined}
+					left="50%"
+					transform="translateX(-50%)"
 				>
-					{/* View toggle — orbital / donut. Two-state pill with icon glyphs. */}
+					{/* Grid / Orbit segmented toggle — TOP LEFT, larger, with text labels.
+					    Was a tiny icon-only pill in the top right; promoting it gives
+					    users a clear way to flip the whole visual language. */}
 					<Flex
 						position="absolute"
-						top="3"
-						right="3"
+						top="14px"
+						left="14px"
 						bg="rgba(255,255,255,0.04)"
 						border="1px solid"
 						borderColor="kk.border"
 						borderRadius="999px"
-						p="1"
-						gap="1"
-						zIndex={2}
+						p="3px"
+						gap="2px"
+						zIndex={3}
 					>
 						<Box
 							as="button"
-							onClick={() => setViewMode('orbital')}
-							w="26px" h="22px"
+							onClick={() => setViewMode('grid')}
+							px="14px" h="32px"
 							borderRadius="999px"
-							display="flex" alignItems="center" justifyContent="center"
-							bg={viewMode === 'orbital' ? 'rgba(233,196,106,0.18)' : 'transparent'}
-							color={viewMode === 'orbital' ? 'var(--gold)' : 'var(--text-3)'}
+							display="flex" alignItems="center" gap="6px"
+							bg={viewMode === 'grid' ? 'rgba(233,196,106,0.22)' : 'transparent'}
+							color={viewMode === 'grid' ? 'var(--gold)' : 'var(--text-3)'}
+							border={viewMode === 'grid' ? '1px solid rgba(233,196,106,0.45)' : '1px solid transparent'}
+							fontSize="12px" fontWeight="600"
 							_hover={{ color: 'var(--text-1)' }}
 							transition="all 0.15s"
 							cursor="pointer"
-							title="Orbital view"
+							title="Grid view"
 						>
-							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-								<circle cx="12" cy="12" r="9" strokeDasharray="2 3"/>
-								<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
-								<circle cx="21" cy="12" r="2.2" fill="currentColor" stroke="none"/>
-								<circle cx="3" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<rect x="3" y="3"  width="7" height="7" rx="1.5"/>
+								<rect x="14" y="3" width="7" height="7" rx="1.5"/>
+								<rect x="3" y="14" width="7" height="7" rx="1.5"/>
+								<rect x="14" y="14" width="7" height="7" rx="1.5"/>
 							</svg>
+							GRID
 						</Box>
 						<Box
 							as="button"
-							onClick={() => setViewMode('donut')}
-							w="26px" h="22px"
+							onClick={() => setViewMode('orbit')}
+							px="14px" h="32px"
 							borderRadius="999px"
-							display="flex" alignItems="center" justifyContent="center"
-							bg={viewMode === 'donut' ? 'rgba(233,196,106,0.18)' : 'transparent'}
-							color={viewMode === 'donut' ? 'var(--gold)' : 'var(--text-3)'}
+							display="flex" alignItems="center" gap="6px"
+							bg={viewMode === 'orbit' ? 'rgba(233,196,106,0.22)' : 'transparent'}
+							color={viewMode === 'orbit' ? 'var(--gold)' : 'var(--text-3)'}
+							border={viewMode === 'orbit' ? '1px solid rgba(233,196,106,0.45)' : '1px solid transparent'}
+							fontSize="12px" fontWeight="600"
 							_hover={{ color: 'var(--text-1)' }}
 							transition="all 0.15s"
 							cursor="pointer"
-							title="Donut view"
+							title="Orbit view"
 						>
-							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-								<circle cx="12" cy="12" r="9"/>
-								<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9" strokeDasharray="2 3"/>
+								<circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/>
+								<circle cx="21" cy="12" r="2.2" fill="currentColor" stroke="none"/>
+								<circle cx="3"  cy="12" r="1.6" fill="currentColor" stroke="none"/>
 							</svg>
+							ORBIT
 						</Box>
 					</Flex>
 
-					{viewMode === 'orbital' ? (
-						<OrbitalView
-							chains={visibleChains}
-							balances={balances}
-							cleanBalanceUsd={cleanBalanceUsd}
-							totalUsd={totalUsd}
-							totalDollars={totalDollars}
-							totalCents={totalCents}
-							cleanTokenTotal={cleanTokenTotal}
-							onSelect={(c) => setSelectedChain(c)}
-						/>
-					) : (
-						<Flex direction="column" align="center" gap="3">
-							<DonutChart
-								data={chartData}
-								size={160}
-								activeIndex={activeSliceIndex}
-								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-							/>
-							<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
-								<ChartLegend
-									data={chartData}
-									total={totalUsd}
-									activeIndex={activeSliceIndex}
-									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-								/>
-							</Box>
-						</Flex>
-					)}
+					<OrbitalView
+						chains={visibleChains}
+						balances={balances}
+						cleanBalanceUsd={cleanBalanceUsd}
+						totalUsd={totalUsd}
+						totalDollars={totalDollars}
+						totalCents={totalCents}
+						cleanTokenTotal={cleanTokenTotal}
+						onSelect={(c) => setSelectedChain(c)}
+						mode={viewMode}
+						onShowReports={() => setShowReports(true)}
+						onRefresh={refreshBalances}
+						loadingBalances={loadingBalances}
+						cacheUpdatedAt={cacheUpdatedAt}
+						canShowReports={!isHiddenWallet}
+						t={t}
+					/>
 				</Box>
 			) : !loadingBalances && initialLoaded && (
 				<Box
@@ -1205,8 +1308,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Refresh + Reports buttons — below chart */}
-			{!watchOnly && (
+			{/* Refresh + Reports buttons — below chart.
+			    HIDDEN when a portfolio view is active: those controls move
+			    into the OrbitalView's center column. The original
+			    out-of-view fallback (no balance loaded yet) still wants
+			    them here. */}
+			{!watchOnly && !hasAnyBalance && (
 				<Flex justify="center" gap="3" mb="4">
 					{!isHiddenWallet && <Box
 						as="button"
@@ -1280,8 +1387,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 			)}
 
-			{/* Big glowing CTA when balances haven't been checked in over a day */}
-			{cacheOlderThanDay && (
+			{/* Big glowing CTA when balances haven't been checked in over a day.
+			    Hidden under portfolio views — the Refresh button moves into
+			    the center column where it already pulses gold when stale. */}
+			{cacheOlderThanDay && !hasAnyBalance && (
 				<Box
 					as="button"
 					w="100%"
@@ -1334,7 +1443,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-		<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
+		{/* Chain grid below the portfolio view. Hidden when the new
+		    Grid/Orbit views are active — those views ARE the dashboard
+		    and rendering this below was visual clutter. */}
+		<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5" display={hasAnyBalance ? "none" : "grid"}>
 				{sortedChains.map((chain) => {
 					const bal = balances.get(chain.id)
 					const clean = cleanBalanceUsd.get(chain.id)
