@@ -1186,6 +1186,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // Allowlist of upstream path prefixes the proxy may serve
       const WC_ALLOWED_PREFIXES = ['/_next/', '/chain-logos/', '/icons/', '/favicon.ico']
 
+      const rewriteWcProxyBody = (body: string): string => body
+        .replace(/keepkey:\/\/launch\/wc/g, 'keepkey-vault://launch/wc')
+        .replace(/keepkey:\/\/wc/g, 'keepkey-vault://wc')
+        .replace(/keepkey%3A%2F%2Flaunch%2Fwc/gi, 'keepkey-vault%3A%2F%2Flaunch%2Fwc')
+        .replace(/keepkey%3A%2F%2Fwc/gi, 'keepkey-vault%3A%2F%2Fwc')
+        .replace(/KeepKey Desktop/g, 'KeepKey Vault')
+        .replace(/Launch Desktop/g, 'Launch Vault')
+
       // Primary: everything under /wc/ is always proxied
       const isWcPrimaryPath = path === '/wc' || path.startsWith('/wc/')
 
@@ -1235,6 +1243,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               durationMs: Date.now() - proxyStart,
               status: upstream.status, appName: 'wc-proxy',
             })
+          }
+
+          if (ct && /text\/html|javascript|application\/json|text\/plain/i.test(ct)) {
+            const body = rewriteWcProxyBody(await upstream.text())
+            return new Response(body, { status: upstream.status, headers: respHeaders })
           }
 
           return new Response(upstream.body, { status: upstream.status, headers: respHeaders })
