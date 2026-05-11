@@ -8,7 +8,7 @@ import { versionCompare } from "../../../shared/firmware-versions"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
-	phase: 'approve' | 'device-confirm'
+	phase: 'approve' | 'sending-payload' | 'device-confirm'
 	onApprove: () => void
 	onReject: () => void
 }
@@ -644,6 +644,57 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 	const methodLabel = labelKey ? t(labelKey) : request.method
 	const remaining = Math.max(0, 120 - elapsed)
 	const timeStr = `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, "0")}`
+
+	// ── Sending-payload phase ─────────────────────────────────────────
+	if (phase === 'sending-payload') {
+		return (
+			<Box
+				position="fixed" inset="0" zIndex={Z.overlay + 1}
+				bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
+				display="flex" alignItems="center" justifyContent="center"
+			>
+				<style>{SIGNING_ANIMATIONS}</style>
+				<VStack
+					bg="kk.cardBg" border="2px solid" borderColor="kk.gold" borderRadius="2xl"
+					p="8" gap="5" maxW="400px" w="90vw" textAlign="center"
+					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 2s ease-in-out infinite 0.3s" }}
+				>
+					<Flex justify="center">
+						<Box
+							w="64px" h="64px" borderRadius="2xl"
+							bg="rgba(233,196,106,0.15)" border="2px solid" borderColor="kk.gold"
+							display="flex" alignItems="center" justifyContent="center"
+							css={{ animation: "signingBadgePulse 1.5s ease-in-out infinite" }}
+						>
+							<svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+								<rect x="6" y="2" width="12" height="20" rx="2" stroke="var(--gold)" strokeWidth="2" />
+								<path d="M12 16V8" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" />
+								<path d="M8.5 11.5 12 8l3.5 3.5" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+							</svg>
+						</Box>
+					</Flex>
+					<VStack gap="2">
+						<Text fontSize="lg" fontWeight="700" color="white">
+							{t("signing.sendingPayload", "Sending payload to device")}
+						</Text>
+						<Text fontSize="sm" color="kk.textSecondary" lineHeight="tall">
+							{t("signing.sendingPayloadDescription", "Keep your KeepKey connected. The confirmation prompt will appear when the device is ready.")}
+						</Text>
+					</VStack>
+					<Text fontSize="xs" fontWeight="600" px="3" py="1" borderRadius="full" bg="rgba(233,196,106,0.12)" color="kk.gold">
+						{methodLabel}
+					</Text>
+					<Flex gap="2" justify="center" align="center">
+						{[0, 1, 2].map((i) => (
+							<Box key={i} w="8px" h="8px" borderRadius="full" bg="kk.gold"
+								css={{ animation: `signingBadgePulse 1.2s ease-in-out infinite ${i * 0.2}s` }}
+							/>
+						))}
+					</Flex>
+				</VStack>
+			</Box>
+		)
+	}
 
 	// ── Device-confirm phase ──────────────────────────────────────────
 	if (phase === 'device-confirm') {
