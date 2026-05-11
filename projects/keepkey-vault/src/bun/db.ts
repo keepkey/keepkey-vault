@@ -706,6 +706,30 @@ export function clearPairings() {
 // ── API Audit Log ──────────────────────────────────────────────────────
 
 const MAX_API_LOG_ROWS = 5000
+const REDACTED_API_LOG_KEYS = new Set(['apiKey'])
+
+function parseApiLogJson(raw: string | null): any {
+  if (!raw) return undefined
+  try {
+    return redactApiLogValue(JSON.parse(raw))
+  } catch {
+    return undefined
+  }
+}
+
+function redactApiLogValue(value: any, depth = 0): any {
+  if (!value || typeof value !== 'object' || depth > 8) return value
+  if (Array.isArray(value)) return value.map(v => redactApiLogValue(v, depth + 1))
+  const out: any = {}
+  for (const [key, child] of Object.entries(value)) {
+    if (REDACTED_API_LOG_KEYS.has(key)) {
+      out[key] = '[trimmed]'
+    } else {
+      out[key] = redactApiLogValue(child, depth + 1)
+    }
+  }
+  return out
+}
 
 /** Insert an API log entry and prune old rows beyond MAX_API_LOG_ROWS */
 export function insertApiLog(entry: ApiLogEntry) {
@@ -777,8 +801,8 @@ export function getApiLogs(limit = 200, offset = 0, deviceId?: string, walletId?
       status: r.status,
       appName: r.app_name,
       imageUrl: r.image_url || undefined,
-      requestBody: r.request_body ? JSON.parse(r.request_body) : undefined,
-      responseBody: r.response_body ? JSON.parse(r.response_body) : undefined,
+      requestBody: parseApiLogJson(r.request_body),
+      responseBody: parseApiLogJson(r.response_body),
     }))
   } catch (e: any) {
     console.warn('[db] getApiLogs failed:', e.message)
@@ -845,8 +869,8 @@ export function findApiLogs(filter: ApiLogFilter = {}): ApiLogEntry[] {
       status: r.status,
       appName: r.app_name,
       imageUrl: r.image_url || undefined,
-      requestBody: r.request_body ? JSON.parse(r.request_body) : undefined,
-      responseBody: r.response_body ? JSON.parse(r.response_body) : undefined,
+      requestBody: parseApiLogJson(r.request_body),
+      responseBody: parseApiLogJson(r.response_body),
       txid: r.txid || undefined,
       chain: r.chain || undefined,
       activityType: r.activity_type || undefined,
@@ -880,8 +904,8 @@ export function getApiLogById(id: number, deviceId?: string, walletId?: string):
       status: r.status,
       appName: r.app_name,
       imageUrl: r.image_url || undefined,
-      requestBody: r.request_body ? JSON.parse(r.request_body) : undefined,
-      responseBody: r.response_body ? JSON.parse(r.response_body) : undefined,
+      requestBody: parseApiLogJson(r.request_body),
+      responseBody: parseApiLogJson(r.response_body),
       txid: r.txid || undefined,
       chain: r.chain || undefined,
       activityType: r.activity_type || undefined,
