@@ -139,6 +139,48 @@ function Assert-Command {
     }
 }
 
+# Zero out the Certificate Table (Security Directory) entry in a PE's Optional
+# Header. Returns $true if an entry existed and was cleared, $false if the
+# file already had no entry (no-op).
+#
+# Why this exists: rcedit (and some upstream Electrobun-built launcher.exe
+# binaries) leave a non-zero Security Directory RVA/Size pointing at garbage
+# data — the file isn't actually signed (Get-AuthenticodeSignature reports
+# NotSigned), but a stale ~10 KB cert-table-shaped chunk lives inside the PE.
+# signtool then refuses to sign the file with the misleading error
+# `0x800700C1 / ERROR_BAD_EXE_FORMAT` because it can't safely overwrite the
+# malformed cert table. `signtool remove /s` also fails (`0x00000057`)
+# because there's no valid signature to strip.
+#
+# The fix is purely a 8-byte zero write in the PE Optional Header — the
+# orphan cert blob at the end of the file is harmless (signtool overwrites
+# or appends past it). No section table, no checksum, no relocation needs
+# to change.
+function Clear-PECertTableEntry {
+    param([string]$FilePath)
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    if ($bytes.Length -lt 64) { return $false }
+    if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { return $false }   # MZ
+    $peOff = [BitConverter]::ToInt32($bytes, 60)
+    if ($peOff -lt 0 -or $peOff + 24 -ge $bytes.Length) { return $false }
+    if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff + 1] -ne 0x45) { return $false }  # PE
+    $optOff = $peOff + 24
+    $magic = [BitConverter]::ToUInt16($bytes, $optOff)
+    # NumberOfRvaAndSizes lives at +108 for PE32+, +92 for PE32 — pick the
+    # right offset so we land on the actual DataDirectories array.
+    $rvaCountOff = if ($magic -eq 0x20B) { $optOff + 108 } elseif ($magic -eq 0x10B) { $optOff + 92 } else { return $false }
+    if ($rvaCountOff + 4 + (5 * 8) -gt $bytes.Length) { return $false }
+    # Security Directory is entry index 4 in the DataDirectories array
+    # (Export=0, Import=1, Resource=2, Exception=3, Security=4).
+    $secDirOff = $rvaCountOff + 4 + (4 * 8)
+    $secDirRva  = [BitConverter]::ToUInt32($bytes, $secDirOff)
+    $secDirSize = [BitConverter]::ToUInt32($bytes, $secDirOff + 4)
+    if ($secDirRva -eq 0 -and $secDirSize -eq 0) { return $false }
+    for ($i = 0; $i -lt 8; $i++) { $bytes[$secDirOff + $i] = 0 }
+    [System.IO.File]::WriteAllBytes($FilePath, $bytes)
+    return $true
+}
+
 function Sign-File {
     param(
         [string]$FilePath,
@@ -220,7 +262,42 @@ function Sign-File {
     }
 
     $resultStr = $lastResult -join ' '
-    if ($resultStr -match "not recognized" -or $resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") {
+
+    # 0x800700C1 / BAD_EXE_FORMAT on a syntactically-valid PE almost always
+    # means the file has a non-zero Security Directory pointing at malformed
+    # data (rcedit residue, or upstream Electrobun/launcher.exe shipped with
+    # a stale cert table). Strip the entry and retry once. See
+    # Clear-PECertTableEntry for the full rationale.
+    if (($resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") -and (Clear-PECertTableEntry -FilePath $FilePath)) {
+        Write-Host "    [FIX] Stripped stale cert-table entry, retrying: $fileName" -ForegroundColor Yellow
+        $signArgs = @(
+            "sign",
+            "/sha1", $Thumbprint,
+            "/fd", "sha256",
+            "/tr", $TimestampUrls[0],
+            "/td", "sha256"
+        )
+        if ($Description) { $signArgs += "/d"; $signArgs += $Description }
+        $signArgs += $FilePath
+
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $retryResult = & $SIGNTOOL @signArgs 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        if ($exitCode -eq 0) {
+            Write-Success "Signed (after strip): $fileName"
+            return $true
+        }
+        $resultStr = $retryResult -join ' '
+    }
+
+    # Genuinely-unsignable formats — bun shims (handled above by path) and
+    # native .node addons (handled above by extension) are the only files
+    # that should land here. If we still match "not recognized", it's a
+    # signtool-side rejection we can't fix; log and skip.
+    if ($resultStr -match "not recognized") {
         Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
         return $true
     }
@@ -350,19 +427,49 @@ if (-not $SkipBuild) {
     bun run build
     Pop-Location
 
-    # Patch channel to stable -- Electrobun's --env=stable produces a macOS-style
-    # bundle on Windows that our installer can't use. Build as dev, patch to stable.
-    $VersionJson = Join-Path $BuildDir "Resources\version.json"
-    if (Test-Path $VersionJson) {
-        $vj = Get-Content $VersionJson -Raw | ConvertFrom-Json
-        $vj.channel = "stable"
-        $vj.name = "keepkey-vault"
-        $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
-        # Use .NET WriteAllText to avoid BOM -- PowerShell 5's -Encoding UTF8 writes a BOM
-        # which breaks JSON parsing in bun's require()
-        [System.IO.File]::WriteAllText($VersionJson, ($vj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
-        Write-Success "Patched version.json: channel=stable"
+    # Electrobun's Windows copy step can silently leave very deep nested
+    # node_modules packages incomplete. collect-externals.ts stages the verified
+    # runtime deps in _build/_ext_modules; mirror that exact tree into the final
+    # app bundle with robocopy, which handles Windows paths more reliably.
+    $ExtModulesDir = Join-Path $ProjectDir "_build\_ext_modules"
+    $AppNodeModulesDir = Join-Path $BuildDir "Resources\app\node_modules"
+    if (Test-Path $ExtModulesDir) {
+        Write-Step "Mirroring external node_modules into app bundle"
+        if (-not (Test-Path $AppNodeModulesDir)) {
+            New-Item -ItemType Directory -Force -Path $AppNodeModulesDir | Out-Null
+        }
+        & robocopy $ExtModulesDir $AppNodeModulesDir /MIR /NFL /NDL /NJH /NJS /NP
+        if ($LASTEXITCODE -gt 7) {
+            throw "robocopy failed while mirroring external node_modules (exit $LASTEXITCODE)"
+        }
+        Write-Success "Mirrored external node_modules into Resources\app"
+    } else {
+        throw "collect-externals did not produce $ExtModulesDir"
     }
+
+    # Patch version.json: stable channel + force version to match package.json.
+    # Electrobun's `bun run build` is an incremental build — when a stale _build/
+    # exists from a different branch, it can leave version.json with the wrong
+    # version. We had a 1.3.2-named installer shipped with 1.2.16 inside because
+    # of this. Force the version field rather than trust Electrobun's output.
+    $VersionJson = Join-Path $BuildDir "Resources\version.json"
+    if (-not (Test-Path $VersionJson)) {
+        throw "Electrobun build did not produce $VersionJson -- build was broken or skipped."
+    }
+    $vj = Get-Content $VersionJson -Raw | ConvertFrom-Json
+    $electrobunSawVersion = $vj.version
+    $vj.channel = "stable"
+    $vj.name = "keepkey-vault"
+    $vj.version = $Version
+    $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
+    # Use .NET WriteAllText to avoid BOM -- PowerShell 5's -Encoding UTF8 writes a BOM
+    # which breaks JSON parsing in bun's require()
+    [System.IO.File]::WriteAllText($VersionJson, ($vj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+    if ($electrobunSawVersion -ne $Version) {
+        Write-Warning "version.json reported $electrobunSawVersion but package.json says $Version -- forced to $Version."
+        Write-Warning "This usually means _build/ was stale from a prior branch. Consider deleting _build/ for next clean build."
+    }
+    Write-Success "Patched version.json: version=$Version channel=stable"
 
     Write-Success "Build completed"
 } else {
@@ -499,31 +606,57 @@ $WrapperExe = Join-Path $BuildDir "KeepKeyVault.exe"
 $WrapperSrc = Join-Path $ScriptDir "wrapper-launcher.zig"
 
 if (-not (Test-Path $WrapperExe)) {
-    # Find Zig compiler
+    # Zig version pin: wrapper-launcher.zig was last updated for 0.15.2
+    # (commit cfd6ea4). Zig 0.16 shipped an IO-context refactor that broke
+    # std.fs.cwd, std.time.milliTimestamp, and std.fs.selfExeDirPath. Refuse
+    # to use anything outside the supported series.
+    $SupportedZigPattern = '^0\.15\.'
+    $SupportedZigDescr   = '0.15.x'
     $ZigExe = $null
-    $zigPaths = @(
-        (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\zig*" -Recurse -Filter "zig.exe" -ErrorAction SilentlyContinue | Select-Object -First 1)
+    # Preferred locations (most-specific first): pinned tools dir, then any
+    # 0.15.x install in tools/, then WinGet, then PATH. Only the explicit
+    # pin and a known-good winget package satisfy the version check below.
+    $zigSearchPaths = @(
+        "$env:USERPROFILE\tools\zig-x86_64-windows-0.15.1\zig.exe",
+        "$env:USERPROFILE\tools\zig-x86_64-windows-0.15.2\zig.exe"
     )
-    foreach ($z in $zigPaths) {
-        if ($z) { $ZigExe = $z.FullName; break }
+    foreach ($p in $zigSearchPaths) {
+        if (Test-Path $p) { $ZigExe = $p; break }
+    }
+    if (-not $ZigExe) {
+        $toolsZigs = Get-ChildItem "$env:USERPROFILE\tools" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'zig.*0\.15\.' } | Sort-Object Name -Descending
+        foreach ($d in $toolsZigs) {
+            $cand = Join-Path $d.FullName 'zig.exe'
+            if (Test-Path $cand) { $ZigExe = $cand; break }
+        }
+    }
+    if (-not $ZigExe) {
+        $wingetZig = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\zig*" -Recurse -Filter "zig.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($wingetZig) { $ZigExe = $wingetZig.FullName }
     }
     if (-not $ZigExe) {
         $ZigExe = Get-Command "zig" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
     }
 
-    if ($ZigExe) {
-        Write-Host "    Using Zig: $ZigExe" -ForegroundColor Gray
-        Push-Location (Split-Path $WrapperSrc -Parent)
-        & $ZigExe build-exe $WrapperSrc -O ReleaseSmall --subsystem windows "-femit-bin=$WrapperExe"
-        Pop-Location
+    if (-not $ZigExe) {
+        throw "Zig compiler not found. Install Zig $SupportedZigDescr to `$env:USERPROFILE\tools\zig-x86_64-windows-0.15.1\ (download from https://ziglang.org/download/0.15.1/zig-x86_64-windows-0.15.1.zip)."
+    }
 
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Built: KeepKeyVault.exe"
-        } else {
-            throw "Failed to compile wrapper EXE with Zig"
-        }
+    # Hard version check -- the source file is pinned to 0.15.x APIs.
+    $zigVer = (& $ZigExe version 2>&1).Trim()
+    if ($zigVer -notmatch $SupportedZigPattern) {
+        throw "Zig $zigVer at $ZigExe is unsupported. wrapper-launcher.zig requires Zig $SupportedZigDescr. Install 0.15.1 to `$env:USERPROFILE\tools\zig-x86_64-windows-0.15.1\."
+    }
+
+    Write-Host "    Using Zig: $ZigExe (version $zigVer)" -ForegroundColor Gray
+    Push-Location (Split-Path $WrapperSrc -Parent)
+    & $ZigExe build-exe $WrapperSrc -O ReleaseSmall --subsystem windows "-femit-bin=$WrapperExe"
+    Pop-Location
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Built: KeepKeyVault.exe"
     } else {
-        throw "Zig compiler not found. Install via: winget install zig.zig"
+        throw "Failed to compile wrapper EXE with Zig"
     }
 } else {
     Write-Success "Wrapper EXE already exists"
@@ -634,12 +767,22 @@ Write-Step "Preparing short-path staging for Inno Setup (MAX_PATH workaround)"
 $ShortStage = "C:\tmp\kk"
 if (Test-Path $ShortStage) { Remove-Item -Recurse -Force $ShortStage }
 Write-Host "    Copying build to $ShortStage ..."
-# robocopy handles source paths >260 chars; /256 disables MAX_PATH for robocopy itself
+# robocopy handles source paths >260 chars; /256 disables MAX_PATH for robocopy itself.
+# Critical flags (learned the hard way):
+#   /MT:16     — 16-thread copy. Single-threaded robocopy + Defender real-time
+#                scan = ~30 min for 14k files. Multi-threaded = ~1-2 min.
+#   /R:1 /W:1  — retry ONCE with a 1-sec wait. Defaults are /R:1000000 /W:30
+#                (one million retries, 30-sec wait), which means a single
+#                Defender-locked file hangs the entire copy for hours.
+#   /XJ        — skip junction points / reparse points. Without this, symlink
+#                loops inside nested node_modules can trap robocopy forever.
 # robocopy exits 0-7 on success (0=no files, 1=copied, 2=extra, etc.) — normalize to 0
-robocopy $BuildDir $ShortStage /E /256 /NFL /NDL /NJH /NJS | Out-Null
+$rcStart = Get-Date
+robocopy $BuildDir $ShortStage /E /256 /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+$rcSeconds = [math]::Round(((Get-Date) - $rcStart).TotalSeconds, 1)
 if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 }
 $StagedFiles = (Get-ChildItem -Recurse -File $ShortStage -ErrorAction SilentlyContinue | Measure-Object).Count
-Write-Host "    Staged $StagedFiles files (source path: $($ShortStage.Length) chars)"
+Write-Host "    Staged $StagedFiles files in ${rcSeconds}s (source path: $($ShortStage.Length) chars)"
 
 Write-Step "Building installer EXE with Inno Setup"
 
