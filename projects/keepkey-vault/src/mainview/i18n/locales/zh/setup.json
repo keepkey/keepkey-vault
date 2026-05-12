@@ -8,7 +8,9 @@
 		"initChoose": "选择设置方式",
 		"initProgress": "正在设置钱包",
 		"initLabel": "为设备命名",
-		"complete": "设置完成！"
+		"complete": "设置完成！",
+		"verifySeed": "验证恢复短语",
+		"securityTips": "安全提示"
 	},
 	"visibleSteps": {
 		"bootloader": "引导程序",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "您的 KeepKey 将引导您完成更新过程。",
 		"bootloaderDetected": "已检测到引导加载程序模式",
 		"deviceReadyForUpdate": "您的 KeepKey 处于引导加载程序模式，已准备好进行更新。",
-		"updateBootloaderTo": "将引导程序更新至 v{{version}}"
+		"updateBootloaderTo": "将引导程序更新至 v{{version}}",
+		"doNotHoldButton": "重新连接时不要按住按钮。只需正常插入设备。按住按钮会让设备重新进入 bootloader 模式。"
 	},
 	"firmware": {
 		"title": "固件更新",
@@ -107,13 +110,19 @@
 		"rebootTakingLong": "重新连接时间超出预期...",
 		"rebootTakingLongSub": "设备可能需要一些时间来重启。",
 		"pleaseDisconnect": "请断开并重新连接您的 KeepKey",
-		"disconnectMessage": "您的设备显示\u201C固件更新完成\u201D。请拔出USB线缆并重新插入以继续。",
+		"disconnectMessage": "您的设备显示“固件更新完成”。请拔出USB线缆并重新插入以继续。",
 		"stillWaitingDisconnect": "仍在等待 — 请确保拔出并重新插入USB线缆。",
 		"manualReconnectTitle": "设备无法重新连接？",
 		"manualReconnectStep1": "1. 拔出您的 KeepKey",
 		"manualReconnectStep2": "2. 等待 5 秒",
 		"manualReconnectStep3": "3. 重新插入",
-		"manualReconnectNote": "检测到设备后，设置将自动继续。"
+		"manualReconnectNote": "检测到设备后，设置将自动继续。",
+		"unsignedBootloaderWarning": "你正在刷入未签名的开发者固件。如果此设备之前运行的是已签名的官方固件，所有数据都会被清除。这是硬件强制的安全边界；切回已签名固件时也同样适用。",
+		"unsignedBootloaderAcknowledge": "我理解这可能会清除设备，并且我已经备份 seed",
+		"autoRebooting": "设备正在重启...",
+		"autoRebootingDetail": "KeepKey 将使用新固件自动重启。通常只需几秒钟。",
+		"waitingForDevice": "正在等待设备...",
+		"wipeAndFlash": "清除并刷入"
 	},
 	"initChoose": {
 		"title": "设置您的钱包",
@@ -123,7 +132,12 @@
 		"createWallet": "创建钱包",
 		"recoverExistingWallet": "恢复现有钱包",
 		"recoverDescription": "在设备上输入您的恢复助记词",
-		"recoverWallet": "恢复钱包"
+		"recoverWallet": "恢复钱包",
+		"seedLength": "Seed 长度",
+		"words": "个词",
+		"entropyNote": "增加 seed 长度不会提升钱包的整体熵。",
+		"learnMore": "了解更多",
+		"howManyWords": "你的 seed 有多少个词？"
 	},
 	"initProgress": {
 		"creatingWallet": "正在创建钱包...",
@@ -133,7 +147,11 @@
 		"followPrompts": "请按照 KeepKey 设备屏幕上的提示操作。",
 		"lookAtDevice": "请查看 KeepKey 设备并按照屏幕上的说明操作。",
 		"failedToCreate": "创建钱包失败",
-		"failedToRecover": "恢复钱包失败"
+		"failedToRecover": "恢复钱包失败",
+		"writeDownWarning": "写下每一个词！",
+		"writeDownDetail": "恢复短语正在设备屏幕上显示。请把每个词写在纸上。这是你唯一的备份；这些词不会再次显示。",
+		"deviceLost": "设备已断开。请重新插入以继续，或返回后重试。",
+		"goBack": "返回"
 	},
 	"initLabel": {
 		"walletCreated": "钱包已创建！",
@@ -155,6 +173,65 @@
 		"stepOf": "第 {{current}} 步，共 {{total}} 步",
 		"settingUpWallet": "正在设置钱包...",
 		"previous": "上一步",
-		"next": "下一步"
+		"next": "下一步",
+		"securityTips": "安全提示"
+	},
+	"verifySeed": {
+		"title": "验证恢复短语",
+		"descriptionEmulator": "我们会从 seed 中随机询问 3 个词，以确认你的备份正确。",
+		"description": "确认你已正确写下恢复短语。设备会要求你输入其中几个词。",
+		"verifyNow": "立即验证",
+		"skipForNow": "跳过；稍后验证",
+		"enterWords": "输入要求的词",
+		"enterWordsDetail": "为恢复短语中的每个位置输入正确的词。",
+		"checkWords": "检查词语",
+		"verifying": "正在验证...",
+		"checkingAnswers": "正在检查答案...",
+		"followDevice": "按照 KeepKey 上的提示输入要求的词。",
+		"verified": "恢复短语已验证！",
+		"verifiedDetail": "你的备份正确。请安全保管，绝不要分享给任何人。",
+		"continue": "继续",
+		"failed": "验证失败",
+		"failedDetail": "你输入的词不匹配。请重试或检查你写下的备份。",
+		"tryAgain": "重试"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "PIN 会被打乱",
+				"body": "KeepKey 会显示随机数字网格。请将电脑屏幕上的位置与设备上的数字对应。布局每次都会改变，防止旁观者偷走你的 PIN。"
+			},
+			"words": {
+				"title": "你的词 = 你的钱包",
+				"body": "把 12/24 个词写在纸上并安全保存。不要在电脑、网站或手机中输入它们。任何拥有这些词的人都能控制你的资金。"
+			},
+			"recovery": {
+				"title": "打乱的恢复输入",
+				"body": "恢复时，KeepKey 会在设备屏幕上打乱字母表。你按位置输入单词，而不是输入真实字母。键盘记录器看不到有用信息。"
+			},
+			"deviceScreen": {
+				"title": "信任设备屏幕",
+				"body": "批准前始终在 KeepKey 上确认地址和金额。电脑可能被攻破；设备屏幕不能被篡改。大额交易尤其如此。"
+			},
+			"appConnections": {
+				"title": "应用连接已关闭",
+				"body": "第三方应用和 dApp 通过 REST API 连接。为保护你，默认关闭。只有在需要时才在设置中启用。"
+			},
+			"hiddenWallets": {
+				"title": "隐藏钱包（高级）",
+				"body": "Passphrase 会从同一个 seed 创建独立的隐藏钱包。启用后必须记住它：错误的 passphrase 会打开另一个空钱包，而不是报错。"
+			}
+		},
+		"actions": {
+			"getStarted": "开始",
+			"startUsing": "开始使用 KeepKey",
+			"skipIntro": "跳过介绍",
+			"skipTips": "跳过提示"
+		},
+		"stepCounter": "{{current}} / {{total}}",
+		"walletLabels": {
+			"visible": "可见",
+			"hidden": "隐藏"
+		}
 	}
 }

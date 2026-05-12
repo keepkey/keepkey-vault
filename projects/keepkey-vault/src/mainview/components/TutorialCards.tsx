@@ -5,6 +5,7 @@
  * Post-tutorial: Verify on Device, REST API, Passphrase (after setup)
  */
 import { Box, Text, VStack, HStack, Flex, Button } from '@chakra-ui/react'
+import { useTranslation } from 'react-i18next'
 import {
   FaLock, FaEyeSlash, FaKey, FaPen, FaShieldAlt, FaKeyboard,
   FaCheckCircle, FaDesktop, FaPlug, FaCog, FaUserSecret,
@@ -86,6 +87,8 @@ function ToggleOff() {
 
 /** Two wallet icons — visible and hidden */
 function DualWallets() {
+  const { t } = useTranslation('setup')
+
   return (
     <HStack gap={3}>
       <VStack gap={0.5}>
@@ -93,7 +96,7 @@ function DualWallets() {
           border="1px solid rgba(139,92,246,0.3)" display="flex" alignItems="center" justifyContent="center">
           <Text fontSize="xs" color="#8B5CF6">A</Text>
         </Box>
-        <Text fontSize="7px" color="gray.500">visible</Text>
+        <Text fontSize="7px" color="gray.500">{t('tutorial.walletLabels.visible')}</Text>
       </VStack>
       <FaArrowRight size={10} color="rgba(139,92,246,0.4)" />
       <VStack gap={0.5}>
@@ -101,7 +104,7 @@ function DualWallets() {
           border="1px dashed rgba(139,92,246,0.3)" display="flex" alignItems="center" justifyContent="center">
           <Text fontSize="xs" color="rgba(139,92,246,0.5)">?</Text>
         </Box>
-        <Text fontSize="7px" color="gray.500">hidden</Text>
+        <Text fontSize="7px" color="gray.500">{t('tutorial.walletLabels.hidden')}</Text>
       </VStack>
     </HStack>
   )
@@ -123,8 +126,8 @@ function DeviceCheck() {
 // ── Card definitions ──────────────────────────────────────────────────
 
 interface TutorialCard {
-  title: string
-  body: string
+  titleKey: string
+  bodyKey: string
   accent: string
   icon1: React.ReactNode
   icon2: React.ReactNode
@@ -133,24 +136,24 @@ interface TutorialCard {
 
 const PRE_CARDS: TutorialCard[] = [
   {
-    title: 'Your PIN is Scrambled',
-    body: 'Your KeepKey shows a randomized number grid. Match positions on screen to numbers on device. The layout changes every time so screen-watchers can\'t steal your PIN.',
+    titleKey: 'tutorial.cards.pin.title',
+    bodyKey: 'tutorial.cards.pin.body',
     accent: 'var(--gold)',
     icon1: <FaLock size={28} color="var(--gold)" />,
     icon2: <PinGrid />,
     icon3: <FaEyeSlash size={22} color="rgba(233,196,106,0.6)" />,
   },
   {
-    title: 'Your Words = Your Wallet',
-    body: 'Write your 12/24 words on paper. Store them somewhere safe. Never type them into a computer, website, or phone. Anyone with these words controls your funds.',
+    titleKey: 'tutorial.cards.words.title',
+    bodyKey: 'tutorial.cards.words.body',
     accent: '#FC8181',
     icon1: <FaKey size={28} color="var(--rose)" />,
     icon2: <WordSlots />,
     icon3: <FaPen size={22} color="rgba(252,129,129,0.6)" />,
   },
   {
-    title: 'Scrambled Recovery Entry',
-    body: 'When recovering, KeepKey scrambles the alphabet on the device screen. You enter words by position — never by typing actual letters. Keyloggers see nothing useful.',
+    titleKey: 'tutorial.cards.recovery.title',
+    bodyKey: 'tutorial.cards.recovery.body',
     accent: '#23DCC8',
     icon1: <FaShieldAlt size={28} color="var(--teal)" />,
     icon2: <CipherGrid />,
@@ -160,8 +163,8 @@ const PRE_CARDS: TutorialCard[] = [
 
 const POST_CARDS: TutorialCard[] = [
   {
-    title: 'Trust Your Device Screen',
-    body: 'Always confirm the address and amount on your KeepKey before approving. Your computer can be compromised — your device screen cannot. Especially for large transactions.',
+    titleKey: 'tutorial.cards.deviceScreen.title',
+    bodyKey: 'tutorial.cards.deviceScreen.body',
     accent: '#48BB78',
     icon1: <FaCheckCircle size={28} color="var(--teal)" />,
     icon2: <DeviceCheck />,
@@ -173,16 +176,16 @@ const POST_CARDS: TutorialCard[] = [
     </Box>,
   },
   {
-    title: 'App Connections Are Off',
-    body: 'Third-party apps and dApps connect via the REST API. It\'s disabled by default for your protection. Only enable it in Settings when you need it.',
+    titleKey: 'tutorial.cards.appConnections.title',
+    bodyKey: 'tutorial.cards.appConnections.body',
     accent: '#627EEA',
     icon1: <FaPlug size={28} color="#627EEA" />,
     icon2: <ToggleOff />,
     icon3: <FaCog size={22} color="rgba(98,126,234,0.6)" />,
   },
   {
-    title: 'Hidden Wallets (Advanced)',
-    body: 'Passphrase creates a separate hidden wallet from the same seed. If enabled, you MUST remember it — a wrong passphrase opens a different empty wallet, not an error.',
+    titleKey: 'tutorial.cards.hiddenWallets.title',
+    bodyKey: 'tutorial.cards.hiddenWallets.body',
     accent: '#8B5CF6',
     icon1: <FaUserSecret size={28} color="#8B5CF6" />,
     icon2: <DualWallets />,
@@ -200,10 +203,15 @@ interface TutorialPageProps {
 }
 
 export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPageProps) {
+  const { t } = useTranslation('setup')
   const cards = type === 'pre' ? PRE_CARDS : POST_CARDS
   const card = cards[cardIndex]
   if (!card) return null
   const isLast = cardIndex === cards.length - 1
+  const nextLabel = isLast
+    ? t(type === 'pre' ? 'tutorial.actions.getStarted' : 'tutorial.actions.startUsing')
+    : t('footer.next')
+  const skipLabel = t(type === 'pre' ? 'tutorial.actions.skipIntro' : 'tutorial.actions.skipTips')
 
   return (
     <VStack gap={4} w="100%" maxW="400px" mx="auto" css={{ animation: 'tutorialFadeIn 0.3s ease-out' }}>
@@ -236,12 +244,12 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
 
           {/* Title */}
           <Text fontSize="xl" fontWeight="800" color="white" textAlign="center" letterSpacing="-0.02em">
-            {card.title}
+            {t(card.titleKey)}
           </Text>
 
           {/* Body */}
           <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6" maxW="340px">
-            {card.body}
+            {t(card.bodyKey)}
           </Text>
         </VStack>
       </Box>
@@ -254,7 +262,7 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
           onClick={onNext}
         >
           <HStack gap={2} justify="center">
-            <Text>{isLast ? (type === 'pre' ? 'Get Started' : 'Start Using KeepKey') : 'Next'}</Text>
+            <Text>{nextLabel}</Text>
             <FaChevronRight size={10} />
           </HStack>
         </Button>
@@ -262,13 +270,13 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
           _hover={{ color: 'gray.300', bg: 'rgba(255,255,255,0.04)' }}
           transition="all 0.15s ease" onClick={onSkip}
         >
-          {type === 'pre' ? 'Skip intro' : 'Skip tips'}
+          {skipLabel}
         </Button>
       </VStack>
 
       {/* Step counter */}
       <Text fontSize="2xs" color="gray.600">
-        {cardIndex + 1} of {cards.length}
+        {t('tutorial.stepCounter', { current: cardIndex + 1, total: cards.length })}
       </Text>
     </VStack>
   )

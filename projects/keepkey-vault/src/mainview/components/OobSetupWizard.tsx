@@ -1154,8 +1154,8 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                         </HStack>
                         <Text fontSize="xs" color="yellow.300">
                           {rebootElapsedMs < 20000
-                            ? t('bootloader.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
-                            : t('bootloader.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
+                            ? t('firmware.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
+                            : t('firmware.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
                         </Text>
                         <Box w="100%" mt={1} p={2} bg="rgba(224,140,123,0.10)" borderRadius="sm" borderWidth="1px" borderColor="red.500">
                           <Text fontSize="xs" color="red.200" fontWeight="bold">
@@ -1591,7 +1591,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                           (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode && !customFwAcknowledged)
                         }
                       >
-                        {customFwAnalysis.willWipeDevice ? 'Wipe & Flash' : t('firmware.flashFirmware')}
+                        {customFwAnalysis.willWipeDevice ? t('firmware.wipeAndFlash', { defaultValue: 'Wipe & Flash' }) : t('firmware.flashFirmware')}
                       </Button>
                     </HStack>
                   </VStack>
@@ -2314,7 +2314,7 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
                       transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
-                      {t('common.back', { defaultValue: 'Back' })}
+                      {t('back', { ns: 'common' })}
                     </Button>
                   </>
                 )}

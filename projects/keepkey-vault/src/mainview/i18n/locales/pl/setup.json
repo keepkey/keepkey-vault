@@ -8,7 +8,9 @@
 		"initChoose": "Wybierz metodę konfiguracji",
 		"initProgress": "Konfigurowanie portfela",
 		"initLabel": "Nazwij swoje urządzenie",
-		"complete": "Konfiguracja zakończona!"
+		"complete": "Konfiguracja zakończona!",
+		"verifySeed": "Zweryfikuj frazę odzyskiwania",
+		"securityTips": "Wskazówki bezpieczeństwa"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Twój KeepKey poprowadzi cię przez proces aktualizacji.",
 		"bootloaderDetected": "Wykryto tryb bootloadera",
 		"deviceReadyForUpdate": "Twój KeepKey jest w trybie bootloadera i gotowy do aktualizacji.",
-		"updateBootloaderTo": "Zaktualizuj bootloader do v{{version}}"
+		"updateBootloaderTo": "Zaktualizuj bootloader do v{{version}}",
+		"doNotHoldButton": "NIE trzymaj przycisku podczas ponownego podłączania. Po prostu podłącz urządzenie normalnie. Przytrzymanie przycisku ponownie uruchomi tryb bootloadera."
 	},
 	"firmware": {
 		"title": "Aktualizacja oprogramowania",
@@ -107,13 +110,19 @@
 		"rebootTakingLong": "Ponowne połączenie trwa dłużej niż zwykle...",
 		"rebootTakingLongSub": "Urządzenie może potrzebować chwili na restart.",
 		"pleaseDisconnect": "Odłącz i ponownie podłącz swój KeepKey",
-		"disconnectMessage": "Twoje urządzenie wyświetla \u201EAktualizacja firmware zako\u0144czona\u201C. Odłącz kabel USB i podłącz go ponownie, aby kontynuować.",
+		"disconnectMessage": "Twoje urządzenie wyświetla „Aktualizacja firmware zakończona“. Odłącz kabel USB i podłącz go ponownie, aby kontynuować.",
 		"stillWaitingDisconnect": "Nadal czekam — upewnij się, że odłączyłeś i ponownie podłączyłeś kabel USB.",
 		"manualReconnectTitle": "Urządzenie nie łączy się ponownie?",
 		"manualReconnectStep1": "1. Odłącz KeepKey",
 		"manualReconnectStep2": "2. Poczekaj 5 sekund",
 		"manualReconnectStep3": "3. Podłącz ponownie",
-		"manualReconnectNote": "Konfiguracja będzie kontynuowana automatycznie po wykryciu urządzenia."
+		"manualReconnectNote": "Konfiguracja będzie kontynuowana automatycznie po wykryciu urządzenia.",
+		"unsignedBootloaderWarning": "Instalujesz niepodpisane firmware (deweloperskie). Jeśli urządzenie wcześniej działało na podpisanym (oficjalnym) firmware, wszystkie dane zostaną usunięte. To granica bezpieczeństwa wymuszana sprzętowo; to samo dotyczy powrotu do podpisanego firmware.",
+		"unsignedBootloaderAcknowledge": "Rozumiem, że to może wymazać urządzenie, i mam kopię zapasową seeda",
+		"autoRebooting": "Urządzenie uruchamia się ponownie...",
+		"autoRebootingDetail": "KeepKey automatycznie uruchomi się ponownie z nowym firmware. Zwykle trwa to kilka sekund.",
+		"waitingForDevice": "Oczekiwanie na urządzenie...",
+		"wipeAndFlash": "Wyczyść i zainstaluj"
 	},
 	"initChoose": {
 		"title": "Skonfiguruj swój portfel",
@@ -123,7 +132,12 @@
 		"createWallet": "Utwórz portfel",
 		"recoverExistingWallet": "Odzyskaj istniejący portfel",
 		"recoverDescription": "Wprowadź frazę odzyskiwania na urządzeniu",
-		"recoverWallet": "Odzyskaj portfel"
+		"recoverWallet": "Odzyskaj portfel",
+		"seedLength": "Długość seeda",
+		"words": "słów",
+		"entropyNote": "Dodatkowa długość seeda nie poprawia ogólnej entropii portfela.",
+		"learnMore": "Dowiedz się więcej",
+		"howManyWords": "Ile słów ma twój seed?"
 	},
 	"initProgress": {
 		"creatingWallet": "Tworzenie portfela...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Postępuj zgodnie z instrukcjami na ekranie KeepKey.",
 		"lookAtDevice": "Spójrz na urządzenie KeepKey i postępuj zgodnie z instrukcjami na ekranie.",
 		"failedToCreate": "Nie udało się utworzyć portfela",
-		"failedToRecover": "Nie udało się odzyskać portfela"
+		"failedToRecover": "Nie udało się odzyskać portfela",
+		"writeDownWarning": "Zapisz każde słowo!",
+		"writeDownDetail": "Fraza odzyskiwania jest wyświetlana na ekranie urządzenia. Zapisz każde słowo na papierze. To JEDYNA kopia zapasowa; NIE zobaczysz tych słów ponownie.",
+		"deviceLost": "Urządzenie odłączone. Podłącz je ponownie, aby kontynuować, albo wróć i spróbuj jeszcze raz.",
+		"goBack": "Wróć"
 	},
 	"initLabel": {
 		"walletCreated": "Portfel utworzony!",
@@ -155,6 +173,65 @@
 		"stepOf": "Krok {{current}} z {{total}}",
 		"settingUpWallet": "Konfigurowanie portfela...",
 		"previous": "Poprzedni",
-		"next": "Dalej"
+		"next": "Dalej",
+		"securityTips": "Wskazówki bezpieczeństwa"
+	},
+	"verifySeed": {
+		"title": "Zweryfikuj frazę odzyskiwania",
+		"descriptionEmulator": "Poprosimy o 3 losowe słowa z seeda, aby potwierdzić, że kopia zapasowa jest poprawna.",
+		"description": "Potwierdź, że poprawnie zapisałeś frazę odzyskiwania. Urządzenie poprosi o wpisanie kilku słów.",
+		"verifyNow": "Zweryfikuj teraz",
+		"skipForNow": "Pomiń; sprawdzę później",
+		"enterWords": "Wprowadź wymagane słowa",
+		"enterWordsDetail": "Wpisz poprawne słowo dla każdej pozycji z frazy odzyskiwania.",
+		"checkWords": "Sprawdź słowa",
+		"verifying": "Weryfikowanie...",
+		"checkingAnswers": "Sprawdzanie odpowiedzi...",
+		"followDevice": "Postępuj zgodnie z instrukcjami na KeepKey, aby wpisać wymagane słowa.",
+		"verified": "Fraza odzyskiwania zweryfikowana!",
+		"verifiedDetail": "Kopia zapasowa jest poprawna. Przechowuj ją bezpiecznie i nigdy nikomu jej nie udostępniaj.",
+		"continue": "Kontynuuj",
+		"failed": "Weryfikacja nie powiodła się",
+		"failedDetail": "Wpisane słowa nie pasują. Spróbuj ponownie albo sprawdź zapisaną kopię.",
+		"tryAgain": "Spróbuj ponownie"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Twój PIN jest pomieszany",
+				"body": "KeepKey pokazuje losową siatkę cyfr. Dopasuj pozycje na ekranie do cyfr na urządzeniu. Układ zmienia się za każdym razem, aby obserwatorzy nie mogli ukraść PIN-u."
+			},
+			"words": {
+				"title": "Twoje słowa = twój portfel",
+				"body": "Zapisz swoje 12/24 słowa na papierze. Przechowuj je bezpiecznie. Nigdy nie wpisuj ich na komputerze, stronie internetowej ani telefonie. Kto ma te słowa, kontroluje twoje środki."
+			},
+			"recovery": {
+				"title": "Pomieszane wprowadzanie odzyskiwania",
+				"body": "Podczas odzyskiwania KeepKey miesza alfabet na ekranie urządzenia. Wprowadzasz słowa według pozycji, nigdy wpisując prawdziwe litery. Keyloggery nie widzą nic przydatnego."
+			},
+			"deviceScreen": {
+				"title": "Ufaj ekranowi urządzenia",
+				"body": "Zawsze potwierdzaj adres i kwotę na KeepKey przed zatwierdzeniem. Komputer może być przejęty; ekran urządzenia nie. Szczególnie przy dużych transakcjach."
+			},
+			"appConnections": {
+				"title": "Połączenia aplikacji są wyłączone",
+				"body": "Aplikacje zewnętrzne i dAppy łączą się przez REST API. Domyślnie jest wyłączone dla twojej ochrony. Włączaj je w Ustawieniach tylko wtedy, gdy jest potrzebne."
+			},
+			"hiddenWallets": {
+				"title": "Ukryte portfele (zaawansowane)",
+				"body": "Passphrase tworzy oddzielny ukryty portfel z tego samego seeda. Jeśli ją włączysz, MUSISZ ją pamiętać: błędna passphrase otwiera inny pusty portfel, a nie błąd."
+			}
+		},
+		"actions": {
+			"getStarted": "Rozpocznij",
+			"startUsing": "Zacznij używać KeepKey",
+			"skipIntro": "Pomiń wprowadzenie",
+			"skipTips": "Pomiń wskazówki"
+		},
+		"stepCounter": "{{current}} z {{total}}",
+		"walletLabels": {
+			"visible": "widoczny",
+			"hidden": "ukryty"
+		}
 	}
 }

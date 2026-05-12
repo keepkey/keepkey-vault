@@ -8,7 +8,9 @@
 		"initChoose": "Kurulum yöntemini seçin",
 		"initProgress": "Cüzdan yapılandırılıyor",
 		"initLabel": "Cihazınıza isim verin",
-		"complete": "Kurulum tamamlandı!"
+		"complete": "Kurulum tamamlandı!",
+		"verifySeed": "Kurtarma ifadenizi doğrulayın",
+		"securityTips": "Güvenlik ipuçları"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "KeepKey'iniz güncelleme sürecinde size rehberlik edecek.",
 		"bootloaderDetected": "Bootloader modu algılandı",
 		"deviceReadyForUpdate": "KeepKey'iniz bootloader modunda ve güncellemeye hazır.",
-		"updateBootloaderTo": "Bootloader'ı v{{version}} sürümüne güncelle"
+		"updateBootloaderTo": "Bootloader'ı v{{version}} sürümüne güncelle",
+		"doNotHoldButton": "Yeniden bağlarken düğmeyi BASILI TUTMAYIN. Sadece normal şekilde takın. Düğmeyi basılı tutmak cihazı tekrar bootloader moduna alır."
 	},
 	"firmware": {
 		"title": "Yazılım güncellemesi",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. KeepKey'i çıkarın",
 		"manualReconnectStep2": "2. 5 saniye bekleyin",
 		"manualReconnectStep3": "3. Yeniden takın",
-		"manualReconnectNote": "Cihaz algılandığında kurulum otomatik olarak devam edecektir."
+		"manualReconnectNote": "Cihaz algılandığında kurulum otomatik olarak devam edecektir.",
+		"unsignedBootloaderWarning": "İmzasız (geliştirici) firmware yüklüyorsunuz. Bu cihaz daha önce imzalı (resmi) firmware çalıştırıyorsa tüm veriler silinecektir. Bu, donanım tarafından zorlanan bir güvenlik sınırıdır; imzalı firmware’e geri dönerken de aynısı geçerlidir.",
+		"unsignedBootloaderAcknowledge": "Bunun cihazı silebileceğini anlıyorum ve seed yedeğim var",
+		"autoRebooting": "Cihazınız yeniden başlatılıyor...",
+		"autoRebootingDetail": "KeepKey yeni firmware ile otomatik olarak yeniden başlayacak. Bu genellikle birkaç saniye sürer.",
+		"waitingForDevice": "Cihazınız bekleniyor...",
+		"wipeAndFlash": "Sil ve yükle"
 	},
 	"initChoose": {
 		"title": "Cüzdanınızı kurun",
@@ -123,7 +132,12 @@
 		"createWallet": "Cüzdan oluştur",
 		"recoverExistingWallet": "Mevcut cüzdanı kurtar",
 		"recoverDescription": "Kurtarma ifadenizi cihazda girin",
-		"recoverWallet": "Cüzdanı kurtar"
+		"recoverWallet": "Cüzdanı kurtar",
+		"seedLength": "Seed uzunluğu",
+		"words": "kelime",
+		"entropyNote": "Seed uzunluğunu artırmak cüzdanın genel entropisini iyileştirmez.",
+		"learnMore": "Daha fazla bilgi",
+		"howManyWords": "Seed’inizde kaç kelime var?"
 	},
 	"initProgress": {
 		"creatingWallet": "Cüzdan oluşturuluyor...",
@@ -133,7 +147,11 @@
 		"followPrompts": "KeepKey ekranındaki yönergeleri izleyin.",
 		"lookAtDevice": "KeepKey cihazına bakın ve ekrandaki yönergeleri izleyin.",
 		"failedToCreate": "Cüzdan oluşturulamadı",
-		"failedToRecover": "Cüzdan kurtarılamadı"
+		"failedToRecover": "Cüzdan kurtarılamadı",
+		"writeDownWarning": "Her kelimeyi yazın!",
+		"writeDownDetail": "Kurtarma ifadeniz cihaz ekranında gösteriliyor. Her kelimeyi kağıda yazın. Bu TEK yedeğinizdir; bu kelimeleri tekrar GÖRMEYECEKSİNİZ.",
+		"deviceLost": "Cihaz bağlantısı kesildi. Devam etmek için tekrar takın veya yeniden denemek için geri dönün.",
+		"goBack": "Geri dön"
 	},
 	"initLabel": {
 		"walletCreated": "Cüzdan oluşturuldu!",
@@ -155,6 +173,65 @@
 		"stepOf": "Adım {{current}} / {{total}}",
 		"settingUpWallet": "Cüzdan kuruluyor...",
 		"previous": "Önceki",
-		"next": "İleri"
+		"next": "İleri",
+		"securityTips": "Güvenlik ipuçları"
+	},
+	"verifySeed": {
+		"title": "Kurtarma ifadenizi doğrulayın",
+		"descriptionEmulator": "Yedeğinizin doğru olduğunu onaylamak için seed’inizden rastgele 3 kelime isteyeceğiz.",
+		"description": "Kurtarma ifadenizi doğru yazdığınızı onaylayın. Cihazınız bazı kelimeleri girmenizi isteyecek.",
+		"verifyNow": "Şimdi doğrula",
+		"skipForNow": "Atla; sonra doğrulayacağım",
+		"enterWords": "İstenen kelimeleri girin",
+		"enterWordsDetail": "Kurtarma ifadenizdeki her konum için doğru kelimeyi yazın.",
+		"checkWords": "Kelimeleri kontrol et",
+		"verifying": "Doğrulanıyor...",
+		"checkingAnswers": "Yanıtlarınız kontrol ediliyor...",
+		"followDevice": "İstenen kelimeleri girmek için KeepKey üzerindeki talimatları izleyin.",
+		"verified": "Kurtarma ifadesi doğrulandı!",
+		"verifiedDetail": "Yedeğiniz doğru. Güvenli tutun ve kimseyle paylaşmayın.",
+		"continue": "Devam et",
+		"failed": "Doğrulama başarısız",
+		"failedDetail": "Girdiğiniz kelimeler eşleşmedi. Tekrar deneyin veya yazılı yedeğinizi kontrol edin.",
+		"tryAgain": "Tekrar dene"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "PIN’iniz karıştırılır",
+				"body": "KeepKey rastgele bir sayı ızgarası gösterir. Ekrandaki konumları cihazdaki sayılarla eşleştirin. Düzen her seferinde değişir, böylece izleyenler PIN’inizi çalamaz."
+			},
+			"words": {
+				"title": "Kelimeleriniz = cüzdanınız",
+				"body": "12/24 kelimenizi kağıda yazın. Güvenli bir yerde saklayın. Bunları asla bilgisayara, web sitesine veya telefona yazmayın. Bu kelimelere sahip olan herkes fonlarınızı kontrol eder."
+			},
+			"recovery": {
+				"title": "Karıştırılmış kurtarma girişi",
+				"body": "Kurtarma sırasında KeepKey cihaz ekranındaki alfabeyi karıştırır. Kelimeleri konuma göre girersiniz; gerçek harfleri yazmazsınız. Keylogger’lar işe yarar hiçbir şey görmez."
+			},
+			"deviceScreen": {
+				"title": "Cihaz ekranına güvenin",
+				"body": "Onaylamadan önce adresi ve tutarı her zaman KeepKey üzerinde doğrulayın. Bilgisayarınız ele geçirilebilir; cihaz ekranınız ele geçirilemez. Özellikle büyük işlemlerde."
+			},
+			"appConnections": {
+				"title": "Uygulama bağlantıları kapalı",
+				"body": "Üçüncü taraf uygulamalar ve dApp’ler REST API ile bağlanır. Korumanız için varsayılan olarak kapalıdır. Yalnızca gerektiğinde Ayarlar’dan açın."
+			},
+			"hiddenWallets": {
+				"title": "Gizli cüzdanlar (gelişmiş)",
+				"body": "Passphrase aynı seed’den ayrı bir gizli cüzdan oluşturur. Etkinleştirirseniz MUTLAKA hatırlamalısınız: yanlış passphrase hata değil, farklı boş bir cüzdan açar."
+			}
+		},
+		"actions": {
+			"getStarted": "Başla",
+			"startUsing": "KeepKey kullanmaya başla",
+			"skipIntro": "Girişi atla",
+			"skipTips": "İpuçlarını atla"
+		},
+		"stepCounter": "{{current}} / {{total}}",
+		"walletLabels": {
+			"visible": "görünür",
+			"hidden": "gizli"
+		}
 	}
 }

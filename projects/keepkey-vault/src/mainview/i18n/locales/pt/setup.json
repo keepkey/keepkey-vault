@@ -8,7 +8,9 @@
 		"initChoose": "Escolha seu método de configuração",
 		"initProgress": "Configurando sua carteira",
 		"initLabel": "Nomeie seu dispositivo",
-		"complete": "Configuração concluída!"
+		"complete": "Configuração concluída!",
+		"verifySeed": "Verificar sua frase de recuperação",
+		"securityTips": "Dicas de segurança"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Seu KeepKey irá guiá-lo pelo processo de atualização.",
 		"bootloaderDetected": "Modo Bootloader detectado",
 		"deviceReadyForUpdate": "Seu KeepKey está no modo bootloader e pronto para atualização.",
-		"updateBootloaderTo": "Atualizar Bootloader para v{{version}}"
+		"updateBootloaderTo": "Atualizar Bootloader para v{{version}}",
+		"doNotHoldButton": "NÃO mantenha o botão pressionado ao reconectar. Apenas conecte normalmente. Manter o botão pressionado colocará o dispositivo de volta no modo bootloader."
 	},
 	"firmware": {
 		"title": "Atualização de Firmware",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. Desconecte seu KeepKey",
 		"manualReconnectStep2": "2. Aguarde 5 segundos",
 		"manualReconnectStep3": "3. Conecte novamente",
-		"manualReconnectNote": "A configuração continuará automaticamente quando o dispositivo for detectado."
+		"manualReconnectNote": "A configuração continuará automaticamente quando o dispositivo for detectado.",
+		"unsignedBootloaderWarning": "Você está instalando firmware não assinado (de desenvolvedor). Se este dispositivo estava executando firmware assinado (oficial), todos os dados serão apagados. Este é um limite de segurança imposto pelo hardware; o mesmo vale ao voltar para firmware assinado.",
+		"unsignedBootloaderAcknowledge": "Entendo que isso pode apagar o dispositivo e tenho backup da minha seed",
+		"autoRebooting": "Seu dispositivo está reiniciando...",
+		"autoRebootingDetail": "Seu KeepKey reiniciará automaticamente com o novo firmware. Isso geralmente leva alguns segundos.",
+		"waitingForDevice": "Aguardando seu dispositivo...",
+		"wipeAndFlash": "Apagar e instalar"
 	},
 	"initChoose": {
 		"title": "Configure sua carteira",
@@ -123,7 +132,12 @@
 		"createWallet": "Criar carteira",
 		"recoverExistingWallet": "Recuperar carteira existente",
 		"recoverDescription": "Insira sua frase semente de recuperação no dispositivo",
-		"recoverWallet": "Recuperar carteira"
+		"recoverWallet": "Recuperar carteira",
+		"seedLength": "Tamanho da seed",
+		"words": "palavras",
+		"entropyNote": "Adicionar palavras à seed não melhora a entropia geral da carteira.",
+		"learnMore": "Saiba mais",
+		"howManyWords": "Quantas palavras há na sua seed?"
 	},
 	"initProgress": {
 		"creatingWallet": "Criando carteira...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Siga as instruções na tela do seu KeepKey.",
 		"lookAtDevice": "Olhe para o seu KeepKey e siga as instruções na tela.",
 		"failedToCreate": "Falha ao criar a carteira",
-		"failedToRecover": "Falha ao recuperar a carteira"
+		"failedToRecover": "Falha ao recuperar a carteira",
+		"writeDownWarning": "Anote cada palavra!",
+		"writeDownDetail": "Sua frase de recuperação está aparecendo na tela do dispositivo. Escreva cada palavra em papel. Este é seu ÚNICO backup; você NÃO verá essas palavras novamente.",
+		"deviceLost": "Dispositivo desconectado. Conecte-o novamente para continuar, ou volte para tentar de novo.",
+		"goBack": "Voltar"
 	},
 	"initLabel": {
 		"walletCreated": "Carteira criada!",
@@ -155,6 +173,65 @@
 		"stepOf": "Passo {{current}} de {{total}}",
 		"settingUpWallet": "Configurando carteira...",
 		"previous": "Anterior",
-		"next": "Próximo"
+		"next": "Próximo",
+		"securityTips": "Dicas de segurança"
+	},
+	"verifySeed": {
+		"title": "Verificar sua frase de recuperação",
+		"descriptionEmulator": "Vamos pedir 3 palavras aleatórias da sua seed para confirmar que você tem um backup correto.",
+		"description": "Confirme que você anotou sua frase de recuperação corretamente. Seu dispositivo pedirá que você insira algumas palavras.",
+		"verifyNow": "Verificar agora",
+		"skipForNow": "Pular; verificarei depois",
+		"enterWords": "Digite as palavras solicitadas",
+		"enterWordsDetail": "Digite a palavra correta para cada posição da sua frase de recuperação.",
+		"checkWords": "Conferir palavras",
+		"verifying": "Verificando...",
+		"checkingAnswers": "Conferindo suas respostas...",
+		"followDevice": "Siga as instruções no KeepKey para inserir as palavras solicitadas.",
+		"verified": "Frase de recuperação verificada!",
+		"verifiedDetail": "Seu backup está correto. Guarde-o com segurança e nunca compartilhe com ninguém.",
+		"continue": "Continuar",
+		"failed": "Verificação falhou",
+		"failedDetail": "As palavras digitadas não correspondem. Tente novamente ou confira seu backup escrito.",
+		"tryAgain": "Tentar novamente"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Seu PIN é embaralhado",
+				"body": "Seu KeepKey mostra uma grade numérica aleatória. Combine as posições na tela com os números no dispositivo. O layout muda toda vez para que observadores não roubem seu PIN."
+			},
+			"words": {
+				"title": "Suas palavras = sua carteira",
+				"body": "Escreva suas 12/24 palavras em papel. Guarde-as em um lugar seguro. Nunca as digite em computador, site ou telefone. Quem tiver essas palavras controla seus fundos."
+			},
+			"recovery": {
+				"title": "Entrada de recuperação embaralhada",
+				"body": "Ao recuperar, o KeepKey embaralha o alfabeto na tela do dispositivo. Você insere palavras por posição, nunca digitando as letras reais. Keyloggers não veem nada útil."
+			},
+			"deviceScreen": {
+				"title": "Confie na tela do dispositivo",
+				"body": "Sempre confirme o endereço e o valor no KeepKey antes de aprovar. Seu computador pode estar comprometido; a tela do dispositivo não. Especialmente em transações grandes."
+			},
+			"appConnections": {
+				"title": "Conexões de apps estão desligadas",
+				"body": "Apps de terceiros e dApps se conectam pela API REST. Ela fica desativada por padrão para sua proteção. Ative em Configurações somente quando precisar."
+			},
+			"hiddenWallets": {
+				"title": "Carteiras ocultas (avançado)",
+				"body": "A passphrase cria uma carteira oculta separada a partir da mesma seed. Se ativada, você DEVE lembrá-la: uma passphrase errada abre outra carteira vazia, não um erro."
+			}
+		},
+		"actions": {
+			"getStarted": "Começar",
+			"startUsing": "Começar a usar KeepKey",
+			"skipIntro": "Pular introdução",
+			"skipTips": "Pular dicas"
+		},
+		"stepCounter": "{{current}} de {{total}}",
+		"walletLabels": {
+			"visible": "visível",
+			"hidden": "oculta"
+		}
 	}
 }

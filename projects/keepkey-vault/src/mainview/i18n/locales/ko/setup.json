@@ -8,7 +8,9 @@
 		"initChoose": "설정 방법 선택",
 		"initProgress": "지갑 설정 중",
 		"initLabel": "기기 이름 지정",
-		"complete": "설정 완료!"
+		"complete": "설정 완료!",
+		"verifySeed": "복구 문구 확인",
+		"securityTips": "보안 팁"
 	},
 	"visibleSteps": {
 		"bootloader": "부트로더",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "KeepKey가 업데이트 과정을 안내합니다.",
 		"bootloaderDetected": "부트로더 모드 감지됨",
 		"deviceReadyForUpdate": "KeepKey가 부트로더 모드에 있으며 업데이트 준비가 되었습니다.",
-		"updateBootloaderTo": "부트로더를 v{{version}}(으)로 업데이트"
+		"updateBootloaderTo": "부트로더를 v{{version}}(으)로 업데이트",
+		"doNotHoldButton": "다시 연결할 때 버튼을 누르고 있지 마세요. 그냥 정상적으로 연결하세요. 버튼을 누르고 있으면 장치가 다시 부트로더 모드로 들어갑니다."
 	},
 	"firmware": {
 		"title": "펌웨어 업데이트",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. KeepKey를 분리하세요",
 		"manualReconnectStep2": "2. 5초간 기다리세요",
 		"manualReconnectStep3": "3. 다시 연결하세요",
-		"manualReconnectNote": "기기가 감지되면 설정이 자동으로 계속됩니다."
+		"manualReconnectNote": "기기가 감지되면 설정이 자동으로 계속됩니다.",
+		"unsignedBootloaderWarning": "서명되지 않은 개발자 펌웨어를 설치하고 있습니다. 이 장치가 이전에 서명된 공식 펌웨어를 실행했다면 모든 데이터가 삭제됩니다. 이는 하드웨어로 강제되는 보안 경계이며, 서명된 펌웨어로 되돌아갈 때도 동일하게 적용됩니다.",
+		"unsignedBootloaderAcknowledge": "이 작업으로 장치가 지워질 수 있음을 이해하며 seed를 백업했습니다",
+		"autoRebooting": "장치가 다시 시작되는 중...",
+		"autoRebootingDetail": "KeepKey가 새 펌웨어로 자동 재시작됩니다. 보통 몇 초 정도 걸립니다.",
+		"waitingForDevice": "장치를 기다리는 중...",
+		"wipeAndFlash": "초기화 후 설치"
 	},
 	"initChoose": {
 		"title": "지갑 설정",
@@ -123,7 +132,12 @@
 		"createWallet": "지갑 만들기",
 		"recoverExistingWallet": "기존 지갑 복구",
 		"recoverDescription": "기기에서 복구 시드 구문 입력",
-		"recoverWallet": "지갑 복구"
+		"recoverWallet": "지갑 복구",
+		"seedLength": "Seed 길이",
+		"words": "단어",
+		"entropyNote": "Seed 길이를 늘려도 전체 지갑 엔트로피는 향상되지 않습니다.",
+		"learnMore": "자세히 알아보기",
+		"howManyWords": "Seed는 몇 단어인가요?"
 	},
 	"initProgress": {
 		"creatingWallet": "지갑 생성 중...",
@@ -133,7 +147,11 @@
 		"followPrompts": "KeepKey 기기 화면의 안내를 따르세요.",
 		"lookAtDevice": "KeepKey 기기를 보고 화면의 지시를 따르세요.",
 		"failedToCreate": "지갑 생성 실패",
-		"failedToRecover": "지갑 복구 실패"
+		"failedToRecover": "지갑 복구 실패",
+		"writeDownWarning": "모든 단어를 적어 두세요!",
+		"writeDownDetail": "복구 문구가 장치 화면에 표시되고 있습니다. 각 단어를 종이에 적으세요. 이것이 유일한 백업이며, 이 단어들은 다시 표시되지 않습니다.",
+		"deviceLost": "장치 연결이 끊어졌습니다. 계속하려면 다시 연결하거나, 뒤로 돌아가 다시 시도하세요.",
+		"goBack": "뒤로"
 	},
 	"initLabel": {
 		"walletCreated": "지갑이 생성되었습니다!",
@@ -155,6 +173,65 @@
 		"stepOf": "{{total}}단계 중 {{current}}단계",
 		"settingUpWallet": "지갑 설정 중...",
 		"previous": "이전",
-		"next": "다음"
+		"next": "다음",
+		"securityTips": "보안 팁"
+	},
+	"verifySeed": {
+		"title": "복구 문구 확인",
+		"descriptionEmulator": "백업이 올바른지 확인하기 위해 seed에서 임의의 3개 단어를 묻겠습니다.",
+		"description": "복구 문구를 정확히 적었는지 확인하세요. 장치가 일부 단어 입력을 요청합니다.",
+		"verifyNow": "지금 확인",
+		"skipForNow": "건너뛰기; 나중에 확인",
+		"enterWords": "요청된 단어 입력",
+		"enterWordsDetail": "복구 문구의 각 위치에 맞는 올바른 단어를 입력하세요.",
+		"checkWords": "단어 확인",
+		"verifying": "확인 중...",
+		"checkingAnswers": "답변 확인 중...",
+		"followDevice": "요청된 단어를 입력하려면 KeepKey의 안내를 따르세요.",
+		"verified": "복구 문구 확인 완료!",
+		"verifiedDetail": "백업이 올바릅니다. 안전하게 보관하고 누구와도 공유하지 마세요.",
+		"continue": "계속",
+		"failed": "확인 실패",
+		"failedDetail": "입력한 단어가 일치하지 않습니다. 다시 시도하거나 적어 둔 백업을 확인하세요.",
+		"tryAgain": "다시 시도"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "PIN은 섞여 표시됩니다",
+				"body": "KeepKey는 무작위 숫자 격자를 보여줍니다. 화면의 위치를 장치의 숫자와 맞추세요. 배열은 매번 바뀌므로 화면을 보는 사람이 PIN을 훔칠 수 없습니다."
+			},
+			"words": {
+				"title": "단어 = 지갑",
+				"body": "12/24개 단어를 종이에 적고 안전한 곳에 보관하세요. 컴퓨터, 웹사이트, 휴대폰에 절대 입력하지 마세요. 이 단어를 가진 사람은 자금을 제어할 수 있습니다."
+			},
+			"recovery": {
+				"title": "섞인 복구 입력",
+				"body": "복구할 때 KeepKey는 장치 화면의 알파벳을 섞습니다. 실제 글자를 입력하지 않고 위치로 단어를 입력합니다. 키로거에는 유용한 정보가 남지 않습니다."
+			},
+			"deviceScreen": {
+				"title": "장치 화면을 신뢰하세요",
+				"body": "승인하기 전에 항상 KeepKey에서 주소와 금액을 확인하세요. 컴퓨터는 손상될 수 있지만 장치 화면은 신뢰할 수 있습니다. 특히 큰 거래에서 중요합니다."
+			},
+			"appConnections": {
+				"title": "앱 연결은 꺼져 있습니다",
+				"body": "타사 앱과 dApp은 REST API로 연결됩니다. 보호를 위해 기본적으로 비활성화되어 있습니다. 필요할 때만 설정에서 활성화하세요."
+			},
+			"hiddenWallets": {
+				"title": "숨겨진 지갑(고급)",
+				"body": "Passphrase는 같은 seed에서 별도의 숨겨진 지갑을 만듭니다. 활성화하면 반드시 기억해야 합니다. 잘못된 passphrase는 오류가 아니라 다른 빈 지갑을 엽니다."
+			}
+		},
+		"actions": {
+			"getStarted": "시작하기",
+			"startUsing": "KeepKey 사용 시작",
+			"skipIntro": "소개 건너뛰기",
+			"skipTips": "팁 건너뛰기"
+		},
+		"stepCounter": "{{current}} / {{total}}",
+		"walletLabels": {
+			"visible": "표시",
+			"hidden": "숨김"
+		}
 	}
 }
