@@ -87,6 +87,22 @@ function maxSpendableAmount(asset: SwapAsset, balance: string): string {
   return spendable.toFixed(8).replace(/\.?0+$/, '')
 }
 
+function nativeUsdValue(balance: ChainBalance): number {
+  const tokenUsdTotal = balance.tokens?.reduce((sum, token) => sum + (token.balanceUsd || 0), 0) || 0
+  const nativeUsd = Number(balance.nativeBalanceUsd ?? 0)
+  if (Number.isFinite(nativeUsd) && nativeUsd > 0) return nativeUsd
+
+  const fallbackUsd = Number(balance.balanceUsd ?? 0) - tokenUsdTotal
+  return Number.isFinite(fallbackUsd) && fallbackUsd > 0 ? fallbackUsd : 0
+}
+
+function nativePriceUsd(balance: ChainBalance): number {
+  const bal = parseFloat(balance.balance || '0')
+  if (!Number.isFinite(bal) || bal <= 0) return 0
+  const nativeUsd = nativeUsdValue(balance)
+  return nativeUsd > 0 ? nativeUsd / bal : 0
+}
+
 // Extended-pubkey prefix regex. Used in two places: (1) the UTXO destination
 // resolver, to decide whether the cached balance address is actually an xpub
 // that needs re-derivation; (2) canQuote, to refuse to send an xpub to Pioneer
@@ -1077,7 +1093,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
   const fromPriceUsd = useMemo(() => {
     if (!fromAsset) { swapLog('[SWAP-PRICE] fromPriceUsd: no fromAsset'); return 0 }
-    const cb = balance && chain && fromAsset.chainId === chain.id ? balance : balances.find(b => b.chainId === fromAsset.chainId)
+    const cachedBalance = balances.find(b => b.chainId === fromAsset.chainId)
+    const propBalance = balance && chain && fromAsset.chainId === chain.id ? balance : undefined
+    const cb = [cachedBalance, propBalance].find((candidate): candidate is ChainBalance => {
+      if (!candidate) return false
+      if (fromAsset.contractAddress) {
+        const token = candidate.tokens?.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
+        return (token?.priceUsd || 0) > 0
+      }
+      return nativePriceUsd(candidate) > 0
+    }) || cachedBalance || propBalance
     if (!cb) { swapLog(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
     // Token assets: only ever use the token's own price. Falling through to the
     // native price logic when tokens haven't loaded yet causes a USDT swap to
@@ -1091,10 +1116,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
-    swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
-    if (bal <= 0) return 0
-    const nativeUsd = cb.nativeBalanceUsd ?? 0
-    const result = nativeUsd > 0 ? nativeUsd / bal : 0
+    const nativeUsd = nativeUsdValue(cb)
+    swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeUsd=${nativeUsd} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    const result = nativePriceUsd(cb)
     swapLog(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
     return result
   }, [fromAsset, balance, chain, balances])
@@ -1111,10 +1135,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       return tok?.priceUsd || 0
     }
     const bal = parseFloat(cb.balance)
-    const nativeUsd = cb.nativeBalanceUsd ?? 0
-    swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
-    if (bal <= 0) return 0
-    const result = nativeUsd > 0 ? nativeUsd / bal : 0
+    const nativeUsd = nativeUsdValue(cb)
+    swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeUsd=${nativeUsd} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    const result = nativePriceUsd(cb)
     swapLog(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
     return result
   }, [toAsset, balances])

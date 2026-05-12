@@ -34,6 +34,7 @@ import {
   broadcastTonBoc,
   type TonBuildResult,
 } from './txbuilder/ton'
+import { usb } from 'usb'
 
 export interface EmuSigningDetails {
   operation: string
@@ -73,6 +74,39 @@ function corsHeaders(_req?: Request): Record<string, string> {
 function requireWallet(engine: EngineController) {
   if (!engine.wallet) throw new HttpError(503, 'No device connected')
   return engine.wallet
+}
+
+const KEEPKEY_VENDOR_ID = 0x2B24
+
+function usbIdHex(value: number | null | undefined): string | null {
+  if (typeof value !== 'number') return null
+  return `0x${value.toString(16).padStart(4, '0')}`
+}
+
+function listUsbDevicesForAdmin() {
+  return usb.getDeviceList().map((device: any) => {
+    const descriptor = device.deviceDescriptor || {}
+    const vendorId = typeof descriptor.idVendor === 'number' ? descriptor.idVendor : null
+    const productId = typeof descriptor.idProduct === 'number' ? descriptor.idProduct : null
+    return {
+      busNumber: typeof device.busNumber === 'number' ? device.busNumber : null,
+      deviceAddress: typeof device.deviceAddress === 'number' ? device.deviceAddress : null,
+      portNumbers: Array.isArray(device.portNumbers) ? device.portNumbers : [],
+      vendorId,
+      vendorIdHex: usbIdHex(vendorId),
+      productId,
+      productIdHex: usbIdHex(productId),
+      deviceClass: typeof descriptor.bDeviceClass === 'number' ? descriptor.bDeviceClass : null,
+      deviceSubClass: typeof descriptor.bDeviceSubClass === 'number' ? descriptor.bDeviceSubClass : null,
+      deviceProtocol: typeof descriptor.bDeviceProtocol === 'number' ? descriptor.bDeviceProtocol : null,
+      usbVersion: typeof descriptor.bcdUSB === 'number' ? usbIdHex(descriptor.bcdUSB) : null,
+      deviceVersion: typeof descriptor.bcdDevice === 'number' ? usbIdHex(descriptor.bcdDevice) : null,
+      manufacturerIndex: typeof descriptor.iManufacturer === 'number' ? descriptor.iManufacturer : null,
+      productIndex: typeof descriptor.iProduct === 'number' ? descriptor.iProduct : null,
+      serialNumberIndex: typeof descriptor.iSerialNumber === 'number' ? descriptor.iSerialNumber : null,
+      isKeepKey: vendorId === KEEPKEY_VENDOR_ID,
+    }
+  })
 }
 
 /**
@@ -1120,7 +1154,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
         // ballooning response_body across repeated reads.
-        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path.startsWith('/admin/') || path === '/auth/pair'
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
@@ -1332,6 +1366,34 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             connected: engine.wallet !== null,
             uptime: Math.floor((Date.now() - startTime) / 1000),
           })
+        }
+
+        if (path === '/admin/usb/devices' && method === 'GET') {
+          try {
+            return json(listUsbDevicesForAdmin())
+          } catch (err: any) {
+            return json({ error: 'Failed to list USB devices', message: err?.message || String(err) }, 500)
+          }
+        }
+
+        if (path === '/admin/usb/state' && method === 'GET') {
+          try {
+            const devices = listUsbDevicesForAdmin()
+            const keepKeyOnBus = devices.some(device => device.isKeepKey)
+            const deviceState = engine.getDeviceState()
+            return json({
+              connected: engine.wallet !== null,
+              state: deviceState.state,
+              deviceId: deviceState.deviceId || null,
+              label: deviceState.label || null,
+              firmwareVersion: deviceState.firmwareVersion || null,
+              activeTransport: deviceState.activeTransport || null,
+              keepKeyOnBus,
+              usbDeviceCount: devices.length,
+            })
+          } catch (err: any) {
+            return json({ error: 'Failed to read USB state', message: err?.message || String(err) }, 500)
+          }
         }
 
         // ═══════════════════════════════════════════════════════════════
