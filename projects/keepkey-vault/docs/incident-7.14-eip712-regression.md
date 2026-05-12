@@ -23,7 +23,7 @@ Production users report Uniswap permit signatures failing to verify. EIP-712 sig
 
 ```bash
 cd projects/keepkey-sdk
-KEEPKEY_API_KEY=9c7d5a7f-12c6-47f8-b706-1f70b62c558d \
+KEEPKEY_API_KEY="${KEEPKEY_API_KEY:?set KEEPKEY_API_KEY}" \
   node tests/evm-eip712/uniswap-permit-prod.js
 ```
 
