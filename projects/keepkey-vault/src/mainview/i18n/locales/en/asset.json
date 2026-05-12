@@ -70,6 +70,8 @@
 	"memosBackfilled": "{{count}} memos fetched",
 	"expandMemo": "Show memo",
 	"collapseMemo": "Hide memo",
+	"outOfSync": "Out of Sync",
+	"synced": "Synced",
 	"refresh": "Refresh",
 	"refreshing": "Refreshing...",
 	"needsScanPrompt": "Wallet has not been scanned yet. Scan the chain to find your shielded notes.",

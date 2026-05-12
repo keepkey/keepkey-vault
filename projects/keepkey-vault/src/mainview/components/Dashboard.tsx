@@ -391,6 +391,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
 	}, [refreshFeatureFlags])
 
+	// Auto-refresh balances when Zcash feature flag is enabled mid-session
+	const prevZcashRef = useRef(zcashEnabled)
+	useEffect(() => {
+		if (zcashEnabled && !prevZcashRef.current && !loadingBalances) {
+			console.log('[Dashboard] Zcash enabled — refreshing balances')
+			refreshBalances()
+		}
+		prevZcashRef.current = zcashEnabled
+	}, [zcashEnabled, refreshBalances, loadingBalances])
+
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
