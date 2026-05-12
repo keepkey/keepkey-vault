@@ -4898,10 +4898,10 @@ engine.on('state-change', (state) => {
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		if (bip85Enabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
+		if (bip85Enabled && (!fw || versionCompare(fw, '7.16.0') < 0)) {
 			bip85Enabled = false
 			setSetting('bip85_enabled', '0')
-			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
+			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.16.0`)
 		}
 		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
 			zcashPrivacyEnabled = false

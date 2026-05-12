@@ -1309,8 +1309,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
 			)}
 
-			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.15.0) */}
-			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0 && (
+			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.16.0) */}
+			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.16.0') >= 0 && (
 				<Box
 					as="button"
 					position="fixed"
