@@ -29,9 +29,21 @@
 param(
     [switch]$SkipBuild = $false,
     [switch]$SkipSign = $false,
-    [string]$Thumbprint = "986AEBA61CF6616393E74D8CBD3A09E836213BAA",
-    [string]$TimestampUrl = "http://timestamp.digicert.com",
-    [string]$OutputDir = "release-windows"
+    # Cert thumbprint: CLI arg > $env:KK_SIGN_THUMBPRINT > hardcoded KEY HODLERS LLC EV cert.
+    # The env var lets CI / a new signer override without editing the script.
+    [string]$Thumbprint = $(if ($env:KK_SIGN_THUMBPRINT) { $env:KK_SIGN_THUMBPRINT } else { "986AEBA61CF6616393E74D8CBD3A09E836213BAA" }),
+    # Timestamp servers tried in order. Any RFC 3161 server works; ordered by
+    # historical reliability. First-success short-circuits; full list exhausted
+    # before Sign-File reports a failure.
+    [string[]]$TimestampUrls = @(
+        "http://timestamp.digicert.com",
+        "http://timestamp.sectigo.com",
+        "http://timestamp.globalsign.com/tsa/r6advanced1"
+    ),
+    [string]$OutputDir = "release-windows",
+    # Set to allow non-fatal sign failures (e.g. iterating on a non-signing
+    # machine). Default: any unexpected failure aborts the run.
+    [switch]$AllowSignFailures = $false
 )
 
 Set-StrictMode -Version Latest
@@ -163,40 +175,58 @@ function Sign-File {
         }
     } catch {}
 
-    $signArgs = @(
-        "sign",
-        "/sha1", $Thumbprint,
-        "/fd", "sha256",
-        "/tr", $TimestampUrl,
-        "/td", "sha256"
-    )
+    # Try each timestamp URL in order. signtool failures with a timestamp
+    # server are transient (network blip, server rotation) — retry against the
+    # next URL before declaring failure. Sign-without-timestamp is NOT a
+    # fallback: an untimestamped sig is valid only while the cert is — once
+    # the cert expires, every signed binary becomes "publisher unknown".
+    $lastResult = ""
+    $exitCode = 1
+    foreach ($tsUrl in $TimestampUrls) {
+        $signArgs = @(
+            "sign",
+            "/sha1", $Thumbprint,
+            "/fd", "sha256",
+            "/tr", $tsUrl,
+            "/td", "sha256"
+        )
 
-    if ($Description) {
-        $signArgs += "/d"
-        $signArgs += $Description
+        if ($Description) {
+            $signArgs += "/d"
+            $signArgs += $Description
+        }
+
+        $signArgs += $FilePath
+
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $lastResult = & $SIGNTOOL @signArgs 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        if ($exitCode -eq 0) { break }
+
+        # Distinguish a real signing failure (cert problem, file format) from
+        # a transient timestamp problem. Only the latter is worth retrying.
+        $resultStr = $lastResult -join ' '
+        $isTimestampError = $resultStr -match "timestamp" -or $resultStr -match "RFC 3161" -or $resultStr -match "0x80096004"
+        if (-not $isTimestampError) { break }
+        Write-Host "    [RETRY] Timestamp $tsUrl failed for $fileName, trying next..." -ForegroundColor Yellow
     }
-
-    $signArgs += $FilePath
-
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $result = & $SIGNTOOL @signArgs 2>&1
-    $exitCode = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
 
     if ($exitCode -eq 0) {
         Write-Success "Signed: $fileName"
         return $true
-    } else {
-        $resultStr = $result -join ' '
-        if ($resultStr -match "not recognized" -or $resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") {
-            Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
-            return $true
-        }
-        Write-Error "Failed to sign: $fileName"
-        Write-Host "    $result" -ForegroundColor Gray
-        return $false
     }
+
+    $resultStr = $lastResult -join ' '
+    if ($resultStr -match "not recognized" -or $resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") {
+        Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
+        return $true
+    }
+    Write-Error "Failed to sign: $fileName"
+    Write-Host "    $resultStr" -ForegroundColor Gray
+    return $false
 }
 
 # ============================================================================
@@ -385,6 +415,14 @@ foreach ($file in $filesToSign) {
 Write-Host ""
 Write-Host "    Signed: $signedCount, Failed: $failedCount" -ForegroundColor $(if ($failedCount -eq 0) { "Green" } else { "Yellow" })
 
+# Abort the release if any file failed to sign. Shipping an installer with
+# mixed signed/unsigned PE files triggers SmartScreen warnings on the unsigned
+# ones and breaks enterprise allowlists. Use -AllowSignFailures to opt out
+# (e.g. when iterating on a build machine without the USB token plugged in).
+if ($failedCount -gt 0 -and -not $AllowSignFailures -and -not $SkipSign) {
+    throw "Aborting: $failedCount file(s) failed to sign. Re-run with -AllowSignFailures if this is intentional."
+}
+
 # ============================================================================
 # Prepare App Icon (convert PNG to ICO if needed)
 # ============================================================================
@@ -503,7 +541,15 @@ if (Test-Path $ManifestSrc) {
 
 # Embed KeepKey icon into all EXEs
 # Electrobun's rcedit call fails (ENOENT -- hardcoded CI path), so we do it ourselves.
+#
+# ORDER MATTERS: rcedit must run BEFORE signing, OR the affected EXEs must be
+# re-signed AFTER rcedit. rcedit modifies the .rsrc section via the Windows
+# BeginUpdateResource API which invalidates Authenticode signatures
+# (https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-beginupdateresourcea).
+# The bulk sign loop above runs before the wrapper EXE exists, and we touch
+# launcher.exe here too — so both get re-signed in the next step.
 $RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
+$rceditTouched = @()
 if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
     # Skip bun.exe -- rcedit on 113MB binary can corrupt it; bun runs headless anyway
     $exesToIcon = @($WrapperExe, (Join-Path $BuildDir "bin\launcher.exe"))
@@ -514,6 +560,7 @@ if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
             & $RceditExe $exePath --set-icon $IconIco
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "Icon embedded into $exeName"
+                $rceditTouched += $exePath
             } else {
                 Write-Warning "Failed to embed icon into $exeName"
             }
@@ -521,6 +568,24 @@ if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
     }
 } elseif (-not (Test-Path $RceditExe)) {
     Write-Warning "rcedit not found - EXEs will use default icon"
+}
+
+# Re-sign EXEs whose .rsrc was modified by rcedit (signatures invalidated above).
+# The wrapper EXE on a clean build was never signed in the bulk loop (didn't
+# exist yet) — this is where it first gets signed.
+if (-not $SkipSign -and $rceditTouched.Count -gt 0) {
+    Write-Step "Re-signing EXEs modified by rcedit"
+    $resignFailed = 0
+    foreach ($exePath in $rceditTouched) {
+        # Force re-sign — the existing sig is invalid post-rcedit but
+        # Get-AuthenticodeSignature may still report Valid for a moment.
+        if (-not (Sign-File -FilePath $exePath -Description $AppName)) {
+            $resignFailed++
+        }
+    }
+    if ($resignFailed -gt 0 -and -not $AllowSignFailures) {
+        throw "Aborting: $resignFailed wrapper/launcher EXE(s) failed to re-sign after rcedit."
+    }
 }
 
 # ============================================================================
@@ -569,8 +634,11 @@ Write-Step "Preparing short-path staging for Inno Setup (MAX_PATH workaround)"
 $ShortStage = "C:\tmp\kk"
 if (Test-Path $ShortStage) { Remove-Item -Recurse -Force $ShortStage }
 Write-Host "    Copying build to $ShortStage ..."
-Copy-Item -Recurse -Force $BuildDir $ShortStage
-$StagedFiles = (Get-ChildItem -Recurse -File $ShortStage | Measure-Object).Count
+# robocopy handles source paths >260 chars; /256 disables MAX_PATH for robocopy itself
+# robocopy exits 0-7 on success (0=no files, 1=copied, 2=extra, etc.) — normalize to 0
+robocopy $BuildDir $ShortStage /E /256 /NFL /NDL /NJH /NJS | Out-Null
+if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 }
+$StagedFiles = (Get-ChildItem -Recurse -File $ShortStage -ErrorAction SilentlyContinue | Measure-Object).Count
 Write-Host "    Staged $StagedFiles files (source path: $($ShortStage.Length) chars)"
 
 Write-Step "Building installer EXE with Inno Setup"
