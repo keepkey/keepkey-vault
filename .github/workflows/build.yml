@@ -21,6 +21,7 @@ concurrency:
 env:
   BUN_VERSION: '1.3.5'
   NODE_VERSION: '20'
+  IS_RELEASE_BUILD: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}
 
 jobs:
   build:
@@ -155,8 +156,8 @@ jobs:
         run: brew install protobuf
 
       - name: Install Linux packaging tools
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y fakeroot lintian dpkg-dev
+        if: runner.os == 'Linux' && env.IS_RELEASE_BUILD == 'true'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg-dev
 
       - name: Build zcash-cli sidecar (macOS)
         if: runner.os == 'macOS'
@@ -168,13 +169,21 @@ jobs:
           cargo build --release
           file target/release/zcash-cli
 
-      - name: Build unsigned app (CI mode)
+      - name: Build app
         env:
           CI: 'true'
-        run: cd projects/keepkey-vault && bun run build:stable
+          ELECTROBUN_GENERATE_PATCH: 'false'
+        run: |
+          cd projects/keepkey-vault
+          if [ "$IS_RELEASE_BUILD" = "true" ]; then
+            bun run build:stable
+          else
+            bun run build
+          fi
         shell: bash
 
       - name: Prune app bundle
+        if: env.IS_RELEASE_BUILD == 'true'
         run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
         shell: bash
 
@@ -224,7 +233,7 @@ jobs:
       # CI only ships the Intel x86_64 DMG (we have no Intel Mac for local builds).
 
       - name: Create x86_64 variant (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.IS_RELEASE_BUILD == 'true'
         shell: bash
         run: |
           echo "=== Creating x86_64 variant from ARM64 build ==="
@@ -332,7 +341,7 @@ jobs:
       # risks clobbering the signed DMG on a CI re-run.
 
       - name: Remove arm64 macOS artifacts (CI ships x64 only)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.IS_RELEASE_BUILD == 'true'
         shell: bash
         run: |
           # arm64 macOS is built+signed locally via `make build-signed`.
@@ -350,7 +359,7 @@ jobs:
           ls -la
 
       - name: Substitute Electrobun Linux core (lower glibc floor)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.IS_RELEASE_BUILD == 'true'
         env:
           # Tag of our self-built Electrobun core on this repo. Built on
           # ubuntu-22.04 against glibc 2.35 so Vault works on Debian 12,
@@ -419,7 +428,7 @@ jobs:
           echo "Repacked $TAR_ZST ($(du -h "$TAR_ZST" | cut -f1))"
 
       - name: Audit Linux glibc footprint
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.IS_RELEASE_BUILD == 'true'
         env:
           # Highest GLIBC_ symbol allowed in any ELF inside the bundle.
           # 2.35 = ubuntu-22.04 floor, reached via our self-built Electrobun
@@ -514,7 +523,7 @@ jobs:
           echo "All $examined ELF files within glibc floor of $FLOOR."
 
       - name: Package AppImage (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.IS_RELEASE_BUILD == 'true'
         run: |
           # Extract the app from tar.zst
           cd projects/keepkey-vault/artifacts
@@ -573,7 +582,7 @@ jobs:
           rm -rf "$WORK"
 
       - name: Package .deb (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.IS_RELEASE_BUILD == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -725,28 +734,40 @@ jobs:
             lintian --suppress-tags binary-without-manpage,no-changelog "$DEB_NAME" || true
           fi
 
+      - name: Remove non-release Linux installer archive
+        if: runner.os == 'Linux' && env.IS_RELEASE_BUILD == 'true'
+        run: rm -f projects/keepkey-vault/artifacts/stable-linux-x64-keepkey-vault-Setup.tar.gz
+        shell: bash
+
       - name: Generate checksums
+        if: env.IS_RELEASE_BUILD == 'true'
         run: |
           cd projects/keepkey-vault/artifacts
           shasum -a 256 * > SHA256SUMS-${{ matrix.artifact-suffix }}.txt 2>/dev/null || true
           cat SHA256SUMS-${{ matrix.artifact-suffix }}.txt
 
       - name: List artifacts
+        if: env.IS_RELEASE_BUILD == 'true'
         run: ls -lh projects/keepkey-vault/artifacts/
         shell: bash
 
       - name: Upload build artifacts
+        if: env.IS_RELEASE_BUILD == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: keepkey-vault-${{ matrix.artifact-suffix }}-${{ github.sha }}
           path: |
-            projects/keepkey-vault/artifacts/*
+            projects/keepkey-vault/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+            projects/keepkey-vault/artifacts/KeepKey-Vault-x86_64.AppImage
+            projects/keepkey-vault/artifacts/keepkey-vault_*_amd64.deb
+            projects/keepkey-vault/artifacts/stable-linux-x64-keepkey-vault.tar.zst
+            projects/keepkey-vault/artifacts/stable-linux-x64-update.json
           retention-days: 30
 
   release:
     name: Create Draft Release
     needs: build
-    if: (!cancelled()) && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch')
+    if: needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -757,12 +778,16 @@ jobs:
         run: |
           REF="${{ github.ref }}"
           if [[ "$REF" == refs/tags/* ]]; then
-            echo "tag=${REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            TAG="${REF#refs/tags/}"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           elif [[ "$REF" == refs/heads/release/* ]]; then
             VERSION="${REF#refs/heads/release/}"
             echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=v0.0.0-dev" >> "$GITHUB_OUTPUT"
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download all artifacts
@@ -777,9 +802,40 @@ jobs:
           # Remove per-platform checksum files (will regenerate combined)
           rm -f SHA256SUMS-*.txt SHA256SUMS.txt
           # Generate checksums for release-worthy files only
-          shasum -a 256 *.dmg *.AppImage *.deb *.exe *.tar.zst 2>/dev/null > SHA256SUMS.txt || true
+          shasum -a 256 \
+            KeepKey-Vault-x86_64.AppImage \
+            keepkey-vault_*_amd64.deb \
+            stable-linux-x64-keepkey-vault.tar.zst \
+            stable-macos-x64-keepkey-vault.app.tar.zst \
+            > SHA256SUMS.txt
           echo "=== Release checksums ==="
           cat SHA256SUMS.txt
+
+      - name: Verify release artifact set
+        run: |
+          cd artifacts
+          VERSION="${{ steps.tag.outputs.version }}"
+          required=(
+            "KeepKey-Vault-x86_64.AppImage"
+            "keepkey-vault_${VERSION}_amd64.deb"
+            "stable-linux-x64-keepkey-vault.tar.zst"
+            "stable-linux-x64-update.json"
+            "stable-macos-x64-keepkey-vault.app.tar.zst"
+            "SHA256SUMS.txt"
+          )
+          missing=0
+          for file in "${required[@]}"; do
+            if [ ! -s "$file" ]; then
+              echo "::error::Missing or empty release artifact: $file"
+              missing=1
+            fi
+          done
+          if find . -maxdepth 1 -name '*Setup.tar.gz' | grep -q .; then
+            echo "::error::Unexpected self-extractor archive in release artifacts"
+            missing=1
+          fi
+          exit "$missing"
+        shell: bash
 
       - name: List release artifacts
         run: find artifacts -type f | sort
@@ -793,6 +849,11 @@ jobs:
           generate_release_notes: true
           name: KeepKey Vault ${{ steps.tag.outputs.tag }}
           files: |
-            artifacts/**/*
+            artifacts/KeepKey-Vault-x86_64.AppImage
+            artifacts/keepkey-vault_*_amd64.deb
+            artifacts/stable-linux-x64-keepkey-vault.tar.zst
+            artifacts/stable-linux-x64-update.json
+            artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+            artifacts/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

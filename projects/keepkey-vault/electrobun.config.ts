@@ -70,5 +70,6 @@ export default {
 	},
 	release: {
 		baseUrl: "https://github.com/keepkey/keepkey-vault/releases/latest/download",
+		generatePatch: process.env.ELECTROBUN_GENERATE_PATCH !== "false",
 	},
 } satisfies ElectrobunConfig;
