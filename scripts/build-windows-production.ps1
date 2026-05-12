@@ -784,6 +784,25 @@ if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 }
 $StagedFiles = (Get-ChildItem -Recurse -File $ShortStage -ErrorAction SilentlyContinue | Measure-Object).Count
 Write-Host "    Staged $StagedFiles files in ${rcSeconds}s (source path: $($ShortStage.Length) chars)"
 
+# The build tree path itself is still long enough to drop very deep
+# WalletConnect nested files while mirroring into Resources\app\node_modules.
+# Overlay the collected externals directly into the short Inno source tree so
+# installer packaging sees the complete dependency tree from a short path.
+$StagedNodeModules = Join-Path $ShortStage "Resources\app\node_modules"
+if (Test-Path $ExtModulesDir) {
+    Write-Host "    Overlaying external node_modules into short stage ..."
+    robocopy $ExtModulesDir $StagedNodeModules /MIR /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+    if ($LASTEXITCODE -gt 7) {
+        throw "robocopy failed while overlaying external node_modules into short stage (exit $LASTEXITCODE)"
+    }
+    $global:LASTEXITCODE = 0
+    $WalletConnectProbe = Join-Path $StagedNodeModules "@walletconnect\sign-client\node_modules\@walletconnect\core\node_modules\@walletconnect\relay-auth\node_modules\uint8arrays\cjs\src\concat.js"
+    if (-not (Test-Path $WalletConnectProbe)) {
+        throw "Short-stage node_modules is incomplete; missing WalletConnect probe file: $WalletConnectProbe"
+    }
+    Write-Success "Short-stage external node_modules overlay verified"
+}
+
 Write-Step "Building installer EXE with Inno Setup"
 
 $IssFile = Join-Path $ScriptDir "installer.iss"

@@ -400,23 +400,20 @@ pub fn main() !void {
     }
 
     // ── Launch the real app ─────────────────────────────────────────
-    // Launch the real app directly through bun.exe. The stock Electrobun
-    // launcher.exe starts Resources/main.js, which then starts the app via
-    // Bun Worker; on Windows that Worker hop can silently stall on paths with
-    // spaces. Direct bun -> Resources/app/bun/index.js is the proven runtime
-    // path and is what vault-backend.log records on successful boots.
+    // Launch through Electrobun's stock launcher. With the install directory
+    // fixed to KeepKeyVault (no spaces), this path boots correctly and keeps
+    // native BrowserWindow initialization on the supported runtime path.
     const bin_dir = try std.fs.path.join(a, &.{ exe_dir, "bin" });
-    const bun_path = try std.fs.path.join(a, &.{ bin_dir, "bun.exe" });
-    const app_index_path = try std.fs.path.join(a, &.{ exe_dir, "Resources", "app", "bun", "index.js" });
-    const cmd = try std.fmt.allocPrint(a, "\"{s}\" \"{s}\"", .{ bun_path, app_index_path });
-    const bun_path_w = try std.unicode.utf8ToUtf16LeAllocZ(a, bun_path);
+    const launcher_path = try std.fs.path.join(a, &.{ bin_dir, "launcher.exe" });
+    const cmd = try std.fmt.allocPrint(a, "\"{s}\"", .{launcher_path});
+    const launcher_path_w = try std.unicode.utf8ToUtf16LeAllocZ(a, launcher_path);
     const cmd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, cmd);
     const cwd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, bin_dir);
 
     var si = STARTUPINFOW{};
     var pi = PROCESS_INFORMATION{};
 
-    const ok = CreateProcessW(bun_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
+    const ok = CreateProcessW(launcher_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
     if (ok != 0) {
         if (pi.hProcess) |h| _ = CloseHandle(h);
         if (pi.hThread) |h| _ = CloseHandle(h);

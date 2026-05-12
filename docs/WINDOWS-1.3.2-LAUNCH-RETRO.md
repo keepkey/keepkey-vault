@@ -221,6 +221,54 @@ Do not upload to GitHub Releases until:
 
 ## Working theories to test next
 
+## Follow-up finding: 2026-05-12
+
+The launch blocker was split across two layers:
+
+1. `collect-externals.ts` did collect the missing WalletConnect dependency into `_build\_ext_modules`, but the long build-tree destination path caused the deep nested file to be absent from `Resources\app\node_modules` and from the installed app.
+   - Missing file:
+     `@walletconnect\sign-client\node_modules\@walletconnect\core\node_modules\@walletconnect\relay-auth\node_modules\uint8arrays\cjs\src\concat.js`
+   - Direct installed Bun stderr before the manual overlay:
+     `Cannot find module './cjs/src/concat.js' from ...\uint8arrays\concat`
+   - Manual `robocopy _build\_ext_modules -> installed Resources\app\node_modules` fixed that crash.
+
+2. The direct `bun.exe Resources\app\bun\index.js` wrapper path got past module resolution after the overlay, but stalled at `new BrowserWindow(...)`. The stock Electrobun launcher path did not stall.
+   - Working process tree:
+     `KeepKeyVault.exe -> bin\launcher.exe -> bin\bun.exe ..\Resources\main.js`
+   - Working backend log reached:
+     `window created`, `boot complete`, and `KeepKey Vault started!`
+
+The production fix is:
+
+- Keep the no-spaces install directory: `KeepKeyVault`.
+- Use the wrapper to start `bin\launcher.exe`, not direct Bun.
+- Overlay `_build\_ext_modules` into `C:\tmp\kk\Resources\app\node_modules` after short staging and before Inno Setup. This bypasses the long build-tree destination path and gives Inno a complete short-path source tree.
+- Add a short-stage probe for the exact WalletConnect file so future builds fail before packaging if the deep dependency is missing.
+
+Verified local smoke after manually copying the complete externals into the installed tree:
+
+- `bin\launcher.exe` launched.
+- Child `bun.exe` ran `Resources\main.js`.
+- Window title appeared as `KeepKey Vault v1.3.2`.
+- `vault-backend.log` advanced through `KeepKey Vault started!`.
+
+Verified clean wrapper smoke after removing temporary diagnostics:
+
+- `KeepKeyVault.exe` launched `bin\launcher.exe`.
+- `launcher.exe` launched `bin\bun.exe ..\Resources\main.js`.
+- `DebugLogExists=False`, confirming the temporary wrapper recorder was not present.
+- Window title appeared as `KeepKey Vault v1.3.2`.
+- `vault-backend.log` advanced through `window created`, `boot complete`, and `KeepKey Vault started!`.
+- The connected KeepKey was detected and reached `State -> ready`.
+
+Remaining release gate:
+
+- Run a fresh production build with the short-stage overlay in `build-windows-production.ps1`.
+- Install that newly produced installer into a clean install tree.
+- Confirm the WalletConnect probe exists in the installed tree.
+- Run wrapper smoke from `KeepKeyVault.exe`, not `launcher.exe` directly.
+- Verify final installer hash/signature before upload.
+
 1. Packaging still drops deep nested WalletConnect files.
    - Evidence: direct installed backend previously failed on nested `uint8arrays`.
    - Test: exact `Test-Path` plus direct backend stderr.
@@ -245,4 +293,3 @@ Do not upload to GitHub Releases until:
 - Treat `vault-backend.log` as the source of truth for app boot.
 - Preserve direct Bun and wrapper tests as separate milestones.
 - If adding wrapper diagnostics, make them append-only and remove or gate them before release.
-
