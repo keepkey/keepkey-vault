@@ -1,6 +1,8 @@
 import type { ReactNode } from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { Box, Flex, Text, Button, Spinner, IconButton } from "@chakra-ui/react"
+import { FaShieldAlt, FaArrowRotateRight } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
@@ -117,6 +119,8 @@ export function ZcashPrivacyTab() {
 	const [page, setPage] = useState<Page>("overview")
 
 	const [status, setStatus] = useState<SidecarStatus>("checking")
+	const [starting, setStarting] = useState(false)
+	const [startError, setStartError] = useState<string | null>(null)
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
 	const [balance, setBalance] = useState<{
 		confirmed: number; pending: number
@@ -552,11 +556,80 @@ export function ZcashPrivacyTab() {
 	const recentTxs = transactions.slice(0, 5)
 
 	if (status === "not_running") {
+		const handleStartEngine = async () => {
+			setStarting(true)
+			setStartError(null)
+			try {
+				const r = await rpcRequest<{ fvk: any; address: string }>(
+					"zcashShieldedInit", { account: 0 }, 60000
+				)
+				if (r.address) {
+					setOrchardAddress(r.address)
+					setStatus("ready")
+				} else {
+					setStartError(t("engineNotRunning"))
+					setStarting(false)
+				}
+			} catch (e: any) {
+				setStartError(e.message || t("engineNotRunning"))
+				setStarting(false)
+			}
+		}
+
 		return (
 			<div className="zcash-v2">
-				<div className="empty-card">
-					<h3>Privacy engine not running</h3>
-					<p>{t("zcashCliRequired")}</p>
+				<div className="empty-card" style={{ textAlign: "center", padding: "32px 24px" }}>
+					<Box
+						w="56px" h="56px" borderRadius="full"
+						bg="rgba(236,178,68,0.1)"
+						display="grid" placeItems="center"
+						mx="auto" mb="4"
+					>
+						<FaShieldAlt fontSize="24px" color="var(--gold)" />
+					</Box>
+					<h3 style={{ margin: "0 0 8px 0" }}>{t("engineNotRunning")}</h3>
+					<p style={{ color: "var(--text-3)", lineHeight: "1.5", maxWidth: "320px", margin: "0 auto 16px auto" }}>
+						{t("engineNotRunningDesc")}
+					</p>
+					{startError && (
+						<Flex
+							justify="center" gap="2" mb="3"
+							py="2" px="3" bg="rgba(245,101,101,0.08)"
+							border="1px solid rgba(245,101,101,0.2)"
+							borderRadius="lg"
+							maxW="360px" mx="auto"
+						>
+							<Text fontSize="11px" color="var(--rose)" fontWeight="500">
+								{t("engineError")}: {startError}
+							</Text>
+						</Flex>
+					)}
+					{starting ? (
+						<Flex direction="column" align="center" gap="2" py="4">
+							<Spinner size="sm" color="var(--gold)" />
+							<Text fontSize="sm" color="var(--text-2)">
+								{t("startingEngine")}
+							</Text>
+						</Flex>
+					) : (
+						<Flex direction="column" align="center" gap="2">
+							<Button
+								size="md"
+								bg="var(--gold)"
+								color="var(--ink-0)"
+								fontWeight="600"
+								px="6"
+								_hover={{ bg: "var(--gold)", opacity: 0.9, transform: "translateY(-1px)" }}
+								_active={{ transform: "translateY(0px)" }}
+								onClick={handleStartEngine}
+							>
+								{t("startEngine")}
+							</Button>
+							<Text fontSize="10px" color="var(--text-4)">
+								{t("engineSetupOneTime")}
+							</Text>
+						</Flex>
+					)}
 				</div>
 			</div>
 		)
