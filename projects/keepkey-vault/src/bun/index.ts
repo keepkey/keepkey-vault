@@ -1719,7 +1719,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
 				}
 
-				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → single GetPortfolioBalances call`)
+				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → chunked GetPortfolioBalances calls`)
 
 				// Build networkId → chainId lookup for token grouping (lowercase keys — Pioneer may return different casing)
 				const networkToChain = new Map<string, string>()
@@ -1730,8 +1730,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
-				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
+				// 3. Chunked API calls — GetPortfolioBalances returns natives + tokens in one flat array
 				const results: ChainBalance[] = []
+				let portfolioHadChunkFailures = false
 				try {
 					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
 					const extraContracts = getCustomTokens().map(ct => ({
@@ -1742,14 +1743,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
-					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
-					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
 					const allEntries: any[] = []
-					const pubkeyChunks = chunkArray(portfolioBody.pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+					const failedChainIds = new Set<string>()
 					let failedChunks = 0
 					for (let i = 0; i < pubkeyChunks.length; i++) {
 						const chunk = pubkeyChunks[i]
-						const chunkBody: any = { pubkeys: chunk }
+						const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
 						if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
 						try {
 							let resp: any
@@ -1774,15 +1774,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							allEntries.push(...unwrapPortfolioEntries(resp))
 						} catch (err: any) {
 							failedChunks++
+							for (const p of chunk) failedChainIds.add(p.chainId)
 							const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
 							console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, getPioneerPortfolioErrorMessage(err))
 						}
 					}
 					if (failedChunks > 0) {
+						portfolioHadChunkFailures = true
 						console.warn(`[getBalances] Portfolio partial response: ${pubkeyChunks.length - failedChunks}/${pubkeyChunks.length} chunks succeeded`)
 					}
 					if (allEntries.length === 0 && failedChunks > 0) {
 						throw new Error('All portfolio chunks failed')
+					}
+					const resultPubkeys = failedChainIds.size > 0
+						? pubkeys.filter(p => !failedChainIds.has(p.chainId))
+						: pubkeys
+					if (resultPubkeys.length < pubkeys.length) {
+						console.warn(`[getBalances] Skipping ${pubkeys.length - resultPubkeys.length} pubkeys from failed portfolio chunks to avoid zeroing cached balances`)
 					}
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
@@ -1829,7 +1837,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					const tokensByChainId = new Map<string, TokenBalance[]>()
 					const evmTokensByOwner = new Map<string, TokenBalance[]>()
-					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensGrouped = 0
+					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensSkippedFailedChain = 0, tokensGrouped = 0
 					for (const tok of tokenEntries) {
 						const bal = parseFloat(String(tok.balance ?? '0'))
 						if (bal <= 0) { tokensSkippedZero++; continue }
@@ -1841,6 +1849,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (!parentChainId) {
 							tokensSkippedNoChain++
 							console.warn(`[getBalances] Token DROPPED (no parent chain): ${tok.symbol} caip=${tok.caip} networkId=${tokNetworkId} caipPrefix=${caipPrefix} bal=${bal} usd=${tok.valueUsd}`)
+							continue
+						}
+						if (failedChainIds.has(parentChainId)) {
+							tokensSkippedFailedChain++
 							continue
 						}
 
@@ -1885,7 +1897,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						tokensGrouped++
 					}
 
-					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
+					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain), ${tokensSkippedFailedChain} skipped (failed chain)`)
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
@@ -1903,7 +1915,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
-					for (const entry of pubkeys) {
+					for (const entry of resultPubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
@@ -1998,7 +2010,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					// Push one aggregated BTC entry — use selected xpub's address so swaps/display match user's chosen script type
-					if (btcPubkeyEntries.length > 0) {
+					if (btcPubkeyEntries.length > 0 && !failedChainIds.has('bitcoin')) {
 						const btcAddress = btcSelectedAddress || btcFallbackAddress
 						results.push({
 							chainId: 'bitcoin', symbol: 'BTC',
@@ -2066,7 +2078,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !portfolioHadChunkFailures && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
