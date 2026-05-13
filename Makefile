@@ -28,9 +28,12 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init --recursive
-	@# Fetch all remotes (recursive) so upstream-behind checks see latest commits
-	@git submodule foreach --recursive --quiet 'git fetch --all --prune 2>/dev/null || true'
+	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+	@# Fetch Vault runtime/build submodules so upstream-behind checks see latest commits.
+	@# Firmware is emulator-only for Vault releases and is intentionally not a gate here.
+	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
+		git -C "$$mod" fetch --all --prune 2>/dev/null || true; \
+	done
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
@@ -466,10 +469,11 @@ release: sign-check build-signed
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
 		--title "KeepKey Vault v$(VERSION)" \
+		--draft \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
 		$$UPDATE_JSON $$TAR_ZST
-	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
+	@echo "Draft release v$(VERSION) created in $(GITHUB_REPO)"
 
 # Sign CI-built macOS artifacts and upload to draft release.
 # Downloads both arm64 and x64 tar.zst from CI, signs all binaries,
@@ -586,7 +590,8 @@ sign-release-intel: sign-check
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
 _sign-one-dmg:
 	@test -f "$(_SRC_TAR)" || (echo "ERROR: $(_SRC_TAR) not found"; exit 1)
-	@STAGING=$$(mktemp -d); \
+	@set -e; \
+	STAGING=$$(mktemp -d); \
 	trap 'rm -rf "$$STAGING"' EXIT; \
 	echo "  Extracting..."; \
 	zstd -d "$(_SRC_TAR)" -o "$$STAGING/app.tar" --force; \
@@ -623,7 +628,7 @@ _sign-one-dmg:
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "  Done: $$DMG_OUT"
 
-# Verify that all MacOS/ binaries have required entitlements (allow-jit).
+# Verify that all MacOS/ executables have required entitlements (allow-jit).
 # Use after signing to confirm bun won't crash with SIGTRAP.
 verify-entitlements:
 	@echo "Verifying entitlements on signed artifacts..."
@@ -644,8 +649,16 @@ verify-entitlements:
 		for BIN in "$$APP/Contents/MacOS/"*; do \
 			[ -f "$$BIN" ] || continue; \
 			NAME=$$(basename "$$BIN"); \
-			file -b "$$BIN" 2>/dev/null | grep -q "Mach-O" || continue; \
-			if codesign -d --entitlements :- "$$BIN" 2>/dev/null | grep -q "allow-jit"; then \
+			FILE_OUT=$$(file -b "$$BIN" 2>/dev/null); \
+			echo "$$FILE_OUT" | grep -q "Mach-O" || continue; \
+			if echo "$$FILE_OUT" | grep -q "dynamically linked shared library"; then \
+				echo "  SKIP: $$NAME is a shared library"; \
+				continue; \
+			fi; \
+			ENTITLEMENTS_OUT=$$(codesign -d --entitlements :- "$$BIN" 2>&1 || true); \
+			if echo "$$ENTITLEMENTS_OUT" | grep -q "invalid entitlements blob"; then \
+				echo "  FAIL: $$NAME has invalid entitlements blob"; FAIL=1; \
+			elif echo "$$ENTITLEMENTS_OUT" | grep -q "allow-jit"; then \
 				echo "  PASS: $$NAME has allow-jit"; \
 			else \
 				echo "  FAIL: $$NAME missing allow-jit"; FAIL=1; \
@@ -693,8 +706,8 @@ help:
 	@echo "  make sign-release   - Download CI artifacts, sign + repack, upload DMGs + auto-update tar.zst"
 	@echo "  make upload-all-dmgs - Upload all signed DMGs to draft release"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
-	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 12)"
-	@echo "  make publish-electrobun-x64-core - Build + publish x64 core to fork releases"
+	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 13+)"
+	@echo "  make publish-electrobun-x64-core - Build + publish x64 core release"
 	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
@@ -702,7 +715,7 @@ help:
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
-	@echo "  make release        - Build, sign, and create new GitHub release"
+	@echo "  make release        - Build, sign, and create a draft GitHub release"
 	@echo "  make upload-dmg     - Upload signed DMG to existing CI draft release"
 	@echo "  make test           - Run all tests"
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
@@ -723,20 +736,18 @@ preflight: submodules
 	@echo ""
 	@echo "1. SUBMODULE PINS"
 	@fail=0; \
-	for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
 		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
 		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
 		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
 		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
 	done; \
 	echo ""; \
-	echo "2. FIRMWARE NESTED SUBMODULES"; \
-	drift=$$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+' || true); \
-	if [ -n "$$drift" ]; then echo "   ❌ DRIFT:"; echo "$$drift"; fail=1; \
-	else echo "   ✅ All clean"; fi; \
+	echo "2. FIRMWARE SUBMODULE"; \
+	echo "   ⚠️  Skipped for Vault release gating (emulator/firmware work only)"; \
 	echo ""; \
 	echo "3. UPSTREAM BEHIND"; \
-	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/keepkey-firmware|origin/master" "modules/electrobun|origin/keepkey/macos-12-support"; do \
+	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/main"; do \
 		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
 		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
 		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
@@ -744,7 +755,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware|BitHighlander/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun|BitHighlander/electrobun"; do \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
 		mod=$$(echo "$$pair" | cut -d'|' -f1); \
 		repo=$$(echo "$$pair" | cut -d'|' -f2); \
 		fork=$$(echo "$$pair" | cut -d'|' -f3); \

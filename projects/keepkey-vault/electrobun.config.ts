@@ -56,7 +56,6 @@ export default {
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,
 				"com.apple.security.cs.disable-library-validation": true,
 				"com.apple.security.cs.allow-dyld-environment-variables": true,
-				"com.apple.security.device.camera": true,
 			},
 		},
 		linux: {

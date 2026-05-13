@@ -74,7 +74,15 @@ codesign --verify --deep --strict "$APP_PATH"
 # --- 5. Spot-check: bun MUST have allow-jit ---
 BUN_BIN="$MACOS_DIR/bun"
 if [ -f "$BUN_BIN" ]; then
-  if ! codesign -d --entitlements :- "$BUN_BIN" 2>/dev/null | grep -q "allow-jit"; then
+  ENTITLEMENTS_OUT="$(codesign -d --entitlements :- "$BUN_BIN" 2>&1 || true)"
+  if echo "$ENTITLEMENTS_OUT" | grep -q "invalid entitlements blob"; then
+    echo ""
+    echo "FATAL: bun binary has an invalid entitlements blob."
+    echo "macOS will ignore invalid entitlements, causing SIGTRAP crashes."
+    echo "$ENTITLEMENTS_OUT"
+    exit 1
+  fi
+  if ! echo "$ENTITLEMENTS_OUT" | grep -q "allow-jit"; then
     echo ""
     echo "FATAL: bun binary is missing allow-jit entitlement!"
     echo "This will cause SIGTRAP crashes at runtime."
