@@ -31,7 +31,11 @@ The entitlements file (`projects/keepkey-vault/entitlements.plist`) contains:
 - `allow-unsigned-executable-memory` — dynamic code execution
 - `disable-library-validation` — load unsigned dylibs
 - `allow-dyld-environment-variables` — runtime environment control
-- `device.camera` — QR code scanning
+
+Do not add `com.apple.security.device.camera` here. Camera permission for QR
+scanning is handled by `NSCameraUsageDescription` in `Info.plist`; adding the
+sandbox camera entitlement to this Developer ID app makes the entitlement blob
+invalid, and macOS ignores the whole blob.
 
 ## Three Signing Paths
 
