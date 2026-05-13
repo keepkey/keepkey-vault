@@ -506,88 +506,105 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	return (
 		<Flex flex="1" direction="column" align="center" px={{ base: "3", md: "6" }} py={{ base: "5", md: "8" }} className="v3-page-enter">
 			<Box w="100%" maxW={{ base: "100%", sm: "640px", md: "880px" }}>
-				{/* Header — back button + chain identity hero + balance on the right */}
-				<Flex align="center" gap={{ base: "3", md: "4" }} mb="6">
-					<Box
-						as="button"
-						onClick={onBack}
-						w="36px"
-						h="36px"
-						borderRadius="10px"
-						bg="var(--ink-2)"
-						border="1px solid var(--line)"
-						color="var(--text-1)"
-						display="grid"
-						placeItems="center"
-						cursor="pointer"
-						_hover={{ bg: "var(--ink-3)", color: "var(--text-0)", borderColor: "var(--line-2)" }}
-						transition="all 0.18s"
-						flexShrink={0}
-						className="electrobun-webkit-app-region-no-drag"
-						aria-label="Back"
-					>
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-							<path d="M19 12H5M12 19l-7-7 7-7"/>
-						</svg>
-					</Box>
+				{/* Header — back button + chain identity hero + sync status + refresh */}
+				<Flex align="center" justify="space-between" gap={{ base: "3", md: "4" }} mb="6">
+					<Flex align="center" gap={{ base: "3", md: "4" }} flex="1" minW="0">
+						<Box
+							as="button"
+							onClick={onBack}
+							w="36px"
+							h="36px"
+							borderRadius="10px"
+							bg="var(--ink-2)"
+							border="1px solid var(--line)"
+							color="var(--text-1)"
+							display="grid"
+							placeItems="center"
+							cursor="pointer"
+							_hover={{ bg: "var(--ink-3)", color: "var(--text-0)", borderColor: "var(--line-2)" }}
+							transition="all 0.18s"
+							flexShrink={0}
+							className="electrobun-webkit-app-region-no-drag"
+							aria-label="Back"
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M19 12H5M12 19l-7-7 7-7"/>
+							</svg>
+						</Box>
 
-					<Image
-						src={getAssetIcon(chain.caip)}
-						alt={chain.symbol}
-						w={{ base: "44px", md: "52px" }}
-						h={{ base: "44px", md: "52px" }}
-						borderRadius="full"
-						flexShrink={0}
-						bg="var(--ink-2)"
-						boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
-					/>
+						<Image
+							src={getAssetIcon(chain.caip)}
+							alt={chain.symbol}
+							w={{ base: "44px", md: "52px" }}
+							h={{ base: "44px", md: "52px" }}
+							borderRadius="full"
+							flexShrink={0}
+							bg="var(--ink-2)"
+							boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
+						/>
 
-					<Box flex="1" minW="0">
-						<Flex align="baseline" gap="2.5">
-							<Text
-								fontFamily="serif"
-								fontStyle="italic"
-								fontWeight="400"
-								fontSize={{ base: "26px", md: "34px" }}
-								letterSpacing="-0.02em"
-								color="var(--text-0)"
-								lineHeight="1.05"
-								truncate
-							>
-								{chain.coin}
-							</Text>
-							<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
-						</Flex>
-						<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" mt="0.5" truncate>
-							{chain.caip}
-						</Text>
-					</Box>
-
-					{activeBalance && (
-						<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
-							<Text
-								fontFamily="mono"
-								fontSize={{ base: "16px", md: "20px" }}
-								fontWeight="500"
-								color="var(--text-0)"
-								letterSpacing="0.01em"
-								lineHeight="1.2"
-							>
-								{activeBalance.balance}
-								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
-							</Text>
-							{cleanBalanceUsd > 0 && (
-								<AnimatedUsd
-									value={cleanBalanceUsd}
-									prefix="≈ "
-									fontSize="12px"
-									fontFamily="mono"
-									color="var(--text-2)"
+						<Box flex="1" minW="0">
+							<Flex align="baseline" gap="2.5">
+								<Text
+									fontFamily="serif"
+									fontStyle="italic"
 									fontWeight="400"
-								/>
-							)}
-						</Flex>
-					)}
+									fontSize={{ base: "26px", md: "34px" }}
+									letterSpacing="-0.02em"
+									color="var(--text-0)"
+									lineHeight="1.05"
+									truncate
+								>
+									{chain.coin}
+								</Text>
+								<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
+							</Flex>
+							<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" mt="0.5" truncate>
+								{chain.caip}
+							</Text>
+						</Box>
+					</Flex>
+
+					<Flex direction="column" align="flex-end" gap="1.5" flexShrink={0}>
+						{/* Sync status indicator */}
+						{activeBalance ? (
+							<Flex align="center" gap="1" color="var(--teal)">
+								<Box as={FaCheck} fontSize="10px" />
+								<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("synced")}</Text>
+							</Flex>
+						) : (
+							<Flex align="center" gap="1" color="var(--rose)">
+								<Box w="7px" h="7px" borderRadius="full" bg="var(--rose)" />
+								<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("outOfSync")}</Text>
+							</Flex>
+						)}
+						{/* Balance display (only when available) */}
+						{activeBalance && (
+							<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
+								<Text
+									fontFamily="mono"
+									fontSize={{ base: "16px", md: "20px" }}
+									fontWeight="500"
+									color="var(--text-0)"
+									letterSpacing="0.01em"
+									lineHeight="1.2"
+								>
+									{activeBalance.balance}
+									<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
+								</Text>
+								{cleanBalanceUsd > 0 && (
+									<AnimatedUsd
+										value={cleanBalanceUsd}
+										prefix="≈ "
+										fontSize="12px"
+										fontFamily="mono"
+										color="var(--text-2)"
+										fontWeight="400"
+									/>
+								)}
+							</Flex>
+						)}
+					</Flex>
 
 					<Box
 						as="button"
