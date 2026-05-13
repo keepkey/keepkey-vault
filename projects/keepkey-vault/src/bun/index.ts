@@ -4910,7 +4910,13 @@ engine.on('state-change', (state) => {
 			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
 	}
-	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
+	if (state.state === 'disconnected') {
+		btcAccounts.reset()
+		evmAddresses.reset()
+		stopSidecar()
+		wipeSidecarWalletDb()
+		console.log('[Vault] Device disconnected: cleared Zcash sidecar + wallet DB')
+	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)
 	}
