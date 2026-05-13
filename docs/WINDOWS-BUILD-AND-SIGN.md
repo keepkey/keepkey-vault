@@ -1,6 +1,6 @@
 # Windows Build & Signing SOP
 
-The linear procedure for cutting a signed KeepKey Vault Windows release. Pairs with [`WINDOWS-DEV-SETUP.md`](./WINDOWS-DEV-SETUP.md) (first-time machine setup) and [`WINDOWS-QUIRKS.md`](./WINDOWS-QUIRKS.md) (platform gotchas reference).
+The linear procedure for cutting a signed KeepKey Vault Windows release. Pairs with [`WINDOWS-DEV-SETUP.md`](./WINDOWS-DEV-SETUP.md) (first-time machine setup), [`WINDOWS-BUILD-QUIRKS.md`](./WINDOWS-BUILD-QUIRKS.md) (build/sign/package gotchas), and [`WINDOWS-QUIRKS.md`](./WINDOWS-QUIRKS.md) (runtime gotchas).
 
 The build, signing, and installer steps are all driven by **one PowerShell script**: [`scripts/build-windows-production.ps1`](../scripts/build-windows-production.ps1). This document explains what the script does, what to verify, and how to recover from common failures.
 
@@ -66,7 +66,7 @@ Only initializes the modules the build actually needs:
 - `modules/keepkey-firmware`
 - `modules/device-protocol`
 
-**Not** recursive — fully recursive init pulls firmware deps with paths exceeding the 260-char MAX_PATH limit. See [`WINDOWS-QUIRKS.md`](./WINDOWS-QUIRKS.md) §22.
+**Not** recursive — fully recursive init pulls firmware deps with paths exceeding the 260-char MAX_PATH limit. See [`WINDOWS-BUILD-QUIRKS.md`](./WINDOWS-BUILD-QUIRKS.md) §22.
 
 ### 3. device-protocol `lib/` verification (lines ~269-283)
 Checks that `modules/device-protocol/lib/messages_pb.js` is present. If missing, the script aborts with instructions. This file is gitignored — see [The device-protocol pitfall](#the-device-protocol-pitfall).
@@ -83,7 +83,7 @@ Checks that `modules/device-protocol/lib/messages_pb.js` is present. If missing,
 `bun run build` — produces `_build/dev-win-x64/keepkey-vault-dev/`. Build channel is patched from `dev` to `stable` at runtime (line ~325) because Electrobun's native `--env=stable` produces a macOS-style bundle on Windows.
 
 ### 7. Bulk signing (lines ~360-396)
-Signs every `*.exe`, `*.dll`, and `*.node` under `bin/` and `Resources/`. The wrapper EXE (`KeepKeyVault.exe`) does **not** exist at this point on a clean build — it's signed later in step 9.
+Scans `*.exe`, `*.dll`, and `*.node` under `bin/` and `Resources/`; native `.node` addons and Bun `.bin` shims are skipped because they are not signable PE files. The wrapper EXE (`KeepKeyVault.exe`) is rebuilt and signed later in step 9.
 
 Skip patterns (treated as success):
 - `.node` files — signtool doesn't support native addon binaries
@@ -102,7 +102,7 @@ Converts the renamed-PNG `Resources/app.ico` to a real multi-size ICO (16/32/48/
 - **Re-signs** both rcedit-modified EXEs — `rcedit` invalidates Authenticode signatures because `BeginUpdateResource` modifies the `.rsrc` section. Without this, the user-launched binary ships unsigned.
 
 ### 10. MAX_PATH staging (lines ~597-614)
-The build tree has paths >260 chars (deep `node_modules`). Inno Setup silently skips such files. Workaround: `robocopy /256` everything into `C:\tmp\kk` first.
+The build tree has paths >260 chars (deep `node_modules`). Inno Setup silently skips such files. Workaround: use `robocopy` to stage everything into `C:\tmp\kk` first. Do not pass `/256`; that disables robocopy long-path support.
 
 ### 11. Inno Setup compile + installer sign (lines ~616-657)
 `ISCC` produces `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe`, then `signtool` signs the installer itself. The WebView2 bootstrapper is bundled into the installer and runs at install time (required on Windows 10).
@@ -198,7 +198,7 @@ Almost always a MAX_PATH issue. Inno silently drops files; the compile fails whe
 If the count is low, robocopy hit a problem. Run it manually with full output:
 
 ```powershell
-robocopy "projects\keepkey-vault\_build\dev-win-x64\keepkey-vault-dev" "C:\tmp\kk" /E /256
+robocopy "projects\keepkey-vault\_build\dev-win-x64\keepkey-vault-dev" "C:\tmp\kk" /E
 ```
 
 ### `FATAL: modules/device-protocol/lib/messages_pb.js is MISSING`

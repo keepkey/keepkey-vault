@@ -89,6 +89,7 @@ try {
 
 # ── Project version ──────────────────────────────────────────────────────
 Section "Project version"
+$pkg = $null
 $pkgJsonPath = Join-Path $ProjectDir "package.json"
 if (-not (Test-Path $pkgJsonPath)) {
     Fail "package.json not found at $pkgJsonPath"

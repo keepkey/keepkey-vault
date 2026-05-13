@@ -1154,7 +1154,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
         // ballooning response_body across repeated reads.
-        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path.startsWith('/admin/') || path === '/auth/pair'
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
@@ -1369,6 +1369,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/admin/usb/devices' && method === 'GET') {
+          auth.requireAuth(req)
           try {
             return json(listUsbDevicesForAdmin())
           } catch (err: any) {
@@ -1377,6 +1378,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/admin/usb/state' && method === 'GET') {
+          auth.requireAuth(req)
           try {
             const devices = listUsbDevicesForAdmin()
             const keepKeyOnBus = devices.some(device => device.isKeepKey)

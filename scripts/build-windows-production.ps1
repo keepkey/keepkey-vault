@@ -184,7 +184,8 @@ function Clear-PECertTableEntry {
 function Sign-File {
     param(
         [string]$FilePath,
-        [string]$Description = ""
+        [string]$Description = "",
+        [switch]$Force = $false
     )
 
     if ($SkipSign) {
@@ -208,14 +209,16 @@ function Sign-File {
         return $true
     }
 
-    # Check if already signed
-    try {
-        $sig = Get-AuthenticodeSignature $FilePath
-        if ($sig.Status -eq 'Valid') {
-            Write-Success "Already signed: $fileName"
-            return $true
-        }
-    } catch {}
+    if (-not $Force) {
+        # Check if already signed
+        try {
+            $sig = Get-AuthenticodeSignature $FilePath
+            if ($sig.Status -eq 'Valid') {
+                Write-Success "Already signed: $fileName"
+                return $true
+            }
+        } catch {}
+    }
 
     # Try each timestamp URL in order. signtool failures with a timestamp
     # server are transient (network blip, server rotation) — retry against the
@@ -392,12 +395,15 @@ if (-not $SkipBuild) {
     Write-Step "Building proto-tx-builder"
     Push-Location (Join-Path $RepoRoot "modules\proto-tx-builder")
     bun install
+    if ($LASTEXITCODE -ne 0) { throw "bun install failed for proto-tx-builder (exit $LASTEXITCODE)" }
     Pop-Location
 
     Write-Step "Building hdwallet"
     Push-Location (Join-Path $RepoRoot "modules\hdwallet")
     yarn install
+    if ($LASTEXITCODE -ne 0) { throw "yarn install failed for hdwallet (exit $LASTEXITCODE)" }
     yarn build
+    if ($LASTEXITCODE -ne 0) { throw "yarn build failed for hdwallet (exit $LASTEXITCODE)" }
     Pop-Location
 
     Write-Step "Installing keepkey-vault dependencies"
@@ -406,8 +412,18 @@ if (-not $SkipBuild) {
     # transitive deps inside file-linked workspace packages. These are not
     # needed at build time (collect-externals resolves them). Tolerate this.
     $ErrorActionPreference = 'Continue'
-    bun install
+    $vaultInstallOutput = bun install 2>&1
+    $vaultInstallExit = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
+    if ($vaultInstallExit -ne 0) {
+        $vaultInstallText = @($vaultInstallOutput) -join "`n"
+        if ($vaultInstallText -match 'ENOENT' -and $vaultInstallText -match 'node_modules') {
+            Write-Warning "bun install exited $vaultInstallExit with nested node_modules ENOENT; continuing per Windows packaging workaround."
+        } else {
+            Write-Host $vaultInstallText -ForegroundColor Gray
+            throw "bun install failed for keepkey-vault (exit $vaultInstallExit)"
+        }
+    }
     Pop-Location
 
     Write-Step "Building zcash-cli sidecar (Rust)"
@@ -425,6 +441,7 @@ if (-not $SkipBuild) {
     Write-Step "Building Electrobun Windows app"
     Push-Location $ProjectDir
     bun run build
+    if ($LASTEXITCODE -ne 0) { throw "bun run build failed for keepkey-vault (exit $LASTEXITCODE)" }
     Pop-Location
 
     # Electrobun's Windows copy step can silently leave very deep nested
@@ -605,7 +622,9 @@ Write-Step "Building wrapper EXE"
 $WrapperExe = Join-Path $BuildDir "KeepKeyVault.exe"
 $WrapperSrc = Join-Path $ScriptDir "wrapper-launcher.zig"
 
-if (-not (Test-Path $WrapperExe)) {
+if ((Test-Path $WrapperExe) -and $SkipBuild) {
+    Write-Warning "Using existing wrapper EXE because -SkipBuild was supplied"
+} else {
     # Zig version pin: wrapper-launcher.zig was last updated for 0.15.2
     # (commit cfd6ea4). Zig 0.16 shipped an IO-context refactor that broke
     # std.fs.cwd, std.time.milliTimestamp, and std.fs.selfExeDirPath. Refuse
@@ -658,8 +677,6 @@ if (-not (Test-Path $WrapperExe)) {
     } else {
         throw "Failed to compile wrapper EXE with Zig"
     }
-} else {
-    Write-Success "Wrapper EXE already exists"
 }
 
 # Copy DPI-awareness manifest next to wrapper EXE
@@ -704,20 +721,26 @@ if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
 }
 
 # Re-sign EXEs whose .rsrc was modified by rcedit (signatures invalidated above).
-# The wrapper EXE on a clean build was never signed in the bulk loop (didn't
-# exist yet) — this is where it first gets signed.
-if (-not $SkipSign -and $rceditTouched.Count -gt 0) {
-    Write-Step "Re-signing EXEs modified by rcedit"
+# Also sign the wrapper after the Zig build. On a clean build it did not exist
+# during the bulk signing pass; when rcedit is unavailable it still must not ship
+# unsigned.
+$finalExeSignTargets = @()
+if (Test-Path $WrapperExe) { $finalExeSignTargets += $WrapperExe }
+foreach ($exePath in $rceditTouched) {
+    if ($finalExeSignTargets -notcontains $exePath) { $finalExeSignTargets += $exePath }
+}
+if (-not $SkipSign -and $finalExeSignTargets.Count -gt 0) {
+    Write-Step "Final signing wrapper/launcher EXEs"
     $resignFailed = 0
-    foreach ($exePath in $rceditTouched) {
-        # Force re-sign — the existing sig is invalid post-rcedit but
-        # Get-AuthenticodeSignature may still report Valid for a moment.
-        if (-not (Sign-File -FilePath $exePath -Description $AppName)) {
+    foreach ($exePath in $finalExeSignTargets) {
+        # Force re-sign because rcedit invalidates Authenticode signatures and
+        # Get-AuthenticodeSignature can briefly report stale validity.
+        if (-not (Sign-File -FilePath $exePath -Description $AppName -Force)) {
             $resignFailed++
         }
     }
     if ($resignFailed -gt 0 -and -not $AllowSignFailures) {
-        throw "Aborting: $resignFailed wrapper/launcher EXE(s) failed to re-sign after rcedit."
+        throw "Aborting: $resignFailed wrapper/launcher EXE(s) failed final signing."
     }
 }
 
@@ -767,7 +790,7 @@ Write-Step "Preparing short-path staging for Inno Setup (MAX_PATH workaround)"
 $ShortStage = "C:\tmp\kk"
 if (Test-Path $ShortStage) { Remove-Item -Recurse -Force $ShortStage }
 Write-Host "    Copying build to $ShortStage ..."
-# robocopy handles source paths >260 chars; /256 disables MAX_PATH for robocopy itself.
+# robocopy can handle source paths >260 chars when long-path support remains enabled.
 # Critical flags (learned the hard way):
 #   /MT:16     — 16-thread copy. Single-threaded robocopy + Defender real-time
 #                scan = ~30 min for 14k files. Multi-threaded = ~1-2 min.
@@ -778,9 +801,13 @@ Write-Host "    Copying build to $ShortStage ..."
 #                loops inside nested node_modules can trap robocopy forever.
 # robocopy exits 0-7 on success (0=no files, 1=copied, 2=extra, etc.) — normalize to 0
 $rcStart = Get-Date
-robocopy $BuildDir $ShortStage /E /256 /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+robocopy $BuildDir $ShortStage /E /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+$stageCopyExit = $LASTEXITCODE
+if ($stageCopyExit -gt 7) {
+    throw "robocopy failed while staging build for Inno Setup (exit $stageCopyExit)"
+}
+$global:LASTEXITCODE = 0
 $rcSeconds = [math]::Round(((Get-Date) - $rcStart).TotalSeconds, 1)
-if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 }
 $StagedFiles = (Get-ChildItem -Recurse -File $ShortStage -ErrorAction SilentlyContinue | Measure-Object).Count
 Write-Host "    Staged $StagedFiles files in ${rcSeconds}s (source path: $($ShortStage.Length) chars)"
 
@@ -835,7 +862,11 @@ if (-not $SkipSign) {
     Write-Step "Signing installer EXE"
     $signed = Sign-File -FilePath $InstallerExe -Description "$AppName Installer"
     if (-not $signed) {
-        Write-Error "Failed to sign the installer EXE!"
+        if ($AllowSignFailures) {
+            Write-Warning "Failed to sign the installer EXE; continuing because -AllowSignFailures was supplied."
+        } else {
+            throw "Failed to sign the installer EXE."
+        }
     }
 }
 
@@ -881,7 +912,11 @@ foreach ($file in $finalArtifacts) {
 Write-Host ""
 
 if (-not $SkipSign) {
-    Write-Host "All executables have been signed with EV certificate." -ForegroundColor Green
+    if ($AllowSignFailures) {
+        Write-Host "Signing was attempted; failures were allowed by -AllowSignFailures." -ForegroundColor Yellow
+    } else {
+        Write-Host "All executables have been signed with EV certificate." -ForegroundColor Green
+    }
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
     Write-Host "  1. Test the installer: run the setup EXE" -ForegroundColor Gray

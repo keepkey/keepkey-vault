@@ -647,7 +647,7 @@ Get-ChildItem -Recurse -File $BuildDir |
 # Anything > 250 is in danger zone
 ```
 
-**Fix**: stage the entire build tree to a short prefix path before invoking ISCC. The build script does this with `robocopy /256 → C:\tmp\kk`. After staging, every absolute path is `C:\tmp\kk\...` (8 char prefix) and well under 260.
+**Fix**: stage the entire build tree to a short prefix path before invoking ISCC. The build script does this with `robocopy → C:\tmp\kk`. After staging, every absolute path is `C:\tmp\kk\...` (8 char prefix) and well under 260. Do not pass `/256`; that disables robocopy long-path support.
 
 **Permanent prevention**: never invoke ISCC against the dev build tree directly. Always stage. The build script does this — don't disable it.
 
@@ -667,7 +667,7 @@ Get-Process robocopy | Select-Object Id, CPU, WorkingSet, StartTime
 
 **Fix**: the script uses these flags:
 ```
-robocopy $src $dst /E /256 /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS
+robocopy $src $dst /E /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS
 ```
 - `/MT:16` — 16-thread parallel copy (~10x faster than single-threaded)
 - `/R:1 /W:1` — retry ONCE with 1-second wait (don't get stuck on Defender locks)
