@@ -129,6 +129,8 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 const PIONEER_TIMEOUT_MS = 60_000
 const PIONEER_PORTFOLIO_CHUNK_SIZE = 8
 const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 20_000
+const PIONEER_PORTFOLIO_MAX_CONCURRENCY = 4
+const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 45_000
 
 function getPioneerPortfolioErrorMessage(err: any): string {
 	const fields = err?.response?.body?.fields || err?.responseError?.fields
@@ -153,6 +155,25 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 	const chunks: T[][] = []
 	for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
 	return chunks
+}
+
+async function mapWithConcurrency<T, R>(
+	items: T[],
+	concurrency: number,
+	fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+	const results = new Array<R>(items.length)
+	let nextIndex = 0
+	const workerCount = Math.min(Math.max(1, concurrency), items.length)
+	const workers = Array.from({ length: workerCount }, async () => {
+		while (true) {
+			const index = nextIndex++
+			if (index >= items.length) return
+			results[index] = await fn(items[index], index)
+		}
+	})
+	await Promise.all(workers)
+	return results
 }
 
 function unwrapPortfolioEntries(resp: any): any[] {
@@ -1732,7 +1753,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// 3. Chunked API calls — GetPortfolioBalances returns natives + tokens in one flat array
 				const results: ChainBalance[] = []
-				let portfolioHadChunkFailures = false
 				try {
 					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
 					const extraContracts = getCustomTokens().map(ct => ({
@@ -1743,55 +1763,49 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
-					const allEntries: any[] = []
 					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
-					const failedChainIds = new Set<string>()
-					let failedChunks = 0
-					for (let i = 0; i < pubkeyChunks.length; i++) {
-						const chunk = pubkeyChunks[i]
-						const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
-						if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
-						try {
-							let resp: any
+					const chunkResults = await withTimeout(
+						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
+							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
 							try {
-								resp = await withTimeout(
-									pioneer.GetPortfolioBalances(chunkBody, { forceRefresh: true }),
-									PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
-									`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
-								)
+								let resp: any
+								try {
+									resp = await withTimeout(
+										pioneer.GetPortfolioBalances(chunkBody, { forceRefresh: true }),
+										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
+									)
+								} catch (err: any) {
+									if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
+									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
+									resp = await withTimeout(
+										pioneer.GetPortfolioBalances(
+											{ pubkeys: chunkBody.pubkeys },
+											{ forceRefresh: true }
+										),
+										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
+									)
+								}
+								return { entries: unwrapPortfolioEntries(resp), error: null as string | null }
 							} catch (err: any) {
-								if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
-								console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
-								resp = await withTimeout(
-									pioneer.GetPortfolioBalances(
-										{ pubkeys: chunkBody.pubkeys },
-										{ forceRefresh: true }
-									),
-									PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
-									`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
-								)
+								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
+								const error = getPioneerPortfolioErrorMessage(err)
+								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
+								return { entries: [] as any[], error }
 							}
-							allEntries.push(...unwrapPortfolioEntries(resp))
-						} catch (err: any) {
-							failedChunks++
-							for (const p of chunk) failedChainIds.add(p.chainId)
-							const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
-							console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, getPioneerPortfolioErrorMessage(err))
-						}
+						}),
+						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
+						'GetPortfolioBalances chunks'
+					)
+					const failedChunks = chunkResults.filter(r => r.error)
+					if (failedChunks.length > 0) {
+						const succeeded = pubkeyChunks.length - failedChunks.length
+						console.warn(`[getBalances] Portfolio refresh failed: ${succeeded}/${pubkeyChunks.length} chunks succeeded`)
+						throw new Error(`Portfolio refresh incomplete: ${failedChunks.length}/${pubkeyChunks.length} chunks failed`)
 					}
-					if (failedChunks > 0) {
-						portfolioHadChunkFailures = true
-						console.warn(`[getBalances] Portfolio partial response: ${pubkeyChunks.length - failedChunks}/${pubkeyChunks.length} chunks succeeded`)
-					}
-					if (allEntries.length === 0 && failedChunks > 0) {
-						throw new Error('All portfolio chunks failed')
-					}
-					const resultPubkeys = failedChainIds.size > 0
-						? pubkeys.filter(p => !failedChainIds.has(p.chainId))
-						: pubkeys
-					if (resultPubkeys.length < pubkeys.length) {
-						console.warn(`[getBalances] Skipping ${pubkeys.length - resultPubkeys.length} pubkeys from failed portfolio chunks to avoid zeroing cached balances`)
-					}
+					const allEntries = chunkResults.flatMap(r => r.entries)
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
@@ -1837,7 +1851,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					const tokensByChainId = new Map<string, TokenBalance[]>()
 					const evmTokensByOwner = new Map<string, TokenBalance[]>()
-					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensSkippedFailedChain = 0, tokensGrouped = 0
+					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensGrouped = 0
 					for (const tok of tokenEntries) {
 						const bal = parseFloat(String(tok.balance ?? '0'))
 						if (bal <= 0) { tokensSkippedZero++; continue }
@@ -1849,10 +1863,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (!parentChainId) {
 							tokensSkippedNoChain++
 							console.warn(`[getBalances] Token DROPPED (no parent chain): ${tok.symbol} caip=${tok.caip} networkId=${tokNetworkId} caipPrefix=${caipPrefix} bal=${bal} usd=${tok.valueUsd}`)
-							continue
-						}
-						if (failedChainIds.has(parentChainId)) {
-							tokensSkippedFailedChain++
 							continue
 						}
 
@@ -1897,7 +1907,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						tokensGrouped++
 					}
 
-					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain), ${tokensSkippedFailedChain} skipped (failed chain)`)
+					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
@@ -1915,7 +1925,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
-					for (const entry of resultPubkeys) {
+					for (const entry of pubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
@@ -2010,7 +2020,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					// Push one aggregated BTC entry — use selected xpub's address so swaps/display match user's chosen script type
-					if (btcPubkeyEntries.length > 0 && !failedChainIds.has('bitcoin')) {
+					if (btcPubkeyEntries.length > 0) {
 						const btcAddress = btcSelectedAddress || btcFallbackAddress
 						results.push({
 							chainId: 'bitcoin', symbol: 'BTC',
@@ -2078,7 +2088,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !portfolioHadChunkFailures && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)

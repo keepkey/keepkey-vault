@@ -862,7 +862,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     playCompletionSound()
     setTimeout(() => setShowConfetti(false), 1500)
     // Fetch updated balances to show before/after diff
-    rpcRequest<ChainBalance[]>('getBalances', undefined, 60000)
+    rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
       .then((result) => {
         if (!result || !fromAsset || !toAsset) return
         const fromCb = result.find(b => b.chainId === fromAsset.chainId)
