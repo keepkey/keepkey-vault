@@ -93,6 +93,8 @@ if ($PSCommandPath) {
 $RepoRoot = Split-Path -Path $ScriptDir -Parent
 $ProjectDir = Join-Path $RepoRoot "projects\keepkey-vault"
 $BuildDir = Join-Path $ProjectDir "_build\dev-win-x64\keepkey-vault-dev"
+$ExtModulesDir = Join-Path $ProjectDir "_build\_ext_modules"
+$AppNodeModulesDir = Join-Path $BuildDir "Resources\app\node_modules"
 $ArtifactsDir = Join-Path $RepoRoot $OutputDir
 
 # Read version from package.json
@@ -448,17 +450,17 @@ if (-not $SkipBuild) {
     # node_modules packages incomplete. collect-externals.ts stages the verified
     # runtime deps in _build/_ext_modules; mirror that exact tree into the final
     # app bundle with robocopy, which handles Windows paths more reliably.
-    $ExtModulesDir = Join-Path $ProjectDir "_build\_ext_modules"
-    $AppNodeModulesDir = Join-Path $BuildDir "Resources\app\node_modules"
     if (Test-Path $ExtModulesDir) {
         Write-Step "Mirroring external node_modules into app bundle"
         if (-not (Test-Path $AppNodeModulesDir)) {
             New-Item -ItemType Directory -Force -Path $AppNodeModulesDir | Out-Null
         }
-        & robocopy $ExtModulesDir $AppNodeModulesDir /MIR /NFL /NDL /NJH /NJS /NP
-        if ($LASTEXITCODE -gt 7) {
-            throw "robocopy failed while mirroring external node_modules (exit $LASTEXITCODE)"
+        & robocopy $ExtModulesDir $AppNodeModulesDir /MIR /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+        $mirrorExit = $LASTEXITCODE
+        if ($mirrorExit -gt 7) {
+            throw "robocopy failed while mirroring external node_modules (exit $mirrorExit)"
         }
+        $global:LASTEXITCODE = 0
         Write-Success "Mirrored external node_modules into Resources\app"
     } else {
         throw "collect-externals did not produce $ExtModulesDir"
@@ -496,6 +498,9 @@ if (-not $SkipBuild) {
 # Verify build exists
 if (-not (Test-Path $BuildDir)) {
     throw "Build directory not found: $BuildDir`nRun without -SkipBuild flag."
+}
+if (-not (Test-Path $ExtModulesDir)) {
+    throw "External modules staging directory not found: $ExtModulesDir`nRun without -SkipBuild to regenerate collect-externals output."
 }
 
 # ============================================================================
