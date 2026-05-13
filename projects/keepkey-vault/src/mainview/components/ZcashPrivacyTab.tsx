@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
+import { QrScannerOverlay } from "./QrScannerOverlay"
 import { ZCASH_V2_CSS } from "./zcash-v2-styles"
 
 /** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
@@ -121,6 +122,7 @@ export function ZcashPrivacyTab() {
 	const [scanResult, setScanResult] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
 
+	const [showScanner, setShowScanner] = useState(false)
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState("")
@@ -185,6 +187,13 @@ export function ZcashPrivacyTab() {
 		if (!recipient) return null
 		return validateZcashRecipient(recipient)
 	}, [recipient])
+
+	const handleQrScan = useCallback((raw: string) => {
+		const data = raw.trim().replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 256)
+		if (!data) return
+		setRecipient(data)
+		setShowScanner(false)
+	}, [])
 
 	useEffect(() => onRpcMessage("shield-progress", (payload: { step: string; detail?: string }) => {
 		setShieldStep(payload.step)
@@ -684,12 +693,26 @@ export function ZcashPrivacyTab() {
 								<div className="field-grid">
 									<div className="field">
 										<span className="lbl">To</span>
-										<input
-											type="text"
-											placeholder="Paste a Zcash address (u1… or t1…)"
-											value={recipient}
-											onChange={e => setRecipient(e.target.value)}
-										/>
+										<div className="zk-qr-field">
+											<input
+												type="text"
+												placeholder="Paste a Zcash address (u1… or t1…)"
+												value={recipient}
+												onChange={e => setRecipient(e.target.value)}
+											/>
+											<button
+												type="button"
+												title="Scan QR code"
+												className="qr-scan-btn"
+												onClick={() => setShowScanner(true)}
+											>
+												<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M3 1V3h1M13 1v2M1 13h2M13 13v2"/>
+													<rect x="3" y="3" width="10" height="10" rx="1"/>
+													<rect x="6" y="6" width="4" height="4"/>
+												</svg>
+											</button>
+										</div>
 									</div>
 									{recipientValidation && !recipientValidation.valid && recipientValidation.error && (
 										<div className="field-err">{t(recipientValidation.error)}</div>
@@ -759,6 +782,11 @@ export function ZcashPrivacyTab() {
 						</div>
 					</div>
 				</section>
+			)}
+
+			{/* QR scanner overlay */}
+			{showScanner && (
+				<QrScannerOverlay onScan={handleQrScan} onClose={() => setShowScanner(false)} />
 			)}
 
 			{/* ===== SHIELD / UNSHIELD ===== */}

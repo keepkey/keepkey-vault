@@ -264,6 +264,18 @@ export const ZCASH_V2_CSS = `
 	content: ""; width: 4px; height: 4px; border-radius: 50%;
 	background: var(--zk-green);
 }
+/* QR scan button inside field */
+.zcash-v2 .zk-qr-field {
+	display: flex; align-items: center; gap: 8px; flex: 1 1 60%;
+}
+.zcash-v2 .qr-scan-btn {
+	flex-shrink: 0;
+	width: 28px; height: 28px;
+	border-radius: 6px;
+	display: flex; align-items: center; justify-content: center;
+	color: var(--zk-fg-dim);
+}
+.zcash-v2 .qr-scan-btn:hover { background: var(--zk-bg-3); color: var(--zk-gold); }
 .zcash-v2 .balance-row {
 	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 	padding: 10px 12px;
