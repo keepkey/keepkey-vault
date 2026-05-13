@@ -3283,10 +3283,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setBip85Enabled: async (params) => {
-				// BIP-85 requires firmware >= 7.15.0
+				// BIP-85 requires firmware >= 7.16.0
 				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
-					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.16.0') < 0)) {
+					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.16.0`)
 					return getAppSettings()
 				}
 				bip85Enabled = params.enabled
@@ -4913,9 +4913,7 @@ engine.on('state-change', (state) => {
 	if (state.state === 'disconnected') {
 		btcAccounts.reset()
 		evmAddresses.reset()
-		stopSidecar()
-		wipeSidecarWalletDb()
-		console.log('[Vault] Device disconnected: cleared Zcash sidecar + wallet DB')
+		console.log('[Vault] Device disconnected: cleared in-memory account managers')
 	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)
