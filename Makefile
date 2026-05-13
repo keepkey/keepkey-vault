@@ -586,7 +586,8 @@ sign-release-intel: sign-check
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
 _sign-one-dmg:
 	@test -f "$(_SRC_TAR)" || (echo "ERROR: $(_SRC_TAR) not found"; exit 1)
-	@STAGING=$$(mktemp -d); \
+	@set -e; \
+	STAGING=$$(mktemp -d); \
 	trap 'rm -rf "$$STAGING"' EXIT; \
 	echo "  Extracting..."; \
 	zstd -d "$(_SRC_TAR)" -o "$$STAGING/app.tar" --force; \
@@ -623,7 +624,7 @@ _sign-one-dmg:
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "  Done: $$DMG_OUT"
 
-# Verify that all MacOS/ binaries have required entitlements (allow-jit).
+# Verify that all MacOS/ executables have required entitlements (allow-jit).
 # Use after signing to confirm bun won't crash with SIGTRAP.
 verify-entitlements:
 	@echo "Verifying entitlements on signed artifacts..."
@@ -644,7 +645,12 @@ verify-entitlements:
 		for BIN in "$$APP/Contents/MacOS/"*; do \
 			[ -f "$$BIN" ] || continue; \
 			NAME=$$(basename "$$BIN"); \
-			file -b "$$BIN" 2>/dev/null | grep -q "Mach-O" || continue; \
+			FILE_OUT=$$(file -b "$$BIN" 2>/dev/null); \
+			echo "$$FILE_OUT" | grep -q "Mach-O" || continue; \
+			if echo "$$FILE_OUT" | grep -q "dynamically linked shared library"; then \
+				echo "  SKIP: $$NAME is a shared library"; \
+				continue; \
+			fi; \
 			ENTITLEMENTS_OUT=$$(codesign -d --entitlements :- "$$BIN" 2>&1 || true); \
 			if echo "$$ENTITLEMENTS_OUT" | grep -q "invalid entitlements blob"; then \
 				echo "  FAIL: $$NAME has invalid entitlements blob"; FAIL=1; \
