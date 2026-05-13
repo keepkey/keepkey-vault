@@ -127,6 +127,8 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
+const PIONEER_PORTFOLIO_CHUNK_SIZE = 8
+const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 20_000
 
 function getPioneerPortfolioErrorMessage(err: any): string {
 	const fields = err?.response?.body?.fields || err?.responseError?.fields
@@ -145,6 +147,17 @@ function isExtraContractsSchemaError(err: any): boolean {
 	const responseText = typeof err?.response?.text === 'string' ? err.response.text : ''
 	const haystack = `${msg} ${responseText}`.toLowerCase()
 	return haystack.includes('extracontracts') && (haystack.includes('excess property') || haystack.includes('not allowed'))
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+	const chunks: T[][] = []
+	for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
+	return chunks
+}
+
+function unwrapPortfolioEntries(resp: any): any[] {
+	const rawData = resp?.data?.data || resp?.data || {}
+	return rawData.balances || (Array.isArray(rawData) ? rawData : [])
 }
 
 // ── Desktop update — open GitHub releases page ──
@@ -1569,9 +1582,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Initialize Pioneer client — isolate failure so device derivation still works
 				let pioneer: any = null
+				let pioneerInitError: Error | null = null
 				try {
 					pioneer = await getPioneer()
 				} catch (e: any) {
+					pioneerInitError = e instanceof Error ? e : new Error(e?.message || String(e))
 					console.warn('[getBalances] Pioneer init failed (will return zero balances):', e.message)
 					// Notify UI so user can change server or get support
 					try { rpc.send['pioneer-error']({ message: e.message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
@@ -1718,7 +1733,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
 				const results: ChainBalance[] = []
 				try {
-					if (!pioneer) throw new Error('Pioneer client not available')
+					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
 					const extraContracts = getCustomTokens().map(ct => ({
 						networkId: ct.networkId,
 						contractAddress: ct.contractAddress,
@@ -1729,28 +1744,46 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}))
 					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
 					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
-					let resp: any
-					try {
-						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh: true }),
-							PIONEER_TIMEOUT_MS,
-							'GetPortfolioBalances'
-						)
-					} catch (err: any) {
-						if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
-						console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio request without custom tokens')
-						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(
-								{ pubkeys: portfolioBody.pubkeys },
-								{ forceRefresh: true }
-							),
-							PIONEER_TIMEOUT_MS,
-							'GetPortfolioBalances'
-						)
+					const allEntries: any[] = []
+					const pubkeyChunks = chunkArray(portfolioBody.pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+					let failedChunks = 0
+					for (let i = 0; i < pubkeyChunks.length; i++) {
+						const chunk = pubkeyChunks[i]
+						const chunkBody: any = { pubkeys: chunk }
+						if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
+						try {
+							let resp: any
+							try {
+								resp = await withTimeout(
+									pioneer.GetPortfolioBalances(chunkBody, { forceRefresh: true }),
+									PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+									`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
+								)
+							} catch (err: any) {
+								if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
+								console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
+								resp = await withTimeout(
+									pioneer.GetPortfolioBalances(
+										{ pubkeys: chunkBody.pubkeys },
+										{ forceRefresh: true }
+									),
+									PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+									`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
+								)
+							}
+							allEntries.push(...unwrapPortfolioEntries(resp))
+						} catch (err: any) {
+							failedChunks++
+							const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
+							console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, getPioneerPortfolioErrorMessage(err))
+						}
 					}
-					// Unwrap: { data: { balances: [...] } } or { data: [...] }
-					const rawData = resp?.data?.data || resp?.data || {}
-					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+					if (failedChunks > 0) {
+						console.warn(`[getBalances] Portfolio partial response: ${pubkeyChunks.length - failedChunks}/${pubkeyChunks.length} chunks succeeded`)
+					}
+					if (allEntries.length === 0 && failedChunks > 0) {
+						throw new Error('All portfolio chunks failed')
+					}
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
