@@ -354,7 +354,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
-	const [tokenWarning, setTokenWarning] = useState(false)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 
@@ -534,7 +533,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (loadingBalances || watchOnly) return
 		setLoadingBalances(true)
 		setPioneerError(null)
-		setTokenWarning(false)
 
 		try {
 			const result = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
@@ -556,11 +554,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				setBalances(map)
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)
-
-				// Warn if no token data came back (possible API issue)
-				if (tokenTotal === 0 && balTotal > 0) {
-					setTokenWarning(true)
-				}
 			}
 		} catch (e: any) {
 			const message = e?.message || 'Unable to refresh balances'
@@ -836,33 +829,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</Box>
 						</Flex>
 					</Flex>
-				</Box>
-			)}
-
-			{/* Token warning banner — shown when refresh succeeded but no tokens returned */}
-			{tokenWarning && !pioneerError && (
-				<Box
-					mb="3"
-					px="4"
-					py="3"
-					bg="rgba(233,196,106,0.08)"
-					border="1px solid"
-					borderColor="rgba(233,196,106,0.3)"
-					borderRadius="lg"
-				>
-					<Flex align="center" gap="2" mb="1">
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-							<line x1="12" y1="9" x2="12" y2="13" />
-							<line x1="12" y1="17" x2="12.01" y2="17" />
-						</svg>
-						<Text fontSize="xs" fontWeight="600" color="var(--gold)">
-							{t("tokenWarningTitle")}
-						</Text>
-					</Flex>
-					<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-						{t("tokenWarningDesc")}
-					</Text>
 				</Box>
 			)}
 
