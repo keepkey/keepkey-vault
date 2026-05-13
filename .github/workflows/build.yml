@@ -174,15 +174,6 @@ jobs:
         run: cd projects/keepkey-vault && bun run build:stable
         shell: bash
 
-      - name: Copy zcash-cli into Vite output (CI)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cp projects/keepkey-vault/zcash-cli/target/release/zcash-cli \
-             projects/keepkey-vault/dist/zcash-cli
-          chmod +x projects/keepkey-vault/dist/zcash-cli
-          ls -lh projects/keepkey-vault/dist/zcash-cli
-
       - name: Prune app bundle
         run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
         shell: bash

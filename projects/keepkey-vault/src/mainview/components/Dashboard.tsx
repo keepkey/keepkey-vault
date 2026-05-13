@@ -394,11 +394,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session
 	const prevZcashRef = useRef(zcashEnabled)
 	useEffect(() => {
-		if (zcashEnabled && !prevZcashRef.current && !loadingBalances) {
+		const becameEnabled = zcashEnabled && !prevZcashRef.current
+		if (becameEnabled && !loadingBalances) {
 			console.log('[Dashboard] Zcash enabled — refreshing balances')
 			refreshBalances()
+			prevZcashRef.current = true
+		} else if (!zcashEnabled) {
+			prevZcashRef.current = false
 		}
-		prevZcashRef.current = zcashEnabled
 	}, [zcashEnabled, refreshBalances, loadingBalances])
 
 	// Listen for Pioneer connection errors from backend

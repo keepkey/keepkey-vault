@@ -567,7 +567,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 					<Flex direction="column" align="flex-end" gap="1.5" flexShrink={0}>
 						{/* Sync status indicator */}
-						{activeBalance && cleanBalanceUsd > 0 ? (
+						{activeBalance ? (
 							<Flex align="center" gap="1" color="var(--teal)">
 								<Box as={FaCheck} fontSize="10px" />
 								<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("synced")}</Text>

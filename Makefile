@@ -85,10 +85,8 @@ endif
 	@touch $@
 
 build-zcash-cli: $(ZCASH_CLI_STAMP)
-	@echo "Copying zcash-cli into Vite output..."
-	@cp $(PROJECT_DIR)/zcash-cli/target/release/zcash-cli ../../dist/zcash-cli
-	@chmod +x ../../dist/zcash-cli
-	@ls -lh ../../dist/zcash-cli
+	@echo "zcash-cli ready for Electrobun packaging:"
+	@ls -lh $(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 
 test-zcash-cli:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
