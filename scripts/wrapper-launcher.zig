@@ -400,20 +400,21 @@ pub fn main() !void {
     }
 
     // ── Launch the real app ─────────────────────────────────────────
-    // Launch through Electrobun's stock launcher. With the install directory
-    // fixed to KeepKeyVault (no spaces), this path boots correctly and keeps
-    // native BrowserWindow initialization on the supported runtime path.
+    // Launch bundled Bun directly so we can opt into Windows' system CA store.
+    // Bun's bundled CA set can reject valid corporate/Windows trust chains,
+    // which breaks api.keepkey.info balance, update, and firmware calls.
     const bin_dir = try std.fs.path.join(a, &.{ exe_dir, "bin" });
-    const launcher_path = try std.fs.path.join(a, &.{ bin_dir, "launcher.exe" });
-    const cmd = try std.fmt.allocPrint(a, "\"{s}\"", .{launcher_path});
-    const launcher_path_w = try std.unicode.utf8ToUtf16LeAllocZ(a, launcher_path);
+    const bun_path = try std.fs.path.join(a, &.{ bin_dir, "bun.exe" });
+    const app_path = try std.fs.path.join(a, &.{ exe_dir, "Resources", "app", "bun", "index.js" });
+    const cmd = try std.fmt.allocPrint(a, "\"{s}\" --use-system-ca \"{s}\"", .{ bun_path, app_path });
+    const bun_path_w = try std.unicode.utf8ToUtf16LeAllocZ(a, bun_path);
     const cmd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, cmd);
     const cwd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, bin_dir);
 
     var si = STARTUPINFOW{};
     var pi = PROCESS_INFORMATION{};
 
-    const ok = CreateProcessW(launcher_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
+    const ok = CreateProcessW(bun_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
     if (ok != 0) {
         if (pi.hProcess) |h| _ = CloseHandle(h);
         if (pi.hThread) |h| _ = CloseHandle(h);

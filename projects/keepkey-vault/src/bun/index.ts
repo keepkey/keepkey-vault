@@ -127,6 +127,10 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
+const PIONEER_PORTFOLIO_CHUNK_SIZE = 8
+const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 20_000
+const PIONEER_PORTFOLIO_MAX_CONCURRENCY = 4
+const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 45_000
 
 function getPioneerPortfolioErrorMessage(err: any): string {
 	const fields = err?.response?.body?.fields || err?.responseError?.fields
@@ -145,6 +149,36 @@ function isExtraContractsSchemaError(err: any): boolean {
 	const responseText = typeof err?.response?.text === 'string' ? err.response.text : ''
 	const haystack = `${msg} ${responseText}`.toLowerCase()
 	return haystack.includes('extracontracts') && (haystack.includes('excess property') || haystack.includes('not allowed'))
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+	const chunks: T[][] = []
+	for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
+	return chunks
+}
+
+async function mapWithConcurrency<T, R>(
+	items: T[],
+	concurrency: number,
+	fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+	const results = new Array<R>(items.length)
+	let nextIndex = 0
+	const workerCount = Math.min(Math.max(1, concurrency), items.length)
+	const workers = Array.from({ length: workerCount }, async () => {
+		while (true) {
+			const index = nextIndex++
+			if (index >= items.length) return
+			results[index] = await fn(items[index], index)
+		}
+	})
+	await Promise.all(workers)
+	return results
+}
+
+function unwrapPortfolioEntries(resp: any): any[] {
+	const rawData = resp?.data?.data || resp?.data || {}
+	return rawData.balances || (Array.isArray(rawData) ? rawData : [])
 }
 
 // ── Desktop update — open GitHub releases page ──
@@ -1569,9 +1603,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Initialize Pioneer client — isolate failure so device derivation still works
 				let pioneer: any = null
+				let pioneerInitError: Error | null = null
 				try {
 					pioneer = await getPioneer()
 				} catch (e: any) {
+					pioneerInitError = e instanceof Error ? e : new Error(e?.message || String(e))
 					console.warn('[getBalances] Pioneer init failed (will return zero balances):', e.message)
 					// Notify UI so user can change server or get support
 					try { rpc.send['pioneer-error']({ message: e.message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
@@ -1704,7 +1740,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
 				}
 
-				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → single GetPortfolioBalances call`)
+				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → chunked GetPortfolioBalances calls`)
 
 				// Build networkId → chainId lookup for token grouping (lowercase keys — Pioneer may return different casing)
 				const networkToChain = new Map<string, string>()
@@ -1715,10 +1751,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
-				// 3. Single API call — GetPortfolioBalances returns natives + tokens in one flat array
+				// 3. Chunked API calls — GetPortfolioBalances returns natives + tokens in one flat array
 				const results: ChainBalance[] = []
 				try {
-					if (!pioneer) throw new Error('Pioneer client not available')
+					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
 					const extraContracts = getCustomTokens().map(ct => ({
 						networkId: ct.networkId,
 						contractAddress: ct.contractAddress,
@@ -1727,30 +1763,49 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
-					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
-					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
-					let resp: any
-					try {
-						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh: true }),
-							PIONEER_TIMEOUT_MS,
-							'GetPortfolioBalances'
-						)
-					} catch (err: any) {
-						if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
-						console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio request without custom tokens')
-						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(
-								{ pubkeys: portfolioBody.pubkeys },
-								{ forceRefresh: true }
-							),
-							PIONEER_TIMEOUT_MS,
-							'GetPortfolioBalances'
-						)
+					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+					const chunkResults = await withTimeout(
+						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
+							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
+							try {
+								let resp: any
+								try {
+									resp = await withTimeout(
+										pioneer.GetPortfolioBalances(chunkBody, { forceRefresh: true }),
+										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
+									)
+								} catch (err: any) {
+									if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
+									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
+									resp = await withTimeout(
+										pioneer.GetPortfolioBalances(
+											{ pubkeys: chunkBody.pubkeys },
+											{ forceRefresh: true }
+										),
+										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
+									)
+								}
+								return { entries: unwrapPortfolioEntries(resp), error: null as string | null }
+							} catch (err: any) {
+								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
+								const error = getPioneerPortfolioErrorMessage(err)
+								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
+								return { entries: [] as any[], error }
+							}
+						}),
+						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
+						'GetPortfolioBalances chunks'
+					)
+					const failedChunks = chunkResults.filter(r => r.error)
+					if (failedChunks.length > 0) {
+						const succeeded = pubkeyChunks.length - failedChunks.length
+						console.warn(`[getBalances] Portfolio refresh failed: ${succeeded}/${pubkeyChunks.length} chunks succeeded`)
+						throw new Error(`Portfolio refresh incomplete: ${failedChunks.length}/${pubkeyChunks.length} chunks failed`)
 					}
-					// Unwrap: { data: { balances: [...] } } or { data: [...] }
-					const rawData = resp?.data?.data || resp?.data || {}
-					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+					const allEntries = chunkResults.flatMap(r => r.entries)
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
