@@ -6,6 +6,7 @@ import { FaShieldAlt, FaArrowRotateRight } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
+import { QrScannerOverlay } from "./QrScannerOverlay"
 import { ZCASH_V2_CSS } from "./zcash-v2-styles"
 
 /** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
@@ -24,7 +25,7 @@ const KEEPKEY_RELEASE_BLOCK = 3282941
 
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
-type Page = "overview" | "send" | "shield" | "receive" | "scan" | "history"
+type Page = "send" | "shield" | "receive" | "scan" | "history"
 
 interface ScanProgress {
 	percent: number
@@ -54,12 +55,6 @@ function formatZec(zatoshis: number): string {
 // Each tab gets a small SVG glyph + accent color so the nav reads at a glance.
 // Colors are pulled from the design palette: gold = primary, green = inbound,
 // copper = outbound, blue/violet/teal for navigation actions.
-const ICO_OVERVIEW = (
-	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
-		<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/>
-		<rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>
-	</svg>
-)
 const ICO_SEND = (
 	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 		<path d="M14 2 L7 9"/><path d="M14 2 L9 14 L7 9 L2 7 Z"/>
@@ -88,7 +83,6 @@ const ICO_HISTORY = (
 )
 
 const NAV_TABS: Array<{ id: Page; label: string; icon: ReactNode; color: string }> = [
-	{ id: "overview", label: "Overview", icon: ICO_OVERVIEW, color: "#c9a368" /* gold */ },
 	{ id: "send",     label: "Send",     icon: ICO_SEND,     color: "#d97757" /* copper */ },
 	{ id: "shield",   label: "Shield",   icon: ICO_SHIELD,   color: "#6ee787" /* green */ },
 	{ id: "receive",  label: "Receive",  icon: ICO_RECEIVE,  color: "#7aa6f0" /* blue */ },
@@ -116,7 +110,7 @@ export function ZcashPrivacyTab() {
 
 	useEffect(() => { ensureStylesInjected() }, [])
 
-	const [page, setPage] = useState<Page>("overview")
+	const [page, setPage] = useState<Page>("send")
 
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [starting, setStarting] = useState(false)
@@ -132,6 +126,7 @@ export function ZcashPrivacyTab() {
 	const [scanResult, setScanResult] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
 
+	const [showScanner, setShowScanner] = useState(false)
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState("")
@@ -196,6 +191,13 @@ export function ZcashPrivacyTab() {
 		if (!recipient) return null
 		return validateZcashRecipient(recipient)
 	}, [recipient])
+
+	const handleQrScan = useCallback((raw: string) => {
+		const data = raw.trim().replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 256)
+		if (!data) return
+		setRecipient(data)
+		setShowScanner(false)
+	}, [])
 
 	useEffect(() => onRpcMessage("shield-progress", (payload: { step: string; detail?: string }) => {
 		setShieldStep(payload.step)
@@ -691,6 +693,12 @@ export function ZcashPrivacyTab() {
 				<div className="status-pill">
 					<span className={`led ${scanInFlight ? "amber" : ""}`} />
 					{scanInFlight ? "Syncing" : synced ? "Up to date" : "Idle"}
+					<button
+						className="ghost-btn refresh-compact"
+						onClick={() => { refreshBalance(); loadTransactions() }}
+						disabled={scanInFlight}
+						title="Refresh balance"
+					>↻</button>
 				</div>
 			</div>
 
@@ -707,53 +715,51 @@ export function ZcashPrivacyTab() {
 				))}
 			</nav>
 
-			{/* ===== OVERVIEW ===== */}
-			{page === "overview" && (
-				<section>
-					<div className="quick-actions">
-						<button className="quick-action" onClick={() => setPage("send")}>
-							<div className="qa-title">Send</div>
-							<div className="qa-sub">Pay any Zcash address privately</div>
-						</button>
-						<button className="quick-action" onClick={() => setPage("receive")}>
-							<div className="qa-title">Receive</div>
-							<div className="qa-sub">Show your address &amp; QR code</div>
-						</button>
-						<button className="quick-action" onClick={() => setPage("shield")}>
-							<div className="qa-title">Shield / Unshield</div>
-							<div className="qa-sub">Move between private &amp; public</div>
-						</button>
-					</div>
+			{/* Inline quick actions + recent activity */}
+			<div className="zk-inline-overview">
+				<div className="quick-actions">
+					<button className="quick-action" onClick={() => setPage("send")}>
+						<div className="qa-title">Send</div>
+						<div className="qa-sub">Pay any Zcash address privately</div>
+					</button>
+					<button className="quick-action" onClick={() => setPage("receive")}>
+						<div className="qa-title">Receive</div>
+						<div className="qa-sub">Show your address &amp; QR code</div>
+					</button>
+					<button className="quick-action" onClick={() => setPage("shield")}>
+						<div className="qa-title">Shield / Unshield</div>
+						<div className="qa-sub">Move between private &amp; public</div>
+					</button>
+				</div>
 
-					<div className="card">
-						<div className="card-head">
-							<div className="title">Recent activity</div>
-							<button className="ghost-btn" onClick={() => setPage("history")}>View all →</button>
-						</div>
-						<div className="recent-list">
-							{loadingTxs ? (
-								<div className="recent-empty">Loading…</div>
-							) : recentTxs.length === 0 ? (
-								<div className="recent-empty">No transactions yet</div>
-							) : recentTxs.map(tx => (
-								<div className="recent-row" key={tx.id}>
-									<span className={`pill ${tx.is_spent ? "pill-trans" : "pill-orchard"}`}>
-										{tx.is_spent ? "Sent" : "Received"}
-									</span>
-									<div className="label">
-										{tx.memo
-											? <>"{tx.memo.slice(0, 60)}{tx.memo.length > 60 ? "…" : ""}"</>
-											: <>Block #{tx.block_height.toLocaleString(fiatLocale)}</>}
-									</div>
-									<div className={`v ${tx.is_spent ? "amount-neg" : "amount-pos"}`}>
-										{tx.is_spent ? "−" : "+"}{formatZec(tx.value)} ZEC
-									</div>
-								</div>
-							))}
-						</div>
+				<div className="card">
+					<div className="card-head">
+						<div className="title">Recent activity</div>
+						<button className="ghost-btn" onClick={() => setPage("history")}>View all →</button>
 					</div>
-				</section>
-			)}
+					<div className="recent-list">
+						{loadingTxs ? (
+							<div className="recent-empty">Loading…</div>
+						) : recentTxs.length === 0 ? (
+							<div className="recent-empty">No transactions yet</div>
+						) : recentTxs.map(tx => (
+							<div className="recent-row" key={tx.id}>
+								<span className={`pill ${tx.is_spent ? "pill-trans" : "pill-orchard"}`}>
+									{tx.is_spent ? "Sent" : "Received"}
+								</span>
+								<div className="label">
+									{tx.memo
+										? <>"{tx.memo.slice(0, 60)}{tx.memo.length > 60 ? "…" : ""}"</>
+										: <>Block #{tx.block_height.toLocaleString(fiatLocale)}</>}
+								</div>
+								<div className={`v ${tx.is_spent ? "amount-neg" : "amount-pos"}`}>
+									{tx.is_spent ? "−" : "+"}{formatZec(tx.value)} ZEC
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+			</div>
 
 			{/* ===== SEND ===== */}
 			{page === "send" && (
@@ -769,12 +775,26 @@ export function ZcashPrivacyTab() {
 								<div className="field-grid">
 									<div className="field">
 										<span className="lbl">To</span>
-										<input
-											type="text"
-											placeholder="Paste a Zcash address (u1… or t1…)"
-											value={recipient}
-											onChange={e => setRecipient(e.target.value)}
-										/>
+										<div className="zk-qr-field">
+											<input
+												type="text"
+												placeholder="Paste a Zcash address (u1… or t1…)"
+												value={recipient}
+												onChange={e => setRecipient(e.target.value)}
+											/>
+											<button
+												type="button"
+												title="Scan QR code"
+												className="qr-scan-btn"
+												onClick={() => setShowScanner(true)}
+											>
+												<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M3 1V3h1M13 1v2M1 13h2M13 13v2"/>
+													<rect x="3" y="3" width="10" height="10" rx="1"/>
+													<rect x="6" y="6" width="4" height="4"/>
+												</svg>
+											</button>
+										</div>
 									</div>
 									{recipientValidation && !recipientValidation.valid && recipientValidation.error && (
 										<div className="field-err">{t(recipientValidation.error)}</div>
@@ -844,6 +864,11 @@ export function ZcashPrivacyTab() {
 						</div>
 					</div>
 				</section>
+			)}
+
+			{/* QR scanner overlay */}
+			{showScanner && (
+				<QrScannerOverlay onScan={handleQrScan} onClose={() => setShowScanner(false)} />
 			)}
 
 			{/* ===== SHIELD / UNSHIELD ===== */}
@@ -1199,13 +1224,14 @@ export function ZcashPrivacyTab() {
 									<th>Memo</th>
 									<th className="num">Amount</th>
 									<th style={{ width: 110 }}>Status</th>
+									<th style={{ width: 120 }}>TX</th>
 								</tr>
 							</thead>
 							<tbody>
 								{loadingTxs ? (
-									<tr><td colSpan={5} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>Loading…</td></tr>
+									<tr><td colSpan={6} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>Loading…</td></tr>
 								) : filteredTxs.length === 0 ? (
-									<tr><td colSpan={5} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>No matching transactions</td></tr>
+									<tr><td colSpan={6} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>No matching transactions</td></tr>
 								) : filteredTxs.map(tx => (
 									<tr key={tx.id}>
 										<td className="block">#{tx.block_height.toLocaleString(fiatLocale)}</td>
@@ -1226,6 +1252,21 @@ export function ZcashPrivacyTab() {
 											<span className={`tx-status ${tx.is_spent ? "spent" : "received"}`}>
 												{tx.is_spent ? "Sent" : "Received"}
 											</span>
+										</td>
+										<td>
+											{tx.txid ? (
+												<button
+													className="explorer-link"
+													onClick={() => {
+														rpcRequest("openExternal", { url: `https://blockchair.com/zcash/transaction/${tx.txid}` }, 5000).catch(() => {})
+													}}
+													title={tx.txid}
+												>
+													View ↗
+												</button>
+											) : (
+												<span style={{ color: "var(--zk-fg-faint)" }}>—</span>
+											)}
 										</td>
 									</tr>
 								))}

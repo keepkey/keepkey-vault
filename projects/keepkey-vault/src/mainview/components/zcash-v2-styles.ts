@@ -264,6 +264,18 @@ export const ZCASH_V2_CSS = `
 	content: ""; width: 4px; height: 4px; border-radius: 50%;
 	background: var(--zk-green);
 }
+/* QR scan button inside field */
+.zcash-v2 .zk-qr-field {
+	display: flex; align-items: center; gap: 8px; flex: 1 1 60%;
+}
+.zcash-v2 .qr-scan-btn {
+	flex-shrink: 0;
+	width: 28px; height: 28px;
+	border-radius: 6px;
+	display: flex; align-items: center; justify-content: center;
+	color: var(--zk-fg-dim);
+}
+.zcash-v2 .qr-scan-btn:hover { background: var(--zk-bg-3); color: var(--zk-gold); }
 .zcash-v2 .balance-row {
 	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 	padding: 10px 12px;
@@ -759,6 +771,30 @@ export const ZCASH_V2_CSS = `
 	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .zcash-v2 .history-card .memo::before { content: "✉ "; color: var(--zk-gold); }
+
+/* TX column — explorer link */
+.zcash-v2 .history-card .explorer-link {
+	background: none; border: none;
+	font-family: var(--zk-font-display); font-size: 11.5px;
+	color: var(--zk-gold); cursor: pointer;
+	text-decoration: underline; text-decoration-color: transparent;
+	transition: text-decoration-color 0.15s;
+}
+.zcash-v2 .history-card .explorer-link:hover { text-decoration-color: var(--zk-gold); }
+
+/* Inline overview — quick actions + recent activity below balance card */
+.zcash-v2 .zk-inline-overview {
+	margin-bottom: 20px;
+}
+.zcash-v2 .zk-inline-overview .quick-actions { margin-bottom: 14px; }
+
+/* Compact refresh button inside status-pill */
+.zcash-v2 .status-pill .refresh-compact {
+	font-size: 15px; line-height: 1;
+	padding: 2px 4px !important;
+	opacity: 0.5; transition: opacity 0.15s;
+}
+.zcash-v2 .status-pill .refresh-compact:hover { opacity: 1; }
 
 /* ---- empty state ---- */
 .zcash-v2 .empty-card {
