@@ -645,7 +645,10 @@ verify-entitlements:
 			[ -f "$$BIN" ] || continue; \
 			NAME=$$(basename "$$BIN"); \
 			file -b "$$BIN" 2>/dev/null | grep -q "Mach-O" || continue; \
-			if codesign -d --entitlements :- "$$BIN" 2>/dev/null | grep -q "allow-jit"; then \
+			ENTITLEMENTS_OUT=$$(codesign -d --entitlements :- "$$BIN" 2>&1 || true); \
+			if echo "$$ENTITLEMENTS_OUT" | grep -q "invalid entitlements blob"; then \
+				echo "  FAIL: $$NAME has invalid entitlements blob"; FAIL=1; \
+			elif echo "$$ENTITLEMENTS_OUT" | grep -q "allow-jit"; then \
 				echo "  PASS: $$NAME has allow-jit"; \
 			else \
 				echo "  FAIL: $$NAME missing allow-jit"; FAIL=1; \
