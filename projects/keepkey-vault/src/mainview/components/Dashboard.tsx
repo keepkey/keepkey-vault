@@ -327,6 +327,8 @@ interface DashboardProps {
 	isHiddenWallet?: boolean
 }
 
+const PIONEER_ERROR_GRACE_MS = 5 * 60 * 1000
+
 /** Format a timestamp as a relative "time ago" string (i18n-aware) */
 function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
 	const diff = Date.now() - ts
@@ -357,6 +359,38 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [tokenWarning, setTokenWarning] = useState(false)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
+	const pioneerErrorFirstSeenRef = useRef<number | null>(null)
+	const pioneerErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const clearPioneerError = useCallback(() => {
+		pioneerErrorFirstSeenRef.current = null
+		if (pioneerErrorTimerRef.current) {
+			clearTimeout(pioneerErrorTimerRef.current)
+			pioneerErrorTimerRef.current = null
+		}
+		setPioneerError(null)
+	}, [])
+
+	const stagePioneerError = useCallback((error: PioneerError) => {
+		if (!pioneerErrorFirstSeenRef.current) pioneerErrorFirstSeenRef.current = Date.now()
+		const elapsed = Date.now() - pioneerErrorFirstSeenRef.current
+		if (elapsed >= PIONEER_ERROR_GRACE_MS) {
+			setPioneerError(error)
+			return
+		}
+		if (!pioneerErrorTimerRef.current) {
+			pioneerErrorTimerRef.current = setTimeout(() => {
+				pioneerErrorTimerRef.current = null
+				setPioneerError(error)
+			}, PIONEER_ERROR_GRACE_MS - elapsed)
+		}
+	}, [])
+
+	useEffect(() => {
+		return () => {
+			if (pioneerErrorTimerRef.current) clearTimeout(pioneerErrorTimerRef.current)
+		}
+	}, [])
 
 	// Load token visibility overrides (for spam filtering). Refetch on
 	// `token-visibility-changed` push so a "mark as scam" action in
@@ -394,9 +428,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
-			setPioneerError(payload as PioneerError)
+			stagePioneerError(payload as PioneerError)
 		})
-	}, [])
+	}, [stagePioneerError])
 
 	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
@@ -533,7 +567,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const refreshBalances = useCallback(async () => {
 		if (loadingBalances || watchOnly) return
 		setLoadingBalances(true)
-		setPioneerError(null)
 		setTokenWarning(false)
 
 		try {
@@ -556,6 +589,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				setBalances(map)
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)
+				clearPioneerError()
 
 				// Warn if no token data came back (possible API issue)
 				if (tokenTotal === 0 && balTotal > 0) {
@@ -565,11 +599,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		} catch (e: any) {
 			const message = e?.message || 'Unable to refresh balances'
 			console.warn('[Dashboard] getBalances failed:', message)
-			setPioneerError(prev => prev || { message, url: 'the configured balance server' })
+			stagePioneerError({ message, url: 'the configured balance server' })
 		}
 
 		setLoadingBalances(false)
-	}, [loadingBalances, watchOnly])
+	}, [loadingBalances, watchOnly, clearPioneerError, stagePioneerError])
 
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session
 	const prevZcashRef = useRef(zcashEnabled)
@@ -793,7 +827,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									cursor="pointer"
 									_hover={{ bg: "rgba(233,196,106,0.35)" }}
 									onClick={() => {
-										setPioneerError(null)
+										clearPioneerError()
 										onOpenSettings()
 									}}
 								>
@@ -828,7 +862,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								cursor="pointer"
 								_hover={{ color: "white" }}
 								onClick={() => {
-									setPioneerError(null)
+									clearPioneerError()
 									refreshBalances()
 								}}
 							>
