@@ -4183,13 +4183,58 @@
               "application/json": {
                 "schema": {
                   "type": "array",
-                  "items": {}
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "busNumber": { "type": "integer", "nullable": true },
+                      "deviceAddress": { "type": "integer", "nullable": true },
+                      "portNumbers": {
+                        "type": "array",
+                        "items": { "type": "integer" }
+                      },
+                      "vendorId": { "type": "integer", "nullable": true },
+                      "vendorIdHex": { "type": "string", "nullable": true },
+                      "productId": { "type": "integer", "nullable": true },
+                      "productIdHex": { "type": "string", "nullable": true },
+                      "deviceClass": { "type": "integer", "nullable": true },
+                      "deviceSubClass": { "type": "integer", "nullable": true },
+                      "deviceProtocol": { "type": "integer", "nullable": true },
+                      "usbVersion": { "type": "string", "nullable": true },
+                      "deviceVersion": { "type": "string", "nullable": true },
+                      "manufacturerIndex": { "type": "integer", "nullable": true },
+                      "productIndex": { "type": "integer", "nullable": true },
+                      "serialNumberIndex": { "type": "integer", "nullable": true },
+                      "isKeepKey": { "type": "boolean" }
+                    },
+                    "required": [
+                      "busNumber",
+                      "deviceAddress",
+                      "portNumbers",
+                      "vendorId",
+                      "vendorIdHex",
+                      "productId",
+                      "productIdHex",
+                      "deviceClass",
+                      "deviceSubClass",
+                      "deviceProtocol",
+                      "usbVersion",
+                      "deviceVersion",
+                      "manufacturerIndex",
+                      "productIndex",
+                      "serialNumberIndex",
+                      "isKeepKey"
+                    ]
+                  }
                 }
               }
             }
           }
         },
-        "security": []
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
       }
     },
     "/admin/usb/state": {
@@ -4207,17 +4252,53 @@
                   "properties": {
                     "connected": {
                       "type": "boolean"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "deviceId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "label": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "firmwareVersion": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "activeTransport": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "keepKeyOnBus": {
+                      "type": "boolean"
+                    },
+                    "usbDeviceCount": {
+                      "type": "integer"
                     }
                   },
                   "required": [
-                    "connected"
+                    "connected",
+                    "state",
+                    "deviceId",
+                    "label",
+                    "firmwareVersion",
+                    "activeTransport",
+                    "keepKeyOnBus",
+                    "usbDeviceCount"
                   ]
                 }
               }
             }
           }
         },
-        "security": []
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
       }
     },
     "/admin/info": {

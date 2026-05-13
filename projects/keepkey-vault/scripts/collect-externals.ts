@@ -8,6 +8,29 @@
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 
+function directorySizeBytes(dirPath: string): number {
+  let total = 0
+  try {
+    for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+      const fullPath = join(dirPath, entry.name)
+      try {
+        if (entry.isDirectory()) {
+          total += directorySizeBytes(fullPath)
+        } else if (entry.isFile()) {
+          total += statSync(fullPath).size
+        }
+      } catch {}
+    }
+  } catch {}
+  return total
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}M`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}K`
+  return `${bytes}B`
+}
+
 // Only packages left external by scripts/bundle-backend.ts.
 // Everything else (ethers, pioneer, swagger, cosmjs, protobuf, @keepkey/*)
 // is pre-bundled into a single index.js. This reduces installed file count
@@ -417,10 +440,7 @@ function cleanNativeArtifacts(dirPath: string) {
         // Remove prebuilds for other platforms (HID-win32-*, linux-x64-*, etc.)
         if (REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
             REMOVE_HID_PREFIXES.some(p => entry.name.startsWith(p))) {
-          try {
-            const result = Bun.spawnSync(['du', '-sk', fullPath])
-            nativePrunedSize += parseInt(result.stdout.toString().split('\t')[0] || '0', 10) * 1024
-          } catch {}
+          nativePrunedSize += directorySizeBytes(fullPath)
           rmSync(fullPath, { recursive: true })
           continue
         }
@@ -550,7 +570,12 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
                 const nestedVer = getPackageVersion(scopedPath)
                 const topVer = getPackageVersion(join(nmDest, scopedName))
                 if (nestedVer && topVer && nestedVer === topVer) {
-                  rmSync(scopedPath, { recursive: true })
+                  // On Windows, removing very deep duplicate node_modules can
+                  // partially delete packages and leave broken shadow dirs
+                  // (for example uint8arrays without cjs/src). Keep them.
+                  if (process.platform !== 'win32') {
+                    rmSync(scopedPath, { recursive: true, force: true })
+                  }
                 } else if (nestedVer && topVer && nestedVer !== topVer) {
                   console.log(`  Keeping nested: ${scopedName}@${nestedVer} (top-level: ${topVer})`)
                 }
@@ -563,7 +588,11 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
               const nestedVer = getPackageVersion(nestedPkgPath)
               const topVer = getPackageVersion(join(nmDest, pkg.name))
               if (nestedVer && topVer && nestedVer === topVer) {
-                rmSync(nestedPkgPath, { recursive: true })
+                // See scoped-package case above: partial deletion on Windows
+                // is worse than a slightly larger bundle.
+                if (process.platform !== 'win32') {
+                  rmSync(nestedPkgPath, { recursive: true, force: true })
+                }
               } else if (nestedVer && topVer && nestedVer !== topVer) {
                 console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
               }
@@ -573,9 +602,15 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
           try {
             if (readdirSync(fullPath).length === 0) rmSync(fullPath, { recursive: true })
           } catch {}
-        } catch {
-          // If we can't read it, remove it
-          rmSync(fullPath, { recursive: true })
+        } catch (e) {
+          // On Windows, very deep nested node_modules paths can fail to read
+          // even though Bun still needs files inside them at runtime.
+          if (process.platform === 'win32') {
+            console.warn(`  WARN: Preserving unreadable nested node_modules on Windows: ${fullPath}: ${e}`)
+          } else {
+            // If we can't read it elsewhere, remove it.
+            rmSync(fullPath, { recursive: true })
+          }
         }
       } else {
         stripDuplicateNestedNodeModules(fullPath)
@@ -590,11 +625,10 @@ for (const dir of STRIP_DIRS) {
   const target = join(nmDest, dir)
   if (existsSync(target)) {
     try {
-      const result = Bun.spawnSync(['du', '-sk', target])
-      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
+      const bytes = directorySizeBytes(target)
       rmSync(target, { recursive: true })
-      strippedSize += kb * 1024
-      console.log(`  Stripped: ${dir} (${(kb / 1024).toFixed(1)}MB)`)
+      strippedSize += bytes
+      console.log(`  Stripped: ${dir} (${(bytes / 1024 / 1024).toFixed(1)}MB)`)
     } catch {}
   }
 }
@@ -690,5 +724,4 @@ function removeDanglingSymlinks(dirPath: string) {
 removeDanglingSymlinks(nmDest)
 
 // Report final size
-const { stdout } = Bun.spawnSync(['du', '-sh', nmDest])
-console.log(`[collect-externals] Final size: ${stdout.toString().trim().split('\t')[0]}`)
+console.log(`[collect-externals] Final size: ${formatBytes(directorySizeBytes(nmDest))}`)

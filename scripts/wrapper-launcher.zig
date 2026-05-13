@@ -400,15 +400,20 @@ pub fn main() !void {
     }
 
     // ── Launch the real app ─────────────────────────────────────────
-    const launcher_path = try std.fs.path.join(a, &.{ exe_dir, "bin", "launcher.exe" });
+    // Launch through Electrobun's stock launcher. With the install directory
+    // fixed to KeepKeyVault (no spaces), this path boots correctly and keeps
+    // native BrowserWindow initialization on the supported runtime path.
+    const bin_dir = try std.fs.path.join(a, &.{ exe_dir, "bin" });
+    const launcher_path = try std.fs.path.join(a, &.{ bin_dir, "launcher.exe" });
     const cmd = try std.fmt.allocPrint(a, "\"{s}\"", .{launcher_path});
+    const launcher_path_w = try std.unicode.utf8ToUtf16LeAllocZ(a, launcher_path);
     const cmd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, cmd);
-    const cwd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, exe_dir);
+    const cwd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, bin_dir);
 
     var si = STARTUPINFOW{};
     var pi = PROCESS_INFORMATION{};
 
-    const ok = CreateProcessW(null, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
+    const ok = CreateProcessW(launcher_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
     if (ok != 0) {
         if (pi.hProcess) |h| _ = CloseHandle(h);
         if (pi.hThread) |h| _ = CloseHandle(h);

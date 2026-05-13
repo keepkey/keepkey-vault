@@ -576,7 +576,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				}
 			}
 		} catch (e: any) {
-			console.warn('[Dashboard] getBalances failed:', e.message)
+			const message = e?.message || 'Unable to refresh balances'
+			console.warn('[Dashboard] getBalances failed:', message)
+			setPioneerError(prev => prev || { message, url: 'the configured balance server' })
 		}
 
 		setLoadingBalances(false)
@@ -770,6 +772,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
 							{t("pioneerOfflineDesc", { url: pioneerError.url })}
 						</Text>
+						{pioneerError.message && (
+							<Text fontSize="11px" color="kk.textMuted" lineHeight="1.4" fontFamily="mono">
+								{pioneerError.message}
+							</Text>
+						)}
 						<Flex gap="2" mt="1">
 							{onOpenSettings && (
 								<Box
@@ -955,7 +962,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						</Flex>
 					)}
 				</Box>
-			) : !loadingBalances && initialLoaded && (
+			) : !loadingBalances && initialLoaded && !pioneerError && (
 				<Box
 					w="100%"
 					p="5"

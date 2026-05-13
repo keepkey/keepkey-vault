@@ -128,6 +128,25 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 
+function getPioneerPortfolioErrorMessage(err: any): string {
+	const fields = err?.response?.body?.fields || err?.responseError?.fields
+	const extraContractsMessage = fields?.['body.extraContracts']?.message
+	const responseMessage = err?.response?.body?.message || err?.responseError?.message
+	const responseText = typeof err?.response?.text === 'string'
+		? err.response.text
+		: typeof err?.response?.data === 'string'
+			? err.response.data
+			: ''
+	return extraContractsMessage || responseMessage || responseText || err?.message || String(err)
+}
+
+function isExtraContractsSchemaError(err: any): boolean {
+	const msg = getPioneerPortfolioErrorMessage(err)
+	const responseText = typeof err?.response?.text === 'string' ? err.response.text : ''
+	const haystack = `${msg} ${responseText}`.toLowerCase()
+	return haystack.includes('extracontracts') && (haystack.includes('excess property') || haystack.includes('not allowed'))
+}
+
 // ── Desktop update — open GitHub releases page ──
 // In-app auto-update is unreliable on both platforms:
 // - macOS: zig-zstd has different CLI flags than zstd, stock macOS has no zstd
@@ -1708,17 +1727,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
-					const resp = await withTimeout(
-						pioneer.GetPortfolioBalances(
-							{
-								pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })),
-								extraContracts: extraContracts.length > 0 ? extraContracts : undefined,
-							},
-							{ forceRefresh: true }
-						),
-						PIONEER_TIMEOUT_MS,
-						'GetPortfolioBalances'
-					)
+					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
+					let resp: any
+					try {
+						resp = await withTimeout(
+							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh: true }),
+							PIONEER_TIMEOUT_MS,
+							'GetPortfolioBalances'
+						)
+					} catch (err: any) {
+						if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
+						console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio request without custom tokens')
+						resp = await withTimeout(
+							pioneer.GetPortfolioBalances(
+								{ pubkeys: portfolioBody.pubkeys },
+								{ forceRefresh: true }
+							),
+							PIONEER_TIMEOUT_MS,
+							'GetPortfolioBalances'
+						)
+					}
 					// Unwrap: { data: { balances: [...] } } or { data: [...] }
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
@@ -2007,14 +2036,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
-					console.warn('[getBalances] Portfolio API failed:', e.message)
-					const seen = new Set<string>()
-					for (const entry of pubkeys) {
-						// Deduplicate BTC entries in fallback
-						if (seen.has(entry.chainId)) continue
-						seen.add(entry.chainId)
-						results.push({ chainId: entry.chainId, symbol: entry.symbol, balance: '0', balanceUsd: 0, address: entry.pubkey })
-					}
+					const message = getPioneerPortfolioErrorMessage(e)
+					console.warn('[getBalances] Portfolio API failed:', message)
+					try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
+					throw new Error(`Balance server error: ${message}`)
 				}
 
 				// ── Final audit log ──
@@ -2151,17 +2176,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							name: ct.name,
 							icon: ct.iconUrl,
 						}))
-					const resp = await withTimeout(
-						pioneer.GetPortfolioBalances(
-							{
-								pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })),
-								extraContracts: extraContracts.length > 0 ? extraContracts : undefined,
-							},
-							{ forceRefresh: true }
-						),
-						PIONEER_TIMEOUT_MS,
-						'GetPortfolioBalances'
-					)
+					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
+					let resp: any
+					try {
+						resp = await withTimeout(
+							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh: true }),
+							PIONEER_TIMEOUT_MS,
+							'GetPortfolioBalances'
+						)
+					} catch (err: any) {
+						if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
+						console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
+						resp = await withTimeout(
+							pioneer.GetPortfolioBalances(
+								{ pubkeys: portfolioBody.pubkeys },
+								{ forceRefresh: true }
+							),
+							PIONEER_TIMEOUT_MS,
+							'GetPortfolioBalances'
+						)
+					}
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 
@@ -2314,7 +2349,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 				} catch (e: any) {
-					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
+					const message = getPioneerPortfolioErrorMessage(e)
+					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, message)
+					try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
+					throw new Error(`Balance server error: ${message}`)
 				}
 				// If Pioneer failed or returned no address, preserve the cached address
 				// so we don't wipe a previously good address from the shared cache (Finding 3)
