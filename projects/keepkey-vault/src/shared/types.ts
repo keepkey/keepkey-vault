@@ -197,10 +197,20 @@ export interface BtcAccountSet {
 }
 
 // ── EVM multi-address types ─────────────────────────────────────────
+export interface EvmAddressChainBalance {
+  chainId: string
+  symbol: string
+  balance: string
+  balanceUsd: number
+  nativeBalanceUsd: number
+  tokens?: TokenBalance[]
+}
+
 export interface EvmTrackedAddress {
   addressIndex: number     // derivation index (m/44'/60'/0'/0/{index})
   address: string          // 0x-prefixed checksummed address
   balanceUsd: number       // aggregate USD across all EVM chains
+  chainBalances?: Record<string, EvmAddressChainBalance>
 }
 
 export interface EvmAddressSet {

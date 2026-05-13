@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react"
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
@@ -81,7 +81,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	}, [chain.id, isBtc, refreshBtcAccounts])
 
 	// Use refreshed balance if available, otherwise prop
-	const activeBalance = refreshedBalance || balance
+	const baseBalance = refreshedBalance || balance
 
 	// Feature flags: swaps, zcash privacy
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
@@ -116,6 +116,22 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	// EVM multi-address support
 	const isEvm = chain.chainFamily === 'evm'
 	const { evmAddresses, selectIndex: evmSelectIndex, addIndex: evmAddIndex, removeIndex: evmRemoveIndex, loading: evmLoading } = useEvmAddresses()
+	const previousEvmSelectedIndex = useRef<number | null>(null)
+	const selectedEvmAddress = isEvm
+		? evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
+		: undefined
+	const selectedEvmChainBalance = selectedEvmAddress?.chainBalances?.[chain.id]
+	const activeBalance: ChainBalance | undefined = isEvm && selectedEvmAddress && selectedEvmChainBalance
+		? {
+			chainId: chain.id,
+			symbol: chain.symbol,
+			balance: selectedEvmChainBalance.balance,
+			balanceUsd: selectedEvmChainBalance.balanceUsd,
+			nativeBalanceUsd: selectedEvmChainBalance.nativeBalanceUsd,
+			address: selectedEvmAddress.address,
+			tokens: selectedEvmChainBalance.tokens,
+		}
+		: baseBalance
 
 	// BTC address index state: change (0=receive, 1=change) and address index
 	const [btcChangeIndex, setBtcChangeIndex] = useState<0 | 1>(0)
@@ -237,6 +253,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 		if (!isEvm || evmAddresses.addresses.length === 0) return
 		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		if (selected) {
+			if (previousEvmSelectedIndex.current !== null && previousEvmSelectedIndex.current !== selected.addressIndex) {
+				setSelectedToken(null)
+			}
+			previousEvmSelectedIndex.current = selected.addressIndex
 			setAddress(selected.address)
 			setCurrentPath([0x8000002C, 0x8000003C, 0x80000000, 0, selected.addressIndex])
 		}
