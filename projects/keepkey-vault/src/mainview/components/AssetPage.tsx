@@ -81,7 +81,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	}, [chain.id, isBtc, refreshBtcAccounts])
 
 	// Use refreshed balance if available, otherwise prop
-	const activeBalance = refreshedBalance || balance
+	const baseBalance = refreshedBalance || balance
 
 	// Feature flags: swaps, zcash privacy
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
@@ -116,6 +116,21 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	// EVM multi-address support
 	const isEvm = chain.chainFamily === 'evm'
 	const { evmAddresses, selectIndex: evmSelectIndex, addIndex: evmAddIndex, removeIndex: evmRemoveIndex, loading: evmLoading } = useEvmAddresses()
+	const selectedEvmAddress = isEvm
+		? evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
+		: undefined
+	const selectedEvmChainBalance = selectedEvmAddress?.chainBalances?.[chain.id]
+	const activeBalance: ChainBalance | undefined = isEvm && selectedEvmAddress
+		? {
+			chainId: chain.id,
+			symbol: chain.symbol,
+			balance: selectedEvmChainBalance?.balance ?? '0',
+			balanceUsd: selectedEvmChainBalance?.balanceUsd ?? 0,
+			nativeBalanceUsd: selectedEvmChainBalance?.nativeBalanceUsd ?? 0,
+			address: selectedEvmAddress.address,
+			tokens: selectedEvmChainBalance?.tokens,
+		}
+		: baseBalance
 
 	// BTC address index state: change (0=receive, 1=change) and address index
 	const [btcChangeIndex, setBtcChangeIndex] = useState<0 | 1>(0)

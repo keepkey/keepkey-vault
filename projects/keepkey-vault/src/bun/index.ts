@@ -1766,6 +1766,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.log(`[getBalances] networkToChain map (${networkToChain.size} entries): ${JSON.stringify(Object.fromEntries(networkToChain))}`)
 
 					const tokensByChainId = new Map<string, TokenBalance[]>()
+					const evmTokensByOwner = new Map<string, TokenBalance[]>()
 					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensGrouped = 0
 					for (const tok of tokenEntries) {
 						const bal = parseFloat(String(tok.balance ?? '0'))
@@ -1811,6 +1812,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const existing = tokensByChainId.get(parentChainId) || []
 						existing.push(token)
 						tokensByChainId.set(parentChainId, existing)
+
+						const ownerAddress = String(tok.address || tok.pubkey || '').toLowerCase()
+						if (ownerAddress && evmAddressSet.has(ownerAddress)) {
+							const ownerKey = `${parentChainId}:${ownerAddress}`
+							const ownerTokens = evmTokensByOwner.get(ownerKey) || []
+							ownerTokens.push(token)
+							evmTokensByOwner.set(ownerKey, ownerTokens)
+						}
 						tokensGrouped++
 					}
 
@@ -1858,14 +1867,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
-						// EVM multi-address: aggregate per-chain, update per-address balance
+						// EVM multi-address: aggregate per-chain and keep per-address chain balances
 						if (evmAddressSet.has(entry.pubkey.toLowerCase())) {
 							const match = pureNatives.find((d: any) => d.caip === entry.caip && d.pubkey === entry.pubkey)
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
-							// Accumulate per-address USD for EvmAddressManager
-							if (usd > 0) evmAddresses.updateAddressBalance(entry.pubkey, usd)
+							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${entry.pubkey.toLowerCase()}`) || []
+							const entryTokenUsd = entryTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							evmAddresses.setAddressChainBalance(entry.pubkey, entry.chainId, {
+								chainId: entry.chainId,
+								symbol: entry.symbol,
+								balance: bal > 0 ? bal.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
+								balanceUsd: usd + entryTokenUsd,
+								nativeBalanceUsd: usd,
+								tokens: entryTokens.length > 0 ? entryTokens : undefined,
+							})
 							// Accumulate per-chain totals
 							const existing = evmChainAgg.get(entry.chainId)
 							if (existing) {
@@ -2120,8 +2137,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				} catch { /* cache lookup failed, non-fatal */ }
 
-				// Reset per-address balances for this refresh (mirrors getBalances line 991)
-				if (isEvm) evmAddresses.resetBalances()
+				// Reset this chain's per-address balances before single-chain refresh.
+				if (isEvm) evmAddresses.resetBalances(chain.id)
 
 				try {
 					const extraContracts = getCustomTokens()
@@ -2196,6 +2213,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const selectedXpubStr = isBtc ? btcAccounts.getSelectedXpub()?.xpub : undefined
 					let selectedPkAddress = ''  // address from selected xpub (BTC) or sole xpub (other UTXO)
 					let fallbackPkAddress = ''  // first Pioneer-returned address from any xpub
+					const evmNativeByPubkey = new Map<string, { balance: number; usd: number }>()
 
 					for (const pk of pubkeys) {
 						// Find ONE matching native entry for this requested pubkey (no double-counting)
@@ -2206,6 +2224,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const usd = Number(match?.valueUsd ?? 0)
 						nativeTotalBalance += bal
 						nativeTotalUsd += usd
+						if (isEvm) evmNativeByPubkey.set(pk.pubkey.toLowerCase(), { balance: bal, usd })
 
 						// Capture Pioneer-returned address for this pubkey
 						if (match?.address) {
@@ -2223,8 +2242,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								const devId = engine.getDeviceState().deviceId
 								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
 							} catch { /* non-fatal */ }
-						} else if (isEvm && usd > 0) {
-							evmAddresses.updateAddressBalance(pk.pubkey, usd)
 						}
 					}
 
@@ -2239,6 +2256,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					// Process tokens — already filtered to this chain + our pubkeys
+					const evmTokensByOwner = new Map<string, TokenBalance[]>()
 					if (tokenEntries.length > 0) {
 						const parsedTokens: TokenBalance[] = []
 						for (const tok of tokenEntries) {
@@ -2246,7 +2264,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (bal <= 0) continue
 							const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
 							const contractAddress = contractMatch?.[2] || tok.contract || undefined
-							parsedTokens.push({
+							const token: TokenBalance = {
 								symbol: tok.symbol || '???',
 								name: tok.name || tok.symbol || 'Unknown Token',
 								balance: String(tok.balance ?? '0'),
@@ -2259,7 +2277,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								decimals: tok.decimals ?? tok.precision,
 								type: tok.type || 'token',
 								dataSource: tok.dataSource,
-							})
+							}
+							parsedTokens.push(token)
+							if (isEvm) {
+								const ownerAddress = String(tok.address || tok.pubkey || '').toLowerCase()
+								if (ownerAddress) {
+									const ownerTokens = evmTokensByOwner.get(ownerAddress) || []
+									ownerTokens.push(token)
+									evmTokensByOwner.set(ownerAddress, ownerTokens)
+								}
+							}
 						}
 
 						if (parsedTokens.length > 0) {
@@ -2268,6 +2295,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							balanceUsd += tokenUsdTotal
 						}
 						console.log(`[getBalance] ${chain.coin}: ${parsedTokens.length} tokens, $${balanceUsd.toFixed(2)} total`)
+					}
+
+					if (isEvm) {
+						for (const pk of pubkeys) {
+							const ownerAddress = pk.pubkey.toLowerCase()
+							const native = evmNativeByPubkey.get(ownerAddress) || { balance: 0, usd: 0 }
+							const ownerTokens = evmTokensByOwner.get(ownerAddress) || []
+							const tokenUsdTotal = ownerTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							evmAddresses.setAddressChainBalance(pk.pubkey, chain.id, {
+								chainId: chain.id,
+								symbol: chain.symbol,
+								balance: native.balance > 0 ? native.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
+								balanceUsd: native.usd + tokenUsdTotal,
+								nativeBalanceUsd: native.usd,
+								tokens: ownerTokens.length > 0 ? ownerTokens : undefined,
+							})
+						}
 					}
 				} catch (e: any) {
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, e.message)
