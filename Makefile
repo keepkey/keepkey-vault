@@ -28,9 +28,12 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init --recursive
-	@# Fetch all remotes (recursive) so upstream-behind checks see latest commits
-	@git submodule foreach --recursive --quiet 'git fetch --all --prune 2>/dev/null || true'
+	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+	@# Fetch Vault runtime/build submodules so upstream-behind checks see latest commits.
+	@# Firmware is emulator-only for Vault releases and is intentionally not a gate here.
+	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
+		git -C "$$mod" fetch --all --prune 2>/dev/null || true; \
+	done
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
@@ -466,10 +469,11 @@ release: sign-check build-signed
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
 		--title "KeepKey Vault v$(VERSION)" \
+		--draft \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
 		$$UPDATE_JSON $$TAR_ZST
-	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
+	@echo "Draft release v$(VERSION) created in $(GITHUB_REPO)"
 
 # Sign CI-built macOS artifacts and upload to draft release.
 # Downloads both arm64 and x64 tar.zst from CI, signs all binaries,
@@ -702,7 +706,7 @@ help:
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
-	@echo "  make release        - Build, sign, and create new GitHub release"
+	@echo "  make release        - Build, sign, and create a draft GitHub release"
 	@echo "  make upload-dmg     - Upload signed DMG to existing CI draft release"
 	@echo "  make test           - Run all tests"
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
@@ -723,20 +727,18 @@ preflight: submodules
 	@echo ""
 	@echo "1. SUBMODULE PINS"
 	@fail=0; \
-	for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
 		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
 		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
 		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
 		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
 	done; \
 	echo ""; \
-	echo "2. FIRMWARE NESTED SUBMODULES"; \
-	drift=$$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+' || true); \
-	if [ -n "$$drift" ]; then echo "   ❌ DRIFT:"; echo "$$drift"; fail=1; \
-	else echo "   ✅ All clean"; fi; \
+	echo "2. FIRMWARE SUBMODULE"; \
+	echo "   ⚠️  Skipped for Vault release gating (emulator/firmware work only)"; \
 	echo ""; \
 	echo "3. UPSTREAM BEHIND"; \
-	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/keepkey-firmware|origin/master" "modules/electrobun|origin/keepkey/macos-12-support"; do \
+	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/main"; do \
 		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
 		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
 		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
@@ -744,7 +746,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware|BitHighlander/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun|BitHighlander/electrobun"; do \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
 		mod=$$(echo "$$pair" | cut -d'|' -f1); \
 		repo=$$(echo "$$pair" | cut -d'|' -f2); \
 		fork=$$(echo "$$pair" | cut -d'|' -f3); \

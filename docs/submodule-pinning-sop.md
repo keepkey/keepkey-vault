@@ -2,10 +2,14 @@
 
 ## Overview
 
-The vault depends on 5 git submodules under `modules/`. Each must be pinned to a
-known-good commit on a well-defined branch before any release branch is cut.
-Drift between submodule state and the pinned commit is the #1 source of
-"works on my machine" build failures.
+The Vault release build depends on 4 git submodules under `modules/`. Each must
+be pinned to a known-good commit on a well-defined branch before any release
+branch is cut. Drift between submodule state and the pinned commit is the #1
+source of "works on my machine" build failures.
+
+`modules/keepkey-firmware` is intentionally not a Vault release gate. It is used
+for emulator and firmware development only; do not block desktop Vault releases
+on its branch, nested submodules, or CI state.
 
 ## Submodule Inventory
 
@@ -14,8 +18,13 @@ Drift between submodule state and the pinned commit is the #1 source of
 | **hdwallet** | `keepkey/hdwallet` | `master` | HD wallet core + KeepKey adapter (lodash/rxjs removed) |
 | **proto-tx-builder** | `BitHighlander/proto-tx-builder` | `main` | Cosmos/Thorchain/Maya TX builder (`@keepkey/proto-tx-builder`) |
 | **device-protocol** | `keepkey/device-protocol` | `master` | Protobuf message definitions — **must match firmware release** |
-| **keepkey-firmware** | `keepkey/keepkey-firmware` | `master` or `release/X.Y.Z` | Emulator build, test fixtures — pin to release tag for stability |
-| **electrobun** | `BitHighlander/electrobun` | `keepkey/macos-12-support` | Desktop framework fork — **tech debt: not yet merged to main** |
+| **electrobun** | `blackboardsh/electrobun` | `main` | Desktop framework fork/runtime used by Vault |
+
+Ignored for Vault releases:
+
+| Module | Repo | Purpose |
+|--------|------|---------|
+| **keepkey-firmware** | `BitHighlander/keepkey-firmware` | Emulator build and firmware test fixtures only. Ignore for Vault packaging/release gating. |
 
 ## Pre-Release Pinning Checklist
 
@@ -24,11 +33,13 @@ Run this BEFORE creating a `release/X.Y.Z` branch:
 ```bash
 cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
 
-# 1. Fetch all remotes (top-level + nested)
-git submodule foreach --recursive 'git fetch --all --prune 2>/dev/null || true'
+# 1. Fetch Vault release-gated submodules only
+for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do
+  git -C "$mod" fetch --all --prune 2>/dev/null || true
+done
 
-# 2. Check top-level submodules
-for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do
+# 2. Check release-gated submodules
+for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do
   pinned=$(git ls-tree HEAD "$mod" | awk '{print substr($3,1,12)}')
   actual=$(cd "$mod" && git rev-parse --short=12 HEAD)
   branch=$(cd "$mod" && git branch --show-current 2>/dev/null || echo "detached")
@@ -36,22 +47,10 @@ for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware mo
   match="OK"; [ "$pinned" != "$actual" ] && match="DRIFT"
   echo "$mod: [$match] pinned=$pinned actual=$actual branch=$branch dirty=$dirty"
 done
-
-# 3. Check firmware nested submodules (deep tree — device-protocol, python-keepkey, trezor-firmware)
-echo ""
-echo "=== Firmware nested submodules ==="
-drifted=$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+')
-if [ -n "$drifted" ]; then
-  echo "⚠️  DRIFTED nested submodules:"
-  echo "$drifted"
-  echo "Fix: cd modules/keepkey-firmware && git submodule update --init --recursive"
-else
-  echo "✅ All firmware nested submodules match pins"
-fi
 ```
 
-**All modules must show `[OK]` and `dirty=0`, and firmware nested submodules
-must have no `+` prefix, before cutting a release branch.**
+**All release-gated modules must show `[OK]` and `dirty=0` before cutting a
+release branch. Ignore `modules/keepkey-firmware` for Vault packaging.**
 
 ```bash
 # 4. Verify CI is green on every pinned commit
@@ -61,8 +60,7 @@ declare -A REPOS=(
   ["modules/hdwallet"]="keepkey/hdwallet"
   ["modules/proto-tx-builder"]="BitHighlander/proto-tx-builder"
   ["modules/device-protocol"]="keepkey/device-protocol"
-  ["modules/keepkey-firmware"]="keepkey/keepkey-firmware"
-  ["modules/electrobun"]="BitHighlander/electrobun"
+  ["modules/electrobun"]="blackboardsh/electrobun"
 )
 for mod in "${!REPOS[@]}"; do
   repo="${REPOS[$mod]}"
@@ -90,10 +88,9 @@ done
 | Repo | Workflows | Notes |
 |------|-----------|-------|
 | keepkey/hdwallet | CI (build matrix) | Must pass |
-| keepkey/keepkey-firmware | CI + Zoo Report | CI must pass; Zoo is informational |
 | BitHighlander/proto-tx-builder | Build & Test | Must pass |
 | keepkey/device-protocol | **None** | No CI — validate manually (lib/ build) |
-| BitHighlander/electrobun | Build and Release + CEF Check | Build must pass; CEF is informational |
+| blackboardsh/electrobun | Build and Release + CEF Check | Build must pass; CEF is informational |
 
 ## Per-Module Rules
 
@@ -119,28 +116,17 @@ done
 - Verify: `cd modules/device-protocol && git log --oneline origin/master..HEAD` (should be empty)
 - If ahead of master: merge or rebase to master, push, then re-pin
 
-### keepkey-firmware (`master` or `release/X.Y.Z`)
+### keepkey-firmware (ignored for Vault releases)
 
-- Pin to `master` HEAD for general development
-- Pin to a `release/X.Y.Z` tag/branch when the vault targets a specific firmware
-- **Has 7 nested submodules** (device-protocol, trezor-firmware, python-keepkey,
-  googletest, code-signing-keys, QR-Code-generator, SecAESSTM32)
-- python-keepkey itself has 2 nested submodules (device-protocol, ethereum-lists)
-- After any firmware pin change, run `cd modules/keepkey-firmware && git submodule update --init --recursive`
-- Verify: `cd modules/keepkey-firmware && git submodule status --recursive | grep '^+'` (should be empty — `+` means drift)
+- Not a desktop Vault release gate.
+- Do not run recursive firmware submodule checks during Vault release prep.
+- Do not block Vault packaging on firmware branch, nested submodules, or firmware CI.
+- Only initialize and validate this repo when building the emulator or changing firmware fixtures.
 
-### electrobun (`keepkey/macos-12-support`)
+### electrobun (`main`)
 
-**This is tech debt.** The fork has macOS 12/Intel support patches that have NOT
-been merged to `main`. The branch diverged from `main` and both have moved forward
-independently.
-
-- Pin to `keepkey/macos-12-support` branch HEAD
-- This branch contains: macOS 12 Monterey + Intel Mac support, resign-swizzle removal
-- `main` has: GPU screenshot readback, Bun 1.3.11 bump, WGPU cleanup
-- **Action item**: Merge `main` into `keepkey/macos-12-support` (or vice versa) to
-  reduce divergence. Until then, this branch is required for Intel Mac builds.
-- Verify: `cd modules/electrobun && git log --oneline origin/keepkey/macos-12-support -1`
+- Pin to `blackboardsh/electrobun` `main`
+- Verify: `cd modules/electrobun && git log --oneline origin/main -1`
 
 ## CRITICAL: Check for Upstream Fixes Before Release
 
@@ -149,11 +135,12 @@ had moved to `92ea4dae` with critical transport fixes (Osmosis/Ethereum/Binance
 message type registration). The vault shipped with a broken Osmosis address
 derivation for months because the pin wasn't updated.
 
-**Before every release, check ALL submodules for commits behind upstream:**
+**Before every release, check every Vault release-gated submodule for commits
+behind upstream:**
 
 ```bash
 echo "=== Commits behind upstream ==="
-for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/keepkey-firmware modules/electrobun; do
+for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do
   branch=$(cd "$mod" && git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
   [ -z "$branch" ] && branch="master"
   (cd "$mod" && git fetch origin "$branch" 2>/dev/null)
@@ -168,7 +155,7 @@ for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol mod
 done
 ```
 
-**If ANY submodule is behind, review the missing commits.** Bug fixes and
+**If ANY release-gated submodule is behind, review the missing commits.** Bug fixes and
 transport/protocol changes MUST be pulled before release. Feature commits
 can be deferred if they introduce risk.
 
@@ -193,7 +180,7 @@ git commit -m "chore: pin <name> to <branch> HEAD (<short-hash>)"
 ## How to Verify Pinning After Checkout
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
 git submodule status
 # No '+' prefix = pinned commit matches checkout
 # '+' prefix = DRIFT — submodule is on a different commit than pinned
@@ -203,7 +190,7 @@ git submodule status
 
 The release skill (`~/.claude/skills/keepkey-vault-release.md`) Step 1 (Pre-flight
 Checks) must include the pinning checklist above. The release branch MUST NOT be
-created until all submodules show `[OK]` and `dirty=0`.
+created until all release-gated submodules show `[OK]` and `dirty=0`.
 
 ### Release Branch Gate
 
@@ -212,10 +199,10 @@ Before `git checkout -b release/X.Y.Z develop`:
 1. Run the pinning checklist (all OK, all clean)
 2. **Run the upstream-behind check** — review and pull any bug fixes
 3. Verify `device-protocol` is on upstream master (not alpha/feature branch)
-4. Verify `keepkey-firmware` pin matches the firmware version being shipped
-5. Verify `electrobun` is on `keepkey/macos-12-support` HEAD
+4. Verify `electrobun` is on `main` HEAD
 5. Verify `hdwallet` is on `master` with lodash/rxjs removal
-6. Run `make build-stable` to confirm build succeeds with current pins
+6. Ignore `modules/keepkey-firmware` unless this release explicitly changes emulator/firmware fixtures
+7. Run `make build-stable` to confirm build succeeds with current pins
 
 ### Post-Release
 
@@ -224,12 +211,17 @@ After release is published:
 - Feature-branch submodule updates go to `develop` only
 - If a hotfix requires a submodule change, document it in the release notes
 
-## Current State (2026-04-03)
+## Current State (2026-05-13)
 
 | Module | Pinned To | Branch | Status |
 |--------|-----------|--------|--------|
-| hdwallet | `9b7b98af` | `master` | OK — latest master |
-| proto-tx-builder | `368987a9` | `main` | OK — latest main |
-| device-protocol | `cb2e0a96` | alpha (detached) | OK — master has all required protocol messages; re-pin to master HEAD before next release |
-| keepkey-firmware | `98fb2103` | detached | OK — release/v7.14.0 merge commit |
-| electrobun | `4f3d422a` | `keepkey/macos-12-support` | OK — latest on branch (tech debt: not merged to main) |
+| hdwallet | `d83a65c3` | `master` | Current vault pin |
+| proto-tx-builder | `f12f8c39` | `main` | Current vault pin |
+| device-protocol | `bf8646b8` | `master` | Current vault pin; generated `lib/` still must be present on the build machine |
+| electrobun | `73519358` | `main` | Current vault pin |
+
+Ignored for Vault release gating:
+
+| Module | Pinned To | Status |
+|--------|-----------|--------|
+| keepkey-firmware | `11d97d40` | Emulator/firmware fixture repo only; do not block Vault release on it |

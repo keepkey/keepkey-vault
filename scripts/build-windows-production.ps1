@@ -370,11 +370,10 @@ if (-not $SkipSign) {
 if (-not $SkipBuild) {
     Write-Step "Updating git submodules (selective)"
     Push-Location $RepoRoot
-    # Only init the submodules we actually need -- recursive init pulls deeply
-    # nested firmware deps whose paths exceed Windows MAX_PATH (260 chars)
+    # Only init the submodules Vault packaging actually needs. Firmware is
+    # emulator-only for Vault releases and is intentionally not a build gate.
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
-    git submodule update --init modules/keepkey-firmware
     git submodule update --init modules/device-protocol
     Pop-Location
 
@@ -469,7 +468,8 @@ if (-not $SkipBuild) {
     # Patch version.json: stable channel + force version to match package.json.
     # Electrobun's `bun run build` is an incremental build — when a stale _build/
     # exists from a different branch, it can leave version.json with the wrong
-    # version. We had a 1.3.2-named installer shipped with 1.2.16 inside because
+    # version. We had a current-version-named installer shipped with stale
+    # previous-version bits inside because
     # of this. Force the version field rather than trust Electrobun's output.
     $VersionJson = Join-Path $BuildDir "Resources\version.json"
     if (-not (Test-Path $VersionJson)) {
@@ -881,7 +881,7 @@ if (-not $SkipSign) {
 
 Write-Step "Generating checksums"
 
-$checksumFile = Join-Path $ArtifactsDir "SHA256SUMS.txt"
+$checksumFile = Join-Path $ArtifactsDir "SHA256SUMS-windows.txt"
 $artifacts = Get-ChildItem -Path $ArtifactsDir -File | Where-Object { $_.Name -notlike "*.txt" }
 
 $checksums = @()
@@ -892,7 +892,7 @@ foreach ($file in $artifacts) {
 }
 
 $checksums | Out-File -FilePath $checksumFile -Encoding UTF8
-Write-Success "Created: SHA256SUMS.txt"
+Write-Success "Created: SHA256SUMS-windows.txt"
 
 # ============================================================================
 # Summary

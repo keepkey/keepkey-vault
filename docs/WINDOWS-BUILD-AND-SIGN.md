@@ -10,10 +10,11 @@ The build, signing, and installer steps are all driven by **one PowerShell scrip
 
 ```powershell
 # From the repo root (PowerShell 5.1+), USB EV signing token plugged in:
+.\scripts\preflight-windows.ps1 -Strict
 .\scripts\build-windows-production.ps1
 ```
 
-Output: `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe` (signed) and `SHA256SUMS.txt`.
+Output: `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe` (signed) and `SHA256SUMS-windows.txt`.
 
 To rebuild the installer from an existing build tree without rebuilding sources:
 
@@ -47,7 +48,7 @@ A fully provisioned build machine. If this is a fresh box, follow [`WINDOWS-DEV-
 - Default thumbprint baked into the script is the KEY HODLERS LLC EV cert (`986AEBA61CF6616393E74D8CBD3A09E836213BAA`). To use a different cert, set `$env:KK_SIGN_THUMBPRINT` or pass `-Thumbprint`.
 
 **Repo state**:
-- Clean checkout on the release branch (e.g. `release/1.3.2`) with all expected submodules initialized — the script handles submodule init itself, but a dirty tree will produce a dirty build
+- Clean checkout on the release branch (e.g. `release/1.3.3`) with all expected submodules initialized — the script handles submodule init itself, but a dirty tree will produce a dirty build
 - `modules/device-protocol/lib/messages_pb.js` **must exist** (see [The device-protocol pitfall](#the-device-protocol-pitfall) below)
 
 ---
@@ -63,10 +64,9 @@ Verifies `signtool`, `ISCC`, `git`, `bun`, `yarn` are reachable. Loads the EV ce
 Only initializes the modules the build actually needs:
 - `modules/hdwallet`
 - `modules/proto-tx-builder`
-- `modules/keepkey-firmware`
 - `modules/device-protocol`
 
-**Not** recursive — fully recursive init pulls firmware deps with paths exceeding the 260-char MAX_PATH limit. See [`WINDOWS-BUILD-QUIRKS.md`](./WINDOWS-BUILD-QUIRKS.md) §22.
+`modules/keepkey-firmware` is not initialized by the Windows Vault build; it is emulator/firmware work only and is not a Vault packaging gate.
 
 ### 3. device-protocol `lib/` verification (lines ~269-283)
 Checks that `modules/device-protocol/lib/messages_pb.js` is present. If missing, the script aborts with instructions. This file is gitignored — see [The device-protocol pitfall](#the-device-protocol-pitfall).
@@ -108,7 +108,7 @@ The build tree has paths >260 chars (deep `node_modules`). Inno Setup silently s
 `ISCC` produces `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe`, then `signtool` signs the installer itself. The WebView2 bootstrapper is bundled into the installer and runs at install time (required on Windows 10).
 
 ### 12. Checksums (lines ~661-680)
-Writes `release-windows\SHA256SUMS.txt` covering every artifact in the output directory.
+Writes `release-windows\SHA256SUMS-windows.txt` covering every Windows artifact in the output directory. The CI draft-release job owns the combined `SHA256SUMS.txt`, so the Windows checksum file is platform-scoped to avoid clobbering it during manual upload.
 
 ---
 
@@ -165,8 +165,8 @@ Get-AuthenticodeSignature $installer.FullName | Format-List
 signtool verify /pa /v $installer.FullName
 # Look for "The signature is timestamped"
 
-# 3. SHA256SUMS matches
-Get-Content "$out\SHA256SUMS.txt"
+# 3. SHA256SUMS-windows matches
+Get-Content "$out\SHA256SUMS-windows.txt"
 (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
 # Should match
 ```
@@ -228,10 +228,10 @@ $ts       = "http://timestamp.digicert.com"
 
 & $signtool sign /sha1 $thumb /fd sha256 /tr $ts /td sha256 `
     /d "KeepKey Vault Installer" `
-    "release-windows\KeepKey-Vault-1.3.2-win-x64-setup.exe"
+    "release-windows\KeepKey-Vault-<version>-win-x64-setup.exe"
 
 # Verify
-& $signtool verify /pa /v "release-windows\KeepKey-Vault-1.3.2-win-x64-setup.exe"
+& $signtool verify /pa /v "release-windows\KeepKey-Vault-<version>-win-x64-setup.exe"
 ```
 
 ---
@@ -257,9 +257,10 @@ Before tagging and uploading:
 - [ ] `package.json` version matches the intended release
 - [ ] `modules/device-protocol/lib/messages_pb.js` is present
 - [ ] EV token plugged in, unlocked, certificate visible
+- [ ] Run `.\scripts\preflight-windows.ps1 -Strict`
 - [ ] Run `.\scripts\build-windows-production.ps1`
 - [ ] Verify installer signature via `signtool verify /pa /v`
 - [ ] Smoke-test the installer on a clean Windows VM
-- [ ] Compare `SHA256SUMS.txt` against the installer hash
-- [ ] Upload `*.exe` and `SHA256SUMS.txt` to the GitHub draft release
+- [ ] Compare `SHA256SUMS-windows.txt` against the installer hash
+- [ ] Upload `*.exe` and `SHA256SUMS-windows.txt` to the GitHub draft release
 - [ ] Run the installed app, pair a real device, confirm `vault-backend.log` has the expected boot lines
