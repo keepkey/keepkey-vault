@@ -144,7 +144,7 @@ git clone https://github.com/keepkey/keepkey-vault.git
 cd keepkey-vault
 ```
 
-Submodules are initialized selectively by the build script — **do not** run `git submodule update --init --recursive` (firmware submodules have paths exceeding MAX_PATH even with long paths enabled in some setups). Let the build script handle it.
+Submodules are initialized selectively by the build script — **do not** run `git submodule update --init --recursive`. Firmware is emulator-only for Vault releases, and recursive firmware submodules have historically caused Windows path issues.
 
 ---
 
@@ -186,7 +186,7 @@ A signed release build needs the EV token, which most contributors won't have. D
 What this should produce:
 - ~15-20 minutes of output (submodule init, `bun install`, `yarn build`, `cargo build`, electrobun bundle, Inno Setup compile)
 - `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe` (unsigned)
-- `release-windows\SHA256SUMS.txt`
+- `release-windows\SHA256SUMS-windows.txt`
 
 If the script aborts, read the error message carefully — every failure mode has a specific message and most are listed in [`WINDOWS-BUILD-AND-SIGN.md`](./WINDOWS-BUILD-AND-SIGN.md#common-failures). The most common first-time issues:
 
