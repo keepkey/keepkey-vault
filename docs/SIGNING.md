@@ -7,18 +7,20 @@ KeepKey Vault ships signed+notarized DMGs for two macOS architectures:
 | Architecture | Build Method | Electrobun Source | Bun Version |
 |-------------|-------------|-------------------|-------------|
 | **arm64** (Apple Silicon) | Native build on `macos-14` runner | Upstream Electrobun | 1.3.5 |
-| **x86_64** (Intel) | Binary swap from custom fork | `BitHighlander/electrobun` | 1.1.20 |
+| **x86_64** (Intel) | Binary swap from published core artifact | `keepkey/keepkey-vault` release built from `blackboardsh/electrobun` | 1.3.9 |
 
 **Signing stays local.** CI builds unsigned artifacts. A developer with Apple credentials runs `make sign-release` to sign both architectures, create DMGs, notarize, and upload.
 
-## Why a Custom Electrobun Fork for x64
+## Why a Published Electrobun x64 Core Artifact
 
-Standard Electrobun x64 builds have two problems on older Intel Macs:
+CI builds the macOS app on Apple Silicon, then swaps in a prebuilt x64
+Electrobun core artifact before packaging the Intel update payload. The artifact
+is published on `keepkey/keepkey-vault` as `electrobun-x64-core-vN` and is built
+from upstream `blackboardsh/electrobun`.
 
-1. **resign-swizzle crash**: `libNativeWrapper.dylib` contains `resignKeyWindow` method swizzling that crashes on macOS 12 when the app loses focus
-2. **Bun version**: Bun 1.3.x dropped macOS 12 support; Bun 1.1.20 is the last compatible version
-
-The fork (`BitHighlander/electrobun @ v1.16.1-keepkey.1`) provides pre-built x64 core binaries without resign-swizzle and with Bun 1.1.20.
+When `modules/electrobun` changes, rebuild and republish the x64 core with
+`make publish-electrobun-x64-core`, then update `X64_CORE_TAG` in
+`.github/workflows/build.yml`.
 
 ## The Entitlements Requirement
 
@@ -91,7 +93,7 @@ CI runs on push to `develop`, `release/*`, or `v*` tags.
 - Produces unsigned `stable-macos-arm64-keepkey-vault.app.tar.zst`
 
 ### x64 Variant (Binary Swap)
-- Downloads pre-built x64 core from `BitHighlander/electrobun @ v1.16.1-keepkey.1`
+- Downloads pre-built x64 core from `keepkey/keepkey-vault @ electrobun-x64-core-vN`
 - Extracts arm64 .app, swaps 4 binaries: `launcher`, `bun`, `libNativeWrapper.dylib`, `libasar.dylib`
 - Removes `zcash-cli` (Zcash shielded not supported on Intel)
 - Verifies all swapped binaries are x86_64
@@ -138,10 +140,10 @@ spctl --assess --type execute -vvv path/to/keepkey-vault.app
 **Cause**: Quarantine flag or missing notarization.
 **Fix**: Right-click → Open, or: `xattr -cr /path/to/app.dmg`
 
-### x64 app crashes on macOS 12
+### x64 app has stale or swizzled runtime binaries
 **Cause**: `libNativeWrapper.dylib` has resign-swizzle symbols.
 **Verify**: `nm .../libNativeWrapper.dylib | grep resignKeyWindow` (should find nothing)
-**Fix**: Rebuild x64 core from fork: `make build-electrobun-x64-core`
+**Fix**: Rebuild and publish the x64 core artifact: `make publish-electrobun-x64-core`
 
 ## Building the x64 Electrobun Core
 
