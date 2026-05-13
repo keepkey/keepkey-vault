@@ -565,7 +565,16 @@ export function ZcashPrivacyTab() {
 				)
 				if (r.address) {
 					setOrchardAddress(r.address)
+					try {
+						const state = await rpcRequest<{ synced_to?: number | null }>(
+							"zcashShieldedStatus", undefined, 5000
+						)
+						if (state.synced_to != null) { setSyncedTo(state.synced_to); setNeedsScan(false) }
+						else setNeedsScan(true)
+					} catch { /* status refresh is best-effort */ }
+					await Promise.allSettled([refreshBalance(), loadTransactions()])
 					setStatus("ready")
+					setStarting(false)
 				} else {
 					setStartError(t("engineNotRunning"))
 					setStarting(false)
