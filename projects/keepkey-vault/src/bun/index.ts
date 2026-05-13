@@ -3283,10 +3283,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setBip85Enabled: async (params) => {
-				// BIP-85 requires firmware >= 7.15.0
+				// BIP-85 requires firmware >= 7.16.0
 				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
-					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.16.0') < 0)) {
+					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.16.0`)
 					return getAppSettings()
 				}
 				bip85Enabled = params.enabled
@@ -4898,10 +4898,10 @@ engine.on('state-change', (state) => {
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		if (bip85Enabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
+		if (bip85Enabled && (!fw || versionCompare(fw, '7.16.0') < 0)) {
 			bip85Enabled = false
 			setSetting('bip85_enabled', '0')
-			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
+			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.16.0`)
 		}
 		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
 			zcashPrivacyEnabled = false
@@ -4910,7 +4910,11 @@ engine.on('state-change', (state) => {
 			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
 	}
-	if (state.state === 'disconnected') { btcAccounts.reset(); evmAddresses.reset() }
+	if (state.state === 'disconnected') {
+		btcAccounts.reset()
+		evmAddresses.reset()
+		console.log('[Vault] Device disconnected: cleared in-memory account managers')
+	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)
 	}
