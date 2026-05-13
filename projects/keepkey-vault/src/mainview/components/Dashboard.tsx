@@ -391,19 +391,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
 	}, [refreshFeatureFlags])
 
-	// Auto-refresh balances when Zcash feature flag is enabled mid-session
-	const prevZcashRef = useRef(zcashEnabled)
-	useEffect(() => {
-		const becameEnabled = zcashEnabled && !prevZcashRef.current
-		if (becameEnabled && !loadingBalances) {
-			console.log('[Dashboard] Zcash enabled — refreshing balances')
-			refreshBalances()
-			prevZcashRef.current = true
-		} else if (!zcashEnabled) {
-			prevZcashRef.current = false
-		}
-	}, [zcashEnabled, refreshBalances, loadingBalances])
-
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
@@ -583,6 +570,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 		setLoadingBalances(false)
 	}, [loadingBalances, watchOnly])
+
+	// Auto-refresh balances when Zcash feature flag is enabled mid-session
+	const prevZcashRef = useRef(zcashEnabled)
+	useEffect(() => {
+		const becameEnabled = zcashEnabled && !prevZcashRef.current
+		if (becameEnabled && !loadingBalances) {
+			console.log('[Dashboard] Zcash enabled — refreshing balances')
+			refreshBalances()
+			prevZcashRef.current = true
+		} else if (!zcashEnabled) {
+			prevZcashRef.current = false
+		}
+	}, [zcashEnabled, refreshBalances, loadingBalances])
 
 	// Auto-refresh after new seed (OOB setup) — one-shot, then clear the flag
 	useEffect(() => {
