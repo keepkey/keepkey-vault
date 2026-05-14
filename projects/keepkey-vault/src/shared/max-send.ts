@@ -29,6 +29,7 @@ export function baseUnitsToDecimalString(units: bigint, decimals: number): strin
 
 export function tokenMaxPrecisionReserveUnits(decimals: number): bigint {
   if (!Number.isInteger(decimals) || decimals < 0) return 1n
+  if (decimals === 0) return 0n
   return 10n ** BigInt(Math.max(0, decimals - TOKEN_MAX_DISPLAY_DECIMALS))
 }
 

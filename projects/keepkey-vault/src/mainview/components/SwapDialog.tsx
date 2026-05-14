@@ -74,7 +74,9 @@ function nativeMaxFeeReserve(asset: SwapAsset): number {
   if (asset.chainFamily === 'tron') return NATIVE_TRON_FEE_RESERVE
   if (asset.chainFamily === 'solana') return NATIVE_SOLANA_FEE_RESERVE
   if (asset.chainFamily !== 'evm') return 0
-  return NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
+  const chainDef = CHAINS.find(c => c.id === asset.chainId)
+  const reserveKey = chainDef?.networkId ?? asset.chainId
+  return NATIVE_EVM_GAS_RESERVE[reserveKey] ?? NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
 }
 
 /** Returns the displayable & spendable max amount for native MAX. For chains
@@ -83,7 +85,8 @@ function nativeMaxFeeReserve(asset: SwapAsset): number {
 function maxSpendableAmount(asset: SwapAsset, balance: string): string {
   const reserve = nativeMaxFeeReserve(asset)
   if (reserve <= 0) return balance
-  return nativeMaxSpendableAmount(balance, asset.decimals, reserve)
+  const chainDef = CHAINS.find(c => c.id === asset.chainId)
+  return nativeMaxSpendableAmount(balance, chainDef?.decimals ?? asset.decimals, reserve)
 }
 
 function nativeUsdValue(balance: ChainBalance): number {
@@ -1311,7 +1314,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     fromAsset ? CHAINS.find(c => c.id === fromAsset.chainId) : undefined
   ), [fromAsset])
 
-  const validAmount = (isMax && !nativeMaxInsufficient && !tokenMaxInsufficient) || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
+  const maxAmountReady = isMax && !isNaN(parseFloat(sendAmount)) && parseFloat(sendAmount) > 0
+  const manualAmountReady = amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0
+  const validAmount = isMax ? (maxAmountReady && !nativeMaxInsufficient && !tokenMaxInsufficient) : manualAmountReady
   // SAFETY: never quote with an xpub as the destination. Pioneer will accept
   // it and substitute a self-derived address, but funds would land at an
   // address that didn't come from the user's wallet. Wait for the UTXO
@@ -1482,7 +1487,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         return
       }
     }
-    const isErc20 = !!fromAsset.contractAddress
+    const isErc20 = fromAsset.chainFamily === 'evm' && !!fromAsset.contractAddress
 
     // Refresh stale quote (>60s old) before signing — protects against price drift
     // between when the user first saw the quote and when they actually confirm.

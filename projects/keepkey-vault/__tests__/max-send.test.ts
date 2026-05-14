@@ -19,6 +19,11 @@ describe('token max send precision reserve', () => {
     expect(tokenMaxSpendableAmount('27.495919', 6)).toBe('27.495918')
   })
 
+  test('does not reserve a whole zero-decimal token', () => {
+    expect(tokenMaxPrecisionReserveUnits(0)).toBe(0n)
+    expect(tokenMaxSpendableAmount('1', 0)).toBe('1')
+  })
+
   test('floors decimal parsing to token precision', () => {
     expect(decimalToBaseUnits('1.123456789', 6)).toBe(1_123_456n)
   })

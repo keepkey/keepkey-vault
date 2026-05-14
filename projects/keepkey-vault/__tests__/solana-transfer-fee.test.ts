@@ -23,9 +23,10 @@ describe('solanaTransferLamportsForAmount', () => {
     expect(solanaTransferLamportsForAmount('1.1234567899')).toBe(1123456789n)
   })
 
-  test('regular native SOL max send uses the provided native balance', async () => {
+  test('regular native SOL max send uses live balance instead of stale cached balance', async () => {
     let transferParams: any
     const pioneer = {
+      GetBalanceAddressByNetwork: async () => ({ data: { balance: '0.23438859' } }),
       BuildSolanaTransfer: async (params: any) => {
         transferParams = params
         return { data: { serialized: 'solana-max-transfer' } }
@@ -38,7 +39,7 @@ describe('solanaTransferLamportsForAmount', () => {
       amount: '0',
       isMax: true,
       fromAddress: solanaAddress,
-      nativeBalance: '0.23438859',
+      nativeBalance: '999',
     })
 
     expect(transferParams.amount).toBe('234383590')

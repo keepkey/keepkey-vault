@@ -213,14 +213,11 @@ export async function buildTx(
         // native balance here before subtracting the signature fee.
         let solAmount = params.amount
         if (params.isMax) {
-          solAmount = params.nativeBalance || ''
-          if (!solAmount) {
-            try {
-              const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: params.fromAddress })
-              solAmount = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
-            } catch (e: any) {
-              throw new Error(`Cannot fetch SOL balance for max send: ${e.message}`)
-            }
+          try {
+            const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: params.fromAddress })
+            solAmount = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
+          } catch (e: any) {
+            throw new Error(`Cannot fetch live SOL balance for max send: ${e.message}`)
           }
         }
         const solAmountLamports = String(solanaTransferLamportsForAmount(solAmount, !!params.isMax))
