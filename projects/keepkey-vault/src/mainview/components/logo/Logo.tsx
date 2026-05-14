@@ -8,12 +8,17 @@ export const Logo = (props: FlexProps & { logo?: React.ReactNode; onClick?: () =
     <>
       <Flex
         width="160px"
+        aspectRatio="1 / 1"
         border="2px solid #c8a75c"
         borderRadius="lg"
         boxShadow="0 0 16px 0 rgba(200, 167, 92, 0.18)"
         className="kk-logo-float"
         cursor={onClick ? "pointer" : "default"}
         onClick={onClick}
+        display="grid"
+        placeItems="center"
+        overflow="hidden"
+        flexShrink={0}
         {...flexProps}
       >
         {logo || <KeepKeyUILogo />}
@@ -26,8 +31,14 @@ export const Logo = (props: FlexProps & { logo?: React.ReactNode; onClick?: () =
         }
         .kk-logo-float {
           animation: kkLogoFloat 4.5s ease-in-out infinite;
+          transform-origin: center center;
           will-change: transform;
           transition: box-shadow 0.3s, transform 0.2s;
+        }
+        .kk-logo-float > svg {
+          display: block;
+          width: 100%;
+          height: 100%;
         }
         .kk-logo-float:hover {
           box-shadow: 0 0 32px 4px rgba(200, 167, 92, 0.28);

@@ -2,13 +2,14 @@ import { useState, useEffect } from "react"
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { Logo } from './logo/Logo'
 import { EllipsisDots } from "./util/EllipsisSpinner"
+import { NAV_HEIGHT, SPLASH_STAGE_Y_PADDING, SPLASH_STATUS_BOTTOM, SPLASH_STATUS_RESERVED } from "../layout"
 
 interface SplashScreenProps {
   statusText: string
   hintText?: string
   children?: React.ReactNode
   variant?: 'searching' | 'connecting' | 'error' | 'claimed'
-  /** When true, logo moves to top and children are visible. When false, logo stays centered. */
+  /** When true, the centered logo/content stack is visible. When false, only the logo is centered. */
   childrenReady?: boolean
   /** Called when the logo is clicked (e.g. to retry connection) */
   onLogoClick?: () => void
@@ -36,78 +37,94 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
   }, [childrenReady, variant, onLogoClick])
 
   return (
-    <Box height="100vh" width="100vw" bg="transparent" position="relative">
+    <Box height="100vh" width="100vw" bg="transparent" position="relative" overflow="hidden">
 
-      {/* Logo — centered when loading, slides to top when grid appears */}
+      {/* Center the full splash stack inside the usable space between nav and status. */}
       <Flex
         position="absolute"
-        left="0" right="0"
-        top={childrenReady ? "6vh" : "35vh"}
+        top={NAV_HEIGHT}
+        bottom={SPLASH_STATUS_RESERVED}
+        left="0"
+        right="0"
         justifyContent="center"
         direction="column"
         alignItems="center"
-        transition="top 0.5s ease"
-        zIndex={1}
-        pointerEvents={onLogoClick ? "auto" : "none"}
-      >
-        <Box
-          as="button"
-          onClick={onLogoClick}
-          cursor={onLogoClick ? "pointer" : "default"}
-          bg="transparent"
-          border="none"
-          p="0"
-          _hover={onLogoClick ? { transform: "scale(1.05)" } : undefined}
-          _active={onLogoClick ? { transform: "scale(0.95)" } : undefined}
-          transition="transform 0.15s ease"
-        >
-          <Logo
-            width={childrenReady ? "60px" : "100px"}
-            style={{
-              filter: 'brightness(1.15) drop-shadow(0 6px 24px rgba(233,196,106,0.25))',
-              transition: 'all 0.5s ease',
-            }}
-          />
-        </Box>
-        {showRetry && !childrenReady && (
-          <Text
-            fontSize="xs"
-            color="var(--text-3)"
-            mt="3"
-            style={{ animation: 'fadeIn 0.4s ease' }}
-            cursor={onLogoClick ? "pointer" : "default"}
-            onClick={onLogoClick}
-            _hover={onLogoClick ? { color: "var(--text-1)" } : undefined}
-            letterSpacing="0.04em"
-            textTransform="uppercase"
-            fontFamily="mono"
-          >
-            Tap to retry
-          </Text>
-        )}
-      </Flex>
-
-      {/* Children (always mounted so DeviceGrid can fire onReady, hidden until ready) */}
-      <Flex
-        position="absolute"
-        left="0" right="0"
-        top={childrenReady ? "16vh" : "0"}
-        bottom="80px"
-        direction="column"
-        alignItems="center"
-        overflow="auto"
         px="4"
-        opacity={childrenReady ? 1 : 0}
-        pointerEvents={childrenReady ? "auto" : "none"}
-        transition="opacity 0.4s ease"
+        py={SPLASH_STAGE_Y_PADDING}
+        minH="0"
+        overflow="hidden"
+        zIndex={1}
       >
-        {children}
+        <Flex
+          direction="column"
+          alignItems="center"
+          w="100%"
+          maxW="760px"
+          maxH="100%"
+          minH="0"
+          gap={childrenReady ? "clamp(20px, 3vh, 34px)" : "0"}
+          transition="gap 0.4s ease"
+        >
+          <Box
+            as="button"
+            onClick={onLogoClick}
+            cursor={onLogoClick ? "pointer" : "default"}
+            bg="transparent"
+            border="none"
+            p="0"
+            flexShrink={0}
+            pointerEvents={onLogoClick ? "auto" : "none"}
+            _hover={onLogoClick ? { transform: "scale(1.05)" } : undefined}
+            _active={onLogoClick ? { transform: "scale(0.95)" } : undefined}
+            transition="transform 0.15s ease"
+          >
+            <Logo
+              width={childrenReady ? "60px" : "100px"}
+              style={{
+                filter: 'brightness(1.15) drop-shadow(0 6px 24px rgba(233,196,106,0.25))',
+                transition: 'width 0.5s ease, filter 0.5s ease',
+              }}
+            />
+          </Box>
+          {showRetry && !childrenReady && (
+            <Text
+              fontSize="xs"
+              color="var(--text-3)"
+              mt="3"
+              style={{ animation: 'fadeIn 0.4s ease' }}
+              cursor={onLogoClick ? "pointer" : "default"}
+              onClick={onLogoClick}
+              _hover={onLogoClick ? { color: "var(--text-1)" } : undefined}
+              letterSpacing="0.04em"
+              textTransform="uppercase"
+              fontFamily="mono"
+              pointerEvents={onLogoClick ? "auto" : "none"}
+            >
+              Tap to retry
+            </Text>
+          )}
+          {/* Children stay mounted while hidden so DeviceGrid can call onReady. */}
+          <Flex
+            w="100%"
+            direction="column"
+            alignItems="center"
+            minH="0"
+            maxH={childrenReady ? "100%" : "0px"}
+            overflowY={childrenReady ? "auto" : "hidden"}
+            overflowX="hidden"
+            opacity={childrenReady ? 1 : 0}
+            pointerEvents={childrenReady ? "auto" : "none"}
+            transition="opacity 0.4s ease, max-height 0.4s ease"
+          >
+            {children}
+          </Flex>
+        </Flex>
       </Flex>
 
       {/* Status bar — pinned to bottom */}
       <Box
         position="absolute"
-        bottom="30px"
+        bottom={SPLASH_STATUS_BOTTOM}
         left="0" right="0"
         textAlign="center"
         px={3}

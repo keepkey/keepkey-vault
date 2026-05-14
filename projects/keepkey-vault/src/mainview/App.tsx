@@ -30,6 +30,7 @@ import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
+import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
@@ -719,7 +720,7 @@ function App() {
 						watchOnly
 						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
-					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
+					<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
 						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
@@ -824,8 +825,8 @@ function App() {
 					passphraseActive={deviceState.isHiddenWallet}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
 				/>
-				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
-				{/* pt: 54px TopNav + 50px banner height when visible */}
+				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
+				{/* TopNav offset plus banner height when visible. */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
 					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 				</Flex>
