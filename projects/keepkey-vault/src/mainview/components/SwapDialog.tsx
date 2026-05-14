@@ -52,9 +52,9 @@ const UINT256_MAX = (1n << 256n) - 1n
 /** Conservative fee reserve (in native units) for native MAX swaps.
  *  Token swaps spend the token, not the native asset, and UTXO/Cosmos MAX is
  *  computed precisely server-side from the input set. The numbers here are a
- *  UX cushion: backend still does precise fee handling at sign time, but we
- *  want the user to *see* a realistic post-fee amount when they click MAX so
- *  they don't think the whole balance will be swapped. */
+ *  UX cushion: backend still performs exact or defensive fee handling at sign
+ *  time, but the user should see and quote the post-fee amount when clicking
+ *  MAX so they do not think the whole balance will be swapped. */
 const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:1':     0.005,    // Ethereum L1 — swap router can cost ~$10-50
   'eip155:8453':  0.00015,  // Base — L2 cheap, but L1 data fee adds up
@@ -66,10 +66,12 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
 }
 const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
 const NATIVE_TRON_FEE_RESERVE = 1.1
+const NATIVE_SOLANA_FEE_RESERVE = 0.000005
 
 function nativeMaxFeeReserve(asset: SwapAsset): number {
   if (asset.contractAddress) return 0
   if (asset.chainFamily === 'tron') return NATIVE_TRON_FEE_RESERVE
+  if (asset.chainFamily === 'solana') return NATIVE_SOLANA_FEE_RESERVE
   if (asset.chainFamily !== 'evm') return 0
   return NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
 }
@@ -1066,9 +1068,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   }, [fromAsset, balance, chain, balances])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
-   * by a conservative fee reserve so the displayed and submitted amount match
-   * what the user actually spends. UTXO/Cosmos/etc. still use isMax=true
-   * server-side because their fee math depends on input set + memo. */
+   * by a conservative fee reserve so the displayed, quoted, and submitted
+   * amount match what the user actually spends. UTXO/Cosmos/etc. still use
+   * isMax=true server-side because their fee math depends on input set + memo. */
   const nativeFeeReservedMaxAmount = useMemo(() => {
     if (!fromAsset || !fromBalance) return null
     if (nativeMaxFeeReserve(fromAsset) <= 0) return null
@@ -1163,7 +1165,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     }
     swapLog('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
     return 0
-  }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, amount, isMax, fromBalance])
+  }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, sendAmount, isMax])
 
   const hasFromPrice = fromPriceUsd > 0
   const hasToPrice = toPriceUsd > 0

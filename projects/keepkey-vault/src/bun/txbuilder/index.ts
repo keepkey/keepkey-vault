@@ -9,10 +9,12 @@ import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
 // Pioneer SDK instance is passed as parameter to buildTx()
 
 export type { BuildTxParams }
+export { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 
 const TRON_SUN_PER_TRX = 1_000_000n
 const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n
@@ -218,14 +220,9 @@ export async function buildTx(
         }
       } else {
         // Native SOL transfer — convert to lamports (9 decimals)
-        const solAmountLamports = (() => {
-          const parts = params.amount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-          return String(BigInt(whole) * 1000000000n + BigInt(frac))
-        })()
+        const solAmountLamports = String(solanaTransferLamportsForAmount(params.amount, !!params.isMax))
 
-        console.debug(`[buildTx:solana] Native SOL transfer`)
+        console.debug(`[buildTx:solana] Native SOL transfer${params.isMax ? ` (max, reserved ${SOLANA_LAMPORTS_PER_SIGNATURE} lamports for fee)` : ''}`)
         try {
           const resp = await pioneer.BuildSolanaTransfer({
             from: params.fromAddress,
