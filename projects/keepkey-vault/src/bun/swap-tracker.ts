@@ -76,6 +76,13 @@ function chainIdToVaultId(caip2: string): string {
 }
 import { decideRevertOutcome } from '../shared/swap-revert'
 export { decideRevertOutcome } from '../shared/swap-revert'
+import {
+  isTerminalSwapStatus,
+  mapRelayExecutionStatus,
+  relayOutboundTxid,
+  shouldApplyRelayStatus,
+  type RelayExecutionStatus,
+} from '../shared/relay-status'
 
 const TAG = '[swap-tracker]'
 
@@ -439,8 +446,13 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
 function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Pioneer's mapped status only takes effect when Midgard hasn't ruled yet.
   const pioneerStatus = mapPioneerStatus(remoteSwap.status)
-  const newStatus = swap.midgardClassified ? swap.status : pioneerStatus
-  const confirmations = remoteSwap.confirmations ?? swap.confirmations
+  const ignoreNonFinalPioneer = isTerminalSwapStatus(swap.status) && !isTerminalSwapStatus(pioneerStatus)
+  const newStatus = swap.midgardClassified
+    ? swap.status
+    : ignoreNonFinalPioneer
+      ? swap.status
+      : pioneerStatus
+  const confirmations = ignoreNonFinalPioneer ? swap.confirmations : (remoteSwap.confirmations ?? swap.confirmations)
   const outboundConfirmations = remoteSwap.outboundConfirmations
   const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
   const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
@@ -683,6 +695,14 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         if (ok) swapLog(`${TAG} Pioneer (re-)registered with relayRequestId for ${swap.txid.slice(0, 10)}... attempt=${attempts + 1} — awaiting verification`)
       }
     }
+
+    const relayStatus = await fetchRelayExecutionStatus(swap)
+    const mappedRelayStatus = mapRelayExecutionStatus(relayStatus?.status)
+    const relayChanged = applyRelayExecutionStatus(swap, relayStatus)
+    if (
+      (relayChanged && isTerminalSwapStatus(swap.status)) ||
+      (mappedRelayStatus && isTerminalSwapStatus(mappedRelayStatus) && mappedRelayStatus === swap.status)
+    ) return swap
   }
 
   const pioneer = await getPioneer()
@@ -737,6 +757,14 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         })
         pushUpdate(swap)
       }
+    }
+
+    // Pioneer can remain stuck on Relay swaps even after Relay itself has
+    // marked the request successful. Re-apply Relay's direct status last so a
+    // stale Pioneer `pending` response cannot downgrade the local tracker.
+    if (shouldBackfillRelayRequestId(swap)) {
+      const relayStatus = await fetchRelayExecutionStatus(swap)
+      applyRelayExecutionStatus(swap, relayStatus)
     }
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
@@ -908,6 +936,72 @@ async function fetchRelayRequestIdByHash(txid: string): Promise<string | undefin
     swapLog(`${TAG} Relay backfill failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
     return undefined
   }
+}
+
+async function fetchRelayExecutionStatus(swap: PendingSwap): Promise<RelayExecutionStatus | null> {
+  if (!swap.relayRequestId) return null
+  try {
+    const resp = await fetch(
+      `https://api.relay.link/intents/status/v3?requestId=${encodeURIComponent(swap.relayRequestId)}`,
+      { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } },
+    )
+    if (!resp.ok) {
+      swapLog(`${TAG} Relay status: HTTP ${resp.status} for ${swap.txid.slice(0, 10)}...`)
+      return null
+    }
+    return await resp.json() as RelayExecutionStatus
+  } catch (e: any) {
+    swapLog(`${TAG} Relay status failed for ${swap.txid.slice(0, 10)}...: ${e?.message || e}`)
+    return null
+  }
+}
+
+function applyRelayExecutionStatus(swap: PendingSwap, relayStatus: RelayExecutionStatus | null): boolean {
+  if (!relayStatus) return false
+  const nextStatus = mapRelayExecutionStatus(relayStatus.status)
+  if (!nextStatus || !shouldApplyRelayStatus(swap.status, nextStatus)) return false
+
+  const now = Date.now()
+  const final = isTerminalSwapStatus(nextStatus)
+  const outboundTxid = relayOutboundTxid(relayStatus, swap.txid)
+  const relayDetails = relayStatus.details || undefined
+  const receivedOutput = nextStatus === 'completed' && swap.receivedOutput === undefined
+    ? undefined
+    : swap.receivedOutput
+
+  swap.status = nextStatus
+  swap.updatedAt = now
+  if (nextStatus !== 'pending') swap.confirmations = Math.max(swap.confirmations || 0, 1)
+  if (outboundTxid && !swap.outboundTxid) swap.outboundTxid = outboundTxid
+  if (nextStatus === 'failed' && relayDetails) swap.error = relayDetails
+  if (nextStatus === 'refunded' && relayDetails) {
+    swap.refundReason = relayDetails
+    swap.error = relayDetails
+  }
+  if (final) {
+    swap.completedAt = now
+    if (nextStatus === 'completed' && swap.outboundTxid) {
+      swap.outboundConfirmations = Math.max(swap.outboundConfirmations || 0, 1)
+      swap.outboundRequiredConfirmations = Math.max(swap.outboundRequiredConfirmations || 0, 1)
+    }
+  }
+
+  swapLog(`${TAG} Relay status override: ${swap.txid.slice(0, 10)}... -> ${nextStatus} (relay=${relayStatus.status || 'unknown'}, outTxid=${swap.outboundTxid || 'none'})`)
+
+  if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, nextStatus, {
+    deviceId: swap.deviceId,
+    walletId: swap.walletId,
+    outboundTxid: swap.outboundTxid || undefined,
+    error: swap.error,
+    receivedOutput,
+    completedAt: final ? now : undefined,
+    actualTimeSeconds: final ? Math.round((now - swap.createdAt) / 1000) : undefined,
+    refundReason: swap.refundReason,
+  })
+
+  pushUpdate(swap)
+  if (final) pushComplete(swap)
+  return true
 }
 
 /** Push the resolved Relay request id into Pioneer's existing pending-swap row.

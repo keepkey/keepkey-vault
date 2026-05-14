@@ -1676,12 +1676,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       previewBuild,
       error,
       txid,
+      trackingStatus: phase === 'submitted' ? liveStatus : null,
+      confirmations: liveConfirmations,
+      outboundConfirmations: liveOutboundConfirmations,
+      outboundRequiredConfirmations: liveOutboundRequired,
+      outboundTxid: liveOutboundTxid ?? null,
+      relayRequestId: liveRelayRequestId ?? null,
+      refundReason: liveRefundReason ?? null,
     }
     const serialized = JSON.stringify(snapshot)
     if (serialized === lastPublishedRef.current) return
     lastPublishedRef.current = serialized
     rpcFire('publishSwapUiState', snapshot)
-  }, [open, phase, fromAsset?.asset, toAsset?.asset, amount, fiatAmount, inputMode, isMax, slippageBps, fromAddress, toAddress, useCustomAddress, customToAddress, quote, previewBuild, error, txid])
+  }, [open, phase, fromAsset?.asset, toAsset?.asset, amount, fiatAmount, inputMode, isMax, slippageBps, fromAddress, toAddress, useCustomAddress, customToAddress, quote, previewBuild, error, txid, liveStatus, liveConfirmations, liveOutboundConfirmations, liveOutboundRequired, liveOutboundTxid, liveRelayRequestId, liveRefundReason])
 
   // Reset the cached snapshot to 'closed' when the dialog unmounts so a stale
   // open state doesn't outlive the user closing the dialog.
@@ -1692,6 +1699,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         inputMode: 'crypto', isMax: false, slippageBps: 100,
         fromAddress: '', toAddress: '', useCustomAddress: false, customToAddress: '',
         quote: null, previewBuild: null, error: null, txid: null,
+        trackingStatus: null, confirmations: 0,
+        outboundConfirmations: undefined, outboundRequiredConfirmations: undefined,
+        outboundTxid: null, relayRequestId: null, refundReason: null,
       } satisfies SwapUiState)
     }
   }, [])
