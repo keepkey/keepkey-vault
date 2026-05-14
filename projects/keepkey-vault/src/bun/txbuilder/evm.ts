@@ -287,8 +287,10 @@ export async function buildEvmTx(
 
   let amountWei: bigint
   if (isMax) {
-    if (nativeBalance <= gasFee) throw new Error('Insufficient funds to cover gas fees')
-    amountWei = nativeBalance - gasFee * 110n / 100n // 10% gas buffer for safety
+    const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
+    if (nativeBalance <= gasReserve) throw new Error('Insufficient funds to cover gas fees')
+    amountWei = nativeBalance - gasReserve
+    if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
   } else {
     amountWei = parseUnits(String(params.amount), 18)
     if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {

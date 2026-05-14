@@ -49,13 +49,12 @@ const chainBadgeCaip = (asset: SwapAsset): string | undefined =>
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
 const UINT256_MAX = (1n << 256n) - 1n
 
-/** Conservative gas reserve (in native units) for native MAX swaps.
- *  Only applies to native EVM assets — token swaps spend the token, not
- *  the native, and UTXO/Cosmos MAX is computed precisely server-side from
- *  the input set. The numbers here are a UX cushion: backend still does
- *  precise gas estimation at sign time, but we want the user to *see* a
- *  realistic post-gas amount when they click MAX so they don't think the
- *  whole balance will be swapped. */
+/** Conservative fee reserve (in native units) for native MAX swaps.
+ *  Token swaps spend the token, not the native asset, and UTXO/Cosmos MAX is
+ *  computed precisely server-side from the input set. The numbers here are a
+ *  UX cushion: backend still does precise fee handling at sign time, but we
+ *  want the user to *see* a realistic post-fee amount when they click MAX so
+ *  they don't think the whole balance will be swapped. */
 const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:1':     0.005,    // Ethereum L1 — swap router can cost ~$10-50
   'eip155:8453':  0.00015,  // Base — L2 cheap, but L1 data fee adds up
@@ -66,19 +65,22 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:43114': 0.005,    // Avalanche C-Chain
 }
 const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
+const NATIVE_TRON_FEE_RESERVE = 1.1
 
-function nativeEvmGasReserve(asset: SwapAsset): number {
-  if (asset.chainFamily !== 'evm' || asset.contractAddress) return 0
+function nativeMaxFeeReserve(asset: SwapAsset): number {
+  if (asset.contractAddress) return 0
+  if (asset.chainFamily === 'tron') return NATIVE_TRON_FEE_RESERVE
+  if (asset.chainFamily !== 'evm') return 0
   return NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
 }
 
-/** Returns the displayable & spendable max amount for native MAX. For
- *  non-EVM-native assets, returns the full balance unchanged (UTXO etc.
- *  are handled correctly server-side and the user expectation matches). */
+/** Returns the displayable & spendable max amount for native MAX. For chains
+ *  without a frontend reserve, returns the full balance unchanged because the
+ *  backend computes their fee-aware MAX amount from chain-specific inputs. */
 function maxSpendableAmount(asset: SwapAsset, balance: string): string {
   const bal = parseFloat(balance || '0')
   if (!isFinite(bal) || bal <= 0) return balance
-  const reserve = nativeEvmGasReserve(asset)
+  const reserve = nativeMaxFeeReserve(asset)
   if (reserve <= 0) return balance
   const spendable = bal - reserve
   if (spendable <= 0) return '0'
@@ -1063,31 +1065,31 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return null
   }, [fromAsset, balance, chain, balances])
 
-  /* Native EVM MAX gas reservation — frontend pre-clamps the balance by a
-   * conservative gas reserve so the displayed and submitted amount match
+  /* Native account-model MAX fee reservation — frontend pre-clamps the balance
+   * by a conservative fee reserve so the displayed and submitted amount match
    * what the user actually spends. UTXO/Cosmos/etc. still use isMax=true
    * server-side because their fee math depends on input set + memo. */
-  const nativeEvmMaxAmount = useMemo(() => {
+  const nativeFeeReservedMaxAmount = useMemo(() => {
     if (!fromAsset || !fromBalance) return null
-    if (fromAsset.chainFamily !== 'evm' || fromAsset.contractAddress) return null
+    if (nativeMaxFeeReserve(fromAsset) <= 0) return null
     return maxSpendableAmount(fromAsset, fromBalance)
   }, [fromAsset, fromBalance])
 
-  /* Resolved (amount, isMax) tuple to send to the backend. For native EVM
+  /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
    * MAX the amount is already clamped, so isMax is dropped to keep the
-   * display honest. For non-EVM-native MAX, isMax remains true so the
-   * backend's input-aware fee math runs. */
+   * display honest. For all other MAX sends, isMax remains true so the
+   * backend's chain-aware fee math runs. */
   const sendAmount = useMemo(() => {
     if (!isMax) return amount
-    return nativeEvmMaxAmount ?? (fromBalance || '0')
-  }, [isMax, amount, nativeEvmMaxAmount, fromBalance])
+    return nativeFeeReservedMaxAmount ?? (fromBalance || '0')
+  }, [isMax, amount, nativeFeeReservedMaxAmount, fromBalance])
 
-  const sendIsMax = isMax && nativeEvmMaxAmount === null
+  const sendIsMax = isMax && nativeFeeReservedMaxAmount === null
 
   /* When the native balance is too small to even cover gas, MAX is
    * unusable — flag it so the UI can show "insufficient for gas" instead
    * of letting the user submit a 0 swap. */
-  const nativeMaxInsufficient = isMax && nativeEvmMaxAmount !== null && parseFloat(nativeEvmMaxAmount) <= 0
+  const nativeMaxInsufficient = isMax && nativeFeeReservedMaxAmount !== null && parseFloat(nativeFeeReservedMaxAmount) <= 0
 
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
@@ -1648,7 +1650,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const busy = phase === 'approving' || phase === 'signing' || phase === 'broadcasting'
   const displayAmount = sentAmount ?? sendAmount
-  const isNativeEvmMax = isMax && nativeEvmMaxAmount !== null
+  const isFeeReservedNativeMax = isMax && nativeFeeReservedMaxAmount !== null
 
   // Must be above early return to satisfy Rules of Hooks
   const swappableChainIds = useMemo(() => new Set(assets.map(a => a.chainId)), [assets])
@@ -2787,7 +2789,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   </Box>
                   <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={40} alt={toAsset.symbol} />
                 </Flex>
-                {isNativeEvmMax && (
+                {isFeeReservedNativeMax && (
                   <Text fontSize="10px" color="var(--gold)" mt="1.5">{t("sendMaxGasNote")}</Text>
                 )}
               </Box>
@@ -3302,14 +3304,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
-                      {isNativeEvmMax && !nativeMaxInsufficient && fromAsset && (
+                      {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && (
                         <Text fontSize="10px" color="kk.textMuted" mt="1" fontFamily="mono" letterSpacing="0.02em">
-                          {t("maxReservesGas", { defaultValue: "Reserves ~{{reserve}} {{symbol}} for network fees", reserve: nativeEvmGasReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
+                          {t("maxReservesGas", { defaultValue: "Reserves ~{{reserve}} {{symbol}} for network fees", reserve: nativeMaxFeeReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
                         </Text>
                       )}
                       {nativeMaxInsufficient && fromAsset && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">
-                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the gas reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeEvmGasReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
+                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
                         </Text>
                       )}
                     </Box>
@@ -3368,7 +3370,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
                         </Text>
                       )}
-                      {isNativeEvmMax && (
+                      {isFeeReservedNativeMax && (
                         <Text fontSize="9px" color="var(--gold)" mt="1">{t("sendMaxGasNote")}</Text>
                       )}
                     </Box>

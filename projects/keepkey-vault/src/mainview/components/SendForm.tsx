@@ -423,7 +423,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								fontWeight="600"
 								fontSize="11px"
 								_hover={{ bg: isMax ? "var(--gold-2)" : "var(--ink-4)" }}
-								onClick={() => { setIsMax(!isMax); setAmount(""); setUsdAmount("") }}
+								onClick={() => { setIsMax(true); setAmount(""); setUsdAmount("") }}
 								px="4" py="2"
 								h="32px"
 							>
