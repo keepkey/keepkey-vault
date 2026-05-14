@@ -55,7 +55,7 @@ describe('TRON max send', () => {
     expect(result.fee).toBe('1.1')
   })
 
-  test('TRC-20 max uses the full frontend token balance in base units', async () => {
+  test('TRC-20 max reserves one token base unit before encoding transfer amount', async () => {
     let contractRequest: any
 
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -86,7 +86,7 @@ describe('TRON max send', () => {
 
     expect(contractRequest.contract_address).toBe(usdtContract)
     expect(contractRequest.function_selector).toBe('transfer(address,uint256)')
-    expect(BigInt(`0x${contractRequest.parameter.slice(64)}`)).toBe(123_450_000n)
+    expect(BigInt(`0x${contractRequest.parameter.slice(64)}`)).toBe(123_449_999n)
     expect(result.unsignedTx.tronGridTx.txID).toBe('trc20-max')
     expect(result.fee).toBe('30')
   })

@@ -3,6 +3,7 @@
  */
 import type { ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
+import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
@@ -19,13 +20,6 @@ export { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from '
 const TRON_SUN_PER_TRX = 1_000_000n
 const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n
 const TRON_TOKEN_CONTRACT_RE = /^tron:[^/]+\/(?:token|trc20):(T[1-9A-HJ-NP-Za-km-z]{33})$/
-
-function decimalToBaseUnits(displayAmount: string, decimals: number): bigint {
-  const parts = displayAmount.split('.')
-  const whole = parts[0] || '0'
-  const frac = (parts[1] || '').slice(0, decimals).padEnd(decimals, '0')
-  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac)
-}
 
 async function fetchTronNativeBalanceSun(address: string): Promise<bigint> {
   const resp = await fetch('https://api.trongrid.io/wallet/getaccount', {
@@ -186,17 +180,12 @@ export async function buildTx(
         const tokenDecimals = params.tokenDecimals
         // For MAX send, use frontend-provided tokenBalance (same pattern as EVM)
         const sendAmount = params.isMax && params.tokenBalance && parseFloat(params.tokenBalance) > 0
-          ? params.tokenBalance
+          ? tokenMaxSpendableAmount(params.tokenBalance, tokenDecimals)
           : params.amount
         if (params.isMax && (!sendAmount || parseFloat(sendAmount) <= 0)) {
           throw new Error('Token balance is zero — cannot send max')
         }
-        const tokenAmountBase = (() => {
-          const parts = sendAmount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, tokenDecimals).padEnd(tokenDecimals, '0')
-          return String(BigInt(whole) * BigInt(10 ** tokenDecimals) + BigInt(frac))
-        })()
+        const tokenAmountBase = decimalToBaseUnitsStrict(sendAmount, tokenDecimals).toString()
 
         console.debug(`[buildTx:solana] SPL token: decimals=${tokenDecimals}`)
         try {
@@ -298,7 +287,7 @@ export async function buildTx(
         let tokenAmountBase: bigint
         if (params.isMax) {
           if (params.tokenBalance && parseFloat(params.tokenBalance) > 0) {
-            tokenAmountBase = decimalToBaseUnits(params.tokenBalance, tokenDecimals)
+            tokenAmountBase = tokenMaxSpendableBaseUnits(params.tokenBalance, tokenDecimals) ?? 0n
           } else {
             const ownerHashHex = tronAddressHashHex(params.fromAddress)
             const ownerParameter = ownerHashHex.padStart(64, '0')
@@ -326,7 +315,7 @@ export async function buildTx(
           }
           if (tokenAmountBase <= 0n) throw new Error('Token balance is zero — cannot send max')
         } else {
-          tokenAmountBase = decimalToBaseUnits(params.amount, tokenDecimals)
+          tokenAmountBase = decimalToBaseUnitsStrict(params.amount, tokenDecimals)
           if (tokenAmountBase <= 0n) throw new Error('Amount must be greater than zero')
         }
 
@@ -408,7 +397,7 @@ export async function buildTx(
             }
             return spendableSun
           })()
-        : decimalToBaseUnits(params.amount, 6)
+        : decimalToBaseUnitsStrict(params.amount, 6)
       if (sunAmountBig <= 0n) throw new Error('Amount must be greater than zero')
       if (sunAmountBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('TRX amount too large')
       // Keep as Number — TronGrid expects integer, and TRX max supply (99B) fits safely in Number.

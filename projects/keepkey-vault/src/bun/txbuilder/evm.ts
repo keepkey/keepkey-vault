@@ -6,6 +6,7 @@
  * Supports native ETH transfers and ERC-20 token transfers.
  */
 import type { ChainDef } from '../../shared/chains'
+import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
@@ -255,7 +256,7 @@ export async function buildEvmTx(
           throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
         }
       }
-      amountBaseUnits = parseUnits(tokBalStr, tokenDecimals)
+      amountBaseUnits = tokenMaxSpendableBaseUnits(tokBalStr, tokenDecimals) ?? 0n
       if (amountBaseUnits <= 0n) throw new Error('Token balance is zero')
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')

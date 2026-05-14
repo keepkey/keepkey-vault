@@ -14,6 +14,7 @@ import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
+import { tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
@@ -1077,21 +1078,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return maxSpendableAmount(fromAsset, fromBalance)
   }, [fromAsset, fromBalance])
 
+  const tokenPrecisionReservedMaxAmount = useMemo(() => {
+    if (!fromAsset?.contractAddress || !fromBalance) return null
+    return tokenMaxSpendableAmount(fromBalance, fromAsset.decimals)
+  }, [fromAsset, fromBalance])
+
   /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
-   * MAX the amount is already clamped, so isMax is dropped to keep the
-   * display honest. For all other MAX sends, isMax remains true so the
-   * backend's chain-aware fee math runs. */
+   * and token-precision-reserved MAX the amount is already clamped, so isMax
+   * is dropped to keep the quote, display, and submitted amount honest. For
+   * all other MAX sends, isMax remains true so the backend's chain-aware fee
+   * math runs. */
   const sendAmount = useMemo(() => {
     if (!isMax) return amount
-    return nativeFeeReservedMaxAmount ?? (fromBalance || '0')
-  }, [isMax, amount, nativeFeeReservedMaxAmount, fromBalance])
+    return nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? (fromBalance || '0')
+  }, [isMax, amount, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
 
-  const sendIsMax = isMax && nativeFeeReservedMaxAmount === null
+  const sendIsMax = isMax && nativeFeeReservedMaxAmount === null && tokenPrecisionReservedMaxAmount === null
 
   /* When the native balance is too small to even cover gas, MAX is
    * unusable — flag it so the UI can show "insufficient for gas" instead
    * of letting the user submit a 0 swap. */
   const nativeMaxInsufficient = isMax && nativeFeeReservedMaxAmount !== null && parseFloat(nativeFeeReservedMaxAmount) <= 0
+  const tokenMaxInsufficient = isMax && tokenPrecisionReservedMaxAmount !== null && parseFloat(tokenPrecisionReservedMaxAmount) <= 0
 
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
@@ -1309,7 +1317,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     fromAsset ? CHAINS.find(c => c.id === fromAsset.chainId) : undefined
   ), [fromAsset])
 
-  const validAmount = (isMax && !nativeMaxInsufficient) || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
+  const validAmount = (isMax && !nativeMaxInsufficient && !tokenMaxInsufficient) || (amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0)
   // SAFETY: never quote with an xpub as the destination. Pioneer will accept
   // it and substitute a self-derived address, but funds would land at an
   // address that didn't come from the user's wallet. Wait for the UTXO
