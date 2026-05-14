@@ -14,7 +14,7 @@ import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
-import { tokenMaxSpendableAmount } from "../../shared/max-send"
+import { nativeMaxSpendableAmount, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
@@ -81,15 +81,9 @@ function nativeMaxFeeReserve(asset: SwapAsset): number {
  *  without a frontend reserve, returns the full balance unchanged because the
  *  backend computes their fee-aware MAX amount from chain-specific inputs. */
 function maxSpendableAmount(asset: SwapAsset, balance: string): string {
-  const bal = parseFloat(balance || '0')
-  if (!isFinite(bal) || bal <= 0) return balance
   const reserve = nativeMaxFeeReserve(asset)
   if (reserve <= 0) return balance
-  const spendable = bal - reserve
-  if (spendable <= 0) return '0'
-  // Trim to a reasonable precision; keep the original digit count if the
-  // reserve subtracts cleanly. The mono input formats this anyway.
-  return spendable.toFixed(8).replace(/\.?0+$/, '')
+  return nativeMaxSpendableAmount(balance, asset.decimals, reserve)
 }
 
 function nativeUsdValue(balance: ChainBalance): number {

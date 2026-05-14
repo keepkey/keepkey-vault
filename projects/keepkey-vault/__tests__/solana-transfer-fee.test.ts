@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import { buildTx } from '../src/bun/txbuilder'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from '../src/bun/txbuilder/solana'
+import { CHAINS } from '../src/shared/chains'
+
+const solana = CHAINS.find(c => c.id === 'solana')!
+const solanaAddress = '11111111111111111111111111111111'
 
 describe('solanaTransferLamportsForAmount', () => {
   test('converts native SOL amount to lamports without max adjustment', () => {
@@ -16,5 +21,27 @@ describe('solanaTransferLamportsForAmount', () => {
 
   test('truncates to Solana native precision', () => {
     expect(solanaTransferLamportsForAmount('1.1234567899')).toBe(1123456789n)
+  })
+
+  test('regular native SOL max send uses the provided native balance', async () => {
+    let transferParams: any
+    const pioneer = {
+      BuildSolanaTransfer: async (params: any) => {
+        transferParams = params
+        return { data: { serialized: 'solana-max-transfer' } }
+      },
+    }
+
+    const result = await buildTx(pioneer, solana, {
+      chainId: 'solana',
+      to: solanaAddress,
+      amount: '0',
+      isMax: true,
+      fromAddress: solanaAddress,
+      nativeBalance: '0.23438859',
+    })
+
+    expect(transferParams.amount).toBe('234383590')
+    expect(result.fee).toBe('0.000005')
   })
 })

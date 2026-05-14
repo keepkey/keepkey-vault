@@ -208,8 +208,22 @@ export async function buildTx(
           throw new Error(`SPL token tx build failed: ${e.message}`)
         }
       } else {
-        // Native SOL transfer — convert to lamports (9 decimals)
-        const solAmountLamports = String(solanaTransferLamportsForAmount(params.amount, !!params.isMax))
+        // Native SOL transfer — convert to lamports (9 decimals). For regular
+        // Send MAX the UI submits amount='0' + isMax=true, so resolve the
+        // native balance here before subtracting the signature fee.
+        let solAmount = params.amount
+        if (params.isMax) {
+          solAmount = params.nativeBalance || ''
+          if (!solAmount) {
+            try {
+              const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: params.fromAddress })
+              solAmount = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
+            } catch (e: any) {
+              throw new Error(`Cannot fetch SOL balance for max send: ${e.message}`)
+            }
+          }
+        }
+        const solAmountLamports = String(solanaTransferLamportsForAmount(solAmount, !!params.isMax))
 
         console.debug(`[buildTx:solana] Native SOL transfer${params.isMax ? ` (max, reserved ${SOLANA_LAMPORTS_PER_SIGNATURE} lamports for fee)` : ''}`)
         try {

@@ -44,3 +44,13 @@ export function tokenMaxSpendableAmount(balance: string, decimals: number): stri
   if (spendableUnits === null) return balance
   return baseUnitsToDecimalString(spendableUnits, decimals)
 }
+
+export function nativeMaxSpendableAmount(balance: string, decimals: number, reserve: string | number): string {
+  const balanceUnits = decimalToBaseUnits(balance, decimals)
+  const reserveUnits = decimalToBaseUnits(String(reserve), decimals)
+  if (balanceUnits === null || reserveUnits === null) return balance
+
+  const spendableUnits = balanceUnits - reserveUnits
+  if (spendableUnits <= 0n) return '0'
+  return baseUnitsToDecimalString(spendableUnits, decimals)
+}

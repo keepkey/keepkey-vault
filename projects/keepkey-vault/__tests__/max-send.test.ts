@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   decimalToBaseUnits,
+  nativeMaxSpendableAmount,
   tokenMaxPrecisionReserveUnits,
   tokenMaxSpendableAmount,
   tokenMaxSpendableBaseUnits,
@@ -24,5 +25,15 @@ describe('token max send precision reserve', () => {
 
   test('returns zero when the balance cannot cover the reserve', () => {
     expect(tokenMaxSpendableAmount('0.000000001', 18)).toBe('0')
+  })
+})
+
+describe('native max send fee reserve', () => {
+  test('subtracts reserve in base units without rounding SOL upward', () => {
+    expect(nativeMaxSpendableAmount('0.100000006', 9, '0.000005')).toBe('0.099995006')
+  })
+
+  test('returns zero when native balance cannot cover reserve', () => {
+    expect(nativeMaxSpendableAmount('0.000004999', 9, '0.000005')).toBe('0')
   })
 })

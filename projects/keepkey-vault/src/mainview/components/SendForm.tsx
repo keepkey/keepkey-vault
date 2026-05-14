@@ -166,6 +166,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				feeLevel,
 				isMax,
 				caip: isTokenSend ? token!.caip : undefined,
+				nativeBalance: !isTokenSend ? balance?.balance : undefined,
 				tokenBalance: isTokenSend ? token!.balance : undefined,
 				tokenDecimals: isTokenSend && token!.decimals != null ? token!.decimals : undefined,
 				xpubOverride: xpubOverride || undefined,
@@ -179,7 +180,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -423,7 +424,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								fontWeight="600"
 								fontSize="11px"
 								_hover={{ bg: isMax ? "var(--gold-2)" : "var(--ink-4)" }}
-								onClick={() => { setIsMax(true); setAmount(""); setUsdAmount("") }}
+								onClick={() => { setIsMax(prev => !prev); setAmount(""); setUsdAmount("") }}
 								px="4" py="2"
 								h="32px"
 							>
