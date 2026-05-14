@@ -699,9 +699,10 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     const relayStatus = await fetchRelayExecutionStatus(swap)
     const mappedRelayStatus = mapRelayExecutionStatus(relayStatus?.status)
     const relayChanged = applyRelayExecutionStatus(swap, relayStatus)
+    const hasEnoughRelayTerminalData = hasEnoughRelayTerminalMetadata(swap)
     if (
-      (relayChanged && isTerminalSwapStatus(swap.status)) ||
-      (mappedRelayStatus && isTerminalSwapStatus(mappedRelayStatus) && mappedRelayStatus === swap.status)
+      (relayChanged && isTerminalSwapStatus(swap.status) && hasEnoughRelayTerminalData) ||
+      (mappedRelayStatus && isTerminalSwapStatus(mappedRelayStatus) && mappedRelayStatus === swap.status && hasEnoughRelayTerminalData)
     ) return swap
   }
 
@@ -959,32 +960,52 @@ async function fetchRelayExecutionStatus(swap: PendingSwap): Promise<RelayExecut
 function applyRelayExecutionStatus(swap: PendingSwap, relayStatus: RelayExecutionStatus | null): boolean {
   if (!relayStatus) return false
   const nextStatus = mapRelayExecutionStatus(relayStatus.status)
-  if (!nextStatus || !shouldApplyRelayStatus(swap.status, nextStatus)) return false
+  if (!nextStatus) return false
 
   const now = Date.now()
   const final = isTerminalSwapStatus(nextStatus)
   const outboundTxid = relayOutboundTxid(relayStatus, swap.txid)
   const relayDetails = relayStatus.details || undefined
+  const statusChanged = nextStatus !== swap.status
+  const nextConfirmations = nextStatus !== 'pending'
+    ? Math.max(swap.confirmations || 0, 1)
+    : swap.confirmations
+  const nextOutboundTxid = swap.outboundTxid || outboundTxid
+  const nextOutboundConfirmations = final && nextStatus === 'completed' && nextOutboundTxid
+    ? Math.max(swap.outboundConfirmations || 0, 1)
+    : swap.outboundConfirmations
+  const nextOutboundRequiredConfirmations = final && nextStatus === 'completed' && nextOutboundTxid
+    ? Math.max(swap.outboundRequiredConfirmations || 0, 1)
+    : swap.outboundRequiredConfirmations
+  const nextError = nextStatus === 'failed' && relayDetails ? relayDetails : swap.error
+  const nextRefundReason = nextStatus === 'refunded' && relayDetails ? relayDetails : swap.refundReason
+  const metadataChanged =
+    nextConfirmations !== swap.confirmations ||
+    (!!outboundTxid && outboundTxid !== swap.outboundTxid) ||
+    nextOutboundConfirmations !== swap.outboundConfirmations ||
+    nextOutboundRequiredConfirmations !== swap.outboundRequiredConfirmations ||
+    nextError !== swap.error ||
+    nextRefundReason !== swap.refundReason
+  if (!shouldApplyRelayStatus(swap.status, nextStatus, metadataChanged)) return false
+
   const receivedOutput = nextStatus === 'completed' && swap.receivedOutput === undefined
     ? undefined
     : swap.receivedOutput
+  const completedAt = final ? (statusChanged ? now : swap.completedAt || now) : undefined
+  const actualTimeSeconds = completedAt ? Math.round((completedAt - swap.createdAt) / 1000) : undefined
 
   swap.status = nextStatus
   swap.updatedAt = now
-  if (nextStatus !== 'pending') swap.confirmations = Math.max(swap.confirmations || 0, 1)
+  swap.confirmations = nextConfirmations
   if (outboundTxid && !swap.outboundTxid) swap.outboundTxid = outboundTxid
-  if (nextStatus === 'failed' && relayDetails) swap.error = relayDetails
+  if (nextOutboundConfirmations !== undefined) swap.outboundConfirmations = nextOutboundConfirmations
+  if (nextOutboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = nextOutboundRequiredConfirmations
+  if (nextStatus === 'failed' && relayDetails) swap.error = nextError
   if (nextStatus === 'refunded' && relayDetails) {
-    swap.refundReason = relayDetails
+    swap.refundReason = nextRefundReason
     swap.error = relayDetails
   }
-  if (final) {
-    swap.completedAt = now
-    if (nextStatus === 'completed' && swap.outboundTxid) {
-      swap.outboundConfirmations = Math.max(swap.outboundConfirmations || 0, 1)
-      swap.outboundRequiredConfirmations = Math.max(swap.outboundRequiredConfirmations || 0, 1)
-    }
-  }
+  if (completedAt) swap.completedAt = completedAt
 
   swapLog(`${TAG} Relay status override: ${swap.txid.slice(0, 10)}... -> ${nextStatus} (relay=${relayStatus.status || 'unknown'}, outTxid=${swap.outboundTxid || 'none'})`)
 
@@ -994,14 +1015,18 @@ function applyRelayExecutionStatus(swap: PendingSwap, relayStatus: RelayExecutio
     outboundTxid: swap.outboundTxid || undefined,
     error: swap.error,
     receivedOutput,
-    completedAt: final ? now : undefined,
-    actualTimeSeconds: final ? Math.round((now - swap.createdAt) / 1000) : undefined,
+    completedAt,
+    actualTimeSeconds,
     refundReason: swap.refundReason,
   })
 
   pushUpdate(swap)
-  if (final) pushComplete(swap)
+  if (final && statusChanged) pushComplete(swap)
   return true
+}
+
+function hasEnoughRelayTerminalMetadata(swap: PendingSwap): boolean {
+  return swap.status !== 'completed' || !!swap.outboundTxid
 }
 
 /** Push the resolved Relay request id into Pioneer's existing pending-swap row.

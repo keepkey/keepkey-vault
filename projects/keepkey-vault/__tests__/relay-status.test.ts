@@ -29,6 +29,8 @@ describe('Relay status mapping', () => {
     expect(shouldApplyRelayStatus('confirming', 'pending')).toBe(false)
     expect(shouldApplyRelayStatus('pending', 'confirming')).toBe(true)
     expect(shouldApplyRelayStatus('output_confirming', 'completed')).toBe(true)
+    expect(shouldApplyRelayStatus('completed', 'completed')).toBe(false)
+    expect(shouldApplyRelayStatus('completed', 'completed', true)).toBe(true)
   })
 
   test('uses inbound tx as outbound tx for same-chain successful Relay fills', () => {
@@ -39,5 +41,15 @@ describe('Relay status mapping', () => {
       inTxHashes: ['0xinput'],
       txHashes: [],
     }, '0xfallback')).toBe('0xinput')
+  })
+
+  test('prefers explicit Relay output hashes when present', () => {
+    expect(relayOutboundTxid({
+      status: 'success',
+      originChainId: 1,
+      destinationChainId: 8453,
+      inTxHashes: ['0xinput'],
+      txHashes: ['0xoutput'],
+    }, '0xfallback')).toBe('0xoutput')
   })
 })

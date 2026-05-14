@@ -51,8 +51,8 @@ export function isTerminalSwapStatus(status: SwapTrackingStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'refunded'
 }
 
-export function shouldApplyRelayStatus(currentStatus: SwapTrackingStatus, relayStatus: SwapTrackingStatus): boolean {
-  if (relayStatus === currentStatus) return false
+export function shouldApplyRelayStatus(currentStatus: SwapTrackingStatus, relayStatus: SwapTrackingStatus, hasMetadataUpdate = false): boolean {
+  if (relayStatus === currentStatus) return hasMetadataUpdate
   if (isTerminalSwapStatus(relayStatus)) return true
   if (isTerminalSwapStatus(currentStatus)) return false
   return STATUS_RANK[relayStatus] > STATUS_RANK[currentStatus]
