@@ -3,16 +3,35 @@
  */
 import type { ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
+import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
 // Pioneer SDK instance is passed as parameter to buildTx()
 
 export type { BuildTxParams }
+export { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
+
+const TRON_SUN_PER_TRX = 1_000_000n
+const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n
+const TRON_TOKEN_CONTRACT_RE = /^tron:[^/]+\/(?:token|trc20):(T[1-9A-HJ-NP-Za-km-z]{33})$/
+
+async function fetchTronNativeBalanceSun(address: string): Promise<bigint> {
+  const resp = await fetch('https://api.trongrid.io/wallet/getaccount', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, visible: true }),
+  })
+  const data = await resp.json() as any
+  if (data?.Error) throw new Error(data.Error)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return BigInt(data?.balance ?? 0)
+}
 
 /**
  * Inject a memo into a TronGrid `triggersmartcontract` response so the
@@ -161,17 +180,12 @@ export async function buildTx(
         const tokenDecimals = params.tokenDecimals
         // For MAX send, use frontend-provided tokenBalance (same pattern as EVM)
         const sendAmount = params.isMax && params.tokenBalance && parseFloat(params.tokenBalance) > 0
-          ? params.tokenBalance
+          ? tokenMaxSpendableAmount(params.tokenBalance, tokenDecimals)
           : params.amount
         if (params.isMax && (!sendAmount || parseFloat(sendAmount) <= 0)) {
           throw new Error('Token balance is zero — cannot send max')
         }
-        const tokenAmountBase = (() => {
-          const parts = sendAmount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, tokenDecimals).padEnd(tokenDecimals, '0')
-          return String(BigInt(whole) * BigInt(10 ** tokenDecimals) + BigInt(frac))
-        })()
+        const tokenAmountBase = decimalToBaseUnitsStrict(sendAmount, tokenDecimals).toString()
 
         console.debug(`[buildTx:solana] SPL token: decimals=${tokenDecimals}`)
         try {
@@ -194,15 +208,21 @@ export async function buildTx(
           throw new Error(`SPL token tx build failed: ${e.message}`)
         }
       } else {
-        // Native SOL transfer — convert to lamports (9 decimals)
-        const solAmountLamports = (() => {
-          const parts = params.amount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-          return String(BigInt(whole) * 1000000000n + BigInt(frac))
-        })()
+        // Native SOL transfer — convert to lamports (9 decimals). For regular
+        // Send MAX the UI submits amount='0' + isMax=true, so resolve the
+        // native balance here before subtracting the signature fee.
+        let solAmount = params.amount
+        if (params.isMax) {
+          try {
+            const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: params.fromAddress })
+            solAmount = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
+          } catch (e: any) {
+            throw new Error(`Cannot fetch live SOL balance for max send: ${e.message}`)
+          }
+        }
+        const solAmountLamports = String(solanaTransferLamportsForAmount(solAmount, !!params.isMax))
 
-        console.debug(`[buildTx:solana] Native SOL transfer`)
+        console.debug(`[buildTx:solana] Native SOL transfer${params.isMax ? ` (max, reserved ${SOLANA_LAMPORTS_PER_SIGNATURE} lamports for fee)` : ''}`)
         try {
           const resp = await pioneer.BuildSolanaTransfer({
             from: params.fromAddress,
@@ -235,7 +255,7 @@ export async function buildTx(
     case 'tron': {
       // Tron — TronGrid builds the raw protobuf tx (raw_data_hex), device signs.
       // Two paths:
-      //   • TRC-20 token (caip contains `/token:Tx...`) — triggersmartcontract
+      //   • TRC-20 token (caip contains `/token:T...` or `/trc20:T...`) — triggersmartcontract
       //     calling `transfer(address,uint256)` on the token contract. Used for
       //     USDT THORChain swaps.
       //   • Native TRX — createtransaction (TransferContract).
@@ -244,11 +264,11 @@ export async function buildTx(
       if (!params.fromAddress) throw new Error('fromAddress required for Tron')
 
       // TRC-20 detection: pioneer-router quote returns `txParams.token: "USDT-T..."`
-      // for tokens, and the upstream caip uses `tron:.../token:T...`. The caip
-      // is canonical — fall back to token-name parsing only if caip is absent.
+      // for tokens, and upstream CAIPs may use `tron:.../token:T...` or
+      // `tron:.../trc20:T...`.
       const tokenContractFromCaip = (() => {
         if (!params.caip) return null
-        const m = params.caip.match(/^tron:[^/]+\/token:(T[1-9A-HJ-NP-Za-km-z]{33})$/)
+        const m = params.caip.match(TRON_TOKEN_CONTRACT_RE)
         return m ? m[1] : null
       })()
       const isTrc20 = !!tokenContractFromCaip
@@ -259,12 +279,6 @@ export async function buildTx(
         // value up rather than hard-coding — but for the THORChain MVP, USDT is
         // the only token in scope.
         const tokenDecimals = params.tokenDecimals ?? 6
-        const tokenAmountBase = (() => {
-          const parts = params.amount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, tokenDecimals).padEnd(tokenDecimals, '0')
-          return BigInt(whole) * BigInt(10) ** BigInt(tokenDecimals) + BigInt(frac)
-        })()
 
         // ABI-encode the `transfer(address,uint256)` parameter pair.
         // TronGrid's `function_selector` field tells it to prepend the 4-byte
@@ -273,11 +287,50 @@ export async function buildTx(
         // TRON's base58check address: [0x41][20 bytes hash][4 byte checksum].
         // Strip prefix + checksum to get the 20-byte EVM-style address slot.
         const base58 = await import('bs58')
-        const toDecoded = base58.default.decode(params.to)
-        if (toDecoded.length !== 25 || toDecoded[0] !== 0x41) {
-          throw new Error(`Invalid TRON destination address: ${params.to}`)
+        const tronAddressHashHex = (address: string): string => {
+          const decoded = base58.default.decode(address)
+          if (decoded.length !== 25 || decoded[0] !== 0x41) {
+            throw new Error(`Invalid TRON address: ${address}`)
+          }
+          return Buffer.from(decoded.slice(1, 21)).toString('hex')
         }
-        const recipientHashHex = Buffer.from(toDecoded.slice(1, 21)).toString('hex')
+
+        let tokenAmountBase: bigint
+        if (params.isMax) {
+          if (params.tokenBalance && parseFloat(params.tokenBalance) > 0) {
+            tokenAmountBase = tokenMaxSpendableBaseUnits(params.tokenBalance, tokenDecimals) ?? 0n
+          } else {
+            const ownerHashHex = tronAddressHashHex(params.fromAddress)
+            const ownerParameter = ownerHashHex.padStart(64, '0')
+            try {
+              const resp = await fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  owner_address: params.fromAddress,
+                  contract_address: tokenContractFromCaip,
+                  function_selector: 'balanceOf(address)',
+                  parameter: ownerParameter,
+                  visible: true,
+                }),
+              })
+              const respJson = await resp.json() as any
+              if (respJson?.Error) throw new Error(respJson.Error)
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+              const balanceHex = respJson?.constant_result?.[0]
+              if (!balanceHex) throw new Error('missing constant_result')
+              tokenAmountBase = BigInt(`0x${balanceHex}`)
+            } catch (e: any) {
+              throw new Error(`Cannot fetch TRC-20 balance for max send: ${e.message}`)
+            }
+          }
+          if (tokenAmountBase <= 0n) throw new Error('Token balance is zero — cannot send max')
+        } else {
+          tokenAmountBase = decimalToBaseUnitsStrict(params.amount, tokenDecimals)
+          if (tokenAmountBase <= 0n) throw new Error('Amount must be greater than zero')
+        }
+
+        const recipientHashHex = tronAddressHashHex(params.to)
         const amountHex = tokenAmountBase.toString(16).padStart(64, '0')
         const parameter = recipientHashHex.padStart(64, '0') + amountHex
 
@@ -346,15 +399,20 @@ export async function buildTx(
 
       // ── Native TRX path (TransferContract) ──
       // Convert TRX amount to sun (6 decimals)
-      const sunAmount = (() => {
-        const parts = params.amount.split('.')
-        const whole = parts[0] || '0'
-        const frac = (parts[1] || '').slice(0, 6).padEnd(6, '0')
-        // Keep as Number — TronGrid expects integer, and TRX max supply (99B) fits safely in Number
-        const sun = BigInt(whole) * 1000000n + BigInt(frac)
-        if (sun > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('TRX amount too large')
-        return Number(sun)
-      })()
+      const sunAmountBig = params.isMax
+        ? await (async () => {
+            const balanceSun = await fetchTronNativeBalanceSun(params.fromAddress!)
+            const spendableSun = balanceSun - TRON_NATIVE_MAX_RESERVE_SUN
+            if (spendableSun <= 0n) {
+              throw new Error(`Insufficient TRX for max send after reserving ${Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000} TRX for network fees`)
+            }
+            return spendableSun
+          })()
+        : decimalToBaseUnitsStrict(params.amount, 6)
+      if (sunAmountBig <= 0n) throw new Error('Amount must be greater than zero')
+      if (sunAmountBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('TRX amount too large')
+      // Keep as Number — TronGrid expects integer, and TRX max supply (99B) fits safely in Number.
+      const sunAmount = Number(sunAmountBig)
 
       let tronGridTx: any
       try {
@@ -398,7 +456,7 @@ export async function buildTx(
         tronGridTx,
       }
       // Tron: bandwidth is typically free for TRX transfers
-      return { unsignedTx: tronUnsignedTx, fee: '0' }
+      return { unsignedTx: tronUnsignedTx, fee: params.isMax ? String(Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000) : '0' }
     }
 
     case 'ton': {

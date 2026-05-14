@@ -130,6 +130,7 @@ export interface BuildTxParams {
   isMax?: boolean
   isSwapDeposit?: boolean // THORChain/Maya: use MsgDeposit instead of MsgSend (for swaps/LP)
   caip?: string        // Token CAIP-19 — triggers token transfer mode when contains 'erc20'
+  nativeBalance?: string // human-readable native balance (from frontend) — avoids re-fetch on max send
   tokenBalance?: string  // human-readable token balance (from frontend) — avoids re-fetch on max send
   tokenDecimals?: number // token decimals (from frontend) — avoids re-fetch
   xpubOverride?: string        // BTC multi-account: use this xpub instead of default

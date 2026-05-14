@@ -6,6 +6,7 @@
  * Supports native ETH transfers and ERC-20 token transfers.
  */
 import type { ChainDef } from '../../shared/chains'
+import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
@@ -255,7 +256,7 @@ export async function buildEvmTx(
           throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
         }
       }
-      amountBaseUnits = parseUnits(tokBalStr, tokenDecimals)
+      amountBaseUnits = tokenMaxSpendableBaseUnits(tokBalStr, tokenDecimals) ?? 0n
       if (amountBaseUnits <= 0n) throw new Error('Token balance is zero')
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')
@@ -287,8 +288,10 @@ export async function buildEvmTx(
 
   let amountWei: bigint
   if (isMax) {
-    if (nativeBalance <= gasFee) throw new Error('Insufficient funds to cover gas fees')
-    amountWei = nativeBalance - gasFee * 110n / 100n // 10% gas buffer for safety
+    const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
+    if (nativeBalance <= gasReserve) throw new Error('Insufficient funds to cover gas fees')
+    amountWei = nativeBalance - gasReserve
+    if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
   } else {
     amountWei = parseUnits(String(params.amount), 18)
     if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {
