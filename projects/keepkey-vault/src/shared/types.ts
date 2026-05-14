@@ -935,6 +935,13 @@ export interface SwapUiState {
   } | null
   error: string | null
   txid: string | null
+  trackingStatus?: SwapTrackingStatus | null
+  confirmations?: number
+  outboundConfirmations?: number
+  outboundRequiredConfirmations?: number
+  outboundTxid?: string | null
+  relayRequestId?: string | null
+  refundReason?: string | null
 }
 
 /** Bun → WebView commands: nudge the SwapDialog the same way a user click

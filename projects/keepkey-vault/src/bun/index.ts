@@ -466,6 +466,13 @@ let swapUiState: import('../shared/types').SwapUiState = {
 	previewBuild: null,
 	error: null,
 	txid: null,
+	trackingStatus: null,
+	confirmations: 0,
+	outboundConfirmations: undefined,
+	outboundRequiredConfirmations: undefined,
+	outboundTxid: null,
+	relayRequestId: null,
+	refundReason: null,
 }
 let swapUiUpdatedAt = 0
 export function getSwapUiState(): { state: import('../shared/types').SwapUiState; updatedAt: number } {
@@ -484,6 +491,9 @@ export function resetSwapUiState(): void {
 		fromAddress: '', toAddress: '',
 		useCustomAddress: false, customToAddress: '',
 		quote: null, previewBuild: null, error: null, txid: null,
+		trackingStatus: null, confirmations: 0,
+		outboundConfirmations: undefined, outboundRequiredConfirmations: undefined,
+		outboundTxid: null, relayRequestId: null, refundReason: null,
 	}
 	swapUiUpdatedAt = Date.now()
 }
