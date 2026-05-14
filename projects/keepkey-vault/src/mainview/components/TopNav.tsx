@@ -5,6 +5,7 @@ import { IS_WINDOWS, IS_MAC } from "../lib/platform"
 import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
+import { NAV_HEIGHT } from "../layout"
 
 export type NavTab = "vault" | "shapeshift" | "apps"
 
@@ -28,11 +29,6 @@ interface TopNavProps {
 	onExitToDeviceSelect?: () => void
 	passphraseActive?: boolean
 }
-
-/* The bar height is locked at 50px because App.tsx pads its main content
-   area by `pt="54px"` (nav + 4px gap). Changing this would mis-align every
-   ready-phase screen — adjust both, not just one. */
-const NAV_H = "50px"
 
 const NAV_BG = "rgba(11,11,14,0.92)"
 const FONT_SANS = "var(--font-sans, 'Space Grotesk', system-ui, sans-serif)"
@@ -104,7 +100,7 @@ export function SplashNav() {
 			top={0}
 			left={0}
 			right={0}
-			h={NAV_H}
+			h={NAV_HEIGHT}
 			bg={NAV_BG}
 			backdropFilter="blur(20px)"
 			borderBottom="1px solid var(--line)"
@@ -182,7 +178,7 @@ export function TopNav({
 			top={0}
 			left={0}
 			right={0}
-			h={NAV_H}
+			h={NAV_HEIGHT}
 			bg={NAV_BG}
 			backdropFilter="blur(20px)"
 			borderBottom="1px solid var(--line)"
