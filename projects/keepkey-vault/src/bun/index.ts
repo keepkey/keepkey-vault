@@ -1919,6 +1919,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
 
+					// Deduplicate tokens within each chain by normalized CAIP.
+					// EVM addresses are case-insensitive hex — normalize for dedup only (caip on
+					// the object stays canonical). Non-EVM identifiers (Solana base58 mint,
+					// Tron base58check) are case-sensitive — keep them exact.
+					// When Pioneer returns the same ERC-20 for multiple EVM address indices,
+					// sum their balances so portfolio value is not underreported.
+					for (const [chainId, chainTokens] of tokensByChainId) {
+						const seen = new Map<string, TokenBalance>()
+						for (const tok of chainTokens) {
+							const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+							const existing = seen.get(key)
+							if (!existing) {
+								seen.set(key, { ...tok })
+							} else {
+								existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+								existing.balanceUsd += tok.balanceUsd
+							}
+						}
+						if (seen.size < chainTokens.length) {
+							console.debug(`[getBalances] Deduped ${chainId}: ${chainTokens.length} → ${seen.size} tokens`)
+							tokensByChainId.set(chainId, [...seen.values()])
+						}
+					}
+
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
 					for (const n of pureNatives) {
@@ -2390,11 +2414,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 
 						if (parsedTokens.length > 0) {
-							tokens = parsedTokens
-							const tokenUsdTotal = parsedTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							// Deduplicate by normalized CAIP — same EVM-only rule as getBalances.
+							// EVM: lowercase for dedup; canonical caip on the object stays intact.
+							// Non-EVM: exact match (Solana/Tron identifiers are case-sensitive).
+							const seen = new Map<string, TokenBalance>()
+							for (const tok of parsedTokens) {
+								const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+								const existing = seen.get(key)
+								if (!existing) {
+									seen.set(key, { ...tok })
+								} else {
+									existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+									existing.balanceUsd += tok.balanceUsd
+								}
+							}
+							tokens = [...seen.values()]
+							const tokenUsdTotal = tokens.reduce((sum, t) => sum + t.balanceUsd, 0)
 							balanceUsd += tokenUsdTotal
 						}
-						console.log(`[getBalance] ${chain.coin}: ${parsedTokens.length} tokens, $${balanceUsd.toFixed(2)} total`)
+						console.log(`[getBalance] ${chain.coin}: ${tokens?.length ?? 0} tokens, $${balanceUsd.toFixed(2)} total`)
 					}
 
 					if (isEvm) {

@@ -19,6 +19,16 @@ export const KNOWN_STABLECOINS = [
 	'FRAX', 'LUSD', 'SUSD', 'ALUSD', 'FEI', 'MIM', 'DOLA', 'AGEUR', 'EURT', 'EURS',
 ]
 
+/**
+ * Known scam tokens, keyed by normalized (fully-lowercased) CAIP.
+ * Scoped to chain+contract so the same address bytes on a different chain
+ * are not incorrectly blocked. Checked BEFORE the $5 value floor because
+ * scam tokens often carry a fake price above it.
+ */
+const SCAM_TOKEN_CAIPS = new Map<string, string>([
+	['eip155:1/erc20:0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', 'IROB — scam airdrop on Ethereum mainnet'],
+])
+
 /** Well-known legitimate token symbols — exempt from dust-airdrop heuristic */
 const KNOWN_LEGIT_SYMBOLS = new Set([
 	// Top tokens by market cap
@@ -103,6 +113,19 @@ export function detectSpamToken(
 			isSpam: true,
 			level: 'confirmed',
 			reason: `Name contains phishing keyword`,
+		}
+	}
+
+	// ── Tier 2b: CAIP-scoped scam blocklist ─────────────────────────
+	// Checked before the value floor — scam tokens often carry a fake price > $5.
+	// Key is the full lowercased CAIP so the same contract on a different chain
+	// is not incorrectly flagged.
+	const scamReason = SCAM_TOKEN_CAIPS.get((token.caip || '').toLowerCase())
+	if (scamReason !== undefined) {
+		return {
+			isSpam: true,
+			level: 'confirmed',
+			reason: `On scam blocklist: ${scamReason}`,
 		}
 	}
 
