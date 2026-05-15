@@ -1943,6 +1943,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
+					// EVM AssetPage shows per-address tokens from evmTokensByOwner, not tokensByChainId.
+					// Pioneer returns the same token multiple times per address — dedup that map too.
+					for (const [ownerKey, ownerTokens] of evmTokensByOwner) {
+						const seen = new Map<string, TokenBalance>()
+						for (const tok of ownerTokens) {
+							const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+							const existing = seen.get(key)
+							if (!existing) {
+								seen.set(key, { ...tok })
+							} else {
+								existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+								existing.balanceUsd += tok.balanceUsd
+							}
+						}
+						if (seen.size < ownerTokens.length) {
+							console.debug(`[getBalances] Deduped owner ${ownerKey}: ${ownerTokens.length} → ${seen.size} tokens`)
+							evmTokensByOwner.set(ownerKey, [...seen.values()])
+						}
+					}
+
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
 					for (const n of pureNatives) {
@@ -2433,6 +2453,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							balanceUsd += tokenUsdTotal
 						}
 						console.log(`[getBalance] ${chain.coin}: ${tokens?.length ?? 0} tokens, $${balanceUsd.toFixed(2)} total`)
+					}
+
+					// Dedup per-address EVM token lists before writing to evmAddresses.
+					// tokensByChainId is already deduped above; evmTokensByOwner feeds AssetPage directly.
+					if (isEvm) {
+						for (const [addr, addrTokens] of evmTokensByOwner) {
+							const seen = new Map<string, TokenBalance>()
+							for (const tok of addrTokens) {
+								const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+								const existing = seen.get(key)
+								if (!existing) {
+									seen.set(key, { ...tok })
+								} else {
+									existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+									existing.balanceUsd += tok.balanceUsd
+								}
+							}
+							if (seen.size < addrTokens.length) evmTokensByOwner.set(addr, [...seen.values()])
+						}
 					}
 
 					if (isEvm) {
