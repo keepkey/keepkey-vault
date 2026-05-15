@@ -478,7 +478,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 								<FaShieldAlt />
 							</IconButton>
 						)}
-						{!spamResult?.isSpam && !isUserHidden && (
+						{/* Hide always available: clean tokens + spam tokens in expanded section */}
+						{(!spamResult?.isSpam || opts?.showActions) && !isUserHidden && !isUserSafe && (
 							<IconButton
 								aria-label={t("hideToken")}
 								size="xs"

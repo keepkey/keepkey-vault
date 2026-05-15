@@ -129,6 +129,21 @@ export function detectSpamToken(
 		}
 	}
 
+	// ── Tier 2c: Quantity > 1M cap — before the value floor ──────────
+	// Scam airdrops often assign a fake price to clear the $5 floor.
+	// Any non-whitelisted token with > 1 million units is assumed spam.
+	// KNOWN_LEGIT_SYMBOLS (SHIB, PEPE, etc.) are explicitly exempt.
+	if (!KNOWN_LEGIT_SYMBOLS.has(sym)) {
+		const qty = parseFloat(token.balance || '0')
+		if (qty > 1_000_000) {
+			return {
+				isSpam: true,
+				level: 'confirmed',
+				reason: `Quantity ${qty.toLocaleString()} exceeds 1M — assumed scam airdrop`,
+			}
+		}
+	}
+
 	// ── Value floor: tokens worth >= $5 are not spam ─────────────────
 	// A token with real USD value is not a dust airdrop or worthless spam.
 	// Pioneer may return priceUsd: "0.00" for LP tokens where per-unit
@@ -153,22 +168,6 @@ export function detectSpamToken(
 			isSpam: true,
 			level: 'confirmed',
 			reason: `Fake ${sym} — real ${sym} is ~$1.00, this has $${usd.toFixed(2)}`,
-		}
-	}
-
-	// ── Tier 5: Dust airdrop heuristic ───────────────────────────────
-	// Huge quantity + near-zero unit price = classic airdrop spam
-	// Exempt known legitimate tokens
-	if (!KNOWN_LEGIT_SYMBOLS.has(sym)) {
-		const qty = parseFloat(token.balance || '0')
-		const price = token.priceUsd ?? 0
-
-		if (qty > 1_000_000 && price < 0.0001) {
-			return {
-				isSpam: true,
-				level: 'confirmed',
-				reason: `Dust airdrop — ${qty.toLocaleString()} units at $${price.toFixed(8)}/unit`,
-			}
 		}
 	}
 
