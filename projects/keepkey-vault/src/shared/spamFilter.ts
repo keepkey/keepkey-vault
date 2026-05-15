@@ -1,55 +1,17 @@
 /**
- * Token Spam Filter — multi-tier heuristic detection.
- *
- * Detection order (first match wins):
- *  1. User override (SQLite-persisted 'visible'/'hidden') — absolute precedence
- *  2. Value floor: tokens worth >= $5 skip heuristic tiers 3-6 (real value = not spam)
- *  3. Name/symbol contains URL or phishing keywords → CONFIRMED spam
- *  4. Symbol has suspicious characters or excessive length → CONFIRMED spam
- *  5. Known stablecoin symbol with value < $0.50 → CONFIRMED spam
- *  6. Dust airdrop: huge quantity (>1M) + near-zero unit price + low value → CONFIRMED spam
- *  7. Value < $0.01 → POSSIBLE spam (only "possible" — not auto-hidden)
- *  8. Otherwise → clean
+ * Token filter — discovery-list based.
+ * Any token whose CAIP is not in the pioneer-discovery catalog is treated as
+ * unknown/spam and hidden. User overrides take absolute precedence.
  */
 
 import type { TokenBalance } from './types'
+import { assetData } from '@pioneer-platform/pioneer-discovery'
 
-export const KNOWN_STABLECOINS = [
-	'USDT', 'USDC', 'DAI', 'BUSD', 'UST', 'TUSD', 'USDD', 'USDP', 'GUSD', 'PYUSD',
-	'FRAX', 'LUSD', 'SUSD', 'ALUSD', 'FEI', 'MIM', 'DOLA', 'AGEUR', 'EURT', 'EURS',
-]
-
-/**
- * Known scam tokens, keyed by normalized (fully-lowercased) CAIP.
- * Scoped to chain+contract so the same address bytes on a different chain
- * are not incorrectly blocked. Checked BEFORE the $5 value floor because
- * scam tokens often carry a fake price above it.
- */
-const SCAM_TOKEN_CAIPS = new Map<string, string>([
-	['eip155:1/erc20:0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', 'IROB — scam airdrop'],
-	['eip155:8453/erc20:0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', 'IROB — scam airdrop on Base'],
-])
-
-/** Well-known legitimate token symbols — exempt from dust-airdrop heuristic */
-const KNOWN_LEGIT_SYMBOLS = new Set([
-	// Top tokens by market cap
-	'ETH', 'BTC', 'WETH', 'WBTC', 'BNB', 'MATIC', 'POL', 'AVAX', 'SOL', 'DOT',
-	'ADA', 'LINK', 'UNI', 'AAVE', 'MKR', 'CRV', 'COMP', 'SNX', 'SUSHI', 'YFI',
-	'LDO', 'RPL', 'ARB', 'OP', 'FTM', 'ATOM', 'OSMO', 'RUNE', 'CACAO', 'XRP',
-	'DOGE', 'LTC', 'BCH', 'DASH', 'ZEC', 'ETC',
-	// Wrapped / bridged
-	'WAVAX', 'WBNB', 'WMATIC', 'WPOL', 'WFTM',
-	// Major stablecoins (also in KNOWN_STABLECOINS but listed here for whitelist purposes)
-	...KNOWN_STABLECOINS,
-	// Major DeFi / governance
-	'GRT', 'ENS', 'APE', 'SHIB', 'PEPE', 'WLD', 'IMX', 'RNDR', 'FET', 'OCEAN',
-	'SAND', 'MANA', 'AXS', 'GALA', 'ILV', 'BLUR', 'PENDLE', 'ENA', 'ETHFI',
-	'STX', 'INJ', 'TIA', 'SEI', 'SUI', 'APT', 'NEAR', 'FIL', 'AR',
-	// LSTs / LRTs
-	'STETH', 'RETH', 'CBETH', 'WSTETH', 'SWETH', 'EETH', 'WEETH', 'METH', 'RSETH',
-	// FOX
-	'FOX',
-])
+// Build once at module load for O(1) lookups.
+const _arr: Array<{ assetId: string }> = Array.isArray(assetData)
+	? assetData
+	: Object.values(assetData as object)
+const DISCOVERY_SET = new Set<string>(_arr.map(a => a.assetId.toLowerCase()))
 
 export type SpamLevel = 'confirmed' | 'possible' | null
 
@@ -59,141 +21,29 @@ export interface SpamResult {
 	reason: string
 }
 
-// ── Heuristic helpers ────────────────────────────────────────────────
-
-/** Tokens worth at least this much skip heuristic spam checks (tiers 3-6) */
-const VALUE_FLOOR_USD = 5
-
-/** URL-like patterns in name or symbol — nearly always phishing */
-const URL_PATTERN = /(?:\.[a-z]{2,6}(?:\/|$))|https?:|www\./i
-
-/** Phishing action words that appear in scam token names */
-const PHISHING_KEYWORDS = /\b(claim|visit|reward|bonus|airdrop|free|voucher|gift|redeem|activate|eligible)\b/i
-
-/** Symbols should be short alphanumeric; these chars indicate scam */
-const SUSPICIOUS_SYMBOL_CHARS = /[./:$!@#%^&*()+=\[\]{}|\\<>,?~`'"]/
-
-/** Max reasonable symbol length — real tokens are 2-11 chars */
-const MAX_SYMBOL_LENGTH = 11
-
 /**
- * Detect whether a token is spam.
- *
- * Call with optional `userOverride` from the token_visibility DB table.
- * When a user override is present it takes absolute precedence.
+ * Returns whether a token should be hidden.
+ * User overrides (from token_visibility DB table) take absolute precedence.
+ * All other tokens are checked against the discovery catalog.
  */
 export function detectSpamToken(
 	token: TokenBalance,
 	userOverride?: 'visible' | 'hidden' | null,
 ): SpamResult {
-	// ── Tier 0: User override — absolute precedence ──────────────────
-	if (userOverride === 'visible') {
-		return { isSpam: false, level: null, reason: 'User marked as safe' }
-	}
-	if (userOverride === 'hidden') {
-		return { isSpam: true, level: 'confirmed', reason: 'User marked as hidden' }
-	}
+	if (userOverride === 'visible') return { isSpam: false, level: null, reason: 'User marked as safe' }
+	if (userOverride === 'hidden') return { isSpam: true, level: 'confirmed', reason: 'User marked as hidden' }
 
-	const usd = token.balanceUsd ?? 0
-	const sym = (token.symbol || '').toUpperCase()
-	const name = token.name || ''
+	const caip = (token.caip || '').toLowerCase()
+	if (!caip) return { isSpam: false, level: null, reason: 'No CAIP' }
 
-	// ── Tier 1: Name/symbol contains URL → CONFIRMED spam ────────────
-	// (Always check regardless of value — phishing tokens can be high-value)
-	if (URL_PATTERN.test(name) || URL_PATTERN.test(token.symbol || '')) {
-		return {
-			isSpam: true,
-			level: 'confirmed',
-			reason: `Name/symbol contains URL — phishing token`,
-		}
-	}
+	if (DISCOVERY_SET.has(caip)) return { isSpam: false, level: null, reason: 'In discovery catalog' }
 
-	// ── Tier 2: Name contains phishing keywords → CONFIRMED spam ─────
-	if (PHISHING_KEYWORDS.test(name)) {
-		return {
-			isSpam: true,
-			level: 'confirmed',
-			reason: `Name contains phishing keyword`,
-		}
-	}
-
-	// ── Tier 2b: CAIP-scoped scam blocklist ─────────────────────────
-	// Checked before the value floor — scam tokens often carry a fake price > $5.
-	// Key is the full lowercased CAIP so the same contract on a different chain
-	// is not incorrectly flagged.
-	const scamReason = SCAM_TOKEN_CAIPS.get((token.caip || '').toLowerCase())
-	if (scamReason !== undefined) {
-		return {
-			isSpam: true,
-			level: 'confirmed',
-			reason: `On scam blocklist: ${scamReason}`,
-		}
-	}
-
-	// ── Tier 2c: Quantity > 1M cap — before the value floor ──────────
-	// Scam airdrops often assign a fake price to clear the $5 floor.
-	// Any non-whitelisted token with > 1 million units is assumed spam.
-	// KNOWN_LEGIT_SYMBOLS (SHIB, PEPE, etc.) are explicitly exempt.
-	if (!KNOWN_LEGIT_SYMBOLS.has(sym)) {
-		const qty = parseFloat(token.balance || '0')
-		if (qty > 1_000_000) {
-			return {
-				isSpam: true,
-				level: 'confirmed',
-				reason: `Quantity ${qty.toLocaleString()} exceeds 1M — assumed scam airdrop`,
-			}
-		}
-	}
-
-	// ── Value floor: tokens worth >= $5 are not spam ─────────────────
-	// A token with real USD value is not a dust airdrop or worthless spam.
-	// Pioneer may return priceUsd: "0.00" for LP tokens where per-unit
-	// price rounds to zero, but the total valueUsd is significant.
-	// Skip all remaining heuristic tiers for tokens with real value.
-	if (usd >= VALUE_FLOOR_USD) {
-		return { isSpam: false, level: null, reason: `Value $${usd.toFixed(2)} above floor` }
-	}
-
-	// ── Tier 3: Suspicious symbol characters or length → CONFIRMED ───
-	if (SUSPICIOUS_SYMBOL_CHARS.test(token.symbol || '') || (token.symbol || '').length > MAX_SYMBOL_LENGTH) {
-		return {
-			isSpam: true,
-			level: 'confirmed',
-			reason: `Symbol has suspicious characters or is too long`,
-		}
-	}
-
-	// ── Tier 4: Fake stablecoin (symbol matches but value way off) ───
-	if (KNOWN_STABLECOINS.includes(sym) && usd < 0.50) {
-		return {
-			isSpam: true,
-			level: 'confirmed',
-			reason: `Fake ${sym} — real ${sym} is ~$1.00, this has $${usd.toFixed(2)}`,
-		}
-	}
-
-	// ── Tier 6: Near-zero value → POSSIBLE spam ──────────────────────
-	if (usd < 0.01) {
-		return {
-			isSpam: true,
-			level: 'possible',
-			reason: `Near-zero value ($${usd.toFixed(4)})`,
-		}
-	}
-
-	// ── Clean — passed all checks ────────────────────────────────────
-	return { isSpam: false, level: null, reason: 'Passed all spam checks' }
+	return { isSpam: true, level: 'confirmed', reason: 'Not in discovery catalog' }
 }
 
 /**
- * Categorize an array of tokens using detectSpamToken.
- *
- * @param tokens      - token array from ChainBalance.tokens
- * @param overrides   - Map<caip, 'visible'|'hidden'> from DB
- * @returns { clean, spam, zeroValue } — mutually exclusive buckets
- *
- * Only "confirmed" spam is auto-hidden. "Possible" spam stays visible
- * so the user can decide (and mark hidden via token_visibility if desired).
+ * Split a token array into clean / spam / zeroValue buckets.
+ * Only confirmed spam is auto-hidden.
  */
 export function categorizeTokens(
 	tokens: TokenBalance[],
@@ -204,7 +54,7 @@ export function categorizeTokens(
 	const zeroValue: TokenBalance[] = []
 
 	for (const t of tokens) {
-		const override = overrides?.get(t.caip?.toLowerCase()) ?? null
+		const override = overrides?.get((t.caip || '').toLowerCase()) ?? null
 		const result = detectSpamToken(t, override)
 
 		if (result.isSpam && result.level === 'confirmed') {
