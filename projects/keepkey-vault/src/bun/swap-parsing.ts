@@ -182,8 +182,15 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  if (!memo && !hasPrebuiltTx) {
-    console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
+  // For memo-less UTXO swaps (e.g. NEAR Intents via ShapeShift), the deposit
+  // address IS the only instruction — no memo or calldata needed. Detect by
+  // swapper name so we don't silently accept broken THORChain quotes.
+  const isMemolessTransfer = !!inboundAddress && swapper === 'NEAR Intents'
+  if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
+    // A quote with neither memo nor prebuilt calldata has no swap instructions —
+    // it cannot be executed. Throw now so the UI surfaces a clear error at
+    // quote-fetch time rather than a cryptic "Missing swap memo" at preview time.
+    throw new Error('Quote returned no swap instructions (no memo and no calldata) — try a different pair or refresh')
   }
 
   // Extract fees — relay uses a different fee structure

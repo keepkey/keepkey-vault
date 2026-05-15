@@ -397,8 +397,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
+  // NEAR Intents (memo-less): deposit address is the only instruction — no memo needed
+  const isMemolessTransfer = !!params.inboundAddress && params.swapper === 'NEAR Intents'
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
-  if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
+  if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   if (params.memo) {
     const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
     if (memoByteLength > MEMO_LIMIT) {
@@ -679,8 +681,9 @@ export async function previewSwapBuild(
 
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
+  const isMemolessTransfer = !!params.inboundAddress && params.swapper === 'NEAR Intents'
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
-  if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
+  if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
 
   const pioneer = await getPioneer()
 
