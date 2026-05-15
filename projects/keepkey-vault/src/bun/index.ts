@@ -1894,7 +1894,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							balance: String(tok.balance ?? '0'),
 							balanceUsd: parsedBalanceUsd,
 							priceUsd: parsedPriceUsd,
-							caip: tok.caip || '',
+							caip: (tok.caip || '').toLowerCase(),
 							contractAddress,
 							networkId: tokNetworkId || caipPrefix,
 							icon: tok.icon || undefined,
@@ -1918,6 +1918,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
+
+					// Deduplicate tokens within each chain by caip.
+					// Pioneer may return the same ERC-20 once per EVM address — keep highest USD value.
+					for (const [chainId, chainTokens] of tokensByChainId) {
+						const seen = new Map<string, TokenBalance>()
+						for (const tok of chainTokens) {
+							const existing = seen.get(tok.caip)
+							if (!existing || tok.balanceUsd > existing.balanceUsd) seen.set(tok.caip, tok)
+						}
+						if (seen.size < chainTokens.length) {
+							console.debug(`[getBalances] Deduped ${chainId}: ${chainTokens.length} → ${seen.size} tokens`)
+							tokensByChainId.set(chainId, [...seen.values()])
+						}
+					}
 
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)

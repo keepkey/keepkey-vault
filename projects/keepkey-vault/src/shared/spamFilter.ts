@@ -19,6 +19,16 @@ export const KNOWN_STABLECOINS = [
 	'FRAX', 'LUSD', 'SUSD', 'ALUSD', 'FEI', 'MIM', 'DOLA', 'AGEUR', 'EURT', 'EURS',
 ]
 
+/**
+ * Known scam/fraud contract addresses (lowercase).
+ * These are checked BEFORE the $5 value floor so fake-price scams are caught.
+ * Add by lowercase contract address only — no chain prefix needed since the
+ * same contract byte-string is the identifier regardless of EVM chain.
+ */
+const SCAM_CONTRACT_ADDRESSES = new Set([
+	'0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', // IROB — known scam airdrop
+])
+
 /** Well-known legitimate token symbols — exempt from dust-airdrop heuristic */
 const KNOWN_LEGIT_SYMBOLS = new Set([
 	// Top tokens by market cap
@@ -103,6 +113,17 @@ export function detectSpamToken(
 			isSpam: true,
 			level: 'confirmed',
 			reason: `Name contains phishing keyword`,
+		}
+	}
+
+	// ── Tier 2b: Known scam contract address ──────────────────────────
+	// Checked before the value floor — scam tokens often carry a fake price > $5.
+	const contractAddr = (token.contractAddress || '').toLowerCase()
+	if (contractAddr && SCAM_CONTRACT_ADDRESSES.has(contractAddr)) {
+		return {
+			isSpam: true,
+			level: 'confirmed',
+			reason: `Contract address is on the scam blocklist`,
 		}
 	}
 
