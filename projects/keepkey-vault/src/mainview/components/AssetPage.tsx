@@ -310,8 +310,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 			Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
 		)
 		const results = new Map<string, SpamResult>()
+		console.log(`[spamFilter] evaluating ${tokens.length} tokens, ${overrides.size} overrides`)
 		for (const t of tokens) {
-			results.set(t.caip, detectSpamToken(t, overrides.get(t.caip?.toLowerCase()) ?? null))
+			const override = overrides.get(t.caip?.toLowerCase()) ?? null
+			const result = detectSpamToken(t, override)
+			results.set(t.caip, result)
+			console.log(`[spamFilter] ${t.symbol} caip="${t.caip}" contract="${t.contractAddress}" qty=${t.balance} usd=${t.balanceUsd} override=${override} → ${result.isSpam ? `SPAM(${result.level})` : 'clean'} — ${result.reason}`)
 		}
 		const { clean, spam, zeroValue } = categorizeTokens(tokens, overrides)
 		return {
@@ -335,11 +339,17 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	// Toggle token visibility via RPC
 	const handleSetVisibility = useCallback(async (caip: string, status: TokenVisibilityStatus) => {
+		console.log(`[hideToken] ▶ caip="${caip}" status="${status}" caipLower="${caip.toLowerCase()}"`)
 		try {
-			await rpcRequest('setTokenVisibility', { caip, status }, 5000)
-			setVisibilityMap(prev => ({ ...prev, [caip.toLowerCase()]: status }))
+			const result = await rpcRequest('setTokenVisibility', { caip, status }, 5000)
+			console.log(`[hideToken] ✓ RPC ok`, result)
+			setVisibilityMap(prev => {
+				const next = { ...prev, [caip.toLowerCase()]: status }
+				console.log(`[hideToken] visibilityMap updated — keys:`, Object.keys(next))
+				return next
+			})
 		} catch (e: any) {
-			console.warn('[AssetPage] setTokenVisibility failed:', e.message)
+			console.error(`[hideToken] ✗ RPC failed: ${e.message}`, e)
 		}
 	}, [])
 
