@@ -339,15 +339,15 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 
 	// Toggle token visibility via RPC
 	const handleSetVisibility = useCallback(async (caip: string, status: TokenVisibilityStatus) => {
-		console.log(`[hideToken] ▶ caip="${caip}" status="${status}" caipLower="${caip.toLowerCase()}"`)
+		console.log(`[hideToken] ▶ caip="${caip}" status="${status}"`)
 		try {
-			const result = await rpcRequest('setTokenVisibility', { caip, status }, 5000)
-			console.log(`[hideToken] ✓ RPC ok`, result)
-			setVisibilityMap(prev => {
-				const next = { ...prev, [caip.toLowerCase()]: status }
-				console.log(`[hideToken] visibilityMap updated — keys:`, Object.keys(next))
-				return next
-			})
+			await rpcRequest('setTokenVisibility', { caip, status }, 5000)
+			console.log(`[hideToken] ✓ stored`)
+			setVisibilityMap(prev => ({ ...prev, [caip.toLowerCase()]: status }))
+			// Collapse the "show filtered" section when hiding so the token disappears
+			// immediately. Without this, the token moves to spam bucket but stays visible
+			// because the section is expanded, making the hide appear broken.
+			if (status === 'hidden') setShowHidden(false)
 		} catch (e: any) {
 			console.error(`[hideToken] ✗ RPC failed: ${e.message}`, e)
 		}

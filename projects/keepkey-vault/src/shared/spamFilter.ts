@@ -26,7 +26,8 @@ export const KNOWN_STABLECOINS = [
  * scam tokens often carry a fake price above it.
  */
 const SCAM_TOKEN_CAIPS = new Map<string, string>([
-	['eip155:1/erc20:0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', 'IROB — scam airdrop on Ethereum mainnet'],
+	['eip155:1/erc20:0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', 'IROB — scam airdrop'],
+	['eip155:8453/erc20:0xd038bbd708b2cdf97a5f07551ed86c469ef02cd3', 'IROB — scam airdrop on Base'],
 ])
 
 /** Well-known legitimate token symbols — exempt from dust-airdrop heuristic */
