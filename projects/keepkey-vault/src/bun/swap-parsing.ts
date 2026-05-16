@@ -188,6 +188,19 @@ export function parseQuoteResponse(
     inboundAddress = router
   }
 
+  // Guard: UTXO sources must send to a chain-native address, not an EVM address.
+  // NEAR Intents BTC→ETH falls back to the user's ETH recipientAddress when Pioneer
+  // can't surface a BTC deposit address from step.allowanceContract — that ETH
+  // address would be passed to the firmware as a Bitcoin output and cause
+  // "Failed to compile output" (code 9). Fail loudly here instead.
+  if (fromIsUtxo && inboundAddress && inboundAddress.startsWith('0x')) {
+    console.error(`${TAG} NEAR Intents BTC deposit address is missing — Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2).slice(0, 2000)}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    throw new Error('Swap quote did not provide a valid BTC deposit address — NEAR Intents deposit channel may be unavailable for this pair. Try refreshing the quote.')
+  }
+
   // Expiry for depositWithExpiry
   const expiry = raw.expiry || quote.expiry || 0
 
