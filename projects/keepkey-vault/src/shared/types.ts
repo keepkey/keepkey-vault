@@ -711,6 +711,7 @@ export interface SwapQuote {
    *  Undefined for non-aggregator integrations (use `integration` directly). */
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
+  minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
 }
 
 /** Parameters for getSwapQuote RPC.
