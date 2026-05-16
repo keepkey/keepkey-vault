@@ -273,6 +273,15 @@ export class WalletConnectManager {
   }
 
   async destroy(): Promise<void> {
+    // Drain pending pair approvals so acquireWindowFocus refcount is balanced.
+    // If we skip this, disabling WC while a pair prompt is open leaks _alwaysOnTopRefs.
+    for (const [id, entry] of this.pendingPairApprovals) {
+      clearTimeout(entry.timer)
+      this.callbacks.onPairApprovalDismiss(id)
+      entry.resolve(false)
+    }
+    this.pendingPairApprovals.clear()
+
     if (!this.web3wallet) return
     const sessions = this.web3wallet.getActiveSessions()
     for (const session of Object.values(sessions)) {

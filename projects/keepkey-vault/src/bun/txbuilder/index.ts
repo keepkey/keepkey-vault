@@ -214,8 +214,20 @@ export async function buildTx(
         let solAmount = params.amount
         if (params.isMax) {
           try {
-            const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: params.fromAddress })
-            solAmount = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
+            // Pioneer's GetBalanceAddressByNetwork uses the /evm/balance/ endpoint
+            // which rejects non-Ethereum addresses. Use Solana JSON-RPC directly.
+            const rpcResp = await fetch('https://api.mainnet-beta.solana.com', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [params.fromAddress, { commitment: 'confirmed' }] }),
+            })
+            const rpcJson = await rpcResp.json() as any
+            if (rpcJson.error) throw new Error(rpcJson.error.message || String(rpcJson.error))
+            const lamports: number = rpcJson.result?.value ?? 0
+            // Integer arithmetic to avoid floating-point precision loss
+            const whole = Math.floor(lamports / 1_000_000_000)
+            const frac = String(lamports % 1_000_000_000).padStart(9, '0')
+            solAmount = `${whole}.${frac}`
           } catch (e: any) {
             throw new Error(`Cannot fetch live SOL balance for max send: ${e.message}`)
           }

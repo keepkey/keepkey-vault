@@ -682,6 +682,10 @@ export interface RelayTxParams {
   maxFeePerGas?: string
   maxPriorityFeePerGas?: string
   chainId: number
+  /** True for deposit-channel protocols (Chainflip, NEAR Intents EVM side) where
+   *  `data` is intentionally empty — the swap destination was registered off-chain
+   *  when the quote/channel was created. Skips the empty-calldata cross-chain guard. */
+  isDepositChannel?: boolean
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */
@@ -745,6 +749,21 @@ export interface ExecuteSwapParams {
   toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
+}
+
+export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
+
+export interface SwapIntegrationHealth {
+  key: string               // 'thorchain' | 'mayachain' | 'shapeshift' | 'relay' | 'chainflip'
+  label: string
+  status: SwapProviderStatus
+  haltedPools?: string[]    // CAIP-19s of suspended/staged pools
+  detail?: string           // one-line reason, e.g. "2 pools halted or suspended"
+}
+
+export interface SwapHealth {
+  fetchedAt: number
+  integrations: SwapIntegrationHealth[]
 }
 
 /** Result of executeSwap RPC */

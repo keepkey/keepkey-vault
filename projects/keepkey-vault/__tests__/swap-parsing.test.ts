@@ -289,9 +289,9 @@ describe('parseQuoteResponse', () => {
   })
 
   test('accepts new Pioneer field names (expectedAmountOut, amount_out)', () => {
-    const camel = { data: [{ quote: { expectedAmountOut: '2.5', inbound_address: '0xv' } }] }
+    const camel = { data: [{ quote: { expectedAmountOut: '2.5', inbound_address: '0xv', memo: '=:ETH.ETH:0xdest' } }] }
     expect(parseQuoteResponse(camel, baseParams).expectedOutput).toBe('2.5')
-    const snake = { data: [{ quote: { amount_out: '3.7', inbound_address: '0xv' } }] }
+    const snake = { data: [{ quote: { amount_out: '3.7', inbound_address: '0xv', memo: '=:ETH.ETH:0xdest' } }] }
     expect(parseQuoteResponse(snake, baseParams).expectedOutput).toBe('3.7')
   })
 
@@ -329,6 +329,125 @@ describe('parseQuoteResponse', () => {
     const noOutput = { data: [{ quote: { inbound_address: '0xv' } }] }
     expect(() => parseQuoteResponse(noOutput, params))
       .toThrow(/eip155:10\/erc20:0x9560/)
+  })
+
+  // ── Deposit-channel protocols (Chainflip, NEAR Intents EVM side) ───
+
+  test('Chainflip ETH→BTC: data="0x" creates deposit-channel relayTx (not rejected)', () => {
+    // The real Pioneer response for ETH→BTC when THORChain is offline: Chainflip
+    // via ShapeShift. Chainflip uses a deposit-channel model — the BTC destination
+    // was registered when the quote was created; the user just sends a plain ETH
+    // transfer to the deposit contract address. `data = '0x'` is intentional.
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshiftSwap',
+        quote: {
+          swapper: 'Chainflip',
+          buyAmount: '0.0002685',
+          txs: [{ txParams: {
+            to: '0xd054199c7c2d30a38cebae7a9c1ca238f932be80',
+            data: '0x',
+            value: '10000000000000000',
+          } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.relayTx).toBeDefined()
+    expect(result.relayTx!.data).toBe('0x')
+    expect(result.relayTx!.isDepositChannel).toBe(true)
+    expect(result.swapper).toBe('Chainflip')
+  })
+
+  test('NEAR Intents ETH→BTC: data="0x" also flagged as deposit-channel', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'NEAR Intents',
+          buyAmount: '0.002',
+          txs: [{ txParams: { data: '0x', to: '0xnear_deposit', value: '10000000000000000' } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.relayTx?.isDepositChannel).toBe(true)
+  })
+
+  test('Relay with data="0x" is NOT a deposit channel — no relayTx created', () => {
+    // Relay is a pure calldata protocol; empty calldata = malformed quote.
+    // Without isDepositChannel, the guard in buildRelaySwapTx will catch it.
+    const ethCaip = 'eip155:1/slip44:60'
+    const usdcCaip = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100.0',
+          memo: 'MEMO',
+          inbound_address: '0xvault',
+          txs: [{ txParams: { data: '0x', to: '0xdest', value: '1000' } }],
+        },
+      }],
+    }
+    // data='0x' with swapper=Relay → not a deposit channel, relayTx not created
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: usdcCaip, slippageBps: 100 })
+    expect(result.relayTx).toBeUndefined()
+    // Memo path used instead
+    expect(result.memo).toBe('MEMO')
+  })
+
+  test('NEAR Intents BTC→ETH (UTXO source, no memo) — isMemolessTransfer fires', () => {
+    // The canonical case: BTC → ETH via NEAR Intents. Pioneer provides a BTC
+    // deposit address; no memo or calldata needed. Should parse successfully.
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'NEAR Intents',
+          buyAmount: '0.05',
+          inbound_address: 'bc1qnearintentsdeposit',
+          // No memo, no calldata — only deposit address (UTXO side)
+          txs: [{ txParams: { to: 'bc1qnearintentsdeposit' } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: btcCaip, toCaip: ethCaip, slippageBps: 300 })
+    expect(result.inboundAddress).toBe('bc1qnearintentsdeposit')
+    expect(result.memo).toBe('')
+    expect(result.relayTx).toBeUndefined()
+    expect(result.swapper).toBe('NEAR Intents')
+  })
+
+  test('relayTx with real calldata to EVM destination is still accepted', () => {
+    // Relay ETH → USDC (same chain, EVM destination) should work fine.
+    const ethCaip = 'eip155:1/slip44:60'
+    const usdcCaip = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100.0',
+          txs: [{ txParams: {
+            data: '0x12345678000000000000000000000000000000000000000000',
+            to: '0xrelayRouter', value: '1000000000000000',
+            chainId: 1, gasLimit: '300000',
+          } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: usdcCaip, slippageBps: 300 })
+    expect(result.relayTx).toBeDefined()
+    expect(result.relayTx!.isDepositChannel).toBeUndefined()
+    expect(result.relayTx!.data).toBe('0x12345678000000000000000000000000000000000000000000')
   })
 })
 

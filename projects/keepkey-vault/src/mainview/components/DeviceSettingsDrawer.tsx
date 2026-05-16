@@ -162,6 +162,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
+	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
+	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
@@ -191,6 +193,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		}
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => setAppSettings(s))
+			.catch(() => {})
+		rpcRequest<{ refs: number; alwaysOnTop: boolean }>("getWindowFocusState")
+			.then(s => setWindowFocusState(s))
 			.catch(() => {})
 	}, [open, deviceState.state])
 
@@ -267,6 +272,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setResetting(false)
 			setResetConfirm(false)
 		}
+	}, [])
+
+	const forceReleaseWindowFocus = useCallback(async () => {
+		setReleasingWindowFocus(true)
+		try {
+			await rpcRequest("forceReleaseWindowFocus", undefined, 5000)
+			const updated = await rpcRequest<{ refs: number; alwaysOnTop: boolean }>("getWindowFocusState")
+			setWindowFocusState(updated)
+		} catch (e: any) { console.error("forceReleaseWindowFocus:", e) }
+		setReleasingWindowFocus(false)
 	}, [])
 
 	const toggleRestApi = useCallback(async (enabled: boolean) => {
@@ -1154,6 +1169,54 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)}
 							</Box>
 
+							{/* Always on Top status + override */}
+							<Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+								<Flex align="center" justify="space-between">
+									<Flex align="center" gap="3">
+										<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.07)">
+											<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+												<rect x="3" y="3" width="18" height="18" rx="2" />
+												<path d="M9 9h6M9 12h6M9 15h4" />
+											</svg>
+										</Flex>
+										<Box>
+											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Always on Top</Text>
+											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+												{windowFocusState === null
+													? "Loading..."
+													: windowFocusState.alwaysOnTop
+														? `Active — ${windowFocusState.refs} request${windowFocusState.refs === 1 ? "" : "s"} holding focus`
+														: "Inactive — window behaves normally"
+												}
+											</Text>
+										</Box>
+									</Flex>
+									{windowFocusState?.alwaysOnTop && (
+										<Box
+											as="button"
+											px="3"
+											py="1.5"
+											borderRadius="full"
+											bg="rgba(255,100,60,0.12)"
+											color="#FF6B6B"
+											fontSize="xs"
+											fontWeight="500"
+											cursor={releasingWindowFocus ? "not-allowed" : "pointer"}
+											opacity={releasingWindowFocus ? 0.5 : 1}
+											_hover={{ bg: "rgba(255,100,60,0.22)" }}
+											transition="all 0.15s"
+											onClick={forceReleaseWindowFocus}
+										>
+											{releasingWindowFocus ? "..." : "Force Release"}
+										</Box>
+									)}
+								</Flex>
+								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">
+									Vault raises itself to the front when a signing or pairing request arrives.
+									Use Force Release if the window is stuck on top after a cancelled request.
+								</Text>
+							</Box>
+
 							{/* Pre-release updates toggle */}
 							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
 								<Flex align="center" gap="3">
@@ -1252,8 +1315,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* Swaps toggle — graduated to default-on in v1.3.0 */}
-							{/*
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
 									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
@@ -1277,7 +1338,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingSwaps}
 								/>
 							</Flex>
-							*/}
 
 							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.16.0 */}
 							{(() => {
