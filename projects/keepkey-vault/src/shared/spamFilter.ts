@@ -36,7 +36,12 @@ export function detectSpamToken(
 	const caip = (token.caip || '').toLowerCase()
 	if (!caip) return { isSpam: false, level: null, reason: 'No CAIP' }
 
-	if (DISCOVERY_SET.has(caip)) return { isSpam: false, level: null, reason: 'In discovery catalog' }
+	// Synthetic tokens injected by the vault that will never appear in the discovery catalog.
+	if (caip.includes('/orchard:')) return { isSpam: false, level: null, reason: 'Synthetic shielded token' }
+
+	// Discovery emits BSC tokens as /bep20:; Pioneer portfolio returns /erc20: for the same assets.
+	const lookupCaip = caip.replace(/^eip155:56\/erc20:/, 'eip155:56/bep20:')
+	if (DISCOVERY_SET.has(lookupCaip)) return { isSpam: false, level: null, reason: 'In discovery catalog' }
 
 	return { isSpam: true, level: 'confirmed', reason: 'Not in discovery catalog' }
 }

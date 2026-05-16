@@ -1043,8 +1043,9 @@ async function buildRelaySwapTx(
               data: approveData,
             }
             if (maxFeePerGas) {
-              approveTx.maxFeePerGas = toHex(BigInt(maxFeePerGas))
-              approveTx.maxPriorityFeePerGas = toHex(BigInt(maxPriorityFeePerGas || '1000000'))
+              // Use signedFeePerGas (relay's quoted cap) to match the balance check and the swap tx.
+              approveTx.maxFeePerGas = toHex(signedFeePerGas)
+              approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
             } else if (gasPrice) {
               approveTx.gasPrice = gasPrice
             }
