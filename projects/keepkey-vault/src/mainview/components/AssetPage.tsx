@@ -767,11 +767,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						<SendForm
 							chain={chain}
 							address={address}
-							balance={isBtc && btcSelected?.xpubData ? {
+							balance={isBtc && btcAccounts.accounts.length > 0 ? {
 								...activeBalance!,
-								balance: btcSelected.xpubData.balance,
-								balanceUsd: btcSelected.xpubData.balanceUsd,
-								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+								balance: btcAccounts.totalBalance,
+								balanceUsd: btcAccounts.totalBalanceUsd,
+								nativeBalanceUsd: btcAccounts.totalBalanceUsd,
 							} : activeBalance}
 							token={selectedToken}
 							onClearToken={() => setSelectedToken(null)}
@@ -906,11 +906,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 							open={showSwapDialog}
 							onClose={() => setShowSwapDialog(false)}
 							chain={chain}
-							balance={isBtc && btcSelected?.xpubData ? {
+							balance={isBtc && btcAccounts.accounts.length > 0 ? {
 								...activeBalance!,
-								balance: btcSelected.xpubData.balance,
-								balanceUsd: btcSelected.xpubData.balanceUsd,
-								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
+								balance: btcAccounts.totalBalance,
+								balanceUsd: btcAccounts.totalBalanceUsd,
+								nativeBalanceUsd: btcAccounts.totalBalanceUsd,
 							} : activeBalance}
 							address={address}
 						/>
