@@ -15,6 +15,9 @@
  */
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
+import { withTimeout } from './engine-controller'
+
+const PIONEER_SWAP_TIMEOUT_MS = 30_000
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid, setSwapRelayRequestId } from './db'
 import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
@@ -404,7 +407,11 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
       symbol: swap.toSymbol,
       amount: swap.expectedOutput,
       amountBaseUnits: swap.expectedOutput,
-      address: '',
+      // For EVM destinations, the receive address is the ETH address embedded in walletId
+      // (format: "deviceId:0x..."). Pioneer's swap-monitor needs this to verify ETH delivery.
+      address: buyCaip.startsWith('eip155:') && swap.walletId?.includes(':')
+        ? swap.walletId.slice(swap.walletId.indexOf(':') + 1)
+        : '',
       networkId: swap.toChainId,
     },
     quote: {
@@ -429,7 +436,7 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
 
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
-  const resp = await pioneer.CreatePendingSwap(body)
+  const resp = await withTimeout(pioneer.CreatePendingSwap(body), PIONEER_SWAP_TIMEOUT_MS, 'CreatePendingSwap')
   swapLog(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
   swapLog(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
 }
@@ -447,9 +454,12 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Pioneer's mapped status only takes effect when Midgard hasn't ruled yet.
   const pioneerStatus = mapPioneerStatus(remoteSwap.status)
   const ignoreNonFinalPioneer = isTerminalSwapStatus(swap.status) && !isTerminalSwapStatus(pioneerStatus)
+  // Pioneer maps refunds → 'completed' and cannot be trusted to override a locally
+  // confirmed refund (verified on-chain or via the swap-monitor's eth_getBalance check).
+  const localRefundOverridesPioneer = swap.status === 'refunded' && pioneerStatus === 'completed'
   const newStatus = swap.midgardClassified
     ? swap.status
-    : ignoreNonFinalPioneer
+    : (ignoreNonFinalPioneer || localRefundOverridesPioneer)
       ? swap.status
       : pioneerStatus
   const confirmations = ignoreNonFinalPioneer ? swap.confirmations : (remoteSwap.confirmations ?? swap.confirmations)
@@ -708,7 +718,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
 
   const pioneer = await getPioneer()
   try {
-    const resp = await pioneer.GetPendingSwap({ txHash: txid })
+    const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap')
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
@@ -733,7 +743,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     // If just completed without an outbound txid, request a rescan to pick it up.
     if (swap.status === 'completed' && !swap.outboundTxid) {
       try {
-        const rescanResp = await pioneer.GetPendingSwap({ txHash: txid, rescan: true })
+        const rescanResp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid, rescan: true }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap rescan')
         const rescanData = rescanResp?.data || rescanResp
         if (rescanData && rescanData.status !== 'not_found') applyRemoteSwapData(swap, rescanData)
       } catch (e: any) {
@@ -873,7 +883,11 @@ export async function debugSwapLookup(txid: string, deviceId?: string, walletId?
   const pioneer = await getPioneer()
   const tryCall = async (rescan: boolean) => {
     try {
-      const resp = await pioneer.GetPendingSwap({ txHash: txid, ...(rescan ? { rescan: true } : {}) })
+      const resp = await withTimeout(
+        pioneer.GetPendingSwap({ txHash: txid, ...(rescan ? { rescan: true } : {}) }),
+        PIONEER_SWAP_TIMEOUT_MS,
+        `GetPendingSwap${rescan ? ' rescan' : ''}`,
+      )
       const raw = resp?.data || resp
       return { ok: true, status: 200, raw }
     } catch (e: any) {
