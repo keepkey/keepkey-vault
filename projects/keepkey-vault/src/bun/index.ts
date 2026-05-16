@@ -2144,8 +2144,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
-					// Push updated BTC accounts to frontend
-					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+					// Push updated BTC accounts to frontend and sync DB cache with aggregate total.
+					// The DB entry (used by getCachedBalances → SwapDialog) would otherwise stay
+					// as a single-xpub value; the in-memory manager always has the correct sum.
+					{
+						const btcSet = btcAccounts.toAccountSet()
+						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
+						try {
+							const devId = engine.getDeviceState().deviceId
+							if (devId && !engine.isPassphraseWallet && parseFloat(btcSet.totalBalance) >= 0) {
+								updateCachedBalance(devId, {
+									chainId: 'bitcoin', symbol: 'BTC',
+									balance: btcSet.totalBalance,
+									balanceUsd: btcSet.totalBalanceUsd,
+									nativeBalanceUsd: btcSet.totalBalanceUsd,
+									address: btcAccounts.getSelectedXpub()?.xpub || '',
+								})
+							}
+						} catch { /* non-fatal */ }
+					}
 					// Push updated EVM addresses to frontend
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
 
@@ -2542,7 +2559,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				// Push updated BTC per-xpub balances — only if manager is hydrated (Finding 2)
 				if (isBtc && btcAccounts.isInitialized && btcAccounts.getAllPubkeyEntries(chain.caip).length > 0) {
-					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+					const btcSet = btcAccounts.toAccountSet()
+					try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
+					// Sync DB cache so getCachedBalances returns aggregate (not stale single-xpub)
+					try {
+						const devId = engine.getDeviceState().deviceId
+						if (devId && !engine.isPassphraseWallet) {
+							updateCachedBalance(devId, {
+								chainId: 'bitcoin', symbol: 'BTC',
+								balance: btcSet.totalBalance,
+								balanceUsd: btcSet.totalBalanceUsd,
+								nativeBalanceUsd: btcSet.totalBalanceUsd,
+								address: btcAccounts.getSelectedXpub()?.xpub || '',
+							})
+						}
+					} catch { /* non-fatal */ }
 				}
 
 				return result
