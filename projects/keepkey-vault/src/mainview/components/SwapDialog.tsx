@@ -14,10 +14,10 @@ import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
-import { nativeMaxSpendableAmount, tokenMaxSpendableAmount } from "../../shared/max-send"
+import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand } from "../../shared/types"
+import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, resolveProvider } from "./ProviderBadge"
@@ -177,30 +177,32 @@ function toBigIntValue(value: unknown): bigint | null {
   return null
 }
 
-function formatUnitsBigInt(value: bigint, decimals: number, maxFraction = 8): string {
-  if (decimals <= 0) return value.toString()
-  const scale = 10n ** BigInt(decimals)
+function formatUnitsBigInt(value: bigint, decimals: unknown, maxFraction = 8): string {
+  const precision = normalizeDecimals(decimals) ?? 0
+  if (precision <= 0) return value.toString()
+  const scale = 10n ** BigInt(precision)
   const whole = value / scale
   const fraction = value % scale
   if (fraction === 0n || maxFraction <= 0) return whole.toString()
-  const frac = fraction.toString().padStart(decimals, '0').slice(0, maxFraction).replace(/0+$/, '')
+  const frac = fraction.toString().padStart(precision, '0').slice(0, maxFraction).replace(/0+$/, '')
   return frac ? `${whole.toString()}.${frac}` : whole.toString()
 }
 
-function formatNativeUnits(value: bigint | null, decimals: number, symbol: string, maxFraction = 8): string {
+function formatNativeUnits(value: bigint | null, decimals: unknown, symbol: string, maxFraction = 8): string {
   if (value === null) return '-'
   return `${formatUnitsBigInt(value, decimals, maxFraction)} ${symbol}`
 }
 
 function formatQuoteAssetAmount(raw: string | number | undefined, asset: SwapAsset, referenceAmount?: string): string {
   const value = raw == null ? '0' : String(raw)
-  if (!/^\d+$/.test(value) || asset.decimals <= 0) return formatBalance(value)
+  const precision = normalizeDecimals(asset.decimals) ?? 0
+  if (!/^\d+$/.test(value) || precision <= 0) return formatBalance(value)
   const reference = referenceAmount ? parseFloat(referenceAmount) : 0
   const asNumber = Number(value)
   const looksLikeBaseUnits =
-    value.length > Math.min(4, asset.decimals) ||
+    value.length > Math.min(4, precision) ||
     (Number.isFinite(asNumber) && reference > 0 && asNumber > reference * 10)
-  return looksLikeBaseUnits ? formatUnitsBigInt(BigInt(value), asset.decimals, 8) : formatBalance(value)
+  return looksLikeBaseUnits ? formatUnitsBigInt(BigInt(value), precision, 8) : formatBalance(value)
 }
 
 function formatGwei(value: bigint | null): string {
@@ -655,6 +657,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [inputMode, setInputMode] = useState<'crypto' | 'fiat'>('crypto')
   const [isMax, setIsMax] = useState(false)
 
+  const [swapHealth, setSwapHealth] = useState<SwapHealth | null>(null)
+  const [healthDialogOpen, setHealthDialogOpen] = useState(false)
+  const [healthRefreshing, setHealthRefreshing] = useState(false)
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   // ts when the current quote was received — used to detect staleness on Confirm
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
@@ -946,6 +951,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       })
     return () => { cancelled = true }
   }, [open])
+
+  // ── Swap provider health — fetch on open, refresh every 60s ─────
+  const refreshSwapHealth = useCallback(() => {
+    setHealthRefreshing(true)
+    rpcRequest<SwapHealth>('getSwapHealth')
+      .then(h => { setSwapHealth(h) })
+      .catch(() => {})
+      .finally(() => setHealthRefreshing(false))
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    let timer: ReturnType<typeof setInterval> | null = null
+    refreshSwapHealth()
+    timer = setInterval(refreshSwapHealth, 60_000)
+    return () => { if (timer) clearInterval(timer) }
+  }, [open, refreshSwapHealth])
 
   // ── Auto-select from asset when dialog opens with chain context ───
   const hasAutoSelected = useRef(false)
@@ -1379,8 +1401,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const quoteVersionRef = useRef(0)
 
   useEffect(() => {
-    // Don't re-quote when viewing a submitted/resumed swap or during signing
-    if (phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving') return
+    // Don't re-quote when the user is actively reviewing a quote or has submitted/is signing.
+    // 'review' is guarded here so balance polling doesn't wipe the quote mid-review;
+    // the explicit 60s stale-check in the Confirm handler covers freshness on confirm.
+    if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving') return
 
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)
@@ -1836,11 +1860,44 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : t("title")}
             </Text>
           </HStack>
-          {!busy && (
-            <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
-              &times;
-            </Button>
-          )}
+          <HStack gap="2" align="center">
+            {/* Provider health dots — click to open detail dialog */}
+            {swapHealth && (
+              <HStack
+                gap="2" px="2" py="1" borderRadius="full" cursor="pointer"
+                bg="rgba(255,255,255,0.04)" _hover={{ bg: 'rgba(255,255,255,0.08)' }}
+                border="1px solid" borderColor="kk.border"
+                title="Click for swap provider status"
+                onClick={() => setHealthDialogOpen(true)}
+              >
+                {swapHealth.integrations.map(intg => {
+                  const dotColor =
+                    intg.status === 'ok'       ? '#22c55e' :
+                    intg.status === 'degraded' ? '#f59e0b' :
+                    intg.status === 'offline'  ? '#ef4444' : '#6b7280'
+                  const hoverLabel =
+                    intg.status === 'ok'       ? `${intg.label}: operational` :
+                    intg.status === 'degraded' ? `${intg.label}: ${intg.detail || 'some pairs unavailable'}` :
+                    intg.status === 'offline'  ? `${intg.label}: unreachable` :
+                    `${intg.label}: status unknown`
+                  return (
+                    <Box key={intg.key} title={hoverLabel}
+                      w="7px" h="7px" borderRadius="full" flexShrink={0}
+                      style={{
+                        background: dotColor,
+                        boxShadow: intg.status === 'ok' ? `0 0 5px ${dotColor}99` : 'none',
+                      }}
+                    />
+                  )
+                })}
+              </HStack>
+            )}
+            {!busy && (
+              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
+                &times;
+              </Button>
+            )}
+          </HStack>
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
@@ -2989,8 +3046,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   refuse to sign rather than waste gas on a guaranteed revert. */}
               {previewBuild?.balance && !previewBuild.balance.sufficient && (() => {
                 const b = previewBuild.balance!
-                const tokenDecimals = fromAsset.decimals
+                const tokenDecimals = normalizeDecimals(fromAsset.decimals)
                 const fmt = (raw: string) => {
+                  if (tokenDecimals === null) return raw
                   try {
                     const n = Number(BigInt(raw)) / Math.pow(10, tokenDecimals)
                     return n.toLocaleString(undefined, { maximumFractionDigits: 8 })
@@ -3021,8 +3079,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   "already approved" so the user knows what to expect. */}
               {previewBuild?.allowance && (() => {
                 const a = previewBuild.allowance
-                const tokenDecimals = fromAsset.decimals
+                const tokenDecimals = normalizeDecimals(fromAsset.decimals)
                 const fmt = (raw: string) => {
+                  if (tokenDecimals === null) return raw
                   try {
                     const n = Number(BigInt(raw)) / Math.pow(10, tokenDecimals)
                     if (n > 1e15) return '∞ (max)'
@@ -3651,6 +3710,107 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       </Box>
 
       {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
+      {/* ── Swap Provider Health Dialog ──────────────────────────── */}
+      {healthDialogOpen && (
+        <Box position="fixed" inset="0" zIndex={Z.assetPicker} display="flex" alignItems="center" justifyContent="center"
+          bg="rgba(0,0,0,0.6)" onClick={() => setHealthDialogOpen(false)}>
+          <Box
+            bg="kk.bg" borderRadius="16px" border="1px solid" borderColor="kk.border"
+            w="360px" maxH="80vh" overflow="auto"
+            boxShadow="0 24px 64px rgba(0,0,0,0.6)"
+            onClick={e => e.stopPropagation()}
+            style={{ animation: 'kkSwapFadeIn 0.15s ease-out' }}
+          >
+            {/* Dialog header */}
+            <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
+              <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">Swap Provider Status</Text>
+              <HStack gap="2">
+                <Button size="xs" variant="ghost" color="kk.textMuted" px="2" minW="auto"
+                  _hover={{ color: 'kk.textPrimary' }} onClick={refreshSwapHealth}
+                  disabled={healthRefreshing}>
+                  {healthRefreshing ? '↻' : '↺'}
+                </Button>
+                <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
+                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>
+                  &times;
+                </Button>
+              </HStack>
+            </Flex>
+
+            {/* Integration rows */}
+            <VStack gap="0" align="stretch" px="4" py="3">
+              {swapHealth?.integrations.map(intg => {
+                const info = resolveProvider(intg.key)
+                const dotColor =
+                  intg.status === 'ok'       ? '#22c55e' :
+                  intg.status === 'degraded' ? '#f59e0b' :
+                  intg.status === 'offline'  ? '#ef4444' : '#6b7280'
+                const statusLabel =
+                  intg.status === 'ok'       ? 'Operational' :
+                  intg.status === 'degraded' ? 'Degraded' :
+                  intg.status === 'offline'  ? 'Offline' : 'Unknown'
+                const statusDesc =
+                  intg.status === 'ok'       ? 'All pools available. Quotes and swaps should work normally.' :
+                  intg.status === 'degraded' ? (intg.detail || 'Some trading pairs are unavailable. Swaps on other pairs may still work.') :
+                  intg.status === 'offline'  ? 'Pioneer cannot reach this provider. Quotes requiring this route will fail.' :
+                  'Status could not be determined.'
+                return (
+                  <Box key={intg.key} py="3" borderBottom="1px solid" borderColor="kk.border"
+                    _last={{ borderBottom: 'none' }}>
+                    <Flex align="center" justify="space-between" mb={intg.haltedPools?.length ? '2' : '1'}>
+                      <HStack gap="2">
+                        <Box w="28px" h="28px" borderRadius="full" overflow="hidden" flexShrink={0}
+                          bg="rgba(255,255,255,0.05)" display="flex" alignItems="center" justifyContent="center">
+                          <img src={info.icon} alt={intg.label} width="22" height="22"
+                            style={{ borderRadius: '50%', objectFit: 'cover' }} />
+                        </Box>
+                        <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{intg.label}</Text>
+                      </HStack>
+                      <HStack gap="1.5" align="center">
+                        <Box w="7px" h="7px" borderRadius="full" flexShrink={0}
+                          style={{ background: dotColor,
+                            boxShadow: intg.status === 'ok' ? `0 0 5px ${dotColor}99` : 'none' }} />
+                        <Text fontSize="11px" fontWeight="600" style={{ color: dotColor }}>{statusLabel}</Text>
+                      </HStack>
+                    </Flex>
+                    <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{statusDesc}</Text>
+                    {intg.haltedPools && intg.haltedPools.length > 0 && (
+                      <Box mt="2" p="2" bg="rgba(245,158,11,0.08)" borderRadius="8px"
+                        border="1px solid rgba(245,158,11,0.2)">
+                        <Text fontSize="10px" fontWeight="600" color="#f59e0b" mb="1">
+                          Halted pools ({intg.haltedPools.length})
+                        </Text>
+                        <VStack gap="0.5" align="start">
+                          {intg.haltedPools.map(caip => (
+                            <Text key={caip} fontSize="10px" color="kk.textMuted" fontFamily="mono"
+                              style={{ wordBreak: 'break-all' }}>
+                              {caip}
+                            </Text>
+                          ))}
+                        </VStack>
+                      </Box>
+                    )}
+                  </Box>
+                )
+              })}
+              {!swapHealth && (
+                <Box py="6" textAlign="center">
+                  <Text fontSize="sm" color="kk.textMuted">Loading provider status…</Text>
+                </Box>
+              )}
+            </VStack>
+
+            {/* Footer */}
+            <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" align="center" justify="space-between">
+              <Text fontSize="10px" color="kk.textMuted">
+                {swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString()}` : 'Fetching…'}
+              </Text>
+              <Text fontSize="10px" color="kk.textMuted">via Pioneer</Text>
+            </Flex>
+          </Box>
+        </Box>
+      )}
+
       <AssetPickerDialog
         open={pickerSide !== null}
         onClose={() => setPickerSide(null)}

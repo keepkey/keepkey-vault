@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  baseUnitsToDecimalString,
   decimalToBaseUnits,
   nativeMaxSpendableAmount,
+  normalizeDecimals,
   tokenMaxPrecisionReserveUnits,
   tokenMaxSpendableAmount,
   tokenMaxSpendableBaseUnits,
@@ -28,6 +30,18 @@ describe('token max send precision reserve', () => {
     expect(decimalToBaseUnits('1.123456789', 6)).toBe(1_123_456n)
   })
 
+  test('accepts numeric-string token decimals from token metadata', () => {
+    expect(normalizeDecimals('18')).toBe(18)
+    expect(tokenMaxSpendableAmount('27.49591932', '18')).toBe('27.49591931')
+  })
+
+  test('does not run BigInt exponent math for invalid decimals', () => {
+    expect(normalizeDecimals(undefined)).toBeNull()
+    expect(decimalToBaseUnits('1.23', undefined)).toBeNull()
+    expect(baseUnitsToDecimalString(123n, undefined)).toBe('123')
+    expect(tokenMaxSpendableAmount('1.23', undefined)).toBe('1.23')
+  })
+
   test('returns zero when the balance cannot cover the reserve', () => {
     expect(tokenMaxSpendableAmount('0.000000001', 18)).toBe('0')
   })
@@ -40,5 +54,9 @@ describe('native max send fee reserve', () => {
 
   test('returns zero when native balance cannot cover reserve', () => {
     expect(nativeMaxSpendableAmount('0.000004999', 9, '0.000005')).toBe('0')
+  })
+
+  test('leaves native max unchanged when decimals are malformed', () => {
+    expect(nativeMaxSpendableAmount('1.23', undefined, '0.01')).toBe('1.23')
   })
 })

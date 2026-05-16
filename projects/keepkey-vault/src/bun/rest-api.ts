@@ -18,7 +18,8 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
+import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
@@ -2677,6 +2678,167 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             total_value_usd: 0,
             message: 'Portfolio not implemented — use Pioneer API for balances',
           })
+        }
+
+        // ── DEBUG PORTFOLIO ENDPOINTS ────────────────────────────────────
+        // Verbose read-only views into cached balances, spam analysis, and
+        // token visibility overrides. Useful for diagnosing balance/spam issues
+        // without needing to dig through the SQLite DB directly.
+
+        if (path === '/api/debug/portfolio' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, balances: [] })
+          const visibilityMap = getAllTokenVisibility()
+          const now = Date.now()
+          const ageMs = now - cached.updatedAt
+
+          let totalUsd = 0
+          let totalTokens = 0
+          let confirmedSpam = 0
+          let possibleSpam = 0
+          let hiddenByUser = 0
+          const chains = cached.balances.map(b => {
+            totalUsd += b.balanceUsd
+            const tokenAnalysis = (b.tokens || []).map(t => {
+              totalTokens++
+              const override = visibilityMap.get((t.caip || '').toLowerCase()) ?? null
+              const spam = detectSpamToken(t, override)
+              if (spam.isSpam && spam.level === 'confirmed') confirmedSpam++
+              if (spam.isSpam && spam.level === 'possible') possibleSpam++
+              if (override === 'hidden') hiddenByUser++
+              return { ...t, _spam: spam, _userOverride: override }
+            })
+            return {
+              chainId: b.chainId,
+              symbol: b.symbol,
+              address: b.address,
+              balance: b.balance,
+              balanceUsd: b.balanceUsd,
+              nativeBalanceUsd: b.nativeBalanceUsd,
+              tokenCount: tokenAnalysis.length,
+              tokens: tokenAnalysis,
+            }
+          })
+
+          return json({
+            deviceId,
+            cached: true,
+            updatedAt: cached.updatedAt,
+            ageMs,
+            ageSec: Math.round(ageMs / 1000),
+            summary: { totalUsd, totalChains: chains.length, totalTokens, confirmedSpam, possibleSpam, hiddenByUser },
+            chains,
+          })
+        }
+
+        if (path === '/api/debug/portfolio/chains' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, chains: [] })
+          const now = Date.now()
+          return json({
+            deviceId,
+            updatedAt: cached.updatedAt,
+            ageMs: now - cached.updatedAt,
+            chains: cached.balances.map(b => ({
+              chainId: b.chainId,
+              symbol: b.symbol,
+              address: b.address,
+              balance: b.balance,
+              balanceUsd: b.balanceUsd,
+              nativeBalanceUsd: b.nativeBalanceUsd ?? null,
+              tokenCount: b.tokens?.length ?? 0,
+            })),
+          })
+        }
+
+        if (path === '/api/debug/portfolio/tokens' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, tokens: [] })
+          const visibilityMap = getAllTokenVisibility()
+          const tokens: any[] = []
+          for (const b of cached.balances) {
+            for (const t of b.tokens || []) {
+              const override = visibilityMap.get((t.caip || '').toLowerCase()) ?? null
+              const spam = detectSpamToken(t, override)
+              tokens.push({ chain: b.chainId, ...t, _spam: spam, _userOverride: override })
+            }
+          }
+          tokens.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+          return json({ deviceId, total: tokens.length, tokens })
+        }
+
+        if (path === '/api/debug/portfolio/spam' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, spam: [] })
+          const visibilityMap = getAllTokenVisibility()
+          const showPossible = new URL(req.url).searchParams.get('level') !== 'confirmed'
+          const spam: any[] = []
+          for (const b of cached.balances) {
+            for (const t of b.tokens || []) {
+              const override = visibilityMap.get((t.caip || '').toLowerCase()) ?? null
+              const result = detectSpamToken(t, override)
+              if (!result.isSpam) continue
+              if (!showPossible && result.level !== 'confirmed') continue
+              spam.push({ chain: b.chainId, ...t, _spam: result, _userOverride: override })
+            }
+          }
+          spam.sort((a, b) => {
+            if (a._spam.level === b._spam.level) return (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)
+            return a._spam.level === 'confirmed' ? -1 : 1
+          })
+          return json({ deviceId, total: spam.length, spam })
+        }
+
+        if (path === '/api/debug/token-visibility' && method === 'GET') {
+          auth.requireAuth(req)
+          const hidden = getTokensByVisibility('hidden')
+          const visible = getTokensByVisibility('visible')
+          return json({
+            total: hidden.length + visible.length,
+            hidden: hidden.map(r => ({ caip: r.caip, updatedAt: r.updatedAt })),
+            visible: visible.map(r => ({ caip: r.caip, updatedAt: r.updatedAt })),
+          })
+        }
+
+        if (path.startsWith('/api/debug/token-visibility/') && method === 'PUT') {
+          auth.requireAuth(req)
+          const caip = decodeURIComponent(path.slice('/api/debug/token-visibility/'.length))
+          if (!caip) return json({ error: 'caip required in path' }, 400)
+          const body = await req.json().catch(() => ({})) as any
+          const status = body?.status
+          if (status !== 'visible' && status !== 'hidden') {
+            return json({ error: 'body.status must be "visible" or "hidden"' }, 400)
+          }
+          setTokenVisibility(caip, status)
+          return json({ caip, status, updated: true })
+        }
+
+        if (path.startsWith('/api/debug/token-visibility/') && method === 'DELETE') {
+          auth.requireAuth(req)
+          const caip = decodeURIComponent(path.slice('/api/debug/token-visibility/'.length))
+          if (!caip) return json({ error: 'caip required in path' }, 400)
+          removeTokenVisibility(caip)
+          return json({ caip, removed: true })
         }
 
         if (path === '/api/pubkeys/batch' && method === 'POST') {

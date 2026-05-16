@@ -397,8 +397,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
+  // NEAR Intents (memo-less UTXO → EVM): deposit address is the only instruction.
+  // Detected by fromCaip chain family — `swapper` is not in ExecuteSwapParams.
+  // Direction guard: only valid for UTXO sources; EVM → BTC with no calldata
+  // has no way to encode the BTC destination.
+  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
+  const isMemolessTransfer = fromIsUtxo && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
-  if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
+  if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   if (params.memo) {
     const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
     if (memoByteLength > MEMO_LIMIT) {
@@ -608,6 +614,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
+      // Insufficient funds: Pioneer fallback will also fail — surface immediately
+      if (directErr.message?.toLowerCase().includes('insufficient funds')) {
+        throw new Error(
+          `Insufficient ${fromChain.symbol} for gas on ${fromChain.id}. ` +
+          `Add ${fromChain.symbol} to your wallet to pay for transaction fees and try again.`
+        )
+      }
       console.warn(`${TAG} Direct RPC broadcast failed (${directErr.message}), falling back to Pioneer...`)
       try {
         const result = await txb.broadcastTx(pioneer, fromChain, signedTx)
@@ -679,8 +692,11 @@ export async function previewSwapBuild(
 
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
+  // NEAR Intents (memo-less UTXO → EVM): CAIP-based detection (swapper not in ExecuteSwapParams)
+  const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
+  const isMemolessTransfer = fromIsUtxoPreview && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
-  if (!params.memo && !hasPrebuiltTx) throw new Error('Missing swap memo from quote')
+  if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
 
   const pioneer = await getPioneer()
 
@@ -777,6 +793,7 @@ async function buildRelaySwapTx(
   _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
 ): Promise<{ unsignedTx: any; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
+  console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 
   // Guard: when the quote ships a chainId, it MUST match the locally-resolved
   // source chain to prevent signing a tx for chain A with a nonce from chain
@@ -816,7 +833,22 @@ async function buildRelaySwapTx(
 
   // Use gas params from relay quote, with sane fallbacks.
   // Mirror the normal EVM path: try quote fields → RPC → Pioneer → chain-specific floor.
-  const gasLimit = relay.gasLimit || '300000'
+  //
+  // Relay gas limit: use quote-provided value, then chain-specific fallback.
+  // 300000 is correct only for Arbitrum (different gas accounting). L2s like
+  // Base/Optimism use mainnet-equivalent gas units; 300000 overestimates by 3-6x
+  // and causes the pre-sign balance check to fail on tight balances.
+  const RELAY_GAS_LIMIT_FALLBACK: Record<string, string> = {
+    arbitrum: '300000',
+    base: '100000',
+    optimism: '100000',
+    polygon: '150000',
+    avalanche: '150000',
+    bsc: '150000',
+    ethereum: '150000',
+  }
+  const gasLimit = relay.gasLimit || RELAY_GAS_LIMIT_FALLBACK[fromChain.id] || '150000'
+  console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
   let gasPrice: string | undefined
@@ -894,9 +926,27 @@ async function buildRelaySwapTx(
   if (!relayFeePerGas) {
     throw new Error(`Unable to determine gas fee for Relay transaction on ${fromChain.id} — refusing to sign. Try refreshing the quote.`)
   }
-  const effectiveRelayFeePerGas = BigInt(relayFeePerGas)
-  const relayGasReserve = relayGasLimit * effectiveRelayFeePerGas
-  const relayNativeRequired = relayValue + relayGasReserve
+  // EIP-1559 nodes require the sender to cover gasLimit * maxFeePerGas + value before
+  // broadcasting. The balance check and the fee cap placed in the signed tx MUST agree,
+  // otherwise a tight balance passes the check but the broadcast rejects.
+  //
+  // Strategy: take the relay's own quoted maxFeePerGas as the signed cap. The live bump
+  // computed above is discarded — the relay quote already reflects current network conditions
+  // at quote time, and on L2s (Base, Optimism) the 3× live-buffer produces wildly over-
+  // estimated caps that block valid swaps on tight balances. If the relay's cap proves
+  // insufficient for inclusion, the tx will be mined anyway at priority-fee level once
+  // the base fee drops — or the user can refresh the quote to get a fresh cap.
+  const signedFeePerGas: bigint = relay.maxFeePerGas
+    ? BigInt(relay.maxFeePerGas)
+    : BigInt(relayFeePerGas)  // no quoted fee → fall back to live (gasPrice path)
+  const signedPrioFeePerGas: bigint = relay.maxPriorityFeePerGas
+    ? BigInt(relay.maxPriorityFeePerGas)
+    : signedFeePerGas  // no quoted prio → cap at max
+  const relayGasReserve = relayGasLimit * signedFeePerGas
+  // ERC-20 relay swaps run an approve tx before the swap. Reserve gas for both.
+  const approveGasReserve = isErc20Source ? 80000n * signedFeePerGas : 0n
+  const relayNativeRequired = relayValue + relayGasReserve + approveGasReserve
+  console.log(`${TAG} relay fee: quoted=${relay.maxFeePerGas} liveBumped=${relayFeePerGas} signedCap=${signedFeePerGas}`)
   let nativeBalance: bigint | undefined
   if (rpcUrl) {
     try {
@@ -918,6 +968,7 @@ async function buildRelaySwapTx(
   if (nativeBalance === undefined) {
     throw new Error(`Unable to verify ${fromChain.symbol} balance for Relay transaction — refusing to sign. Try refreshing the quote.`)
   }
+  console.log(`${TAG} relay gas check: value=${formatWei(relayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(relayNativeRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
   if (nativeBalance < relayNativeRequired) {
     if (params.isMax && !isErc20Source) {
       throw new Error(
@@ -992,8 +1043,9 @@ async function buildRelaySwapTx(
               data: approveData,
             }
             if (maxFeePerGas) {
-              approveTx.maxFeePerGas = toHex(BigInt(maxFeePerGas))
-              approveTx.maxPriorityFeePerGas = toHex(BigInt(maxPriorityFeePerGas || '1000000'))
+              // Use signedFeePerGas (relay's quoted cap) to match the balance check and the swap tx.
+              approveTx.maxFeePerGas = toHex(signedFeePerGas)
+              approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
             } else if (gasPrice) {
               approveTx.gasPrice = gasPrice
             }
@@ -1021,33 +1073,50 @@ async function buildRelaySwapTx(
     data: relay.data,
   }
 
-  // EIP-1559 fields
-  if (maxFeePerGas) {
-    unsignedTx.maxFeePerGas = toHex(BigInt(maxFeePerGas))
-    unsignedTx.maxPriorityFeePerGas = toHex(BigInt(maxPriorityFeePerGas || '1000000'))
+  // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
+  // matches the balance check above. Using the live-bumped cap here while checking
+  // against the quoted cap would allow a tx that the account cannot cover.
+  if (relay.maxFeePerGas) {
+    unsignedTx.maxFeePerGas = toHex(signedFeePerGas)
+    unsignedTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
   } else if (gasPrice) {
     unsignedTx.gasPrice = gasPrice
+  } else if (maxFeePerGas) {
+    // No relay-quoted fee — fall back to live-bumped (consistent with signedFeePerGas fallback above)
+    unsignedTx.maxFeePerGas = maxFeePerGas
+    unsignedTx.maxPriorityFeePerGas = maxPriorityFeePerGas || toHex(1_000_000n)
   }
 
-  // Sanity guard — any swap whose execution depends on protocol-specific
-  // calldata (ERC-20 transferFrom OR cross-chain memo/router call) MUST end
-  // up as a contract call. An empty `data` field would broadcast a plain
-  // value transfer that can't encode swap intent (which BTC address to send
-  // to, which protocol to route through, etc.). We hit this twice in
-  // shapeshiftSwap quotes:
+  // Sanity guard — ERC-20 sources ALWAYS need calldata (transferFrom or
+  // approveAndDeposit). An empty data field on an ERC-20 relay tx means we'd
+  // broadcast a plain 0-value transfer with no swap instruction.
+  //
+  // Historical incidents:
   //   - USDT→BTC (Maya, txid 0x8426ca…) — ERC-20 source, dust transfer to non-vault EOA
-  //   - ETH→BTC (NEAR Intents) — native source, would have broadcast 0.04 ETH with no destination encoded
-  const isCrossChain = params.fromChainId !== params.toChainId
+  //
+  // Cross-chain native-asset swaps (ETH→BTC) via deposit-channel protocols
+  // (Chainflip, NEAR Intents) legitimately use `data = '0x'` — the swap
+  // destination was registered off-chain when the quote/channel was created.
+  // These are flagged `relay.isDepositChannel = true` by parseQuoteResponse
+  // so we can distinguish them from truly malformed quotes.
   const dataIsEmpty = !relay.data || relay.data === '0x' || relay.data === '0x0' || relay.data.length < 10
-  if (dataIsEmpty && (isErc20Source || isCrossChain)) {
-    const reason = isErc20Source
-      ? `source is ERC-20 but quote's relayTx has empty calldata`
-      : `cross-chain swap (${params.fromChainId} → ${params.toChainId}) but quote's relayTx has empty calldata — no destination encoded`
+  if (dataIsEmpty && isErc20Source) {
     throw new Error(
-      `Refusing to sign: ${reason}. Broadcasting would send a plain transfer to ${relay.to} ` +
-      `with value=${relay.value} instead of executing the swap. Pioneer returned a malformed quote ` +
-      `— try a different route or pair.`
+      `Refusing to sign: source is ERC-20 but relayTx has empty calldata. ` +
+      `Broadcasting would send a plain transfer to ${relay.to} — no token transfer encoded. ` +
+      `Pioneer returned a malformed quote — try a different route or pair.`
     )
+  }
+  if (dataIsEmpty && !relay.isDepositChannel) {
+    const isCrossChain = params.fromChainId !== params.toChainId
+    if (isCrossChain) {
+      throw new Error(
+        `Refusing to sign: cross-chain swap (${params.fromChainId} → ${params.toChainId}) ` +
+        `but relayTx has empty calldata and is not a recognized deposit-channel protocol. ` +
+        `Broadcasting would send a plain transfer to ${relay.to} with value=${relay.value} ` +
+        `instead of executing the swap. Pioneer returned a malformed quote — try a different route or pair.`
+      )
+    }
   }
 
   swapLog(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)

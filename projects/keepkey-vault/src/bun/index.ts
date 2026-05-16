@@ -130,7 +130,7 @@ const PIONEER_TIMEOUT_MS = 60_000
 const PIONEER_PORTFOLIO_CHUNK_SIZE = 8
 const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 20_000
 const PIONEER_PORTFOLIO_MAX_CONCURRENCY = 4
-const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 45_000
+const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 90_000
 
 function getPioneerPortfolioErrorMessage(err: any): string {
 	const fields = err?.response?.body?.fields || err?.responseError?.fields
@@ -403,7 +403,7 @@ const auth = new AuthStore()
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
-let swapsEnabled = true
+let swapsEnabled = true  // default on; only disabled when explicitly set to '0'
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 // True after the per-session incremental scan has caught the wallet up to
@@ -423,7 +423,7 @@ let alphaFirmware = false
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
-	swapsEnabled = true  // graduated to default-on in v1.3.0; ignore stored setting
+	swapsEnabled = getSetting('swaps_enabled') !== '0'  // absent → true (opt-out model)
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
@@ -1809,11 +1809,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
 						'GetPortfolioBalances chunks'
 					)
-					const failedChunks = chunkResults.filter(r => r.error)
-					if (failedChunks.length > 0) {
-						const succeeded = pubkeyChunks.length - failedChunks.length
-						console.warn(`[getBalances] Portfolio refresh failed: ${succeeded}/${pubkeyChunks.length} chunks succeeded`)
-						throw new Error(`Portfolio refresh incomplete: ${failedChunks.length}/${pubkeyChunks.length} chunks failed`)
+					const failedChunkCount = chunkResults.filter(r => r.error).length
+					let hadChunkFailures = false
+					// effectivePubkeys: pubkeys whose chunk succeeded — chains from failed chunks show 0
+					let effectivePubkeys = pubkeys
+					if (failedChunkCount > 0) {
+						hadChunkFailures = true
+						const succeeded = pubkeyChunks.length - failedChunkCount
+						console.warn(`[getBalances] Partial portfolio response: ${succeeded}/${pubkeyChunks.length} chunks succeeded — failed chains will show 0`)
+						if (failedChunkCount === pubkeyChunks.length) {
+							throw new Error(`All ${pubkeyChunks.length} portfolio chunks failed`)
+						}
+						const failedPubkeySet = new Set<string>()
+						for (let i = 0; i < chunkResults.length; i++) {
+							if (chunkResults[i].error) {
+								for (const p of pubkeyChunks[i]) failedPubkeySet.add(p.pubkey)
+							}
+						}
+						effectivePubkeys = pubkeys.filter(p => !failedPubkeySet.has(p.pubkey))
 					}
 					const allEntries = chunkResults.flatMap(r => r.entries)
 
@@ -1862,9 +1875,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const tokensByChainId = new Map<string, TokenBalance[]>()
 					const evmTokensByOwner = new Map<string, TokenBalance[]>()
 					let tokensSkippedZero = 0, tokensSkippedNoChain = 0, tokensGrouped = 0
+					// Dedup by (caip, ownerAddress) before accumulation so Pioneer returning the same
+					// token multiple times for the same address doesn't inflate the balance.
+					const seenByOwnerCaip = new Set<string>()
 					for (const tok of tokenEntries) {
 						const bal = parseFloat(String(tok.balance ?? '0'))
 						if (bal <= 0) { tokensSkippedZero++; continue }
+						const ownerAddr = String(tok.address || tok.pubkey || '').toLowerCase()
+						const caipNorm = (tok.caip || '').startsWith('eip155:') ? (tok.caip || '').toLowerCase() : (tok.caip || '')
+						const ownerCaipKey = `${caipNorm}|${ownerAddr}`
+						if (seenByOwnerCaip.has(ownerCaipKey)) { tokensSkippedZero++; continue }
+						seenByOwnerCaip.add(ownerCaipKey)
 
 						// Determine parent chainId from networkId or CAIP-2 prefix (lowercase — Pioneer may return different casing)
 						const tokNetworkId = (tok.networkId || '').toLowerCase()
@@ -1943,6 +1964,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
+					// EVM AssetPage shows per-address tokens from evmTokensByOwner, not tokensByChainId.
+					// Pioneer returns the same token multiple times per address — dedup that map too.
+					for (const [ownerKey, ownerTokens] of evmTokensByOwner) {
+						const seen = new Map<string, TokenBalance>()
+						for (const tok of ownerTokens) {
+							const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+							const existing = seen.get(key)
+							if (!existing) {
+								seen.set(key, { ...tok })
+							} else {
+								existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+								existing.balanceUsd += tok.balanceUsd
+							}
+						}
+						if (seen.size < ownerTokens.length) {
+							console.debug(`[getBalances] Deduped owner ${ownerKey}: ${ownerTokens.length} → ${seen.size} tokens`)
+							evmTokensByOwner.set(ownerKey, [...seen.values()])
+						}
+					}
+
 					// Aggregate BTC entries into one ChainBalance + update per-xpub balances
 					console.debug(`[getBalances] pureNatives count: ${pureNatives.length}`)
 					for (const n of pureNatives) {
@@ -1959,7 +2000,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
-					for (const entry of pubkeys) {
+					for (const entry of effectivePubkeys) {
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
@@ -2118,11 +2159,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}).catch(() => {})
 					}
 
-					// Cache balances (fire-and-forget) — only on successful Pioneer response.
+					// Cache balances (fire-and-forget) — only on clean (no partial failures) Pioneer response.
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !hadChunkFailures && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -2383,9 +2424,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmTokensByOwner = new Map<string, TokenBalance[]>()
 					if (tokenEntries.length > 0) {
 						const parsedTokens: TokenBalance[] = []
+						// Dedup by (caip, ownerAddress) — same fix as getBalances path
+						const seenByOwnerCaip = new Set<string>()
 						for (const tok of tokenEntries) {
 							const bal = parseFloat(String(tok.balance ?? '0'))
 							if (bal <= 0) continue
+							const ownerAddr = String(tok.address || tok.pubkey || '').toLowerCase()
+							const caipNorm = (tok.caip || '').startsWith('eip155:') ? (tok.caip || '').toLowerCase() : (tok.caip || '')
+							if (seenByOwnerCaip.has(`${caipNorm}|${ownerAddr}`)) continue
+							seenByOwnerCaip.add(`${caipNorm}|${ownerAddr}`)
 							const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
 							const contractAddress = contractMatch?.[2] || tok.contract || undefined
 							const token: TokenBalance = {
@@ -2433,6 +2480,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							balanceUsd += tokenUsdTotal
 						}
 						console.log(`[getBalance] ${chain.coin}: ${tokens?.length ?? 0} tokens, $${balanceUsd.toFixed(2)} total`)
+					}
+
+					// Dedup per-address EVM token lists before writing to evmAddresses.
+					// tokensByChainId is already deduped above; evmTokensByOwner feeds AssetPage directly.
+					if (isEvm) {
+						for (const [addr, addrTokens] of evmTokensByOwner) {
+							const seen = new Map<string, TokenBalance>()
+							for (const tok of addrTokens) {
+								const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+								const existing = seen.get(key)
+								if (!existing) {
+									seen.set(key, { ...tok })
+								} else {
+									existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+									existing.balanceUsd += tok.balanceUsd
+								}
+							}
+							if (seen.size < addrTokens.length) evmTokensByOwner.set(addr, [...seen.values()])
+						}
 					}
 
 					if (isEvm) {
@@ -3402,6 +3468,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { code: data.code, expiresAt: data.expiresAt, expiresIn: data.expiresIn, qrPayload }
 			},
 
+			// ── Window Focus ─────────────────────────────────────────
+			getWindowFocusState: async () => {
+				return { refs: _alwaysOnTopRefs, alwaysOnTop: _alwaysOnTopRefs > 0 }
+			},
+			forceReleaseWindowFocus: async () => {
+				if (_alwaysOnTopRefs > 0) {
+					console.warn(`[window-focus] Force-releasing stuck always-on-top (refs was ${_alwaysOnTopRefs})`)
+					_alwaysOnTopRefs = 0
+					try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+				}
+			},
+
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
 				return getAppSettings()
@@ -3834,6 +3912,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
 				return await getSwapAssets()
+			},
+
+			getSwapHealth: async () => {
+				const base = await (await import('./pioneer')).getPioneerApiBase()
+				try {
+					const resp = await fetch(`${base}/api/v1/swap/health`, { signal: AbortSignal.timeout(8000) })
+					if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+					const data = await resp.json() as any
+					return data as import('../shared/types').SwapHealth
+				} catch (e: any) {
+					// Pioneer unreachable — return offline for all known integrations
+					console.warn('[swap] getSwapHealth failed:', e?.message)
+					return {
+						fetchedAt: Date.now(),
+						integrations: [
+							{ key: 'thorchain',  label: 'THORChain', status: 'offline' as const },
+							{ key: 'mayachain',  label: 'Mayachain', status: 'offline' as const },
+							{ key: 'shapeshift', label: 'ShapeShift', status: 'offline' as const },
+							{ key: 'relay',      label: 'Relay',     status: 'offline' as const },
+						],
+					}
+				}
 			},
 
 			/** Look up an unknown EVM token by contract address.

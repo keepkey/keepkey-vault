@@ -129,20 +129,44 @@ export function parseQuoteResponse(
   // Any integration that hands us calldata gets the same treatment: we sign
   // the supplied tx as-is. The field stays named `relayTx` for backwards
   // compatibility with ExecuteSwapParams; conceptually it's "prebuilt tx".
-  const hasPrebuiltTx = !!txParams.data
+  //
+  // Two sub-cases:
+  //  A) Real calldata (data.length ≥ 10): encodes the swap instruction (Relay, 0x, …)
+  //  B) Deposit-channel (data = '0x' / empty): Chainflip and NEAR Intents EVM-side
+  //     use a plain ETH transfer to a protocol-controlled address; the swap destination
+  //     was registered off-chain when the quote/channel was created. `data` is empty
+  //     intentionally — do NOT conflate with a malformed Relay quote.
+  const rawData: string | undefined = txParams.data
+  const hasRealCalldata = !!rawData && rawData !== '0x' && rawData !== '0x0' && rawData.length >= 10
+
+  // Deposit-channel protocols send a plain native transfer (data = '0x') to a
+  // protocol-controlled address. The BTC/etc. destination is registered off-chain.
+  // Allowed list is narrow and explicit — unknown swappers with empty calldata
+  // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
+  // by the pre-existing cross-chain guard.
+  // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
+  // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
+  // path instead (isMemolessTransfer below).
+  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
+  const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
+  const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
+  const hasPrebuiltTx = hasRealCalldata || isDepositChannel
   let relayTx: RelayTxParams | undefined
 
   if (hasPrebuiltTx) {
     relayTx = {
       to: txParams.to,
-      data: txParams.data,
+      data: rawData ?? '0x',
       value: String(txParams.value || '0'),
-      gasLimit: String(txParams.gasLimit || txParams.gas || '300000'),
+      // Leave gasLimit undefined when Pioneer omits it so buildRelaySwapTx
+      // can apply its chain-aware fallback (300000 is only correct for Arbitrum).
+      gasLimit: (txParams.gasLimit || txParams.gas) ? String(txParams.gasLimit || txParams.gas) : undefined,
       maxFeePerGas: txParams.maxFeePerGas ? String(txParams.maxFeePerGas) : undefined,
       maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? String(txParams.maxPriorityFeePerGas) : undefined,
       chainId: txParams.chainId,
+      isDepositChannel: isDepositChannel || undefined,
     }
-    console.log(`${TAG} ${integration} — prebuilt tx extracted (to=${relayTx.to}, chainId=${relayTx.chainId})`)
+    console.log(`${TAG} ${integration} (${swapper}) — prebuilt tx extracted (to=${relayTx.to}, depositChannel=${isDepositChannel})`)
   }
 
   // Memo lives in txParams (Pioneer constructs it), fallback to raw
@@ -164,6 +188,19 @@ export function parseQuoteResponse(
     inboundAddress = router
   }
 
+  // Guard: UTXO sources must send to a chain-native address, not an EVM address.
+  // NEAR Intents BTC→ETH falls back to the user's ETH recipientAddress when Pioneer
+  // can't surface a BTC deposit address from step.allowanceContract — that ETH
+  // address would be passed to the firmware as a Bitcoin output and cause
+  // "Failed to compile output" (code 9). Fail loudly here instead.
+  if (fromIsUtxo && inboundAddress && inboundAddress.startsWith('0x')) {
+    console.error(`${TAG} NEAR Intents BTC deposit address is missing — Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2).slice(0, 2000)}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    throw new Error('Swap quote did not provide a valid BTC deposit address — NEAR Intents deposit channel may be unavailable for this pair. Try refreshing the quote.')
+  }
+
   // Expiry for depositWithExpiry
   const expiry = raw.expiry || quote.expiry || 0
 
@@ -182,8 +219,15 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  if (!memo && !hasPrebuiltTx) {
-    console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
+  // For memo-less UTXO swaps (NEAR Intents BTC→ETH): the deposit address IS the
+  // only instruction — no memo or calldata needed. fromIsUtxo guards direction:
+  // EVM→BTC with no calldata has no way to encode the BTC destination.
+  const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
+  if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
+    // A quote with neither memo nor prebuilt calldata has no swap instructions —
+    // it cannot be executed. Throw now so the UI surfaces a clear error at
+    // quote-fetch time rather than a cryptic "Missing swap memo" at preview time.
+    throw new Error('Quote returned no swap instructions (no memo and no calldata) — try a different pair or refresh')
   }
 
   // Extract fees — relay uses a different fee structure
