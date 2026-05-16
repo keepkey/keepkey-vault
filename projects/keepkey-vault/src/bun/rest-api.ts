@@ -2687,6 +2687,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/debug/portfolio' && method === 'GET') {
           auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
           const ds = engine.getDeviceState()
           const deviceId = ds.deviceId
           if (!deviceId) return json({ error: 'No device connected' }, 503)
@@ -2737,6 +2738,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/debug/portfolio/chains' && method === 'GET') {
           auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
           const ds = engine.getDeviceState()
           const deviceId = ds.deviceId
           if (!deviceId) return json({ error: 'No device connected' }, 503)
@@ -2761,6 +2763,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/debug/portfolio/tokens' && method === 'GET') {
           auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
           const ds = engine.getDeviceState()
           const deviceId = ds.deviceId
           if (!deviceId) return json({ error: 'No device connected' }, 503)
@@ -2781,6 +2784,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/debug/portfolio/spam' && method === 'GET') {
           auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
           const ds = engine.getDeviceState()
           const deviceId = ds.deviceId
           if (!deviceId) return json({ error: 'No device connected' }, 503)

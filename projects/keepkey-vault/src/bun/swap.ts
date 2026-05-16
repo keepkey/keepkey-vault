@@ -926,22 +926,27 @@ async function buildRelaySwapTx(
   if (!relayFeePerGas) {
     throw new Error(`Unable to determine gas fee for Relay transaction on ${fromChain.id} — refusing to sign. Try refreshing the quote.`)
   }
-  // `effectiveRelayFeePerGas` is used in the signed tx params (live-bumped for inclusion).
-  const effectiveRelayFeePerGas = BigInt(relayFeePerGas)
-
-  // For the BALANCE CHECK: use the relay's own quoted fee, not the live-bumped value.
-  // Live bumping happens between preview and execute (gas spikes); using the bumped
-  // fee for the check causes false failures on L2s (Base: 0.001-0.1 gwei base fee
-  // vs the 3x buffer that kicks the check fee to 3+ gwei). The relay quote is the
-  // price the user agreed to; if they can afford that, let the swap proceed.
-  const checkFeePerGas: bigint = relay.maxFeePerGas
+  // EIP-1559 nodes require the sender to cover gasLimit * maxFeePerGas + value before
+  // broadcasting. The balance check and the fee cap placed in the signed tx MUST agree,
+  // otherwise a tight balance passes the check but the broadcast rejects.
+  //
+  // Strategy: take the relay's own quoted maxFeePerGas as the signed cap. The live bump
+  // computed above is discarded — the relay quote already reflects current network conditions
+  // at quote time, and on L2s (Base, Optimism) the 3× live-buffer produces wildly over-
+  // estimated caps that block valid swaps on tight balances. If the relay's cap proves
+  // insufficient for inclusion, the tx will be mined anyway at priority-fee level once
+  // the base fee drops — or the user can refresh the quote to get a fresh cap.
+  const signedFeePerGas: bigint = relay.maxFeePerGas
     ? BigInt(relay.maxFeePerGas)
-    : effectiveRelayFeePerGas
-  const relayGasReserve = relayGasLimit * checkFeePerGas
+    : BigInt(relayFeePerGas)  // no quoted fee → fall back to live (gasPrice path)
+  const signedPrioFeePerGas: bigint = relay.maxPriorityFeePerGas
+    ? BigInt(relay.maxPriorityFeePerGas)
+    : signedFeePerGas  // no quoted prio → cap at max
+  const relayGasReserve = relayGasLimit * signedFeePerGas
   // ERC-20 relay swaps run an approve tx before the swap. Reserve gas for both.
-  const approveGasReserve = isErc20Source ? 80000n * checkFeePerGas : 0n
+  const approveGasReserve = isErc20Source ? 80000n * signedFeePerGas : 0n
   const relayNativeRequired = relayValue + relayGasReserve + approveGasReserve
-  console.log(`${TAG} relay fee: quoted=${relay.maxFeePerGas} effective=${effectiveRelayFeePerGas} checkFee=${checkFeePerGas}`)
+  console.log(`${TAG} relay fee: quoted=${relay.maxFeePerGas} liveBumped=${relayFeePerGas} signedCap=${signedFeePerGas}`)
   let nativeBalance: bigint | undefined
   if (rpcUrl) {
     try {
@@ -1067,12 +1072,18 @@ async function buildRelaySwapTx(
     data: relay.data,
   }
 
-  // EIP-1559 fields
-  if (maxFeePerGas) {
-    unsignedTx.maxFeePerGas = toHex(BigInt(maxFeePerGas))
-    unsignedTx.maxPriorityFeePerGas = toHex(BigInt(maxPriorityFeePerGas || '1000000'))
+  // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
+  // matches the balance check above. Using the live-bumped cap here while checking
+  // against the quoted cap would allow a tx that the account cannot cover.
+  if (relay.maxFeePerGas) {
+    unsignedTx.maxFeePerGas = toHex(signedFeePerGas)
+    unsignedTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
   } else if (gasPrice) {
     unsignedTx.gasPrice = gasPrice
+  } else if (maxFeePerGas) {
+    // No relay-quoted fee — fall back to live-bumped (consistent with signedFeePerGas fallback above)
+    unsignedTx.maxFeePerGas = maxFeePerGas
+    unsignedTx.maxPriorityFeePerGas = maxPriorityFeePerGas || toHex(1_000_000n)
   }
 
   // Sanity guard — ERC-20 sources ALWAYS need calldata (transferFrom or

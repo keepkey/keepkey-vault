@@ -158,7 +158,9 @@ export function parseQuoteResponse(
       to: txParams.to,
       data: rawData ?? '0x',
       value: String(txParams.value || '0'),
-      gasLimit: String(txParams.gasLimit || txParams.gas || '300000'),
+      // Leave gasLimit undefined when Pioneer omits it so buildRelaySwapTx
+      // can apply its chain-aware fallback (300000 is only correct for Arbitrum).
+      gasLimit: (txParams.gasLimit || txParams.gas) ? String(txParams.gasLimit || txParams.gas) : undefined,
       maxFeePerGas: txParams.maxFeePerGas ? String(txParams.maxFeePerGas) : undefined,
       maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? String(txParams.maxPriorityFeePerGas) : undefined,
       chainId: txParams.chainId,

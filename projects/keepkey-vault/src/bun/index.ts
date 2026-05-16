@@ -403,7 +403,7 @@ const auth = new AuthStore()
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
-let swapsEnabled = false
+let swapsEnabled = true  // default on; only disabled when explicitly set to '0'
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 // True after the per-session incremental scan has caught the wallet up to
@@ -423,7 +423,7 @@ let alphaFirmware = false
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
-	swapsEnabled = getSetting('swaps_enabled') === '1'
+	swapsEnabled = getSetting('swaps_enabled') !== '0'  // absent → true (opt-out model)
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
