@@ -579,7 +579,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 120000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
 			if (result) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
