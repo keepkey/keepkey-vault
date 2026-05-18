@@ -93,7 +93,7 @@ An HTTP API for external applications (dApps, SDKs, CLI tools). Disabled by defa
 
 | Method | Params | Response | Description |
 |--------|--------|----------|-------------|
-| `getBalances` | void | `ChainBalance[]` | Fetch all chain balances via Pioneer |
+| `getBalances` | `{ forceRefresh?: boolean }` | `ChainBalance[]` | Fetch all chain balances via Pioneer; forceRefresh bypasses cache (default false) |
 | `getBalance` | `{ chainId }` | `ChainBalance` | Fetch single chain balance |
 | `buildTx` | `BuildTxParams` | `BuildTxResult` | Build unsigned transaction |
 | `broadcastTx` | `{ chainId, signedTx }` | `BroadcastResult` | Broadcast signed transaction |

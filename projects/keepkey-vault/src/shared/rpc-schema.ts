@@ -84,7 +84,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       tonSignMessage: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
-      getBalances: { params: void; response: ChainBalance[] }
+      getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
       getBalance: { params: { chainId: string }; response: ChainBalance }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
       broadcastTx: { params: { chainId: string; signedTx: any }; response: BroadcastResult }
