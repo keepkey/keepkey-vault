@@ -1143,31 +1143,41 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					maxH="calc(100vh - 110px)"
 					overflowY="auto"
 					pr="1"
+					style={{ colorScheme: "dark" }}
 					css={{
-						// Reserve the gutter at all times — toggling width on hover
-						// would shift the row content. Thumb stays invisible until hover.
-						scrollbarWidth: "thin",
-						scrollbarColor: "transparent transparent",
+						// Reserve a 6px gutter at all times so the rows don't reflow when
+						// the thumb fades in. Only the thumb opacity changes on hover.
+						// Don't set `scrollbar-width: thin` — on WebKit it forces the
+						// system thin scrollbar and disables our pseudo-element styles,
+						// which made the gutter render as a bright system-default bar.
 						"&::-webkit-scrollbar": {
 							width: "6px",
+							height: "6px",
 							background: "transparent",
 						},
 						"&::-webkit-scrollbar-track": {
 							background: "transparent",
+							border: "0",
 						},
 						"&::-webkit-scrollbar-thumb": {
 							background: "transparent",
 							borderRadius: "3px",
+							border: "0",
 							transition: "background-color 0.2s ease",
 						},
-						"&:hover": {
-							scrollbarColor: "rgba(255,255,255,0.08) transparent",
-						},
+						"&::-webkit-scrollbar-corner": { background: "transparent" },
 						"&:hover::-webkit-scrollbar-thumb": {
-							background: "rgba(255,255,255,0.06)",
+							background: "rgba(255,255,255,0.08)",
 						},
 						"&::-webkit-scrollbar-thumb:hover": {
-							background: "rgba(255,255,255,0.14)",
+							background: "rgba(255,255,255,0.18)",
+						},
+						// Firefox fallback — webkit ignores `scrollbar-width`, so this
+						// only affects Firefox builds; webkit follows the rules above.
+						"@supports (-moz-appearance: none)": {
+							scrollbarWidth: "thin",
+							scrollbarColor: "transparent transparent",
+							"&:hover": { scrollbarColor: "rgba(255,255,255,0.10) transparent" },
 						},
 					}}
 				>

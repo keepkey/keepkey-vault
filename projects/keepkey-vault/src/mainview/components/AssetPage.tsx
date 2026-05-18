@@ -568,8 +568,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						</Box>
 
 						<Image
-							src={getAssetIcon(chain.caip)}
-							alt={chain.symbol}
+							src={selectedToken ? (selectedToken.icon || getAssetIcon(selectedToken.caip)) : getAssetIcon(chain.caip)}
+							alt={selectedToken ? selectedToken.symbol : chain.symbol}
 							w={{ base: "44px", md: "52px" }}
 							h={{ base: "44px", md: "52px" }}
 							borderRadius="full"
@@ -588,13 +588,41 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									lineHeight="1.05"
 									truncate
 								>
-									{chain.coin}
+									{selectedToken ? (selectedToken.name || selectedToken.symbol) : chain.coin}
 								</Text>
-								<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
+								<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">
+									{selectedToken ? selectedToken.symbol : chain.symbol}
+								</Text>
 							</Flex>
-							<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" mt="0.5" truncate>
-								{chain.caip}
-							</Text>
+							{selectedToken ? (
+								<Flex align="center" gap="1.5" mt="0.5">
+									<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.02em">on</Text>
+									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="12px" h="12px" borderRadius="full" bg="var(--ink-2)" />
+									<Text fontSize="11px" color="var(--text-2)" fontWeight="500">{chain.coin}</Text>
+									<Box
+										as="button"
+										onClick={() => setSelectedToken(null)}
+										ml="1.5"
+										fontSize="10px"
+										color="var(--text-3)"
+										border="1px solid var(--line)"
+										borderRadius="md"
+										px="1.5"
+										py="0.5"
+										bg="transparent"
+										cursor="pointer"
+										_hover={{ color: "var(--text-0)", bg: "var(--ink-3)" }}
+										transition="all 0.15s"
+										title="Back to chain"
+									>
+										← chain
+									</Box>
+								</Flex>
+							) : (
+								<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" mt="0.5" truncate>
+									{chain.caip}
+								</Text>
+							)}
 						</Box>
 					</Flex>
 
@@ -612,7 +640,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							</Flex>
 						)}
 						{/* Balance display (only when available) */}
-						{activeBalance && (
+						{(selectedToken || activeBalance) && (
 							<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 								<Text
 									fontFamily="mono"
@@ -622,12 +650,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									letterSpacing="0.01em"
 									lineHeight="1.2"
 								>
-									{activeBalance.balance}
-									<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
+									{selectedToken ? selectedToken.balance : activeBalance!.balance}
+									<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>
+										{selectedToken ? selectedToken.symbol : chain.symbol}
+									</Box>
 								</Text>
-								{cleanBalanceUsd > 0 && (
+								{(selectedToken ? (selectedToken.balanceUsd ?? 0) : cleanBalanceUsd) > 0 && (
 									<AnimatedUsd
-										value={cleanBalanceUsd}
+										value={selectedToken ? (selectedToken.balanceUsd ?? 0) : cleanBalanceUsd}
 										prefix="≈ "
 										fontSize="12px"
 										fontFamily="mono"
