@@ -119,6 +119,7 @@ export interface ChainBalance {
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
+  updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
 }
 
 export interface BuildTxParams {

@@ -593,8 +593,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				const map = new Map<string, ChainBalance>()
-				for (const b of result) map.set(b.chainId, b)
+				// No-walk-backwards merge: start from current displayed balances so chains
+				// from failed Pioneer chunks (which are absent from `result`) stay visible.
+				// Only update a chain if the new value is non-zero, or if we had no prior data.
+				const map = new Map<string, ChainBalance>(balances)
+				for (const b of result) {
+					const prev = map.get(b.chainId)
+					if (!prev || b.balanceUsd > 0 || parseFloat(b.balance || '0') > 0) {
+						map.set(b.chainId, b)
+					} else {
+						console.log(`[Dashboard] Preserving prior ${b.chainId} balance — Pioneer returned 0`)
+					}
+				}
 				setBalances(map)
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)
