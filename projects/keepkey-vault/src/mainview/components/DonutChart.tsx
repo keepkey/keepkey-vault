@@ -77,19 +77,16 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice }: Donu
 					)
 				})}
 
-				{/* Center circle with total */}
+				{/* Inner cutout — no stroke, blends into the background. */}
 				<circle
 					cx={cx}
 					cy={cy}
-					r={innerR * 0.88}
-					fill="rgba(0,0,0,0.6)"
-					stroke="var(--gold)"
-					strokeWidth={1}
-					strokeOpacity={0.3}
+					r={innerR * 0.96}
+					fill="transparent"
 				/>
 			</svg>
 
-			{/* Center text overlay */}
+			{/* Center text overlay — matches the orbital "TOTAL" treatment. */}
 			<Flex
 				position="absolute"
 				top="0"
@@ -100,11 +97,25 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice }: Donu
 				justify="center"
 				direction="column"
 				pointerEvents="none"
+				gap="1"
 			>
-				<Text fontSize="11px" color="kk.gold" fontWeight="500" lineHeight="1">
-					Portfolio
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.20em"
+					textTransform="uppercase"
+					fontWeight="500"
+					lineHeight="1"
+				>
+					Total
 				</Text>
-				<AnimatedUsd value={total} fontSize="18px" color="kk.gold" fontWeight="bold" lineHeight="1.4" />
+				<AnimatedUsd
+					value={total}
+					fontSize={`${Math.round(size * 0.10)}px`}
+					color="var(--text-0)"
+					fontWeight="500"
+					lineHeight="1.1"
+				/>
 			</Flex>
 		</Box>
 	)
@@ -117,9 +128,9 @@ interface ChartLegendProps {
 	onHoverItem: (index: number | null) => void
 }
 
-export function ChartLegend({ data, total, activeIndex, onHoverItem }: ChartLegendProps) {
+export function ChartLegend({ data, total, activeIndex, onHoverItem: _onHoverItem }: ChartLegendProps) {
 	if (activeIndex === null || !data[activeIndex]) {
-		return <Box h="24px" />
+		return <Box h="40px" />
 	}
 
 	const item = data[activeIndex]
@@ -127,22 +138,30 @@ export function ChartLegend({ data, total, activeIndex, onHoverItem }: ChartLege
 
 	return (
 		<Flex
-			justify="center"
+			justify="space-between"
 			align="center"
-			py="2"
-			px="3"
-			borderRadius="md"
-			bg={`${item.color}20`}
-			borderLeft="2px solid"
-			borderColor={item.color}
+			py="3"
+			px="4"
+			borderRadius="lg"
+			bg="transparent"
+			border="1px solid"
+			borderColor="kk.border"
 			w="100%"
-			gap="2"
-			transition="all 0.15s"
+			gap="4"
+			transition="border-color 0.2s"
 		>
-			<Box w="8px" h="8px" borderRadius="full" bg={item.color} flexShrink={0} />
-			<Text fontSize="xs" fontWeight="500" color="white">{item.name}</Text>
-			<Text fontSize="xs" fontWeight="bold" color="white">{percent}%</Text>
-			<AnimatedUsd value={item.value} fontSize="xs" fontWeight="500" />
+			<Flex align="center" gap="3" minW="0" flex="1">
+				<Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} boxShadow={`0 0 14px -2px ${item.color}`} />
+				<Text fontSize="15px" fontWeight="600" color="var(--text-0)" truncate>{item.name}</Text>
+				<Text fontSize="12px" color="var(--text-2)" letterSpacing="0.04em" flexShrink={0}>{percent}%</Text>
+			</Flex>
+			<AnimatedUsd
+				value={item.value}
+				fontSize={{ base: "20px", md: "26px" }}
+				color="var(--text-0)"
+				fontWeight="500"
+				letterSpacing="-0.01em"
+			/>
 		</Flex>
 	)
 }

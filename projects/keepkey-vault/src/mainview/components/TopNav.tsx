@@ -4,6 +4,7 @@ import { Z } from "../lib/z-index"
 import { IS_WINDOWS, IS_MAC } from "../lib/platform"
 import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
+import { useDashboardView } from "../lib/dashboardViewContext"
 import kkIcon from "../assets/icon.png"
 import { NAV_HEIGHT } from "../layout"
 
@@ -143,6 +144,7 @@ export function TopNav({
 }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
+	const { viewMode, setViewMode } = useDashboardView()
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
@@ -345,8 +347,63 @@ export function TopNav({
 				})}
 			</HStack>
 
-			{/* Right: walletconnect + mobile + settings */}
-			<Flex flex="1" justify="flex-end" align="center" gap="1">
+			{/* Right: portfolio view toggle (vault tab only) + walletconnect + mobile + settings */}
+			<Flex flex="1" justify="flex-end" align="center" gap="2">
+				{activeTab === "vault" && (
+					<Flex
+						bg="var(--ink-2)"
+						border="1px solid var(--line)"
+						borderRadius="999px"
+						p="3px"
+						gap="1"
+						className="electrobun-webkit-app-region-no-drag"
+					>
+						<Box
+							as="button"
+							onClick={() => setViewMode("orbital")}
+							w="28px"
+							h="22px"
+							borderRadius="999px"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+							bg={viewMode === "orbital" ? "var(--ink-4)" : "transparent"}
+							color={viewMode === "orbital" ? "var(--gold)" : "var(--text-3)"}
+							_hover={{ color: "var(--text-0)" }}
+							transition="all 0.18s"
+							cursor="pointer"
+							title="Orbital view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9" strokeDasharray="2 3" />
+								<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+								<circle cx="21" cy="12" r="2.2" fill="currentColor" stroke="none" />
+								<circle cx="3" cy="12" r="1.6" fill="currentColor" stroke="none" />
+							</svg>
+						</Box>
+						<Box
+							as="button"
+							onClick={() => setViewMode("donut")}
+							w="28px"
+							h="22px"
+							borderRadius="999px"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+							bg={viewMode === "donut" ? "var(--ink-4)" : "transparent"}
+							color={viewMode === "donut" ? "var(--gold)" : "var(--text-3)"}
+							_hover={{ color: "var(--text-0)" }}
+							transition="all 0.18s"
+							cursor="pointer"
+							title="Donut view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9" />
+								<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+							</svg>
+						</Box>
+					</Flex>
+				)}
 				{onWalletConnectToggle && (
 					<IconButton
 						aria-label={t("walletConnect", { defaultValue: "WalletConnect" })}

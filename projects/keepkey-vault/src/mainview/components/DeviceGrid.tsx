@@ -175,8 +175,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					fontSize="28px"
 					fontWeight="500"
 					color="var(--text-0)"
-					fontFamily="serif"
-					fontStyle="italic"
 					letterSpacing="-0.01em"
 					lineHeight="1.1"
 				>
@@ -260,7 +258,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 								<Image src={kkIcon} alt="KeepKey" w="36px" h="36px" borderRadius="10px"
 									border="1px solid var(--ink-4)" flexShrink={0} bg="var(--ink-2)" />
 								<Box flex="1" minW="0">
-									<Text fontSize="14px" fontWeight="500" color="var(--text-0)" fontFamily="serif" fontStyle="italic" truncate lineHeight="1.2">
+									<Text fontSize="14px" fontWeight="500" color="var(--text-0)" truncate lineHeight="1.2">
 										{d.label || "KeepKey"}
 									</Text>
 									<Text fontSize="10px" color="var(--text-3)" fontFamily="mono" letterSpacing="0.02em">
@@ -275,7 +273,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 									<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
 										Cached balance
 									</Text>
-									<Text fontSize="17px" fontWeight="500" color={showValues ? "var(--text-0)" : "var(--text-3)"} fontFamily="serif" fontStyle="italic" lineHeight="1.1">
+									<Text fontSize="17px" fontWeight="500" color={showValues ? "var(--text-0)" : "var(--text-3)"} lineHeight="1.1">
 										{showValues ? `$${formatUsd(d.totalUsd)}` : '$ ••••'}
 									</Text>
 								</Box>
@@ -305,7 +303,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 								<Flex align="center" gap="2.5" mb="2.5">
 									<EmulatorIcon active={active} />
 									<Box flex="1" minW="0">
-										<Text fontSize="14px" fontWeight="500" color={active ? "var(--teal)" : "var(--text-0)"} fontFamily="serif" fontStyle="italic" truncate lineHeight="1.2">
+										<Text fontSize="14px" fontWeight="500" color={active ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
 											{displayName}
 										</Text>
 										{w.label && w.label !== w.name && (
@@ -320,7 +318,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
 											Cached balance
 										</Text>
-										<Text fontSize="17px" fontWeight="500" color={showValues ? (active ? "var(--teal)" : "var(--text-0)") : "var(--text-3)"} fontFamily="serif" fontStyle="italic" lineHeight="1.1">
+										<Text fontSize="17px" fontWeight="500" color={showValues ? (active ? "var(--teal)" : "var(--text-0)") : "var(--text-3)"} lineHeight="1.1">
 											{showValues ? `$${formatUsd(w.totalUsd ?? 0)}` : '$ ••••'}
 										</Text>
 									</Box>

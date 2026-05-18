@@ -46,12 +46,14 @@ interface AssetPageProps {
 	balance?: ChainBalance
 	onBack: () => void
 	firmwareVersion?: string
+	/** Open the page on a specific action ("send" / "receive" / "swap"). */
+	initialAction?: "send" | "receive" | "swap"
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
-	const [view, setView] = useState<AssetView>("receive")
+	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : "receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
@@ -332,7 +334,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
-	const [showSwapDialog, setShowSwapDialog] = useState(false)
+	const [showSwapDialog, setShowSwapDialog] = useState(initialAction === "swap")
 	const [showSweep, setShowSweep] = useState(false)
 	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
 	const isEvmChain = chain.chainFamily === 'evm'
@@ -577,11 +579,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						<Box flex="1" minW="0">
 							<Flex align="baseline" gap="2.5">
 								<Text
-									fontFamily="serif"
-									fontStyle="italic"
-									fontWeight="400"
+									fontWeight="500"
 									fontSize={{ base: "26px", md: "34px" }}
-									letterSpacing="-0.02em"
+									letterSpacing="-0.01em"
 									color="var(--text-0)"
 									lineHeight="1.05"
 									truncate

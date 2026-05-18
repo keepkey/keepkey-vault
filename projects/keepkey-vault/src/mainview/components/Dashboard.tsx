@@ -1,4 +1,4 @@
-import { Component, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
+import { Component, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
@@ -11,8 +11,17 @@ import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
+import { DogeEasterEgg } from "./DogeEasterEgg"
+
+// SwapDialog is heavy (loads swapper providers) — lazy so it doesn't enter the
+// initial Dashboard chunk. Used to open Swap directly from the action row
+// without routing through AssetPage.
+const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useIconColor } from "../lib/iconColor"
+import { preloadIcons } from "../lib/iconPreload"
+import { useDashboardView } from "../lib/dashboardViewContext"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
@@ -136,14 +145,6 @@ function OrbitalView({
 	return (
 		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
 			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-				<defs>
-					<radialGradient id="dashboardCoreGlow" cx="50%" cy="50%">
-						<stop offset="0%" stopColor="rgba(233,196,106,0.18)" />
-						<stop offset="55%" stopColor="rgba(139,227,196,0.05)" />
-						<stop offset="100%" stopColor="transparent" />
-					</radialGradient>
-				</defs>
-				<circle cx={cx} cy={cy} r={size * 0.5} fill="url(#dashboardCoreGlow)" />
 				<circle
 					cx={cx}
 					cy={cy}
@@ -221,6 +222,9 @@ function OrbitalView({
 				const sat = Math.max(40, Math.min(72, 30 + Math.sqrt(usd) * 1.4))
 				const isHover = hover === chain.id
 				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				// Flip the hover tip below the satellite when it's in the upper
+				// half of the orbit so the TopNav doesn't clip it.
+				const tipBelow = y < cy
 				return (
 					<Box
 						key={chain.id}
@@ -279,7 +283,7 @@ function OrbitalView({
 						{isHover && (
 							<Box
 								position="absolute"
-								top="-58px"
+								{...(tipBelow ? { bottom: "-58px" } : { top: "-58px" })}
 								left="50%"
 								transform="translateX(-50%)"
 								bg="var(--ink-3)"
@@ -290,6 +294,7 @@ function OrbitalView({
 								whiteSpace="nowrap"
 								boxShadow="0 8px 24px -8px rgba(0,0,0,0.6)"
 								pointerEvents="none"
+								zIndex={20}
 							>
 								<Text fontSize="12px" fontWeight="600" color="var(--text-0)" textAlign="center">
 									{chain.coin}
@@ -301,6 +306,246 @@ function OrbitalView({
 							</Box>
 						)}
 					</Box>
+				)
+			})}
+		</Box>
+	)
+}
+
+/** Single token satellite — separate component so each call site gets its own
+ *  hook stack (useIconColor) keyed by the token icon. */
+function TokenSatellite({
+	tok,
+	x,
+	y,
+	sat,
+	isHover,
+	tipBelow,
+	fallbackColor,
+	onEnter,
+	onLeave,
+	onClick,
+}: {
+	tok: import("../../shared/types").TokenBalance
+	x: number
+	y: number
+	sat: number
+	isHover: boolean
+	tipBelow: boolean
+	fallbackColor: string
+	onEnter: () => void
+	onLeave: () => void
+	onClick: () => void
+}) {
+	const iconUrl = tok.icon || getAssetIcon(tok.caip)
+	const glow = useIconColor(iconUrl, fallbackColor)
+	const usd = tok.balanceUsd ?? 0
+	return (
+		<Box
+			as="button"
+			onMouseEnter={onEnter}
+			onMouseLeave={onLeave}
+			onClick={onClick}
+			position="absolute"
+			left={`${x - sat / 2}px`}
+			top={`${y - sat / 2}px`}
+			w={`${sat}px`}
+			h={`${sat}px`}
+			borderRadius="full"
+			bg="transparent"
+			border="0"
+			p={0}
+			display="grid"
+			placeItems="center"
+			transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
+			transform={isHover ? 'scale(1.15)' : 'scale(1)'}
+			filter={isHover
+				? `drop-shadow(0 0 24px ${glow})`
+				: `drop-shadow(0 0 12px ${glow}66) drop-shadow(0 4px 14px rgba(0,0,0,0.55))`}
+			zIndex={isHover ? 10 : 1}
+			cursor="pointer"
+			aria-label={tok.symbol}
+		>
+			<Image
+				src={iconUrl}
+				alt={tok.symbol}
+				w="100%"
+				h="100%"
+				borderRadius="full"
+				bg="var(--ink-2)"
+				boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${glow}`}
+			/>
+			{isHover && (
+				<Box
+					position="absolute"
+					{...(tipBelow ? { bottom: "-66px" } : { top: "-66px" })}
+					left="50%"
+					transform="translateX(-50%)"
+					bg="var(--ink-3)"
+					border="1px solid rgba(255,255,255,0.10)"
+					px="3"
+					py="1.5"
+					borderRadius="10px"
+					whiteSpace="nowrap"
+					boxShadow="0 8px 24px -8px rgba(0,0,0,0.6)"
+					pointerEvents="none"
+					zIndex={20}
+				>
+					<Text fontSize="12px" fontWeight="600" color="var(--text-0)" textAlign="center">
+						{tok.symbol}
+					</Text>
+					<Text fontSize="11px" color="var(--text-2)" textAlign="center">
+						{formatBalance(tok.balance)} · ${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+					</Text>
+				</Box>
+			)}
+		</Box>
+	)
+}
+
+/** Chain-detail orbital — chain icon as the sun, tokens orbiting as satellites.
+ *  Shown when the user picks a chain from the sidebar list. */
+function ChainDetailOrbital({
+	chain,
+	balance,
+	nativeBalanceUsd,
+	cleanTokens,
+	onSelectChain,
+	onSelectToken,
+}: {
+	chain: ChainDef
+	balance?: ChainBalance
+	nativeBalanceUsd: number
+	cleanTokens: import("../../shared/types").TokenBalance[]
+	onSelectChain: () => void
+	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
+}) {
+	const [hover, setHover] = useState<string | null>(null)
+	const [size, setSize] = useState(440)
+
+	useEffect(() => {
+		const compute = () => setSize(Math.min(520, Math.max(320, window.innerWidth - 420)))
+		compute()
+		window.addEventListener('resize', compute)
+		return () => window.removeEventListener('resize', compute)
+	}, [])
+
+	const cx = size / 2
+	const cy = size / 2
+	const orbitR = size * 0.42
+	const ringR  = size * 0.46
+
+	const tokenSats = cleanTokens
+		.slice()
+		.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+		.slice(0, 8)
+
+	const nativeBal = balance?.balance || '0'
+
+	return (
+		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
+			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+				<circle
+					cx={cx}
+					cy={cy}
+					r={ringR}
+					fill="none"
+					stroke="rgba(255,255,255,0.10)"
+					strokeWidth="1"
+					strokeDasharray="2 6"
+					style={{
+						transformOrigin: `${cx}px ${cy}px`,
+						animation: 'v3-spin 90s linear infinite',
+					}}
+				/>
+			</svg>
+
+			{/* Center sun — chain icon + native balance */}
+			<Box
+				position="absolute"
+				top="50%"
+				left="50%"
+				transform="translate(-50%, -50%)"
+				w="70%"
+				textAlign="center"
+				display="flex"
+				flexDirection="column"
+				alignItems="center"
+				gap="2"
+			>
+				<Box
+					as="button"
+					onClick={onSelectChain}
+					w="96px"
+					h="96px"
+					borderRadius="full"
+					bg="transparent"
+					border="0"
+					p={0}
+					cursor="pointer"
+					title={`Open ${chain.coin}`}
+					transition="transform 0.2s"
+					_hover={{ transform: 'scale(1.05)' }}
+				>
+					<Image
+						src={getAssetIcon(chain.caip)}
+						alt={chain.symbol}
+						w="100%"
+						h="100%"
+						borderRadius="full"
+						bg="var(--ink-2)"
+						boxShadow={`0 0 0 1px var(--line), 0 0 70px -10px ${chain.color}, 0 8px 24px -8px rgba(0,0,0,0.6)`}
+					/>
+				</Box>
+				<Text
+					fontSize={{ base: "10px" }}
+					color="var(--text-3)"
+					letterSpacing="0.20em"
+					textTransform="uppercase"
+					fontWeight="500"
+					mt="1"
+				>
+					{chain.coin}
+				</Text>
+				<Text
+					fontSize={{ base: "26px", md: "32px" }}
+					fontWeight="500"
+					color="var(--text-0)"
+					letterSpacing="-0.02em"
+					lineHeight="1"
+				>
+					{formatBalance(nativeBal)} {chain.symbol}
+				</Text>
+				{nativeBalanceUsd > 0 && (
+					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
+						≈ ${nativeBalanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+					</Text>
+				)}
+			</Box>
+
+			{/* Token satellites — each pulls its glow color from its own icon. */}
+			{tokenSats.map((tok, i) => {
+				const angle = (Math.PI * 2 * i) / tokenSats.length - Math.PI / 2
+				const x = cx + Math.cos(angle) * orbitR
+				const y = cy + Math.sin(angle) * orbitR
+				const usd = tok.balanceUsd ?? 0
+				const sat = Math.max(40, Math.min(64, 32 + Math.sqrt(usd) * 1.2))
+				const isHover = hover === tok.caip
+				const tipBelow = y < cy
+				return (
+					<TokenSatellite
+						key={tok.caip}
+						tok={tok}
+						x={x}
+						y={y}
+						sat={sat}
+						isHover={isHover}
+						tipBelow={tipBelow}
+						fallbackColor={chain.color}
+						onEnter={() => setHover(tok.caip)}
+						onLeave={() => setHover(null)}
+						onClick={() => onSelectToken(tok)}
+					/>
 				)
 			})}
 		</Box>
@@ -344,6 +589,19 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
+	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | undefined>(undefined)
+	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
+	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
+	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap") => {
+		// Swap routes directly to SwapDialog — skip the AssetPage shell that
+		// would otherwise show the Receive view underneath.
+		if (action === "swap") {
+			setSwapDialogChain(chain)
+			return
+		}
+		setSelectedChainAction(action)
+		setSelectedChain(chain)
+	}, [])
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
 	const [loadingBalances, setLoadingBalances] = useState(false)
 	const [initialLoaded, setInitialLoaded] = useState(false)
@@ -685,12 +943,25 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	const allChains = useMemo(() => [...CHAINS, ...customChainDefs], [customChainDefs])
 
+	// Warm the browser-level image cache + hold live Image references so chain
+	// and token logos don't visibly re-fetch when the user switches between
+	// chains in the sidebar.
+	useEffect(() => {
+		const urls: (string | undefined)[] = []
+		for (const chain of allChains) urls.push(getAssetIcon(chain.caip))
+		for (const bal of balances.values()) {
+			if (!bal.tokens) continue
+			for (const tok of bal.tokens) urls.push(tok.icon || getAssetIcon(tok.caip))
+		}
+		preloadIcons(urls)
+	}, [allChains, balances])
+
 	const existingChainIds = useMemo(() => [
 		...CHAINS.filter(c => c.chainFamily === 'evm' && c.chainId).map(c => Number(c.chainId)),
 		...customChainDefs.filter(c => c.chainId).map(c => Number(c.chainId)),
 	], [customChainDefs])
 
-	const chartData = useMemo<DonutChartItem[]>(() => allChains
+	const allChainsChartData = useMemo<DonutChartItem[]>(() => allChains
 		.map((chain) => {
 			const clean = cleanBalanceUsd.get(chain.id)
 			return { name: chain.coin, value: clean?.usd || 0, color: chain.color, chainId: chain.id }
@@ -698,15 +969,39 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		.filter((d) => d.value > 0)
 		.sort((a, b) => b.value - a.value), [allChains, cleanBalanceUsd])
 
-	const hasAnyBalance = chartData.length > 0
+	// Token palette used for the drilled-chain donut so each slice reads as a
+	// distinct color even though tokens don't carry a brand color of their own.
+	const TOKEN_PALETTE = ['#e9c46a', '#8be3c4', '#6c7be8', '#e08c7b', '#9f8ce0', '#f0a85c', '#4eb591', '#4f7fc8']
 
-	/* Portfolio view mode — orbital is the new default per design handoff,
-	 * donut is preserved as a toggle so power users can still get the
-	 * percentage-bar legend. Persisted to localStorage. */
-	const [viewMode, setViewMode] = useState<DashboardView>(readSavedView)
-	useEffect(() => {
-		try { localStorage.setItem(DASHBOARD_VIEW_KEY, viewMode) } catch { /* private mode etc. */ }
-	}, [viewMode])
+	const drilledChainTokensChartData = useMemo<DonutChartItem[]>(() => {
+		if (!drilledChainId) return []
+		const chain = allChains.find(c => c.id === drilledChainId)
+		const bal = balances.get(drilledChainId)
+		if (!chain || !bal) return []
+		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+		const cleanTokens = bal.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+		const nativeUsd = bal.nativeBalanceUsd ?? Math.max(0, (bal.balanceUsd || 0) - cleanTokens.reduce((s, t) => s + (t.balanceUsd || 0), 0))
+		const out: DonutChartItem[] = []
+		if (nativeUsd > 0) {
+			out.push({ name: chain.symbol, value: nativeUsd, color: chain.color })
+		}
+		cleanTokens
+			.slice()
+			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+			.forEach((tok, i) => {
+				out.push({ name: tok.symbol, value: tok.balanceUsd ?? 0, color: TOKEN_PALETTE[i % TOKEN_PALETTE.length] })
+			})
+		return out.filter(d => d.value > 0)
+	}, [drilledChainId, allChains, balances, visibilityMap])
+
+	const chartData = drilledChainId ? drilledChainTokensChartData : allChainsChartData
+
+	const hasAnyBalance = allChainsChartData.length > 0
+
+	/* Portfolio view mode — pulled from a shared context so the toggle living
+	 * in the TopNav can drive Dashboard's rendering. Persistence happens in
+	 * the provider. */
+	const { viewMode } = useDashboardView()
 
 	/* Splits totalUsd into dollars + cents so the orbital can render the
 	 * cents in a smaller weight (matches handoff layout). */
@@ -751,14 +1046,215 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-				<AssetPage chain={selectedChain} balance={bal} onBack={() => setSelectedChain(null)} firmwareVersion={firmwareVersion} />
+				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} />
 			</AssetPageErrorBoundary>
 		)
 	}
 
 	return (
-		<Box w="100%" maxW="600px" mx="auto" pt="2">
+		<Flex w="100%" pt="2" align="stretch" gap={{ base: 0, md: 3 }} px={{ base: 0, md: 3 }} minH="100%">
 			<style>{DASHBOARD_ANIMATIONS}</style>
+
+			{/* ── Sidebar: chains list (replaces the cards grid) ───────────── */}
+			{hasUsableBalanceSnapshot && (
+				<Box
+					w={{ base: "220px", md: "260px" }}
+					flexShrink={0}
+					alignSelf="stretch"
+					position="sticky"
+					top="2"
+					maxH="calc(100vh - 110px)"
+					overflowY="auto"
+					pr="1"
+				>
+					{/* "All Chains" reset row */}
+					<Box
+						as="button"
+						onClick={() => setDrilledChainId(null)}
+						w="100%"
+						textAlign="left"
+						p="2.5"
+						mb="2"
+						borderRadius="lg"
+						bg={drilledChainId === null ? "kk.cardBgHover" : "transparent"}
+						border="1px solid"
+						borderColor={drilledChainId === null ? "kk.border" : "transparent"}
+						_hover={{ bg: "kk.cardBg" }}
+						cursor="pointer"
+						transition="all 0.15s"
+					>
+						<Flex align="center" gap="2.5">
+							<Box w="28px" h="28px" borderRadius="full" bg="kk.cardBg" border="1px solid" borderColor="kk.border" display="grid" placeItems="center" flexShrink={0}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<circle cx="12" cy="12" r="9" strokeDasharray="2 3"/>
+									<circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/>
+								</svg>
+							</Box>
+							<Box flex="1" minW="0">
+								<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
+								<Text fontSize="11px" color="var(--text-2)" lineHeight="1.3">
+									${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+								</Text>
+							</Box>
+						</Flex>
+					</Box>
+
+					{sortedChains.map((chain) => {
+						const bal = balances.get(chain.id)
+						const clean = cleanBalanceUsd.get(chain.id)
+						const balNum = parseFloat(bal?.balance || '0')
+						const usdNum = clean?.usd || 0
+						const hasBalance = balNum > 0 || usdNum > 0
+						const tokenCount = clean?.cleanTokenCount || 0
+						const isActive = drilledChainId === chain.id
+						return (
+							<Box
+								key={chain.id}
+								as="button"
+								onClick={() => setDrilledChainId(chain.id)}
+								w="100%"
+								textAlign="left"
+								p="2.5"
+								mb="1.5"
+								borderRadius="lg"
+								bg={isActive ? "kk.cardBgHover" : "transparent"}
+								border="1px solid"
+								borderColor={isActive ? `${chain.color}80` : "transparent"}
+								_hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }}
+								cursor="pointer"
+								transition="all 0.15s"
+								opacity={hasBalance ? 1 : 0.55}
+							>
+								<Flex align="center" gap="2.5">
+									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="28px" h="28px" borderRadius="full" flexShrink={0} bg={chain.color} />
+									<Box flex="1" minW="0">
+										<Flex align="baseline" justify="space-between" gap="2">
+											<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
+												{chain.coin}
+											</Text>
+											{usdNum > 0 && (
+												<Text fontSize="11px" color="var(--text-1)" fontWeight="500" lineHeight="1.2" flexShrink={0}>
+													${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+												</Text>
+											)}
+										</Flex>
+										<Flex align="baseline" justify="space-between" gap="2">
+											<Text fontSize="10px" color="var(--text-3)" lineHeight="1.3" truncate>
+												{hasBalance ? `${formatBalance(bal?.balance || '0')} ${chain.symbol}` : t("noBalance")}
+											</Text>
+											{tokenCount > 0 && (
+												<Text fontSize="9px" color={chain.color} fontWeight="600" lineHeight="1.3" flexShrink={0}>
+													+{tokenCount}
+												</Text>
+											)}
+										</Flex>
+									</Box>
+								</Flex>
+							</Box>
+						)
+					})}
+
+					{/* Add Chain row */}
+					{!watchOnly && (
+						<Box
+							as="button"
+							onClick={() => setShowAddChain(true)}
+							w="100%"
+							mt="2"
+							p="2.5"
+							borderRadius="lg"
+							bg="transparent"
+							border="1px dashed"
+							borderColor="kk.border"
+							_hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.05)" }}
+							cursor="pointer"
+							transition="all 0.15s"
+						>
+							<Flex align="center" gap="2" justify="center">
+								<Text fontSize="14px" color="kk.textMuted">+</Text>
+								<Text fontSize="11px" color="kk.textMuted">{t("addChain")}</Text>
+							</Flex>
+						</Box>
+					)}
+				</Box>
+			)}
+
+			<Flex flex="1" direction="column" minW="0" px={{ base: 2, md: 4 }} w="100%">
+
+			{/* Top-right utility row: Reports + Refresh (sits above all main content) */}
+			{!watchOnly && (
+				<Flex justify="flex-end" align="center" gap="3" mb="2" pt="1">
+					{!isHiddenWallet && <Box
+						as="button"
+						px="3"
+						py="1"
+						fontSize="11px"
+						fontWeight="600"
+						color="kk.gold"
+						bg="transparent"
+						borderRadius="full"
+						cursor="pointer"
+						transition="all 0.2s"
+						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
+						onClick={() => setShowReports(true)}
+					>
+						<Flex align="center" gap="1.5">
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+								<polyline points="14 2 14 8 20 8" />
+								<line x1="16" y1="13" x2="8" y2="13" />
+								<line x1="16" y1="17" x2="8" y2="17" />
+								<polyline points="10 9 9 9 8 9" />
+							</svg>
+							{t("reports")}
+						</Flex>
+					</Box>}
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						fontSize="11px"
+						fontWeight="600"
+						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
+						bg="transparent"
+						borderRadius="full"
+						cursor={loadingBalances ? "default" : "pointer"}
+						transition="all 0.2s"
+						_hover={loadingBalances ? {} : {
+							color: "white",
+							bg: "rgba(233,196,106,0.12)",
+						}}
+						onClick={loadingBalances ? undefined : refreshBalances}
+						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
+					>
+						<Flex align="center" gap="1.5">
+							{loadingBalances ? (
+								<Spinner size="xs" color="kk.gold" />
+							) : (
+								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+									<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+								</svg>
+							)}
+							{loadingBalances
+								? t("refreshing")
+								: cacheUpdatedAt
+									? <>
+										<Text as="span" color={(() => {
+											const age = Date.now() - cacheUpdatedAt
+											if (age < 3_600_000) return "var(--teal)"
+											if (age < 86_400_000) return "var(--gold)"
+											return "var(--rose)"
+										})()}>
+											{formatTimeAgo(cacheUpdatedAt, t)}
+										</Text>
+										{" · "}{t("refreshBalances")}
+									</>
+									: t("refreshPrompt")}
+						</Flex>
+					</Box>
+				</Flex>
+			)}
 
 			{/* Watch-only banner */}
 			{watchOnly && (
@@ -876,230 +1372,254 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Portfolio view — orbital (default) or donut, switchable via the
-			    pill toggle in the top-right of the card. */}
-			{hasAnyBalance ? (
-				<Box
-					w="100%"
-					p="4"
-					mb="2"
-					borderRadius="xl"
-					bg="kk.cardBg"
-					border="1px solid"
-					borderColor="kk.border"
-					position="relative"
-				>
-					{/* View toggle — orbital / donut. Two-state pill with icon glyphs. */}
-					<Flex
-						position="absolute"
-						top="3"
-						right="3"
-						bg="rgba(255,255,255,0.04)"
-						border="1px solid"
-						borderColor="kk.border"
-						borderRadius="999px"
-						p="1"
-						gap="1"
-						zIndex={2}
-					>
-						<Box
-							as="button"
-							onClick={() => setViewMode('orbital')}
-							w="26px" h="22px"
-							borderRadius="999px"
-							display="flex" alignItems="center" justifyContent="center"
-							bg={viewMode === 'orbital' ? 'rgba(233,196,106,0.18)' : 'transparent'}
-							color={viewMode === 'orbital' ? 'var(--gold)' : 'var(--text-3)'}
-							_hover={{ color: 'var(--text-1)' }}
-							transition="all 0.15s"
-							cursor="pointer"
-							title="Orbital view"
-						>
-							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-								<circle cx="12" cy="12" r="9" strokeDasharray="2 3"/>
-								<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
-								<circle cx="21" cy="12" r="2.2" fill="currentColor" stroke="none"/>
-								<circle cx="3" cy="12" r="1.6" fill="currentColor" stroke="none"/>
-							</svg>
-						</Box>
-						<Box
-							as="button"
-							onClick={() => setViewMode('donut')}
-							w="26px" h="22px"
-							borderRadius="999px"
-							display="flex" alignItems="center" justifyContent="center"
-							bg={viewMode === 'donut' ? 'rgba(233,196,106,0.18)' : 'transparent'}
-							color={viewMode === 'donut' ? 'var(--gold)' : 'var(--text-3)'}
-							_hover={{ color: 'var(--text-1)' }}
-							transition="all 0.15s"
-							cursor="pointer"
-							title="Donut view"
-						>
-							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-								<circle cx="12" cy="12" r="9"/>
-								<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
-							</svg>
-						</Box>
-					</Flex>
-
-					{viewMode === 'orbital' ? (
-						<OrbitalView
-							chains={visibleChains}
-							balances={balances}
-							cleanBalanceUsd={cleanBalanceUsd}
-							totalUsd={totalUsd}
-							totalDollars={totalDollars}
-							totalCents={totalCents}
-							cleanTokenTotal={cleanTokenTotal}
-							onSelect={(c) => setSelectedChain(c)}
-						/>
-					) : (
-						<Flex direction="column" align="center" gap="3">
+			{/* Centered hero region — split into a flex-1 "sun" area (vertically
+			    centered) and a fixed-min-height "below" area. The split anchors
+			    the sun and the donut center at the same y-coordinate regardless
+			    of how much below content is rendered. */}
+			<Flex flex="1" direction="column" w="100%" minH={{ base: "60vh", md: "70vh" }}>
+				{/* Top: orbital widget / donut / welcome — vertically centered */}
+				<Flex flex="1" align="center" justify="center" w="100%" minH="0" px="3">
+					{hasAnyBalance ? (() => {
+						if (drilledChainId && viewMode === 'orbital') {
+							const dchain = visibleChains.find(c => c.id === drilledChainId)
+							if (!dchain) return null
+							const bal = balances.get(dchain.id)
+							const overrides = new Map(
+								Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
+							)
+							const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+							const nativeUsd = bal?.nativeBalanceUsd ?? bal?.balanceUsd ?? 0
+							return (
+								<ChainDetailOrbital
+									chain={dchain}
+									balance={bal}
+									nativeBalanceUsd={nativeUsd}
+									cleanTokens={cleanTokens}
+									onSelectChain={() => openChainPage(dchain)}
+									onSelectToken={() => openChainPage(dchain)}
+								/>
+							)
+						}
+						if (viewMode === 'orbital') {
+							return (
+								<OrbitalView
+									chains={visibleChains}
+									balances={balances}
+									cleanBalanceUsd={cleanBalanceUsd}
+									totalUsd={totalUsd}
+									totalDollars={totalDollars}
+									totalCents={totalCents}
+									cleanTokenTotal={cleanTokenTotal}
+									onSelect={(c) => setSelectedChain(c)}
+								/>
+							)
+						}
+						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : (chartData.length > 0 ? 0 : null)
+						return (
 							<DonutChart
 								data={chartData}
-								size={160}
-								activeIndex={activeSliceIndex}
+								size={380}
+								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 							/>
-							<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
+						)
+					})() : !loadingBalances && initialLoaded && !pioneerError ? (
+						<Box
+							w="100%"
+							maxW="480px"
+							p="5"
+							borderRadius="xl"
+							bg="kk.cardBg"
+							border="1px solid"
+							borderColor="rgba(233,196,106,0.2)"
+						>
+							<Flex direction="column" align="center" gap="3" textAlign="center">
+								<Box
+									w="56px"
+									h="56px"
+									borderRadius="full"
+									bg="rgba(233,196,106,0.1)"
+									display="flex"
+									alignItems="center"
+									justifyContent="center"
+								>
+									<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+										<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+										<path d="M9 12l2 2 4-4" />
+									</svg>
+								</Box>
+								<Box>
+									<Text fontSize="md" fontWeight="600" color="white" mb="1">
+										{t("welcomeTitle")}
+									</Text>
+									<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
+										{t("welcomeSubtitle")}
+									</Text>
+								</Box>
+								<Flex direction="column" gap="2" w="100%" maxW="340px" mt="1">
+									<Flex align="flex-start" gap="2.5" textAlign="left">
+										<Text fontSize="sm" mt="0.5">1.</Text>
+										<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
+											{t("welcomeTip1")}
+										</Text>
+									</Flex>
+									<Flex align="flex-start" gap="2.5" textAlign="left">
+										<Text fontSize="sm" mt="0.5">2.</Text>
+										<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
+											{t("welcomeTip2")}
+										</Text>
+									</Flex>
+								</Flex>
+							</Flex>
+						</Box>
+					) : null}
+				</Flex>
+
+				{/* Below the sun: token list / action buttons / donut legend / empty.
+				    Fixed min-height keeps the sun's y-position stable across modes. */}
+				<Flex direction="column" align="center" w="100%" maxW="540px" mx="auto" px="3" minH="200px" pt="3" pb="3" gap="3">
+					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
+						const donutTotal = drilledChainId
+							? chartData.reduce((s, d) => s + d.value, 0)
+							: totalUsd
+						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
+						return (
+							<Box w="100%" maxW="440px">
 								<ChartLegend
 									data={chartData}
-									total={totalUsd}
-									activeIndex={activeSliceIndex}
+									total={donutTotal}
+									activeIndex={safeIndex}
 									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 								/>
 							</Box>
-						</Flex>
-					)}
-				</Box>
-			) : !loadingBalances && initialLoaded && !pioneerError && (
-				<Box
-					w="100%"
-					p="5"
-					mb="5"
-					borderRadius="xl"
-					bg="kk.cardBg"
-					border="1px solid"
-					borderColor="rgba(233,196,106,0.2)"
-				>
-					<Flex direction="column" align="center" gap="3" textAlign="center">
-						{/* Shield / vault icon */}
-						<Box
-							w="56px"
-							h="56px"
-							borderRadius="full"
-							bg="rgba(233,196,106,0.1)"
-							display="flex"
-							alignItems="center"
-							justifyContent="center"
-						>
-							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-								<path d="M9 12l2 2 4-4" />
-							</svg>
-						</Box>
+						)
+					})()}
 
-						<Box>
-							<Text fontSize="md" fontWeight="600" color="white" mb="1">
-								{t("welcomeTitle")}
-							</Text>
-							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-								{t("welcomeSubtitle")}
-							</Text>
-						</Box>
+					{hasAnyBalance && viewMode === 'orbital' && drilledChainId && (() => {
+						const dchain = visibleChains.find(c => c.id === drilledChainId)
+						if (!dchain) return null
+						const bal = balances.get(dchain.id)
+						const overrides = new Map(
+							Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
+						)
+						const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
 
-						<Flex direction="column" gap="2" w="100%" maxW="340px" mt="1">
-							<Flex align="flex-start" gap="2.5" textAlign="left">
-								<Text fontSize="sm" mt="0.5">1.</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip1")}
-								</Text>
-							</Flex>
-							<Flex align="flex-start" gap="2.5" textAlign="left">
-								<Text fontSize="sm" mt="0.5">2.</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-									{t("welcomeTip2")}
-								</Text>
-							</Flex>
-						</Flex>
-					</Flex>
-				</Box>
-			)}
+						return (
+							<>
+								{/* Always-on action row: Receive / Send / Swap. Sits in the same
+								    slot whether or not the chain has tokens. */}
+								<Flex
+									align="center"
+									gap="2px"
+									bg="var(--ink-2)"
+									border="1px solid var(--line)"
+									p="3px"
+									borderRadius="999px"
+								>
+									{([
+										{ id: 'receive' as const, label: 'Receive', icon: (
+											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
+										) },
+										{ id: 'send' as const, label: 'Send', icon: (
+											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+										) },
+										{ id: 'swap' as const, label: 'Swap', icon: (
+											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+										) },
+									]).map((p) => {
+										const isPrimary = p.id === 'receive'
+										return (
+											<Box
+												key={p.id}
+												as="button"
+												onClick={() => openChainPage(dchain, p.id)}
+												display="flex"
+												alignItems="center"
+												gap="2"
+												px="5"
+												py="2.5"
+												borderRadius="999px"
+												fontSize="13px"
+												fontWeight="500"
+												letterSpacing="-0.005em"
+												color={isPrimary ? "var(--ink-0)" : "var(--text-2)"}
+												bg={isPrimary ? "var(--gold)" : "transparent"}
+												_hover={isPrimary ? {} : { color: "var(--text-0)", bg: "var(--ink-3)" }}
+												transition="all 0.18s"
+												cursor="pointer"
+												minW="110px"
+												justifyContent="center"
+											>
+												{p.icon}
+												{p.label}
+											</Box>
+										)
+									})}
+								</Flex>
 
-			{/* Refresh + Reports buttons — below chart */}
-			{!watchOnly && (
-				<Flex justify="center" gap="3" mb="4">
-					{!isHiddenWallet && <Box
-						as="button"
-						px="3"
-						py="1"
-						fontSize="11px"
-						fontWeight="600"
-						color="kk.gold"
-						bg="transparent"
-						borderRadius="full"
-						cursor="pointer"
-						transition="all 0.2s"
-						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
-						onClick={() => setShowReports(true)}
-					>
-						<Flex align="center" gap="1.5">
-							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-								<polyline points="14 2 14 8 20 8" />
-								<line x1="16" y1="13" x2="8" y2="13" />
-								<line x1="16" y1="17" x2="8" y2="17" />
-								<polyline points="10 9 9 9 8 9" />
-							</svg>
-							{t("reports")}
-						</Flex>
-					</Box>}
-					<Box
-						as="button"
-						px="3"
-						py="1"
-						fontSize="11px"
-						fontWeight="600"
-						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
-						bg="transparent"
-						borderRadius="full"
-						cursor={loadingBalances ? "default" : "pointer"}
-						transition="all 0.2s"
-						_hover={loadingBalances ? {} : {
-							color: "white",
-							bg: "rgba(233,196,106,0.12)",
-						}}
-						onClick={loadingBalances ? undefined : refreshBalances}
-						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
-					>
-						<Flex align="center" gap="1.5">
-							{loadingBalances ? (
-								<Spinner size="xs" color="kk.gold" />
-							) : (
-								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-									<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-									<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-								</svg>
-							)}
-							{loadingBalances
-								? t("refreshing")
-								: cacheUpdatedAt
-									? <>
-										<Text as="span" color={(() => {
-											const age = Date.now() - cacheUpdatedAt
-											if (age < 3_600_000) return "var(--teal)"
-											if (age < 86_400_000) return "var(--gold)"
-											return "var(--rose)"
-										})()}>
-											{formatTimeAgo(cacheUpdatedAt, t)}
+								{/* Token list (only when the chain has clean tokens). */}
+								{cleanTokens.length > 0 && (
+									<Box w="100%">
+										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="2" px="1">
+											{t("tokensCount", { count: cleanTokens.length })}
 										</Text>
-										{" · "}{t("refreshBalances")}
-									</>
-									: t("refreshPrompt")}
-						</Flex>
-					</Box>
+										<Flex direction="column" gap="1">
+											{cleanTokens
+												.slice()
+												.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+												.map((tok) => (
+													<Flex
+														key={tok.caip}
+														as="button"
+														onClick={() => openChainPage(dchain)}
+														align="center"
+														gap="2.5"
+														p="2"
+														borderRadius="md"
+														bg="transparent"
+														_hover={{ bg: "kk.cardBg" }}
+														cursor="pointer"
+														transition="all 0.15s"
+														border="0"
+														title={tok.name || tok.symbol}
+													>
+														<Image
+															src={tok.icon || getAssetIcon(tok.caip)}
+															alt={tok.symbol}
+															w="26px"
+															h="26px"
+															borderRadius="full"
+															flexShrink={0}
+															bg="var(--ink-2)"
+														/>
+														<Box flex="1" minW="0" textAlign="left">
+															<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
+																{tok.symbol}
+															</Text>
+															<Text fontSize="10px" color="var(--text-3)" lineHeight="1.3" truncate>
+																{tok.name || dchain.coin}
+															</Text>
+														</Box>
+														<Box textAlign="right" flexShrink={0}>
+															<Text fontSize="12px" fontWeight="500" color="var(--text-0)" lineHeight="1.2">
+																{formatBalance(tok.balance)}
+															</Text>
+															<Text fontSize="10px" color="var(--text-2)" lineHeight="1.3">
+																${(tok.balanceUsd ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+															</Text>
+														</Box>
+													</Flex>
+												))}
+										</Flex>
+									</Box>
+								)}
+							</>
+						)
+					})()}
 				</Flex>
-			)}
+
+			</Flex>
+
 
 			{/* Big glowing CTA when balances haven't been checked in over a day */}
 			{cacheOlderThanDay && (
@@ -1155,7 +1675,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-		<SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
+		{false && <SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
 				{sortedChains.map((chain) => {
 					const bal = balances.get(chain.id)
 					const clean = cleanBalanceUsd.get(chain.id)
@@ -1311,7 +1831,21 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						</Flex>
 					</Box>
 				)}
-			</SimpleGrid>
+			</SimpleGrid>}
+
+			{drilledChainId === 'dogecoin' && <DogeEasterEgg />}
+
+			{swapDialogChain && (
+				<Suspense fallback={null}>
+					<LazySwapDialog
+						open={true}
+						onClose={() => setSwapDialogChain(null)}
+						chain={swapDialogChain}
+						balance={balances.get(swapDialogChain.id)}
+						address={balances.get(swapDialogChain.id)?.address}
+					/>
+				</Suspense>
+			)}
 
 			{showAddChain && (
 				<AddChainDialog
@@ -1374,6 +1908,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					</svg>
 				</Box>
 			)}
-		</Box>
+			</Flex>
+		</Flex>
 	)
 }

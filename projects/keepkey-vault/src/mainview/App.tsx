@@ -803,9 +803,19 @@ function App() {
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
-			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary"
+			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary" position="relative"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
+				{/* Full-screen ambient radial glow — replaces the per-card glow inside the orbital view. */}
+				<Box
+					position="absolute"
+					inset="0"
+					pointerEvents="none"
+					zIndex={0}
+					style={{
+						background: 'radial-gradient(ellipse 70% 55% at 50% 42%, rgba(233,196,106,0.22) 0%, rgba(139,227,196,0.06) 35%, transparent 75%)',
+					}}
+				/>
 				<TopNav
 					label={deviceState.label}
 					connected={deviceState.state === "ready"}
