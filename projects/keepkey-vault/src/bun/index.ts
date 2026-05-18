@@ -96,6 +96,11 @@ process.on('uncaughtException', (err) => {
 	try { sendFatal('uncaught-exception', err) } catch {}
 })
 process.on('unhandledRejection', (reason) => {
+	// Suppress noise from pioneer-client's internal 60s timer (customHttpClient) racing
+	// against our withTimeout(45s). The promise is always handled — this is a Bun timing
+	// artifact where the rejection registers before the .catch() propagates.
+	const msg = (reason as any)?.message || String(reason)
+	if (msg === 'Request timed out') return
 	console.error('[Vault] UNHANDLED REJECTION:', reason)
 	try { sendFatal('unhandled-rejection', reason) } catch {}
 })
@@ -104,7 +109,7 @@ import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
-import { getPioneer, getPioneerApiBase, resetPioneer } from "./pioneer"
+import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE } from "./pioneer"
 import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
@@ -128,9 +133,9 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 const PIONEER_PORTFOLIO_CHUNK_SIZE = 8
-const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 20_000
+const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 45_000
 const PIONEER_PORTFOLIO_MAX_CONCURRENCY = 4
-const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 90_000
+const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 120_000
 
 function getPioneerPortfolioErrorMessage(err: any): string {
 	const fields = err?.response?.body?.fields || err?.responseError?.fields
@@ -403,7 +408,7 @@ const auth = new AuthStore()
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
-let swapsEnabled = true  // default on; only disabled when explicitly set to '0'
+let swapsEnabled = false  // default off; only enabled when explicitly set to '1'
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 // True after the per-session incremental scan has caught the wallet up to
@@ -423,7 +428,7 @@ let alphaFirmware = false
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
-	swapsEnabled = getSetting('swaps_enabled') !== '0'  // absent → true (opt-out model)
+	swapsEnabled = getSetting('swaps_enabled') === '1'  // absent → false (opt-in model)
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
@@ -792,6 +797,8 @@ const restCallbacks: RestApiCallbacks = {
 	sendSwapCmd: (cmd) => {
 		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
 	},
+	getPioneer: () => getPioneer(),
+	getPioneerApiBase: () => getPioneerApiBase(),
 }
 
 /** Check if a port is already in use by trying to connect to it */
@@ -1608,7 +1615,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
-			getBalances: async () => {
+			getBalances: async ({ forceRefresh = false } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
 
 				// Initialize Pioneer client — isolate failure so device derivation still works
@@ -1703,6 +1710,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
+				console.log(`[getBalances] nonEvmChains to derive: ${nonEvmChains.filter(c => !c.hidden).map(c => c.id).join(', ')}`)
 				for (const chain of nonEvmChains) {
 					if (chain.hidden) continue
 					const t0 = Date.now()
@@ -1715,17 +1723,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const result = await wallet[method](addrParams)
 						const address = typeof result === 'string' ? result : result?.address || ''
 						const ms = Date.now() - t0
-						if (ms > 2000) console.log(`[getBalances] ${chain.id}.${method} took ${ms}ms`)
 						if (address) {
+							console.log(`[getBalances] ${chain.id} address derived in ${ms}ms: ${address.substring(0, 20)}... caip=${chain.caip}`)
 							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
-							if (chain.id === 'tron') console.log(`[getBalances] TRON address derived: ${address}, caip: ${chain.caip}, networkId: ${chain.networkId}`)
 						} else {
-							if (chain.id === 'tron') console.warn(`[getBalances] TRON address derivation returned empty! result:`, JSON.stringify(result))
+							console.warn(`[getBalances] ${chain.id} address empty after ${ms}ms! method=${method} result=${JSON.stringify(result)}`)
 						}
 					} catch (e: any) {
-						console.warn(`[getBalances] ${chain.coin} address failed (${Date.now() - t0}ms):`, e.message)
+						console.warn(`[getBalances] ${chain.id} address THREW (${Date.now() - t0}ms): ${e.message}`)
 					}
 				}
+				console.log(`[getBalances] pubkeys after nonEVM derivation: ${pubkeys.length} total (nonEVM added: ${pubkeys.filter(p => !['bitcoin','litecoin','dogecoin','bitcoincash','dash','digibyte','zcash'].includes(p.chainId) && !p.chainId.startsWith('evm')).length})`)
 
 				// 3. Add ALL BTC xpubs from multi-account manager
 				const btcChain = allChains.find(c => c.id === 'bitcoin')!
@@ -1782,7 +1790,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								let resp: any
 								try {
 									resp = await withTimeout(
-										pioneer.GetPortfolioBalances(chunkBody, { forceRefresh: true }),
+										pioneer.GetPortfolioBalances(chunkBody, { forceRefresh }),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
@@ -1792,7 +1800,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									resp = await withTimeout(
 										pioneer.GetPortfolioBalances(
 											{ pubkeys: chunkBody.pubkeys },
-											{ forceRefresh: true }
+											{ forceRefresh }
 										),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
@@ -1817,17 +1825,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						hadChunkFailures = true
 						const succeeded = pubkeyChunks.length - failedChunkCount
 						console.warn(`[getBalances] Partial portfolio response: ${succeeded}/${pubkeyChunks.length} chunks succeeded — failed chains will show 0`)
+						for (let i = 0; i < chunkResults.length; i++) {
+							if (chunkResults[i].error) {
+								const chains = pubkeyChunks[i].map((p: any) => p.chainId || String(p.caip).split(':')[0]).join(', ')
+								console.warn(`[getBalances] Chunk ${i + 1} failed — excluded chains: ${chains}`)
+							}
+						}
 						if (failedChunkCount === pubkeyChunks.length) {
 							throw new Error(`All ${pubkeyChunks.length} portfolio chunks failed`)
 						}
+						// Key by caip:pubkey so a failed Hyperliquid entry (which shares the
+						// ETH address as pubkey) doesn't exclude all other EVM chains.
 						const failedPubkeySet = new Set<string>()
 						for (let i = 0; i < chunkResults.length; i++) {
 							if (chunkResults[i].error) {
-								for (const p of pubkeyChunks[i]) failedPubkeySet.add(p.pubkey)
+								for (const p of pubkeyChunks[i]) failedPubkeySet.add(`${p.caip}:${p.pubkey}`)
 							}
 						}
-						effectivePubkeys = pubkeys.filter(p => !failedPubkeySet.has(p.pubkey))
+						effectivePubkeys = pubkeys.filter(p => !failedPubkeySet.has(`${p.caip}:${p.pubkey}`))
 					}
+					// failedPubkeySet used below to gate DB writes — results always use all pubkeys
+					// so chains from failed chunks still appear (with 0) rather than vanishing entirely.
+					const failedPubkeySetForDb = new Set(
+						effectivePubkeys.length < pubkeys.length
+							? pubkeys.filter(p => !effectivePubkeys.includes(p)).map(p => `${p.caip}:${p.pubkey}`)
+							: []
+					)
+					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
@@ -2000,7 +2024,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
-					for (const entry of effectivePubkeys) {
+					for (const entry of pubkeys) {
+						const isFailedEntry = failedPubkeySetForDb.has(`${entry.caip}:${entry.pubkey}`)
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
@@ -2017,12 +2042,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							}
 							// Update per-xpub balance in BtcAccountManager + persist to cache.
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
+							// Skip if this entry came from a failed chunk (don't persist zeros).
 							const xpubBal = String(match?.balance ?? '0')
-							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
-							try {
-								const devId = engine.getDeviceState().deviceId
-								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
-							} catch { /* non-fatal */ }
+							if (!isFailedEntry) {
+								btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
+								try {
+									const devId = engine.getDeviceState().deviceId
+									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+								} catch { /* non-fatal */ }
+							}
 							continue
 						}
 
@@ -2144,8 +2172,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
-					// Push updated BTC accounts to frontend
-					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+					// Push updated BTC accounts to frontend and sync DB cache with aggregate total.
+					// The DB entry (used by getCachedBalances → SwapDialog) would otherwise stay
+					// as a single-xpub value; the in-memory manager always has the correct sum.
+					// Use the real address from Pioneer (btcSelectedAddress/btcFallbackAddress) when
+					// available — fall back to xpub only if Pioneer didn't return an address.
+					{
+						const btcSet = btcAccounts.toAccountSet()
+						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
+						try {
+							const devId = engine.getDeviceState().deviceId
+							if (devId && !engine.isPassphraseWallet && parseFloat(btcSet.totalBalance) >= 0) {
+								updateCachedBalance(devId, {
+									chainId: 'bitcoin', symbol: 'BTC',
+									balance: btcSet.totalBalance,
+									balanceUsd: btcSet.totalBalanceUsd,
+									nativeBalanceUsd: btcSet.totalBalanceUsd,
+									address: btcSelectedAddress || btcFallbackAddress || btcAccounts.getSelectedXpub()?.xpub || '',
+								})
+							}
+						} catch { /* non-fatal */ }
+					}
 					// Push updated EVM addresses to frontend
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
 
@@ -2159,11 +2206,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}).catch(() => {})
 					}
 
-					// Cache balances (fire-and-forget) — only on clean (no partial failures) Pioneer response.
+					// Cache balances (fire-and-forget).
+					// Write partial results even on chunk failures — chains from failed chunks simply
+					// won't be in results, so the next getCachedBalances staleness check will flag
+					// them as missing and trigger another refresh. Partial is always better than nothing.
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !hadChunkFailures && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -2542,7 +2592,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				// Push updated BTC per-xpub balances — only if manager is hydrated (Finding 2)
 				if (isBtc && btcAccounts.isInitialized && btcAccounts.getAllPubkeyEntries(chain.caip).length > 0) {
-					try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+					const btcSet = btcAccounts.toAccountSet()
+					try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
+					// Sync DB cache so getCachedBalances returns aggregate (not stale single-xpub)
+					try {
+						const devId = engine.getDeviceState().deviceId
+						if (devId && !engine.isPassphraseWallet) {
+							updateCachedBalance(devId, {
+								chainId: 'bitcoin', symbol: 'BTC',
+								balance: btcSet.totalBalance,
+								balanceUsd: btcSet.totalBalanceUsd,
+								nativeBalanceUsd: btcSet.totalBalanceUsd,
+								address: result.address || btcAccounts.getSelectedXpub()?.xpub || '',
+							})
+						}
+					} catch { /* non-fatal */ }
 				}
 
 				return result
@@ -3691,9 +3755,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					throw new Error(`Health check failed for ${healthUrl}: ${e.message}`)
 				}
-				// Find the default server — if switching to default, clear the override
-				const defaultServer = servers.find(s => s.isDefault)
-				if (defaultServer && defaultServer.url === url) {
+				// If switching to the built-in hardcoded default, clear the override so
+				// getPioneerApiBase() falls back naturally. Otherwise store the URL.
+				// NOTE: do NOT use the DB isDefault flag here — that flag is user-managed
+				// (e.g. the user may have marked a custom server as "default") and would
+				// cause the wrong URL to be silently cleared.
+				if (url === DEFAULT_API_BASE) {
 					setSetting('pioneer_api_base', '')
 				} else {
 					setSetting('pioneer_api_base', url)

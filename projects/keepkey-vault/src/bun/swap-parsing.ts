@@ -250,6 +250,11 @@ export function parseQuoteResponse(
 
   const minOutStr = minOut > 0 ? minOut.toFixed(8).replace(/\.?0+$/, '') : '0'
 
+  // Minimum sell amount — solvers/protocols may refuse amounts below this floor
+  // Check multiple field names across the response layers (Pioneer schema varies by swapper)
+  const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
+  const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
+
   return {
     expectedOutput: expectedOutputStr,
     minimumOutput: minOutStr,
@@ -268,6 +273,7 @@ export function parseQuoteResponse(
     integration,
     swapper,
     relayTx,
+    minAmountIn,
   }
 }
 

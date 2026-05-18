@@ -287,6 +287,30 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     ? `${result.swapper} via ${result.integration}`
     : (result.integration || 'unknown')
   swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
+
+  // NEAR Intents BTC→EVM: competitive solver network that fronts ETH then claims BTC.
+  // Solvers need 2 BTC confirmations (20-40 min) and must cover ETH gas (~$2-5).
+  // Amounts below ~$50 USD are systematically refunded — no solver finds it profitable.
+  if (result.swapper === 'NEAR Intents' && params.fromCaip.startsWith('bip122:')) {
+    // Block amounts below the protocol's stated minimum
+    if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
+      throw new Error(
+        `Amount too small for NEAR Intents — minimum ${result.minAmountIn} BTC required. ` +
+        `Solvers must front ETH and wait for BTC confirmations; smaller amounts are unprofitable and will be refunded.`
+      )
+    }
+    // Warn if quote deadline is too short for BTC's 2-confirmation requirement (~20-40 min).
+    // A 30-min deadline may expire before BTC even confirms, causing automatic refund.
+    const nowSec = Math.floor(Date.now() / 1000)
+    const minutesUntilExpiry = result.expiry ? (result.expiry - nowSec) / 60 : 0
+    if (result.expiry && minutesUntilExpiry < 60) {
+      console.warn(
+        `${TAG} NEAR Intents BTC→EVM quote expires in ${minutesUntilExpiry.toFixed(0)} min — ` +
+        `BTC requires 2 confirmations (20-40 min). If BTC doesn't confirm in time, swap will be refunded.`
+      )
+    }
+  }
+
   return result
 }
 

@@ -831,12 +831,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	}) // runs on every render but ref-gated to fire once
 
 	// Manual refresh: fetch live data from Pioneer API
-	const refreshBalances = useCallback(async () => {
+	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
+	const refreshBalances = useCallback(async (forceRefresh = false) => {
 		if (loadingBalances || watchOnly) return
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
 			if (result) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -850,8 +851,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				const map = new Map<string, ChainBalance>()
-				for (const b of result) map.set(b.chainId, b)
+				// No-walk-backwards merge: start from current displayed balances so chains
+				// from failed Pioneer chunks (which are absent from `result`) stay visible.
+				// Only update a chain if the new value is non-zero, or if we had no prior data.
+				const map = new Map<string, ChainBalance>(balances)
+				for (const b of result) {
+					const prev = map.get(b.chainId)
+					if (!prev || b.balanceUsd > 0 || parseFloat(b.balance || '0') > 0) {
+						map.set(b.chainId, b)
+					} else {
+						console.log(`[Dashboard] Preserving prior ${b.chainId} balance — Pioneer returned 0`)
+					}
+				}
 				setBalances(map)
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)
@@ -883,7 +894,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	useEffect(() => {
 		if (forceRefresh && initialLoaded && !hasEverRefreshed && !loadingBalances) {
 			console.log('[Dashboard] New seed detected — auto-refreshing balances (one-shot)')
-			refreshBalances()
+			refreshBalances(true)
 			onForceRefreshConsumed?.()
 		}
 	}, [forceRefresh, initialLoaded, hasEverRefreshed, loadingBalances, refreshBalances, onForceRefreshConsumed])
@@ -1224,7 +1235,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							color: "white",
 							bg: "rgba(233,196,106,0.12)",
 						}}
-						onClick={loadingBalances ? undefined : refreshBalances}
+						onClick={loadingBalances ? undefined : () => refreshBalances(true)}
 						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
 					>
 						<Flex align="center" gap="1.5">
@@ -1362,7 +1373,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								_hover={{ color: "white" }}
 								onClick={() => {
 									clearPioneerError()
-									refreshBalances()
+									refreshBalances(true)
 								}}
 							>
 								{t("retry")}
@@ -1643,7 +1654,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
 					}}
 					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
-					onClick={refreshBalances}
+					onClick={() => refreshBalances(true)}
 				>
 					<Flex align="center" justify="center" gap="3">
 						<Box
