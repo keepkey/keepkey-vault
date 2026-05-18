@@ -12,6 +12,7 @@ import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
+import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
 
 // SwapDialog is heavy (loads swapper providers) — lazy so it doesn't enter the
 // initial Dashboard chunk. Used to open Swap directly from the action row
@@ -1454,6 +1455,21 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									onSelect={(c) => setSelectedChain(c)}
 								/>
 							)
+						}
+						if (viewMode === 'heatmap') {
+							const tiles = drilledChainId
+								? (() => {
+									const dchain = visibleChains.find(c => c.id === drilledChainId)
+									if (!dchain) return []
+									const bal = balances.get(dchain.id)
+									const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+									const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+									const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
+									const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd)
+									return buildChainDetailTiles(dchain, bal, cleanTokens, nativeUsd, (tok) => openChainPage(dchain, undefined, tok))
+								})()
+								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
+							return <HeatmapView tiles={tiles} width={520} height={420} />
 						}
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : (chartData.length > 0 ? 0 : null)
 						return (

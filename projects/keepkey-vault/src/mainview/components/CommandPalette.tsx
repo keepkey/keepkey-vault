@@ -180,12 +180,12 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 					align="center"
 					gap="3"
 					px="4"
-					py="3"
+					py="3.5"
 					borderBottom="1px solid"
 					borderColor="kk.border"
 					bg="rgba(0,0,0,0.35)"
 				>
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold, #E9C46A)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
 						<circle cx="11" cy="11" r="8" />
 						<path d="M21 21l-4.35-4.35" />
 					</svg>
@@ -194,17 +194,37 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 						value={query}
 						onChange={(e) => { setQuery(e.target.value); setActiveIdx(0) }}
 						placeholder="Search chains and tokens — name, symbol, CAIP"
-						size="md"
 						variant="unstyled"
-						color="kk.textPrimary"
-						_placeholder={{ color: "kk.textMuted" }}
+						border="0"
+						outline="none"
+						color="var(--text-0)"
+						fontSize="14px"
+						lineHeight="1.4"
+						py="0"
+						minH="0"
+						h="auto"
+						_placeholder={{ color: "var(--text-3)" }}
+						_focus={{ outline: "none", boxShadow: "none", borderColor: "transparent" }}
+						_focusVisible={{ outline: "none", boxShadow: "none", borderColor: "transparent" }}
 						spellCheck={false}
 						autoComplete="off"
-						style={{ fontFamily: "inherit", fontSize: "14px" }}
+						style={{ fontFamily: "inherit" }}
 					/>
-					<Text fontSize="11px" color="kk.textMuted" px="2" py="1" borderRadius="md" border="1px solid" borderColor="kk.border" flexShrink={0}>
+					<Box
+						fontSize="10px"
+						color="var(--text-3)"
+						px="2"
+						py="0.5"
+						borderRadius="md"
+						bg="var(--ink-3)"
+						border="1px solid var(--line)"
+						flexShrink={0}
+						letterSpacing="0.05em"
+						textTransform="uppercase"
+						fontWeight={500}
+					>
 						esc
-					</Text>
+					</Box>
 				</Flex>
 
 				{/* Result list */}

@@ -402,6 +402,29 @@ export function TopNav({
 								<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
 							</svg>
 						</Box>
+						<Box
+							as="button"
+							onClick={() => setViewMode("heatmap")}
+							w="28px"
+							h="22px"
+							borderRadius="999px"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+							bg={viewMode === "heatmap" ? "var(--ink-4)" : "transparent"}
+							color={viewMode === "heatmap" ? "var(--gold)" : "var(--text-3)"}
+							_hover={{ color: "var(--text-0)" }}
+							transition="all 0.18s"
+							cursor="pointer"
+							title="Heatmap view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+								<rect x="3" y="3" width="8" height="13" rx="1" />
+								<rect x="13" y="3" width="8" height="8" rx="1" />
+								<rect x="13" y="13" width="8" height="8" rx="1" />
+								<rect x="3" y="18" width="8" height="3" rx="1" />
+							</svg>
+						</Box>
 					</Flex>
 				)}
 				{onWalletConnectToggle && (
