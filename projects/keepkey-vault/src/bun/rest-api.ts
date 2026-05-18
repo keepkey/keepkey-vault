@@ -2825,22 +2825,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const cachedPks = getCachedPubkeys(deviceId)
           const pubkeys: Array<{ caip: string; pubkey: string; label: string }> = []
 
-          // getCachedPubkeys() returns chainId but not caip — build CAIP from chainId
-          const CHAIN_ID_TO_CAIP: Record<string, string> = {
-            bitcoin:   'bip122:000000000019d6689c085ae165831e93/slip44:0',
-            dogecoin:  'bip122:00000000001a91e3dace36e2be3bf030/slip44:3',
-            litecoin:  'bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2',
-            dash:      'bip122:00000ffd590b1485b3caadc19b22e12f/slip44:5',
-            cosmos:    'cosmos:cosmoshub-4/slip44:118',
-            thorchain: 'cosmos:thorchain-mainnet-v1/slip44:931',
-            mayachain: 'cosmos:mayachain-mainnet-v1/slip44:931',
-            osmosis:   'cosmos:osmosis-1/slip44:118',
-            ripple:    'ripple:4109c6f2045fc7eff4cde8f9905d19c2/slip44:144',
-          }
+          // getCachedPubkeys() returns chainId but not caip — derive from the shared CHAINS registry
+          // so new chains added to chains.ts are automatically covered.
+          const chainIdToCaip = new Map(CHAINS.map(c => [c.id, c.caip]))
 
           // UTXO (xpubs) and non-EVM address-based entries
           for (const pk of cachedPks) {
-            const caip = CHAIN_ID_TO_CAIP[pk.chainId] || ''
+            const caip = chainIdToCaip.get(pk.chainId) || ''
             if (pk.xpub) pubkeys.push({ caip, pubkey: pk.xpub, label: `${pk.chainId}:xpub` })
             else if (pk.address) pubkeys.push({ caip, pubkey: pk.address, label: `${pk.chainId}:addr` })
           }
