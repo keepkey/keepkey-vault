@@ -1348,7 +1348,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing,
             apiVersion: 2,
-            supportedChains: CHAINS.map(c => c.networkId),
+            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion)).map(c => c.networkId),
             device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
