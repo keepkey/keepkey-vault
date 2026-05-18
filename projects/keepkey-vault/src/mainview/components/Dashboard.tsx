@@ -1421,7 +1421,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    of how much below content is rendered. */}
 			<Flex flex="1" direction="column" w="100%" minH={{ base: "60vh", md: "70vh" }}>
 				{/* Top: orbital widget / donut / welcome — vertically centered */}
-				<Flex flex="1" align="center" justify="center" w="100%" minH="0" px="3">
+				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'}>
 					{hasAnyBalance ? (() => {
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -1470,7 +1470,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									return buildChainDetailTiles(dchain, bal, cleanTokens, nativeUsd, (tok) => openChainPage(dchain, undefined, tok))
 								})()
 								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
-							return <HeatmapView tiles={tiles} width={520} height={420} />
+							// Full-canvas: the heatmap measures its parent and lays out to fill it.
+							return (
+								<Box w="100%" h="100%" minH="60vh" alignSelf="stretch">
+									<HeatmapView tiles={tiles} />
+								</Box>
+							)
 						}
 						if (viewMode === 'stack') {
 							const items: StackedBarItem[] = drilledChainId
@@ -1572,7 +1577,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 				{/* Below the sun: token list / action buttons / donut legend / empty.
 				    Fixed min-height keeps the sun's y-position stable across modes. */}
-				<Flex direction="column" align="center" w="100%" maxW="540px" mx="auto" px="3" minH="200px" pt="3" pb="3" gap="3">
+				<Flex
+					direction="column"
+					align="center"
+					w="100%"
+					maxW="540px"
+					mx="auto"
+					px="3"
+					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '200px'}
+					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
+					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
+					gap="3"
+				>
 					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
 						const donutTotal = drilledChainId
 							? chartData.reduce((s, d) => s + d.value, 0)

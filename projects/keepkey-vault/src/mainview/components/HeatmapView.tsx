@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Image, Text } from "@chakra-ui/react"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance } from "../../shared/types"
@@ -21,8 +21,10 @@ interface HeatmapTile {
 
 interface HeatmapViewProps {
 	tiles: HeatmapTile[]
-	width: number
-	height: number
+	/** Optional explicit size — if omitted the view fills its parent container
+	 *  and re-lays out on resize via ResizeObserver. */
+	width?: number
+	height?: number
 }
 
 /** Squarified treemap algorithm — Bruls et al, 2000.
@@ -190,13 +192,36 @@ function HeatmapTileBox({
 }
 
 export function HeatmapView({ tiles, width, height }: HeatmapViewProps) {
-	const laid = useMemo(
-		() => layoutSquarified(tiles.filter(t => t.value > 0), 0, 0, width, height),
-		[tiles, width, height],
-	)
-	if (laid.length === 0) return null
+	const wrapRef = useRef<HTMLDivElement>(null)
+	const [measured, setMeasured] = useState<{ w: number; h: number }>({ w: width ?? 0, h: height ?? 0 })
+
+	useEffect(() => {
+		// Explicit dimensions short-circuit measurement.
+		if (width !== undefined && height !== undefined) {
+			setMeasured({ w: width, h: height })
+			return
+		}
+		const el = wrapRef.current
+		if (!el) return
+		const ro = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				const { width: w, height: h } = entry.contentRect
+				setMeasured({ w: Math.floor(w), h: Math.floor(h) })
+			}
+		})
+		ro.observe(el)
+		const r = el.getBoundingClientRect()
+		setMeasured({ w: Math.floor(r.width), h: Math.floor(r.height) })
+		return () => ro.disconnect()
+	}, [width, height])
+
+	const laid = useMemo(() => {
+		if (measured.w <= 0 || measured.h <= 0) return []
+		return layoutSquarified(tiles.filter(t => t.value > 0), 0, 0, measured.w, measured.h)
+	}, [tiles, measured.w, measured.h])
+
 	return (
-		<Box position="relative" w={`${width}px`} h={`${height}px`}>
+		<Box ref={wrapRef} position="relative" w="100%" h="100%" minH="0" minW="0">
 			{laid.map((rect) => (
 				<HeatmapTileBox key={rect.tile.id} rect={rect} />
 			))}
