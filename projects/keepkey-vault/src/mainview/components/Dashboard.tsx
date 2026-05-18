@@ -626,7 +626,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	useEffect(() => {
 		if (forceRefresh && initialLoaded && !hasEverRefreshed && !loadingBalances) {
 			console.log('[Dashboard] New seed detected — auto-refreshing balances (one-shot)')
-			refreshBalances()
+			refreshBalances(true)
 			onForceRefreshConsumed?.()
 		}
 	}, [forceRefresh, initialLoaded, hasEverRefreshed, loadingBalances, refreshBalances, onForceRefreshConsumed])
@@ -1124,7 +1124,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
 					}}
 					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
-					onClick={refreshBalances}
+					onClick={() => refreshBalances(true)}
 				>
 					<Flex align="center" justify="center" gap="3">
 						<Box
