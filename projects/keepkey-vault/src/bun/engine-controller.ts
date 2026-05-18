@@ -87,6 +87,8 @@ function extractErrorMessage(err: any): string {
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
+  // Suppress unhandled rejection on the original promise if the timeout fires first.
+  promise.catch(() => {})
   return Promise.race([
     promise,
     new Promise<never>((_, reject) => {
@@ -119,6 +121,7 @@ export class EngineController extends EventEmitter {
   // Linux: KeepKey was enumerated on the bus but neither transport could open
   // it. Surfaces in DeviceStateInfo so the UI can offer the udev-rules auto-fix.
   private linuxUdevPermissionDenied = false
+  private _loggedBlHash = false
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
@@ -1321,7 +1324,10 @@ export class EngineController extends EventEmitter {
         const resolved = this.manifest.hashes.bootloader[blHash]
         if (resolved) {
           effectiveBlVersion = resolved.replace(/^v/, '')
-          console.log(`[Engine] Resolved BL hash ${blHash.slice(0, 8)}… → v${effectiveBlVersion}`)
+          if (!this._loggedBlHash) {
+            this._loggedBlHash = true
+            console.log(`[Engine] Resolved BL hash ${blHash.slice(0, 8)}… → v${effectiveBlVersion}`)
+          }
         }
       }
     }

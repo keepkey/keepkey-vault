@@ -579,7 +579,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 120000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
 			if (result) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -593,8 +593,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				const map = new Map<string, ChainBalance>()
-				for (const b of result) map.set(b.chainId, b)
+				// No-walk-backwards merge: start from current displayed balances so chains
+				// from failed Pioneer chunks (which are absent from `result`) stay visible.
+				// Only update a chain if the new value is non-zero, or if we had no prior data.
+				const map = new Map<string, ChainBalance>(balances)
+				for (const b of result) {
+					const prev = map.get(b.chainId)
+					if (!prev || b.balanceUsd > 0 || parseFloat(b.balance || '0') > 0) {
+						map.set(b.chainId, b)
+					} else {
+						console.log(`[Dashboard] Preserving prior ${b.chainId} balance — Pioneer returned 0`)
+					}
+				}
 				setBalances(map)
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)

@@ -18,7 +18,7 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
@@ -58,6 +58,10 @@ export interface RestApiCallbacks {
   getSwapUiState?: () => { state: import('../shared/types').SwapUiState; updatedAt: number }
   /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
   sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
+  /** Returns initialized Pioneer client (for debug endpoints) */
+  getPioneer?: () => Promise<any>
+  /** Returns the active Pioneer API base URL */
+  getPioneerApiBase?: () => string
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -1112,6 +1116,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return fn()
   }
 
+  /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
+  function requireChainSupport(chainId: string): Response | null {
+    const chain = CHAINS.find(c => c.id === chainId)
+    if (!chain?.minFirmware) return null
+    const fw = engine.getDeviceState().firmwareVersion
+    if (!fw || !isChainSupported(chain, fw)) {
+      return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
+    }
+    return null
+  }
+
   /** Normalize showDisplay to boolean (undefined → false). */
   function showDisplay(requested: boolean | undefined): boolean {
     return requested ?? false
@@ -1333,7 +1348,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing,
             apiVersion: 2,
-            supportedChains: CHAINS.map(c => c.networkId),
+            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion)).map(c => c.networkId),
             device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
@@ -1833,6 +1848,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/solana' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('solana')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'sol', body)
@@ -1852,6 +1869,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tron' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('tron')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'trx', body)
@@ -1871,6 +1890,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/ton' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('ton')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'ton', body)
@@ -2809,6 +2830,130 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ deviceId, total: spam.length, spam })
         }
 
+        // ── Pioneer diagnostic: drive a full chunked portfolio call and report results ──
+        if (path === '/api/debug/pioneer-audit' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+
+          // Build pubkey list from cached DB entries (avoids device round-trips)
+          const cachedPks = getCachedPubkeys(deviceId)
+          const pubkeys: Array<{ caip: string; pubkey: string; label: string }> = []
+
+          // getCachedPubkeys() returns chainId but not caip — derive from the shared CHAINS registry
+          // so new chains added to chains.ts are automatically covered.
+          const chainIdToCaip = new Map(CHAINS.map(c => [c.id, c.caip]))
+
+          // UTXO (xpubs) and non-EVM address-based entries
+          for (const pk of cachedPks) {
+            const caip = chainIdToCaip.get(pk.chainId) || ''
+            if (pk.xpub) pubkeys.push({ caip, pubkey: pk.xpub, label: `${pk.chainId}:xpub` })
+            else if (pk.address) pubkeys.push({ caip, pubkey: pk.address, label: `${pk.chainId}:addr` })
+          }
+
+          // EVM chains — use ETH address from cache for each supported EVM chain
+          const ethCachedPk = cachedPks.find(p => p.chainId === 'ethereum' && p.address)
+          if (ethCachedPk?.address) {
+            const evmCaips: Array<[string, string]> = [
+              ['eip155:1/slip44:60', 'ethereum'],
+              ['eip155:137/slip44:966', 'polygon'],
+              ['eip155:42161/slip44:60', 'arbitrum'],
+              ['eip155:10/slip44:60', 'optimism'],
+              ['eip155:43114/slip44:60', 'avalanche'],
+              ['eip155:56/slip44:60', 'bsc'],
+              ['eip155:8453/slip44:60', 'base'],
+              ['eip155:100/slip44:60', 'gnosis'],
+            ]
+            for (const [caip, label] of evmCaips) {
+              if (!pubkeys.find(p => p.caip === caip)) {
+                pubkeys.push({ caip, pubkey: ethCachedPk.address, label: `${label}:evm` })
+              }
+            }
+          }
+
+          // Cached non-EVM addresses (cosmos, xrp, etc.)
+          const cachedBalances = getCachedBalances(deviceId)
+          if (cachedBalances) {
+            const cosmosChains: Record<string, string> = {
+              cosmos: 'cosmos:cosmoshub-4/slip44:118',
+              thorchain: 'cosmos:thorchain-mainnet-v1/slip44:931',
+              mayachain: 'cosmos:mayachain-mainnet-v1/slip44:931',
+              osmosis: 'cosmos:osmosis-1/slip44:118',
+            }
+            for (const b of cachedBalances.balances) {
+              const caip = cosmosChains[b.chainId]
+              if (caip && b.address && !b.address.startsWith('xpub') && !b.address.startsWith('zpub') && !b.address.startsWith('ypub')) {
+                if (!pubkeys.find(p => p.caip === caip)) {
+                  pubkeys.push({ caip, pubkey: b.address, label: `${b.chainId}:addr` })
+                }
+              }
+              if (b.chainId === 'ripple' && b.address) {
+                const xrpCaip = 'ripple:4109c6f2045fc7eff4cde8f9905d19c2/slip44:144'
+                if (!pubkeys.find(p => p.caip === xrpCaip)) {
+                  pubkeys.push({ caip: xrpCaip, pubkey: b.address, label: 'ripple:addr' })
+                }
+              }
+            }
+          }
+
+          const CHUNK_SIZE = 8
+          const chunks: typeof pubkeys[] = []
+          for (let i = 0; i < pubkeys.length; i += CHUNK_SIZE) chunks.push(pubkeys.slice(i, i + CHUNK_SIZE))
+
+          // Call Pioneer for each chunk
+          let pioneer: any
+          try { pioneer = await callbacks.getPioneer() } catch (e: any) {
+            return json({ error: `Pioneer init failed: ${e.message}`, pubkeyCount: pubkeys.length })
+          }
+
+          const chunkResults: any[] = []
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i]
+            const t0 = Date.now()
+            try {
+              const resp = await Promise.race([
+                pioneer.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }, { forceRefresh: true }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('60s timeout')), 60000)),
+              ])
+              const entries = Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp?.data?.balances) ? resp.data.balances : (Array.isArray(resp) ? resp : []))
+              chunkResults.push({
+                chunk: i + 1,
+                pubkeys: chunk.map(p => ({ caip: p.caip, label: p.label, pubkey: p.pubkey.substring(0, 20) + '...' })),
+                ok: true,
+                durationMs: Date.now() - t0,
+                entryCount: entries.length,
+                entries: entries.map((e: any) => ({
+                  caip: e.caip, symbol: e.symbol, balance: e.balance, valueUsd: e.valueUsd,
+                  dataSource: e.dataSource, isStale: e.isStale,
+                })),
+              })
+            } catch (e: any) {
+              chunkResults.push({
+                chunk: i + 1,
+                pubkeys: chunk.map(p => ({ caip: p.caip, label: p.label })),
+                ok: false,
+                durationMs: Date.now() - t0,
+                error: e?.message || String(e),
+              })
+            }
+          }
+
+          const succeeded = chunkResults.filter(r => r.ok).length
+          const failed = chunkResults.filter(r => !r.ok).length
+          return json({
+            deviceId,
+            pubkeyCount: pubkeys.length,
+            chunkCount: chunks.length,
+            chunkSize: CHUNK_SIZE,
+            succeeded,
+            failed,
+            pioneerUrl: callbacks.getPioneerApiBase?.() || 'unknown',
+            chunks: chunkResults,
+          })
+        }
+
         if (path === '/api/debug/token-visibility' && method === 'GET') {
           auth.requireAuth(req)
           const hidden = getTokensByVisibility('hidden')
@@ -2897,18 +3042,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   const r = await wallet.cosmosGetAddress({ addressNList: addrNList, showDisplay: false })
                   address = typeof r === 'string' ? r : r?.address || ''
                 } else if (coinType === 501) {
-                  // Solana uses ed25519 with 4-element path (m/44'/501'/0'/0') — don't extend to 5
-                  const solNList = p.address_n
-                  const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('solana')) {
+                    const solNList = p.address_n
+                    const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 } else if (coinType === 195) {
-                  const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('tron')) {
+                    const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 } else if (coinType === 607) {
-                  // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
-                  const tonNList = p.address_n
-                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('ton')) {
+                    const tonNList = p.address_n
+                    const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 }
 
                 if (address) {
@@ -3470,7 +3619,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // Extract firmware Failure message if present (hdwallet wraps them)
         const fwMsg = err?.message?.message || err?.message || 'Internal error'
         const fwCode = err?.message?.code ?? err?.code
-        console.error('[REST] Error:', typeof fwMsg === 'string' ? fwMsg : JSON.stringify(fwMsg),
+        console.error(`[REST] Error on ${method} ${path}:`, typeof fwMsg === 'string' ? fwMsg : JSON.stringify(fwMsg),
           fwCode != null ? `(code ${fwCode})` : '')
         return json({ error: typeof fwMsg === 'string' ? fwMsg : 'Internal error', code: fwCode }, 500)
       } finally {
