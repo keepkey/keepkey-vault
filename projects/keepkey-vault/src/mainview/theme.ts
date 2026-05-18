@@ -7,9 +7,9 @@ import { createSystem, defaultConfig, defineConfig } from "@chakra-ui/react";
    var(--ink-0) etc.) lives in src/mainview/styles/tokens.css; this file is the
    bridge for screens still rendered through Chakra. */
 
-const FONT_SANS  = "'Space Grotesk', -apple-system, system-ui, sans-serif"
 const FONT_MONO  = "'Geist Mono', ui-monospace, monospace"
-const FONT_SERIF = "'Instrument Serif', serif"
+const FONT_SANS  = FONT_MONO  // mono is now the app-wide default
+const FONT_SERIF = FONT_MONO  // serif usages collapse to mono too
 
 const config = defineConfig({
 	globalCss: {

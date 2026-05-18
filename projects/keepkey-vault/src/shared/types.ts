@@ -729,6 +729,8 @@ export interface SwapQuoteParams {
   fromAddress: string      // sender address
   toAddress: string        // destination address
   slippageBps?: number     // slippage tolerance (default 300 = 3%)
+  isMax?: boolean          // true when sending full balance (UTXO fee must be deducted before quoting)
+  feeLevel?: number        // 1=slow, 3=avg, 5=fast — passed to UTXO fee estimator
 }
 
 /** Parameters for executeSwap RPC. CAIP-only identification — the tracker

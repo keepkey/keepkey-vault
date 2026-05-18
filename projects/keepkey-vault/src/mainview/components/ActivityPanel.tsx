@@ -19,6 +19,7 @@ interface ActivityPanelProps {
   pendingSwaps: PendingSwap[]
   onRefresh: () => void
   onResumeSwap?: (swap: PendingSwap) => void
+  onOpenFullPage?: () => void
 }
 
 const CHAIN_COLORS: Record<string, string> = {}
@@ -99,12 +100,12 @@ function getExplorerUrl(chainSymbol: string, txid: string): string | null {
   return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 
-function truncateTxid(txid: string): string {
+export function truncateTxid(txid: string): string {
   if (txid.length <= 16) return txid
   return txid.slice(0, 8) + '...' + txid.slice(-8)
 }
 
-function timeAgo(ts: number): string {
+export function timeAgo(ts: number): string {
   const diff = Date.now() - ts
   if (diff < 60_000) return 'just now'
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`
@@ -117,7 +118,7 @@ function recentTimestamp(item: { createdAt: number }): number {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
-function recentFirst<T extends { createdAt: number }>(items: T[]): T[] {
+export function recentFirst<T extends { createdAt: number }>(items: T[]): T[] {
   return [...items].sort((a, b) => recentTimestamp(b) - recentTimestamp(a))
 }
 
@@ -174,7 +175,7 @@ function formatNativeValue(raw: string | undefined, chainDef: { decimals: number
   return { amount, usd }
 }
 
-function nativePriceByChain(balances: ChainBalance[]): Record<string, number> {
+export function nativePriceByChain(balances: ChainBalance[]): Record<string, number> {
   const prices: Record<string, number> = {}
   for (const b of balances) {
     const balance = Number(b.balance)
@@ -188,7 +189,7 @@ function nativePriceByChain(balances: ChainBalance[]): Record<string, number> {
 }
 
 // ── Detail types for the TX detail dialog ───────────────────────────
-type TxDetail = {
+export type TxDetail = {
   kind: 'activity'
   activity: RecentActivity
 } | {
@@ -196,11 +197,11 @@ type TxDetail = {
   swap: PendingSwap
 }
 
-type ActivityTimelineItem =
+export type ActivityTimelineItem =
   | { kind: 'activity'; id: string; createdAt: number; activity: RecentActivity }
   | { kind: 'swap'; id: string; createdAt: number; swap: PendingSwap }
 
-function formatFullDate(ts: number): string {
+export function formatFullDate(ts: number): string {
   const d = new Date(ts)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
     ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -243,7 +244,7 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
   )
 }
 
-function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; onClose: () => void; nativePrices: Record<string, number> }) {
+export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; onClose: () => void; nativePrices: Record<string, number> }) {
   if (detail.kind === 'activity') {
     const a = detail.activity
     const typeConf = TYPE_CONFIG[a.type] || TYPE_CONFIG.sign
@@ -443,7 +444,7 @@ function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; o
   )
 }
 
-function ActivityRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
+export function ActivityRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
   const [copied, setCopied] = useState(false)
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
   const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
@@ -525,7 +526,7 @@ function ActivityRow({ activity, onSelect, nativePrices }: { activity: RecentAct
   )
 }
 
-function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingSwap) => void }) {
+export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingSwap) => void }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
@@ -695,7 +696,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
   )
 }
 
-export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefresh, onResumeSwap }: ActivityPanelProps) {
+export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefresh, onResumeSwap, onOpenFullPage }: ActivityPanelProps) {
   const [tab, setTab] = useState<'activity' | 'swaps'>('activity')
   const [selectedChain, setSelectedChain] = useState<string>('')
   const [scanning, setScanning] = useState(false)
@@ -796,15 +797,30 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       <Box position="fixed" inset="0" bg="blackAlpha.600" zIndex={Z.drawerBackdrop} onClick={onClose} />
 
       <Box
-        position="fixed" bottom="0" left="0"
+        position="fixed" bottom="0" right="0"
         w="min(100vw, 430px)" h="min(72vh, 680px)" maxH="calc(100vh - 20px)"
-        bg="kk.bg" border="1px solid" borderColor="kk.border" borderTopRightRadius="xl"
+        bg="kk.bg" border="1px solid" borderColor="kk.border" borderTopLeftRadius="xl"
         zIndex={Z.drawerPanel} display="flex" flexDirection="column" overflow="hidden"
       >
         {/* Header */}
         <Flex px="4" pt="4" pb="2" justify="space-between" align="center" flexShrink={0}>
           <Text fontSize="sm" fontWeight="700" color="white">Recent Activity</Text>
-          <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">&times;</Text>
+          <HStack gap="2">
+            {onOpenFullPage && (
+              <Text
+                as="button" fontSize="xs" color="var(--teal)" fontWeight="600"
+                _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+                onClick={() => { onClose(); onOpenFullPage() }}
+                display="flex" alignItems="center" gap="1"
+              >
+                Full page
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </Text>
+            )}
+            <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">&times;</Text>
+          </HStack>
         </Flex>
 
         {/* Tabs */}

@@ -188,7 +188,7 @@ export function ActivityTracker() {
       <style>{TRACKER_CSS}</style>
 
       {/* Floating bubble — always visible */}
-      <Box position="fixed" bottom="20px" left="20px" zIndex={Z.nav + 1}>
+      <Box position="fixed" bottom="20px" right="20px" zIndex={Z.nav + 1}>
         <Box
           as="button"
           display="flex"
@@ -233,6 +233,7 @@ export function ActivityTracker() {
         pendingSwaps={pendingSwaps}
         onRefresh={() => { fetchActivities(); fetchSwaps() }}
         onResumeSwap={(swap) => { setPanelOpen(false); setResumeSwap(swap) }}
+        onOpenFullPage={() => window.dispatchEvent(new CustomEvent('keepkey-open-activity'))}
       />
 
       {/* Resume swap dialog — opened from activity panel swap click */}

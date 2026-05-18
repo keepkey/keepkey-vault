@@ -1439,6 +1439,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           fromAddress,
           toAddress,
           slippageBps,
+          isMax: sendIsMax,
         }, 30000)
         if (version !== quoteVersionRef.current) return
         setQuote(result)
@@ -2009,7 +2010,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       letterSpacing="-0.03em" textAlign="center" lineHeight="1.1">
                       {t("swap", "Swap")}{" "}
                       <Text as="span" color="var(--gold)"
-                        fontFamily="serif" fontStyle="italic" fontWeight={400} fontSize="1.2em">
+                        fontWeight={500} fontSize="1.2em">
                         {t("completed", "completed").toLowerCase()}
                       </Text>
                     </Text>
@@ -2342,8 +2343,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               <Flex align="center" gap="3" w="full" justify="center" position="relative">
                 <VStack gap="0" align="center">
                   <Text fontSize="lg" fontWeight="700" letterSpacing="-0.01em"
-                    color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}
-                    fontFamily="serif" fontStyle="italic">
+                    color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}>
                     {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
                   </Text>
                   {!isSwapComplete && !isSwapFailed && (
@@ -2772,8 +2772,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     fontSize="20px"
                     fontWeight="600"
                     color="kk.textPrimary"
-                    fontFamily="serif"
-                    fontStyle="italic"
                     letterSpacing="-0.01em"
                   >
                     {subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")

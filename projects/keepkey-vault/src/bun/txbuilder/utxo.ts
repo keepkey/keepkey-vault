@@ -176,6 +176,68 @@ async function fetchUtxosForXpub(
   return utxos
 }
 
+/** Estimate the miner fee for a UTXO send without building the full tx.
+ *  Runs steps 1-3 of buildUtxoTx (fetch UTXOs + fee rate + coin selection) and
+ *  returns the fee in satoshis and the net spendable amount. Returns null on any
+ *  error so callers can safely degrade to no-estimate. */
+export async function estimateUtxoFee(
+  pioneer: any,
+  chain: ChainDef,
+  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'accountPath'>,
+): Promise<{ feeSat: number; netSat: number } | null> {
+  try {
+    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, accountPath } = params
+    const primaryXpub = xpub || allXpubs?.[0]?.xpub
+    if (!primaryXpub) return null
+    const scriptType = getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+
+    let utxos: any[]
+    if (allXpubs && allXpubs.length > 0) {
+      const settled = await Promise.allSettled(
+        allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.networkId, x.xpub, x.scriptType, x.accountPath))
+      )
+      utxos = settled.flatMap(r => r.status === 'fulfilled' ? r.value : [])
+    } else {
+      utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath)
+    }
+    if (!utxos.length) return null
+
+    let feeRates: { slow: number; average: number; fast: number }
+    if (HARDCODED_FEES[chain.networkId]) {
+      feeRates = HARDCODED_FEES[chain.networkId]
+    } else {
+      try {
+        const feeResp = pioneer.GetFeeRateByNetwork
+          ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+          : await pioneer.GetFeeRate({ networkId: chain.networkId })
+        const data = feeResp?.data || {}
+        const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
+        const needsConversion = vals.some((v: number) => v > 500)
+        feeRates = {
+          slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
+          average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
+          fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
+        }
+      } catch {
+        feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
+      }
+    }
+    const effectiveFeeRate = Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
+
+    const satoshis = parseDecimalToInt(params.amount, chain.decimals)
+    const result = isMax
+      ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
+      : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)
+
+    if (!result?.inputs || result.fee == null) return null
+    const totalIn = result.inputs.reduce((s: number, i: any) => s + i.value, 0)
+    const feeSat: number = result.fee
+    return { feeSat, netSat: totalIn - feeSat }
+  } catch {
+    return null
+  }
+}
+
 export async function buildUtxoTx(
   pioneer: any,
   chain: ChainDef,

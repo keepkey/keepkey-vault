@@ -4123,7 +4123,43 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
 				}
 
-				const quote = await getSwapQuote(params)
+				let quote = await getSwapQuote(params)
+
+				// NEAR Intents sendMax BTC fix: the first quote commits NEAR Intents to
+				// receiving `params.amount` (full balance), but the UTXO tx only delivers
+				// `balance - miner_fee`. NEAR Intents hard-fails (PARTIAL_DEPOSIT refund)
+				// on any shortfall. Fix: re-quote with the actual net delivery amount.
+				if (
+					quote.swapper === 'NEAR Intents'
+					&& params.isMax
+					&& params.fromCaip.startsWith('bip122:')
+					&& engine.wallet
+				) {
+					try {
+						const { estimateUtxoFee } = await import('./txbuilder/utxo')
+						const { getPioneer: getPio } = await import('./pioneer')
+						const pio = await getPio()
+						const btcChain = getAllChains().find(c => c.id === 'bitcoin')
+						const xpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
+						if (btcChain && xpubs.length > 0) {
+							const est = await estimateUtxoFee(pio, btcChain, {
+								to: quote.inboundAddress || params.fromAddress,
+								amount: params.amount,
+								isMax: true,
+								feeLevel: params.feeLevel,
+								allXpubs: xpubs,
+							})
+							if (est && est.feeSat > 0) {
+								const netBtc = (est.netSat / 1e8).toFixed(8)
+								console.log(`[swap] NEAR Intents sendMax: re-quoting with net amount ${netBtc} BTC (fee=${est.feeSat} sat)`)
+								quote = await getSwapQuote({ ...params, amount: netBtc, isMax: false })
+							}
+						}
+					} catch (e: any) {
+						console.warn(`[swap] NEAR Intents fee estimation failed, using original quote: ${e.message}`)
+					}
+				}
+
 				// Cache quote so executeSwap can pass real data to the tracker
 				const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
 				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering

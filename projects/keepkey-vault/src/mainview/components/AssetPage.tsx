@@ -20,6 +20,8 @@ const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ defa
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
 
 import { SweepDialog } from "./SweepDialog"
+import { ActivityRow, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
+import type { RecentActivity } from "../../shared/types"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
@@ -46,13 +48,19 @@ interface AssetPageProps {
 	balance?: ChainBalance
 	onBack: () => void
 	firmwareVersion?: string
+	/** Open the page on a specific action ("send" / "receive" / "swap"). */
+	initialAction?: "send" | "receive" | "swap"
+	/** Pre-select a specific token so the page lands directly on its detail view. */
+	initialToken?: TokenBalance
+	/** Navigate to the full Activity page filtered by this chain */
+	onViewActivity?: (chainId: string) => void
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
-	const [view, setView] = useState<AssetView>("receive")
-	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
+	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : "receive")
+	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
@@ -332,9 +340,28 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
-	const [showSwapDialog, setShowSwapDialog] = useState(false)
+	const [showSwapDialog, setShowSwapDialog] = useState(initialAction === "swap")
 	const [showSweep, setShowSweep] = useState(false)
 	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
+
+	// Activity preview
+	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])
+	const [previewPrices, setPreviewPrices] = useState<Record<string, number>>({})
+	const [activityDetail, setActivityDetail] = useState<TxDetail | null>(null)
+	useEffect(() => {
+		rpcRequest<RecentActivity[]>('getRecentActivity', { limit: 100 }, 10000)
+			.then(result => {
+				if (!result) return
+				const filtered = recentFirst(result.filter(a =>
+					a.chainId === chain.id || a.chain === chain.symbol || a.chain === chain.id
+				)).slice(0, 5)
+				setPreviewActivities(filtered)
+			})
+			.catch(() => {})
+		rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances')
+			.then(r => { if (r?.balances) setPreviewPrices(nativePriceByChain(r.balances)) })
+			.catch(() => {})
+	}, [chain.id, chain.symbol])
 	const isEvmChain = chain.chainFamily === 'evm'
 
 	// Toggle token visibility via RPC
@@ -577,11 +604,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						<Box flex="1" minW="0">
 							<Flex align="baseline" gap="2.5">
 								<Text
-									fontFamily="serif"
-									fontStyle="italic"
-									fontWeight="400"
+									fontWeight="500"
 									fontSize={{ base: "26px", md: "34px" }}
-									letterSpacing="-0.02em"
+									letterSpacing="-0.01em"
 									color="var(--text-0)"
 									lineHeight="1.05"
 									truncate
@@ -897,6 +922,69 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 						onClose={() => setShowAddToken(false)}
 					/>
 				)}
+
+				{/* Activity preview */}
+				<Box mt="6">
+					<Flex align="center" justify="space-between" mb="3" px="1">
+						<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
+							Recent Activity{previewActivities.length > 0 && ` · ${previewActivities.length}`}
+						</Text>
+						{onViewActivity && (
+							<Box
+								as="button"
+								fontSize="11px"
+								color="var(--teal)"
+								fontWeight="500"
+								cursor="pointer"
+								display="flex"
+								alignItems="center"
+								gap="1"
+								_hover={{ opacity: 0.75 }}
+								transition="opacity 0.15s"
+								onClick={() => onViewActivity(chain.id)}
+								className="electrobun-webkit-app-region-no-drag"
+							>
+								View all
+								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M5 12h14M12 5l7 7-7 7"/>
+								</svg>
+							</Box>
+						)}
+					</Flex>
+
+					{previewActivities.length === 0 ? (
+						<Flex
+							align="center" justify="space-between"
+							py="3" px="4"
+							bg="var(--ink-1)" border="1px solid var(--line)"
+							borderRadius="var(--r-sm)"
+						>
+							<Text fontSize="12px" color="var(--text-3)">No indexed activity yet</Text>
+							{onViewActivity && (
+								<Box
+									as="button"
+									fontSize="11px" color="var(--teal)" fontWeight="500"
+									cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+									onClick={() => onViewActivity(chain.id)}
+									className="electrobun-webkit-app-region-no-drag"
+								>
+									Scan history →
+								</Box>
+							)}
+						</Flex>
+					) : (
+						<VStack gap="1.5">
+							{previewActivities.map(a => (
+								<ActivityRow
+									key={a.id}
+									activity={a}
+									nativePrices={previewPrices}
+									onSelect={act => setActivityDetail({ kind: 'activity', activity: act })}
+								/>
+							))}
+						</VStack>
+					)}
+				</Box>
 			</Box>
 			{/* SwapDialog rendered outside overflow container so position:fixed works */}
 			{swapsEnabled && showSwapDialog && (
@@ -962,6 +1050,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion }: AssetPage
 					onClose={() => setShowSweep(false)}
 					currentMaxAccountHint={btcAccounts.accounts.length > 0 ? Math.max(...btcAccounts.accounts.map(a => a.accountIndex)) : 0}
 					refreshAccounts={refreshBtcAccounts}
+				/>
+			)}
+
+			{activityDetail && (
+				<TxDetailDialog
+					detail={activityDetail}
+					nativePrices={previewPrices}
+					onClose={() => setActivityDetail(null)}
 				/>
 			)}
 		</Flex>

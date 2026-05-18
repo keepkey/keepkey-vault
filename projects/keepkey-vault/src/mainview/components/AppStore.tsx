@@ -70,10 +70,8 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 					</Text>
 					<Text
 						as="h1"
-						fontFamily="serif"
-						fontStyle="italic"
-						fontWeight="400"
-						letterSpacing="-0.02em"
+						fontWeight="500"
+						letterSpacing="-0.01em"
 						color="var(--text-0)"
 						lineHeight="1"
 						fontSize={{ base: "44px", md: "64px" }}
