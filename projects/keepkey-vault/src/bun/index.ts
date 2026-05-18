@@ -1608,7 +1608,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
-			getBalances: async () => {
+			getBalances: async ({ forceRefresh = false } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
 
 				// Initialize Pioneer client — isolate failure so device derivation still works
@@ -1782,7 +1782,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								let resp: any
 								try {
 									resp = await withTimeout(
-										pioneer.GetPortfolioBalances(chunkBody, { forceRefresh: true }),
+										pioneer.GetPortfolioBalances(chunkBody, { forceRefresh }),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
@@ -1792,7 +1792,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									resp = await withTimeout(
 										pioneer.GetPortfolioBalances(
 											{ pubkeys: chunkBody.pubkeys },
-											{ forceRefresh: true }
+											{ forceRefresh }
 										),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
