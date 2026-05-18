@@ -1138,7 +1138,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				<ActivityPage
 					defaultChainId={activityDefaultChain}
 					onBack={() => setShowActivityPage(false)}
-					onResumeSwap={(swap) => { setShowActivityPage(false); setActivityResumeSwap(swap) }}
+					onResumeSwap={(swap) => setActivityResumeSwap(swap)}
 				/>
 				<Suspense fallback={null}>
 					<LazySwapDialog
