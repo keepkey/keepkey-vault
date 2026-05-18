@@ -1439,6 +1439,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           fromAddress,
           toAddress,
           slippageBps,
+          isMax: sendIsMax,
         }, 30000)
         if (version !== quoteVersionRef.current) return
         setQuote(result)

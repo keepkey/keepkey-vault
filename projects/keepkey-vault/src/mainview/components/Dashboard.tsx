@@ -630,6 +630,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [selectedChainInitialToken, setSelectedChainInitialToken] = useState<TokenBalance | undefined>(undefined)
 	const [showActivityPage, setShowActivityPage] = useState(false)
 	const [activityDefaultChain, setActivityDefaultChain] = useState('')
+	const [activityResumeSwap, setActivityResumeSwap] = useState<import('../../shared/types').PendingSwap | null>(null)
 	const handleViewActivity = useCallback((chainId: string) => {
 		setActivityDefaultChain(chainId)
 		setShowActivityPage(true)
@@ -1133,10 +1134,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	if (showActivityPage) {
 		return (
-			<ActivityPage
-				defaultChainId={activityDefaultChain}
-				onBack={() => setShowActivityPage(false)}
-			/>
+			<>
+				<ActivityPage
+					defaultChainId={activityDefaultChain}
+					onBack={() => setShowActivityPage(false)}
+					onResumeSwap={(swap) => { setShowActivityPage(false); setActivityResumeSwap(swap) }}
+				/>
+				<Suspense fallback={null}>
+					<LazySwapDialog
+						open={!!activityResumeSwap}
+						onClose={() => setActivityResumeSwap(null)}
+						resumeSwap={activityResumeSwap}
+					/>
+				</Suspense>
+			</>
 		)
 	}
 
@@ -1223,7 +1234,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box
 								key={chain.id}
 								as="button"
-								onClick={() => setDrilledChainId(chain.id)}
+								onClick={() => openChainPage(chain)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -1592,54 +1603,42 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							/>
 						)
 					})() : !loadingBalances && initialLoaded && !pioneerError ? (
-						<Box
-							w="100%"
-							maxW="480px"
-							p="5"
-							borderRadius="xl"
-							bg="kk.cardBg"
-							border="1px solid"
-							borderColor="rgba(233,196,106,0.2)"
-						>
-							<Flex direction="column" align="center" gap="3" textAlign="center">
+						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
+							<Box
+								w="48px" h="48px" borderRadius="full"
+								bg="rgba(233,196,106,0.1)"
+								display="flex" alignItems="center" justifyContent="center"
+							>
+								<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+									<path d="M9 12l2 2 4-4" />
+								</svg>
+							</Box>
+							<Box>
+								<Text fontSize="15px" fontWeight="600" color="var(--text-0)" mb="1">
+									{t("welcomeTitle")}
+								</Text>
+								<Text fontSize="13px" color="var(--text-2)" lineHeight="1.5">
+									Pick a chain from the list on the left to get your deposit address.
+								</Text>
+							</Box>
+							{visibleChains.length > 0 && (
 								<Box
-									w="56px"
-									h="56px"
-									borderRadius="full"
-									bg="rgba(233,196,106,0.1)"
-									display="flex"
-									alignItems="center"
-									justifyContent="center"
+									as="button"
+									onClick={() => openChainPage(visibleChains[0]!)}
+									px="5" py="2.5"
+									bg="var(--gold)" color="var(--ink-0)"
+									borderRadius="999px"
+									fontSize="13px" fontWeight="600"
+									cursor="pointer"
+									_hover={{ bg: 'var(--gold-2)' }}
+									transition="all 0.15s"
+									className="electrobun-webkit-app-region-no-drag"
 								>
-									<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-										<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-										<path d="M9 12l2 2 4-4" />
-									</svg>
+									Get {visibleChains[0]!.symbol} address →
 								</Box>
-								<Box>
-									<Text fontSize="md" fontWeight="600" color="white" mb="1">
-										{t("welcomeTitle")}
-									</Text>
-									<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-										{t("welcomeSubtitle")}
-									</Text>
-								</Box>
-								<Flex direction="column" gap="2" w="100%" maxW="340px" mt="1">
-									<Flex align="flex-start" gap="2.5" textAlign="left">
-										<Text fontSize="sm" mt="0.5">1.</Text>
-										<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-											{t("welcomeTip1")}
-										</Text>
-									</Flex>
-									<Flex align="flex-start" gap="2.5" textAlign="left">
-										<Text fontSize="sm" mt="0.5">2.</Text>
-										<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.4">
-											{t("welcomeTip2")}
-										</Text>
-									</Flex>
-								</Flex>
-							</Flex>
-						</Box>
+							)}
+						</Flex>
 					) : null}
 				</Flex>
 

@@ -23,17 +23,31 @@ export type VaultCommand =
 type CommandListener = (cmd: VaultCommand) => void
 
 const commandListeners = new Set<CommandListener>()
+// Holds one pending command when Dashboard isn't mounted (no listeners).
+// CommandPalette calls onJumpToVault() then dispatchVaultCommand() synchronously,
+// but React hasn't re-rendered yet so Dashboard's useEffect hasn't subscribed.
+// On the next subscribe() call (Dashboard mount) we drain this immediately.
+let pendingCommand: VaultCommand | null = null
 
-/** Dispatch a vault command. All subscribers are notified synchronously. */
+/** Dispatch a vault command. If Dashboard isn't mounted yet, queues it for delivery on next subscribe. */
 export function dispatchVaultCommand(cmd: VaultCommand): void {
+	if (commandListeners.size === 0) {
+		pendingCommand = cmd
+		return
+	}
 	for (const fn of commandListeners) {
 		try { fn(cmd) } catch (e) { console.error("[commandBus] listener threw:", e) }
 	}
 }
 
-/** Subscribe to vault commands. Returns an unsubscribe function. */
+/** Subscribe to vault commands. Returns an unsubscribe function. Drains any pending command immediately. */
 export function subscribeVaultCommand(fn: CommandListener): () => void {
 	commandListeners.add(fn)
+	if (pendingCommand) {
+		const cmd = pendingCommand
+		pendingCommand = null
+		try { fn(cmd) } catch (e) { console.error("[commandBus] listener threw:", e) }
+	}
 	return () => { commandListeners.delete(fn) }
 }
 
