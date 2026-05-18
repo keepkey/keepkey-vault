@@ -1705,6 +1705,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
+				console.log(`[getBalances] nonEvmChains to derive: ${nonEvmChains.filter(c => !c.hidden).map(c => c.id).join(', ')}`)
 				for (const chain of nonEvmChains) {
 					if (chain.hidden) continue
 					const t0 = Date.now()
@@ -1717,17 +1718,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const result = await wallet[method](addrParams)
 						const address = typeof result === 'string' ? result : result?.address || ''
 						const ms = Date.now() - t0
-						if (ms > 2000) console.log(`[getBalances] ${chain.id}.${method} took ${ms}ms`)
 						if (address) {
+							console.log(`[getBalances] ${chain.id} address derived in ${ms}ms: ${address.substring(0, 20)}... caip=${chain.caip}`)
 							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
-							if (chain.id === 'tron') console.log(`[getBalances] TRON address derived: ${address}, caip: ${chain.caip}, networkId: ${chain.networkId}`)
 						} else {
-							if (chain.id === 'tron') console.warn(`[getBalances] TRON address derivation returned empty! result:`, JSON.stringify(result))
+							console.warn(`[getBalances] ${chain.id} address empty after ${ms}ms! method=${method} result=${JSON.stringify(result)}`)
 						}
 					} catch (e: any) {
-						console.warn(`[getBalances] ${chain.coin} address failed (${Date.now() - t0}ms):`, e.message)
+						console.warn(`[getBalances] ${chain.id} address THREW (${Date.now() - t0}ms): ${e.message}`)
 					}
 				}
+				console.log(`[getBalances] pubkeys after nonEVM derivation: ${pubkeys.length} total (nonEVM added: ${pubkeys.filter(p => !['bitcoin','litecoin','dogecoin','bitcoincash','dash','digibyte','zcash'].includes(p.chainId) && !p.chainId.startsWith('evm')).length})`)
 
 				// 3. Add ALL BTC xpubs from multi-account manager
 				const btcChain = allChains.find(c => c.id === 'bitcoin')!
@@ -1819,6 +1820,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						hadChunkFailures = true
 						const succeeded = pubkeyChunks.length - failedChunkCount
 						console.warn(`[getBalances] Partial portfolio response: ${succeeded}/${pubkeyChunks.length} chunks succeeded — failed chains will show 0`)
+						for (let i = 0; i < chunkResults.length; i++) {
+							if (chunkResults[i].error) {
+								const chains = pubkeyChunks[i].map((p: any) => p.chainId || String(p.caip).split(':')[0]).join(', ')
+								console.warn(`[getBalances] Chunk ${i + 1} failed — excluded chains: ${chains}`)
+							}
+						}
 						if (failedChunkCount === pubkeyChunks.length) {
 							throw new Error(`All ${pubkeyChunks.length} portfolio chunks failed`)
 						}
@@ -1832,6 +1839,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						effectivePubkeys = pubkeys.filter(p => !failedPubkeySet.has(`${p.caip}:${p.pubkey}`))
 					}
+					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
