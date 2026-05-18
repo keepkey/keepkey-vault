@@ -375,6 +375,7 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
         balance: r.balance,
         balanceUsd: r.balance_usd,
         address: r.address,
+        updatedAt: r.updated_at,
       }
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
@@ -395,9 +396,20 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
   try {
     if (!db) return
     const now = Date.now()
+    // No-walk-backwards upsert: only overwrite a cached non-zero balance if the new value is
+    // also non-zero. This prevents Pioneer cold-cache or transient 0 responses from wiping
+    // a balance the user has actually seen. The updated_at timestamp is only advanced when
+    // the balance is genuinely updated, so the UI accurately shows "from X ago".
     const stmt = db.prepare(
-      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, chain_id) DO UPDATE SET
+         symbol     = excluded.symbol,
+         address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+         balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
+         balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
+         tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
+         updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
@@ -411,14 +423,21 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
   }
 }
 
-/** Update a single chain's cached balance (upsert). */
+/** Update a single chain's cached balance. Never downgrades a non-zero cached value to zero. */
 export function updateCachedBalance(deviceId: string, balance: ChainBalance) {
   try {
     if (!db) return
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
     db.run(
-      `INSERT OR REPLACE INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, chain_id) DO UPDATE SET
+         symbol     = excluded.symbol,
+         address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+         balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
+         balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
+         tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
+         updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
       [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
     )
   } catch (e: any) {
@@ -1226,7 +1245,15 @@ export function saveCachedPubkey(deviceId: string, chainId: string, path: string
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, chain_id, path) DO UPDATE SET
+         xpub        = excluded.xpub,
+         address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+         script_type = excluded.script_type,
+         balance     = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance     ELSE balance     END,
+         balance_usd = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
+         updated_at  = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
       [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', balance || '0', balanceUsd ?? 0, Date.now()]
     )
   } catch (e: any) {
