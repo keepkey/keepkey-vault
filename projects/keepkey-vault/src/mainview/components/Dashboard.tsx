@@ -1144,16 +1144,30 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					overflowY="auto"
 					pr="1"
 					css={{
-						scrollbarWidth: "none",
-						"&::-webkit-scrollbar": { width: "0px", background: "transparent" },
-						"&:hover": { scrollbarWidth: "thin" },
-						"&:hover::-webkit-scrollbar": { width: "6px" },
-						"&:hover::-webkit-scrollbar-thumb": {
-							background: "rgba(255,255,255,0.18)",
-							borderRadius: "3px",
+						// Reserve the gutter at all times — toggling width on hover
+						// would shift the row content. Thumb stays invisible until hover.
+						scrollbarWidth: "thin",
+						scrollbarColor: "transparent transparent",
+						"&::-webkit-scrollbar": {
+							width: "6px",
+							background: "transparent",
 						},
-						"&:hover::-webkit-scrollbar-thumb:hover": {
-							background: "rgba(255,255,255,0.32)",
+						"&::-webkit-scrollbar-track": {
+							background: "transparent",
+						},
+						"&::-webkit-scrollbar-thumb": {
+							background: "transparent",
+							borderRadius: "3px",
+							transition: "background-color 0.2s ease",
+						},
+						"&:hover": {
+							scrollbarColor: "rgba(255,255,255,0.08) transparent",
+						},
+						"&:hover::-webkit-scrollbar-thumb": {
+							background: "rgba(255,255,255,0.06)",
+						},
+						"&::-webkit-scrollbar-thumb:hover": {
+							background: "rgba(255,255,255,0.14)",
 						},
 					}}
 				>
