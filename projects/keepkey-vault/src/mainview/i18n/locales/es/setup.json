@@ -8,7 +8,9 @@
 		"initChoose": "Elige tu método de configuración",
 		"initProgress": "Configurando tu billetera",
 		"initLabel": "Nombra tu dispositivo",
-		"complete": "¡Configuración completada!"
+		"complete": "¡Configuración completada!",
+		"verifySeed": "Verifica tu frase de recuperación",
+		"securityTips": "Consejos de seguridad"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Tu KeepKey te guiará a través del proceso de actualización.",
 		"bootloaderDetected": "Modo Bootloader detectado",
 		"deviceReadyForUpdate": "Tu KeepKey está en modo bootloader y listo para la actualización.",
-		"updateBootloaderTo": "Actualizar Bootloader a v{{version}}"
+		"updateBootloaderTo": "Actualizar Bootloader a v{{version}}",
+		"doNotHoldButton": "NO mantengas presionado el botón al reconectar. Conéctalo normalmente. Mantener el botón presionado volverá a poner el dispositivo en modo bootloader."
 	},
 	"firmware": {
 		"title": "Actualización de Firmware",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. Desconecta tu KeepKey",
 		"manualReconnectStep2": "2. Espera 5 segundos",
 		"manualReconnectStep3": "3. Conéctalo de nuevo",
-		"manualReconnectNote": "La configuración continuará automáticamente cuando se detecte el dispositivo."
+		"manualReconnectNote": "La configuración continuará automáticamente cuando se detecte el dispositivo.",
+		"unsignedBootloaderWarning": "Estás instalando firmware sin firmar (de desarrollador). Si este dispositivo antes ejecutaba firmware firmado (oficial), se borrarán todos los datos. Este es un límite de seguridad impuesto por hardware; lo mismo aplica al volver a firmware firmado.",
+		"unsignedBootloaderAcknowledge": "Entiendo que esto puede borrar el dispositivo y tengo respaldada mi semilla",
+		"autoRebooting": "Tu dispositivo se está reiniciando...",
+		"autoRebootingDetail": "Tu KeepKey se reiniciará automáticamente con el nuevo firmware. Esto suele tardar unos segundos.",
+		"waitingForDevice": "Esperando tu dispositivo...",
+		"wipeAndFlash": "Borrar e instalar"
 	},
 	"initChoose": {
 		"title": "Configura tu billetera",
@@ -123,7 +132,12 @@
 		"createWallet": "Crear billetera",
 		"recoverExistingWallet": "Recuperar billetera existente",
 		"recoverDescription": "Ingresa tu frase semilla de recuperación en el dispositivo",
-		"recoverWallet": "Recuperar billetera"
+		"recoverWallet": "Recuperar billetera",
+		"seedLength": "Longitud de semilla",
+		"words": "palabras",
+		"entropyNote": "Agregar más palabras no mejora la entropía general de la billetera.",
+		"learnMore": "Más información",
+		"howManyWords": "¿Cuántas palabras tiene tu semilla?"
 	},
 	"initProgress": {
 		"creatingWallet": "Creando billetera...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Sigue las instrucciones en la pantalla de tu KeepKey.",
 		"lookAtDevice": "Mira tu dispositivo KeepKey y sigue las instrucciones en pantalla.",
 		"failedToCreate": "Error al crear la billetera",
-		"failedToRecover": "Error al recuperar la billetera"
+		"failedToRecover": "Error al recuperar la billetera",
+		"writeDownWarning": "¡Anota cada palabra!",
+		"writeDownDetail": "Tu frase de recuperación aparece en la pantalla del dispositivo. Escribe cada palabra en papel. Es tu ÚNICO respaldo; NO volverás a ver estas palabras.",
+		"deviceLost": "Dispositivo desconectado. Vuelve a conectarlo para continuar, o regresa para intentarlo de nuevo.",
+		"goBack": "Volver"
 	},
 	"initLabel": {
 		"walletCreated": "¡Billetera creada!",
@@ -155,6 +173,65 @@
 		"stepOf": "Paso {{current}} de {{total}}",
 		"settingUpWallet": "Configurando billetera...",
 		"previous": "Anterior",
-		"next": "Siguiente"
+		"next": "Siguiente",
+		"securityTips": "Consejos de seguridad"
+	},
+	"verifySeed": {
+		"title": "Verifica tu frase de recuperación",
+		"descriptionEmulator": "Te pediremos 3 palabras aleatorias de tu semilla para confirmar que tienes un respaldo correcto.",
+		"description": "Confirma que anotaste correctamente tu frase de recuperación. Tu dispositivo te pedirá introducir algunas palabras.",
+		"verifyNow": "Verificar ahora",
+		"skipForNow": "Omitir; verificaré después",
+		"enterWords": "Ingresa las palabras solicitadas",
+		"enterWordsDetail": "Escribe la palabra correcta para cada posición de tu frase de recuperación.",
+		"checkWords": "Comprobar palabras",
+		"verifying": "Verificando...",
+		"checkingAnswers": "Comprobando tus respuestas...",
+		"followDevice": "Sigue las instrucciones en tu KeepKey para ingresar las palabras solicitadas.",
+		"verified": "¡Frase de recuperación verificada!",
+		"verifiedDetail": "Tu respaldo es correcto. Guárdalo en un lugar seguro y nunca lo compartas con nadie.",
+		"continue": "Continuar",
+		"failed": "Verificación fallida",
+		"failedDetail": "Las palabras que ingresaste no coinciden. Inténtalo de nuevo o revisa tu respaldo escrito.",
+		"tryAgain": "Intentar de nuevo"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Tu PIN está mezclado",
+				"body": "Tu KeepKey muestra una cuadrícula numérica aleatoria. Haz coincidir las posiciones en pantalla con los números del dispositivo. El diseño cambia cada vez para que nadie pueda robar tu PIN mirando la pantalla."
+			},
+			"words": {
+				"title": "Tus palabras = tu billetera",
+				"body": "Escribe tus 12/24 palabras en papel. Guárdalas en un lugar seguro. Nunca las escribas en una computadora, sitio web o teléfono. Quien tenga estas palabras controla tus fondos."
+			},
+			"recovery": {
+				"title": "Entrada de recuperación mezclada",
+				"body": "Al recuperar, KeepKey mezcla el alfabeto en la pantalla del dispositivo. Ingresas palabras por posición, nunca escribiendo las letras reales. Los keyloggers no ven nada útil."
+			},
+			"deviceScreen": {
+				"title": "Confía en la pantalla del dispositivo",
+				"body": "Confirma siempre la dirección y el monto en tu KeepKey antes de aprobar. Tu computadora puede estar comprometida; la pantalla del dispositivo no. Especialmente en transacciones grandes."
+			},
+			"appConnections": {
+				"title": "Las conexiones de apps están desactivadas",
+				"body": "Las apps de terceros y dApps se conectan mediante la API REST. Está desactivada por defecto para protegerte. Actívala en Configuración solo cuando la necesites."
+			},
+			"hiddenWallets": {
+				"title": "Billeteras ocultas (avanzado)",
+				"body": "La frase de contraseña crea una billetera oculta separada desde la misma semilla. Si la activas, DEBES recordarla: una frase incorrecta abre una billetera vacía diferente, no un error."
+			}
+		},
+		"actions": {
+			"getStarted": "Comenzar",
+			"startUsing": "Comenzar a usar KeepKey",
+			"skipIntro": "Omitir introducción",
+			"skipTips": "Omitir consejos"
+		},
+		"stepCounter": "{{current}} de {{total}}",
+		"walletLabels": {
+			"visible": "visible",
+			"hidden": "oculta"
+		}
 	}
 }

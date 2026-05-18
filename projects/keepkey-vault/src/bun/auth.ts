@@ -1,12 +1,17 @@
 import { getStoredPairings, storePairing, removePairing, clearPairings } from './db'
 import type { PairedAppInfo } from '../shared/types'
 
-/** HTTP-aware error with status code — caught by rest-api error handler */
+/** HTTP-aware error with status code — caught by rest-api error handler.
+ *  `details` is an optional structured payload returned alongside the error
+ *  message (e.g. `{ boc, txid }` so a caller can retry broadcast without
+ *  re-signing). */
 export class HttpError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  details?: unknown
+  constructor(status: number, message: string, details?: unknown) {
     super(message)
     this.status = status
+    if (details !== undefined) this.details = details
   }
 }
 

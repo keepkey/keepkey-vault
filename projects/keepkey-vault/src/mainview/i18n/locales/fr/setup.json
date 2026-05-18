@@ -8,7 +8,9 @@
 		"initChoose": "Choisissez votre méthode de configuration",
 		"initProgress": "Configuration de votre portefeuille",
 		"initLabel": "Nommez votre appareil",
-		"complete": "Configuration terminée !"
+		"complete": "Configuration terminée !",
+		"verifySeed": "Vérifier votre phrase de récupération",
+		"securityTips": "Conseils de sécurité"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Votre KeepKey vous guidera tout au long du processus de mise à jour.",
 		"bootloaderDetected": "Mode Bootloader détecté",
 		"deviceReadyForUpdate": "Votre KeepKey est en mode bootloader et prêt pour la mise à jour.",
-		"updateBootloaderTo": "Mettre à jour le Bootloader vers v{{version}}"
+		"updateBootloaderTo": "Mettre à jour le Bootloader vers v{{version}}",
+		"doNotHoldButton": "NE maintenez PAS le bouton enfoncé lors de la reconnexion. Branchez simplement l’appareil normalement. Maintenir le bouton enfoncé remettra l’appareil en mode bootloader."
 	},
 	"firmware": {
 		"title": "Mise à jour du Firmware",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. Débranchez votre KeepKey",
 		"manualReconnectStep2": "2. Attendez 5 secondes",
 		"manualReconnectStep3": "3. Rebranchez-le",
-		"manualReconnectNote": "La configuration continuera automatiquement lorsque l'appareil sera détecté."
+		"manualReconnectNote": "La configuration continuera automatiquement lorsque l'appareil sera détecté.",
+		"unsignedBootloaderWarning": "Vous installez un firmware non signé (développeur). Si cet appareil exécutait auparavant un firmware signé (officiel), toutes les données seront effacées. C’est une limite de sécurité imposée par le matériel; elle s’applique aussi lors du retour à un firmware signé.",
+		"unsignedBootloaderAcknowledge": "Je comprends que cela peut effacer l’appareil et j’ai sauvegardé ma graine",
+		"autoRebooting": "Votre appareil redémarre...",
+		"autoRebootingDetail": "Votre KeepKey redémarrera automatiquement avec le nouveau firmware. Cela prend généralement quelques secondes.",
+		"waitingForDevice": "En attente de votre appareil...",
+		"wipeAndFlash": "Effacer et flasher"
 	},
 	"initChoose": {
 		"title": "Configurez votre portefeuille",
@@ -123,7 +132,12 @@
 		"createWallet": "Créer le portefeuille",
 		"recoverExistingWallet": "Récupérer un portefeuille existant",
 		"recoverDescription": "Entrez votre phrase de récupération sur l'appareil",
-		"recoverWallet": "Récupérer le portefeuille"
+		"recoverWallet": "Récupérer le portefeuille",
+		"seedLength": "Longueur de la graine",
+		"words": "mots",
+		"entropyNote": "Ajouter des mots n’améliore pas l’entropie globale du portefeuille.",
+		"learnMore": "En savoir plus",
+		"howManyWords": "Combien de mots contient votre graine ?"
 	},
 	"initProgress": {
 		"creatingWallet": "Création du portefeuille...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Suivez les instructions sur l'écran de votre KeepKey.",
 		"lookAtDevice": "Regardez votre KeepKey et suivez les instructions à l'écran.",
 		"failedToCreate": "Échec de la création du portefeuille",
-		"failedToRecover": "Échec de la récupération du portefeuille"
+		"failedToRecover": "Échec de la récupération du portefeuille",
+		"writeDownWarning": "Notez chaque mot !",
+		"writeDownDetail": "Votre phrase de récupération s’affiche sur l’écran de l’appareil. Écrivez chaque mot sur papier. C’est votre SEULE sauvegarde; vous ne reverrez PAS ces mots.",
+		"deviceLost": "Appareil déconnecté. Rebranchez-le pour continuer, ou revenez en arrière pour réessayer.",
+		"goBack": "Retour"
 	},
 	"initLabel": {
 		"walletCreated": "Portefeuille créé !",
@@ -155,6 +173,65 @@
 		"stepOf": "Étape {{current}} sur {{total}}",
 		"settingUpWallet": "Configuration du portefeuille...",
 		"previous": "Précédent",
-		"next": "Suivant"
+		"next": "Suivant",
+		"securityTips": "Conseils de sécurité"
+	},
+	"verifySeed": {
+		"title": "Vérifier votre phrase de récupération",
+		"descriptionEmulator": "Nous vous demanderons 3 mots aléatoires de votre graine pour confirmer que votre sauvegarde est correcte.",
+		"description": "Confirmez que vous avez correctement noté votre phrase de récupération. Votre appareil vous demandera de saisir certains mots.",
+		"verifyNow": "Vérifier maintenant",
+		"skipForNow": "Ignorer; je vérifierai plus tard",
+		"enterWords": "Saisissez les mots demandés",
+		"enterWordsDetail": "Tapez le mot correct pour chaque position de votre phrase de récupération.",
+		"checkWords": "Vérifier les mots",
+		"verifying": "Vérification...",
+		"checkingAnswers": "Vérification de vos réponses...",
+		"followDevice": "Suivez les instructions sur votre KeepKey pour saisir les mots demandés.",
+		"verified": "Phrase de récupération vérifiée !",
+		"verifiedDetail": "Votre sauvegarde est correcte. Gardez-la en sécurité et ne la partagez jamais.",
+		"continue": "Continuer",
+		"failed": "Échec de la vérification",
+		"failedDetail": "Les mots saisis ne correspondent pas. Réessayez ou vérifiez votre sauvegarde écrite.",
+		"tryAgain": "Réessayer"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Votre PIN est mélangé",
+				"body": "Votre KeepKey affiche une grille de chiffres aléatoire. Faites correspondre les positions à l’écran avec les chiffres sur l’appareil. La disposition change à chaque fois afin qu’un observateur ne puisse pas voler votre PIN."
+			},
+			"words": {
+				"title": "Vos mots = votre portefeuille",
+				"body": "Écrivez vos 12/24 mots sur papier. Conservez-les en lieu sûr. Ne les saisissez jamais sur un ordinateur, un site web ou un téléphone. Toute personne qui possède ces mots contrôle vos fonds."
+			},
+			"recovery": {
+				"title": "Saisie de récupération mélangée",
+				"body": "Lors de la récupération, KeepKey mélange l’alphabet sur l’écran de l’appareil. Vous saisissez les mots par position, jamais en tapant les vraies lettres. Les enregistreurs de frappe ne voient rien d’utile."
+			},
+			"deviceScreen": {
+				"title": "Fiez-vous à l’écran de l’appareil",
+				"body": "Confirmez toujours l’adresse et le montant sur votre KeepKey avant d’approuver. Votre ordinateur peut être compromis; l’écran de votre appareil ne l’est pas. Surtout pour les grosses transactions."
+			},
+			"appConnections": {
+				"title": "Les connexions d’apps sont désactivées",
+				"body": "Les apps tierces et dApps se connectent via l’API REST. Elle est désactivée par défaut pour votre protection. Activez-la dans Paramètres uniquement lorsque vous en avez besoin."
+			},
+			"hiddenWallets": {
+				"title": "Portefeuilles cachés (avancé)",
+				"body": "La phrase secrète crée un portefeuille caché séparé à partir de la même graine. Si elle est activée, vous DEVEZ vous en souvenir: une mauvaise phrase ouvre un autre portefeuille vide, pas une erreur."
+			}
+		},
+		"actions": {
+			"getStarted": "Commencer",
+			"startUsing": "Commencer à utiliser KeepKey",
+			"skipIntro": "Ignorer l’introduction",
+			"skipTips": "Ignorer les conseils"
+		},
+		"stepCounter": "{{current}} sur {{total}}",
+		"walletLabels": {
+			"visible": "visible",
+			"hidden": "caché"
+		}
 	}
 }

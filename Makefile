@@ -20,7 +20,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core preflight build-emulators build-emulator-alpha build-emulator-beta build-emulator-release download-emulators download-emulator-alpha download-emulator-beta download-emulator-release emulator-status clean-emulators
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -28,9 +28,12 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init --recursive
-	@# Fetch all remotes (recursive) so upstream-behind checks see latest commits
-	@git submodule foreach --recursive --quiet 'git fetch --all --prune 2>/dev/null || true'
+	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+	@# Fetch Vault runtime/build submodules so upstream-behind checks see latest commits.
+	@# Firmware is emulator-only for Vault releases and is intentionally not a gate here.
+	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
+		git -C "$$mod" fetch --all --prune 2>/dev/null || true; \
+	done
 	@touch $@
 
 submodules: $(SUBMODULES_STAMP)
@@ -85,6 +88,8 @@ endif
 	@touch $@
 
 build-zcash-cli: $(ZCASH_CLI_STAMP)
+	@echo "zcash-cli ready for Electrobun packaging:"
+	@ls -lh $(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 
 test-zcash-cli:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
@@ -210,6 +215,36 @@ publish-electrobun-x64-core: build-electrobun-x64-core
 	echo ""; \
 	echo "NEXT: Update .github/workflows/build.yml X64_CORE_TAG to $(ELECTROBUN_X64_TAG)"
 
+# --- Electrobun Linux x64 Core (glibc 2.35 floor) ---
+# Builds Electrobun's libNativeWrapper.so + friends on Ubuntu 22.04 so the
+# resulting Linux Vault bundle works on Debian 12, Ubuntu 22.04, RHEL 9, etc.
+# Upstream's prebuilt core ships against glibc 2.38, which excludes those.
+#
+# Local invocation only works on an actual Ubuntu 22.04 host (or via
+# `make publish-electrobun-linux-x64-core` which runs the GH workflow).
+
+ELECTROBUN_LINUX_REPO ?= keepkey/keepkey-vault
+ELECTROBUN_LINUX_TAG ?= electrobun-linux-x64-core-v1
+# Pin to the upstream electrobun ref that matches the npm runtime version.
+ELECTROBUN_LINUX_REF ?= v1.13.1
+
+build-electrobun-linux-x64-core:
+	@echo "Building Electrobun Linux x64 core (must run on ubuntu-22.04)..."
+	ELECTROBUN_REF=$(ELECTROBUN_LINUX_REF) ./scripts/build-electrobun-linux-x64-core.sh
+
+# Triggers the GitHub workflow that builds + publishes on ubuntu-22.04.
+# Direct local publish isn't supported because the .so must be built on Linux.
+publish-electrobun-linux-x64-core:
+	@echo "Dispatching publish-electrobun-linux-x64-core.yml on $(ELECTROBUN_LINUX_REPO)..."
+	gh workflow run publish-electrobun-linux-x64-core.yml \
+		--repo $(ELECTROBUN_LINUX_REPO) \
+		--field electrobun_ref=$(ELECTROBUN_LINUX_REF) \
+		--field release_tag=$(ELECTROBUN_LINUX_TAG)
+	@echo "Watch progress: https://github.com/$(ELECTROBUN_LINUX_REPO)/actions/workflows/publish-electrobun-linux-x64-core.yml"
+	@echo ""
+	@echo "Once published, the main build workflow will pick it up automatically"
+	@echo "(see ELECTROBUN_LINUX_CORE_TAG in .github/workflows/build.yml)."
+
 # --- Vault ---
 
 $(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
@@ -287,7 +322,7 @@ dmg: verify-arch
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/wizard-messaging.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts
 
 test-integration: test-rest
 
@@ -295,19 +330,54 @@ test-rest:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-api.test.ts
 
 test-emu:
+	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \
+		(echo "ERROR: emulator not installed. Run: make build-emulator"; exit 1)
 	cd $(PROJECT_DIR) && bun test tests/emulator/
 
-# Run python-keepkey consistency tests against the kkemu binary (UDP).
-# Launches kkemu, runs pytest, then kills kkemu.
-# Uses alpha channel by default; override with: make test-emu-python EMU_CHANNEL=release
-EMU_CHANNEL ?= alpha
-EMU_VERSION := 7.14.0-$(EMU_CHANNEL)
+# --- Emulator (developer feature) ---
+# Build the native macOS emulator (libkkemu.dylib + kkemu) from the firmware
+# submodule on the current checkout, install the dylib at
+# ~/.keepkey/emulator/libkkemu.dylib (where the vault loads it), and place
+# the standalone kkemu binary alongside for python-keepkey UDP testing.
+#
+# No channels — devs bring their own firmware checkout. Switch revs by
+# checking out the target ref in modules/keepkey-firmware before running.
 
+EMU_FW_DIR := modules/keepkey-firmware
+EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
+EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
+
+build-emulator:
+	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
+	@cd $(EMU_FW_DIR) && git rev-parse HEAD | xargs -I{} echo "    Source SHA: {}"
+	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	rm -rf $(EMU_BUILD_DIR)
+	mkdir -p $(EMU_BUILD_DIR)
+	@# KK_DEBUG_LINK=ON: required for the dylib FFI path (DebugLinkDecision parsing).
+	@# KK_BUILD_DYLIB=ON: produces libkkemu.dylib alongside standalone kkemu.
+	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
+		-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
+		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
+	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
+	mkdir -p $(EMU_INSTALL_DIR)
+	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
+		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
+		echo "    Dylib:  $(EMU_INSTALL_DIR)/libkkemu.dylib"; \
+	else \
+		echo "ERROR: libkkemu.dylib missing from build output"; exit 1; \
+	fi
+	cp $(EMU_BUILD_DIR)/bin/kkemu $(EMU_INSTALL_DIR)/kkemu
+	chmod +x $(EMU_INSTALL_DIR)/kkemu
+	@echo "    Binary: $(EMU_INSTALL_DIR)/kkemu"
+	@echo "=== Emulator installed ==="
+
+# Run python-keepkey consistency tests against the locally-built kkemu binary.
 test-emu-python:
-	@test -x ./firmware/emulators/$(EMU_VERSION)/kkemu || \
-		(echo "ERROR: kkemu not found for $(EMU_CHANNEL) channel. Run: make build-emulator-$(EMU_CHANNEL)"; exit 1)
-	@echo "Starting kkemu ($(EMU_CHANNEL) channel, UDP 11044/11045)..."
-	@./firmware/emulators/$(EMU_VERSION)/kkemu & KKPID=$$!; \
+	@test -x $(EMU_INSTALL_DIR)/kkemu || \
+		(echo "ERROR: kkemu not found at $(EMU_INSTALL_DIR)/kkemu. Run: make build-emulator"; exit 1)
+	@echo "Starting kkemu (UDP 11044/11045)..."
+	@$(EMU_INSTALL_DIR)/kkemu & KKPID=$$!; \
 	sleep 1; \
 	echo "Running python-keepkey tests..."; \
 	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
@@ -325,86 +395,9 @@ test-emu-python:
 	kill $$KKPID 2>/dev/null; \
 	exit $$EXIT
 
-# --- Emulator Channels (alpha/beta/release) ---
-# Build native macOS emulator (libkkemu.dylib + kkemu) from the firmware submodule.
-# Each channel gets its own directory under firmware/emulators/<version>/.
-#   alpha   — tracks BitHighlander fork branch tip (moves with new commits)
-#   beta    — pinned to a specific commit SHA (manually promoted)
-#   release — tracks upstream keepkey/keepkey-firmware master
-#
-# To promote a new beta, update BETA_PIN_SHA here AND in manifest.json.
-
-EMU_FW_DIR := modules/keepkey-firmware
-EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
-BETA_PIN_SHA := 9f52bb69f2e32a71f08b31b0c7df788129a0578e
-EMU_UPSTREAM_URL := https://github.com/keepkey/keepkey-firmware.git
-
-# Common cmake emulator build (called by channel-specific targets)
-# _EMU_REF can be a branch (origin/release/7.14.0), a remote/branch, or a commit SHA.
-_build-emu:
-	@echo "=== Building emulator for $(_EMU_CHANNEL) channel ==="
-	@echo "    Source: $(_EMU_REF)"
-	@echo "    Output: firmware/emulators/$(_EMU_VERSION)/"
-	@# Ensure the upstream (keepkey) remote exists — .gitmodules points to the fork,
-	@# so fresh clones only have origin. The release channel needs keepkey/master.
-	@cd $(EMU_FW_DIR) && git remote get-url keepkey >/dev/null 2>&1 || \
-		(echo "    Adding keepkey remote ($(EMU_UPSTREAM_URL))..." && \
-		 cd $(EMU_FW_DIR) && git remote add keepkey $(EMU_UPSTREAM_URL))
-	cd $(EMU_FW_DIR) && git fetch --all --prune 2>/dev/null
-	cd $(EMU_FW_DIR) && git checkout $(_EMU_REF)
-	@# Verify we landed on the expected ref (catches typos in SHA)
-	@ACTUAL=$$(cd $(EMU_FW_DIR) && git rev-parse HEAD); \
-	echo "    Checked out: $$ACTUAL"
-	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+clean-emulator:
 	rm -rf $(EMU_BUILD_DIR)
-	mkdir -p $(EMU_BUILD_DIR)
-	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
-		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
-	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu
-	mkdir -p firmware/emulators/$(_EMU_VERSION)
-	cp $(EMU_BUILD_DIR)/bin/kkemu firmware/emulators/$(_EMU_VERSION)/kkemu
-	@echo "    Binary: firmware/emulators/$(_EMU_VERSION)/kkemu"
-	@# Check if a shared lib was also built (optional — depends on CMake config)
-	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
-		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib; \
-		echo "    Dylib:  firmware/emulators/$(_EMU_VERSION)/libkkemu.dylib"; \
-	fi
-	chmod +x firmware/emulators/$(_EMU_VERSION)/kkemu
-	@# Record which commit was actually built
-	@cd $(EMU_FW_DIR) && git rev-parse HEAD > ../../firmware/emulators/$(_EMU_VERSION)/.build-sha
-	@echo "=== $(_EMU_CHANNEL) emulator ready ==="
-
-build-emulator-alpha:
-	$(MAKE) _build-emu _EMU_CHANNEL=alpha _EMU_VERSION=7.14.0-alpha _EMU_REF=origin/release/7.14.0
-
-build-emulator-beta:
-	$(MAKE) _build-emu _EMU_CHANNEL=beta _EMU_VERSION=7.14.0-beta _EMU_REF=$(BETA_PIN_SHA)
-
-build-emulator-release:
-	$(MAKE) _build-emu _EMU_CHANNEL=release _EMU_VERSION=7.14.0-release _EMU_REF=keepkey/master
-
-build-emulators: build-emulator-alpha build-emulator-beta build-emulator-release
-
-# Download pre-built emulators (if published as release assets)
-download-emulators:
-	bun firmware/download-emulators.ts
-
-download-emulator-alpha:
-	bun firmware/download-emulators.ts --channel alpha
-
-download-emulator-beta:
-	bun firmware/download-emulators.ts --channel beta
-
-download-emulator-release:
-	bun firmware/download-emulators.ts --channel release
-
-emulator-status:
-	bun firmware/download-emulators.ts --status
-
-clean-emulators:
-	rm -rf firmware/emulators/7.14.0-alpha firmware/emulators/7.14.0-beta firmware/emulators/7.14.0-release
-	rm -rf $(EMU_BUILD_DIR)
+	rm -f $(EMU_INSTALL_DIR)/libkkemu.dylib $(EMU_INSTALL_DIR)/kkemu
 
 clean: modules-clean
 	cd $(PROJECT_DIR) && rm -rf dist node_modules build _build artifacts
@@ -476,10 +469,11 @@ release: sign-check build-signed
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
 		--title "KeepKey Vault v$(VERSION)" \
+		--draft \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
 		$$UPDATE_JSON $$TAR_ZST
-	@echo "Release v$(VERSION) published to $(GITHUB_REPO)"
+	@echo "Draft release v$(VERSION) created in $(GITHUB_REPO)"
 
 # Sign CI-built macOS artifacts and upload to draft release.
 # Downloads both arm64 and x64 tar.zst from CI, signs all binaries,
@@ -596,7 +590,8 @@ sign-release-intel: sign-check
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
 _sign-one-dmg:
 	@test -f "$(_SRC_TAR)" || (echo "ERROR: $(_SRC_TAR) not found"; exit 1)
-	@STAGING=$$(mktemp -d); \
+	@set -e; \
+	STAGING=$$(mktemp -d); \
 	trap 'rm -rf "$$STAGING"' EXIT; \
 	echo "  Extracting..."; \
 	zstd -d "$(_SRC_TAR)" -o "$$STAGING/app.tar" --force; \
@@ -633,7 +628,7 @@ _sign-one-dmg:
 	xcrun stapler staple "$$DMG_OUT"; \
 	echo "  Done: $$DMG_OUT"
 
-# Verify that all MacOS/ binaries have required entitlements (allow-jit).
+# Verify that all MacOS/ executables have required entitlements (allow-jit).
 # Use after signing to confirm bun won't crash with SIGTRAP.
 verify-entitlements:
 	@echo "Verifying entitlements on signed artifacts..."
@@ -654,8 +649,16 @@ verify-entitlements:
 		for BIN in "$$APP/Contents/MacOS/"*; do \
 			[ -f "$$BIN" ] || continue; \
 			NAME=$$(basename "$$BIN"); \
-			file -b "$$BIN" 2>/dev/null | grep -q "Mach-O" || continue; \
-			if codesign -d --entitlements :- "$$BIN" 2>/dev/null | grep -q "allow-jit"; then \
+			FILE_OUT=$$(file -b "$$BIN" 2>/dev/null); \
+			echo "$$FILE_OUT" | grep -q "Mach-O" || continue; \
+			if echo "$$FILE_OUT" | grep -q "dynamically linked shared library"; then \
+				echo "  SKIP: $$NAME is a shared library"; \
+				continue; \
+			fi; \
+			ENTITLEMENTS_OUT=$$(codesign -d --entitlements :- "$$BIN" 2>&1 || true); \
+			if echo "$$ENTITLEMENTS_OUT" | grep -q "invalid entitlements blob"; then \
+				echo "  FAIL: $$NAME has invalid entitlements blob"; FAIL=1; \
+			elif echo "$$ENTITLEMENTS_OUT" | grep -q "allow-jit"; then \
 				echo "  PASS: $$NAME has allow-jit"; \
 			else \
 				echo "  FAIL: $$NAME missing allow-jit"; FAIL=1; \
@@ -703,8 +706,8 @@ help:
 	@echo "  make sign-release   - Download CI artifacts, sign + repack, upload DMGs + auto-update tar.zst"
 	@echo "  make upload-all-dmgs - Upload all signed DMGs to draft release"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
-	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 12)"
-	@echo "  make publish-electrobun-x64-core - Build + publish x64 core to fork releases"
+	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 13+)"
+	@echo "  make publish-electrobun-x64-core - Build + publish x64 core release"
 	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
@@ -712,21 +715,18 @@ help:
 	@echo "  make sign-check     - Verify signing env vars are configured"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
-	@echo "  make release        - Build, sign, and create new GitHub release"
+	@echo "  make release        - Build, sign, and create a draft GitHub release"
 	@echo "  make upload-dmg     - Upload signed DMG to existing CI draft release"
 	@echo "  make test           - Run all tests"
 	@echo "  make test-rest      - Run REST API integration tests (requires running vault)"
 	@echo "  make clean          - Remove all build artifacts and node_modules"
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
-	@echo "Emulator Channels:"
-	@echo "  make build-emulators       - Build all 3 emulator channels from firmware submodule"
-	@echo "  make build-emulator-alpha  - Build alpha (BitHighlander fork, release/7.14.0)"
-	@echo "  make build-emulator-beta   - Build beta (BitHighlander fork, release/7.14.0)"
-	@echo "  make build-emulator-release - Build release (upstream keepkey/keepkey-firmware master)"
-	@echo "  make download-emulators    - Download pre-built emulator binaries"
-	@echo "  make emulator-status       - Show installed emulator channels"
-	@echo "  make clean-emulators       - Remove all built emulator binaries"
+	@echo "Emulator (developer feature, macOS only):"
+	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
+	@echo "                               and install to ~/.keepkey/emulator/"
+	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
+	@echo "  make clean-emulator        - Remove the installed dylib + binary"
 
 # --- Pre-release Validation ---
 preflight: submodules
@@ -736,20 +736,18 @@ preflight: submodules
 	@echo ""
 	@echo "1. SUBMODULE PINS"
 	@fail=0; \
-	for mod in modules/hdwallet modules/proto-tx-builder modules/keepkey-firmware modules/device-protocol modules/electrobun; do \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
 		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
 		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
 		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
 		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
 	done; \
 	echo ""; \
-	echo "2. FIRMWARE NESTED SUBMODULES"; \
-	drift=$$(cd modules/keepkey-firmware && git submodule status --recursive | grep '^+' || true); \
-	if [ -n "$$drift" ]; then echo "   ❌ DRIFT:"; echo "$$drift"; fail=1; \
-	else echo "   ✅ All clean"; fi; \
+	echo "2. FIRMWARE SUBMODULE"; \
+	echo "   ⚠️  Skipped for Vault release gating (emulator/firmware work only)"; \
 	echo ""; \
 	echo "3. UPSTREAM BEHIND"; \
-	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/keepkey-firmware|origin/master" "modules/electrobun|origin/keepkey/macos-12-support"; do \
+	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/main"; do \
 		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
 		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
 		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
@@ -757,7 +755,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/keepkey-firmware|keepkey/keepkey-firmware|BitHighlander/keepkey-firmware" "modules/electrobun|BitHighlander/electrobun|BitHighlander/electrobun"; do \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
 		mod=$$(echo "$$pair" | cut -d'|' -f1); \
 		repo=$$(echo "$$pair" | cut -d'|' -f2); \
 		fork=$$(echo "$$pair" | cut -d'|' -f3); \

@@ -64,8 +64,8 @@ function PairingFallbackIcon() {
 			>
 				<svg width="48" height="48" viewBox="0 0 24 24" fill="none">
 					{/* Chain link icon */}
-					<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#22C55E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-					<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#22C55E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+					<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+					<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 				</svg>
 			</Flex>
 		</Box>
@@ -150,7 +150,7 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 					w="100%"
 					justify="center"
 				>
-					<Text fontSize="sm" color="#22C55E" fontWeight="500">
+					<Text fontSize="sm" color="var(--teal)" fontWeight="500">
 						{t("pairing.wantsToConnect")}
 					</Text>
 				</Flex>
@@ -159,14 +159,14 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 				<Flex gap="3" w="100%">
 					<Button
 						flex="1"
-						bg="#22C55E"
+						bg="var(--teal)"
 						color="black"
 						fontWeight="700"
 						fontSize="md"
 						size="lg"
 						h="52px"
 						borderRadius="xl"
-						_hover={{ bg: "#16A34A" }}
+						_hover={{ bg: "var(--teal)" }}
 						onClick={onApprove}
 					>
 						{t("pairing.approve")}
@@ -174,7 +174,7 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 					<Button
 						flex="1"
 						bg="rgba(239,68,68,0.12)"
-						color="#EF4444"
+						color="var(--rose)"
 						fontWeight="600"
 						fontSize="md"
 						size="lg"

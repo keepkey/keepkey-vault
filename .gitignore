@@ -43,6 +43,7 @@ modules/keepkey-firmware/build-emu/
 release-windows/
 
 # Developer-local files
-.claude/settings.local.json
+.claude/
+emulator.img
 rmdir-result.txt
 *.bat

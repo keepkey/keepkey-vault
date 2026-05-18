@@ -29,9 +29,21 @@
 param(
     [switch]$SkipBuild = $false,
     [switch]$SkipSign = $false,
-    [string]$Thumbprint = "986AEBA61CF6616393E74D8CBD3A09E836213BAA",
-    [string]$TimestampUrl = "http://timestamp.digicert.com",
-    [string]$OutputDir = "release-windows"
+    # Cert thumbprint: CLI arg > $env:KK_SIGN_THUMBPRINT > hardcoded KEY HODLERS LLC EV cert.
+    # The env var lets CI / a new signer override without editing the script.
+    [string]$Thumbprint = $(if ($env:KK_SIGN_THUMBPRINT) { $env:KK_SIGN_THUMBPRINT } else { "986AEBA61CF6616393E74D8CBD3A09E836213BAA" }),
+    # Timestamp servers tried in order. Any RFC 3161 server works; ordered by
+    # historical reliability. First-success short-circuits; full list exhausted
+    # before Sign-File reports a failure.
+    [string[]]$TimestampUrls = @(
+        "http://timestamp.digicert.com",
+        "http://timestamp.sectigo.com",
+        "http://timestamp.globalsign.com/tsa/r6advanced1"
+    ),
+    [string]$OutputDir = "release-windows",
+    # Set to allow non-fatal sign failures (e.g. iterating on a non-signing
+    # machine). Default: any unexpected failure aborts the run.
+    [switch]$AllowSignFailures = $false
 )
 
 Set-StrictMode -Version Latest
@@ -81,6 +93,8 @@ if ($PSCommandPath) {
 $RepoRoot = Split-Path -Path $ScriptDir -Parent
 $ProjectDir = Join-Path $RepoRoot "projects\keepkey-vault"
 $BuildDir = Join-Path $ProjectDir "_build\dev-win-x64\keepkey-vault-dev"
+$ExtModulesDir = Join-Path $ProjectDir "_build\_ext_modules"
+$AppNodeModulesDir = Join-Path $BuildDir "Resources\app\node_modules"
 $ArtifactsDir = Join-Path $RepoRoot $OutputDir
 
 # Read version from package.json
@@ -127,10 +141,53 @@ function Assert-Command {
     }
 }
 
+# Zero out the Certificate Table (Security Directory) entry in a PE's Optional
+# Header. Returns $true if an entry existed and was cleared, $false if the
+# file already had no entry (no-op).
+#
+# Why this exists: rcedit (and some upstream Electrobun-built launcher.exe
+# binaries) leave a non-zero Security Directory RVA/Size pointing at garbage
+# data — the file isn't actually signed (Get-AuthenticodeSignature reports
+# NotSigned), but a stale ~10 KB cert-table-shaped chunk lives inside the PE.
+# signtool then refuses to sign the file with the misleading error
+# `0x800700C1 / ERROR_BAD_EXE_FORMAT` because it can't safely overwrite the
+# malformed cert table. `signtool remove /s` also fails (`0x00000057`)
+# because there's no valid signature to strip.
+#
+# The fix is purely a 8-byte zero write in the PE Optional Header — the
+# orphan cert blob at the end of the file is harmless (signtool overwrites
+# or appends past it). No section table, no checksum, no relocation needs
+# to change.
+function Clear-PECertTableEntry {
+    param([string]$FilePath)
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    if ($bytes.Length -lt 64) { return $false }
+    if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { return $false }   # MZ
+    $peOff = [BitConverter]::ToInt32($bytes, 60)
+    if ($peOff -lt 0 -or $peOff + 24 -ge $bytes.Length) { return $false }
+    if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff + 1] -ne 0x45) { return $false }  # PE
+    $optOff = $peOff + 24
+    $magic = [BitConverter]::ToUInt16($bytes, $optOff)
+    # NumberOfRvaAndSizes lives at +108 for PE32+, +92 for PE32 — pick the
+    # right offset so we land on the actual DataDirectories array.
+    $rvaCountOff = if ($magic -eq 0x20B) { $optOff + 108 } elseif ($magic -eq 0x10B) { $optOff + 92 } else { return $false }
+    if ($rvaCountOff + 4 + (5 * 8) -gt $bytes.Length) { return $false }
+    # Security Directory is entry index 4 in the DataDirectories array
+    # (Export=0, Import=1, Resource=2, Exception=3, Security=4).
+    $secDirOff = $rvaCountOff + 4 + (4 * 8)
+    $secDirRva  = [BitConverter]::ToUInt32($bytes, $secDirOff)
+    $secDirSize = [BitConverter]::ToUInt32($bytes, $secDirOff + 4)
+    if ($secDirRva -eq 0 -and $secDirSize -eq 0) { return $false }
+    for ($i = 0; $i -lt 8; $i++) { $bytes[$secDirOff + $i] = 0 }
+    [System.IO.File]::WriteAllBytes($FilePath, $bytes)
+    return $true
+}
+
 function Sign-File {
     param(
         [string]$FilePath,
-        [string]$Description = ""
+        [string]$Description = "",
+        [switch]$Force = $false
     )
 
     if ($SkipSign) {
@@ -154,49 +211,104 @@ function Sign-File {
         return $true
     }
 
-    # Check if already signed
-    try {
-        $sig = Get-AuthenticodeSignature $FilePath
-        if ($sig.Status -eq 'Valid') {
-            Write-Success "Already signed: $fileName"
-            return $true
-        }
-    } catch {}
-
-    $signArgs = @(
-        "sign",
-        "/sha1", $Thumbprint,
-        "/fd", "sha256",
-        "/tr", $TimestampUrl,
-        "/td", "sha256"
-    )
-
-    if ($Description) {
-        $signArgs += "/d"
-        $signArgs += $Description
+    if (-not $Force) {
+        # Check if already signed
+        try {
+            $sig = Get-AuthenticodeSignature $FilePath
+            if ($sig.Status -eq 'Valid') {
+                Write-Success "Already signed: $fileName"
+                return $true
+            }
+        } catch {}
     }
 
-    $signArgs += $FilePath
+    # Try each timestamp URL in order. signtool failures with a timestamp
+    # server are transient (network blip, server rotation) — retry against the
+    # next URL before declaring failure. Sign-without-timestamp is NOT a
+    # fallback: an untimestamped sig is valid only while the cert is — once
+    # the cert expires, every signed binary becomes "publisher unknown".
+    $lastResult = ""
+    $exitCode = 1
+    foreach ($tsUrl in $TimestampUrls) {
+        $signArgs = @(
+            "sign",
+            "/sha1", $Thumbprint,
+            "/fd", "sha256",
+            "/tr", $tsUrl,
+            "/td", "sha256"
+        )
 
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $result = & $SIGNTOOL @signArgs 2>&1
-    $exitCode = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
+        if ($Description) {
+            $signArgs += "/d"
+            $signArgs += $Description
+        }
+
+        $signArgs += $FilePath
+
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $lastResult = & $SIGNTOOL @signArgs 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        if ($exitCode -eq 0) { break }
+
+        # Distinguish a real signing failure (cert problem, file format) from
+        # a transient timestamp problem. Only the latter is worth retrying.
+        $resultStr = $lastResult -join ' '
+        $isTimestampError = $resultStr -match "timestamp" -or $resultStr -match "RFC 3161" -or $resultStr -match "0x80096004"
+        if (-not $isTimestampError) { break }
+        Write-Host "    [RETRY] Timestamp $tsUrl failed for $fileName, trying next..." -ForegroundColor Yellow
+    }
 
     if ($exitCode -eq 0) {
         Write-Success "Signed: $fileName"
         return $true
-    } else {
-        $resultStr = $result -join ' '
-        if ($resultStr -match "not recognized" -or $resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") {
-            Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
+    }
+
+    $resultStr = $lastResult -join ' '
+
+    # 0x800700C1 / BAD_EXE_FORMAT on a syntactically-valid PE almost always
+    # means the file has a non-zero Security Directory pointing at malformed
+    # data (rcedit residue, or upstream Electrobun/launcher.exe shipped with
+    # a stale cert table). Strip the entry and retry once. See
+    # Clear-PECertTableEntry for the full rationale.
+    if (($resultStr -match "0x800700C1" -or $resultStr -match "BAD_EXE_FORMAT") -and (Clear-PECertTableEntry -FilePath $FilePath)) {
+        Write-Host "    [FIX] Stripped stale cert-table entry, retrying: $fileName" -ForegroundColor Yellow
+        $signArgs = @(
+            "sign",
+            "/sha1", $Thumbprint,
+            "/fd", "sha256",
+            "/tr", $TimestampUrls[0],
+            "/td", "sha256"
+        )
+        if ($Description) { $signArgs += "/d"; $signArgs += $Description }
+        $signArgs += $FilePath
+
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $retryResult = & $SIGNTOOL @signArgs 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        if ($exitCode -eq 0) {
+            Write-Success "Signed (after strip): $fileName"
             return $true
         }
-        Write-Error "Failed to sign: $fileName"
-        Write-Host "    $result" -ForegroundColor Gray
-        return $false
+        $resultStr = $retryResult -join ' '
     }
+
+    # Genuinely-unsignable formats — bun shims (handled above by path) and
+    # native .node addons (handled above by extension) are the only files
+    # that should land here. If we still match "not recognized", it's a
+    # signtool-side rejection we can't fix; log and skip.
+    if ($resultStr -match "not recognized") {
+        Write-Host "    [SKIP] Not signable format: $fileName" -ForegroundColor Gray
+        return $true
+    }
+    Write-Error "Failed to sign: $fileName"
+    Write-Host "    $resultStr" -ForegroundColor Gray
+    return $false
 }
 
 # ============================================================================
@@ -258,11 +370,10 @@ if (-not $SkipSign) {
 if (-not $SkipBuild) {
     Write-Step "Updating git submodules (selective)"
     Push-Location $RepoRoot
-    # Only init the submodules we actually need -- recursive init pulls deeply
-    # nested firmware deps whose paths exceed Windows MAX_PATH (260 chars)
+    # Only init the submodules Vault packaging actually needs. Firmware is
+    # emulator-only for Vault releases and is intentionally not a build gate.
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
-    git submodule update --init modules/keepkey-firmware
     git submodule update --init modules/device-protocol
     Pop-Location
 
@@ -285,12 +396,15 @@ if (-not $SkipBuild) {
     Write-Step "Building proto-tx-builder"
     Push-Location (Join-Path $RepoRoot "modules\proto-tx-builder")
     bun install
+    if ($LASTEXITCODE -ne 0) { throw "bun install failed for proto-tx-builder (exit $LASTEXITCODE)" }
     Pop-Location
 
     Write-Step "Building hdwallet"
     Push-Location (Join-Path $RepoRoot "modules\hdwallet")
     yarn install
+    if ($LASTEXITCODE -ne 0) { throw "yarn install failed for hdwallet (exit $LASTEXITCODE)" }
     yarn build
+    if ($LASTEXITCODE -ne 0) { throw "yarn build failed for hdwallet (exit $LASTEXITCODE)" }
     Pop-Location
 
     Write-Step "Installing keepkey-vault dependencies"
@@ -299,8 +413,18 @@ if (-not $SkipBuild) {
     # transitive deps inside file-linked workspace packages. These are not
     # needed at build time (collect-externals resolves them). Tolerate this.
     $ErrorActionPreference = 'Continue'
-    bun install
+    $vaultInstallOutput = bun install 2>&1
+    $vaultInstallExit = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
+    if ($vaultInstallExit -ne 0) {
+        $vaultInstallText = @($vaultInstallOutput) -join "`n"
+        if ($vaultInstallText -match 'ENOENT' -and $vaultInstallText -match 'node_modules') {
+            Write-Warning "bun install exited $vaultInstallExit with nested node_modules ENOENT; continuing per Windows packaging workaround."
+        } else {
+            Write-Host $vaultInstallText -ForegroundColor Gray
+            throw "bun install failed for keepkey-vault (exit $vaultInstallExit)"
+        }
+    }
     Pop-Location
 
     Write-Step "Building zcash-cli sidecar (Rust)"
@@ -318,21 +442,53 @@ if (-not $SkipBuild) {
     Write-Step "Building Electrobun Windows app"
     Push-Location $ProjectDir
     bun run build
+    if ($LASTEXITCODE -ne 0) { throw "bun run build failed for keepkey-vault (exit $LASTEXITCODE)" }
     Pop-Location
 
-    # Patch channel to stable -- Electrobun's --env=stable produces a macOS-style
-    # bundle on Windows that our installer can't use. Build as dev, patch to stable.
-    $VersionJson = Join-Path $BuildDir "Resources\version.json"
-    if (Test-Path $VersionJson) {
-        $vj = Get-Content $VersionJson -Raw | ConvertFrom-Json
-        $vj.channel = "stable"
-        $vj.name = "keepkey-vault"
-        $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
-        # Use .NET WriteAllText to avoid BOM -- PowerShell 5's -Encoding UTF8 writes a BOM
-        # which breaks JSON parsing in bun's require()
-        [System.IO.File]::WriteAllText($VersionJson, ($vj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
-        Write-Success "Patched version.json: channel=stable"
+    # Electrobun's Windows copy step can silently leave very deep nested
+    # node_modules packages incomplete. collect-externals.ts stages the verified
+    # runtime deps in _build/_ext_modules; mirror that exact tree into the final
+    # app bundle with robocopy, which handles Windows paths more reliably.
+    if (Test-Path $ExtModulesDir) {
+        Write-Step "Mirroring external node_modules into app bundle"
+        if (-not (Test-Path $AppNodeModulesDir)) {
+            New-Item -ItemType Directory -Force -Path $AppNodeModulesDir | Out-Null
+        }
+        & robocopy $ExtModulesDir $AppNodeModulesDir /MIR /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+        $mirrorExit = $LASTEXITCODE
+        if ($mirrorExit -gt 7) {
+            throw "robocopy failed while mirroring external node_modules (exit $mirrorExit)"
+        }
+        $global:LASTEXITCODE = 0
+        Write-Success "Mirrored external node_modules into Resources\app"
+    } else {
+        throw "collect-externals did not produce $ExtModulesDir"
     }
+
+    # Patch version.json: stable channel + force version to match package.json.
+    # Electrobun's `bun run build` is an incremental build — when a stale _build/
+    # exists from a different branch, it can leave version.json with the wrong
+    # version. We had a current-version-named installer shipped with stale
+    # previous-version bits inside because
+    # of this. Force the version field rather than trust Electrobun's output.
+    $VersionJson = Join-Path $BuildDir "Resources\version.json"
+    if (-not (Test-Path $VersionJson)) {
+        throw "Electrobun build did not produce $VersionJson -- build was broken or skipped."
+    }
+    $vj = Get-Content $VersionJson -Raw | ConvertFrom-Json
+    $electrobunSawVersion = $vj.version
+    $vj.channel = "stable"
+    $vj.name = "keepkey-vault"
+    $vj.version = $Version
+    $vj.hash = (Get-FileHash (Join-Path $BuildDir "Resources\app\bun\index.js") -Algorithm SHA256).Hash.ToLower().Substring(0, 16)
+    # Use .NET WriteAllText to avoid BOM -- PowerShell 5's -Encoding UTF8 writes a BOM
+    # which breaks JSON parsing in bun's require()
+    [System.IO.File]::WriteAllText($VersionJson, ($vj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+    if ($electrobunSawVersion -ne $Version) {
+        Write-Warning "version.json reported $electrobunSawVersion but package.json says $Version -- forced to $Version."
+        Write-Warning "This usually means _build/ was stale from a prior branch. Consider deleting _build/ for next clean build."
+    }
+    Write-Success "Patched version.json: version=$Version channel=stable"
 
     Write-Success "Build completed"
 } else {
@@ -342,6 +498,9 @@ if (-not $SkipBuild) {
 # Verify build exists
 if (-not (Test-Path $BuildDir)) {
     throw "Build directory not found: $BuildDir`nRun without -SkipBuild flag."
+}
+if (-not (Test-Path $ExtModulesDir)) {
+    throw "External modules staging directory not found: $ExtModulesDir`nRun without -SkipBuild to regenerate collect-externals output."
 }
 
 # ============================================================================
@@ -384,6 +543,14 @@ foreach ($file in $filesToSign) {
 
 Write-Host ""
 Write-Host "    Signed: $signedCount, Failed: $failedCount" -ForegroundColor $(if ($failedCount -eq 0) { "Green" } else { "Yellow" })
+
+# Abort the release if any file failed to sign. Shipping an installer with
+# mixed signed/unsigned PE files triggers SmartScreen warnings on the unsigned
+# ones and breaks enterprise allowlists. Use -AllowSignFailures to opt out
+# (e.g. when iterating on a build machine without the USB token plugged in).
+if ($failedCount -gt 0 -and -not $AllowSignFailures -and -not $SkipSign) {
+    throw "Aborting: $failedCount file(s) failed to sign. Re-run with -AllowSignFailures if this is intentional."
+}
 
 # ============================================================================
 # Prepare App Icon (convert PNG to ICO if needed)
@@ -460,35 +627,61 @@ Write-Step "Building wrapper EXE"
 $WrapperExe = Join-Path $BuildDir "KeepKeyVault.exe"
 $WrapperSrc = Join-Path $ScriptDir "wrapper-launcher.zig"
 
-if (-not (Test-Path $WrapperExe)) {
-    # Find Zig compiler
+if ((Test-Path $WrapperExe) -and $SkipBuild) {
+    Write-Warning "Using existing wrapper EXE because -SkipBuild was supplied"
+} else {
+    # Zig version pin: wrapper-launcher.zig was last updated for 0.15.2
+    # (commit cfd6ea4). Zig 0.16 shipped an IO-context refactor that broke
+    # std.fs.cwd, std.time.milliTimestamp, and std.fs.selfExeDirPath. Refuse
+    # to use anything outside the supported series.
+    $SupportedZigPattern = '^0\.15\.'
+    $SupportedZigDescr   = '0.15.x'
     $ZigExe = $null
-    $zigPaths = @(
-        (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\zig*" -Recurse -Filter "zig.exe" -ErrorAction SilentlyContinue | Select-Object -First 1)
+    # Preferred locations (most-specific first): pinned tools dir, then any
+    # 0.15.x install in tools/, then WinGet, then PATH. Only the explicit
+    # pin and a known-good winget package satisfy the version check below.
+    $zigSearchPaths = @(
+        "$env:USERPROFILE\tools\zig-x86_64-windows-0.15.1\zig.exe",
+        "$env:USERPROFILE\tools\zig-x86_64-windows-0.15.2\zig.exe"
     )
-    foreach ($z in $zigPaths) {
-        if ($z) { $ZigExe = $z.FullName; break }
+    foreach ($p in $zigSearchPaths) {
+        if (Test-Path $p) { $ZigExe = $p; break }
+    }
+    if (-not $ZigExe) {
+        $toolsZigs = Get-ChildItem "$env:USERPROFILE\tools" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'zig.*0\.15\.' } | Sort-Object Name -Descending
+        foreach ($d in $toolsZigs) {
+            $cand = Join-Path $d.FullName 'zig.exe'
+            if (Test-Path $cand) { $ZigExe = $cand; break }
+        }
+    }
+    if (-not $ZigExe) {
+        $wingetZig = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\zig*" -Recurse -Filter "zig.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($wingetZig) { $ZigExe = $wingetZig.FullName }
     }
     if (-not $ZigExe) {
         $ZigExe = Get-Command "zig" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
     }
 
-    if ($ZigExe) {
-        Write-Host "    Using Zig: $ZigExe" -ForegroundColor Gray
-        Push-Location (Split-Path $WrapperSrc -Parent)
-        & $ZigExe build-exe $WrapperSrc -O ReleaseSmall --subsystem windows "-femit-bin=$WrapperExe"
-        Pop-Location
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Built: KeepKeyVault.exe"
-        } else {
-            throw "Failed to compile wrapper EXE with Zig"
-        }
-    } else {
-        throw "Zig compiler not found. Install via: winget install zig.zig"
+    if (-not $ZigExe) {
+        throw "Zig compiler not found. Install Zig $SupportedZigDescr to `$env:USERPROFILE\tools\zig-x86_64-windows-0.15.1\ (download from https://ziglang.org/download/0.15.1/zig-x86_64-windows-0.15.1.zip)."
     }
-} else {
-    Write-Success "Wrapper EXE already exists"
+
+    # Hard version check -- the source file is pinned to 0.15.x APIs.
+    $zigVer = (& $ZigExe version 2>&1).Trim()
+    if ($zigVer -notmatch $SupportedZigPattern) {
+        throw "Zig $zigVer at $ZigExe is unsupported. wrapper-launcher.zig requires Zig $SupportedZigDescr. Install 0.15.1 to `$env:USERPROFILE\tools\zig-x86_64-windows-0.15.1\."
+    }
+
+    Write-Host "    Using Zig: $ZigExe (version $zigVer)" -ForegroundColor Gray
+    Push-Location (Split-Path $WrapperSrc -Parent)
+    & $ZigExe build-exe $WrapperSrc -O ReleaseSmall --subsystem windows "-femit-bin=$WrapperExe"
+    Pop-Location
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Built: KeepKeyVault.exe"
+    } else {
+        throw "Failed to compile wrapper EXE with Zig"
+    }
 }
 
 # Copy DPI-awareness manifest next to wrapper EXE
@@ -503,7 +696,15 @@ if (Test-Path $ManifestSrc) {
 
 # Embed KeepKey icon into all EXEs
 # Electrobun's rcedit call fails (ENOENT -- hardcoded CI path), so we do it ourselves.
+#
+# ORDER MATTERS: rcedit must run BEFORE signing, OR the affected EXEs must be
+# re-signed AFTER rcedit. rcedit modifies the .rsrc section via the Windows
+# BeginUpdateResource API which invalidates Authenticode signatures
+# (https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-beginupdateresourcea).
+# The bulk sign loop above runs before the wrapper EXE exists, and we touch
+# launcher.exe here too — so both get re-signed in the next step.
 $RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
+$rceditTouched = @()
 if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
     # Skip bun.exe -- rcedit on 113MB binary can corrupt it; bun runs headless anyway
     $exesToIcon = @($WrapperExe, (Join-Path $BuildDir "bin\launcher.exe"))
@@ -514,6 +715,7 @@ if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
             & $RceditExe $exePath --set-icon $IconIco
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "Icon embedded into $exeName"
+                $rceditTouched += $exePath
             } else {
                 Write-Warning "Failed to embed icon into $exeName"
             }
@@ -521,6 +723,30 @@ if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
     }
 } elseif (-not (Test-Path $RceditExe)) {
     Write-Warning "rcedit not found - EXEs will use default icon"
+}
+
+# Re-sign EXEs whose .rsrc was modified by rcedit (signatures invalidated above).
+# Also sign the wrapper after the Zig build. On a clean build it did not exist
+# during the bulk signing pass; when rcedit is unavailable it still must not ship
+# unsigned.
+$finalExeSignTargets = @()
+if (Test-Path $WrapperExe) { $finalExeSignTargets += $WrapperExe }
+foreach ($exePath in $rceditTouched) {
+    if ($finalExeSignTargets -notcontains $exePath) { $finalExeSignTargets += $exePath }
+}
+if (-not $SkipSign -and $finalExeSignTargets.Count -gt 0) {
+    Write-Step "Final signing wrapper/launcher EXEs"
+    $resignFailed = 0
+    foreach ($exePath in $finalExeSignTargets) {
+        # Force re-sign because rcedit invalidates Authenticode signatures and
+        # Get-AuthenticodeSignature can briefly report stale validity.
+        if (-not (Sign-File -FilePath $exePath -Description $AppName -Force)) {
+            $resignFailed++
+        }
+    }
+    if ($resignFailed -gt 0 -and -not $AllowSignFailures) {
+        throw "Aborting: $resignFailed wrapper/launcher EXE(s) failed final signing."
+    }
 }
 
 # ============================================================================
@@ -569,9 +795,45 @@ Write-Step "Preparing short-path staging for Inno Setup (MAX_PATH workaround)"
 $ShortStage = "C:\tmp\kk"
 if (Test-Path $ShortStage) { Remove-Item -Recurse -Force $ShortStage }
 Write-Host "    Copying build to $ShortStage ..."
-Copy-Item -Recurse -Force $BuildDir $ShortStage
-$StagedFiles = (Get-ChildItem -Recurse -File $ShortStage | Measure-Object).Count
-Write-Host "    Staged $StagedFiles files (source path: $($ShortStage.Length) chars)"
+# robocopy can handle source paths >260 chars when long-path support remains enabled.
+# Critical flags (learned the hard way):
+#   /MT:16     — 16-thread copy. Single-threaded robocopy + Defender real-time
+#                scan = ~30 min for 14k files. Multi-threaded = ~1-2 min.
+#   /R:1 /W:1  — retry ONCE with a 1-sec wait. Defaults are /R:1000000 /W:30
+#                (one million retries, 30-sec wait), which means a single
+#                Defender-locked file hangs the entire copy for hours.
+#   /XJ        — skip junction points / reparse points. Without this, symlink
+#                loops inside nested node_modules can trap robocopy forever.
+# robocopy exits 0-7 on success (0=no files, 1=copied, 2=extra, etc.) — normalize to 0
+$rcStart = Get-Date
+robocopy $BuildDir $ShortStage /E /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+$stageCopyExit = $LASTEXITCODE
+if ($stageCopyExit -gt 7) {
+    throw "robocopy failed while staging build for Inno Setup (exit $stageCopyExit)"
+}
+$global:LASTEXITCODE = 0
+$rcSeconds = [math]::Round(((Get-Date) - $rcStart).TotalSeconds, 1)
+$StagedFiles = (Get-ChildItem -Recurse -File $ShortStage -ErrorAction SilentlyContinue | Measure-Object).Count
+Write-Host "    Staged $StagedFiles files in ${rcSeconds}s (source path: $($ShortStage.Length) chars)"
+
+# The build tree path itself is still long enough to drop very deep
+# WalletConnect nested files while mirroring into Resources\app\node_modules.
+# Overlay the collected externals directly into the short Inno source tree so
+# installer packaging sees the complete dependency tree from a short path.
+$StagedNodeModules = Join-Path $ShortStage "Resources\app\node_modules"
+if (Test-Path $ExtModulesDir) {
+    Write-Host "    Overlaying external node_modules into short stage ..."
+    robocopy $ExtModulesDir $StagedNodeModules /MIR /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
+    if ($LASTEXITCODE -gt 7) {
+        throw "robocopy failed while overlaying external node_modules into short stage (exit $LASTEXITCODE)"
+    }
+    $global:LASTEXITCODE = 0
+    $WalletConnectProbe = Join-Path $StagedNodeModules "@walletconnect\sign-client\node_modules\@walletconnect\core\node_modules\@walletconnect\relay-auth\node_modules\uint8arrays\cjs\src\concat.js"
+    if (-not (Test-Path $WalletConnectProbe)) {
+        throw "Short-stage node_modules is incomplete; missing WalletConnect probe file: $WalletConnectProbe"
+    }
+    Write-Success "Short-stage external node_modules overlay verified"
+}
 
 Write-Step "Building installer EXE with Inno Setup"
 
@@ -605,7 +867,11 @@ if (-not $SkipSign) {
     Write-Step "Signing installer EXE"
     $signed = Sign-File -FilePath $InstallerExe -Description "$AppName Installer"
     if (-not $signed) {
-        Write-Error "Failed to sign the installer EXE!"
+        if ($AllowSignFailures) {
+            Write-Warning "Failed to sign the installer EXE; continuing because -AllowSignFailures was supplied."
+        } else {
+            throw "Failed to sign the installer EXE."
+        }
     }
 }
 
@@ -615,7 +881,7 @@ if (-not $SkipSign) {
 
 Write-Step "Generating checksums"
 
-$checksumFile = Join-Path $ArtifactsDir "SHA256SUMS.txt"
+$checksumFile = Join-Path $ArtifactsDir "SHA256SUMS-windows.txt"
 $artifacts = Get-ChildItem -Path $ArtifactsDir -File | Where-Object { $_.Name -notlike "*.txt" }
 
 $checksums = @()
@@ -626,7 +892,7 @@ foreach ($file in $artifacts) {
 }
 
 $checksums | Out-File -FilePath $checksumFile -Encoding UTF8
-Write-Success "Created: SHA256SUMS.txt"
+Write-Success "Created: SHA256SUMS-windows.txt"
 
 # ============================================================================
 # Summary
@@ -651,7 +917,11 @@ foreach ($file in $finalArtifacts) {
 Write-Host ""
 
 if (-not $SkipSign) {
-    Write-Host "All executables have been signed with EV certificate." -ForegroundColor Green
+    if ($AllowSignFailures) {
+        Write-Host "Signing was attempted; failures were allowed by -AllowSignFailures." -ForegroundColor Yellow
+    } else {
+        Write-Host "All executables have been signed with EV certificate." -ForegroundColor Green
+    }
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
     Write-Host "  1. Test the installer: run the setup EXE" -ForegroundColor Gray

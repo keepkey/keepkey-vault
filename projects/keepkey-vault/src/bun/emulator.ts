@@ -7,15 +7,17 @@
  * Architecture:
  *   Bun process
  *     ├─ emulator-keychain.ts  — Keychain key + AES-256-GCM encrypt/decrypt
- *     ├─ emulator.ts (this)    — flash lifecycle, FFI bridge, version selection
+ *     ├─ emulator.ts (this)    — flash lifecycle, FFI bridge
  *     └─ libkkemu.dylib        — firmware as shared library (loaded via bun:ffi)
  *
- * Emulator binaries are bundled at: firmware/emulators/<version>/libkkemu.dylib
- * Manifest at: firmware/emulators/manifest.json
+ * The dylib is user-installed at ~/.keepkey/emulator/libkkemu.dylib —
+ * dropped onto the app via FileDropZone, or copied there by `make
+ * build-emulator`. No channel/version system: one slot, one binary.
  */
-import { dlopen, FFIType, ptr, toBuffer } from 'bun:ffi'
-import { resolve, join, dirname } from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { dlopen, FFIType, ptr, toArrayBuffer } from 'bun:ffi'
+import { join } from 'path'
+import { existsSync, mkdirSync } from 'fs'
+import { homedir } from 'os'
 import {
   isMacOS, getOrCreateKey, getPairingStatus,
   loadFlash, saveFlash, zeroFlash, listFlashImages, deleteFlash,
@@ -27,121 +29,23 @@ import type { EmulatorStatus, EmulatorProcessState } from '../shared/types'
 const TAG = '[emulator]'
 const FLASH_SIZE = 1048576  // 1 MB
 
-// ── Emulator manifest ───────────────────────────────────────────────────
+// ── Dylib resolution (single user-installed slot) ───────────────────────
 
-interface EmulatorSource {
-  repo: string
-  ref: string
-  type: 'branch' | 'commit'
+/** Directory for the user-installed emulator binary. */
+function getEmulatorBinDir(): string {
+  const dir = join(homedir(), '.keepkey', 'emulator')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
+  return dir
 }
 
-interface EmulatorEntry {
-  version: string
-  firmwareVersion: string
-  channel: string
-  arch: string
-  platform: string
-  dylib: string
-  binary: string
-  debugLink: boolean
-  description: string
-  source: EmulatorSource
+/** Path to the user-installed dylib. May not exist yet. */
+export function getDylibPath(): string {
+  return join(getEmulatorBinDir(), 'libkkemu.dylib')
 }
 
-interface EmulatorManifest {
-  emulators: EmulatorEntry[]
-  default: string
-}
-
-export type EmulatorChannel = 'alpha' | 'beta' | 'release'
-
-let _emuDirCache: string | null = null
-function getEmulatorsDir(): string {
-  if (_emuDirCache) return _emuDirCache
-  // firmware/emulators/ lives at the vault-v11 project root, which is
-  // outside the Electrobun .app bundle. Walk up from import.meta.dir
-  // (app/bun/) through the .app structure to find it.
-  const candidates: string[] = []
-  // Walk 2..12 levels up from import.meta.dir — covers source tree,
-  // dev .app bundle, and production .app bundle depths.
-  for (let depth = 2; depth <= 12; depth++) {
-    candidates.push(resolve(import.meta.dir, ...Array(depth).fill('..'), 'firmware', 'emulators'))
-  }
-  // Also try cwd-relative
-  candidates.push(resolve(process.cwd(), 'firmware', 'emulators'))
-  candidates.push(resolve(process.cwd(), '..', '..', 'firmware', 'emulators'))
-
-  for (const dir of candidates) {
-    if (existsSync(join(dir, 'manifest.json'))) {
-      _emuDirCache = dir
-      console.log(`${TAG} Emulators dir resolved: ${dir}`)
-      return dir
-    }
-  }
-  console.error(`${TAG} Could not find firmware/emulators/manifest.json (tried ${candidates.length} paths from import.meta.dir=${import.meta.dir})`)
-  return candidates[0]
-}
-
-function loadManifest(): EmulatorManifest | null {
-  const manifestPath = join(getEmulatorsDir(), 'manifest.json')
-  if (!existsSync(manifestPath)) return null
-  try {
-    return JSON.parse(readFileSync(manifestPath, 'utf-8'))
-  } catch { return null }
-}
-
-export function getAvailableEmulators(): EmulatorEntry[] {
-  const manifest = loadManifest()
-  if (!manifest) return []
-  return manifest.emulators.filter(e => e.platform === process.platform && e.arch === process.arch)
-}
-
-/** Get available channels with their installation status. */
-export function getEmulatorChannels(): Array<{
-  channel: EmulatorChannel
-  version: string
-  description: string
-  installed: boolean
-  source: EmulatorSource
-}> {
-  const manifest = loadManifest()
-  if (!manifest) return []
-  return manifest.emulators
-    .filter(e => e.platform === process.platform && e.arch === process.arch)
-    .map(e => ({
-      channel: e.channel as EmulatorChannel,
-      version: e.version,
-      description: e.description,
-      installed: existsSync(join(getEmulatorsDir(), e.dylib)),
-      source: e.source,
-    }))
-}
-
-/** Find the emulator entry for a given channel. */
-function getEntryByChannel(channel: EmulatorChannel): EmulatorEntry | null {
-  const manifest = loadManifest()
-  if (!manifest) return null
-  return manifest.emulators.find(
-    e => e.channel === channel && e.platform === process.platform && e.arch === process.arch
-  ) || null
-}
-
-function getDylibPath(version?: string): string | null {
-  const manifest = loadManifest()
-  if (!manifest) return null
-  const ver = version || manifest.default
-  const entry = manifest.emulators.find(e => e.version === ver)
-  if (!entry) return null
-  const fullPath = join(getEmulatorsDir(), entry.dylib)
-  return existsSync(fullPath) ? fullPath : null
-}
-
-/** Resolve dylib path from a channel name. */
-function getDylibPathByChannel(channel: EmulatorChannel): string | null {
-  const entry = getEntryByChannel(channel)
-  if (!entry) return null
-  const fullPath = join(getEmulatorsDir(), entry.dylib)
-  return existsSync(fullPath) ? fullPath : null
+/** True when the user has installed a dylib. */
+export function isDylibInstalled(): boolean {
+  return existsSync(getDylibPath())
 }
 
 // ── FFI Handle ──────────────────────────────────────────────────────────
@@ -158,6 +62,7 @@ function loadDylib(path: string) {
     kkemu_poll:         { args: [], returns: FFIType.i32 },
     kkemu_is_running:   { args: [], returns: FFIType.i32 },
     kkemu_get_display:  { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    kkemu_pop_frame:    { args: [FFIType.ptr], returns: FFIType.i32 },
   })
 }
 
@@ -165,14 +70,6 @@ function loadDylib(path: string) {
 
 let activeFlash: EmulatorFlash | null = null
 let activeFlashName: string = 'default'
-let activeVersion: string | null = null
-let activeChannel: EmulatorChannel | null = null
-/**
- * The user's selected channel — persists across stop/start cycles.
- * Set when the user explicitly picks a channel via emulatorInit(channel).
- * Re-used by import/switch/restore flows that restart without an explicit channel.
- */
-let selectedChannel: EmulatorChannel | null = null
 let emuState: EmulatorProcessState = 'stopped'
 let emuError: string | undefined
 
@@ -181,14 +78,13 @@ export function getActiveFlashName(): string { return activeFlashName }
 
 // ── Status ──────────────────────────────────────────────────────────────
 
-export function getEmulatorStatus(): EmulatorStatus & { channel?: EmulatorChannel } {
+export function getEmulatorStatus(): EmulatorStatus {
   const pairing = getPairingStatus()
   return {
     state: emuState,
     bridgeReady: emuState === 'running' && ffi !== null,
-    host: activeVersion ? `libkkemu (${activeVersion})` : 'not loaded',
+    host: ffi ? 'libkkemu' : 'not loaded',
     error: emuError,
-    channel: activeChannel ?? undefined,
     ...pairing,
   }
 }
@@ -209,23 +105,20 @@ export function pairEmulator(): EmulatorPairingStatus {
 /**
  * Initialize the emulator:
  * 1. Decrypt flash into memory (or create fresh)
- * 2. Load libkkemu.dylib for the selected firmware version/channel
+ * 2. Load the user-installed libkkemu.dylib at ~/.keepkey/emulator/
  * 3. Pass flash buffer to kkemu_init() via FFI
  * 4. Start poll timer
  *
  * @param flashName - Name of the flash image to use (default: 'default')
- * @param version   - Specific version string (e.g. '7.14.0-alpha')
- * @param channel   - Channel shorthand: 'alpha' | 'beta' | 'release'
- *                    If channel is provided, it overrides version.
  */
-export function initEmulator(flashName = 'default', version?: string, channel?: EmulatorChannel): EmulatorStatus {
+export function initEmulator(flashName = 'default'): EmulatorStatus {
   if (!isMacOS()) {
     emuError = 'Emulator requires macOS'
     return getEmulatorStatus()
   }
 
   if (activeFlash && ffi) {
-    console.log(`${TAG} Emulator already running (${activeVersion}, channel=${activeChannel})`)
+    console.log(`${TAG} Emulator already running`)
     return getEmulatorStatus()
   }
 
@@ -234,7 +127,14 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
     emuError = undefined
     activeFlashName = flashName
 
-    // 1. Decrypt flash
+    // 1. Locate dylib BEFORE touching flash — failing early avoids creating
+    // an orphan flash file when the user hasn't installed an emulator yet.
+    const dylibPath = getDylibPath()
+    if (!isDylibInstalled()) {
+      throw new Error(`No emulator installed. Drop a libkkemu.dylib onto the window or run: make build-emulator`)
+    }
+
+    // 2. Decrypt flash
     activeFlash = loadFlash(flashName)
     console.log(`${TAG} Flash loaded: ${flashName} (${activeFlash.isNew ? 'new' : 'existing'}, ${activeFlash.buffer.length} bytes)`)
 
@@ -242,36 +142,7 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
       saveFlash(activeFlash)
     }
 
-    // 2. Load dylib — resolve channel: explicit arg > sticky selection > version > manifest default
-    const resolvedChannel = channel ?? selectedChannel
-    let dylibPath: string | null
-    if (resolvedChannel) {
-      dylibPath = getDylibPathByChannel(resolvedChannel)
-      if (!dylibPath) {
-        const entry = getEntryByChannel(resolvedChannel)
-        throw new Error(
-          entry
-            ? `Emulator dylib not installed for channel "${resolvedChannel}". Run: make download-emulator-${resolvedChannel}`
-            : `Unknown emulator channel "${resolvedChannel}". Available: alpha, beta, release`
-        )
-      }
-      activeChannel = resolvedChannel
-      if (channel) selectedChannel = channel  // explicit pick updates sticky selection
-      const entry = getEntryByChannel(resolvedChannel)!
-      activeVersion = entry.version
-    } else {
-      dylibPath = getDylibPath(version)
-      if (!dylibPath) {
-        throw new Error(`No emulator dylib found for version ${version || 'default'}. Check firmware/emulators/`)
-      }
-      activeVersion = version || loadManifest()?.default || 'unknown'
-      // Infer channel from version
-      const manifest = loadManifest()
-      const entry = manifest?.emulators.find(e => e.version === activeVersion)
-      activeChannel = (entry?.channel as EmulatorChannel) ?? null
-    }
-
-    console.log(`${TAG} Loading dylib: ${dylibPath} (channel=${activeChannel})`)
+    console.log(`${TAG} Loading dylib: ${dylibPath}`)
     ffi = loadDylib(dylibPath)
 
     // 3. Pass flash buffer to firmware
@@ -291,7 +162,7 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
     startEmulatorWatchdog()
 
     emuState = 'running'
-    console.log(`${TAG} Emulator running — firmware ${activeVersion}, channel=${activeChannel}, flash "${flashName}"`)
+    console.log(`${TAG} Emulator running — flash "${flashName}"`)
     return getEmulatorStatus()
   } catch (err: any) {
     emuState = 'error'
@@ -304,7 +175,6 @@ export function initEmulator(flashName = 'default', version?: string, channel?: 
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
     if (ffi) { try { ffi.close() } catch {} ; ffi = null }
     if (activeFlash) { zeroFlash(activeFlash); activeFlash = null }
-    activeChannel = null
 
     return getEmulatorStatus()
   }
@@ -357,8 +227,6 @@ export function stopEmulator(): EmulatorStatus {
       activeFlash = null
     }
 
-    activeVersion = null
-    activeChannel = null
     emuState = 'stopped'
     emuError = undefined
     console.log(`${TAG} Emulator stopped, flash encrypted + memory zeroed`)
@@ -422,7 +290,14 @@ export function flushRingBuffers(): void {
 // ── Poll control (for pre-writing confirmations) ────────────────────────
 
 let pollSafetyTimer: ReturnType<typeof setTimeout> | null = null
-const POLL_SAFETY_MS = 30_000 // auto-resume poll after 30s to prevent permanent stall
+// Auto-resume poll after this long to prevent a forgotten resume from
+// permanently stalling the firmware. MUST exceed both the confirm prompt
+// (CONFIRM_TIMEOUT_MS = 120s) AND the readChunk deadline (READ_TIMEOUT_MS
+// = 240s) since fn() runs while the user is deciding and chunks are
+// queued in the ring. If safety fires first, the auto-resumed poll
+// consumes the queued sign chunk -> confirm_helper enters with no
+// prewritten BA/DLD -> busy-loop -> watchdog SIGKILL.
+const POLL_SAFETY_MS = 270_000
 
 /** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
 export function pausePoll(): void {
@@ -459,8 +334,13 @@ export function resumePoll(): void {
 
 /**
  * Read the emulator's 256x64 OLED framebuffer.
- * Returns null if the dylib doesn't expose a framebuffer (current alpha returns NULL).
- * Call between kkemu_poll() ticks — pointer is valid until next poll.
+ * Returns null if the dylib doesn't expose a framebuffer.
+ *
+ * The returned Uint8Array is a fresh copy. We use `toArrayBuffer + slice()`
+ * rather than `toBuffer` because Bun's Buffer-from-pointer wrapper attempts
+ * to free the underlying memory on GC — fine for malloc'd C buffers, but
+ * the dylib's framebuffer is a static `.bss` page and freeing it segfaults
+ * the next setInterval tick.
  */
 export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number; height: number } {
   if (!ffi) return { framebuffer: null, width: 0, height: 0 }
@@ -471,11 +351,38 @@ export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number
   const h = heightBuf[0]
   if (!fbPtr || w === 0 || h === 0) return { framebuffer: null, width: w, height: h }
   const byteLen = (w * h) / 8 // 2048 bytes for 256x64 1-bit
-  const framebuffer = new Uint8Array(toBuffer(fbPtr, 0, byteLen))
+  // .slice() forces a copy into a JS-owned ArrayBuffer; the borrowed view of
+  // the dylib's static memory is dropped immediately.
+  const framebuffer = new Uint8Array(toArrayBuffer(fbPtr, 0, byteLen)).slice()
   return { framebuffer, width: w, height: h }
+}
+
+/**
+ * Pop captured framebuffers from the dylib's display ring.
+ *
+ * The firmware's display_refresh() (called every kkemu_poll AND every
+ * iteration of confirm_helper's busy loop) snapshots the canvas into a
+ * ring buffer. This drains the ring so the host can replay confirm/init/
+ * recovery screens that exist only inside synchronous C calls.
+ *
+ * Adjacent identical frames are deduplicated in C, so the returned list
+ * contains only distinct screen states. Capped per call to avoid
+ * unbounded JS work if the firmware is animating fast.
+ */
+const POP_BATCH_CAP = 64
+
+export function emuPopFrames(): Uint8Array[] {
+  if (!ffi) return []
+  const frames: Uint8Array[] = []
+  const buf = new Uint8Array(2048)
+  for (let i = 0; i < POP_BATCH_CAP; i++) {
+    const got = ffi.symbols.kkemu_pop_frame(ptr(buf))
+    if (!got) break
+    frames.push(buf.slice())
+  }
+  return frames
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────
 
 export { listFlashImages, deleteFlash }
-export type { EmulatorEntry, EmulatorManifest }

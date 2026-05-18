@@ -6,6 +6,7 @@
  */
 import { CHAINS } from '../shared/chains'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
+import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
 const TAG = '[swap]'
 
@@ -20,28 +21,44 @@ export function parseThorAsset(asset: string): { chain: string; symbol: string; 
   return { chain, symbol: rest.slice(0, dashIdx), contractAddress: rest.slice(dashIdx + 1) }
 }
 
-/** Map THORChain chain prefixes to our chain IDs */
+/** Map THORChain chain prefixes to our vault chain IDs.
+ *
+ *  Source of truth: `@pioneer-platform/pioneer-coins` `COIN_MAP_LONG`. The
+ *  overlay below covers two narrow gaps:
+ *    1. BSC mismatch — pioneer-coins maps `BSC → 'binance'`, but vault's
+ *       chains.ts uses `'bsc'` as the chain id; we override here.
+ *    2. Long-form aliases (OPTIMISM, ARBITRUM, BASE, etc.) — ShapeShift
+ *       swapper and ad-hoc paths sometimes emit the long chain name. Without
+ *       these, parseThorAsset throws "Unsupported THORChain chain: OPTIMISM"
+ *       on tokens like VELO routed via ShapeShift.
+ *    3. TRON alias — THORChain memos use `TRON.TRX`, pioneer-coins only has
+ *       the symbol form `TRX`. */
 export const THOR_TO_CHAIN: Record<string, string> = {
-  BTC: 'bitcoin',
-  ETH: 'ethereum',
-  LTC: 'litecoin',
-  DOGE: 'dogecoin',
-  BCH: 'bitcoincash',
-  DASH: 'dash',
-  GAIA: 'cosmos',
-  THOR: 'thorchain',
-  MAYA: 'mayachain',
-  AVAX: 'avalanche',
-  BSC: 'bsc',
-  BASE: 'base',
-  ARB: 'arbitrum',
-  OP: 'optimism',
-  MATIC: 'polygon',
-  XRP: 'ripple',
-  SOL: 'solana',
-  TRX: 'tron',
-  TON: 'ton',
+  ...COIN_MAP_LONG,
+  // Vault chain-id overrides (where vault and pioneer-coins disagree)
+  BSC:  'bsc',
+  BNB:  'bsc',
+  // THORChain memo aliases not in pioneer-coins
+  TRON: 'tron',
+  // Long-form aliases — defensive against ShapeShift swapper output
+  ETHEREUM:    'ethereum',
+  AVALANCHE:   'avalanche',
+  ARBITRUM:    'arbitrum',
+  OPTIMISM:    'optimism',
+  POLYGON:     'polygon',
+  BITCOIN:     'bitcoin',
+  LITECOIN:    'litecoin',
+  DOGECOIN:    'dogecoin',
+  BITCOINCASH: 'bitcoincash',
+  COSMOS:      'cosmos',
+  SOLANA:      'solana',
+  RIPPLE:      'ripple',
 }
+
+// VAULT_CHAIN_TO_THOR lives in shared/swap-discovery.ts so both bun and
+// frontend can use it without crossing the layer boundary. Re-exported here
+// for callers that already import from this module.
+export { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 
 // ── Quote parsing ───────────────────────────────────────────────────
 
@@ -55,7 +72,7 @@ export const THOR_TO_CHAIN: Record<string, string> = {
  */
 export function parseQuoteResponse(
   quoteResp: any,
-  params: { fromAsset: string; toAsset: string; slippageBps?: number },
+  params: { fromCaip: string; toCaip: string; slippageBps?: number },
 ): SwapQuote {
   // Pioneer SDK wraps responses: { data: { success, data: [...] } }
   const qOuter = quoteResp?.data || quoteResp
@@ -73,27 +90,83 @@ export function parseQuoteResponse(
   // Pioneer wraps THORNode data in quote.raw and tx details in quote.txs[]
   const raw = quote.raw || {}
   const txParams = quote.txs?.[0]?.txParams || {}
+  // Underlying protocol for aggregator integrations. ShapeShift surfaces this
+  // as quote.swapper (and quote.meta.swapper) — e.g. "Relay", "Thorchain", "0x",
+  // "Uniswap". Falls back to undefined for direct integrations (THORChain,
+  // ChainFlip) where `integration` already names the protocol.
+  const swapperRaw = quote.swapper || quote.meta?.swapper || raw.swapper
+  const swapper = swapperRaw && typeof swapperRaw === 'string' && swapperRaw.toLowerCase() !== 'unknown'
+    ? swapperRaw
+    : undefined
 
-  // Extract fields from Pioneer's normalized fields + raw THORNode data
-  const expectedOutput = quote.buyAmount || quote.amountOut || raw.expected_amount_out
-  if (!expectedOutput) throw new Error('Quote response missing output amount')
+  // Extract fields from Pioneer's normalized fields + raw THORNode data.
+  // Snake_case fallbacks added because Pioneer's Quote response has drifted —
+  // some integrations now return `expectedAmountOut` / `amount_out` / etc.
+  const expectedOutput = quote.buyAmount
+    ?? quote.amountOut
+    ?? quote.expectedAmountOut
+    ?? quote.expected_amount_out
+    ?? quote.amount_out
+    ?? raw.expected_amount_out
+    ?? raw.expectedAmountOut
+  if (expectedOutput == null || expectedOutput === '' || expectedOutput === 0 || expectedOutput === '0') {
+    // Dump field shapes so we can see exactly what Pioneer returned. This is
+    // the "expected output coming back 0" path users hit when a pool has no
+    // liquidity or Pioneer drifts its schema; without this dump the bug is
+    // invisible in production logs.
+    console.error(`${TAG} expectedOutput is empty/zero — dumping response structure:`)
+    console.error(`${TAG}   integration: ${integration}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
+    console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
+    throw new Error(`No quote output for ${params.fromCaip} → ${params.toCaip} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
+  }
   const expectedOutputStr = String(expectedOutput)
 
-  // ── Relay integration: pre-built tx with calldata, no memo ──
-  const isRelay = integration === 'relay'
+  // ── Pre-built calldata integrations (relay, shapeshiftSwap, …) ──
+  // Any integration that hands us calldata gets the same treatment: we sign
+  // the supplied tx as-is. The field stays named `relayTx` for backwards
+  // compatibility with ExecuteSwapParams; conceptually it's "prebuilt tx".
+  //
+  // Two sub-cases:
+  //  A) Real calldata (data.length ≥ 10): encodes the swap instruction (Relay, 0x, …)
+  //  B) Deposit-channel (data = '0x' / empty): Chainflip and NEAR Intents EVM-side
+  //     use a plain ETH transfer to a protocol-controlled address; the swap destination
+  //     was registered off-chain when the quote/channel was created. `data` is empty
+  //     intentionally — do NOT conflate with a malformed Relay quote.
+  const rawData: string | undefined = txParams.data
+  const hasRealCalldata = !!rawData && rawData !== '0x' && rawData !== '0x0' && rawData.length >= 10
+
+  // Deposit-channel protocols send a plain native transfer (data = '0x') to a
+  // protocol-controlled address. The BTC/etc. destination is registered off-chain.
+  // Allowed list is narrow and explicit — unknown swappers with empty calldata
+  // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
+  // by the pre-existing cross-chain guard.
+  // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
+  // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
+  // path instead (isMemolessTransfer below).
+  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
+  const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
+  const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
+  const hasPrebuiltTx = hasRealCalldata || isDepositChannel
   let relayTx: RelayTxParams | undefined
 
-  if (isRelay && txParams.data) {
+  if (hasPrebuiltTx) {
     relayTx = {
       to: txParams.to,
-      data: txParams.data,
+      data: rawData ?? '0x',
       value: String(txParams.value || '0'),
-      gasLimit: String(txParams.gasLimit || txParams.gas || '300000'),
+      // Leave gasLimit undefined when Pioneer omits it so buildRelaySwapTx
+      // can apply its chain-aware fallback (300000 is only correct for Arbitrum).
+      gasLimit: (txParams.gasLimit || txParams.gas) ? String(txParams.gasLimit || txParams.gas) : undefined,
       maxFeePerGas: txParams.maxFeePerGas ? String(txParams.maxFeePerGas) : undefined,
       maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? String(txParams.maxPriorityFeePerGas) : undefined,
       chainId: txParams.chainId,
+      isDepositChannel: isDepositChannel || undefined,
     }
-    console.log(`${TAG} Relay integration — pre-built tx extracted (to=${relayTx.to}, chainId=${relayTx.chainId})`)
+    console.log(`${TAG} ${integration} (${swapper}) — prebuilt tx extracted (to=${relayTx.to}, depositChannel=${isDepositChannel})`)
   }
 
   // Memo lives in txParams (Pioneer constructs it), fallback to raw
@@ -115,13 +188,28 @@ export function parseQuoteResponse(
     inboundAddress = router
   }
 
+  // Guard: UTXO sources must send to a chain-native address, not an EVM address.
+  // NEAR Intents BTC→ETH falls back to the user's ETH recipientAddress when Pioneer
+  // can't surface a BTC deposit address from step.allowanceContract — that ETH
+  // address would be passed to the firmware as a Bitcoin output and cause
+  // "Failed to compile output" (code 9). Fail loudly here instead.
+  if (fromIsUtxo && inboundAddress && inboundAddress.startsWith('0x')) {
+    console.error(`${TAG} NEAR Intents BTC deposit address is missing — Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2).slice(0, 2000)}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    throw new Error('Swap quote did not provide a valid BTC deposit address — NEAR Intents deposit channel may be unavailable for this pair. Try refreshing the quote.')
+  }
+
   // Expiry for depositWithExpiry
   const expiry = raw.expiry || quote.expiry || 0
 
   // Native THORChain/Maya swaps (RUNE, CACAO) use MsgDeposit — no inbound vault needed
-  const isNativeDeposit = params.fromAsset === 'THOR.RUNE' || params.fromAsset === 'MAYA.CACAO'
+  const isNativeDeposit =
+    params.fromCaip === 'cosmos:thorchain-mainnet-v1/slip44:931' ||
+    params.fromCaip === 'cosmos:mayachain-mainnet-v1/slip44:931'
 
-  if (!inboundAddress && !isNativeDeposit && !isRelay) {
+  if (!inboundAddress && !isNativeDeposit && !hasPrebuiltTx) {
     // Dump full response structure to help diagnose missing field
     console.error(`${TAG} MISSING inbound address — dumping response structure:`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
@@ -131,8 +219,15 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  if (!memo && !isRelay) {
-    console.warn(`${TAG} WARNING: Quote has no memo — tx may fail`)
+  // For memo-less UTXO swaps (NEAR Intents BTC→ETH): the deposit address IS the
+  // only instruction — no memo or calldata needed. fromIsUtxo guards direction:
+  // EVM→BTC with no calldata has no way to encode the BTC destination.
+  const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
+  if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
+    // A quote with neither memo nor prebuilt calldata has no swap instructions —
+    // it cannot be executed. Throw now so the UI surfaces a clear error at
+    // quote-fetch time rather than a cryptic "Missing swap memo" at preview time.
+    throw new Error('Quote returned no swap instructions (no memo and no calldata) — try a different pair or refresh')
   }
 
   // Extract fees — relay uses a different fee structure
@@ -140,7 +235,7 @@ export function parseQuoteResponse(
   let totalBps = fees.total_bps || fees.totalBps || 0
   let outboundFee = fees.outbound || fees.outboundFee || '0'
   let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
-  const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 300)
+  const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 100)
 
   // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc
   const expectedNum = parseFloat(expectedOutputStr)
@@ -154,6 +249,11 @@ export function parseQuoteResponse(
     || quote.estimatedTime || raw.inbound_confirmation_seconds || 600
 
   const minOutStr = minOut > 0 ? minOut.toFixed(8).replace(/\.?0+$/, '') : '0'
+
+  // Minimum sell amount — solvers/protocols may refuse amounts below this floor
+  // Check multiple field names across the response layers (Pioneer schema varies by swapper)
+  const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
+  const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
 
   return {
     expectedOutput: expectedOutputStr,
@@ -170,10 +270,10 @@ export function parseQuoteResponse(
     estimatedTime: Number(estimatedTime),
     warning: raw.warning || quote.warning || undefined,
     slippageBps: Number(actualSlippageBps),
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
     integration,
+    swapper,
     relayTx,
+    minAmountIn,
   }
 }
 
@@ -208,6 +308,24 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
 
     const isToken = !!parsed.contractAddress
 
+    // CAIP is required for tokens — pioneer-server's swap-config controller
+    // ALWAYS emits it (verified live; the response is keyed on CAIP). If a
+    // token entry arrives without one, that's a malformed Pioneer response;
+    // dropping the asset is safer than falling back to the native chain CAIP,
+    // which would silently quote / attach the wrong asset (e.g. ETH.USDT
+    // routing as eip155:1/slip44:60 — native ETH).
+    let caip: string
+    if (isToken) {
+      if (!raw.caip) {
+        console.warn(`[swap] dropping token ${thorAsset} — pioneer-server response missing caip`)
+        continue
+      }
+      caip = raw.caip
+    } else {
+      // Native: chainDef.caip is correct by definition (chain native = chain CAIP).
+      caip = raw.caip || chainDef.caip
+    }
+
     assets.push({
       asset: thorAsset,
       chainId: ourChainId,
@@ -215,7 +333,7 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
       name: raw.name || (isToken ? `${parsed.symbol} (${chainDef.coin})` : chainDef.coin),
       chainFamily: chainDef.chainFamily,
       decimals: raw.decimals ?? chainDef.decimals,
-      caip: raw.caip || chainDef.caip,
+      caip,
       contractAddress: parsed.contractAddress,
       icon: raw.icon || raw.image,
     })
@@ -224,8 +342,25 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
   return assets
 }
 
-/** Convert our chain CAIP + asset info into the CAIP format Pioneer Quote expects */
-export function assetToCaip(thorAsset: string): string {
+/** Convert our chain CAIP + asset info into the CAIP format Pioneer Quote expects.
+ *
+ *  Prefer the canonical caip from the cached SwapAsset list (pioneer is the
+ *  source of truth — it knows that TRON tokens use `/token:T...` with the
+ *  case-sensitive base58 address, while EVM tokens use `/erc20:0x...`). The
+ *  reconstruct path only fires when we don't have a cached asset (e.g. the
+ *  legacy code path passing arbitrary thor-asset strings).
+ *
+ *  The bug this guards against: reconstructing always emitted `/erc20:` and
+ *  preserved THORChain's uppercase form of the contract address. For TRON
+ *  USDT, that produced `tron:.../erc20:TR7NHQJ...` instead of pioneer's
+ *  canonical `tron:.../token:TR7NHqj...`, and pioneer-router rejected the
+ *  quote with "No quotes available". */
+export function assetToCaip(thorAsset: string, knownAssets?: SwapAsset[]): string {
+  // Prefer the canonical caip pioneer gave us — it has the right namespace
+  // (/token: vs /erc20:) and the right case for chains where it matters.
+  const known = knownAssets?.find(a => a.asset === thorAsset)
+  if (known?.caip) return known.caip
+
   const parsed = parseThorAsset(thorAsset)
   const ourChainId = THOR_TO_CHAIN[parsed.chain]
   if (!ourChainId) throw new Error(`Unsupported THORChain chain: ${parsed.chain}`)
@@ -233,10 +368,15 @@ export function assetToCaip(thorAsset: string): string {
   const chainDef = CHAINS.find(c => c.id === ourChainId)
   if (!chainDef) throw new Error(`No chain def for: ${ourChainId}`)
 
-  // For ERC-20 tokens, build eip155:N/erc20:0x... CAIP
   if (parsed.contractAddress) {
-    const networkParts = chainDef.networkId // e.g. "eip155:1"
-    return `${networkParts}/erc20:${parsed.contractAddress}`
+    // Token namespace differs by chain family. Without a cached SwapAsset
+    // we can only pick the right namespace heuristically — and for TRON we
+    // can't recover the case-sensitive base58 address from THORChain's
+    // uppercased form, so the result may still be invalid. Callers that
+    // need TRON tokens should pass `knownAssets` so we hit the canonical
+    // path above.
+    const tokenNamespace = chainDef.chainFamily === 'tron' ? 'token' : 'erc20'
+    return `${chainDef.networkId}/${tokenNamespace}:${parsed.contractAddress}`
   }
 
   // Native asset — use the chain's CAIP-19

@@ -208,6 +208,19 @@ export function rpcFire(method: string, params?: any): void {
 }
 
 /**
+ * Re-emit a message locally to all subscribers of `messageName`. Used when one
+ * UI component receives a Bun message and needs to forward it to a sibling
+ * component that has just mounted (e.g. SwapRpcMount opens a dialog and needs
+ * the dialog's listener — registered after mount — to also see the original
+ * payload).
+ */
+export function dispatchLocalRpcMessage(messageName: string, payload: any): void {
+  const listeners = messageListeners.get(messageName)
+  if (!listeners) return
+  for (const listener of listeners) listener(payload)
+}
+
+/**
  * Listen for messages from the Bun main process.
  */
 export function onRpcMessage(messageName: string, listener: MessageListener): () => void {

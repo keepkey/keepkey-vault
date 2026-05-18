@@ -5,10 +5,11 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
+import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
@@ -86,6 +87,8 @@ function extractErrorMessage(err: any): string {
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
+  // Suppress unhandled rejection on the original promise if the timeout fires first.
+  promise.catch(() => {})
   return Promise.race([
     promise,
     new Promise<never>((_, reject) => {
@@ -115,6 +118,10 @@ export class EngineController extends EventEmitter {
   private retryCount = 0
   private static readonly MAX_PAIR_RETRIES = 24 // ~2 minutes at 5s intervals
   private rebootPollTimer: ReturnType<typeof setInterval> | null = null
+  // Linux: KeepKey was enumerated on the bus but neither transport could open
+  // it. Surfaces in DeviceStateInfo so the UI can offer the udev-rules auto-fix.
+  private linuxUdevPermissionDenied = false
+  private _loggedBlHash = false
 
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
@@ -129,6 +136,20 @@ export class EngineController extends EventEmitter {
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
   get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
+  /** Read-only snapshot used by signing approval UI; avoids transport calls mid-prompt. */
+  getCachedFeaturesSnapshot(): any | null { return this.cachedFeatures }
+  /** Refresh feature policy state after explicit settings/policy mutations. */
+  async refreshFeaturesSnapshot(): Promise<any> {
+    if (!this.wallet) throw new Error('No device connected')
+    this.cachedFeatures = await this.wallet.getFeatures()
+    this.updateState(this.deriveState(this.cachedFeatures))
+    return this.cachedFeatures
+  }
+  /** Drop stale features when a refresh fails so signing UI does not trust old policy state. */
+  invalidateFeaturesSnapshot(): void {
+    this.cachedFeatures = null
+    this.emit('state-change', this.getDeviceState())
+  }
 
   constructor() {
     super()
@@ -187,6 +208,10 @@ export class EngineController extends EventEmitter {
 
     transport.on(String(core.Events.BUTTON_REQUEST), () => {
       console.log('[Engine] BUTTON_REQUEST — confirm on device')
+      // Forward to listeners (e.g. Zcash tab's TxFlowStatus) so the UI can
+      // distinguish "device computing silently" from "user must press the
+      // button NOW". Fires globally for any device flow that needs a press.
+      this.emit('button-request')
       // Emulator button presses are handled by prewriteConfirmations() in
       // the RPC handler — NOT here. Sending stale DebugLinkDecision from a
       // setTimeout poisons the ring buffer and causes "Unexpected message".
@@ -252,6 +277,9 @@ export class EngineController extends EventEmitter {
         }
         this.clearWallet()
         this.lastError = null
+        // Clear the Linux udev flag — otherwise getDeviceState() keeps reporting
+        // "KeepKey detected, install rules" after the user has unplugged.
+        this.linuxUdevPermissionDenied = false
         this.updateState('disconnected')
       })
       console.log('[Engine] USB listeners registered')
@@ -325,7 +353,24 @@ export class EngineController extends EventEmitter {
       if (this.isPassphraseWallet) {
         console.log('[Engine] Hidden wallet active — skipping device snapshot, seed identity (privacy)')
       } else if (this.isEmulator) {
-        console.log('[Engine] Emulator device — skipping device snapshot (emulators use flash images)')
+        // Emulators get their own metadata table keyed by flash name so the
+        // splash UI can show label / firmware / USD per wallet without
+        // contaminating real-device snapshots. Synchronous write — a fire-
+        // and-forget here would race rollback paths in create/import/load
+        // that delete this metadata when verification fails.
+        try {
+          const features = this.cachedFeatures
+          const fwVer = this.extractVersion(features)
+          saveEmulatorWalletMeta(
+            getActiveFlashName(),
+            features.label || '',
+            features.deviceId || '',
+            fwVer,
+            '',
+          )
+        } catch (e: any) {
+          console.warn('[Engine] saveEmulatorWalletMeta failed:', e?.message)
+        }
       } else {
         try {
           const deviceId = this.cachedFeatures.deviceId || 'unknown'
@@ -637,6 +682,24 @@ export class EngineController extends EventEmitter {
       // Try to pair via WebUSB then HID
       const result = await this.initializeWallet()
 
+      // Linux only: detect "device on the bus, but the OS won't let us open it"
+      // → udev rules are missing. Two signals, OR'd:
+      //   1. permissionDenied: pairRawDevice() threw LIBUSB_ERROR_ACCESS / EACCES.
+      //      Primary signal — fires when enumeration succeeds (so usbDetected is
+      //      true) but the open() call inside pairRawDevice() is rejected.
+      //   2. keepKeyOnBus && !usbDetected: libusb sees the device but neither
+      //      adapter's getDevice() returned anything. Backstop for adapters
+      //      that swallow access errors during enumeration.
+      // Cleared on any successful pair (early return paths above).
+      // Track transitions so we can force a state-change emit when the flag
+      // flips while the device-state itself stays "disconnected" — without
+      // this the UI never learns the udev rule is missing.
+      const prevLinuxUdevDenied = this.linuxUdevPermissionDenied
+      this.linuxUdevPermissionDenied =
+        process.platform === 'linux' &&
+        (result.permissionDenied || (result.keepKeyOnBus && !result.usbDetected))
+      const linuxUdevFlagChanged = this.linuxUdevPermissionDenied !== prevLinuxUdevDenied
+
       if (result.wallet) {
         this.wallet = result.wallet
         this.retryCount = 0
@@ -677,6 +740,18 @@ export class EngineController extends EventEmitter {
           this.lastError = `Failed to read device: ${err}`
           this.updateState('error')
         }
+      } else if (this.linuxUdevPermissionDenied) {
+        // Linux udev block: enumeration sets result.usbDetected=true even
+        // when pairRawDevice() failed with EACCES, which would otherwise
+        // route us into the connected_unpaired+error branch below — and
+        // App.tsx renders that as the DeviceClaimedDialog, not the splash
+        // with LinuxUdevWarning. Treat it as disconnected instead so the
+        // UI hits the splash branch and reads linuxUdevPermissionDenied
+        // off DeviceStateInfo. updateState() always emits state-change,
+        // so calling it when lastState is already 'disconnected' still
+        // refreshes the flag for the renderer.
+        this.lastError = null
+        this.updateState('disconnected')
       } else if (result.usbDetected) {
         this.lastError = result.error || 'Device detected but cannot be claimed'
         console.warn(`[Engine] Device seen but not paired: ${this.lastError}`)
@@ -692,6 +767,12 @@ export class EngineController extends EventEmitter {
         }
         this.lastError = null
         this.updateState('disconnected')
+      } else if (linuxUdevFlagChanged) {
+        // No state transition (still disconnected), but the udev-permission flag
+        // flipped — push a state-change so the UI can render or clear the
+        // Linux udev warning.
+        console.log(`[Engine] linuxUdevPermissionDenied → ${this.linuxUdevPermissionDenied}`)
+        this.emit('state-change', this.getDeviceState())
       }
     } catch (err) {
       console.error('[Engine] syncState error:', err)
@@ -788,10 +869,32 @@ export class EngineController extends EventEmitter {
   private async initializeWallet(): Promise<{
     wallet: any | undefined
     usbDetected: boolean
+    /** True when libusb sees a KeepKey on the bus (vendor 0x2B24) regardless of
+     *  whether we could open it. Used on Linux to distinguish "no device plugged
+     *  in" from "device plugged in but we can't talk to it" (udev rules). */
+    keepKeyOnBus: boolean
+    /** True when an adapter enumerated the device but pairRawDevice() failed
+     *  with a permission/access error (LIBUSB_ERROR_ACCESS / EACCES). On Linux
+     *  this is the canonical "udev rules missing" signal — usbDetected alone
+     *  is not enough, since it gets set on enumeration *before* the failed open. */
+    permissionDenied: boolean
     error: string | null
   }> {
     let usbDetected = false
+    let permissionDenied = false
     let lastError: string | null = null
+    const isPermissionError = (msg: string) =>
+      /LIBUSB_ERROR_ACCESS|EACCES|permission denied/i.test(msg)
+
+    // Snapshot the USB bus before trying to open the device. libusb's
+    // getDeviceList() reads /sys/bus/usb and works for unprivileged users —
+    // it's the actual open() that needs udev permissions on Linux.
+    let keepKeyOnBus = false
+    try {
+      keepKeyOnBus = usb.getDeviceList().some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+    } catch (err: any) {
+      console.warn('[Engine] initializeWallet: getDeviceList() threw:', err?.message || err)
+    }
 
     // Clear stale keyring entries before attempting to pair — without this,
     // a previous failed pairing leaves the transport in "opened" state and
@@ -821,7 +924,7 @@ export class EngineController extends EventEmitter {
           if (wallet) {
             this.activeTransport = 'webusb'
             console.log('[Engine] Paired via WebUSB')
-            return { wallet, usbDetected: true, error: null }
+            return { wallet, usbDetected: true, keepKeyOnBus, permissionDenied: false, error: null }
           }
           console.warn('[Engine] WebUSB pairRawDevice returned falsy')
         } catch (err: any) {
@@ -830,8 +933,9 @@ export class EngineController extends EventEmitter {
           // Close the raw USB device so its `opened` flag resets — without this,
           // the next retry sees opened=true and throws "already-connected".
           try { await webUsbDevice.close() } catch (_) {}
-          if (lastError.includes('LIBUSB_ERROR_ACCESS')) {
-            console.warn('[Engine] Device claimed by another process, trying HID...')
+          if (isPermissionError(lastError)) {
+            permissionDenied = true
+            console.warn('[Engine] WebUSB open denied (likely missing udev rules), trying HID...')
           }
         }
       }
@@ -861,20 +965,24 @@ export class EngineController extends EventEmitter {
           if (wallet) {
             this.activeTransport = 'hid'
             console.log('[Engine] Paired via HID')
-            return { wallet, usbDetected: true, error: null }
+            return { wallet, usbDetected: true, keepKeyOnBus, permissionDenied: false, error: null }
           }
           console.warn('[Engine] HID pairRawDevice returned falsy')
         } catch (err: any) {
           lastError = err?.message || String(err)
           console.warn('[Engine] HID pair failed:', lastError)
+          if (isPermissionError(lastError)) {
+            permissionDenied = true
+            console.warn('[Engine] HID open denied (likely missing udev/hidraw rules)')
+          }
         }
       }
     } catch (err: any) {
       console.warn('[Engine] HID getDevice error:', err?.message || err)
     }
 
-    console.log(`[Engine] initializeWallet done — usbDetected=${usbDetected}, error=${lastError}`)
-    return { wallet: undefined, usbDetected, error: lastError }
+    console.log(`[Engine] initializeWallet done — usbDetected=${usbDetected}, keepKeyOnBus=${keepKeyOnBus}, permissionDenied=${permissionDenied}, error=${lastError}`)
+    return { wallet: undefined, usbDetected, keepKeyOnBus, permissionDenied, error: lastError }
   }
 
   // ── Emulator Transport ────────────────────────────────────────────────
@@ -1059,17 +1167,42 @@ export class EngineController extends EventEmitter {
                 )
               }
 
-              // Verify auto-reload actually took effect
-              const verifyMnemonic = await this.getEmulatorMnemonic()
-              if (!verifyMnemonic) {
-                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
-              } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
-                console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
-                console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
-                console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
-              } else {
-                console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
-              }
+              // Verify auto-reload actually took effect. Race against a 3s
+              // deadline — the DebugLinkGetState read can hang on the dylib
+              // path (separate timing bug). The verify is just a sanity log;
+              // if it hangs, connectEmulator must NOT block forever or the
+              // wizard / dashboard never sees state → ready.
+              //
+              // The underlying readChunk has its own ~240s timeout and we
+              // can't cancel it from here, so the .then below may fire long
+              // after the race resolves. Suppress its log in that case so
+              // the user doesn't see a spurious VERIFY FAIL minutes later.
+              let verifyAbandoned = false
+              const verifyPromise = this.getEmulatorMnemonic()
+                .then(verifyMnemonic => {
+                  if (verifyAbandoned) return
+                  if (!verifyMnemonic) {
+                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
+                  } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
+                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
+                    console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
+                    console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
+                  } else {
+                    console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
+                  }
+                })
+                .catch(err => {
+                  if (verifyAbandoned) return
+                  console.warn('[Engine] AUTO-RELOAD VERIFY error:', err?.message || err)
+                })
+              await Promise.race([
+                verifyPromise,
+                new Promise<void>(resolve => setTimeout(() => {
+                  verifyAbandoned = true
+                  console.warn('[Engine] AUTO-RELOAD VERIFY timed out (3s) — continuing')
+                  resolve()
+                }, 3000)),
+              ])
 
               this.updateState(this.deriveState(this.cachedFeatures))
             } else {
@@ -1191,7 +1324,10 @@ export class EngineController extends EventEmitter {
         const resolved = this.manifest.hashes.bootloader[blHash]
         if (resolved) {
           effectiveBlVersion = resolved.replace(/^v/, '')
-          console.log(`[Engine] Resolved BL hash ${blHash.slice(0, 8)}… → v${effectiveBlVersion}`)
+          if (!this._loggedBlHash) {
+            this._loggedBlHash = true
+            console.log(`[Engine] Resolved BL hash ${blHash.slice(0, 8)}… → v${effectiveBlVersion}`)
+          }
         }
       }
     }
@@ -1227,6 +1363,7 @@ export class EngineController extends EventEmitter {
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
       isHiddenWallet: this.hiddenWalletActive,
+      linuxUdevPermissionDenied: this.linuxUdevPermissionDenied || undefined,
     }
   }
 
@@ -1894,6 +2031,8 @@ export class EngineController extends EventEmitter {
         console.log(`[Engine] Seed identity OK: ${addr.slice(0, 10)}...`)
       }
       setSetting(key, addr)
+      this.emit('wallet-scope-ready', { deviceId, seedAddress: addr })
+      this.emit('state-change', this.getDeviceState())
     } catch (err: any) {
       console.warn('[Engine] checkSeedIdentity failed:', err?.message)
     }

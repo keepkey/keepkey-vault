@@ -8,7 +8,9 @@
 		"initChoose": "Kies installatiemethode",
 		"initProgress": "Wallet configureren",
 		"initLabel": "Geef je apparaat een naam",
-		"complete": "Installatie voltooid!"
+		"complete": "Installatie voltooid!",
+		"verifySeed": "Herstelzin controleren",
+		"securityTips": "Beveiligingstips"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Je KeepKey begeleidt je door het updateproces.",
 		"bootloaderDetected": "Bootloadermodus gedetecteerd",
 		"deviceReadyForUpdate": "Je KeepKey is in bootloadermodus en klaar voor de update.",
-		"updateBootloaderTo": "Bootloader bijwerken naar v{{version}}"
+		"updateBootloaderTo": "Bootloader bijwerken naar v{{version}}",
+		"doNotHoldButton": "Houd de knop NIET ingedrukt bij het opnieuw aansluiten. Sluit het apparaat gewoon normaal aan. Als u de knop ingedrukt houdt, komt het apparaat weer in bootloader-modus."
 	},
 	"firmware": {
 		"title": "Firmware-update",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. Koppel je KeepKey los",
 		"manualReconnectStep2": "2. Wacht 5 seconden",
 		"manualReconnectStep3": "3. Sluit opnieuw aan",
-		"manualReconnectNote": "De installatie gaat automatisch verder zodra het apparaat wordt gedetecteerd."
+		"manualReconnectNote": "De installatie gaat automatisch verder zodra het apparaat wordt gedetecteerd.",
+		"unsignedBootloaderWarning": "U installeert niet-ondertekende firmware (ontwikkelaarsfirmware). Als dit apparaat eerder ondertekende (officiële) firmware draaide, worden alle gegevens gewist. Dit is een door hardware afgedwongen beveiligingsgrens; hetzelfde geldt bij teruggaan naar ondertekende firmware.",
+		"unsignedBootloaderAcknowledge": "Ik begrijp dat dit het apparaat kan wissen en ik heb mijn seed geback-upt",
+		"autoRebooting": "Uw apparaat wordt opnieuw opgestart...",
+		"autoRebootingDetail": "Uw KeepKey start automatisch opnieuw op met de nieuwe firmware. Dit duurt meestal enkele seconden.",
+		"waitingForDevice": "Wachten op uw apparaat...",
+		"wipeAndFlash": "Wissen en flashen"
 	},
 	"initChoose": {
 		"title": "Stel je wallet in",
@@ -123,7 +132,12 @@
 		"createWallet": "Wallet aanmaken",
 		"recoverExistingWallet": "Bestaande wallet herstellen",
 		"recoverDescription": "Voer je herstelzin in op het apparaat",
-		"recoverWallet": "Wallet herstellen"
+		"recoverWallet": "Wallet herstellen",
+		"seedLength": "Seed-lengte",
+		"words": "woorden",
+		"entropyNote": "Extra seed-lengte verbetert de totale wallet-entropie niet.",
+		"learnMore": "Meer informatie",
+		"howManyWords": "Hoeveel woorden zitten er in uw seed?"
 	},
 	"initProgress": {
 		"creatingWallet": "Wallet aanmaken...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Volg de aanwijzingen op het scherm van je KeepKey.",
 		"lookAtDevice": "Kijk naar je KeepKey-apparaat en volg de instructies op het scherm.",
 		"failedToCreate": "Wallet aanmaken mislukt",
-		"failedToRecover": "Wallet herstellen mislukt"
+		"failedToRecover": "Wallet herstellen mislukt",
+		"writeDownWarning": "Schrijf elk woord op!",
+		"writeDownDetail": "Uw herstelzin wordt op het apparaatscherm weergegeven. Schrijf elk woord op papier. Dit is uw ENIGE back-up; u zult deze woorden NIET opnieuw zien.",
+		"deviceLost": "Apparaat losgekoppeld. Sluit het opnieuw aan om door te gaan, of ga terug om het opnieuw te proberen.",
+		"goBack": "Terug"
 	},
 	"initLabel": {
 		"walletCreated": "Wallet aangemaakt!",
@@ -155,6 +173,65 @@
 		"stepOf": "Stap {{current}} van {{total}}",
 		"settingUpWallet": "Wallet instellen...",
 		"previous": "Vorige",
-		"next": "Volgende"
+		"next": "Volgende",
+		"securityTips": "Beveiligingstips"
+	},
+	"verifySeed": {
+		"title": "Herstelzin controleren",
+		"descriptionEmulator": "We vragen om 3 willekeurige woorden uit uw seed om te bevestigen dat uw back-up klopt.",
+		"description": "Bevestig dat u uw herstelzin correct hebt opgeschreven. Uw apparaat vraagt u enkele woorden in te voeren.",
+		"verifyNow": "Nu controleren",
+		"skipForNow": "Overslaan; later controleren",
+		"enterWords": "Voer de gevraagde woorden in",
+		"enterWordsDetail": "Typ het juiste woord voor elke positie uit uw herstelzin.",
+		"checkWords": "Woorden controleren",
+		"verifying": "Controleren...",
+		"checkingAnswers": "Antwoorden controleren...",
+		"followDevice": "Volg de aanwijzingen op uw KeepKey om de gevraagde woorden in te voeren.",
+		"verified": "Herstelzin gecontroleerd!",
+		"verifiedDetail": "Uw back-up is correct. Bewaar hem veilig en deel hem nooit met iemand.",
+		"continue": "Doorgaan",
+		"failed": "Controle mislukt",
+		"failedDetail": "De ingevoerde woorden komen niet overeen. Probeer het opnieuw of controleer uw geschreven back-up.",
+		"tryAgain": "Opnieuw proberen"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Uw PIN is gehusseld",
+				"body": "Uw KeepKey toont een willekeurig cijferraster. Koppel de posities op het scherm aan de cijfers op het apparaat. De indeling verandert elke keer zodat meekijkers uw PIN niet kunnen stelen."
+			},
+			"words": {
+				"title": "Uw woorden = uw wallet",
+				"body": "Schrijf uw 12/24 woorden op papier. Bewaar ze veilig. Typ ze nooit op een computer, website of telefoon. Iedereen met deze woorden beheert uw geld."
+			},
+			"recovery": {
+				"title": "Gehusselde herstelinvoer",
+				"body": "Bij herstel husselt KeepKey het alfabet op het apparaatscherm. U voert woorden in op positie, nooit door de echte letters te typen. Keyloggers zien niets bruikbaars."
+			},
+			"deviceScreen": {
+				"title": "Vertrouw op het apparaatscherm",
+				"body": "Bevestig altijd het adres en bedrag op uw KeepKey voordat u goedkeurt. Uw computer kan gecompromitteerd zijn; het apparaatscherm niet. Zeker bij grote transacties."
+			},
+			"appConnections": {
+				"title": "App-verbindingen staan uit",
+				"body": "Apps van derden en dApps verbinden via de REST API. Die staat standaard uit voor uw bescherming. Schakel hem alleen in Instellingen in wanneer nodig."
+			},
+			"hiddenWallets": {
+				"title": "Verborgen wallets (geavanceerd)",
+				"body": "Een passphrase maakt een aparte verborgen wallet uit dezelfde seed. Als dit aanstaat, MOET u die onthouden: een verkeerde passphrase opent een andere lege wallet, geen foutmelding."
+			}
+		},
+		"actions": {
+			"getStarted": "Aan de slag",
+			"startUsing": "KeepKey gebruiken",
+			"skipIntro": "Intro overslaan",
+			"skipTips": "Tips overslaan"
+		},
+		"stepCounter": "{{current}} van {{total}}",
+		"walletLabels": {
+			"visible": "zichtbaar",
+			"hidden": "verborgen"
+		}
 	}
 }

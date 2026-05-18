@@ -33,14 +33,14 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
   // Hidden for idle and checking phases
   if (phase === "idle" || phase === "checking") return null
 
-  // Warning/error: render as subtle bottom-right toast
+  // Warning/error: subtle bottom-right toast
   if (phase === "warning" || phase === "error") {
     if (!toastVisible) return null
 
     const isError = phase === "error"
-    const bg = isError ? "rgba(255,23,68,0.12)" : "rgba(251,191,36,0.08)"
-    const border = isError ? "rgba(255,23,68,0.25)" : "rgba(251,191,36,0.18)"
-    const accent = isError ? "#FF6B6B" : "#FBBF24"
+    const accent = isError ? "var(--rose)" : "var(--gold)"
+    const bg     = isError ? "rgba(224,140,123,0.10)" : "rgba(233,196,106,0.08)"
+    const border = isError ? "rgba(224,140,123,0.25)" : "rgba(233,196,106,0.22)"
 
     return (
       <Box
@@ -48,7 +48,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
         bottom="16px"
         right="16px"
         zIndex={999}
-        maxW="340px"
+        maxW="360px"
         opacity={toastVisible ? 1 : 0}
         transform={toastVisible ? "translateY(0)" : "translateY(8px)"}
         transition="opacity 0.3s, transform 0.3s"
@@ -58,59 +58,39 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
           bg={bg}
           border="1px solid"
           borderColor={border}
-          borderRadius="lg"
-          px="3"
+          borderRadius="999px"
+          px="3.5"
           py="2"
-          gap="2"
-          backdropFilter="blur(8px)"
+          gap="2.5"
+          backdropFilter="blur(12px)"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-            {isError ? (
-              <>
-                <path d="M12 2L1 21h22L12 2z" fill={accent} />
-                <path d="M12 9v4M12 17h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
-              </>
-            ) : (
-              <>
-                <circle cx="12" cy="12" r="10" fill={accent} />
-                <path d="M12 8v4M12 16h.01" stroke="white" strokeWidth="2" strokeLinecap="round" />
-              </>
-            )}
-          </svg>
-          <Text fontSize="xs" color={accent} flex="1" minW="0" truncate>
+          <Box w="6px" h="6px" borderRadius="full" bg={accent} flexShrink={0} />
+          <Text fontSize="12px" color="var(--text-1)" flex="1" minW="0" truncate letterSpacing="-0.005em">
             {isError
               ? t("errorWithMessage", { error: error || message || "Unknown error" })
               : t("checkFailed", { defaultValue: "Update check failed" })}
           </Text>
-          <Button
-            size="xs"
-            variant="ghost"
-            color="kk.textSecondary"
-            _hover={{ color: "kk.textPrimary" }}
+          <Box
+            as="button"
             onClick={() => { setToastVisible(false); onDismiss() }}
+            color="var(--text-3)"
+            _hover={{ color: "var(--text-0)" }}
+            cursor="pointer"
+            fontSize="13px"
+            lineHeight="1"
             px="1"
-            minW="auto"
-            h="auto"
           >
             ✕
-          </Button>
+          </Box>
         </Flex>
       </Box>
     )
   }
 
-  // Actionable phases (available, downloading, ready, applying): full-width top banner
-  const bgColor =
-    phase === "ready" ? "rgba(34,197,94,0.12)"
-    : "rgba(192,168,96,0.12)"
-
-  const borderColor =
-    phase === "ready" ? "rgba(34,197,94,0.3)"
-    : "rgba(192,168,96,0.3)"
-
-  const accentColor =
-    phase === "ready" ? "#22C55E"
-    : "kk.gold"
+  // Actionable phases: full-width top banner
+  const isReady = phase === "ready"
+  const accentColor = isReady ? "var(--teal)" : "var(--gold)"
+  const accentRgb   = isReady ? "139,227,196"  : "233,196,106"
 
   return (
     <Box
@@ -125,35 +105,34 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
       <Flex
         align="center"
         justify="space-between"
-        bg={bgColor}
+        bg={`rgba(${accentRgb},0.08)`}
         border="1px solid"
-        borderColor={borderColor}
-        borderRadius="lg"
+        borderColor={`rgba(${accentRgb},0.22)`}
+        borderRadius="14px"
         px="4"
         py="2.5"
         mx="auto"
         maxW="900px"
         mt="2"
         gap="3"
+        backdropFilter="blur(8px)"
       >
-        {/* Icon */}
         <Flex align="center" gap="3" flex="1" minW="0">
-          {phase === "ready" ? (
+          {isReady ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" fill="#22C55E" />
-              <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="12" cy="12" r="10" fill={accentColor} />
+              <path d="M9 12l2 2 4-4" stroke="var(--ink-0)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
           )}
 
-          {/* Text */}
           <Box flex="1" minW="0">
-            <Text fontSize="sm" color={accentColor} fontWeight="500" truncate>
+            <Text fontSize="13px" color={accentColor} fontWeight="500" truncate letterSpacing="-0.005em">
               {phase === "available" && t("newVersionAvailable")}
               {phase === "downloading" && (
                 progress !== undefined
@@ -163,33 +142,57 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
               {phase === "ready" && t("readyToInstall")}
               {phase === "applying" && t("applying")}
             </Text>
-            {/* Progress bar for downloading */}
             {phase === "downloading" && progress !== undefined && (
-              <Box mt="1" h="3px" bg="rgba(255,255,255,0.1)" borderRadius="full" overflow="hidden">
-                <Box h="100%" w={`${Math.min(progress, 100)}%`} bg="kk.gold" borderRadius="full" transition="width 0.3s" />
+              <Box mt="1.5" h="3px" bg="var(--ink-3)" borderRadius="999px" overflow="hidden">
+                <Box h="100%" w={`${Math.min(progress, 100)}%`} bg="var(--gold)" borderRadius="999px" transition="width 0.3s" />
               </Box>
             )}
           </Box>
         </Flex>
 
-        {/* Actions */}
         <Flex gap="2" flexShrink={0}>
           {phase === "available" && (
             <>
-              <Button size="xs" bg="kk.gold" color="black" _hover={{ bg: "kk.goldHover" }} onClick={onDownload}>
+              <Button
+                size="xs"
+                bg="var(--gold)"
+                color="var(--ink-0)"
+                fontWeight="600"
+                _hover={{ bg: "var(--gold-2)" }}
+                onClick={onDownload}
+              >
                 {t("download")}
               </Button>
-              <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
+              <Button
+                size="xs"
+                variant="ghost"
+                color="var(--text-2)"
+                _hover={{ color: "var(--text-0)" }}
+                onClick={onDismiss}
+              >
                 {t("later")}
               </Button>
             </>
           )}
           {phase === "ready" && (
             <>
-              <Button size="xs" bg="#22C55E" color="white" _hover={{ bg: "#16A34A" }} onClick={onApply}>
+              <Button
+                size="xs"
+                bg="var(--teal)"
+                color="var(--ink-0)"
+                fontWeight="600"
+                _hover={{ bg: "var(--teal-2)" }}
+                onClick={onApply}
+              >
                 {t("restartToUpdate")}
               </Button>
-              <Button size="xs" variant="ghost" color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} onClick={onDismiss}>
+              <Button
+                size="xs"
+                variant="ghost"
+                color="var(--text-2)"
+                _hover={{ color: "var(--text-0)" }}
+                onClick={onDismiss}
+              >
                 {t("later")}
               </Button>
             </>

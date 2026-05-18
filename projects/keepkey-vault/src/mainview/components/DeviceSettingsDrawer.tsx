@@ -121,10 +121,10 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 		return (
 			<Flex align="center" gap="1">
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-					<circle cx="12" cy="12" r="10" fill="#22C55E" />
+					<circle cx="12" cy="12" r="10" fill="var(--teal)" />
 					<path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 				</svg>
-				<Text fontSize="11px" color="#22C55E" fontWeight="600">{t("official")}</Text>
+				<Text fontSize="11px" color="var(--teal)" fontWeight="600">{t("official")}</Text>
 			</Flex>
 		)
 	}
@@ -162,6 +162,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
+	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
+	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
@@ -191,6 +193,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		}
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => setAppSettings(s))
+			.catch(() => {})
+		rpcRequest<{ refs: number; alwaysOnTop: boolean }>("getWindowFocusState")
+			.then(s => setWindowFocusState(s))
 			.catch(() => {})
 	}, [open, deviceState.state])
 
@@ -267,6 +272,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setResetting(false)
 			setResetConfirm(false)
 		}
+	}, [])
+
+	const forceReleaseWindowFocus = useCallback(async () => {
+		setReleasingWindowFocus(true)
+		try {
+			await rpcRequest("forceReleaseWindowFocus", undefined, 5000)
+			const updated = await rpcRequest<{ refs: number; alwaysOnTop: boolean }>("getWindowFocusState")
+			setWindowFocusState(updated)
+		} catch (e: any) { console.error("forceReleaseWindowFocus:", e) }
+		setReleasingWindowFocus(false)
 	}, [])
 
 	const toggleRestApi = useCallback(async (enabled: boolean) => {
@@ -705,8 +720,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 										<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 									</svg>
@@ -725,13 +740,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="rgba(192,168,96,0.12)"
+										bg="rgba(233,196,106,0.12)"
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
 										cursor={changingPin ? "not-allowed" : "pointer"}
 										opacity={changingPin ? 0.5 : 1}
-										_hover={{ bg: "rgba(192,168,96,0.22)" }}
+										_hover={{ bg: "rgba(233,196,106,0.22)" }}
 										transition="all 0.15s"
 										onClick={handleChangePin}
 									>
@@ -794,13 +809,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									px="3"
 									py="1.5"
 									borderRadius="full"
-									bg="rgba(192,168,96,0.12)"
+									bg="rgba(233,196,106,0.12)"
 									color="kk.gold"
 									fontSize="xs"
 									fontWeight="500"
 									cursor={changingPin ? "not-allowed" : "pointer"}
 									opacity={changingPin ? 0.5 : 1}
-									_hover={{ bg: "rgba(192,168,96,0.22)" }}
+									_hover={{ bg: "rgba(233,196,106,0.22)" }}
 									transition="all 0.15s"
 									onClick={handleChangePin}
 								>
@@ -818,8 +833,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<path d="M12 2a5 5 0 0 1 5 5v3H7V7a5 5 0 0 1 5-5z" />
 										<rect x="3" y="10" width="18" height="12" rx="2" />
 										<path d="M12 14v4" />
@@ -848,8 +863,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						<Box py="3">
 							<Flex align="center" justify="space-between">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 											<path d="M9 12l2 2 4-4" />
 										</svg>
@@ -869,13 +884,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									px="3"
 									py="1.5"
 									borderRadius="full"
-									bg="rgba(192,168,96,0.12)"
+									bg="rgba(233,196,106,0.12)"
 									color="kk.gold"
 									fontSize="xs"
 									fontWeight="500"
 									cursor={verifying ? "not-allowed" : "pointer"}
 									opacity={verifying ? 0.5 : 1}
-									_hover={{ bg: "rgba(192,168,96,0.22)" }}
+									_hover={{ bg: "rgba(233,196,106,0.22)" }}
 									transition="all 0.15s"
 									onClick={verifySeed}
 								>
@@ -973,8 +988,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M4 11a9 9 0 0 1 9 9" />
 											<path d="M4 4a16 16 0 0 1 16 16" />
 											<circle cx="5" cy="19" r="1" />
@@ -995,17 +1010,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Flex>
 
 							{/* API Bridge status */}
-							<Box bg="rgba(192,168,96,0.08)" borderRadius="lg" px="3" py="3">
+							<Box bg="rgba(233,196,106,0.08)" borderRadius="lg" px="3" py="3">
 								<Flex align="center" justify="space-between">
 									<Flex align="center" gap="2">
 										<Box
 											w="8px"
 											h="8px"
 											borderRadius="full"
-											bg={appSettings.restApiEnabled ? "#22C55E" : "#EF4444"}
+											bg={appSettings.restApiEnabled ? "var(--teal)" : "var(--rose)"}
 											boxShadow={appSettings.restApiEnabled ? "0 0 6px rgba(34,197,94,0.5)" : "0 0 6px rgba(239,68,68,0.4)"}
 										/>
-										<Text fontSize="sm" fontWeight="500" color={appSettings.restApiEnabled ? "#22C55E" : "#EF4444"}>
+										<Text fontSize="sm" fontWeight="500" color={appSettings.restApiEnabled ? "var(--teal)" : "var(--rose)"}>
 											{appSettings.restApiEnabled ? t("running") : t("stopped")}
 										</Text>
 									</Flex>
@@ -1071,13 +1086,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="rgba(192,168,96,0.12)"
+										bg="rgba(233,196,106,0.12)"
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
 										cursor={deviceState.state !== "ready" ? "not-allowed" : "pointer"}
 										opacity={deviceState.state !== "ready" ? 0.4 : 1}
-										_hover={deviceState.state === "ready" ? { bg: "rgba(192,168,96,0.22)" } : {}}
+										_hover={deviceState.state === "ready" ? { bg: "rgba(233,196,106,0.22)" } : {}}
 										transition="all 0.15s"
 										onClick={() => { if (deviceState.state === "ready") onOpenMobilePairing?.() }}
 									>
@@ -1101,13 +1116,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										px="3"
 										py="1.5"
 										borderRadius="full"
-										bg="rgba(192,168,96,0.12)"
+										bg="rgba(233,196,106,0.12)"
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
 										cursor={checkingUpdate ? "not-allowed" : "pointer"}
 										opacity={checkingUpdate ? 0.5 : 1}
-										_hover={{ bg: "rgba(192,168,96,0.22)" }}
+										_hover={{ bg: "rgba(233,196,106,0.22)" }}
 										transition="all 0.15s"
 										onClick={handleCheckForUpdate}
 									>
@@ -1134,8 +1149,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								{updatePhase === "ready" && onApplyUpdate && (
 									<Box
 										as="button" mt="2" px="3" py="1.5" borderRadius="full"
-										bg="#22C55E" color="white" fontSize="xs" fontWeight="600"
-										cursor="pointer" _hover={{ bg: "#16A34A" }}
+										bg="var(--teal)" color="white" fontSize="xs" fontWeight="600"
+										cursor="pointer" _hover={{ bg: "var(--teal)" }}
 										onClick={onApplyUpdate}
 									>
 										{t("restartToUpdate", { defaultValue: "Restart & Install" })}
@@ -1152,6 +1167,54 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										{t("downloadManually", { defaultValue: "Download from GitHub" })}
 									</Box>
 								)}
+							</Box>
+
+							{/* Always on Top status + override */}
+							<Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
+								<Flex align="center" justify="space-between">
+									<Flex align="center" gap="3">
+										<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.07)">
+											<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+												<rect x="3" y="3" width="18" height="18" rx="2" />
+												<path d="M9 9h6M9 12h6M9 15h4" />
+											</svg>
+										</Flex>
+										<Box>
+											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Always on Top</Text>
+											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+												{windowFocusState === null
+													? "Loading..."
+													: windowFocusState.alwaysOnTop
+														? `Active — ${windowFocusState.refs} request${windowFocusState.refs === 1 ? "" : "s"} holding focus`
+														: "Inactive — window behaves normally"
+												}
+											</Text>
+										</Box>
+									</Flex>
+									{windowFocusState?.alwaysOnTop && (
+										<Box
+											as="button"
+											px="3"
+											py="1.5"
+											borderRadius="full"
+											bg="rgba(255,100,60,0.12)"
+											color="#FF6B6B"
+											fontSize="xs"
+											fontWeight="500"
+											cursor={releasingWindowFocus ? "not-allowed" : "pointer"}
+											opacity={releasingWindowFocus ? 0.5 : 1}
+											_hover={{ bg: "rgba(255,100,60,0.22)" }}
+											transition="all 0.15s"
+											onClick={forceReleaseWindowFocus}
+										>
+											{releasingWindowFocus ? "..." : "Force Release"}
+										</Box>
+									)}
+								</Flex>
+								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">
+									Vault raises itself to the front when a signing or pairing request arrives.
+									Use Force Release if the window is stuck on top after a cancelled request.
+								</Text>
 							</Box>
 
 							{/* Pre-release updates toggle */}
@@ -1252,11 +1315,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* Swaps toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
 									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#23DCC8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M16 3l5 5-5 5" />
 											<path d="M21 8H9" />
 											<path d="M8 21l-5-5 5-5" />
@@ -1277,14 +1339,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.15.0 */}
+							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.16.0 */}
 							{(() => {
-								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
+								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.16.0') >= 0
 								return (
 									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
 										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(192,168,96,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 													<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 												</svg>
@@ -1292,7 +1354,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											<Box>
 												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
 												<Text fontSize="sm" color={bip85FwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.15.0 or later"}
+													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.16.0 or later"}
 												</Text>
 											</Box>
 										</Flex>

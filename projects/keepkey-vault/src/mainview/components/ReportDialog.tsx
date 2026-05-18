@@ -13,8 +13,8 @@ import keepkeyLogo from "../assets/icon.png"
 type ExportFormat = "pdf" | "csv" | "cointracker" | "zenledger"
 
 const EXPORT_OPTIONS: { key: ExportFormat; label: string; sub: string; logo: string; bg: string }[] = [
-	{ key: "pdf", label: "KeepKey PDF", sub: "Full portfolio report", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
-	{ key: "csv", label: "KeepKey CSV", sub: "Full portfolio data", logo: keepkeyLogo, bg: "rgba(192,168,96,0.10)" },
+	{ key: "pdf", label: "KeepKey PDF", sub: "Full portfolio report", logo: keepkeyLogo, bg: "rgba(233,196,106,0.10)" },
+	{ key: "csv", label: "KeepKey CSV", sub: "Full portfolio data", logo: keepkeyLogo, bg: "rgba(233,196,106,0.10)" },
 	// TODO: Re-enable when tax report data is populated
 	// { key: "cointracker", label: "CoinTracker", sub: "Tax transactions", logo: coinTrackerLogo, bg: "rgba(255,255,255,0.05)" },
 	// { key: "zenledger", label: "ZenLedger", sub: "Tax transactions", logo: zenLedgerLogo, bg: "rgba(255,255,255,0.05)" },
@@ -157,9 +157,9 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 					<Box
 						p="3"
 						mb="4"
-						bg="rgba(192,168,96,0.06)"
+						bg="rgba(233,196,106,0.06)"
 						border="1px solid"
-						borderColor="rgba(192,168,96,0.15)"
+						borderColor="rgba(233,196,106,0.15)"
 						borderRadius="lg"
 					>
 						<Text fontSize="10px" color="kk.gold" lineHeight="1.5">
@@ -220,12 +220,12 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 						<Box
 							p="3"
 							mb="4"
-							bg="rgba(220,53,69,0.08)"
+							bg="rgba(224,140,123,0.08)"
 							border="1px solid"
-							borderColor="rgba(220,53,69,0.3)"
+							borderColor="rgba(224,140,123,0.3)"
 							borderRadius="lg"
 						>
-							<Text fontSize="xs" color="#DC3545">{error}</Text>
+							<Text fontSize="xs" color="var(--rose)">{error}</Text>
 						</Box>
 					)}
 
@@ -253,7 +253,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 											<Text fontSize="xs" fontWeight="600" color="white">
 												Full Detail Report
 											</Text>
-											<Text fontSize="10px" color={r.status === "error" ? "#DC3545" : "kk.textMuted"}>
+											<Text fontSize="10px" color={r.status === "error" ? "var(--rose)" : "kk.textMuted"}>
 												{r.status === "error" ? "Failed" : fmtCompact(r.totalUsd)}
 											</Text>
 										</Flex>
@@ -261,7 +261,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 											{new Date(r.createdAt).toLocaleString(fiatLocale)}
 										</Text>
 										{r.error && (
-											<Text fontSize="10px" color="#DC3545" mb="3">{r.error}</Text>
+											<Text fontSize="10px" color="var(--rose)" mb="3">{r.error}</Text>
 										)}
 
 										{/* Export buttons with logos */}
@@ -279,11 +279,11 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 															p="2"
 															bg={bg}
 															border="1px solid"
-															borderColor="rgba(192,168,96,0.2)"
+															borderColor="rgba(233,196,106,0.2)"
 															borderRadius="lg"
 															cursor={isSavingThis ? "default" : "pointer"}
 															opacity={isSavingThis ? 0.5 : 1}
-															_hover={isSavingThis ? {} : { borderColor: "kk.gold", bg: "rgba(192,168,96,0.15)" }}
+															_hover={isSavingThis ? {} : { borderColor: "kk.gold", bg: "rgba(233,196,106,0.15)" }}
 															transition="all 0.15s"
 															onClick={() => !isSavingThis && handleDownload(r.id, key)}
 														>
@@ -323,7 +323,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 														fontSize="10px"
 														fontWeight="600"
 														color="white"
-														bg="#DC3545"
+														bg="var(--rose)"
 														borderRadius="md"
 														cursor="pointer"
 														onClick={() => handleDelete(r.id)}
@@ -360,7 +360,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 													borderColor="kk.border"
 													borderRadius="md"
 													cursor="pointer"
-													_hover={{ borderColor: "#DC3545", color: "#DC3545" }}
+													_hover={{ borderColor: "var(--rose)", color: "var(--rose)" }}
 													onClick={() => setConfirmDeleteId(r.id)}
 												>
 													Delete

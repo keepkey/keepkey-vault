@@ -50,7 +50,7 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 				zIndex={1}
 			>
 				<Flex align="center" gap="2">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
 						<line x1="12" y1="18" x2="12.01" y2="18" />
 					</svg>
@@ -78,7 +78,7 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 				{/* ── Get the App ───────────────────────────────── */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" mb="4">
 					<Flex align="center" gap="2" mb="3">
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 							<polyline points="7 10 12 15 17 10" />
 							<line x1="12" y1="15" x2="12" y2="3" />
@@ -114,13 +114,13 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 						w="100%"
 						py="2.5"
 						borderRadius="lg"
-						bg="rgba(192,168,96,0.12)"
+						bg="rgba(233,196,106,0.12)"
 						color="kk.gold"
 						fontSize="sm"
 						fontWeight="500"
 						cursor="pointer"
 						textAlign="center"
-						_hover={{ bg: "rgba(192,168,96,0.22)" }}
+						_hover={{ bg: "rgba(233,196,106,0.22)" }}
 						transition="all 0.15s"
 						onClick={() => rpcRequest("openUrl", { url: APP_STORE_URL })}
 					>
@@ -131,7 +131,7 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 				{/* ── Pair Device ───────────────────────────────── */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" mb="4">
 					<Flex align="center" gap="2" mb="3">
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
 							<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
 						</svg>
@@ -149,7 +149,7 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 						w="100%"
 						py="2.5"
 						borderRadius="lg"
-						bg={deviceReady ? "kk.gold" : "rgba(192,168,96,0.12)"}
+						bg={deviceReady ? "kk.gold" : "rgba(233,196,106,0.12)"}
 						color={deviceReady ? "black" : "kk.textMuted"}
 						fontSize="sm"
 						fontWeight="600"

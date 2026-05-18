@@ -8,7 +8,9 @@
 		"initChoose": "Chọn phương thức thiết lập",
 		"initProgress": "Đang thiết lập ví",
 		"initLabel": "Đặt tên cho thiết bị",
-		"complete": "Thiết lập hoàn tất!"
+		"complete": "Thiết lập hoàn tất!",
+		"verifySeed": "Xác minh cụm từ khôi phục",
+		"securityTips": "Mẹo bảo mật"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "KeepKey của bạn sẽ hướng dẫn bạn qua quá trình cập nhật.",
 		"bootloaderDetected": "Đã phát hiện chế độ bootloader",
 		"deviceReadyForUpdate": "KeepKey của bạn đang ở chế độ bootloader và sẵn sàng cập nhật.",
-		"updateBootloaderTo": "Cập nhật bootloader lên v{{version}}"
+		"updateBootloaderTo": "Cập nhật bootloader lên v{{version}}",
+		"doNotHoldButton": "KHÔNG giữ nút khi kết nối lại. Chỉ cần cắm thiết bị bình thường. Giữ nút sẽ đưa thiết bị trở lại chế độ bootloader."
 	},
 	"firmware": {
 		"title": "Cập nhật phần mềm",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. Rút KeepKey ra",
 		"manualReconnectStep2": "2. Đợi 5 giây",
 		"manualReconnectStep3": "3. Cắm lại",
-		"manualReconnectNote": "Thiết lập sẽ tự động tiếp tục khi phát hiện thiết bị."
+		"manualReconnectNote": "Thiết lập sẽ tự động tiếp tục khi phát hiện thiết bị.",
+		"unsignedBootloaderWarning": "Bạn đang cài firmware chưa ký (dành cho nhà phát triển). Nếu thiết bị này trước đó chạy firmware đã ký (chính thức), toàn bộ dữ liệu sẽ bị xóa. Đây là ranh giới bảo mật do phần cứng áp đặt; điều tương tự áp dụng khi quay lại firmware đã ký.",
+		"unsignedBootloaderAcknowledge": "Tôi hiểu việc này có thể xóa thiết bị và tôi đã sao lưu seed",
+		"autoRebooting": "Thiết bị của bạn đang khởi động lại...",
+		"autoRebootingDetail": "KeepKey sẽ tự động khởi động lại với firmware mới. Việc này thường mất vài giây.",
+		"waitingForDevice": "Đang chờ thiết bị của bạn...",
+		"wipeAndFlash": "Xóa và cài đặt"
 	},
 	"initChoose": {
 		"title": "Thiết lập ví của bạn",
@@ -123,7 +132,12 @@
 		"createWallet": "Tạo ví",
 		"recoverExistingWallet": "Khôi phục ví hiện có",
 		"recoverDescription": "Nhập cụm từ khôi phục trên thiết bị",
-		"recoverWallet": "Khôi phục ví"
+		"recoverWallet": "Khôi phục ví",
+		"seedLength": "Độ dài seed",
+		"words": "từ",
+		"entropyNote": "Tăng độ dài seed không cải thiện entropy tổng thể của ví.",
+		"learnMore": "Tìm hiểu thêm",
+		"howManyWords": "Seed của bạn có bao nhiêu từ?"
 	},
 	"initProgress": {
 		"creatingWallet": "Đang tạo ví...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Thực hiện theo hướng dẫn trên màn hình KeepKey.",
 		"lookAtDevice": "Nhìn vào thiết bị KeepKey và thực hiện theo hướng dẫn trên màn hình.",
 		"failedToCreate": "Không thể tạo ví",
-		"failedToRecover": "Không thể khôi phục ví"
+		"failedToRecover": "Không thể khôi phục ví",
+		"writeDownWarning": "Hãy ghi lại từng từ!",
+		"writeDownDetail": "Cụm từ khôi phục của bạn đang hiển thị trên màn hình thiết bị. Ghi từng từ ra giấy. Đây là bản sao lưu DUY NHẤT; bạn sẽ KHÔNG thấy lại các từ này.",
+		"deviceLost": "Thiết bị đã ngắt kết nối. Cắm lại để tiếp tục, hoặc quay lại để thử lại.",
+		"goBack": "Quay lại"
 	},
 	"initLabel": {
 		"walletCreated": "Ví đã được tạo!",
@@ -155,6 +173,65 @@
 		"stepOf": "Bước {{current}} trên {{total}}",
 		"settingUpWallet": "Đang thiết lập ví...",
 		"previous": "Trước",
-		"next": "Tiếp"
+		"next": "Tiếp",
+		"securityTips": "Mẹo bảo mật"
+	},
+	"verifySeed": {
+		"title": "Xác minh cụm từ khôi phục",
+		"descriptionEmulator": "Chúng tôi sẽ hỏi 3 từ ngẫu nhiên trong seed để xác nhận bạn có bản sao lưu đúng.",
+		"description": "Xác nhận rằng bạn đã ghi đúng cụm từ khôi phục. Thiết bị sẽ yêu cầu bạn nhập một số từ.",
+		"verifyNow": "Xác minh ngay",
+		"skipForNow": "Bỏ qua; tôi sẽ xác minh sau",
+		"enterWords": "Nhập các từ được yêu cầu",
+		"enterWordsDetail": "Nhập đúng từ cho từng vị trí trong cụm từ khôi phục.",
+		"checkWords": "Kiểm tra từ",
+		"verifying": "Đang xác minh...",
+		"checkingAnswers": "Đang kiểm tra câu trả lời...",
+		"followDevice": "Làm theo hướng dẫn trên KeepKey để nhập các từ được yêu cầu.",
+		"verified": "Cụm từ khôi phục đã được xác minh!",
+		"verifiedDetail": "Bản sao lưu của bạn chính xác. Hãy giữ an toàn và không bao giờ chia sẻ với ai.",
+		"continue": "Tiếp tục",
+		"failed": "Xác minh thất bại",
+		"failedDetail": "Các từ bạn nhập không khớp. Vui lòng thử lại hoặc kiểm tra bản sao lưu đã ghi.",
+		"tryAgain": "Thử lại"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "PIN của bạn được xáo trộn",
+				"body": "KeepKey hiển thị một lưới số ngẫu nhiên. Hãy khớp vị trí trên màn hình với số trên thiết bị. Bố cục thay đổi mỗi lần để người nhìn trộm không thể lấy PIN của bạn."
+			},
+			"words": {
+				"title": "Từ của bạn = ví của bạn",
+				"body": "Ghi 12/24 từ ra giấy. Cất chúng ở nơi an toàn. Không bao giờ nhập chúng vào máy tính, trang web hoặc điện thoại. Ai có các từ này sẽ kiểm soát tiền của bạn."
+			},
+			"recovery": {
+				"title": "Nhập khôi phục được xáo trộn",
+				"body": "Khi khôi phục, KeepKey xáo trộn bảng chữ cái trên màn hình thiết bị. Bạn nhập từ theo vị trí, không bao giờ gõ chữ cái thật. Keylogger không thấy gì hữu ích."
+			},
+			"deviceScreen": {
+				"title": "Tin vào màn hình thiết bị",
+				"body": "Luôn xác nhận địa chỉ và số tiền trên KeepKey trước khi phê duyệt. Máy tính có thể bị xâm nhập; màn hình thiết bị thì không. Đặc biệt với giao dịch lớn."
+			},
+			"appConnections": {
+				"title": "Kết nối ứng dụng đang tắt",
+				"body": "Ứng dụng bên thứ ba và dApp kết nối qua REST API. Tính năng này tắt mặc định để bảo vệ bạn. Chỉ bật trong Cài đặt khi cần."
+			},
+			"hiddenWallets": {
+				"title": "Ví ẩn (nâng cao)",
+				"body": "Passphrase tạo một ví ẩn riêng từ cùng seed. Nếu bật, bạn PHẢI nhớ nó: passphrase sai sẽ mở một ví trống khác, không phải lỗi."
+			}
+		},
+		"actions": {
+			"getStarted": "Bắt đầu",
+			"startUsing": "Bắt đầu dùng KeepKey",
+			"skipIntro": "Bỏ qua giới thiệu",
+			"skipTips": "Bỏ qua mẹo"
+		},
+		"stepCounter": "{{current}} / {{total}}",
+		"walletLabels": {
+			"visible": "hiển thị",
+			"hidden": "ẩn"
+		}
 	}
 }

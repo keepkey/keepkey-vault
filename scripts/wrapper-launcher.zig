@@ -98,6 +98,7 @@ extern "kernel32" fn CreateProcessW(?[*:0]const u16, ?[*:0]u16, ?*anyopaque, ?*a
 extern "kernel32" fn CloseHandle(HANDLE) callconv(.winapi) BOOL;
 extern "kernel32" fn GetModuleHandleW(?[*:0]const u16) callconv(.winapi) HINSTANCE;
 extern "kernel32" fn Sleep(DWORD) callconv(.winapi) void;
+extern "kernel32" fn SetEnvironmentVariableW([*:0]const u16, ?[*:0]const u16) callconv(.winapi) BOOL;
 
 // user32
 extern "user32" fn RegisterClassExW(*const WNDCLASSEXW) callconv(.winapi) u16;
@@ -400,15 +401,25 @@ pub fn main() !void {
     }
 
     // ── Launch the real app ─────────────────────────────────────────
-    const launcher_path = try std.fs.path.join(a, &.{ exe_dir, "bin", "launcher.exe" });
+    // Launch through Electrobun's stock launcher so BrowserWindow initializes
+    // on the supported runtime path. Export BUN_OPTIONS so the launcher's Bun
+    // child uses Windows' system CA store; without this, Bun's bundled CA set
+    // can reject valid corporate/Windows trust chains and break api.keepkey.info.
+    const bin_dir = try std.fs.path.join(a, &.{ exe_dir, "bin" });
+    _ = SetEnvironmentVariableW(
+        std.unicode.utf8ToUtf16LeStringLiteral("BUN_OPTIONS"),
+        std.unicode.utf8ToUtf16LeStringLiteral("--use-system-ca"),
+    );
+    const launcher_path = try std.fs.path.join(a, &.{ bin_dir, "launcher.exe" });
     const cmd = try std.fmt.allocPrint(a, "\"{s}\"", .{launcher_path});
+    const launcher_path_w = try std.unicode.utf8ToUtf16LeAllocZ(a, launcher_path);
     const cmd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, cmd);
-    const cwd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, exe_dir);
+    const cwd_w = try std.unicode.utf8ToUtf16LeAllocZ(a, bin_dir);
 
     var si = STARTUPINFOW{};
     var pi = PROCESS_INFORMATION{};
 
-    const ok = CreateProcessW(null, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
+    const ok = CreateProcessW(launcher_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
     if (ok != 0) {
         if (pi.hProcess) |h| _ = CloseHandle(h);
         if (pi.hThread) |h| _ = CloseHandle(h);

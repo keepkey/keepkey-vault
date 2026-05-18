@@ -10,8 +10,9 @@
  *   h.shutdown()
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
-import { resolve } from 'path'
-import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
+import { existsSync } from 'fs'
+import { homedir } from 'os'
 import * as core from '@keepkey/hdwallet-core'
 import { Adapter, Transport, type TransportDelegate } from '@keepkey/hdwallet-keepkey'
 
@@ -21,7 +22,9 @@ const FLASH_SIZE = 1048576
 const PACKET_SIZE = 64
 const POLL_MS = 5
 const READ_TIMEOUT_MS = 10_000 // 10s for tests (not 120s)
-const MANIFEST_PATH = resolve(__dirname, '../../../../firmware/emulators/manifest.json')
+// Tests load whichever dylib the developer has installed at the same path
+// the production app uses. Run `make build-emulator` first.
+const DYLIB_PATH = join(homedir(), '.keepkey', 'emulator', 'libkkemu.dylib')
 
 // Standard python-keepkey test mnemonic (same as tests/common.py mnemonic12)
 export const TEST_MNEMONIC = 'alcohol woman abuse must during monitor noble actual mixed trade anger aisle'
@@ -38,15 +41,10 @@ interface EmuFFI {
 }
 
 function loadDylib(): { symbols: EmuFFI; close: () => void } {
-  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'))
-  const entry = manifest.emulators.find(
-    (e: any) => e.platform === process.platform && e.arch === process.arch
-  )
-  if (!entry) throw new Error(`No emulator for ${process.platform}/${process.arch}`)
-  const dylibPath = resolve(MANIFEST_PATH, '..', entry.dylib)
-  if (!existsSync(dylibPath)) throw new Error(`Dylib not found: ${dylibPath}`)
-
-  return dlopen(dylibPath, {
+  if (!existsSync(DYLIB_PATH)) {
+    throw new Error(`Emulator dylib not installed at ${DYLIB_PATH}. Run: make build-emulator`)
+  }
+  return dlopen(DYLIB_PATH, {
     kkemu_init:       { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
     kkemu_shutdown:   { args: [], returns: FFIType.void },
     kkemu_write:      { args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32 },

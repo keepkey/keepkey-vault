@@ -65,15 +65,247 @@ class AssetPageErrorBoundary extends Component<
 
 const DASHBOARD_ANIMATIONS = `
 	@keyframes pulseGold {
-		0%, 100% { box-shadow: 0 0 12px rgba(192,168,96,0.4); }
-		50% { box-shadow: 0 0 24px rgba(192,168,96,0.7); }
+		0%, 100% { box-shadow: 0 0 12px rgba(233,196,106,0.4); }
+		50% { box-shadow: 0 0 24px rgba(233,196,106,0.7); }
 	}
 	@keyframes glowCta {
-		0% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
-		50% { box-shadow: 0 0 16px rgba(192,168,96,0.5), 0 0 40px rgba(192,168,96,0.2); }
-		100% { box-shadow: 0 0 8px rgba(192,168,96,0.3), 0 0 20px rgba(192,168,96,0.1); }
+		0% { box-shadow: 0 0 8px rgba(233,196,106,0.3), 0 0 20px rgba(233,196,106,0.1); }
+		50% { box-shadow: 0 0 16px rgba(233,196,106,0.5), 0 0 40px rgba(233,196,106,0.2); }
+		100% { box-shadow: 0 0 8px rgba(233,196,106,0.3), 0 0 20px rgba(233,196,106,0.1); }
+	}
+	@keyframes v3-spin {
+		from { transform: rotate(0deg); }
+		to   { transform: rotate(360deg); }
 	}
 `
+
+/* localStorage key for user's preferred portfolio view. */
+const DASHBOARD_VIEW_KEY = 'keepkey.dashboard.view'
+type DashboardView = 'orbital' | 'donut'
+function readSavedView(): DashboardView {
+	try {
+		const v = localStorage.getItem(DASHBOARD_VIEW_KEY)
+		return v === 'donut' ? 'donut' : 'orbital'
+	} catch { return 'orbital' }
+}
+
+/** Orbital portfolio view — chain logos placed on a slowly rotating ring
+ *  around a center total. Ported from the design handoff (balances.jsx
+ *  OrbitalView) with vault tokens. Logos sized by sqrt(usd) so a
+ *  $10k chain isn't 1000× the diameter of a $10 chain — the ring still
+ *  reads even when one wallet dominates. */
+function OrbitalView({
+	chains,
+	balances,
+	cleanBalanceUsd,
+	totalUsd,
+	totalDollars,
+	totalCents,
+	cleanTokenTotal,
+	onSelect,
+}: {
+	chains: ChainDef[]
+	balances: Map<string, ChainBalance>
+	cleanBalanceUsd: Map<string, { usd: number; cleanTokenCount: number }>
+	totalUsd: number
+	totalDollars: number
+	totalCents: string
+	cleanTokenTotal: number
+	onSelect: (c: ChainDef) => void
+}) {
+	const [hover, setHover] = useState<string | null>(null)
+	const [size, setSize] = useState(440)
+
+	useEffect(() => {
+		const compute = () => setSize(Math.min(440, Math.max(280, window.innerWidth - 80)))
+		compute()
+		window.addEventListener('resize', compute)
+		return () => window.removeEventListener('resize', compute)
+	}, [])
+
+	const cx = size / 2
+	const cy = size / 2
+	const orbitR = size * 0.42
+	const ringR  = size * 0.46
+
+	const orbitChains = chains
+		.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
+		.filter(x => x.usd > 0)
+		.slice(0, 8)
+
+	return (
+		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
+			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+				<defs>
+					<radialGradient id="dashboardCoreGlow" cx="50%" cy="50%">
+						<stop offset="0%" stopColor="rgba(233,196,106,0.18)" />
+						<stop offset="55%" stopColor="rgba(139,227,196,0.05)" />
+						<stop offset="100%" stopColor="transparent" />
+					</radialGradient>
+				</defs>
+				<circle cx={cx} cy={cy} r={size * 0.5} fill="url(#dashboardCoreGlow)" />
+				<circle
+					cx={cx}
+					cy={cy}
+					r={ringR}
+					fill="none"
+					stroke="rgba(255,255,255,0.10)"
+					strokeWidth="1"
+					strokeDasharray="2 6"
+					style={{
+						transformOrigin: `${cx}px ${cy}px`,
+						animation: 'v3-spin 90s linear infinite',
+					}}
+				/>
+			</svg>
+
+			{/* Center total */}
+			<Box
+				position="absolute"
+				top="50%"
+				left="50%"
+				transform="translate(-50%, -50%)"
+				textAlign="center"
+				w="60%"
+				pointerEvents="none"
+			>
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.20em"
+					textTransform="uppercase"
+					mb="2"
+					fontWeight="500"
+				>
+					Total
+				</Text>
+				<Flex align="baseline" justify="center" gap="0">
+					<Text
+						fontSize={{ base: "38px", md: "48px" }}
+						fontWeight="500"
+						color="var(--text-0)"
+						letterSpacing="-0.04em"
+						lineHeight="1"
+					>
+						${totalDollars.toLocaleString()}
+					</Text>
+					<Text
+						fontSize={{ base: "20px", md: "24px" }}
+						fontWeight="400"
+						color="var(--text-2)"
+						letterSpacing="-0.02em"
+						lineHeight="1"
+						ml="1"
+					>
+						.{totalCents}
+					</Text>
+				</Flex>
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					letterSpacing="0.14em"
+					textTransform="uppercase"
+					mt="3"
+					fontFamily="mono"
+				>
+					{chains.length} CHAINS
+					{cleanTokenTotal > 0 && ` · ${cleanTokenTotal} ASSETS`}
+				</Text>
+			</Box>
+
+			{/* Satellite chains */}
+			{orbitChains.map(({ chain, usd, bal }, i) => {
+				const angle = (Math.PI * 2 * i) / orbitChains.length - Math.PI / 2
+				const x = cx + Math.cos(angle) * orbitR
+				const y = cy + Math.sin(angle) * orbitR
+				const sat = Math.max(40, Math.min(72, 30 + Math.sqrt(usd) * 1.4))
+				const isHover = hover === chain.id
+				const pct = totalUsd > 0 ? (usd / totalUsd) * 100 : 0
+				return (
+					<Box
+						key={chain.id}
+						as="button"
+						onMouseEnter={() => setHover(chain.id)}
+						onMouseLeave={() => setHover(null)}
+						onClick={() => onSelect(chain)}
+						position="absolute"
+						left={`${x - sat / 2}px`}
+						top={`${y - sat / 2}px`}
+						w={`${sat}px`}
+						h={`${sat}px`}
+						borderRadius="full"
+						bg="transparent"
+						border="0"
+						p={0}
+						display="grid"
+						placeItems="center"
+						transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
+						transform={isHover ? 'scale(1.12)' : 'scale(1)'}
+						filter={isHover
+							? `drop-shadow(0 0 24px ${chain.color})`
+							: 'drop-shadow(0 4px 14px rgba(0,0,0,0.55))'}
+						zIndex={isHover ? 10 : 1}
+						cursor="pointer"
+						aria-label={chain.coin}
+					>
+						<Image
+							src={getAssetIcon(chain.caip)}
+							alt={chain.symbol}
+							w="100%"
+							h="100%"
+							borderRadius="full"
+							bg="var(--ink-2)"
+							boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}`}
+						/>
+						{(bal?.tokens?.length ?? 0) > 0 && (
+							<Box
+								position="absolute"
+								bottom="-4px"
+								right="-4px"
+								w="22px"
+								h="22px"
+								borderRadius="full"
+								bg="var(--ink-3)"
+								border="1px solid var(--line-2)"
+								fontSize="10px"
+								fontFamily="mono"
+								color="var(--text-1)"
+								display="grid"
+								placeItems="center"
+							>
+								+{bal!.tokens!.length}
+							</Box>
+						)}
+						{isHover && (
+							<Box
+								position="absolute"
+								top="-58px"
+								left="50%"
+								transform="translateX(-50%)"
+								bg="var(--ink-3)"
+								border="1px solid rgba(255,255,255,0.10)"
+								px="3"
+								py="1.5"
+								borderRadius="10px"
+								whiteSpace="nowrap"
+								boxShadow="0 8px 24px -8px rgba(0,0,0,0.6)"
+								pointerEvents="none"
+							>
+								<Text fontSize="12px" fontWeight="600" color="var(--text-0)" textAlign="center">
+									{chain.coin}
+								</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" textAlign="center">
+									${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									{totalUsd > 0 && ` · ${pct.toFixed(1)}%`}
+								</Text>
+							</Box>
+						)}
+					</Box>
+				)
+			})}
+		</Box>
+	)
+}
 
 interface PioneerError {
 	message: string
@@ -94,6 +326,8 @@ interface DashboardProps {
 	/** True when using a hidden wallet — reports and some features are unavailable */
 	isHiddenWallet?: boolean
 }
+
+const PIONEER_ERROR_GRACE_MS = 5 * 60 * 1000
 
 /** Format a timestamp as a relative "time ago" string (i18n-aware) */
 function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -122,15 +356,65 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
-	const [tokenWarning, setTokenWarning] = useState(false)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
+	const pioneerErrorFirstSeenRef = useRef<number | null>(null)
+	const pioneerErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const hasUsableBalanceSnapshot = balances.size > 0 || cacheUpdatedAt !== null
 
-	// Load token visibility overrides (for spam filtering)
+	const clearPioneerError = useCallback(() => {
+		pioneerErrorFirstSeenRef.current = null
+		if (pioneerErrorTimerRef.current) {
+			clearTimeout(pioneerErrorTimerRef.current)
+			pioneerErrorTimerRef.current = null
+		}
+		setPioneerError(null)
+	}, [])
+
+	const stagePioneerError = useCallback((error: PioneerError) => {
+		if (!hasUsableBalanceSnapshot) {
+			pioneerErrorFirstSeenRef.current = Date.now()
+			if (pioneerErrorTimerRef.current) {
+				clearTimeout(pioneerErrorTimerRef.current)
+				pioneerErrorTimerRef.current = null
+			}
+			setPioneerError(error)
+			return
+		}
+		if (!pioneerErrorFirstSeenRef.current) pioneerErrorFirstSeenRef.current = Date.now()
+		const elapsed = Date.now() - pioneerErrorFirstSeenRef.current
+		if (elapsed >= PIONEER_ERROR_GRACE_MS) {
+			setPioneerError(error)
+			return
+		}
+		if (!pioneerErrorTimerRef.current) {
+			pioneerErrorTimerRef.current = setTimeout(() => {
+				pioneerErrorTimerRef.current = null
+				setPioneerError(error)
+			}, PIONEER_ERROR_GRACE_MS - elapsed)
+		}
+	}, [hasUsableBalanceSnapshot])
+
 	useEffect(() => {
-		rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
-			.then(setVisibilityMap)
-			.catch(() => {})
+		return () => {
+			if (pioneerErrorTimerRef.current) clearTimeout(pioneerErrorTimerRef.current)
+		}
+	}, [])
+
+	// Load token visibility overrides (for spam filtering). Refetch on
+	// `token-visibility-changed` push so a "mark as scam" action in
+	// AssetPage immediately removes the spam USD from the dashboard total
+	// (and a "mark as safe" puts it back). Without this subscription, the
+	// initial on-mount snapshot would persist and the dashboard would keep
+	// showing the spam balance until full reload.
+	useEffect(() => {
+		const refetch = () => {
+			rpcRequest<Record<string, TokenVisibilityStatus>>('getTokenVisibilityMap', undefined, 5000)
+				.then(setVisibilityMap)
+				.catch(() => {})
+		}
+		refetch()
+		return onRpcMessage('token-visibility-changed', refetch)
 	}, [])
 
 	// Load feature flags (re-check when settings change)
@@ -153,9 +437,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Listen for Pioneer connection errors from backend
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
-			setPioneerError(payload as PioneerError)
+			stagePioneerError(payload as PioneerError)
 		})
-	}, [])
+	}, [stagePioneerError])
 
 	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
@@ -289,14 +573,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	}) // runs on every render but ref-gated to fire once
 
 	// Manual refresh: fetch live data from Pioneer API
-	const refreshBalances = useCallback(async () => {
+	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
+	const refreshBalances = useCallback(async (forceRefresh = false) => {
 		if (loadingBalances || watchOnly) return
 		setLoadingBalances(true)
-		setPioneerError(null)
-		setTokenWarning(false)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
 			if (result) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -310,29 +593,50 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				const map = new Map<string, ChainBalance>()
-				for (const b of result) map.set(b.chainId, b)
+				// No-walk-backwards merge: start from current displayed balances so chains
+				// from failed Pioneer chunks (which are absent from `result`) stay visible.
+				// Only update a chain if the new value is non-zero, or if we had no prior data.
+				const map = new Map<string, ChainBalance>(balances)
+				for (const b of result) {
+					const prev = map.get(b.chainId)
+					if (!prev || b.balanceUsd > 0 || parseFloat(b.balance || '0') > 0) {
+						map.set(b.chainId, b)
+					} else {
+						console.log(`[Dashboard] Preserving prior ${b.chainId} balance — Pioneer returned 0`)
+					}
+				}
 				setBalances(map)
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)
-
-				// Warn if no token data came back (possible API issue)
-				if (tokenTotal === 0 && balTotal > 0) {
-					setTokenWarning(true)
-				}
+				clearPioneerError()
 			}
 		} catch (e: any) {
-			console.warn('[Dashboard] getBalances failed:', e.message)
+			const message = e?.message || 'Unable to refresh balances'
+			console.warn('[Dashboard] getBalances failed:', message)
+			stagePioneerError({ message, url: 'the configured balance server' })
 		}
 
 		setLoadingBalances(false)
-	}, [loadingBalances, watchOnly])
+	}, [loadingBalances, watchOnly, clearPioneerError, stagePioneerError])
+
+	// Auto-refresh balances when Zcash feature flag is enabled mid-session
+	const prevZcashRef = useRef(zcashEnabled)
+	useEffect(() => {
+		const becameEnabled = zcashEnabled && !prevZcashRef.current
+		if (becameEnabled && !loadingBalances) {
+			console.log('[Dashboard] Zcash enabled — refreshing balances')
+			refreshBalances()
+			prevZcashRef.current = true
+		} else if (!zcashEnabled) {
+			prevZcashRef.current = false
+		}
+	}, [zcashEnabled, refreshBalances, loadingBalances])
 
 	// Auto-refresh after new seed (OOB setup) — one-shot, then clear the flag
 	useEffect(() => {
 		if (forceRefresh && initialLoaded && !hasEverRefreshed && !loadingBalances) {
 			console.log('[Dashboard] New seed detected — auto-refreshing balances (one-shot)')
-			refreshBalances()
+			refreshBalances(true)
 			onForceRefreshConsumed?.()
 		}
 	}, [forceRefresh, initialLoaded, hasEverRefreshed, loadingBalances, refreshBalances, onForceRefreshConsumed])
@@ -407,6 +711,27 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	const hasAnyBalance = chartData.length > 0
 
+	/* Portfolio view mode — orbital is the new default per design handoff,
+	 * donut is preserved as a toggle so power users can still get the
+	 * percentage-bar legend. Persisted to localStorage. */
+	const [viewMode, setViewMode] = useState<DashboardView>(readSavedView)
+	useEffect(() => {
+		try { localStorage.setItem(DASHBOARD_VIEW_KEY, viewMode) } catch { /* private mode etc. */ }
+	}, [viewMode])
+
+	/* Splits totalUsd into dollars + cents so the orbital can render the
+	 * cents in a smaller weight (matches handoff layout). */
+	const totalDollars = Math.floor(totalUsd)
+	const totalCents = (totalUsd % 1).toFixed(2).slice(2) || '00'
+
+	/* cleanTokenTotal — sum of non-spam tokens across all chains. Used for
+	 * the "N CHAINS · M ASSETS" subtitle on the orbital. */
+	const cleanTokenTotal = useMemo(() => {
+		let n = 0
+		for (const v of cleanBalanceUsd.values()) n += v.cleanTokenCount
+		return n
+	}, [cleanBalanceUsd])
+
 	const visibleChains = useMemo(() => allChains.filter(c => {
 		if (!isChainSupported(c, firmwareVersion)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
@@ -455,12 +780,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="3"
 					px="3"
 					py="2"
-					bg="rgba(255,215,0,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					border="1px solid"
-					borderColor="rgba(255,215,0,0.2)"
+					borderColor="rgba(233,196,106,0.2)"
 					borderRadius="lg"
 				>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
 						<circle cx="12" cy="12" r="3" />
 					</svg>
@@ -476,25 +801,30 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="3"
 					px="4"
 					py="3"
-					bg="rgba(220,53,69,0.08)"
+					bg="rgba(224,140,123,0.08)"
 					border="1px solid"
-					borderColor="rgba(220,53,69,0.3)"
+					borderColor="rgba(224,140,123,0.3)"
 					borderRadius="lg"
 				>
 					<Flex direction="column" gap="2">
 						<Flex align="center" gap="2">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#DC3545" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<circle cx="12" cy="12" r="10" />
 								<line x1="12" y1="8" x2="12" y2="12" />
 								<line x1="12" y1="16" x2="12.01" y2="16" />
 							</svg>
-							<Text fontSize="sm" fontWeight="600" color="#DC3545">
+							<Text fontSize="sm" fontWeight="600" color="var(--rose)">
 								{t("pioneerOfflineTitle")}
 							</Text>
 						</Flex>
 						<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
 							{t("pioneerOfflineDesc", { url: pioneerError.url })}
 						</Text>
+						{pioneerError.message && (
+							<Text fontSize="11px" color="kk.textMuted" lineHeight="1.4" fontFamily="mono">
+								{pioneerError.message}
+							</Text>
+						)}
 						<Flex gap="2" mt="1">
 							{onOpenSettings && (
 								<Box
@@ -504,14 +834,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									fontSize="xs"
 									fontWeight="600"
 									color="white"
-									bg="rgba(192,168,96,0.2)"
+									bg="rgba(233,196,106,0.2)"
 									border="1px solid"
 									borderColor="kk.gold"
 									borderRadius="md"
 									cursor="pointer"
-									_hover={{ bg: "rgba(192,168,96,0.35)" }}
+									_hover={{ bg: "rgba(233,196,106,0.35)" }}
 									onClick={() => {
-										setPioneerError(null)
+										clearPioneerError()
 										onOpenSettings()
 									}}
 								>
@@ -546,8 +876,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								cursor="pointer"
 								_hover={{ color: "white" }}
 								onClick={() => {
-									setPioneerError(null)
-									refreshBalances()
+									clearPioneerError()
+									refreshBalances(true)
 								}}
 							>
 								{t("retry")}
@@ -557,34 +887,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Token warning banner — shown when refresh succeeded but no tokens returned */}
-			{tokenWarning && !pioneerError && (
-				<Box
-					mb="3"
-					px="4"
-					py="3"
-					bg="rgba(255,165,0,0.08)"
-					border="1px solid"
-					borderColor="rgba(255,165,0,0.3)"
-					borderRadius="lg"
-				>
-					<Flex align="center" gap="2" mb="1">
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFA500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-							<line x1="12" y1="9" x2="12" y2="13" />
-							<line x1="12" y1="17" x2="12.01" y2="17" />
-						</svg>
-						<Text fontSize="xs" fontWeight="600" color="#FFA500">
-							{t("tokenWarningTitle")}
-						</Text>
-					</Flex>
-					<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-						{t("tokenWarningDesc")}
-					</Text>
-				</Box>
-			)}
-
-			{/* Portfolio Chart — or Welcome placeholder for empty wallets */}
+			{/* Portfolio view — orbital (default) or donut, switchable via the
+			    pill toggle in the top-right of the card. */}
 			{hasAnyBalance ? (
 				<Box
 					w="100%"
@@ -594,25 +898,92 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					bg="kk.cardBg"
 					border="1px solid"
 					borderColor="kk.border"
+					position="relative"
 				>
-					<Flex direction="column" align="center" gap="3">
-						<DonutChart
-							data={chartData}
-							size={160}
-							activeIndex={activeSliceIndex}
-							onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-						/>
-						<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
-							<ChartLegend
-								data={chartData}
-								total={totalUsd}
-								activeIndex={activeSliceIndex}
-								onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-							/>
+					{/* View toggle — orbital / donut. Two-state pill with icon glyphs. */}
+					<Flex
+						position="absolute"
+						top="3"
+						right="3"
+						bg="rgba(255,255,255,0.04)"
+						border="1px solid"
+						borderColor="kk.border"
+						borderRadius="999px"
+						p="1"
+						gap="1"
+						zIndex={2}
+					>
+						<Box
+							as="button"
+							onClick={() => setViewMode('orbital')}
+							w="26px" h="22px"
+							borderRadius="999px"
+							display="flex" alignItems="center" justifyContent="center"
+							bg={viewMode === 'orbital' ? 'rgba(233,196,106,0.18)' : 'transparent'}
+							color={viewMode === 'orbital' ? 'var(--gold)' : 'var(--text-3)'}
+							_hover={{ color: 'var(--text-1)' }}
+							transition="all 0.15s"
+							cursor="pointer"
+							title="Orbital view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9" strokeDasharray="2 3"/>
+								<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
+								<circle cx="21" cy="12" r="2.2" fill="currentColor" stroke="none"/>
+								<circle cx="3" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+							</svg>
+						</Box>
+						<Box
+							as="button"
+							onClick={() => setViewMode('donut')}
+							w="26px" h="22px"
+							borderRadius="999px"
+							display="flex" alignItems="center" justifyContent="center"
+							bg={viewMode === 'donut' ? 'rgba(233,196,106,0.18)' : 'transparent'}
+							color={viewMode === 'donut' ? 'var(--gold)' : 'var(--text-3)'}
+							_hover={{ color: 'var(--text-1)' }}
+							transition="all 0.15s"
+							cursor="pointer"
+							title="Donut view"
+						>
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<circle cx="12" cy="12" r="9"/>
+								<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
+							</svg>
 						</Box>
 					</Flex>
+
+					{viewMode === 'orbital' ? (
+						<OrbitalView
+							chains={visibleChains}
+							balances={balances}
+							cleanBalanceUsd={cleanBalanceUsd}
+							totalUsd={totalUsd}
+							totalDollars={totalDollars}
+							totalCents={totalCents}
+							cleanTokenTotal={cleanTokenTotal}
+							onSelect={(c) => setSelectedChain(c)}
+						/>
+					) : (
+						<Flex direction="column" align="center" gap="3">
+							<DonutChart
+								data={chartData}
+								size={160}
+								activeIndex={activeSliceIndex}
+								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
+							/>
+							<Box w="100%" borderTop="1px solid" borderColor="whiteAlpha.100" pt="2">
+								<ChartLegend
+									data={chartData}
+									total={totalUsd}
+									activeIndex={activeSliceIndex}
+									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
+								/>
+							</Box>
+						</Flex>
+					)}
 				</Box>
-			) : !loadingBalances && initialLoaded && (
+			) : !loadingBalances && initialLoaded && !pioneerError && (
 				<Box
 					w="100%"
 					p="5"
@@ -620,7 +991,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					borderRadius="xl"
 					bg="kk.cardBg"
 					border="1px solid"
-					borderColor="rgba(192,168,96,0.2)"
+					borderColor="rgba(233,196,106,0.2)"
 				>
 					<Flex direction="column" align="center" gap="3" textAlign="center">
 						{/* Shield / vault icon */}
@@ -628,12 +999,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							w="56px"
 							h="56px"
 							borderRadius="full"
-							bg="rgba(192,168,96,0.1)"
+							bg="rgba(233,196,106,0.1)"
 							display="flex"
 							alignItems="center"
 							justifyContent="center"
 						>
-							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 								<path d="M9 12l2 2 4-4" />
 							</svg>
@@ -680,7 +1051,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						borderRadius="full"
 						cursor="pointer"
 						transition="all 0.2s"
-						_hover={{ color: "white", bg: "rgba(192,168,96,0.12)" }}
+						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
 						onClick={() => setShowReports(true)}
 					>
 						<Flex align="center" gap="1.5">
@@ -707,9 +1078,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						transition="all 0.2s"
 						_hover={loadingBalances ? {} : {
 							color: "white",
-							bg: "rgba(192,168,96,0.12)",
+							bg: "rgba(233,196,106,0.12)",
 						}}
-						onClick={loadingBalances ? undefined : refreshBalances}
+						onClick={loadingBalances ? undefined : () => refreshBalances(true)}
 						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
 					>
 						<Flex align="center" gap="1.5">
@@ -727,9 +1098,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									? <>
 										<Text as="span" color={(() => {
 											const age = Date.now() - cacheUpdatedAt
-											if (age < 3_600_000) return "#4ADE80"
-											if (age < 86_400_000) return "#FBBF24"
-											return "#F87171"
+											if (age < 3_600_000) return "var(--teal)"
+											if (age < 86_400_000) return "var(--gold)"
+											return "var(--rose)"
 										})()}>
 											{formatTimeAgo(cacheUpdatedAt, t)}
 										</Text>
@@ -749,34 +1120,34 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					mb="4"
 					px="5"
 					py="4"
-					bg="rgba(192,168,96,0.08)"
+					bg="rgba(233,196,106,0.08)"
 					border="1px solid"
-					borderColor="rgba(192,168,96,0.35)"
+					borderColor="rgba(233,196,106,0.35)"
 					borderRadius="xl"
 					cursor="pointer"
 					transition="all 0.3s ease-out"
 					css={{ animation: "glowCta 3s ease-in-out infinite" }}
 					_hover={{
-						bg: "rgba(192,168,96,0.15)",
+						bg: "rgba(233,196,106,0.15)",
 						borderColor: "kk.gold",
 						transform: "scale(1.02)",
-						boxShadow: "0 0 24px rgba(192,168,96,0.5), 0 0 48px rgba(192,168,96,0.2)",
+						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
 					}}
 					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
-					onClick={refreshBalances}
+					onClick={() => refreshBalances(true)}
 				>
 					<Flex align="center" justify="center" gap="3">
 						<Box
 							w="40px"
 							h="40px"
 							borderRadius="full"
-							bg="rgba(192,168,96,0.15)"
+							bg="rgba(233,196,106,0.15)"
 							display="flex"
 							alignItems="center"
 							justifyContent="center"
 							flexShrink={0}
 						>
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
 								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
 							</svg>
@@ -888,11 +1259,32 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										{usdNum > 0 && (
 											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : undefined} fontWeight="500" lineHeight="1.3" />
 										)}
-										{tokenCount > 0 && (
-											<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
-												{t("tokensCount", { count: tokenCount })}
-											</Text>
-										)}
+										{(() => {
+											// Zcash gets a special "+ shielded" sub-row instead of generic token count.
+											// The shielded balance is appended as a synthetic token with type:'shielded'
+											// in getBalances; surface it explicitly so users see the private balance.
+											const shielded = bal.tokens?.find(tk => tk.type === 'shielded')
+											const otherTokens = bal.tokens?.filter(tk => tk.type !== 'shielded') ?? []
+											return (
+												<>
+													{shielded && parseFloat(shielded.balance || '0') > 0 && (
+														<Flex align="center" gap="1" mt="0.5" title="Shielded (Orchard) balance — visible only to you">
+															<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={chain.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+																<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+															</svg>
+															<Text fontSize="10px" fontFamily="mono" color={chain.color} fontWeight="600" lineHeight="1.3" truncate>
+																+ {formatBalance(shielded.balance)} private
+															</Text>
+														</Flex>
+													)}
+													{otherTokens.length > 0 && (
+														<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
+															{t("tokensCount", { count: otherTokens.length })}
+														</Text>
+													)}
+												</>
+											)
+										})()}
 									</Box>
 								) : loadingBalances ? (
 									<Text fontSize="10px" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>
@@ -916,7 +1308,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						transition="all 0.15s"
 						_hover={{
 							borderColor: "kk.gold",
-							bg: "rgba(255,215,0,0.05)",
+							bg: "rgba(233,196,106,0.05)",
 						}}
 						onClick={() => setShowAddChain(true)}
 						display="flex"
@@ -958,8 +1350,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
 			)}
 
-			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.15.0) */}
-			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0 && (
+			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.16.0) */}
+			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.16.0') >= 0 && (
 				<Box
 					as="button"
 					position="fixed"
@@ -968,26 +1360,26 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					w="52px"
 					h="52px"
 					borderRadius="full"
-					bg="rgba(192,168,96,0.15)"
+					bg="rgba(233,196,106,0.15)"
 					border="1px solid"
-					borderColor="rgba(192,168,96,0.3)"
+					borderColor="rgba(233,196,106,0.3)"
 					display="flex"
 					alignItems="center"
 					justifyContent="center"
 					cursor="pointer"
 					transition="all 0.2s"
 					_hover={{
-						bg: "rgba(192,168,96,0.25)",
+						bg: "rgba(233,196,106,0.25)",
 						borderColor: "kk.gold",
 						transform: "scale(1.08)",
-						boxShadow: "0 0 20px rgba(192,168,96,0.3)",
+						boxShadow: "0 0 20px rgba(233,196,106,0.3)",
 					}}
 					_active={{ transform: "scale(0.95)" }}
 					onClick={() => setShowBip85(true)}
 					zIndex={10}
 					title="BIP-85 Seed Vault"
 				>
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C0A860" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 					</svg>

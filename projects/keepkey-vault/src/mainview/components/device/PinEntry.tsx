@@ -40,8 +40,8 @@ const PIN_ANIMATIONS = `
 		100% { transform: scale(1); opacity: 1; }
 	}
 	@keyframes pinLogoGlow {
-		0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.3)); }
-		50%      { filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.6)); }
+		0%, 100% { filter: drop-shadow(0 0 2px rgba(233,196,106, 0.3)); }
+		50%      { filter: drop-shadow(0 0 6px rgba(233,196,106, 0.6)); }
 	}
 	@keyframes pinShake {
 		0%, 100% { transform: translateX(0); }
@@ -146,7 +146,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 				p="8"
 				maxW="360px"
 				w="90%"
-				boxShadow="0 0 20px rgba(255, 215, 0, 0.08), 0 8px 32px rgba(0,0,0,0.6)"
+				boxShadow="0 0 20px rgba(233,196,106, 0.08), 0 8px 32px rgba(0,0,0,0.6)"
 				style={{ animation: "pinFadeIn 0.3s ease-out" }}
 			>
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
@@ -184,7 +184,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 					bg="kk.bg"
 					borderRadius="md"
 					border="1px solid"
-					borderColor={showError ? "rgba(255, 59, 48, 0.5)" : pin.length > 0 ? "kk.gold" : "rgba(255, 215, 0, 0.3)"}
+					borderColor={showError ? "rgba(255, 59, 48, 0.5)" : pin.length > 0 ? "kk.gold" : "rgba(233,196,106, 0.3)"}
 					p="3"
 					mb="5"
 					textAlign="center"
@@ -223,7 +223,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 									h="72px"
 									bg="kk.cardBg"
 									border="1px solid"
-									borderColor="rgba(255, 215, 0, 0.25)"
+									borderColor="rgba(233,196,106, 0.25)"
 									color="kk.textPrimary"
 									fontSize="xl"
 									fontWeight="bold"
@@ -246,7 +246,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 						onClick={handleBackspace}
 						size="md"
 						variant="outline"
-						borderColor="rgba(255, 215, 0, 0.2)"
+						borderColor="rgba(233,196,106, 0.2)"
 						color="kk.textSecondary"
 						transition="all 0.15s ease"
 						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
@@ -334,7 +334,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 								checked={wipeAcknowledged}
 								onChange={(e: any) => setWipeAcknowledged(e.target.checked)}
 								mt="1"
-								accentColor="#FFD700"
+								accentColor="var(--gold)"
 							/>
 							<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
 								{t("pin.wipeAcknowledge")}
@@ -344,7 +344,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 							<Button
 								size="sm"
 								variant="outline"
-								borderColor="rgba(255, 215, 0, 0.2)"
+								borderColor="rgba(233,196,106, 0.2)"
 								color="kk.textSecondary"
 								_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
 								flex={1}
@@ -377,7 +377,7 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 						p="3px"
 						borderRadius="md"
 						border="1px solid"
-						borderColor="rgba(255, 215, 0, 0.3)"
+						borderColor="rgba(233,196,106, 0.3)"
 						style={{ animation: "pinLogoGlow 3s ease-in-out infinite" }}
 					>
 						<KeepKeyUILogo style={{ opacity: 0.5 }} />

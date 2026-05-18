@@ -50,7 +50,12 @@ const CONFIGS: ChainConfig[] = [
     id: 'bitcoin', chain: Chain.Bitcoin, coin: 'Bitcoin', symbol: 'BTC',
     chainFamily: 'utxo', color: '#F7931A',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
-    defaultPath: [0x8000002C, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2pkh',
+    // Native SegWit (BIP84) — matches btcAccountManager's default `p2wpkh`
+    // selection. Was Legacy (m/44'/0'/0') which silently sent BTC swap deliveries
+    // to a 1... address users didn't normally watch when btcAccountManager hadn't
+    // been initialized (cold start before BTC dashboard). Native SegWit is the
+    // de-facto modern default since 2017.
+    defaultPath: [0x80000054, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2wpkh',
     explorerTxUrl: 'https://blockchair.com/bitcoin/transaction/{{txid}}',
     explorerAddressUrl: 'https://blockchair.com/bitcoin/address/{{address}}',
   },
@@ -203,7 +208,8 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'utxo', color: '#ECB244',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
-    hidden: true, // Shown only when zcashPrivacyEnabled feature flag is ON
+    explorerTxUrl: 'https://blockchair.com/zcash/transaction/{{txid}}',
+    explorerAddressUrl: 'https://blockchair.com/zcash/address/{{address}}',
     minFirmware: '7.15.0',
   },
   {
@@ -289,9 +295,13 @@ export function getExplorerTxUrl(chainId: string, txid: string): string | null {
   const chain = CHAINS.find(c => c.id === chainId)
   if (!chain?.explorerTxUrl) return null
   // EVM explorers expect 0x prefix; all others (Mintscan, Runescan, Blockchair, etc.) do not
-  const normalizedTxid = chain.chainFamily === 'evm'
+  let normalizedTxid = chain.chainFamily === 'evm'
     ? (txid.startsWith('0x') ? txid : '0x' + txid)
     : txid.replace(/^0x/i, '')
+  // Tronscan URL routing is case-sensitive (`/transaction/EEB4...` 404s, `/eeb4...` works)
+  // even though TRON txids are hex. THORChain emits txids uppercased, so we'd otherwise
+  // hand the user a broken explorer link for any THORChain-routed swap landing on TRON.
+  if (chain.chainFamily === 'tron') normalizedTxid = normalizedTxid.toLowerCase()
   return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 

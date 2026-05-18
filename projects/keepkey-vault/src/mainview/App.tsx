@@ -15,6 +15,7 @@ import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
+import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
@@ -28,9 +29,14 @@ import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
+import { SwapRpcMount } from "./components/SwapRpcMount"
+import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
+type SigningPhase = "approve" | "sending-payload" | "device-confirm"
+
+const SIGNING_PAYLOAD_MIN_MS = 15000
 
 function App() {
 	const { t } = useTranslation()
@@ -75,10 +81,49 @@ function App() {
 		rpcRequest<{ version: string; channel: string }>("getAppVersion")
 			.then(setAppVersion)
 			.catch(() => {})
-		rpcRequest<AppSettings>("getAppSettings")
-			.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
-			.catch(() => {})
+		const refreshSettings = () => {
+			rpcRequest<AppSettings>("getAppSettings")
+				.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+				.catch(() => {})
+		}
+		refreshSettings()
+		// Other surfaces (settings drawer close, drop-zone dylib install) flip
+		// server-side flags then dispatch this event so the React tree picks up
+		// the new state without waiting for the user to reopen settings.
+		window.addEventListener("keepkey-settings-changed", refreshSettings)
+		return () => window.removeEventListener("keepkey-settings-changed", refreshSettings)
 	}, [])
+
+	// ── REST API UI-active handshake ─────────────────────────────────
+	// The Bun process refuses to serve pubkeys/addresses on port 1646 unless
+	// the Vault UI signals it's open + heartbeats regularly. `viewDeviceId`
+	// scopes serving to the device the user currently has open, so a
+	// 3rd-party request can never get xpubs from a device the user isn't
+	// actively viewing (incl. watch-only mode which uses the cached device).
+	//
+	// Defer activation until we know which device the UI is bound to. On
+	// fresh mount `deviceState.deviceId` is null until the engine state
+	// machine reports `ready`; activating with viewDeviceId=null in that
+	// window would let a stale on-disk pubkey cache from a prior session
+	// be served against the wrong (or no) device, since requireUiActive
+	// only enforces device matching when uiState.viewDeviceId is truthy.
+	useEffect(() => {
+		const viewDeviceId = watchOnlyMode ? (watchOnlyDeviceId ?? null) : (deviceState.deviceId ?? null)
+		if (!viewDeviceId) return
+		rpcRequest("uiSetActive", { active: true, viewDeviceId }).catch(() => {})
+		const heartbeat = setInterval(() => {
+			rpcRequest("uiHeartbeat", { viewDeviceId }).catch(() => {})
+		}, 15_000)
+		const beforeUnload = () => {
+			try { rpcRequest("uiSetActive", { active: false, viewDeviceId: null }).catch(() => {}) } catch { /* ignore */ }
+		}
+		window.addEventListener("beforeunload", beforeUnload)
+		return () => {
+			clearInterval(heartbeat)
+			window.removeEventListener("beforeunload", beforeUnload)
+			rpcRequest("uiSetActive", { active: false, viewDeviceId: null }).catch(() => {})
+		}
+	}, [deviceState.deviceId, watchOnlyMode, watchOnlyDeviceId])
 
 	// Reset dismiss when update phase transitions to available or ready
 	useEffect(() => {
@@ -198,41 +243,95 @@ function App() {
 
 	// ── Signing approval overlay ────────────────────────────────────
 	const [signingRequest, setSigningRequest] = useState<SigningRequestInfo | null>(null)
-	const [signingPhase, setSigningPhase] = useState<'approve' | 'device-confirm'>('approve')
+	const [signingPhase, setSigningPhase] = useState<SigningPhase>('approve')
+	const signingRequestRef = useRef<SigningRequestInfo | null>(null)
+	const signingPhaseRef = useRef<SigningPhase>('approve')
+	const signingPayloadStartedAt = useRef<number | null>(null)
+	const signingConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const setSigningPhaseTracked = useCallback((phase: SigningPhase) => {
+		signingPhaseRef.current = phase
+		setSigningPhase(phase)
+	}, [])
+
+	const clearSigningConfirmTimer = useCallback(() => {
+		if (signingConfirmTimer.current) {
+			clearTimeout(signingConfirmTimer.current)
+			signingConfirmTimer.current = null
+		}
+	}, [])
 
 	useEffect(() => {
 		const unsub1 = onRpcMessage("signing-request", (payload) => {
-			setSigningPhase('approve')
-			setSigningRequest(payload as SigningRequestInfo)
+			clearSigningConfirmTimer()
+			signingPayloadStartedAt.current = null
+			const request = payload as SigningRequestInfo
+			signingRequestRef.current = request
+			setSigningPhaseTracked('approve')
+			setSigningRequest(request)
 		})
 		const unsub2 = onRpcMessage("signing-dismissed", () => {
+			clearSigningConfirmTimer()
+			signingPayloadStartedAt.current = null
+			signingRequestRef.current = null
 			setSigningRequest(null)
-			setSigningPhase('approve')
+			setSigningPhaseTracked('approve')
 		})
 		return () => { unsub1(); unsub2() }
-	}, [])
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked])
+
+	useEffect(() => {
+		return () => clearSigningConfirmTimer()
+	}, [clearSigningConfirmTimer])
+
+	useEffect(() => {
+		return onRpcMessage("device-button-request", () => {
+			if (!signingRequestRef.current || signingPhaseRef.current !== 'sending-payload') return
+
+			const startedAt = signingPayloadStartedAt.current ?? Date.now()
+			const elapsedMs = Date.now() - startedAt
+			const delayMs = Math.max(0, SIGNING_PAYLOAD_MIN_MS - elapsedMs)
+
+			clearSigningConfirmTimer()
+			signingConfirmTimer.current = setTimeout(() => {
+				signingConfirmTimer.current = null
+				if (signingPhaseRef.current === 'sending-payload') {
+					setSigningPhaseTracked('device-confirm')
+				}
+			}, delayMs)
+		})
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked])
 
 	const handleApproveSign = useCallback(async () => {
 		if (!signingRequest) return
-		// Transition overlay to "confirm on device" — don't dismiss yet
-		setSigningPhase('device-confirm')
+		clearSigningConfirmTimer()
+		signingPayloadStartedAt.current = Date.now()
+		// The backend is now unblocked and can start writing the request to the
+		// device. Wait for the real device ButtonRequest before asking the user
+		// to press the physical button.
+		setSigningPhaseTracked('sending-payload')
 		try {
 			await rpcRequest("approveSigningRequest", { id: signingRequest.id })
 		} catch (e) {
 			console.error("approveSign:", e)
+			clearSigningConfirmTimer()
+			signingPayloadStartedAt.current = null
 			// RPC failed (device disconnected, timeout, etc.) — revert to actionable
 			// approve/reject state so the user isn't stuck on a dead "confirm on device" overlay.
-			setSigningPhase('approve')
+			setSigningPhaseTracked('approve')
 		}
 		// On success, overlay stays open until 'signing-dismissed' RPC arrives from bun side
-	}, [signingRequest])
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked, signingRequest])
 
 	const handleRejectSign = useCallback(async () => {
 		if (!signingRequest) return
 		try { await rpcRequest("rejectSigningRequest", { id: signingRequest.id }) } catch (e) { console.error("rejectSign:", e) }
+		clearSigningConfirmTimer()
+		signingPayloadStartedAt.current = null
+		signingRequestRef.current = null
 		setSigningRequest(null)
-		setSigningPhase('approve')
-	}, [signingRequest])
+		setSigningPhaseTracked('approve')
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked, signingRequest])
 
 	// ── Paired Apps panel ───────────────────────────────────────────
 	const [pairedAppsOpen, setPairedAppsOpen] = useState(false)
@@ -271,6 +370,34 @@ function App() {
 	useEffect(() => {
 		return onRpcMessage("walletconnect-uri", (_uri) => {
 			setWcNotSupportedOpen(true)
+		})
+	}, [])
+
+	// Warm-path WC deep link: backend hands us the URI so the panel can mount
+	// *before* the session_proposal arrives — the pair-approval modal lives
+	// inside the panel, so opening it after the proposal would let the modal
+	// render invisibly and silently time out at 120s.
+	useEffect(() => {
+		return onRpcMessage("wc-deep-link-pair", (data) => {
+			const { uri } = data as { uri: string }
+			if (!walletConnectEnabled) {
+				setWcNotSupportedOpen(true)
+				return
+			}
+			setWcUri(uri)
+			setWcPanelOpen(true)
+		})
+	}, [walletConnectEnabled])
+
+	// Force-open the panel whenever a pair proposal arrives. The pair-approval
+	// modal lives inside WalletConnectPanel and renders nothing while the panel
+	// is closed — so a proposal landing after the user closed the panel (e.g.
+	// closed it between hitting Pair and the session_proposal arriving) would
+	// be invisible until the 120s backend timeout. The panel keeps its own
+	// listener for the request payload; this one only ensures visibility.
+	useEffect(() => {
+		return onRpcMessage("wc-pair-request", () => {
+			setWcPanelOpen(true)
 		})
 	}, [])
 
@@ -593,7 +720,7 @@ function App() {
 						watchOnly
 						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
-					<Flex flex="1" direction="column" overflow="auto" pt="54px" pb="4">
+					<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
 						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
@@ -627,27 +754,33 @@ function App() {
 		const isError = deviceState.state === "error"
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
+		const linuxUdevBlocked = !!deviceState.linuxUdevPermissionDenied
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={
-						needsPin ? t("unlockYourKeepKey", { ns: "nav" })
+						linuxUdevBlocked ? "KeepKey detected — install udev rules to continue"
+						: needsPin ? t("unlockYourKeepKey", { ns: "nav" })
 						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
 						: isConnecting ? t("keepkeyDetectedConnecting", { ns: "nav" })
 						: isError ? t("errorWithMessage", { ns: "nav", error: deviceState.error || "Unknown" })
 						: t("searchingForKeepKey", { ns: "nav" })
 					}
 					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
-					variant={needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
-					childrenReady={gridReady}
-					onLogoClick={needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
+					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
+					childrenReady={linuxUdevBlocked ? true : gridReady}
+					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
 				>
-					{/* Unified device grid — registered devices + emulator wallets */}
-					<DeviceGrid
-						onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
-						onReady={() => setGridReady(true)}
-						emulatorEnabled={emulatorEnabled}
-					/>
+					{linuxUdevBlocked ? (
+						<LinuxUdevWarning />
+					) : (
+						/* Unified device grid — registered devices + emulator wallets */
+						<DeviceGrid
+							onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
+							onReady={() => setGridReady(true)}
+							emulatorEnabled={emulatorEnabled}
+						/>
+					)}
 				</SplashScreen>
 			</>
 		)
@@ -683,17 +816,19 @@ function App() {
 					isEmulator={deviceState.isEmulator}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
+					onWalletConnectToggle={walletConnectEnabled ? handleOpenWalletConnect : undefined}
 					settingsOpen={settingsOpen}
 					mobileOpen={mobilePanelOpen}
+					walletConnectOpen={wcPanelOpen}
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
 				/>
-				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? "104px" : "54px"} pb="4" transition="padding-top 0.2s">
-				{/* pt: 54px TopNav + 50px banner height when visible */}
+				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
+				{/* TopNav offset plus banner height when visible. */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
-					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} onOpenWalletConnect={handleOpenWalletConnect} />}
+					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
@@ -745,6 +880,8 @@ function App() {
 				nativeEnabled={walletConnectEnabled}
 			/>
 			<ActivityTracker />
+			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
+			<SwapRpcMount />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{/* ── WalletConnect Not Supported dialog ──────────────────── */}
 			{wcNotSupportedOpen && (

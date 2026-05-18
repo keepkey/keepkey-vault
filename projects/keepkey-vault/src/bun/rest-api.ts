@@ -8,6 +8,7 @@ import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
+  ensureFvkLoaded, displayOrchardAddressOnDevice,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady } from './zcash-sidecar'
 import { readFileSync } from 'fs'
@@ -15,8 +16,26 @@ import { join } from 'path'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
+import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
-import { getSetting } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
+import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
+import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
+import type { SwapTrackingStatus } from '../shared/types'
+import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
+import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
+import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
+import {
+  buildTonTransfer,
+  assembleTonSignedBoc,
+  computeTonBodyHash,
+  getTonSeqno,
+  getTonWalletState,
+  broadcastTonBoc,
+  type TonBuildResult,
+} from './txbuilder/ton'
+import { usb } from 'usb'
 
 export interface EmuSigningDetails {
   operation: string
@@ -35,6 +54,14 @@ export interface RestApiCallbacks {
   getVersion: () => string
   /** Wrap a signing/display op for the emulator (pre-writes confirmations, interactive approve) */
   emuSigningOp?: (fn: () => Promise<any>, details: EmuSigningDetails) => Promise<any>
+  /** Read the latest SwapDialog UI state mirror (set by /api/v2/swap/state) */
+  getSwapUiState?: () => { state: import('../shared/types').SwapUiState; updatedAt: number }
+  /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
+  sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
+  /** Returns initialized Pioneer client (for debug endpoints) */
+  getPioneer?: () => Promise<any>
+  /** Returns the active Pioneer API base URL */
+  getPioneerApiBase?: () => string
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -54,6 +81,71 @@ function requireWallet(engine: EngineController) {
   return engine.wallet
 }
 
+const KEEPKEY_VENDOR_ID = 0x2B24
+
+function usbIdHex(value: number | null | undefined): string | null {
+  if (typeof value !== 'number') return null
+  return `0x${value.toString(16).padStart(4, '0')}`
+}
+
+function listUsbDevicesForAdmin() {
+  return usb.getDeviceList().map((device: any) => {
+    const descriptor = device.deviceDescriptor || {}
+    const vendorId = typeof descriptor.idVendor === 'number' ? descriptor.idVendor : null
+    const productId = typeof descriptor.idProduct === 'number' ? descriptor.idProduct : null
+    return {
+      busNumber: typeof device.busNumber === 'number' ? device.busNumber : null,
+      deviceAddress: typeof device.deviceAddress === 'number' ? device.deviceAddress : null,
+      portNumbers: Array.isArray(device.portNumbers) ? device.portNumbers : [],
+      vendorId,
+      vendorIdHex: usbIdHex(vendorId),
+      productId,
+      productIdHex: usbIdHex(productId),
+      deviceClass: typeof descriptor.bDeviceClass === 'number' ? descriptor.bDeviceClass : null,
+      deviceSubClass: typeof descriptor.bDeviceSubClass === 'number' ? descriptor.bDeviceSubClass : null,
+      deviceProtocol: typeof descriptor.bDeviceProtocol === 'number' ? descriptor.bDeviceProtocol : null,
+      usbVersion: typeof descriptor.bcdUSB === 'number' ? usbIdHex(descriptor.bcdUSB) : null,
+      deviceVersion: typeof descriptor.bcdDevice === 'number' ? usbIdHex(descriptor.bcdDevice) : null,
+      manufacturerIndex: typeof descriptor.iManufacturer === 'number' ? descriptor.iManufacturer : null,
+      productIndex: typeof descriptor.iProduct === 'number' ? descriptor.iProduct : null,
+      serialNumberIndex: typeof descriptor.iSerialNumber === 'number' ? descriptor.iSerialNumber : null,
+      isKeepKey: vendorId === KEEPKEY_VENDOR_ID,
+    }
+  })
+}
+
+/**
+ * Parse a hex string into a Buffer with explicit validation.
+ *
+ * `Buffer.from(str, 'hex')` silently truncates on the first non-hex char
+ * or odd length, which surfaces downstream as "wrong-length signature"
+ * errors that don't point at the actual bug. This helper rejects bad
+ * input up front with a clear 400.
+ */
+function parseHex(input: string, label: string, expectedBytes?: number): Buffer {
+  const stripped = input.replace(/^0x/i, '')
+  if (!/^[0-9a-fA-F]*$/.test(stripped)) {
+    throw new HttpError(400, `${label}: invalid hex (non-hex characters)`)
+  }
+  if (stripped.length % 2 !== 0) {
+    throw new HttpError(400, `${label}: invalid hex (odd-length string, must be even)`)
+  }
+  if (expectedBytes !== undefined && stripped.length !== expectedBytes * 2) {
+    throw new HttpError(400, `${label}: expected ${expectedBytes} bytes, got ${stripped.length / 2}`)
+  }
+  return Buffer.from(stripped, 'hex')
+}
+
+/** Decode a `message` body field per `is_text` (default UTF-8, false = hex bytes). */
+function decodeMessageBody(message: string, isText: boolean | undefined, label: string): Buffer {
+  return isText === false ? parseHex(message, `${label}.message (is_text=false)`) : Buffer.from(message, 'utf8')
+}
+
+/** Single-shot Uint8Array → hex serializer used by every signing handler. */
+function toHex(value: Uint8Array | string): string {
+  return value instanceof Uint8Array ? Buffer.from(value).toString('hex') : value
+}
+
 /** SLIP44 coin type → KeepKey firmware coin name (must match firmware coin table) */
 const SLIP44_TO_COIN: Record<number, string> = {
   0: 'Bitcoin', 2: 'Litecoin', 3: 'Dogecoin', 5: 'Dash',
@@ -66,6 +158,23 @@ const TICKER_TO_COIN: Record<string, string> = {
   BTC: 'Bitcoin', LTC: 'Litecoin', DOGE: 'Dogecoin', DASH: 'Dash',
   DGB: 'DigiByte', ETH: 'Ethereum', ATOM: 'Cosmos', XRP: 'Ripple',
   BCH: 'BitcoinCash', TRX: 'Tron', SOL: 'Solana', TON: 'Ton', RUNE: 'Rune',
+}
+
+const DEFAULT_SOLANA_ADDRESS_N = [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+
+function pickAddressNList(body: any, fallback: number[]): number[] {
+  return Array.isArray(body?.addressNList)
+    ? body.addressNList
+    : Array.isArray(body?.address_n)
+      ? body.address_n
+      : fallback
+}
+
+function formatAddressNPath(addressNList: number[]): string {
+  return 'm/' + addressNList.map((n) => {
+    const hardened = n >= 0x80000000
+    return `${hardened ? n - 0x80000000 : n}${hardened ? "'" : ''}`
+  }).join('/')
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -147,6 +256,54 @@ function evictOldest<K, V>(cache: Map<K, V>, count: number) {
     cache.delete(key)
     removed++
   }
+}
+
+/** Cache key scoped by device_id — prevents cross-device pubkey leakage.
+ *  deviceId is read at call time from engine; if no device is connected,
+ *  we still prefix with `none:` so orphan entries can be flushed together. */
+function scopedKey(engine: EngineController, prefix: string, body: unknown): string {
+  const deviceId = engine.getDeviceState().deviceId || 'none'
+  return `${deviceId}:${prefix}:${JSON.stringify(body)}`
+}
+
+/** Clear every pubkey cache entry. Call on device disconnect / device swap. */
+export function clearPubkeyCache() {
+  pubkeyCache.clear()
+}
+
+/** Clear every address cache entry. Call on device disconnect / device swap. */
+export function clearAddressCache() {
+  addressCache.clear()
+}
+
+// ── UI lifecycle signal ────────────────────────────────────────────────
+// The WebView signals `setUiActive(true)` on mount and `setUiActive(false)`
+// on unload. We use the active→inactive transition to flush caches so a
+// later re-open cannot serve entries the user might assume were re-derived.
+// Note: access control for these endpoints is handled by `auth.requireAuth`
+// (paired-app API key) plus per-device cache scoping via `scopedKey`; we do
+// NOT gate on UI visibility, because paired apps (e.g. the browser extension)
+// must be able to refresh pubkeys after a device reconnect even when the
+// Vault window is closed.
+let uiActive = false
+
+/** Called from RPC handler when the WebView signals its state. */
+export function setUiActive(active: boolean, _viewDeviceId: string | null = null) {
+  const wasActive = uiActive
+  uiActive = active
+  if (!active && wasActive) {
+    // UI just closed — flush caches so next session can't serve stale pubkeys.
+    clearPubkeyCache()
+    clearAddressCache()
+    clearFeaturesCache()
+  }
+}
+
+/** Called from RPC handler on periodic heartbeat from the WebView.
+ *  Retained as a no-op so the RPC contract with the frontend stays stable;
+ *  cache lifecycle is driven entirely by `setUiActive` transitions now. */
+export function uiHeartbeat(_viewDeviceId: string | null = null) {
+  // intentionally empty
 }
 
 // ── Cosmos-family amino signing helper ─────────────────────────────────
@@ -509,7 +666,16 @@ function getSwaggerUiHtml(): string {
           <tr><td><code>POST</code></td><td><code>/utxo/sign-transaction</code></td><td>Sign Bitcoin/UTXO tx</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/cosmos/sign-amino</code></td><td>Sign Cosmos amino</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/solana/sign-transaction</code></td><td>Sign Solana tx</td><td>600s</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/zcash/shielded/display-address</code></td><td>Display device-derived Orchard UA</td><td>600s</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/pubkeys/batch</code></td><td>Batch public keys</td><td>30s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity/recent</code></td><td>Wallet-facing recent activity (auth) — rebuilt tx history + swaps, current wallet scope only</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity</code></td><td>Raw signing/API audit log (auth) — filter by route/txid/chain/activityType/since/until</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/activity/:id</code></td><td>Single audit entry with full request/response bodies (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swaps</code></td><td>Swap history (auth) — filter by status/asset/fromDate/toDate/limit/offset</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swaps/stats</code></td><td>Aggregate counts: total/completed/failed/refunded/pending (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swaps/:txid</code></td><td>Single swap record with full fee + memo + status detail (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swap/availability/:caip</code></td><td>Picker classification for one CAIP-19 (debug) — assessment + provider list + reason (auth)</td><td>5s</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/v1/swap/discovery</code></td><td>Search the unified asset universe (~30k); filter by ?q=&amp;status=&amp;limit= (auth)</td><td>5s</td></tr>
         </tbody>
       </table>
     </div>
@@ -864,10 +1030,77 @@ const SIGNING_ROUTES = new Set([
   '/mayachain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
 ])
 
+/**
+ * Minimum-payload fingerprint per signing route.
+ *
+ * Empty-body probes (observed hitting /solana/sign-transaction etc. with
+ * `{}`) used to reach the approval dialog and spam the user with dialogs
+ * for requests that had nothing to sign. This function returns the list
+ * of top-level payload keys where *any* one being present indicates a
+ * real signing attempt. The approval gate short-circuits with 400 when
+ * the body contains none of them.
+ *
+ * Keys mirror the schemas in schemas.ts exactly; when a new sign route is
+ * added to SIGNING_ROUTES it must also be added here or it'll fall
+ * through as "no required fields known" → no probe gating (the handler's
+ * schema.parse will still reject the empty body, just one layer deeper).
+ *
+ * Route families that share a schema (all the Cosmos/Osmosis amino
+ * variants use CosmosAminoSignRequest — { signerAddress, signDoc }) are
+ * covered by a single prefix check so we don't have to enumerate every
+ * variant and risk missing one.
+ */
+function requiredSigningFields(path: string): string[] | null {
+  const exact: Record<string, string[]> = {
+    '/eth/sign-transaction':    ['to', 'data', 'value', 'nonce'],
+    '/eth/sign-typed-data':     ['typedData'],
+    '/eth/sign':                ['message'],
+    '/utxo/sign-transaction':   ['inputs', 'outputs'],
+    '/xrp/sign-transaction':    ['payment', 'sequence'],
+    '/solana/sign-transaction': ['raw_tx', 'rawTx'],
+    '/solana/sign-message':     ['message'],
+    '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
+    '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
+  }
+  if (exact[path]) return exact[path]
+  // All Cosmos-family amino sign endpoints (cosmos/osmosis/thorchain/
+  // mayachain delegates, swaps, LP ops, IBC transfers, etc.) use
+  // CosmosAminoSignRequest.
+  if (/^\/(cosmos|osmosis|thorchain|mayachain)\/sign-amino/.test(path)) {
+    return ['signerAddress', 'signDoc']
+  }
+  return null
+}
+
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
-  // Invalidate features cache on device disconnect
+  const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
+    const deviceId = engine.getDeviceState().deviceId
+    if (!deviceId) return null
+    const seedId = engine.currentSeedEthAddress?.toLowerCase()
+    if (!seedId) return null
+    return { deviceId, walletId: `${deviceId}:${seedId}` }
+  }
+
+  // Device-swap detection: if deviceId changes between two `ready` states,
+  // pubkey/address caches must be flushed or the old device's xpubs will
+  // leak. (lastDeviceId is also flushed on disconnect so a re-connect of the
+  // SAME device will repopulate from scratch.)
+  let lastDeviceId: string | null = null
   engine.on('state-change', (state) => {
-    if (state.state === 'disconnected') clearFeaturesCache()
+    const nextId = state.deviceId ?? null
+    if (state.state === 'disconnected') {
+      clearFeaturesCache()
+      clearPubkeyCache()
+      clearAddressCache()
+      lastDeviceId = null
+      return
+    }
+    if (nextId && lastDeviceId && nextId !== lastDeviceId) {
+      clearFeaturesCache()
+      clearPubkeyCache()
+      clearAddressCache()
+    }
+    if (nextId) lastDeviceId = nextId
   })
 
   /**
@@ -881,6 +1114,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       return callbacks.emuSigningOp(fn, details) as Promise<T>
     }
     return fn()
+  }
+
+  /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
+  function requireChainSupport(chainId: string): Response | null {
+    const chain = CHAINS.find(c => c.id === chainId)
+    if (!chain?.minFirmware) return null
+    const fw = engine.getDeviceState().firmwareVersion
+    if (!fw || !isChainSupported(chain, fw)) {
+      return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
+    }
+    return null
   }
 
   /** Normalize showDisplay to boolean (undefined → false). */
@@ -922,30 +1166,51 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // Log the request with body + response + duration.
         // Sanitize: strip sensitive fields from signing payloads to prevent
         // leaking signatures, transaction data, or typed-data content to audit log.
-        if (callbacks?.onApiLog) {
+        //
+        // The audit-log read endpoints don't get logged — otherwise each read
+        // would persist the full prior history into a new row, recursively
+        // ballooning response_body across repeated reads.
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
+        if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
-          const SENSITIVE_KEYS = new Set([
-            'signature', 'serialized', 'serializedTx', 'signedTx', 'signed',
-            'typedData', 'message', 'rawTx', 'hex', 'data', 'signedPayload',
-            'msgs', 'memo', 'tx', 'txBytes', 'signDoc', 'authInfoBytes', 'bodyBytes',
+          // Audit logs are stored locally (SQLite) on the user's own machine,
+          // so the signing *inputs* (message, typedData, calldata, etc.) must
+          // be preserved verbatim — they're the exact thing a user needs to
+          // replay when debugging "what did I just sign?". Redacting them
+          // would defeat the audit log's primary purpose.
+          //
+          // The signed *outputs* (signature blob, serialized tx) are already
+          // returned to the dApp in the response body and don't add debug
+          // value when duplicated in the log, so we still trim those to keep
+          // log rows compact.
+          // Note: 'signature' is intentionally NOT trimmed — at ~130 chars it's small,
+          // and the audit log is the only place to retrieve a prior signature for
+          // regression debugging (recover-and-compare) without re-issuing the sign.
+          const SENSITIVE_OUTPUT_KEYS = new Set([
+            'apiKey', 'serialized', 'serializedTx', 'signedTx', 'signed', 'signedPayload',
           ])
-          const sanitize = (obj: any, depth = 0): any => {
+          const trimOutputs = (obj: any, depth = 0): any => {
             if (!obj || typeof obj !== 'object' || depth > 8) return obj
-            if (Array.isArray(obj)) return obj.map(v => sanitize(v, depth + 1))
+            if (Array.isArray(obj)) {
+              if (obj.length > 50) return `[trimmed ${obj.length} items]`
+              return obj.map(v => trimOutputs(v, depth + 1))
+            }
             const out: any = {}
             for (const [k, v] of Object.entries(obj)) {
-              if (SENSITIVE_KEYS.has(k)) { out[k] = '[REDACTED]'; continue }
-              out[k] = (v && typeof v === 'object') ? sanitize(v, depth + 1) : v
+              if (SENSITIVE_OUTPUT_KEYS.has(k)) { out[k] = '[trimmed]'; continue }
+              out[k] = (v && typeof v === 'object') ? trimOutputs(v, depth + 1) : v
             }
             return out
           }
-          const isSigning = SIGNING_ROUTES.has(path)
           callbacks.onApiLog({
             method, route: path, timestamp: requestStart,
             durationMs: Date.now() - requestStart,
             status, appName, imageUrl: imageUrl || undefined,
-            requestBody: isSigning ? sanitize(reqBody) : reqBody,
-            responseBody: isSigning ? sanitize(data) : data,
+            // Request body kept as-is so the user can see what they signed.
+            requestBody: reqBody,
+            // Response body trims large or sensitive output blobs but leaves compact
+            // fields intact for local debugging.
+            responseBody: trimOutputs(data),
             ...resolvedActivity,
           })
         }
@@ -970,6 +1235,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
       // Allowlist of upstream path prefixes the proxy may serve
       const WC_ALLOWED_PREFIXES = ['/_next/', '/chain-logos/', '/icons/', '/favicon.ico']
+
+      const rewriteWcProxyBody = (body: string): string => body
+        .replace(/keepkey:\/\/launch\/wc/g, 'keepkey-vault://launch/wc')
+        .replace(/keepkey:\/\/wc/g, 'keepkey-vault://wc')
+        .replace(/keepkey%3A%2F%2Flaunch%2Fwc/gi, 'keepkey-vault%3A%2F%2Flaunch%2Fwc')
+        .replace(/keepkey%3A%2F%2Fwc/gi, 'keepkey-vault%3A%2F%2Fwc')
+        .replace(/KeepKey Desktop/g, 'KeepKey Vault')
+        .replace(/Launch Desktop/g, 'Launch Vault')
 
       // Primary: everything under /wc/ is always proxied
       const isWcPrimaryPath = path === '/wc' || path.startsWith('/wc/')
@@ -1022,6 +1295,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             })
           }
 
+          if (ct && /text\/html|javascript|application\/json|text\/plain/i.test(ct)) {
+            const body = rewriteWcProxyBody(await upstream.text())
+            return new Response(body, { status: upstream.status, headers: respHeaders })
+          }
+
           return new Response(upstream.body, { status: upstream.status, headers: respHeaders })
         } catch {
           if (callbacks?.onApiLog) {
@@ -1070,7 +1348,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing,
             apiVersion: 2,
-            supportedChains: CHAINS.map(c => c.networkId),
+            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion)).map(c => c.networkId),
             device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
@@ -1104,6 +1382,36 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             connected: engine.wallet !== null,
             uptime: Math.floor((Date.now() - startTime) / 1000),
           })
+        }
+
+        if (path === '/admin/usb/devices' && method === 'GET') {
+          auth.requireAuth(req)
+          try {
+            return json(listUsbDevicesForAdmin())
+          } catch (err: any) {
+            return json({ error: 'Failed to list USB devices', message: err?.message || String(err) }, 500)
+          }
+        }
+
+        if (path === '/admin/usb/state' && method === 'GET') {
+          auth.requireAuth(req)
+          try {
+            const devices = listUsbDevicesForAdmin()
+            const keepKeyOnBus = devices.some(device => device.isKeepKey)
+            const deviceState = engine.getDeviceState()
+            return json({
+              connected: engine.wallet !== null,
+              state: deviceState.state,
+              deviceId: deviceState.deviceId || null,
+              label: deviceState.label || null,
+              firmwareVersion: deviceState.firmwareVersion || null,
+              activeTransport: deviceState.activeTransport || null,
+              keepKeyOnBus,
+              usbDeviceCount: devices.length,
+            })
+          } catch (err: any) {
+            return json({ error: 'Failed to read USB state', message: err?.message || String(err) }, 500)
+          }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -1153,6 +1461,42 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (method === 'POST' && SIGNING_ROUTES.has(path) && callbacks?.onSigningRequest) {
           auth.requireAuth(req)
+
+          // Pre-approval payload validation. Some clients (and our own
+          // discovery code) POST `{}` to signing endpoints to probe which
+          // methods the wallet supports. Without this short-circuit every
+          // probe pops an approval dialog with nothing to sign, which spams
+          // the user and hides the real request. Reject empties with 400
+          // before the approval flow runs.
+          //
+          // We look for *any* payload field that indicates this is a real
+          // signing attempt. The permissive "has any of these keys" check
+          // is intentional — the per-chain handlers below will run the
+          // full schema validation, we just need to avoid gating on empty.
+          //
+          // Keys are taken from schemas.ts so the check mirrors the actual
+          // wire contract each handler parses. When a new sign route is
+          // added to SIGNING_ROUTES, add its required-any list here (or
+          // extend the prefix match for route families that share a schema).
+          let probeCheckBody: any
+          try {
+            probeCheckBody = await req.clone().json()
+          } catch {
+            probeCheckBody = null
+          }
+          const requiredAny = requiredSigningFields(path)
+          if (requiredAny && (!probeCheckBody || typeof probeCheckBody !== 'object')) {
+            console.warn(`[REST] ${path} probe rejected: body is not an object`)
+            return json({ error: 'Empty or invalid signing payload' }, 400)
+          }
+          if (requiredAny && !requiredAny.some((k) => probeCheckBody[k] !== undefined)) {
+            console.warn(
+              `[REST] ${path} probe rejected: missing all of`, requiredAny,
+              'keys seen:', Object.keys(probeCheckBody || {}),
+            )
+            return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
+          }
+
           const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()
           const signingInfo: SigningRequestInfo = { id, method: path, appName }
@@ -1173,6 +1517,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
               }
+            } else if (path === '/eth/sign') {
+              // EIP-191 personal_sign: body is { address, addressNList, message }.
+              // Message arrives as a hex string per JSON-RPC spec; in practice it
+              // nearly always encodes UTF-8 text (SIWE, dApp login challenges).
+              // Decode to plaintext so the user sees what they're actually
+              // signing — raw hex alone is useless for consent.
+              signingInfo.from = preview.address
+              const raw = typeof preview.message === 'string' ? preview.message : ''
+              let text: string | undefined
+              let isUtf8Text = false
+              if (raw) {
+                const hexMatch = /^0x([0-9a-fA-F]*)$/.exec(raw)
+                if (hexMatch) {
+                  try {
+                    const buf = Buffer.from(hexMatch[1], 'hex')
+                    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+                    text = decoded
+                    isUtf8Text = true
+                  } catch {
+                    // Not valid UTF-8 — leave `text` undefined; UI will show hex.
+                  }
+                } else {
+                  // Already a plaintext string (non-spec clients).
+                  text = raw
+                  isUtf8Text = true
+                }
+              }
+              signingInfo.ethMessageDecoded = {
+                address: preview.address,
+                messageRaw: raw,
+                messageText: text,
+                isUtf8Text,
+              }
             } else if (path === '/ton/sign-transaction') {
               // TON: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address
@@ -1181,6 +1558,71 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // Tron: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address
               signingInfo.value = preview.amount
+            } else if (path === '/solana/sign-message') {
+              const raw = typeof preview.message === 'string' ? preview.message : ''
+              const messageEncoding = /^[0-9a-fA-F]+$/.test(raw) ? 'hex' : 'base64'
+              const addressNList = pickAddressNList(preview, DEFAULT_SOLANA_ADDRESS_N)
+              const claimedSigner = typeof preview.pubkey === 'string'
+                ? preview.pubkey
+                : typeof preview.address === 'string'
+                  ? preview.address
+                  : undefined
+              let actualSigner = formatAddressNPath(addressNList)
+              try {
+                const wallet = requireWallet(engine)
+                const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
+                const derivedSigner = typeof derived === 'string' ? derived : derived?.address
+                if (derivedSigner) actualSigner = derivedSigner
+                if (claimedSigner && derivedSigner && claimedSigner !== derivedSigner) {
+                  throw new HttpError(400, 'Solana signer mismatch: claimed signer does not match address_n/addressNList')
+                }
+              } catch (e: any) {
+                if (e instanceof HttpError) throw e
+                console.warn('[REST] Could not derive Solana signer for preview:', e?.message || e)
+              }
+              signingInfo.chain = 'solana'
+              signingInfo.from = actualSigner
+              signingInfo.data = raw
+              signingInfo.needsBlindSigning = true
+              signingInfo.requiresAdvancedMode = true
+              signingInfo.solanaMessageDecoded = buildSolanaMessageDecodedInfo(raw, {
+                // Match hdwallet's SolanaSignMessage string coercion exactly:
+                // hex strings sign hex bytes, everything else signs base64 bytes.
+                encoding: messageEncoding,
+                signer: actualSigner,
+              })
+            } else if (path === '/solana/sign-transaction') {
+              // Solana clear-signing: parse v0/legacy message, resolve ALTs,
+              // decode each instruction via the pioneer-discovery program
+              // registry. Best-effort — a parse/ALT-RPC failure surfaces an
+              // explicit warning in the UI rather than silently falling
+              // back to an unflagged simple-transfer dialog.
+              if (typeof preview.raw_tx === 'string') {
+                try {
+                  const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
+                  signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
+                    preview.raw_tx,
+                    createRpcAltFetcher(endpoint),
+                  )
+                } catch (e: any) {
+                  const errName = e?.name || 'Error'
+                  const errMsg = e?.message || String(e)
+                  // Surface error with type prefix so the UI banner shows a
+                  // useful diagnostic ("SolanaTxParseError: ..." vs "TypeError:
+                  // fetch failed") instead of a bare string.
+                  signingInfo.solanaDecodeError = `${errName}: ${errMsg}`
+                  // Full stack + raw tx goes to the vault log so we can
+                  // reproduce the failure locally — don't ship raw bytes to
+                  // the UI, but *do* leave a breadcrumb in the console.
+                  console.warn(
+                    '[REST] Solana decode failed:', errName, errMsg,
+                    '\n  raw_tx (base64):', preview.raw_tx,
+                    '\n  stack:', e?.stack,
+                  )
+                }
+              } else {
+                signingInfo.solanaDecodeError = 'missing raw_tx payload'
+              }
             } else {
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to
@@ -1205,7 +1647,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning}, source=${decoded?.source}`)
               }
             }
-          } catch { /* body parse failed, non-fatal */ }
+          } catch (e: any) {
+            if (e instanceof HttpError) throw e
+            console.warn('[REST] Signing preview extraction failed:', e?.message || e)
+          }
 
           // Check device AdvancedMode policy before presenting to user.
           // ONLY use cached features — never call getFeatures() here because
@@ -1251,7 +1696,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'utxo:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'utxo', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1272,7 +1717,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'cosmos:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'cosmos', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1291,7 +1736,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'osmo:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'osmo', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1310,7 +1755,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'eth:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'eth', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1329,7 +1774,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'tendermint:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'tendermint', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1348,7 +1793,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'thor:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'thor', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1367,7 +1812,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'maya:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'maya', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1386,7 +1831,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'xrp:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'xrp', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1403,9 +1848,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/solana' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('solana')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'sol:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'sol', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1422,9 +1869,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tron' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('tron')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'trx:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'trx', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1441,9 +1890,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/ton' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('ton')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = 'ton:' + JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'ton', body)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -1761,40 +2212,66 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignRequest)
-          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const addressNList = pickAddressNList(body, DEFAULT_SOLANA_ADDRESS_N)
 
           // Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
-          // Firmware expects just the message bytes. Extract message portion.
-          let deviceRawTx = body.raw_tx
+          // Firmware expects just the message bytes. See solana-tx.ts for the
+          // wire-format contract and malformed-input rejection rules.
           const fullTx = Buffer.from(body.raw_tx, 'base64')
-          let pos = 0, sigCount = 0
-          if (fullTx[0] < 0x80) { sigCount = fullTx[0]; pos = 1 }
-          else if (fullTx.length >= 2 && fullTx[1] < 0x80) {
-            sigCount = (fullTx[0] & 0x7f) | (fullTx[1] << 7); pos = 2
-          } else if (fullTx.length >= 3) {
-            sigCount = (fullTx[0] & 0x7f) | ((fullTx[1] & 0x7f) << 7) | (fullTx[2] << 14); pos = 3
+          let parsed
+          try {
+            parsed = parseSolanaTx(fullTx)
+          } catch (err) {
+            if (err instanceof SolanaTxParseError) throw new HttpError(400, err.message)
+            throw err
           }
-          const messageStart = pos + sigCount * 64
-          if (sigCount > 0 && messageStart < fullTx.length) {
-            deviceRawTx = Buffer.from(fullTx.subarray(messageStart)).toString('base64')
-          }
-
-          const result = await emuWrap(() => wallet.solanaSignTx({
-            addressNList,
-            rawTx: deviceRawTx,
-          }), { operation: 'solanaSignTx', chain: 'Solana' })
-          // Assemble signed tx: replace dummy 64-byte signature in full tx with real signature
-          if (result?.signature && body.raw_tx) {
-            const rawBytes = Buffer.from(body.raw_tx, 'base64')
-            const sigBytes = result.signature instanceof Uint8Array
+          // KeepKey firmware message type 752 (SolanaSignTx) parses legacy
+          // messages only. For versioned (v0) messages we route the exact
+          // message bytes — including the 0x80 prefix — through type 754
+          // (SolanaSignMessage), which signs raw bytes with Ed25519 over the
+          // user's Solana key. The resulting 64-byte signature is valid for
+          // the original v0 tx because Solana computes signatures over the
+          // message payload (not the wrapper).
+          //
+          // Trade-off: the device displays a generic "sign message" prompt
+          // rather than a parsed-tx summary. Users must review the resolved
+          // accounts/amounts in the Vault approval dialog. Full on-device
+          // parsing of v0 + ALT display is a firmware-side follow-up.
+          let sigBytes: Uint8Array
+          if (parsed.isVersioned) {
+            const messageBytes = solanaMessageSlice(fullTx, parsed)
+            const msgResult = await emuWrap(() => wallet.solanaSignMessage({
+              addressNList,
+              message: Buffer.from(messageBytes).toString('base64'),
+              showDisplay: body.show_display !== false,
+            }), { operation: 'solanaSignMessage', chain: 'Solana' })
+            const sig = msgResult?.signature
+            if (!sig) throw new HttpError(500, 'Solana v0 sign: device returned no signature')
+            sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+          } else {
+            const deviceRawTx = Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64')
+            const result = await emuWrap(() => wallet.solanaSignTx({
+              addressNList,
+              rawTx: deviceRawTx,
+            }), { operation: 'solanaSignTx', chain: 'Solana' })
+            if (!result?.signature) return json(result)
+            sigBytes = result.signature instanceof Uint8Array
               ? result.signature
               : Buffer.from(result.signature, 'base64')
-            if (rawBytes.length > 65 && sigBytes.length === 64) {
-              sigBytes.forEach((b: number, i: number) => { rawBytes[1 + i] = b })
-              return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
-            }
           }
-          return json(result)
+
+          // Assemble signed tx: write the real signature into the first sig
+          // slot (starts at `parsed.sigStart`, 64 bytes long). Same layout
+          // for legacy and v0 because the wrapper format is identical.
+          if (sigBytes.length !== 64) {
+            throw new HttpError(500, `Solana sign: unexpected signature length ${sigBytes.length}`)
+          }
+          const rawBytes = Buffer.from(body.raw_tx, 'base64')
+          if (rawBytes.length < parsed.sigStart + 64) {
+            throw new HttpError(500, 'Solana sign: raw tx too short to hold signature')
+          }
+          for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
+          return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
         }
 
         // ── SOLANA MESSAGE SIGNING (firmware type 754) ──────────────────
@@ -1850,8 +2327,252 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             toAddress: body.to_address,
             amount: body.amount,
           }), { operation: 'tonSignTx', chain: 'TON' })
-          if (!result) throw Object.assign(new Error('tonSignTx returned no result'), { statusCode: 500 })
+          if (!result) throw new HttpError(500, 'tonSignTx returned no result')
           return json(result)
+        }
+
+        // ── MESSAGE SIGNING (firmware 7.14.1+) ────────────────────────
+        // TIP-191 personal_sign for TRON.
+        // hash = keccak256("\x19TRON Signed Message:\n" + len + msg)
+        if (path === '/tron/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          const message = decodeMessageBody(body.message, body.is_text, 'tronSignMessage')
+          const result = await emuWrap(() => wallet.tronSignMessage({
+            addressNList,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'tronSignMessage', chain: 'Tron' })
+          if (!result) throw new HttpError(500, 'tronSignMessage returned no result')
+          return json({ address: result.address, signature: toHex(result.signature) })
+        }
+
+        // TIP-191 verify — recovers signer pubkey from sig + checks claimed address.
+        if (path === '/tron/verify-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronVerifyMessageRequest)
+          // signature is regex-validated to 65 bytes hex by zod; parseHex is belt-and-braces.
+          const sig = parseHex(body.signature, 'tronVerifyMessage.signature', 65)
+          const message = decodeMessageBody(body.message, body.is_text, 'tronVerifyMessage')
+          const ok = await emuWrap(() => wallet.tronVerifyMessage({
+            address: body.address,
+            signature: sig,
+            message,
+          }), { operation: 'tronVerifyMessage', chain: 'Tron' })
+          return json({ verified: !!ok })
+        }
+
+        // TIP-712 typed-data signing (hash mode). Host pre-computes the
+        // domainSeparator + message hashes per the TIP-712 spec; device
+        // assembles keccak256("\x19\x01" || ds_hash || msg_hash) and signs.
+        if (path === '/tron/sign-typed-hash' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TronSignTypedHashRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+          // Both hashes are regex-validated to 32 bytes hex by zod; parseHex
+          // re-checks length defensively in case the schema constraint loosens.
+          const dsHash = parseHex(body.domain_separator_hash, 'tronSignTypedHash.domain_separator_hash', 32)
+          const msgHash = body.message_hash
+            ? parseHex(body.message_hash, 'tronSignTypedHash.message_hash', 32)
+            : undefined
+          const result = await emuWrap(() => wallet.tronSignTypedHash({
+            addressNList,
+            domainSeparatorHash: dsHash,
+            messageHash: msgHash,
+          }), { operation: 'tronSignTypedHash', chain: 'Tron' })
+          if (!result) throw new HttpError(500, 'tronSignTypedHash returned no result')
+          return json({ address: result.address, signature: toHex(result.signature) })
+        }
+
+        // Bare Ed25519 SignMessage for TON. Firmware fences this behind
+        // the AdvancedMode policy — without it, expect Failure.
+        if (path === '/ton/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.TonSignMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
+          const message = decodeMessageBody(body.message, body.is_text, 'tonSignMessage')
+          const result = await emuWrap(() => wallet.tonSignMessage({
+            addressNList,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'tonSignMessage', chain: 'TON' })
+          if (!result) throw new HttpError(500, 'tonSignMessage returned no result')
+          return json({ publicKey: toHex(result.publicKey), signature: toHex(result.signature) })
+        }
+
+        // Domain-separated Solana off-chain message. Firmware constructs
+        //   "\xff" || "solana offchain" || version || format || length || msg
+        // and Ed25519-signs the envelope.
+        if (path === '/solana/sign-offchain-message' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SolanaSignOffchainMessageRequest)
+          const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          const message = decodeMessageBody(body.message, body.is_text, 'solanaSignOffchainMessage')
+          // Off-chain spec: 1212-byte ceiling for formats 0/1. Firmware
+          // rejects above this anyway; enforcing here surfaces the error
+          // pre-USB-roundtrip with a clearer source.
+          if (message.length > 1212) {
+            throw new HttpError(400, `solanaSignOffchainMessage.message: exceeds 1212-byte off-chain spec ceiling (got ${message.length})`)
+          }
+          const result = await emuWrap(() => wallet.solanaSignOffchainMessage({
+            addressNList,
+            version: body.version,
+            messageFormat: body.message_format,
+            message,
+            showDisplay: body.show_display,
+          }), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
+          if (!result) throw new HttpError(500, 'solanaSignOffchainMessage returned no result')
+          return json({ publicKey: toHex(result.publicKey), signature: toHex(result.signature) })
+        }
+
+        // ── TON BUILD + FINALIZE (2 endpoints) ────────────────────────
+        // Exposes the local v4R2 BOC builder so thin clients (browser
+        // extension, mobile) don't have to embed a TON lib + toncenter
+        // plumbing just to construct a transfer. The existing desktop
+        // flow in txbuilder/index.ts already uses the same helpers —
+        // these endpoints are a thin REST shell around them.
+        if (path === '/ton/build-transfer' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.TonBuildTransferRequest)
+
+          // Memo cap. Plain-text TON memos are encoded into a single cell
+          // alongside the 32-bit op code; ~120 bytes UTF-8 is a safe ceiling
+          // (1023-bit cell budget minus framing). Longer memos technically
+          // require a continuation cell ref, which buildInternalMessage
+          // doesn't emit — without this guard the user gets a cryptic
+          // BitWriter overflow deep in the assembler.
+          if (body.memo && Buffer.byteLength(body.memo, 'utf8') > 120) {
+            throw new HttpError(400, 'memo too large (max 120 bytes UTF-8)')
+          }
+
+          // Seqno + wallet-state fetch fails independently; run in parallel
+          // so the caller eats one RTT rather than two, and surface both
+          // errors via a single diagnostic when the network's down.
+          let seqno: number
+          let walletState: { initialized: boolean; balance: string }
+          try {
+            ;[seqno, walletState] = await Promise.all([
+              getTonSeqno(body.fromAddress),
+              getTonWalletState(body.fromAddress),
+            ])
+          } catch (e: any) {
+            throw new HttpError(502, `TON network error — cannot determine wallet state: ${e.message}`)
+          }
+
+          const needsDeploy = !walletState.initialized
+          if (needsDeploy && !body.publicKeyHex) {
+            // Firmware needs the pubkey to derive the v4R2 contract data
+            // cell for StateInit — without it, the first-ever tx from a
+            // fresh address can't be constructed. Make the failure loud
+            // rather than silently producing an un-broadcastable tx.
+            throw new HttpError(400, 'TON wallet not initialized — publicKeyHex required for first-time deployment')
+          }
+
+          // 5-minute validity window. The hardware wallet confirmation UI
+          // can take 30s+ for a careful user, and the v4R2 wallet
+          // contract rejects messages past expireAt — anything tighter
+          // than ~2 min risks a "expired" failure after the user already
+          // confirmed on the device. If the device-side flow (PIN +
+          // passphrase + multi-step confirm) takes longer than 5 min, the
+          // caller must call /ton/build-transfer again to refresh expireAt
+          // before signing — we have no way to extend it post-hoc without
+          // changing the bodyHash the device just signed.
+          const expireAt = Math.floor(Date.now() / 1000) + 300
+
+          const build = buildTonTransfer({
+            fromAddress: body.fromAddress,
+            to: body.toAddress,
+            amountNano: body.amountNano,
+            memo: body.memo,
+            seqno,
+            expireAt,
+            needsDeploy,
+            publicKeyHex: body.publicKeyHex,
+          })
+
+          return json({
+            build,
+            // Convenience fields the client would otherwise have to pluck
+            // off `build` — flatten the ones most callers need.
+            bodyHash: build.bodyHash,
+            rawTx: build.rawTx,
+            seqno: build.seqno,
+            expireAt: build.expireAt,
+            needsDeploy: build.needsDeploy,
+            // Approximate fees for the UI. Clear-signing makes the exact
+            // figure visible on-device; this is just so the send screen
+            // can surface an estimate before the user commits.
+            feeEstimate: needsDeploy ? '0.01' : '0.005',
+          })
+        }
+
+        if (path === '/ton/finalize-transfer' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.TonFinalizeTransferRequest)
+
+          // Signature is 64 bytes Ed25519. Hex validation in the schema
+          // catches length mismatches before they bubble into the
+          // assembler as a cryptic BitWriter error.
+          const sigBuf = Buffer.from(body.signature, 'hex')
+          if (sigBuf.length !== 64) {
+            throw new HttpError(400, 'signature must decode to 64 bytes')
+          }
+
+          const buildResult = body.build as unknown as TonBuildResult
+          if (!buildResult?._internal) {
+            throw new HttpError(400, 'build._internal missing — pass the full object returned by /ton/build-transfer')
+          }
+          if (typeof buildResult.bodyHash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(buildResult.bodyHash)) {
+            throw new HttpError(400, 'build.bodyHash missing or not 32-byte hex')
+          }
+
+          // Detect a client that mutated _internal (amount, destination,
+          // memo, seqno, expireAt) after the device already signed the
+          // original bodyHash. Without this, broadcast=false would return
+          // a structurally-valid BOC that carries a signature over different
+          // bytes than what it now encodes — the caller can't tell the tx
+          // is doomed until TonCenter rejects it (or worse, with a collision,
+          // never).
+          let recomputedHash: string
+          try {
+            recomputedHash = computeTonBodyHash(buildResult)
+          } catch (e: any) {
+            throw new HttpError(400, `build object malformed — cannot reconstruct unsigned body: ${e.message}`)
+          }
+          if (recomputedHash !== buildResult.bodyHash.toLowerCase()) {
+            throw new HttpError(400, 'build tampered — _internal state does not match bodyHash')
+          }
+
+          const { boc, extMsgHash } = assembleTonSignedBoc(buildResult, sigBuf)
+
+          // broadcast=false lets a caller handle the broadcast elsewhere
+          // (offline signing, pre-flight BOC inspection, etc.). Default
+          // true because the common path is build → sign → broadcast in
+          // one user action.
+          const broadcast = body.broadcast !== false
+          if (!broadcast) {
+            return json({ boc, txid: extMsgHash, broadcasted: false })
+          }
+
+          try {
+            await broadcastTonBoc(boc)
+          } catch (e: any) {
+            // Surface the BOC and the txid even on broadcast failure so
+            // the caller can retry broadcast without re-signing.
+            throw new HttpError(
+              502,
+              `TON broadcast failed (boc preserved in error payload): ${e.message}`,
+              { boc, txid: extMsgHash },
+            )
+          }
+
+          return json({ boc, txid: extMsgHash, broadcasted: true })
         }
 
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
@@ -1866,7 +2587,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.GetPublicKeyRequest)
-          const cacheKey = JSON.stringify(body)
+          const cacheKey = scopedKey(engine, 'pubkey', body)
           const cached = pubkeyCache.get(cacheKey)
           if (cached) return json(cached)
           const sd = showDisplay(body.show_display)
@@ -1980,6 +2701,291 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           })
         }
 
+        // ── DEBUG PORTFOLIO ENDPOINTS ────────────────────────────────────
+        // Verbose read-only views into cached balances, spam analysis, and
+        // token visibility overrides. Useful for diagnosing balance/spam issues
+        // without needing to dig through the SQLite DB directly.
+
+        if (path === '/api/debug/portfolio' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, balances: [] })
+          const visibilityMap = getAllTokenVisibility()
+          const now = Date.now()
+          const ageMs = now - cached.updatedAt
+
+          let totalUsd = 0
+          let totalTokens = 0
+          let confirmedSpam = 0
+          let possibleSpam = 0
+          let hiddenByUser = 0
+          const chains = cached.balances.map(b => {
+            totalUsd += b.balanceUsd
+            const tokenAnalysis = (b.tokens || []).map(t => {
+              totalTokens++
+              const override = visibilityMap.get((t.caip || '').toLowerCase()) ?? null
+              const spam = detectSpamToken(t, override)
+              if (spam.isSpam && spam.level === 'confirmed') confirmedSpam++
+              if (spam.isSpam && spam.level === 'possible') possibleSpam++
+              if (override === 'hidden') hiddenByUser++
+              return { ...t, _spam: spam, _userOverride: override }
+            })
+            return {
+              chainId: b.chainId,
+              symbol: b.symbol,
+              address: b.address,
+              balance: b.balance,
+              balanceUsd: b.balanceUsd,
+              nativeBalanceUsd: b.nativeBalanceUsd,
+              tokenCount: tokenAnalysis.length,
+              tokens: tokenAnalysis,
+            }
+          })
+
+          return json({
+            deviceId,
+            cached: true,
+            updatedAt: cached.updatedAt,
+            ageMs,
+            ageSec: Math.round(ageMs / 1000),
+            summary: { totalUsd, totalChains: chains.length, totalTokens, confirmedSpam, possibleSpam, hiddenByUser },
+            chains,
+          })
+        }
+
+        if (path === '/api/debug/portfolio/chains' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, chains: [] })
+          const now = Date.now()
+          return json({
+            deviceId,
+            updatedAt: cached.updatedAt,
+            ageMs: now - cached.updatedAt,
+            chains: cached.balances.map(b => ({
+              chainId: b.chainId,
+              symbol: b.symbol,
+              address: b.address,
+              balance: b.balance,
+              balanceUsd: b.balanceUsd,
+              nativeBalanceUsd: b.nativeBalanceUsd ?? null,
+              tokenCount: b.tokens?.length ?? 0,
+            })),
+          })
+        }
+
+        if (path === '/api/debug/portfolio/tokens' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, tokens: [] })
+          const visibilityMap = getAllTokenVisibility()
+          const tokens: any[] = []
+          for (const b of cached.balances) {
+            for (const t of b.tokens || []) {
+              const override = visibilityMap.get((t.caip || '').toLowerCase()) ?? null
+              const spam = detectSpamToken(t, override)
+              tokens.push({ chain: b.chainId, ...t, _spam: spam, _userOverride: override })
+            }
+          }
+          tokens.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+          return json({ deviceId, total: tokens.length, tokens })
+        }
+
+        if (path === '/api/debug/portfolio/spam' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+          const cached = getCachedBalances(deviceId)
+          if (!cached) return json({ deviceId, cached: false, spam: [] })
+          const visibilityMap = getAllTokenVisibility()
+          const showPossible = new URL(req.url).searchParams.get('level') !== 'confirmed'
+          const spam: any[] = []
+          for (const b of cached.balances) {
+            for (const t of b.tokens || []) {
+              const override = visibilityMap.get((t.caip || '').toLowerCase()) ?? null
+              const result = detectSpamToken(t, override)
+              if (!result.isSpam) continue
+              if (!showPossible && result.level !== 'confirmed') continue
+              spam.push({ chain: b.chainId, ...t, _spam: result, _userOverride: override })
+            }
+          }
+          spam.sort((a, b) => {
+            if (a._spam.level === b._spam.level) return (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)
+            return a._spam.level === 'confirmed' ? -1 : 1
+          })
+          return json({ deviceId, total: spam.length, spam })
+        }
+
+        // ── Pioneer diagnostic: drive a full chunked portfolio call and report results ──
+        if (path === '/api/debug/pioneer-audit' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Unavailable for passphrase wallet sessions' }, 403)
+          const ds = engine.getDeviceState()
+          const deviceId = ds.deviceId
+          if (!deviceId) return json({ error: 'No device connected' }, 503)
+
+          // Build pubkey list from cached DB entries (avoids device round-trips)
+          const cachedPks = getCachedPubkeys(deviceId)
+          const pubkeys: Array<{ caip: string; pubkey: string; label: string }> = []
+
+          // getCachedPubkeys() returns chainId but not caip — derive from the shared CHAINS registry
+          // so new chains added to chains.ts are automatically covered.
+          const chainIdToCaip = new Map(CHAINS.map(c => [c.id, c.caip]))
+
+          // UTXO (xpubs) and non-EVM address-based entries
+          for (const pk of cachedPks) {
+            const caip = chainIdToCaip.get(pk.chainId) || ''
+            if (pk.xpub) pubkeys.push({ caip, pubkey: pk.xpub, label: `${pk.chainId}:xpub` })
+            else if (pk.address) pubkeys.push({ caip, pubkey: pk.address, label: `${pk.chainId}:addr` })
+          }
+
+          // EVM chains — use ETH address from cache for each supported EVM chain
+          const ethCachedPk = cachedPks.find(p => p.chainId === 'ethereum' && p.address)
+          if (ethCachedPk?.address) {
+            const evmCaips: Array<[string, string]> = [
+              ['eip155:1/slip44:60', 'ethereum'],
+              ['eip155:137/slip44:966', 'polygon'],
+              ['eip155:42161/slip44:60', 'arbitrum'],
+              ['eip155:10/slip44:60', 'optimism'],
+              ['eip155:43114/slip44:60', 'avalanche'],
+              ['eip155:56/slip44:60', 'bsc'],
+              ['eip155:8453/slip44:60', 'base'],
+              ['eip155:100/slip44:60', 'gnosis'],
+            ]
+            for (const [caip, label] of evmCaips) {
+              if (!pubkeys.find(p => p.caip === caip)) {
+                pubkeys.push({ caip, pubkey: ethCachedPk.address, label: `${label}:evm` })
+              }
+            }
+          }
+
+          // Cached non-EVM addresses (cosmos, xrp, etc.)
+          const cachedBalances = getCachedBalances(deviceId)
+          if (cachedBalances) {
+            const cosmosChains: Record<string, string> = {
+              cosmos: 'cosmos:cosmoshub-4/slip44:118',
+              thorchain: 'cosmos:thorchain-mainnet-v1/slip44:931',
+              mayachain: 'cosmos:mayachain-mainnet-v1/slip44:931',
+              osmosis: 'cosmos:osmosis-1/slip44:118',
+            }
+            for (const b of cachedBalances.balances) {
+              const caip = cosmosChains[b.chainId]
+              if (caip && b.address && !b.address.startsWith('xpub') && !b.address.startsWith('zpub') && !b.address.startsWith('ypub')) {
+                if (!pubkeys.find(p => p.caip === caip)) {
+                  pubkeys.push({ caip, pubkey: b.address, label: `${b.chainId}:addr` })
+                }
+              }
+              if (b.chainId === 'ripple' && b.address) {
+                const xrpCaip = 'ripple:4109c6f2045fc7eff4cde8f9905d19c2/slip44:144'
+                if (!pubkeys.find(p => p.caip === xrpCaip)) {
+                  pubkeys.push({ caip: xrpCaip, pubkey: b.address, label: 'ripple:addr' })
+                }
+              }
+            }
+          }
+
+          const CHUNK_SIZE = 8
+          const chunks: typeof pubkeys[] = []
+          for (let i = 0; i < pubkeys.length; i += CHUNK_SIZE) chunks.push(pubkeys.slice(i, i + CHUNK_SIZE))
+
+          // Call Pioneer for each chunk
+          let pioneer: any
+          try { pioneer = await callbacks.getPioneer() } catch (e: any) {
+            return json({ error: `Pioneer init failed: ${e.message}`, pubkeyCount: pubkeys.length })
+          }
+
+          const chunkResults: any[] = []
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i]
+            const t0 = Date.now()
+            try {
+              const resp = await Promise.race([
+                pioneer.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }, { forceRefresh: true }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('60s timeout')), 60000)),
+              ])
+              const entries = Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp?.data?.balances) ? resp.data.balances : (Array.isArray(resp) ? resp : []))
+              chunkResults.push({
+                chunk: i + 1,
+                pubkeys: chunk.map(p => ({ caip: p.caip, label: p.label, pubkey: p.pubkey.substring(0, 20) + '...' })),
+                ok: true,
+                durationMs: Date.now() - t0,
+                entryCount: entries.length,
+                entries: entries.map((e: any) => ({
+                  caip: e.caip, symbol: e.symbol, balance: e.balance, valueUsd: e.valueUsd,
+                  dataSource: e.dataSource, isStale: e.isStale,
+                })),
+              })
+            } catch (e: any) {
+              chunkResults.push({
+                chunk: i + 1,
+                pubkeys: chunk.map(p => ({ caip: p.caip, label: p.label })),
+                ok: false,
+                durationMs: Date.now() - t0,
+                error: e?.message || String(e),
+              })
+            }
+          }
+
+          const succeeded = chunkResults.filter(r => r.ok).length
+          const failed = chunkResults.filter(r => !r.ok).length
+          return json({
+            deviceId,
+            pubkeyCount: pubkeys.length,
+            chunkCount: chunks.length,
+            chunkSize: CHUNK_SIZE,
+            succeeded,
+            failed,
+            pioneerUrl: callbacks.getPioneerApiBase?.() || 'unknown',
+            chunks: chunkResults,
+          })
+        }
+
+        if (path === '/api/debug/token-visibility' && method === 'GET') {
+          auth.requireAuth(req)
+          const hidden = getTokensByVisibility('hidden')
+          const visible = getTokensByVisibility('visible')
+          return json({
+            total: hidden.length + visible.length,
+            hidden: hidden.map(r => ({ caip: r.caip, updatedAt: r.updatedAt })),
+            visible: visible.map(r => ({ caip: r.caip, updatedAt: r.updatedAt })),
+          })
+        }
+
+        if (path.startsWith('/api/debug/token-visibility/') && method === 'PUT') {
+          auth.requireAuth(req)
+          const caip = decodeURIComponent(path.slice('/api/debug/token-visibility/'.length))
+          if (!caip) return json({ error: 'caip required in path' }, 400)
+          const body = await req.json().catch(() => ({})) as any
+          const status = body?.status
+          if (status !== 'visible' && status !== 'hidden') {
+            return json({ error: 'body.status must be "visible" or "hidden"' }, 400)
+          }
+          setTokenVisibility(caip, status)
+          return json({ caip, status, updated: true })
+        }
+
+        if (path.startsWith('/api/debug/token-visibility/') && method === 'DELETE') {
+          auth.requireAuth(req)
+          const caip = decodeURIComponent(path.slice('/api/debug/token-visibility/'.length))
+          if (!caip) return json({ error: 'caip required in path' }, 400)
+          removeTokenVisibility(caip)
+          return json({ caip, removed: true })
+        }
+
         if (path === '/api/pubkeys/batch' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
@@ -1994,7 +3000,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // SDK sends type='address' for chains that need actual addresses, not xpubs.
             if (p.type === 'address') {
               const primaryNetwork = (p.networks || [])[0] || ''
-              const addrCacheKey = `batch-addr:${JSON.stringify(p.address_n)}:${primaryNetwork}`
+              const addrCacheKey = scopedKey(engine, 'batch-addr', { n: p.address_n, net: primaryNetwork })
               const cachedAddr = addressCache.get(addrCacheKey)
               if (cachedAddr) {
                 results.push({
@@ -2036,18 +3042,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   const r = await wallet.cosmosGetAddress({ addressNList: addrNList, showDisplay: false })
                   address = typeof r === 'string' ? r : r?.address || ''
                 } else if (coinType === 501) {
-                  // Solana uses ed25519 with 4-element path (m/44'/501'/0'/0') — don't extend to 5
-                  const solNList = p.address_n
-                  const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('solana')) {
+                    const solNList = p.address_n
+                    const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 } else if (coinType === 195) {
-                  const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('tron')) {
+                    const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 } else if (coinType === 607) {
-                  // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
-                  const tonNList = p.address_n
-                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('ton')) {
+                    const tonNList = p.address_n
+                    const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 }
 
                 if (address) {
@@ -2074,7 +3084,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
 
             // ── xpub/ypub/zpub-type paths (UTXO chains) ──
-            const cacheKey = JSON.stringify({ address_n: p.address_n, script_type: p.script_type })
+            const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type })
             const cached = pubkeyCache.get(cacheKey)
             if (cached) {
               results.push({
@@ -2129,6 +3139,249 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ═══════════════════════════════════════════════════════════════
+        // SIGNING HISTORY / AUDIT LOG (auth-required — exposes payloads)
+        // PRIVACY: standard-wallet history is hidden during passphrase sessions,
+        // matching the RPC `getApiLogs` / `getRecentActivity` behavior.
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/activity/recent' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const limitRaw = q.get('limit')
+          const limit = limitRaw === null ? 50 : Number(limitRaw)
+          if (!Number.isFinite(limit)) {
+            throw new HttpError(400, 'Invalid limit: must be a number')
+          }
+          const entries = getRecentActivityFromLog(
+            Math.min(Math.max(limit, 1), 500),
+            q.get('chainId') || q.get('chain') || undefined,
+            scope.deviceId,
+            scope.walletId,
+          )
+          return json({ entries, count: entries.length })
+        }
+
+        if (path === '/api/v1/activity' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const parseNumParam = (name: string): number | undefined => {
+            const raw = q.get(name)
+            if (raw === null) return undefined
+            const n = Number(raw)
+            if (!Number.isFinite(n)) {
+              throw new HttpError(400, `Invalid ${name}: must be a number`)
+            }
+            return n
+          }
+          const entries = findApiLogs({
+            ...scope,
+            route:        q.get('route')         || undefined,
+            activityType: q.get('activityType')  || undefined,
+            txid:         q.get('txid')          || undefined,
+            chain:        q.get('chain')         || undefined,
+            since:        parseNumParam('since'),
+            until:        parseNumParam('until'),
+            limit:        parseNumParam('limit'),
+            offset:       parseNumParam('offset'),
+          })
+          return json({ entries, count: entries.length })
+        }
+
+        if (path === '/api/v1/activity/rebuild' && method === 'POST') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) {
+            return json({ error: 'Activity rebuild is not available for passphrase-protected wallets' }, 403)
+          }
+          const scope = getWalletDbScope()
+          if (!scope) {
+            return json({ error: 'Wallet scope is not ready. Unlock the device and wait for seed identity.' }, 409)
+          }
+          const wallet = requireWallet(engine)
+          reqBody = await req.json().catch(() => ({}))
+          const body = (reqBody && typeof reqBody === 'object') ? reqBody as ActivityHistoryRebuildOptions : {}
+          const chainIds = [
+            ...(Array.isArray(body.chainIds) ? body.chainIds : []),
+            ...(typeof body.chainId === 'string' ? [body.chainId] : []),
+          ]
+          const unknown = chainIds.filter(id => !CHAINS.some(c => c.id === id || c.symbol === id))
+          if (unknown.length > 0) {
+            return json({ error: `Unknown chain id(s): ${unknown.join(', ')}` }, 400)
+          }
+          const result = await rebuildActivityHistory({
+            wallet,
+            scope,
+            chains: CHAINS,
+            firmwareVersion: engine.getDeviceState().firmwareVersion,
+            options: body,
+          })
+          return json(result)
+        }
+
+        if (path.startsWith('/api/v1/activity/') && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const scope = getWalletDbScope()
+          if (!scope) return json({ error: 'Not found' }, 404)
+          const tail = path.split('/').pop() || ''
+          const id = Number(tail)
+          if (!Number.isFinite(id) || !Number.isInteger(id)) {
+            return json({ error: 'Invalid id' }, 400)
+          }
+          const entry = getApiLogById(id, scope.deviceId, scope.walletId)
+          if (!entry) return json({ error: 'Not found' }, 404)
+          return json(entry)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SWAP HISTORY (auth-required — reports / external tooling)
+        // PRIVACY: standard-wallet history is hidden during passphrase
+        // sessions, matching the RPC `getSwapHistory` behavior.
+        // Read-only — the table is owned by swap-tracker / executeSwap.
+        // ═══════════════════════════════════════════════════════════════
+        if (path === '/api/v1/swaps/stats' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) {
+            return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
+          }
+          const scope = getWalletDbScope()
+          if (!scope) return json({ totalSwaps: 0, completed: 0, failed: 0, refunded: 0, pending: 0 })
+          return json(getSwapHistoryStats(scope.deviceId, scope.walletId))
+        }
+
+        if (path === '/api/v1/swaps' && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ entries: [], count: 0 })
+          const scope = getWalletDbScope()
+          if (!scope) return json({ entries: [], count: 0 })
+          const url = new URL(req.url)
+          const q = url.searchParams
+          const parseNumParam = (name: string): number | undefined => {
+            const raw = q.get(name)
+            if (raw === null) return undefined
+            const n = Number(raw)
+            if (!Number.isFinite(n)) throw new HttpError(400, `Invalid ${name}: must be a number`)
+            return n
+          }
+          // Whitelist `status` so callers can't smuggle arbitrary text into the
+          // query — invalid values get rejected loudly instead of silently
+          // returning everything via a no-match LIKE.
+          const VALID_STATUSES: ReadonlyArray<SwapTrackingStatus | 'all'> = [
+            'all', 'pending', 'confirming', 'output_detected', 'output_confirming',
+            'output_confirmed', 'completed', 'failed', 'refunded',
+          ]
+          const rawStatus = q.get('status')
+          let status: SwapTrackingStatus | 'all' | undefined
+          if (rawStatus !== null) {
+            if (!VALID_STATUSES.includes(rawStatus as any)) {
+              throw new HttpError(400, `Invalid status: ${rawStatus} (allowed: ${VALID_STATUSES.join(', ')})`)
+            }
+            status = rawStatus as SwapTrackingStatus | 'all'
+          }
+          const entries = getSwapHistory({
+            ...scope,
+            status,
+            asset:    q.get('asset')   || undefined,
+            fromDate: parseNumParam('fromDate'),
+            toDate:   parseNumParam('toDate'),
+            limit:    parseNumParam('limit'),
+            offset:   parseNumParam('offset'),
+          })
+          return json({ entries, count: entries.length })
+        }
+
+        if (path.startsWith('/api/v1/swaps/') && method === 'GET') {
+          auth.requireAuth(req)
+          if (engine.isPassphraseWallet) return json({ error: 'Not found' }, 404)
+          const scope = getWalletDbScope()
+          if (!scope) return json({ error: 'Not found' }, 404)
+          const tail = path.split('/').pop() || ''
+          if (!tail) return json({ error: 'Invalid txid' }, 400)
+          const record = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
+          if (!record) return json({ error: 'Not found' }, 404)
+          return json(record)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SWAP AVAILABILITY (debug — picker classification visibility)
+        // Returns the same data the AssetPickerDialog uses to decide
+        // whether each row is selectable. Keyed by CAIP-19. Auth-gated.
+        //   GET /api/v1/swap/availability/:caip          — single asset
+        //   GET /api/v1/swap/discovery?q=&limit=&status= — search + filter
+        // ═══════════════════════════════════════════════════════════════
+        if (path.startsWith('/api/v1/swap/availability/') && method === 'GET') {
+          auth.requireAuth(req)
+          // Path is "/api/v1/swap/availability/<caip>" — caip itself contains
+          // ':' and '/' so we can't naively split. Slice from the prefix.
+          const caip = decodeURIComponent(path.slice('/api/v1/swap/availability/'.length))
+          if (!caip) return json({ error: 'Missing caip' }, 400)
+          const { assessAvailability } = await import('../shared/swap-support-matrix')
+          const { networkDisplayName, chainMetaForCaip2 } = await import('../shared/swap-discovery')
+          const slash = caip.indexOf('/')
+          const chainCaip2 = slash >= 0 ? caip.slice(0, slash) : caip
+          return json({
+            caip,
+            chainCaip2,
+            chainDisplayName: networkDisplayName(chainCaip2),
+            chainKnownToVault: !!chainMetaForCaip2(chainCaip2),
+            assessment: assessAvailability(caip),
+          })
+        }
+
+        if (path === '/api/v1/swap/discovery' && method === 'GET') {
+          auth.requireAuth(req)
+          const url = new URL(req.url)
+          const q = url.searchParams.get('q') || ''
+          const statusFilter = url.searchParams.get('status')
+          const limitRaw = url.searchParams.get('limit')
+          const limit = limitRaw ? Math.max(1, Math.min(500, Number(limitRaw))) : 50
+          if (limitRaw && !Number.isFinite(Number(limitRaw))) {
+            throw new HttpError(400, `Invalid limit: ${limitRaw}`)
+          }
+
+          const { buildAssetEntries, buildSearchIndex, searchEntries, bucketFor } = await import('../shared/swap-discovery')
+          // Debug endpoint — uses the same swappable list as the picker but
+          // intentionally drops balances. The classification (status, providers,
+          // bucket) is what callers want to inspect; balances would skew rows
+          // into bucket 0/1 and conflate UX-state with matrix correctness.
+          const { getSwapAssets } = await import('./swap')
+          const swappable = await getSwapAssets()
+          const entries = await buildAssetEntries({ swappable, balances: [] })
+          const idx = buildSearchIndex(entries)
+          let results = searchEntries(idx, q)
+          if (statusFilter) {
+            const allowed = ['swappable', 'unknown', 'unsupported_chain', 'unsupported_token']
+            if (!allowed.includes(statusFilter)) {
+              throw new HttpError(400, `Invalid status: ${statusFilter} (allowed: ${allowed.join(', ')})`)
+            }
+            results = results.filter(e => e.availability.status === statusFilter)
+          }
+          return json({
+            query: q,
+            statusFilter: statusFilter || null,
+            totalUniverse: entries.length,
+            matched: results.length,
+            entries: results.slice(0, limit).map(e => ({
+              caip: e.caip,
+              chainId: e.chainId,
+              symbol: e.symbol,
+              name: e.name,
+              isNative: e.isNative,
+              hasBalance: !!e.balance,
+              pioneerSwappable: !!e.swappable,
+              bucket: bucketFor(e),
+              availability: e.availability,
+            })),
+          })
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         // SYSTEM MANAGEMENT (keepkey-desktop compatible — require auth)
         // ═══════════════════════════════════════════════════════════════
         if (path === '/system/info/list-coins' && method === 'POST') {
@@ -2176,6 +3429,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.ApplyPoliciesRequest)
           await wallet.applyPolicy(body)
           featuresCache = null
+          try {
+            await engine.refreshFeaturesSnapshot()
+          } catch (e: any) {
+            engine.invalidateFeaturesSnapshot()
+            console.warn('[REST] Applied policy but failed to refresh features:', e?.message || e)
+          }
           return json({ success: true })
         }
 
@@ -2250,16 +3509,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
-        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.state?.firmwareVersion)
+        const zcashFwSupported = zcashShieldedDef && isChainSupported(zcashShieldedDef, engine.getDeviceState().firmwareVersion)
+        const zcashFwError = `Zcash requires firmware >= ${zcashShieldedDef?.minFirmware ?? 'unknown'}`
 
         if (path === '/api/zcash/shielded/status' && method === 'GET') {
-          if (!zcashFwSupported) return json({ ready: false, error: 'Zcash requires firmware >= 7.11.0' })
+          if (!zcashFwSupported) return json({ ready: false, error: zcashFwError })
           return json({ ready: isSidecarReady() })
         }
 
         // All mutating zcash endpoints require firmware support
         if (path.startsWith('/api/zcash/shielded/') && path !== '/api/zcash/shielded/status' && !zcashFwSupported) {
-          return json({ error: 'Zcash requires firmware >= 7.11.0' }, 503)
+          return json({ error: zcashFwError }, 503)
         }
 
         if (path === '/api/zcash/shielded/init' && method === 'POST') {
@@ -2274,10 +3534,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ error: 'seed_hex init disabled — use from_device: true' }, 403)
         }
 
+        if (path === '/api/zcash/shielded/display-address' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ZcashDisplayAddressRequest)
+          const wallet = requireWallet(engine)
+          return json(await displayOrchardAddressOnDevice(wallet, body.account ?? 0))
+        }
+
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashScanRequest)
-          const result = await scanOrchardNotes(body.start_height)
+          const wallet = requireWallet(engine)
+          // REST callers haven't necessarily gone through the Privacy tab init,
+          // so the sidecar may have no FVK yet — refresh from device first
+          // rather than failing with "No FVK set".
+          await ensureFvkLoaded(wallet, 0)
+          const result = await scanOrchardNotes(body.start_height, body.full_rescan)
           return json(result)
         }
 
@@ -2308,8 +3580,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
-        // ── REST v2 data routes (balances, market, UTXOs, swap, etc.) ──
-        if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/')) {
+        // ── REST v2 swap routes (UI control + parsed/raw quotes + history) ──
+        // Must come before handleV2DataRoute so the new /swap/* paths match
+        // the dedicated handler instead of falling through to the legacy
+        // pioneer-passthrough quote endpoint.
+        if (path.startsWith('/api/v2/swap')) {
+          const resp = await handleSwapRoute(path, method, req, auth, json, callbacks)
+          if (resp) return resp
+        }
+
+        // ── REST v2 data routes (balances, market, UTXOs, etc.) ──
+        if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/') && !path.startsWith('/api/v2/swap')) {
           const resp = await handleV2DataRoute(path, method, req, auth, json)
           if (resp) return resp
         }
@@ -2326,13 +3607,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return json({ error: 'Not found', path }, 404)
 
       } catch (err: any) {
-        if (err.status) {
-          return json({ error: err.message }, err.status)
+        // HttpError carries a typed status + optional `details` (e.g.
+        // { boc, txid } on TON broadcast failure so a client can retry
+        // broadcast without re-signing). Anything without a status falls
+        // through to the firmware-failure extraction below as a 500.
+        if (typeof err?.status === 'number') {
+          const payload: Record<string, unknown> = { error: err.message }
+          if (err.details && typeof err.details === 'object') payload.details = err.details
+          return json(payload, err.status)
         }
         // Extract firmware Failure message if present (hdwallet wraps them)
         const fwMsg = err?.message?.message || err?.message || 'Internal error'
         const fwCode = err?.message?.code ?? err?.code
-        console.error('[REST] Error:', typeof fwMsg === 'string' ? fwMsg : JSON.stringify(fwMsg),
+        console.error(`[REST] Error on ${method} ${path}:`, typeof fwMsg === 'string' ? fwMsg : JSON.stringify(fwMsg),
           fwCode != null ? `(code ${fwCode})` : '')
         return json({ error: typeof fwMsg === 'string' ? fwMsg : 'Internal error', code: fwCode }, 500)
       } finally {

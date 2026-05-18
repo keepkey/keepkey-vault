@@ -274,7 +274,7 @@ export function FirmwareUpgradePreview({ currentVersion, targetVersion }: Props)
 // ── Feature card ────────────────────────────────────────────────────
 
 function FeatureCard({ feature, index, visible }: { feature: FirmwareFeature; index: number; visible: boolean }) {
-  const color = feature.color || '#C0A860'
+  const color = feature.color || 'var(--gold)'
 
   // Resolve chain logos for this feature
   const featureChains = (feature.chains || [])

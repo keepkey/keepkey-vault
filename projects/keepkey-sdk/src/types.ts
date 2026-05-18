@@ -158,6 +158,147 @@ export interface TonSignTxParams {
   raw_tx: string  // base64 or hex encoded raw transaction
 }
 
+// ── Message-signing surface (firmware 7.14.1+) ────────────────────
+
+export interface TronSignMessageParams {
+  address_n?: number[]
+  addressNList?: number[]
+  /** UTF-8 string by default; pass is_text=false to send as hex bytes */
+  message: string
+  is_text?: boolean
+  show_display?: boolean
+}
+
+export interface TronMessageSignatureResult {
+  /** Base58Check signer address derived from the recovered pubkey */
+  address: string
+  /** 65-byte recoverable secp256k1 signature (r || s || v), hex-encoded */
+  signature: string
+}
+
+export interface TronVerifyMessageParams {
+  address: string
+  /** Hex (with or without 0x) */
+  signature: string
+  message: string
+  is_text?: boolean
+}
+
+export interface TronSignTypedHashParams {
+  address_n?: number[]
+  addressNList?: number[]
+  /** 32-byte domainSeparator hash, hex (with or without 0x) */
+  domain_separator_hash: string
+  /** 32-byte message hash, hex; omit for primaryType=EIP712Domain */
+  message_hash?: string
+}
+
+export interface TronTypedDataSignatureResult {
+  address: string
+  /** 65-byte recoverable secp256k1 signature, hex */
+  signature: string
+}
+
+export interface TonSignMessageParams {
+  address_n?: number[]
+  addressNList?: number[]
+  message: string
+  is_text?: boolean
+  show_display?: boolean
+}
+
+export interface TonMessageSignatureResult {
+  /** 32-byte Ed25519 public key, hex */
+  publicKey: string
+  /** 64-byte Ed25519 signature, hex */
+  signature: string
+}
+
+export interface SolanaSignOffchainMessageParams {
+  address_n?: number[]
+  addressNList?: number[]
+  message: string
+  is_text?: boolean
+  /** Spec version. Only 0 currently defined. */
+  version?: number
+  /** 0 = restricted ASCII, 1 = UTF-8 limited (max 1212 bytes). 2 not supported. */
+  message_format?: number
+  show_display?: boolean
+}
+
+export interface SolanaOffchainMessageSignatureResult {
+  /** 32-byte Ed25519 public key, hex */
+  publicKey: string
+  /** 64-byte Ed25519 signature over the spec envelope, hex */
+  signature: string
+}
+
+// ── TON build/finalize helpers ─────────────────────────────────────
+// These wrap the vault's local v4R2 BOC builder so thin clients
+// (browser extension, mobile) can issue a TON transfer without
+// embedding a TON lib + toncenter plumbing. Build returns the
+// unsigned body hash the device signs; finalize reassembles the
+// signed BOC and (by default) broadcasts to TonCenter.
+
+export interface TonBuildTransferParams {
+  fromAddress: string
+  toAddress: string
+  /** Transfer amount in nanoTON, as a decimal string (BigInt-compatible). */
+  amountNano: string
+  memo?: string
+  /** Ed25519 public key hex — only needed for first-time activation. */
+  publicKeyHex?: string
+}
+
+/**
+ * Opaque internal state carried between /ton/build-transfer and
+ * /ton/finalize-transfer. Callers should echo this back verbatim;
+ * they don't need to inspect it.
+ */
+export interface TonBuildResult {
+  bodyHash: string
+  rawTx: string
+  seqno: number
+  expireAt: number
+  toAddress: string
+  amountNano: string
+  needsDeploy: boolean
+  publicKeyHex?: string
+  _internal: {
+    destWorkchain: number
+    destHash: string
+    fromWorkchain: number
+    fromHash: string
+    amountNano: string
+    bounce: boolean
+    memo?: string
+  }
+}
+
+export interface TonBuildTransferResult {
+  build: TonBuildResult
+  bodyHash: string
+  rawTx: string
+  seqno: number
+  expireAt: number
+  needsDeploy: boolean
+  feeEstimate: string
+}
+
+export interface TonFinalizeTransferParams {
+  build: TonBuildResult
+  /** 64-byte Ed25519 signature, hex-encoded (128 chars). */
+  signature: string
+  /** Default true. When false, vault returns the signed BOC without broadcasting. */
+  broadcast?: boolean
+}
+
+export interface TonFinalizeTransferResult {
+  boc: string
+  txid: string
+  broadcasted: boolean
+}
+
 // ── Public Key Types ────────────────────────────────────────────────
 export interface GetPublicKeyRequest {
   address_n: number[]

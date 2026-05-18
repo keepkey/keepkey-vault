@@ -11,6 +11,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { getExplorerTxUrl } from "../../shared/chains"
 import type { PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryStats, SwapTrackingStatus } from "../../shared/types"
+import { ProviderBadge } from "./ProviderBadge"
 
 const ExternalLinkIcon = () => (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -39,12 +40,12 @@ function getStage(status: string): 1 | 2 | 3 {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'signing': return '#A78BFA'
-    case 'pending': return '#FBBF24'
+    case 'pending': return 'var(--gold)'
     case 'confirming': return '#3B82F6'
     case 'output_detected': return '#23DCC8'
     case 'output_confirming': return '#3B82F6'
     case 'output_confirmed':
-    case 'completed': return '#4ADE80'
+    case 'completed': return 'var(--teal)'
     case 'failed': return '#EF4444'
     case 'refunded': return '#FB923C'
     default: return '#9CA3AF'
@@ -90,7 +91,7 @@ function StageIndicator({ stage, status }: { stage: 1 | 2 | 3; status: string })
       {[1, 2, 3].map((s) => {
         const isActive = s === stage
         const isDone = s < stage || isFinal
-        const dotColor = isDone ? '#4ADE80' : isActive ? color : 'rgba(255,255,255,0.15)'
+        const dotColor = isDone ? 'var(--teal)' : isActive ? color : 'rgba(255,255,255,0.15)'
         return (
           <HStack key={s} gap="0">
             <Box
@@ -102,7 +103,7 @@ function StageIndicator({ stage, status }: { stage: 1 | 2 | 3; status: string })
               boxShadow={isActive ? `0 0 8px ${color}` : 'none'}
             />
             {s < 3 && (
-              <Box w="28px" h="2px" bg={isDone ? '#4ADE80' : 'rgba(255,255,255,0.1)'} transition="background 0.3s" />
+              <Box w="28px" h="2px" bg={isDone ? 'var(--teal)' : 'rgba(255,255,255,0.1)'} transition="background 0.3s" />
             )}
           </HStack>
         )
@@ -198,7 +199,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
       )}
 
       {swap.error && (
-        <Text fontSize="10px" color="#EF4444" mt="2">{swap.error}</Text>
+        <Text fontSize="10px" color="var(--rose)" mt="2">{swap.error}</Text>
       )}
 
       <Flex justify="space-between" align="center" mt="3" pt="2" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
@@ -210,23 +211,26 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
           <Button
             size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
             fontSize="10px" onClick={(e) => { e.stopPropagation(); copyTxid() }}
-            _hover={{ color: "#23DCC8" }}
+            _hover={{ color: "var(--teal)" }}
           >
             {copied ? t("copied") : swap.txid.slice(0, 6) + '...' + swap.txid.slice(-4)}
           </Button>
           {(() => {
             const url = getExplorerTxUrl(swap.fromChainId, swap.txid)
             return url ? (
-              <Button size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+              <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                 onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                 <ExternalLinkIcon />
               </Button>
             ) : null
           })()}
           {swap.outboundTxid && (() => {
-            const url = getExplorerTxUrl(swap.toChainId, swap.outboundTxid)
+            // Refunds outbound on the SOURCE chain (Maya returns the inbound
+            // asset). Use outboundChainId from the classifier when present
+            // so the explorer link doesn't 404 on a non-existent ZEC tx hash.
+            const url = getExplorerTxUrl(swap.outboundChainId || swap.toChainId, swap.outboundTxid)
             return url ? (
-              <Button size="xs" variant="ghost" color="#4ADE80" px="1" minW="auto" h="auto" py="0.5"
+              <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                 onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View outbound on explorer">
                 <ExternalLinkIcon />
               </Button>
@@ -302,7 +306,10 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
             {record.status}
           </Text>
         </HStack>
-        <Text fontSize="10px" color="kk.textMuted">{formatDate(record.createdAt)}</Text>
+        <HStack gap="2">
+          <ProviderBadge swapper={record.swapper || record.integration} integration={record.integration} size={14} variant="compact" />
+          <Text fontSize="10px" color="kk.textMuted">{formatDate(record.createdAt)}</Text>
+        </HStack>
       </Flex>
 
       {/* Amounts row */}
@@ -322,21 +329,27 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       {/* Quote accuracy badge */}
       {quoteAccuracy && (
         <HStack gap="1" mt="1">
-          <Text fontSize="10px" color={quoteAccuracy.positive ? '#4ADE80' : '#EF4444'}>
+          <Text fontSize="10px" color={quoteAccuracy.positive ? 'var(--teal)' : '#EF4444'}>
             {quoteAccuracy.positive ? '+' : ''}{quoteAccuracy.pct}% vs quote
           </Text>
         </HStack>
       )}
 
       {record.error && (
-        <Text fontSize="10px" color="#EF4444" mt="1" noOfLines={expanded ? undefined : 1}>{record.error}</Text>
+        <Text fontSize="10px" color="var(--rose)" mt="1" noOfLines={expanded ? undefined : 1}>{record.error}</Text>
       )}
 
       {/* Expanded details */}
       {expanded && (
         <Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
           <VStack gap="1.5" align="stretch">
-            <DetailRow label="Integration" value={record.integration} />
+            <Flex justify="space-between" align="center" gap="2">
+              <Text fontSize="10px" color="kk.textMuted" minW="80px">Route</Text>
+              <ProviderBadge swapper={record.swapper || record.integration} integration={record.integration} size={16} variant="detailed" />
+            </Flex>
+            {record.swapper && record.integration && record.swapper.toLowerCase() !== record.integration.toLowerCase() && (
+              <DetailRow label="Source" value={record.integration} />
+            )}
             <DetailRow label="Slippage" value={`${record.slippageBps} bps (${(record.slippageBps / 100).toFixed(1)}%)`} />
             <DetailRow label="Fee" value={`${record.feeBps} bps`} />
             <DetailRow label="Outbound Fee" value={record.feeOutbound} />
@@ -355,16 +368,16 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
               <Text fontSize="10px" color="kk.textMuted" minW="80px">Inbound TX</Text>
               <HStack gap="1">
                 <Button
-                  size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                  size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                   fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.txid, 'inbound') }}
-                  _hover={{ color: "#4ADE80" }}
+                  _hover={{ color: "var(--teal)" }}
                 >
                   {copied === 'inbound' ? 'Copied!' : record.txid.slice(0, 10) + '...' + record.txid.slice(-6)}
                 </Button>
                 {(() => {
                   const url = getExplorerTxUrl(record.fromChainId, record.txid)
                   return url ? (
-                    <Button size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                    <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                       onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                       <ExternalLinkIcon />
                     </Button>
@@ -377,16 +390,19 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 <Text fontSize="10px" color="kk.textMuted" minW="80px">Outbound TX</Text>
                 <HStack gap="1">
                   <Button
-                    size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                    size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                     fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.outboundTxid!, 'outbound') }}
-                    _hover={{ color: "#4ADE80" }}
+                    _hover={{ color: "var(--teal)" }}
                   >
                     {copied === 'outbound' ? 'Copied!' : record.outboundTxid.slice(0, 10) + '...' + record.outboundTxid.slice(-6)}
                   </Button>
                   {(() => {
-                    const url = getExplorerTxUrl(record.toChainId, record.outboundTxid)
+                    // Refunded swaps deliver outbound on the source chain.
+                    // outboundChainId from the Maya midgard classifier is the
+                    // truth; fall back to toChainId for legacy records.
+                    const url = getExplorerTxUrl(record.outboundChainId || record.toChainId, record.outboundTxid)
                     return url ? (
-                      <Button size="xs" variant="ghost" color="#4ADE80" px="1" minW="auto" h="auto" py="0.5"
+                      <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                         onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                         <ExternalLinkIcon />
                       </Button>
@@ -400,16 +416,16 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 <Text fontSize="10px" color="kk.textMuted" minW="80px">Approval TX</Text>
                 <HStack gap="1">
                   <Button
-                    size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                    size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                     fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.approvalTxid!, 'approval') }}
-                    _hover={{ color: "#4ADE80" }}
+                    _hover={{ color: "var(--teal)" }}
                   >
                     {copied === 'approval' ? 'Copied!' : record.approvalTxid.slice(0, 10) + '...' + record.approvalTxid.slice(-6)}
                   </Button>
                   {(() => {
                     const url = getExplorerTxUrl(record.fromChainId, record.approvalTxid)
                     return url ? (
-                      <Button size="xs" variant="ghost" color="#23DCC8" px="1" minW="auto" h="auto" py="0.5"
+                      <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                         onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
                         <ExternalLinkIcon />
                       </Button>
@@ -426,7 +442,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                 mt="2"
                 w="full"
                 bg="rgba(35,220,200,0.12)"
-                color="#23DCC8"
+                color="var(--teal)"
                 fontWeight="600"
                 fontSize="11px"
                 _hover={{ bg: "rgba(35,220,200,0.2)" }}
@@ -446,6 +462,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     inboundAddress: record.inboundAddress,
                     router: record.router,
                     integration: record.integration,
+                    swapper: record.swapper,
                     status: record.status,
                     confirmations: 0,
                     outboundTxid: record.outboundTxid,
@@ -453,6 +470,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     updatedAt: record.updatedAt,
                     estimatedTime: record.estimatedTimeSeconds,
                     error: record.error,
+                    relayRequestId: record.relayRequestId,
                   })
                 }}
               >
@@ -479,10 +497,10 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 const STATUS_OPTIONS: { id: StatusFilter; label: string; color: string }[] = [
   { id: 'all', label: 'All', color: '#9CA3AF' },
-  { id: 'completed', label: 'Completed', color: '#4ADE80' },
+  { id: 'completed', label: 'Completed', color: 'var(--teal)' },
   { id: 'failed', label: 'Failed', color: '#EF4444' },
   { id: 'refunded', label: 'Refunded', color: '#FB923C' },
-  { id: 'pending', label: 'Pending', color: '#FBBF24' },
+  { id: 'pending', label: 'Pending', color: 'var(--gold)' },
 ]
 
 // ── Main SwapHistoryDialog ──────────────────────────────────────────
@@ -639,11 +657,11 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
             <Text fontSize="md" fontWeight="600" color="kk.textPrimary">{t("swapHistory")}</Text>
             {stats && (
               <HStack gap="1.5">
-                <Text fontSize="10px" color="#4ADE80" bg="rgba(74,222,128,0.1)" px="1.5" py="0.5" borderRadius="md">
+                <Text fontSize="10px" color="var(--teal)" bg="rgba(74,222,128,0.1)" px="1.5" py="0.5" borderRadius="md">
                   {stats.completed}
                 </Text>
                 {stats.failed > 0 && (
-                  <Text fontSize="10px" color="#EF4444" bg="rgba(239,68,68,0.1)" px="1.5" py="0.5" borderRadius="md">
+                  <Text fontSize="10px" color="var(--rose)" bg="rgba(239,68,68,0.1)" px="1.5" py="0.5" borderRadius="md">
                     {stats.failed}
                   </Text>
                 )}
@@ -709,7 +727,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
             borderRadius="md" flexShrink={0}
           >
             <Flex justify="space-between" align="center">
-              <Text fontSize="11px" color={exportResult.startsWith('Error') ? '#EF4444' : '#4ADE80'}>
+              <Text fontSize="11px" color={exportResult.startsWith('Error') ? '#EF4444' : 'var(--teal)'}>
                 {exportResult.startsWith('Error') ? exportResult : `Saved to ${exportResult}`}
               </Text>
               <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
@@ -737,8 +755,8 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 {activeSwaps.length > 0 && (
                   <>
                     <HStack gap="2" mb="1">
-                      <Box w="6px" h="6px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
-                      <Text fontSize="xs" fontWeight="600" color="#23DCC8" textTransform="uppercase" letterSpacing="0.05em">
+                      <Box w="6px" h="6px" borderRadius="full" bg="var(--teal)" style={{ animation: 'kkSwapPulse 1.5s ease-in-out infinite' }} />
+                      <Text fontSize="xs" fontWeight="600" color="var(--teal)" textTransform="uppercase" letterSpacing="0.05em">
                         {t("activeSwaps")} ({activeSwaps.length})
                       </Text>
                     </HStack>
@@ -812,7 +830,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 <Flex justify="center" align="center" py="10" direction="column" gap="2">
                   <Text fontSize="sm" color="kk.textMuted">No swap history found</Text>
                   {statusFilter !== 'all' && (
-                    <Button size="xs" variant="ghost" color="#23DCC8" onClick={() => setStatusFilter('all')}>
+                    <Button size="xs" variant="ghost" color="var(--teal)" onClick={() => setStatusFilter('all')}>
                       Clear filter
                     </Button>
                   )}

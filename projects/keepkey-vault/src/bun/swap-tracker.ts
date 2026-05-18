@@ -1,11 +1,13 @@
 /**
- * Swap Tracker — monitors pending swaps via Pioneer HTTP polling.
+ * Swap Tracker — pull-only state for in-flight swaps.
  *
- * After executeSwap broadcasts a tx, the tracker:
- *   1. Registers the swap with Pioneer (CreatePendingSwap)
- *   2. Polls Pioneer API (GetPendingSwap per txHash) for status updates
- *   3. Pushes status changes to the frontend via RPC messages
- *   4. Auto-removes completed/failed swaps after a grace period
+ * Lifecycle:
+ *   1. trackSwap() registers a freshly broadcast swap (in-memory + DB) and
+ *      tells Pioneer about it via CreatePendingSwap.
+ *   2. The SwapDialog drives polling on-demand via refreshSwap(txid) — there
+ *      is no background timer. When the dialog closes, polling stops.
+ *   3. Status changes get pushed to the UI via the existing swap-update
+ *      RPC message and persisted to SQLite.
  *
  * Pioneer operationIds used:
  *   - CreatePendingSwap  (POST /swaps/pending)
@@ -13,10 +15,91 @@
  */
 import type { PendingSwap, SwapTrackingStatus, SwapStatusUpdate, SwapResult, ExecuteSwapParams, SwapQuote, SwapHistoryRecord } from '../shared/types'
 import { getPioneer } from './pioneer'
-import { assetToCaip } from './swap-parsing'
-import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory } from './db'
+import { withTimeout } from './engine-controller'
+
+const PIONEER_SWAP_TIMEOUT_MS = 30_000
+import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid, setSwapRelayRequestId } from './db'
+import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
+import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
+import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
+import { extractRelayRequestId } from '../shared/relay-utils'
+import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
+
+/** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
+ *  layer accepts; symbols / asset names / display names are derived here for
+ *  UI rendering and historic records, never used for routing or selection.
+ *
+ *  Falls back to a CAIP-derived hint for assets pioneer-discovery doesn't
+ *  know — better than crashing or silently writing empty strings. */
+function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
+  const entry = (discoveryAssetData as Record<string, { symbol?: string; name?: string; chainId?: string }>)[caip]
+  const symbol = entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
+  const name = entry?.name || symbol
+  // THORChain-style display string (CHAIN.SYMBOL[-CONTRACT]). Used only for
+  // log lines + history rows; vault never parses this back to identify.
+  const chainId = entry?.chainId || caip.split('/')[0]
+  const thorPrefix = VAULT_CHAIN_TO_THOR[chainIdToVaultId(chainId)] || symbol
+  const tokenMatch = caip.match(/\/(erc20|bep20|token):(.+)$/)
+  const asset = tokenMatch
+    ? `${thorPrefix}.${symbol}-${tokenMatch[2].toUpperCase()}`
+    : `${thorPrefix}.${symbol}`
+  return { symbol, name, asset }
+}
+
+/** Best-effort CAIP-2 → vault chain id (e.g. 'eip155:1' → 'ethereum'). Used
+ *  by resolveDisplayFromCaip — VAULT_CHAIN_TO_THOR is keyed on vault ids,
+ *  not raw CAIP-2. Safe fallback: return the CAIP-2 itself when unknown. */
+function chainIdToVaultId(caip2: string): string {
+  // Inline the small mapping rather than importing CHAINS just for this —
+  // covers every chain that has a THORChain prefix in our lookup.
+  const map: Record<string, string> = {
+    'bip122:000000000019d6689c085ae165831e93': 'bitcoin',
+    'bip122:000000000000000000651ef99cb9fcbe': 'bitcoincash',
+    'bip122:00000000001a91e3dace36e2be3bf030': 'dogecoin',
+    'bip122:12a765e31ffd4059bada1e25190f6e98': 'litecoin',
+    'bip122:000007d91d1254d60e2dd1ae58038307': 'dash',
+    'eip155:1': 'ethereum',
+    'eip155:10': 'optimism',
+    'eip155:56': 'bsc',
+    'eip155:137': 'polygon',
+    'eip155:8453': 'base',
+    'eip155:42161': 'arbitrum',
+    'eip155:43114': 'avalanche',
+    'cosmos:cosmoshub-4': 'cosmos',
+    'cosmos:thorchain-mainnet-v1': 'thorchain',
+    'cosmos:mayachain-mainnet-v1': 'mayachain',
+    'cosmos:osmosis-1': 'osmosis',
+    'tron:0x2b6653dc': 'tron',
+    'tron:27Lqcw': 'tron',
+    'ton:-239': 'ton',
+    'ripple:0': 'ripple',
+    'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'solana',
+  }
+  return map[caip2] || caip2
+}
+import { decideRevertOutcome } from '../shared/swap-revert'
+export { decideRevertOutcome } from '../shared/swap-revert'
+import {
+  isTerminalSwapStatus,
+  mapRelayExecutionStatus,
+  relayOutboundTxid,
+  shouldApplyRelayStatus,
+  type RelayExecutionStatus,
+} from '../shared/relay-status'
 
 const TAG = '[swap-tracker]'
+
+/** Debug log — gated behind SWAP_DEBUG=1 (env) or localStorage `swap.debug=1`.
+ *  Used in place of console.log for high-volume per-swap chatter. console.warn /
+ *  console.error are deliberately *not* gated — those still ship in prod. */
+const SWAP_DEBUG = ((): boolean => {
+  try {
+    if (typeof process !== 'undefined' && process.env?.SWAP_DEBUG === '1') return true
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('swap.debug') === '1') return true
+  } catch { /* noop */ }
+  return false
+})()
+const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
 /** Infer a reasonable confirmation count from persisted status when the DB lacks a confirmations column.
  *  These are conservative lower-bounds — the next poll will replace them with real data. */
@@ -35,24 +118,26 @@ export function inferConfirmationsFromStatus(status: SwapTrackingStatus): number
 // ── In-memory swap registry ─────────────────────────────────────────
 
 const pendingSwaps = new Map<string, PendingSwap>()
-const dismissedSwaps = new Set<string>() // prevents race between dismiss and poll
 // PRIVACY: txids that must not be persisted to DB (passphrase wallet swaps)
 const noPersistSwaps = new Set<string>()
-let pollTimer: ReturnType<typeof setTimeout> | null = null
+// txids whose registered Pioneer row has been verified (via GetPendingSwap)
+// to carry our relayRequestId. Used to stop the lazy re-registration loop —
+// without this, every refreshSwap retries CreatePendingSwap forever.
+const relayPioneerVerified = new Set<string>()
+// Per-txid count of register-relay-id attempts. Caps the retry loop at
+// MAX_RELAY_REGISTER_ATTEMPTS so a permanent Pioneer-side rejection (e.g.
+// 409 on duplicate txHash with no upsert) doesn't spin forever each time
+// the user reopens the dialog. Once the cap is hit, we log loudly and stop
+// — the user-visible tracker link still works (it's local), only Pioneer's
+// monitor side stays missing the id.
+const relayRegisterAttempts = new Map<string, number>()
+const MAX_RELAY_REGISTER_ATTEMPTS = 5
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 let initPromise: Promise<void> | null = null
-
-/** Adaptive polling: fast at first, backs off as swap ages, gives up after 1 hour */
-const FAST_POLL_MS = 10_000       // 10s for first 2 minutes
-const NORMAL_POLL_MS = 20_000     // 20s for 2-10 minutes
-const SLOW_POLL_MS = 30_000       // 30s for 10-20 minutes
-const BACKOFF_POLL_MS = 60_000    // 60s after 20 minutes
-const FAST_PHASE_MS = 2 * 60_000  // 2 min
-const NORMAL_PHASE_MS = 10 * 60_000 // 10 min
-const BACKOFF_PHASE_MS = 20 * 60_000 // 20 min — start backing off
-const MAX_TRACKING_MS = 60 * 60_000  // 1 hour — give up, user can manually refresh
-const COMPLETED_GRACE_MS = 120_000 // keep completed swaps visible for 2 min
+let getActiveDeviceId: () => string | undefined = () => undefined
+let getActiveWalletId: () => string | undefined = () => undefined
+const rehydratedWalletIds = new Set<string>()
 
 // Required Pioneer SDK methods — app MUST NOT start without these
 const REQUIRED_METHODS = ['CreatePendingSwap', 'GetPendingSwap'] as const
@@ -64,13 +149,70 @@ export function isTrackerInitialized(): boolean {
   return sendMessage !== null
 }
 
+function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
+  const scopeId = walletId || deviceId
+  if (!scopeId || rehydratedWalletIds.has(scopeId)) return
+
+  try {
+    const activeStatuses: SwapTrackingStatus[] = ['pending', 'confirming', 'output_detected', 'output_confirming', 'output_confirmed']
+    for (const status of activeStatuses) {
+      const records = getSwapHistory({ status, limit: 50, deviceId, walletId })
+      for (const r of records) {
+        if (pendingSwaps.has(r.txid)) continue
+        const swap: PendingSwap = {
+          deviceId: r.deviceId,
+          walletId: r.walletId,
+          txid: r.txid,
+          fromAsset: r.fromAsset,
+          toAsset: r.toAsset,
+          fromSymbol: r.fromSymbol,
+          toSymbol: r.toSymbol,
+          fromChainId: r.fromChainId,
+          toChainId: r.toChainId,
+          fromCaip: r.fromCaip,
+          toCaip: r.toCaip,
+          fromAmount: r.fromAmount,
+          expectedOutput: r.quotedOutput,
+          receivedOutput: r.receivedOutput,
+          memo: r.memo,
+          inboundAddress: r.inboundAddress,
+          router: r.router,
+          integration: r.integration,
+          swapper: r.swapper,
+          status: r.status,
+          confirmations: inferConfirmationsFromStatus(r.status),
+          outboundTxid: r.outboundTxid,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          completedAt: r.completedAt,
+          estimatedTime: r.estimatedTimeSeconds,
+          slippageBps: r.slippageBps,
+          relayRequestId: r.relayRequestId,
+        }
+        pendingSwaps.set(r.txid, swap)
+      }
+    }
+    rehydratedWalletIds.add(scopeId)
+    if (pendingSwaps.size > 0) {
+      swapLog(`${TAG} Rehydrated active swap(s) for scope ${scopeId}`)
+    }
+  } catch (e: any) {
+    console.warn(`${TAG} Failed to rehydrate swaps from SQLite: ${e.message}`)
+  }
+}
+
 /** Initialize the tracker — verifies Pioneer SDK has required methods. Idempotent: safe to call multiple times. */
-export async function initSwapTracker(messageSender: (msg: string, data: any) => void): Promise<void> {
+export async function initSwapTracker(messageSender: (msg: string, data: any) => void, opts?: { getDeviceId?: () => string | undefined; getWalletId?: () => string | undefined }): Promise<void> {
   // Always update the message sender (supports re-init after failure)
   sendMessage = messageSender
+  if (opts?.getDeviceId) getActiveDeviceId = opts.getDeviceId
+  if (opts?.getWalletId) getActiveWalletId = opts.getWalletId
 
   // If already verified, just update the sender and return
-  if (pioneerVerified) return
+  if (pioneerVerified) {
+    rehydrateActiveSwaps(getActiveDeviceId(), getActiveWalletId())
+    return
+  }
 
   // Deduplicate concurrent init calls
   if (initPromise) return initPromise
@@ -91,7 +233,7 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
     }
 
     pioneerVerified = true
-    console.log(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
+    swapLog(`${TAG} Tracker initialized — Pioneer SDK verified (${REQUIRED_METHODS.join(', ')})`)
   })()
 
   try {
@@ -100,44 +242,9 @@ export async function initSwapTracker(messageSender: (msg: string, data: any) =>
     initPromise = null
   }
 
-  // Rehydrate active swaps from SQLite (survives app restart)
-  try {
-    const activeStatuses: SwapTrackingStatus[] = ['pending', 'confirming', 'output_detected', 'output_confirming', 'output_confirmed']
-    for (const status of activeStatuses) {
-      const records = getSwapHistory({ status, limit: 50 })
-      for (const r of records) {
-        if (pendingSwaps.has(r.txid)) continue
-        const swap: PendingSwap = {
-          txid: r.txid,
-          fromAsset: r.fromAsset,
-          toAsset: r.toAsset,
-          fromSymbol: r.fromSymbol,
-          toSymbol: r.toSymbol,
-          fromChainId: r.fromChainId,
-          toChainId: r.toChainId,
-          fromAmount: r.fromAmount,
-          expectedOutput: r.quotedOutput,
-          memo: r.memo,
-          inboundAddress: r.inboundAddress,
-          router: r.router,
-          integration: r.integration,
-          status: r.status,
-          confirmations: inferConfirmationsFromStatus(r.status),
-          outboundTxid: r.outboundTxid,
-          createdAt: r.createdAt,
-          updatedAt: r.updatedAt,
-          estimatedTime: r.estimatedTimeSeconds,
-        }
-        pendingSwaps.set(r.txid, swap)
-      }
-    }
-    if (pendingSwaps.size > 0) {
-      console.log(`${TAG} Rehydrated ${pendingSwaps.size} active swap(s) from SQLite`)
-      startPolling()
-    }
-  } catch (e: any) {
-    console.warn(`${TAG} Failed to rehydrate swaps from SQLite: ${e.message}`)
-  }
+  // Rehydrate active swaps for the connected device only. No polling at boot —
+  // refreshSwap() drives status updates only when the user opens a swap dialog.
+  rehydrateActiveSwaps(getActiveDeviceId(), getActiveWalletId())
 }
 
 /** Register a newly broadcast swap for tracking.
@@ -146,43 +253,68 @@ export function trackSwap(
   result: SwapResult,
   params: ExecuteSwapParams,
   quote: SwapQuote,
-  opts?: { skipPersist?: boolean },
+  opts?: { skipPersist?: boolean; deviceId?: string; walletId?: string },
 ): void {
   const now = Date.now()
+  const deviceId = opts?.deviceId
+  const walletId = opts?.walletId
+  // CAIP is the only identifier the caller provides. Display strings
+  // (symbol, name, THORChain-style asset) are derived here so UI/history
+  // can render without a Pioneer round-trip — never used for routing.
+  const fromDisplay = resolveDisplayFromCaip(params.fromCaip)
+  const toDisplay = resolveDisplayFromCaip(params.toCaip)
+
+  // Relay deposits embed the request id as the trailing bytes32 of the
+  // prebuilt calldata. Extract once at sign-time so the resume path / tracker
+  // link doesn't need a round-trip to api.relay.link for new swaps.
+  const relayRequestId = extractRelayRequestId(params.relayTx?.data)
+
   const swap: PendingSwap = {
+    deviceId,
+    walletId,
     txid: result.txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
-    fromSymbol: params.fromAsset.split('.').pop()?.split('-')[0] || params.fromAsset,
-    toSymbol: params.toAsset.split('.').pop()?.split('-')[0] || params.toAsset,
+    fromAsset: fromDisplay.asset,
+    toAsset: toDisplay.asset,
+    fromSymbol: fromDisplay.symbol,
+    toSymbol: toDisplay.symbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     memo: params.memo,
     inboundAddress: params.inboundAddress,
     router: params.router,
     integration: quote.integration || 'thorchain',
+    swapper: quote.swapper,
     status: 'pending',
     confirmations: 0,
     createdAt: now,
     updatedAt: now,
     estimatedTime: quote.estimatedTime,
+    slippageBps: quote.slippageBps,
+    relayRequestId,
   }
 
   pendingSwaps.set(result.txid, swap)
-  console.log(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
+  swapLog(`${TAG} Tracking swap: ${result.txid} (${swap.fromSymbol} → ${swap.toSymbol})`)
 
-  // Persist to SQLite — full lifecycle record
+  // Persist to SQLite — full lifecycle record. Asset string + symbols are
+  // derived display fields, populated from the CAIP. CAIP is canonical.
   const historyRecord: SwapHistoryRecord = {
     id: crypto.randomUUID(),
+    deviceId,
+    walletId,
     txid: result.txid,
-    fromAsset: params.fromAsset,
-    toAsset: params.toAsset,
-    fromSymbol: swap.fromSymbol,
-    toSymbol: swap.toSymbol,
+    fromAsset: fromDisplay.asset,
+    toAsset: toDisplay.asset,
+    fromSymbol: fromDisplay.symbol,
+    toSymbol: toDisplay.symbol,
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
     fromAmount: params.amount,
     quotedOutput: quote.expectedOutput || params.expectedOutput,
     minimumOutput: quote.minimumOutput || '0',
@@ -190,6 +322,7 @@ export function trackSwap(
     feeBps: quote.fees?.totalBps || 0,
     feeOutbound: quote.fees?.outbound || '0',
     integration: quote.integration || 'thorchain',
+    swapper: quote.swapper,
     memo: params.memo,
     inboundAddress: params.inboundAddress,
     router: params.router,
@@ -198,6 +331,7 @@ export function trackSwap(
     updatedAt: now,
     estimatedTimeSeconds: quote.estimatedTime || 0,
     approvalTxid: result.approvalTxid,
+    relayRequestId,
   }
   // PRIVACY: Skip DB write for passphrase wallets — swap still tracked in-memory for UI.
   if (opts?.skipPersist) {
@@ -215,44 +349,53 @@ export function trackSwap(
     console.error(`${TAG} Stack: ${e.stack}`)
   })
 
-  // Start polling
-  startPolling()
+  // Polling is on-demand — the UI calls refreshSwap(txid) once the dialog
+  // mounts in the 'submitted' phase.
 }
 
 /** Get all pending swaps (for getPendingSwaps RPC) */
-export function getPendingSwaps(): PendingSwap[] {
+export function getPendingSwaps(deviceId?: string, walletId?: string): PendingSwap[] {
+  rehydrateActiveSwaps(deviceId, walletId)
   return Array.from(pendingSwaps.values())
+    .filter(s => walletId ? s.walletId === walletId : !deviceId || s.deviceId === deviceId)
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
 /** Dismiss a swap from the tracker (user clicked dismiss) */
 export function dismissSwap(txid: string): void {
-  dismissedSwaps.add(txid)
   pendingSwaps.delete(txid)
-  // Only stop polling when no ACTIVE swaps remain — don't kill polling for other pending swaps
-  const hasActive = Array.from(pendingSwaps.values()).some(s =>
-    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
-  )
-  if (pendingSwaps.size === 0 || !hasActive) {
-    stopPolling()
-  }
-}
-
-/** Convert THORChain asset to CAIP, falling back to the raw string on unsupported chains */
-function safeAssetToCaip(thorAsset: string): string {
-  try { return assetToCaip(thorAsset) } catch { return thorAsset }
 }
 
 // ── Pioneer REST registration ───────────────────────────────────────
 
+// Pioneer's CreatePendingSwap validator only accepts these integration values
+// (see pioneer-server's swagger). Vault internally uses the module-level names
+// returned by /api/v1/quote (e.g. "shapeshiftSwap"), so map to the validator
+// enum here. Unknown values fall through unchanged — Pioneer will 400 and the
+// log will show the mismatch so we can extend this map.
+const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
+  shapeshiftSwap: 'shapeshift',
+}
+
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   const pioneer = await getPioneer()
 
-  const body = {
+  // CAIP comes straight from the swap record — no asset-string round-trip
+  // needed. PendingSwap.fromCaip is populated by trackSwap() from the picker's
+  // selection and is the canonical identifier Pioneer's tracker keys on.
+  const sellCaip = swap.fromCaip
+  const buyCaip = swap.toCaip
+  if (!sellCaip || !buyCaip) {
+    throw new Error(`registerWithPioneer: missing CAIP (from=${sellCaip}, to=${buyCaip}) for ${swap.txid}`)
+  }
+
+  const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
+
+  const body: Record<string, any> = {
     txHash: swap.txid,
     addresses: [],
     sellAsset: {
-      caip: safeAssetToCaip(swap.fromAsset),
+      caip: sellCaip,
       symbol: swap.fromSymbol,
       amount: swap.fromAmount,
       amountBaseUnits: swap.fromAmount,
@@ -260,98 +403,107 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
       networkId: swap.fromChainId,
     },
     buyAsset: {
-      caip: safeAssetToCaip(swap.toAsset),
+      caip: buyCaip,
       symbol: swap.toSymbol,
       amount: swap.expectedOutput,
       amountBaseUnits: swap.expectedOutput,
-      address: '',
+      // For EVM destinations, the receive address is the ETH address embedded in walletId
+      // (format: "deviceId:0x..."). Pioneer's swap-monitor needs this to verify ETH delivery.
+      address: buyCaip.startsWith('eip155:') && swap.walletId?.includes(':')
+        ? swap.walletId.slice(swap.walletId.indexOf(':') + 1)
+        : '',
       networkId: swap.toChainId,
     },
     quote: {
       id: swap.txid,
-      integration: swap.integration,
+      integration,
       expectedAmountOut: swap.expectedOutput,
       minimumAmountOut: swap.expectedOutput,
       slippage: 3,
       fees: { affiliate: '0', protocol: '0', network: '0' },
       memo: swap.memo,
     },
-    integration: swap.integration,
+    integration,
+    swapper: swap.swapper,
+  }
+  // Forward the Relay request id when we have one. Pioneer's swap-monitor
+  // (checkRelaySwap) keys on relayData.requestId; without it Pioneer falls
+  // back to a confirmation-only watcher that never reaches a terminal status
+  // for Relay's off-chain settlement model.
+  if (swap.relayRequestId) {
+    body.relayData = { requestId: swap.relayRequestId }
   }
 
-  console.log(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration }))
+  swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
-  const resp = await pioneer.CreatePendingSwap(body)
-  console.log(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
-  console.log(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
+  const resp = await withTimeout(pioneer.CreatePendingSwap(body), PIONEER_SWAP_TIMEOUT_MS, 'CreatePendingSwap')
+  swapLog(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
+  swapLog(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
 }
 
-// ── HTTP Polling ────────────────────────────────────────────────────
+// ── On-demand Pioneer fetch ────────────────────────────────────────
 
-/** Get adaptive poll interval based on oldest active swap age */
-function getPollInterval(): number {
-  let oldestAge = 0
-  for (const swap of pendingSwaps.values()) {
-    if (swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded') continue
-    const age = Date.now() - swap.createdAt
-    if (age > oldestAge) oldestAge = age
-  }
-  if (oldestAge < FAST_PHASE_MS) return FAST_POLL_MS
-  if (oldestAge < NORMAL_PHASE_MS) return NORMAL_POLL_MS
-  if (oldestAge < BACKOFF_PHASE_MS) return SLOW_POLL_MS
-  return BACKOFF_POLL_MS
-}
-
-function startPolling(): void {
-  if (pollTimer) return
-  // Poll immediately on start, then schedule next
-  pollAllSwaps().then(scheduleNextPoll)
-}
-
-/** Schedule next poll using setTimeout (prevents stacking if pollAllSwaps is slow) */
-function scheduleNextPoll(): void {
-  if (pollTimer) clearTimeout(pollTimer)
-  // Don't schedule if no active swaps remain
-  const hasActive = Array.from(pendingSwaps.values()).some(s =>
-    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
-  )
-  if (pendingSwaps.size === 0 || !hasActive) {
-    pollTimer = null
-    return
-  }
-  const interval = getPollInterval()
-  pollTimer = setTimeout(async () => {
-    await pollAllSwaps()
-    scheduleNextPoll()
-  }, interval)
-}
-
-function stopPolling(): void {
-  if (pollTimer) {
-    clearTimeout(pollTimer)
-    pollTimer = null
-    console.log(`${TAG} Stopped polling (no active swaps)`)
-  }
-}
-
-/** Apply remote swap data to local swap, push updates if changed */
+/** Apply remote swap data to local swap, push updates if changed.
+ *
+ * If `swap.midgardClassified` is true, Pioneer's status is non-authoritative
+ * (it cannot tell a refund apart from a completion) and gets ignored — we
+ * still consume confirmations / timing / fees from Pioneer, but status is
+ * frozen at whatever Midgard ruled. Without this gate the two sources
+ * ping-pong on every refresh and burn through Pioneer rate limits. */
 function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
-  const newStatus = mapPioneerStatus(remoteSwap.status)
-  const confirmations = remoteSwap.confirmations ?? swap.confirmations
+  // Pioneer's mapped status only takes effect when Midgard hasn't ruled yet.
+  const pioneerStatus = mapPioneerStatus(remoteSwap.status)
+  const ignoreNonFinalPioneer = isTerminalSwapStatus(swap.status) && !isTerminalSwapStatus(pioneerStatus)
+  // Pioneer maps refunds → 'completed' and cannot be trusted to override a locally
+  // confirmed refund (verified on-chain or via the swap-monitor's eth_getBalance check).
+  const localRefundOverridesPioneer = swap.status === 'refunded' && pioneerStatus === 'completed'
+  const newStatus = swap.midgardClassified
+    ? swap.status
+    : (ignoreNonFinalPioneer || localRefundOverridesPioneer)
+      ? swap.status
+      : pioneerStatus
+  const confirmations = ignoreNonFinalPioneer ? swap.confirmations : (remoteSwap.confirmations ?? swap.confirmations)
   const outboundConfirmations = remoteSwap.outboundConfirmations
   const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
   const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
     || remoteSwap.mayachainData?.outboundTxHash
     || remoteSwap.relayData?.outTxHashes?.[0]
+  // Pioneer surfaces the detected underlying protocol in `details.protocol.protocol`.
+  // If the quote-time parse missed `swapper` (common for aggregator routes where
+  // ShapeShift's response shape varies), this is the authoritative value.
+  //
+  // EXCEPTION: native vault routes (mayachain, thorchain) ARE the swapper —
+  // there's no underlying aggregator to discover. Maya forked THORChain's code
+  // and Pioneer's `details.protocol.protocol` reports "thorchain" even for
+  // Maya pools, which would mis-render as "THORChain via Maya" in the badge.
+  // Suppress the override so the badge falls back to `integration`.
+  const isNativeVaultRoute = swap.integration === 'mayachain' || swap.integration === 'thorchain'
+  const detectedSwapper: string | undefined = isNativeVaultRoute
+    ? undefined
+    : (remoteSwap.details?.protocol?.protocol || remoteSwap.swapper || undefined)
   const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
     || (remoteSwap.error ? String(remoteSwap.error) : undefined)
   const timeEstimate = remoteSwap.timeEstimate
+
+  // When Midgard has ruled, Pioneer's outboundTxid is also non-authoritative —
+  // Pioneer may carry a stale "expected outbound" hash that disagrees with
+  // the actual on-chain refund/delivery. Locking it here prevents the same
+  // ping-pong loop status had.
+  const acceptOutboundTxid = !swap.midgardClassified
+
+  // Stale-swapper cleanup MUST be evaluated as a "change" before the changed
+  // boolean is computed. Otherwise the cleanup runs but no push/persist
+  // fires, leaving the DB record (and the resume-render path that seeds
+  // liveSwapper from it) stuck on "thorchain" forever.
+  const shouldClearSwapper = isNativeVaultRoute && !!swap.swapper
 
   const changed =
     newStatus !== swap.status ||
     confirmations !== swap.confirmations ||
     (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
-    (outboundTxid && outboundTxid !== swap.outboundTxid)
+    (acceptOutboundTxid && outboundTxid && outboundTxid !== swap.outboundTxid) ||
+    (detectedSwapper && detectedSwapper !== swap.swapper) ||
+    shouldClearSwapper
 
   if (changed) {
     swap.status = newStatus
@@ -359,8 +511,10 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     swap.confirmations = confirmations
     if (outboundConfirmations !== undefined) swap.outboundConfirmations = outboundConfirmations
     if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
-    if (outboundTxid) swap.outboundTxid = outboundTxid
+    if (acceptOutboundTxid && outboundTxid) swap.outboundTxid = outboundTxid
+    if (shouldClearSwapper) swap.swapper = undefined
     if (errorMsg) swap.error = errorMsg
+    if (detectedSwapper && !swap.swapper) swap.swapper = detectedSwapper
 
     if (timeEstimate?.total_swap_seconds && timeEstimate.total_swap_seconds > 0) {
       swap.estimatedTime = timeEstimate.total_swap_seconds
@@ -370,18 +524,28 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       ? remoteSwap.buyAsset.amount
       : undefined
     if (receivedOutput) {
+      swap.receivedOutput = receivedOutput
+      // Backward-compat: display still reads expectedOutput in some places.
       swap.expectedOutput = receivedOutput
     }
 
-    console.log(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
+    swapLog(`${TAG} Status change: ${swap.txid} → ${newStatus} (confirmations=${confirmations}, outbound=${outboundConfirmations || 0}/${outboundRequiredConfirmations || '?'}, outTxid=${outboundTxid || 'none'})`)
 
-    // Persist status change to SQLite (skip for passphrase wallet swaps)
+    // Persist status change to SQLite (skip for passphrase wallet swaps).
+    // Use `swap.outboundTxid` (post-lock truth) NOT the local `outboundTxid`
+    // extracted from Pioneer — when midgardClassified is set Pioneer's view
+    // is stale and would otherwise overwrite the DB on the next refresh.
+    // Same rationale for swapper: pass `null` (not undefined) when we just
+    // cleared a stale value so the DB column actually clears.
     const isFinal = newStatus === 'completed' || newStatus === 'failed' || newStatus === 'refunded'
     const now = Date.now()
     if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, newStatus, {
-      outboundTxid: outboundTxid || undefined,
+      deviceId: swap.deviceId,
+      walletId: swap.walletId,
+      outboundTxid: swap.outboundTxid || undefined,
       error: errorMsg || undefined,
       receivedOutput,
+      swapper: shouldClearSwapper ? null : swap.swapper,
       completedAt: isFinal ? now : undefined,
       actualTimeSeconds: isFinal ? Math.round((now - swap.createdAt) / 1000) : undefined,
     })
@@ -394,86 +558,546 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   }
 }
 
-async function pollAllSwaps(): Promise<void> {
-  const now = Date.now()
+/** Build an in-memory PendingSwap from a persisted history row. Pure read —
+ *  no side effects. Use this anywhere the caller wants to inspect a stored
+ *  swap without "reactivating" it in the live tracker registry. */
+function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): PendingSwap | null {
+  const r = getSwapHistoryByTxid(txid, deviceId, walletId)
+  if (!r) return null
+  return {
+    deviceId: r.deviceId,
+    walletId: r.walletId,
+    txid: r.txid,
+    fromAsset: r.fromAsset, toAsset: r.toAsset,
+    fromSymbol: r.fromSymbol, toSymbol: r.toSymbol,
+    fromChainId: r.fromChainId, toChainId: r.toChainId,
+    fromCaip: r.fromCaip, toCaip: r.toCaip,
+    fromAmount: r.fromAmount,
+    expectedOutput: r.receivedOutput || r.quotedOutput,
+    receivedOutput: r.receivedOutput,
+    memo: r.memo, inboundAddress: r.inboundAddress, router: r.router,
+    integration: r.integration, swapper: r.swapper,
+    status: r.status, confirmations: inferConfirmationsFromStatus(r.status),
+    outboundTxid: r.outboundTxid,
+    createdAt: r.createdAt, updatedAt: r.updatedAt, completedAt: r.completedAt,
+    estimatedTime: r.estimatedTimeSeconds,
+    slippageBps: r.slippageBps,
+    error: r.error,
+    relayRequestId: r.relayRequestId,
+    // Carry the classifier output across resumes so the UI's explorer link
+    // and refund reason render correctly without waiting for the next poll.
+    // Implies `midgardClassified=true` if either is set, locking Pioneer's
+    // status mapping out from regression on the first refresh.
+    outboundChainId: r.outboundChainId,
+    refundReason: r.refundReason,
+    midgardClassified: !!(r.outboundChainId || r.refundReason),
+  }
+}
 
-  // Expire swaps older than 1 hour — stop tracking, user can manually refresh
-  for (const [txid, swap] of pendingSwaps) {
-    if (swap.status !== 'completed' && swap.status !== 'failed' && swap.status !== 'refunded') {
-      if (now - swap.createdAt > MAX_TRACKING_MS) {
-        console.log(`${TAG} Swap ${txid.slice(0, 10)}... exceeded 1h tracking limit — stopping (status was: ${swap.status})`)
-        swap.status = 'failed'
-        swap.error = 'Tracking timed out after 1 hour. Use refresh to check status manually.'
-        swap.updatedAt = now
-        if (!noPersistSwaps.has(txid)) updateSwapHistoryStatus(txid, 'failed', { error: swap.error })
-        pushUpdate(swap)
-      }
-    }
+/** Hydrate the in-memory swap from the persisted record AND register it in
+ *  the active tracker registry. Use only on paths that intend to refresh /
+ *  push updates for the swap going forward (refreshSwap, getPendingSwaps).
+ *  For diagnostic / read-only paths, call readSwapFromDb directly so the
+ *  tracker registry isn't polluted by an idle history lookup. */
+function hydrateFromDb(txid: string, deviceId?: string, walletId?: string): PendingSwap | null {
+  const swap = readSwapFromDb(txid, deviceId, walletId)
+  if (swap) pendingSwaps.set(txid, swap)
+  return swap
+}
+
+// Vault stores fromChainId in mixed formats — historical 'ethereum', current
+// 'eip155:1', or sometimes the bare numeric. Map any of them to the EVM_RPC_URLS
+// numeric key. Anything not in this table is treated as non-EVM.
+const EVM_CHAIN_TO_NUMERIC: Record<string, string> = {
+  ethereum: '1', polygon: '137', arbitrum: '42161', optimism: '10',
+  avalanche: '43114', bsc: '56', base: '8453',
+}
+function evmRpcUrlFor(fromChainId: string): string | undefined {
+  if (!fromChainId) return undefined
+  // CAIP form: "eip155:1" → "1"
+  if (fromChainId.startsWith('eip155:')) return EVM_RPC_URLS[fromChainId.slice('eip155:'.length)]
+  // Legacy slug: "ethereum" → "1" → URL
+  if (EVM_CHAIN_TO_NUMERIC[fromChainId]) return EVM_RPC_URLS[EVM_CHAIN_TO_NUMERIC[fromChainId]]
+  // Bare numeric: "1" → URL
+  return EVM_RPC_URLS[fromChainId]
+}
+
+/** Check the EVM source receipt directly. If status=0x0 the tx reverted on-chain
+ *  (allowance failed, contract revert, etc.) — the swap will NEVER complete and
+ *  the user is just being lied to with "waiting for confirmations". Mark failed
+ *  + push update so the UI flips to a failure state.
+ *
+ *  Returns true if we definitively flagged the swap as failed (caller should
+ *  short-circuit any further status polling). */
+async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
+  const rpcUrl = evmRpcUrlFor(swap.fromChainId || '')
+  if (!rpcUrl) return false
+  try {
+    const receipt = await getTxReceiptOnce(rpcUrl, swap.txid)
+    const decision = decideRevertOutcome(swap.status, receipt)
+    if (!decision) return false
+    console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${decision.blockNumber}) — marking failed`)
+    swap.status = decision.status
+    swap.error = decision.error
+    swap.updatedAt = Date.now()
+    try { updateSwapHistoryStatus(swap.txid, 'failed', { deviceId: swap.deviceId, walletId: swap.walletId }) } catch { /* ignore */ }
+    pushUpdate(swap)
+    return true
+  } catch (e: any) {
+    console.warn(`${TAG} EVM receipt check failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
+  }
+  return false
+}
+
+/** Single on-demand Pioneer poll for one swap.
+ *  Called by the SwapDialog while the user has it open (there is no background
+ *  timer). Returns the latest in-memory swap state, or null if unknown. */
+export async function refreshSwap(txid: string, deviceId?: string, walletId?: string): Promise<PendingSwap | null> {
+  const live = pendingSwaps.get(txid)
+  let swap = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : hydrateFromDb(txid, deviceId, walletId)
+  if (!swap) {
+    swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
+    return null
   }
 
-  const active = Array.from(pendingSwaps.values()).filter(s =>
-    s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded'
-  )
+  // Detect EVM revert FIRST — Pioneer's THORChain/Maya queries return "still
+  // processing" forever for reverted txs because the protocol never observed
+  // them. Without this check the user sees "waiting for confirmations" until
+  // the heat-death of the universe.
+  if (await detectEvmRevert(swap)) return swap
 
-  if (active.length === 0) {
-    // Clean up completed swaps past grace period
-    for (const [txid, swap] of pendingSwaps) {
-      if ((swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded') &&
-          now - swap.updatedAt > COMPLETED_GRACE_MS) {
-        pendingSwaps.delete(txid)
+  // Relay request-id backfill is two phases, both retry-safe:
+  //   1. Local backfill: api.relay.link/requests/v2?hash= once we don't have
+  //      the id locally. Cheap; only fires until swap.relayRequestId is set.
+  //   2. Pioneer registration: re-post CreatePendingSwap so its checkRelaySwap
+  //      monitor can key on relayData.requestId. Retries on every refreshSwap
+  //      until the next GetPendingSwap response confirms Pioneer reflects our
+  //      id (relayPioneerVerified set after applyRemoteSwapData below). This
+  //      handles the case where Pioneer's CreatePendingSwap is a no-op upsert
+  //      or 409s on the duplicate hash — without verification we'd silently
+  //      give up after one attempt and the original "stuck on confirmation
+  //      watcher" bug would reappear for a subset of swaps.
+  if (shouldBackfillRelayRequestId(swap)) {
+    if (!swap.relayRequestId) {
+      const id = await fetchRelayRequestIdByHash(swap.txid)
+      if (id) {
+        swap.relayRequestId = id
+        try { setSwapRelayRequestId(swap.txid, id, swap.deviceId, swap.walletId) } catch { /* best-effort */ }
+        pushUpdate(swap)
+        swapLog(`${TAG} Relay requestId backfilled for ${swap.txid.slice(0, 10)}...: ${id.slice(0, 12)}...`)
       }
     }
-    if (pendingSwaps.size === 0) {
-      stopPolling()
+    if (swap.relayRequestId && !relayPioneerVerified.has(swap.txid)) {
+      const attempts = relayRegisterAttempts.get(swap.txid) || 0
+      if (attempts >= MAX_RELAY_REGISTER_ATTEMPTS) {
+        // Loud one-time log per refresh after we've given up. The local
+        // tracker link still works; only Pioneer's checkRelaySwap monitor
+        // is left without the id, which means stuck-status detection on
+        // the Pioneer side won't resolve until pioneer-server ships an
+        // explicit UpdatePendingSwap / PATCH endpoint.
+        if (attempts === MAX_RELAY_REGISTER_ATTEMPTS) {
+          console.warn(`${TAG} Giving up Pioneer re-registration with Relay id for ${swap.txid.slice(0, 10)}... after ${attempts} attempts — needs a Pioneer-side update endpoint, see PR #152 review thread`)
+          relayRegisterAttempts.set(swap.txid, attempts + 1) // bump past so this log only fires once
+        }
+      } else {
+        relayRegisterAttempts.set(swap.txid, attempts + 1)
+        const ok = await setRelayRequestIdOnPioneer(swap)
+        if (ok) swapLog(`${TAG} Pioneer (re-)registered with relayRequestId for ${swap.txid.slice(0, 10)}... attempt=${attempts + 1} — awaiting verification`)
+      }
     }
-    return
+
+    const relayStatus = await fetchRelayExecutionStatus(swap)
+    const mappedRelayStatus = mapRelayExecutionStatus(relayStatus?.status)
+    const relayChanged = applyRelayExecutionStatus(swap, relayStatus)
+    const hasEnoughRelayTerminalData = hasEnoughRelayTerminalMetadata(swap)
+    if (
+      (relayChanged && isTerminalSwapStatus(swap.status) && hasEnoughRelayTerminalData) ||
+      (mappedRelayStatus && isTerminalSwapStatus(mappedRelayStatus) && mappedRelayStatus === swap.status && hasEnoughRelayTerminalData)
+    ) return swap
   }
 
   const pioneer = await getPioneer()
+  try {
+    const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap')
+    const remoteSwap = resp?.data || resp
+    if (!remoteSwap || remoteSwap.status === 'not_found') {
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
+      return swap
+    }
+    swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
+    applyRemoteSwapData(swap, remoteSwap)
 
-  console.log(`${TAG} Polling ${active.length} active swap(s) via GetPendingSwap (per-txHash)...`)
-
-  // Poll each swap individually — GetPendingSwap uses /swaps/pending/{txHash}
-  // which doesn't conflict with the SwapHistoryController route
-  for (const swap of active) {
-    // Skip swaps dismissed mid-poll cycle (race condition guard)
-    if (dismissedSwaps.has(swap.txid)) continue
-    try {
-      // GetPendingSwap expects txHash as a path parameter
-      // pioneer-client for GET: first arg = parameters (mapped to spec params)
-      const resp = await pioneer.GetPendingSwap({ txHash: swap.txid })
-      const remoteSwap = resp?.data || resp
-
-      if (!remoteSwap || remoteSwap.status === 'not_found') {
-        console.log(`${TAG} Swap ${swap.txid.slice(0, 10)}... not found in Pioneer yet`)
-        continue
-      }
-
-      console.log(`${TAG} GetPendingSwap ${swap.txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
-
-      applyRemoteSwapData(swap, remoteSwap)
-
-      // When swap just completed and we don't have outbound txid, do a rescan to get it
-      if (swap.status === 'completed' && !swap.outboundTxid) {
-        try {
-          console.log(`${TAG} Swap completed but no outbound txid — requesting rescan...`)
-          const rescanResp = await pioneer.GetPendingSwap({ txHash: swap.txid, rescan: true })
-          const rescanData = rescanResp?.data || rescanResp
-          if (rescanData && rescanData.status !== 'not_found') {
-            applyRemoteSwapData(swap, rescanData)
-          }
-        } catch (e: any) {
-          console.warn(`${TAG} Rescan failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
-        }
-      }
-    } catch (e: any) {
-      // 404 is expected for newly created swaps that haven't been indexed yet
-      if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
-        console.log(`${TAG} Swap ${swap.txid.slice(0, 10)}... not indexed yet (404)`)
-      } else {
-        console.error(`${TAG} GetPendingSwap FAILED for ${swap.txid.slice(0, 10)}...: ${e.message}`)
+    // Pioneer-side relay-id verification. If GetPendingSwap reports our id,
+    // mark the txid as Pioneer-verified so the lazy re-registration loop
+    // above stops on the next refresh. Without this verification the loop
+    // either never stopped (chatty) or stopped after one attempt that may
+    // have silently failed to land — the original P2 finding.
+    if (swap.relayRequestId && !relayPioneerVerified.has(swap.txid)) {
+      const remoteId = (remoteSwap?.relayData?.requestId || '').toLowerCase()
+      if (remoteId && remoteId === swap.relayRequestId.toLowerCase()) {
+        relayPioneerVerified.add(swap.txid)
+        swapLog(`${TAG} Pioneer relay-id verified for ${swap.txid.slice(0, 10)}... — re-registration loop done`)
       }
     }
+
+    // If just completed without an outbound txid, request a rescan to pick it up.
+    if (swap.status === 'completed' && !swap.outboundTxid) {
+      try {
+        const rescanResp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid, rescan: true }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap rescan')
+        const rescanData = rescanResp?.data || rescanResp
+        if (rescanData && rescanData.status !== 'not_found') applyRemoteSwapData(swap, rescanData)
+      } catch (e: any) {
+        console.warn(`${TAG} refreshSwap rescan failed for ${txid.slice(0, 10)}...: ${e.message}`)
+      }
+    }
+
+    // ── Midgard truth pass (Maya only — Thor has no public midgard) ──
+    // Pioneer maps refunds → 'completed' and uses toAsset.chainId for the
+    // explorer link. Both are wrong for the failure path. Hit Midgard
+    // directly and let classifySwapOutcome correct the record.
+    if (swap.integration === 'mayachain') {
+      const midgard = await fetchMayaMidgardActions(txid)
+      if (applyClassifiedOutcome(swap, midgard)) {
+        const isFinal = swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded'
+        if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, {
+          outboundTxid: swap.outboundTxid,
+          outboundChainId: swap.outboundChainId,
+          refundReason: swap.refundReason,
+          error: swap.error,
+          completedAt: isFinal ? Date.now() : undefined,
+        })
+        pushUpdate(swap)
+      }
+    }
+
+    // Pioneer can remain stuck on Relay swaps even after Relay itself has
+    // marked the request successful. Re-apply Relay's direct status last so a
+    // stale Pioneer `pending` response cannot downgrade the local tracker.
+    if (shouldBackfillRelayRequestId(swap)) {
+      const relayStatus = await fetchRelayExecutionStatus(swap)
+      applyRelayExecutionStatus(swap, relayStatus)
+    }
+  } catch (e: any) {
+    if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
+    } else {
+      console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
+    }
+  }
+  return swap
+}
+
+// ── Midgard fallback: source-of-truth for Maya/Thor swap outcomes ──
+//
+// Pioneer's normalized status maps refunds -> 'completed', and we previously
+// keyed the explorer URL on toAsset.chainId. Both are wrong for refunds, where
+// the outbound is on the source chain. Midgard's action.type='refund' is
+// unambiguous; it also tells us the actual outbound chain via the action.out
+// asset. Maya has a working public Midgard at midgard.mayachain.info; Thor's
+// Midgard has no live public mirror at the moment so this only covers Maya.
+//
+// We fetch on every refreshSwap for Maya integrations. Failure to reach
+// Midgard is non-fatal: we fall back to Pioneer's view.
+const MAYA_MIDGARD_BASE = 'https://midgard.mayachain.info'
+
+async function fetchMayaMidgardActions(txid: string): Promise<MidgardActionsResponse | null> {
+  const normalized = txid.replace(/^0x/i, '').toUpperCase()
+  const url = `${MAYA_MIDGARD_BASE}/v2/actions?txid=${normalized}`
+  try {
+    const resp = await fetch(url, { headers: { accept: 'application/json' } })
+    if (!resp.ok) {
+      swapLog(`${TAG} Maya midgard fetch ${resp.status} for ${txid.slice(0, 10)}...`)
+      return null
+    }
+    return await resp.json() as MidgardActionsResponse
+  } catch (e: any) {
+    console.warn(`${TAG} Maya midgard fetch failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
+    return null
+  }
+}
+
+function applyClassifiedOutcome(swap: PendingSwap, midgard: MidgardActionsResponse | null): boolean {
+  if (!midgard) return false
+  const outcome = classifySwapOutcome(midgard)
+  if (outcome.status === 'unknown') return false
+
+  let changed = false
+  if (outcome.status !== swap.status) {
+    swap.status = outcome.status
+    changed = true
+  }
+  if (outcome.outboundTxid && outcome.outboundTxid !== swap.outboundTxid) {
+    swap.outboundTxid = outcome.outboundTxid
+    changed = true
+  }
+  if (outcome.outboundChainId && outcome.outboundChainId !== swap.outboundChainId) {
+    swap.outboundChainId = outcome.outboundChainId
+    changed = true
+  }
+  if (outcome.refundReason && outcome.refundReason !== swap.refundReason) {
+    swap.refundReason = outcome.refundReason
+    changed = true
+  }
+  if (!swap.midgardClassified) {
+    swap.midgardClassified = true
+    changed = true
+  }
+  if (changed) {
+    swap.updatedAt = Date.now()
+    swapLog(`${TAG} Midgard reclassified ${swap.txid.slice(0, 10)}... -> status=${outcome.status} outChain=${outcome.outboundChainId || 'n/a'}`)
+  }
+  return changed
+}
+
+/** Diagnostic snapshot for a single swap: local state + Pioneer state +
+ *  Pioneer rescan result, with raw responses preserved. Surfaced via the
+ *  `debugSwapLookup` RPC so the user can introspect why a swap is stuck
+ *  without flipping the SWAP_DEBUG flag and re-broadcasting. Read-only —
+ *  does not mutate the in-memory or persisted swap state.
+ *
+ *  PRIVACY: refuses to operate on passphrase-wallet swaps (txids tagged in
+ *  noPersistSwaps). A passphrase swap stays in `pendingSwaps` for in-session
+ *  UI but must never leak through any read RPC — including from a later
+ *  standard-wallet session in the same vault process. Returns null with no
+ *  Pioneer query so we don't even confirm the txid's existence. */
+export async function debugSwapLookup(txid: string, deviceId?: string, walletId?: string): Promise<{
+  txid: string
+  pioneerBaseUrl: string | undefined
+  local: PendingSwap | null
+  pioneer: { ok: boolean; status: number | null; raw: any; error?: string }
+  pioneerRescan: { ok: boolean; status: number | null; raw: any; error?: string }
+  divergence?: { vaultProtocol: string; pioneerProtocol: string }
+} | null> {
+  if (noPersistSwaps.has(txid)) return null
+  // readSwapFromDb (not hydrateFromDb) — debugSwapLookup is read-only and
+  // must not promote an idle history row back into the active tracker registry.
+  const live = pendingSwaps.get(txid)
+  const local = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : readSwapFromDb(txid, deviceId, walletId)
+  if ((walletId || deviceId) && !local) return null
+  let pioneerBaseUrl: string | undefined
+  try {
+    const { getPioneerApiBase } = await import('./pioneer')
+    pioneerBaseUrl = getPioneerApiBase()
+  } catch { /* best-effort */ }
+
+  const pioneer = await getPioneer()
+  const tryCall = async (rescan: boolean) => {
+    try {
+      const resp = await withTimeout(
+        pioneer.GetPendingSwap({ txHash: txid, ...(rescan ? { rescan: true } : {}) }),
+        PIONEER_SWAP_TIMEOUT_MS,
+        `GetPendingSwap${rescan ? ' rescan' : ''}`,
+      )
+      const raw = resp?.data || resp
+      return { ok: true, status: 200, raw }
+    } catch (e: any) {
+      return { ok: false, status: e?.status ?? e?.statusCode ?? null, raw: null, error: e?.message || String(e) }
+    }
+  }
+  const [p1, p2] = await Promise.all([tryCall(false), tryCall(true)])
+
+  // Surface the protocol-tracking divergence loudly so the user sees the
+  // exact failure mode: vault registered as X, Pioneer is monitoring as Y.
+  const detectedProtocol = p1.raw?.details?.protocol?.protocol || p1.raw?.integration
+  const localProto = (local?.swapper || local?.integration || '').toLowerCase()
+  const remoteProto = (detectedProtocol || '').toLowerCase()
+  const divergence = (localProto && remoteProto && !localProto.includes(remoteProto) && !remoteProto.includes(localProto))
+    ? { vaultProtocol: localProto, pioneerProtocol: remoteProto }
+    : undefined
+
+  return { txid, pioneerBaseUrl, local, pioneer: p1, pioneerRescan: p2, divergence }
+}
+
+// ── Relay request-id backfill ───────────────────────────────────────
+//
+// Relay's request id (bytes32) keys their public status page and our tracker
+// link. trackSwap extracts it from the prebuilt calldata for new swaps; this
+// fallback covers legacy rows persisted before that extractor existed and any
+// future Relay deposit selector we haven't taught the extractor about yet.
+//
+// We only attempt it for integrations that route through Relay (relay native,
+// or shapeshift's Relay sub-route) and only when the id isn't already on the
+// swap. The /requests/v2?hash=... endpoint matches against the inbound tx
+// hash directly — no sender lookup or quote-shape parsing needed.
+
+function shouldBackfillRelayRequestId(swap: PendingSwap): boolean {
+  const integration = (swap.integration || '').toLowerCase()
+  // shapeshift may or may not be routing through Relay — the API call is cheap
+  // and returns nothing for non-Relay swaps, so we let the lookup decide.
+  if (integration === 'relay' || integration === 'shapeshift' || integration === 'shapeshiftswap') return true
+  const swapper = (swap.swapper || '').toLowerCase().replace(/[\s_.-]/g, '')
+  return swapper === 'relay' || swapper === 'relaylink' || swapper === 'relayexchange'
+}
+
+async function fetchRelayRequestIdByHash(txid: string): Promise<string | undefined> {
+  try {
+    const resp = await fetch(
+      `https://api.relay.link/requests/v2?hash=${encodeURIComponent(txid)}`,
+      { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } },
+    )
+    if (!resp.ok) {
+      swapLog(`${TAG} Relay backfill: HTTP ${resp.status} for ${txid.slice(0, 10)}...`)
+      return undefined
+    }
+    const data = await resp.json() as { requests?: Array<{ id?: string; data?: { inTxs?: Array<{ hash?: string }> } }> }
+    // Prefer the request whose inTx hash matches exactly — Relay can return
+    // siblings for the same user when the hash query is partial.
+    const target = txid.toLowerCase()
+    const match = (data.requests || []).find(r =>
+      (r.data?.inTxs || []).some(t => (t.hash || '').toLowerCase() === target)
+    ) || data.requests?.[0]
+    return match?.id?.toLowerCase() || undefined
+  } catch (e: any) {
+    swapLog(`${TAG} Relay backfill failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
+    return undefined
+  }
+}
+
+async function fetchRelayExecutionStatus(swap: PendingSwap): Promise<RelayExecutionStatus | null> {
+  if (!swap.relayRequestId) return null
+  try {
+    const resp = await fetch(
+      `https://api.relay.link/intents/status/v3?requestId=${encodeURIComponent(swap.relayRequestId)}`,
+      { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } },
+    )
+    if (!resp.ok) {
+      swapLog(`${TAG} Relay status: HTTP ${resp.status} for ${swap.txid.slice(0, 10)}...`)
+      return null
+    }
+    return await resp.json() as RelayExecutionStatus
+  } catch (e: any) {
+    swapLog(`${TAG} Relay status failed for ${swap.txid.slice(0, 10)}...: ${e?.message || e}`)
+    return null
+  }
+}
+
+function applyRelayExecutionStatus(swap: PendingSwap, relayStatus: RelayExecutionStatus | null): boolean {
+  if (!relayStatus) return false
+  const nextStatus = mapRelayExecutionStatus(relayStatus.status)
+  if (!nextStatus) return false
+
+  const now = Date.now()
+  const final = isTerminalSwapStatus(nextStatus)
+  const outboundTxid = relayOutboundTxid(relayStatus, swap.txid)
+  const relayDetails = relayStatus.details || undefined
+  const statusChanged = nextStatus !== swap.status
+  const nextConfirmations = nextStatus !== 'pending'
+    ? Math.max(swap.confirmations || 0, 1)
+    : swap.confirmations
+  const nextOutboundTxid = swap.outboundTxid || outboundTxid
+  const nextOutboundConfirmations = final && nextStatus === 'completed' && nextOutboundTxid
+    ? Math.max(swap.outboundConfirmations || 0, 1)
+    : swap.outboundConfirmations
+  const nextOutboundRequiredConfirmations = final && nextStatus === 'completed' && nextOutboundTxid
+    ? Math.max(swap.outboundRequiredConfirmations || 0, 1)
+    : swap.outboundRequiredConfirmations
+  const nextError = nextStatus === 'failed' && relayDetails ? relayDetails : swap.error
+  const nextRefundReason = nextStatus === 'refunded' && relayDetails ? relayDetails : swap.refundReason
+  const metadataChanged =
+    nextConfirmations !== swap.confirmations ||
+    (!!outboundTxid && outboundTxid !== swap.outboundTxid) ||
+    nextOutboundConfirmations !== swap.outboundConfirmations ||
+    nextOutboundRequiredConfirmations !== swap.outboundRequiredConfirmations ||
+    nextError !== swap.error ||
+    nextRefundReason !== swap.refundReason
+  if (!shouldApplyRelayStatus(swap.status, nextStatus, metadataChanged)) return false
+
+  const receivedOutput = nextStatus === 'completed' && swap.receivedOutput === undefined
+    ? undefined
+    : swap.receivedOutput
+  const completedAt = final ? (statusChanged ? now : swap.completedAt || now) : undefined
+  const actualTimeSeconds = completedAt ? Math.round((completedAt - swap.createdAt) / 1000) : undefined
+
+  swap.status = nextStatus
+  swap.updatedAt = now
+  swap.confirmations = nextConfirmations
+  if (outboundTxid && !swap.outboundTxid) swap.outboundTxid = outboundTxid
+  if (nextOutboundConfirmations !== undefined) swap.outboundConfirmations = nextOutboundConfirmations
+  if (nextOutboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = nextOutboundRequiredConfirmations
+  if (nextStatus === 'failed' && relayDetails) swap.error = nextError
+  if (nextStatus === 'refunded' && relayDetails) {
+    swap.refundReason = nextRefundReason
+    swap.error = relayDetails
+  }
+  if (completedAt) swap.completedAt = completedAt
+
+  swapLog(`${TAG} Relay status override: ${swap.txid.slice(0, 10)}... -> ${nextStatus} (relay=${relayStatus.status || 'unknown'}, outTxid=${swap.outboundTxid || 'none'})`)
+
+  if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, nextStatus, {
+    deviceId: swap.deviceId,
+    walletId: swap.walletId,
+    outboundTxid: swap.outboundTxid || undefined,
+    error: swap.error,
+    receivedOutput,
+    completedAt,
+    actualTimeSeconds,
+    refundReason: swap.refundReason,
+  })
+
+  pushUpdate(swap)
+  if (final && statusChanged) pushComplete(swap)
+  return true
+}
+
+function hasEnoughRelayTerminalMetadata(swap: PendingSwap): boolean {
+  return swap.status !== 'completed' || !!swap.outboundTxid
+}
+
+/** Push the resolved Relay request id into Pioneer's existing pending-swap row.
+ *
+ *  Pioneer ships PUT /swaps/pending/{txHash} (operationId UpdatePendingSwap)
+ *  which accepts { relayData: { requestId } }. Caller convention follows
+ *  pioneer-client@>=11.1.0: body is the first arg, path/query the second.
+ *
+ *  Falls back to CreatePendingSwap when the live client doesn't expose
+ *  UpdatePendingSwap (pioneer-client < 11.1.0 silently dropped PUT bodies,
+ *  so older deploys never made the method usable even though the server
+ *  endpoint existed). On the fallback path Pioneer may 409 on the duplicate
+ *  txHash; we detect that and burn the caller's remaining attempts so the
+ *  bounded loop stops instead of spinning on a permanent rejection.
+ *
+ *  Returns true if the call completed without throwing (verification happens
+ *  by re-reading GetPendingSwap.relayData.requestId in refreshSwap); false
+ *  on a thrown error. The user-visible relay tracker link works in either
+ *  case since relayRequestId is stored locally first. */
+async function setRelayRequestIdOnPioneer(swap: PendingSwap): Promise<boolean> {
+  if (!swap.relayRequestId) return false
+  try {
+    const pioneer = await getPioneer()
+    // Prefer the explicit update endpoint when the loaded swagger exposes
+    // it. Spec confirmed shipping at api.keepkey.info; method also surfaces
+    // on PatchPendingSwap and SetPendingSwapRelayData if pioneer-server
+    // adds aliases later. Forward-compat at zero cost.
+    const updateMethod = ['UpdatePendingSwap', 'PatchPendingSwap', 'SetPendingSwapRelayData']
+      .find(name => typeof (pioneer as any)?.[name] === 'function')
+    if (updateMethod) {
+      await (pioneer as any)[updateMethod](
+        { relayData: { requestId: swap.relayRequestId } },
+        { txHash: swap.txid },
+      )
+      swapLog(`${TAG} Pioneer ${updateMethod} succeeded for ${swap.txid.slice(0, 10)}...`)
+      return true
+    }
+    // Fallback: re-post CreatePendingSwap with the full body. This works
+    // only if pioneer-server happens to upsert on duplicate txHash; if it
+    // 409s the catch below burns remaining retries.
+    await registerWithPioneer(swap)
+    return true
+  } catch (e: any) {
+    const msg = String(e?.message || e || '')
+    const isDuplicate = e?.status === 409
+      || e?.statusCode === 409
+      || /already exists|duplicate|409/i.test(msg)
+    if (isDuplicate) {
+      console.warn(`${TAG} Pioneer rejected Relay-id (re-)registration for ${swap.txid.slice(0, 10)}... as duplicate (${msg.slice(0, 80)}). Pioneer needs an UpdatePendingSwap endpoint — opening a tracking issue on pioneer-server.`)
+      // Burn the remaining attempts so the caller's bounded loop stops on
+      // the next refresh — there's no recovery from a permanent 409 without
+      // a Pioneer-side change.
+      relayRegisterAttempts.set(swap.txid, MAX_RELAY_REGISTER_ATTEMPTS)
+    } else {
+      console.warn(`${TAG} Pioneer Relay-id registration call failed for ${swap.txid.slice(0, 10)}...: ${msg.slice(0, 200)}`)
+    }
+    return false
   }
 }
 
@@ -506,13 +1130,17 @@ function pushUpdate(swap: PendingSwap): void {
     outboundRequiredConfirmations: swap.outboundRequiredConfirmations,
     outboundTxid: swap.outboundTxid,
     error: swap.error,
+    swapper: swap.swapper,
+    relayRequestId: swap.relayRequestId,
+    outboundChainId: swap.outboundChainId,
+    refundReason: swap.refundReason,
   }
-  console.log(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
+  swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)
 }
 
 function pushComplete(swap: PendingSwap): void {
   if (!sendMessage) return
-  console.log(`${TAG} Pushing swap-complete: ${swap.txid} status=${swap.status}`)
+  swapLog(`${TAG} Pushing swap-complete: ${swap.txid} status=${swap.status}`)
   sendMessage('swap-complete', swap)
 }

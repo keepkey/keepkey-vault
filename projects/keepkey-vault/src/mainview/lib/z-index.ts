@@ -4,5 +4,8 @@ export const Z = {
   drawerBackdrop: 1100,
   drawerPanel: 1200,
   dialog: 1500,
+  /** Sits above dialog (asset picker opened from SwapDialog) but below overlay
+   *  so PIN/passphrase prompts always trump asset selection. */
+  assetPicker: 1700,
   overlay: 2000,
 } as const
