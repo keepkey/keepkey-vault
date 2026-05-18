@@ -87,6 +87,8 @@ function extractErrorMessage(err: any): string {
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
+  // Suppress unhandled rejection on the original promise if the timeout fires first.
+  promise.catch(() => {})
   return Promise.race([
     promise,
     new Promise<never>((_, reject) => {
