@@ -29,21 +29,30 @@ interface HeatmapViewProps {
 
 /** Squarified treemap algorithm — Bruls et al, 2000.
  *  Lays out rectangles in rows, picking the row that keeps aspect ratios
- *  closest to 1:1. Good enough for ~30 tiles. */
+ *  closest to 1:1. Good enough for ~30 tiles.
+ *
+ *  `valueExponent` (default 0.65) compresses the dynamic range so a
+ *  tiny-balance chain still gets a usable tile next to a five-figure
+ *  position. value=raw uses pure proportional sizing. */
 function layoutSquarified(
 	items: HeatmapTile[],
 	x: number,
 	y: number,
 	w: number,
 	h: number,
+	valueExponent: number = 0.65,
 ): Array<{ tile: HeatmapTile; x: number; y: number; w: number; h: number }> {
 	if (items.length === 0) return []
-	const total = items.reduce((s, t) => s + t.value, 0)
+	// Apply the compression curve once. We treat the transformed value as the
+	// "area weight" — total adjusts accordingly so the bounding rect still
+	// fills exactly.
+	const weighted = items.map(t => ({ tile: t, weight: Math.pow(Math.max(t.value, 0), valueExponent) }))
+	const total = weighted.reduce((s, t) => s + t.weight, 0)
 	if (total <= 0) return []
 
-	// Scale values to area of the bounding rect
+	// Scale weights to area of the bounding rect
 	const area = w * h
-	const scaled = items.map(t => ({ tile: t, area: (t.value / total) * area }))
+	const scaled = weighted.map(t => ({ tile: t.tile, area: (t.weight / total) * area }))
 	scaled.sort((a, b) => b.area - a.area)
 
 	const result: Array<{ tile: HeatmapTile; x: number; y: number; w: number; h: number }> = []

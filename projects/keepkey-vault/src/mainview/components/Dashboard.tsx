@@ -1101,6 +1101,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			{/* ── Sidebar: chains list (replaces the cards grid) ───────────── */}
 			{hasUsableBalanceSnapshot && (
 				<Box
+					className="kk-sidebar-scroll"
 					w={{ base: "260px", md: "320px" }}
 					flexShrink={0}
 					alignSelf="stretch"
@@ -1109,6 +1110,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					maxH="calc(100vh - 110px)"
 					overflowY="auto"
 					pr="1"
+					css={{
+						scrollbarWidth: "none",
+						"&::-webkit-scrollbar": { width: "0px", background: "transparent" },
+						"&:hover": { scrollbarWidth: "thin" },
+						"&:hover::-webkit-scrollbar": { width: "6px" },
+						"&:hover::-webkit-scrollbar-thumb": {
+							background: "rgba(255,255,255,0.18)",
+							borderRadius: "3px",
+						},
+						"&:hover::-webkit-scrollbar-thumb:hover": {
+							background: "rgba(255,255,255,0.32)",
+						},
+					}}
 				>
 					{/* "All Chains" reset row */}
 					<Box
@@ -1419,7 +1433,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    centered) and a fixed-min-height "below" area. The split anchors
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
-			<Flex flex="1" direction="column" w="100%" minH={{ base: "60vh", md: "70vh" }}>
+			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "60vh", md: "70vh" } as unknown as string)}>
 				{/* Top: orbital widget / donut / welcome — vertically centered */}
 				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'}>
 					{hasAnyBalance ? (() => {
@@ -1471,8 +1485,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								})()
 								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
 							// Full-canvas: the heatmap measures its parent and lays out to fill it.
+							// `maxH` clamps to the visible viewport so smaller tiles never fall
+							// below the fold (TopNav 54px + breathing room).
 							return (
-								<Box w="100%" h="100%" minH="60vh" alignSelf="stretch">
+								<Box
+									w="100%"
+									h="calc(100vh - 90px)"
+									maxH="calc(100vh - 90px)"
+									alignSelf="stretch"
+								>
 									<HeatmapView tiles={tiles} />
 								</Box>
 							)
