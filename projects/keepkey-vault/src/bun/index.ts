@@ -96,6 +96,11 @@ process.on('uncaughtException', (err) => {
 	try { sendFatal('uncaught-exception', err) } catch {}
 })
 process.on('unhandledRejection', (reason) => {
+	// Suppress noise from pioneer-client's internal 60s timer (customHttpClient) racing
+	// against our withTimeout(45s). The promise is always handled — this is a Bun timing
+	// artifact where the rejection registers before the .catch() propagates.
+	const msg = (reason as any)?.message || String(reason)
+	if (msg === 'Request timed out') return
 	console.error('[Vault] UNHANDLED REJECTION:', reason)
 	try { sendFatal('unhandled-rejection', reason) } catch {}
 })
