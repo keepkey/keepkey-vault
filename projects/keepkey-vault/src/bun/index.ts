@@ -1839,6 +1839,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						effectivePubkeys = pubkeys.filter(p => !failedPubkeySet.has(`${p.caip}:${p.pubkey}`))
 					}
+					// failedPubkeySet used below to gate DB writes — results always use all pubkeys
+					// so chains from failed chunks still appear (with 0) rather than vanishing entirely.
+					const failedPubkeySetForDb = new Set(
+						effectivePubkeys.length < pubkeys.length
+							? pubkeys.filter(p => !effectivePubkeys.includes(p)).map(p => `${p.caip}:${p.pubkey}`)
+							: []
+					)
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 
@@ -2012,7 +2019,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
-					for (const entry of effectivePubkeys) {
+					for (const entry of pubkeys) {
+						const isFailedEntry = failedPubkeySetForDb.has(`${entry.caip}:${entry.pubkey}`)
 						if (entry.chainId === 'bitcoin') {
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
@@ -2029,12 +2037,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							}
 							// Update per-xpub balance in BtcAccountManager + persist to cache.
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
+							// Skip if this entry came from a failed chunk (don't persist zeros).
 							const xpubBal = String(match?.balance ?? '0')
-							btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
-							try {
-								const devId = engine.getDeviceState().deviceId
-								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
-							} catch { /* non-fatal */ }
+							if (!isFailedEntry) {
+								btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
+								try {
+									const devId = engine.getDeviceState().deviceId
+									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+								} catch { /* non-fatal */ }
+							}
 							continue
 						}
 
