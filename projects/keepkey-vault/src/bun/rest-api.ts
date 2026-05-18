@@ -1116,6 +1116,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return fn()
   }
 
+  /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
+  function requireChainSupport(chainId: string): Response | null {
+    const chain = CHAINS.find(c => c.id === chainId)
+    if (!chain?.minFirmware) return null
+    const fw = engine.getDeviceState().firmwareVersion
+    if (!fw || !isChainSupported(chain, fw)) {
+      return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
+    }
+    return null
+  }
+
   /** Normalize showDisplay to boolean (undefined → false). */
   function showDisplay(requested: boolean | undefined): boolean {
     return requested ?? false
@@ -1837,6 +1848,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/solana' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('solana')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'sol', body)
@@ -1856,6 +1869,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tron' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('tron')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'trx', body)
@@ -1875,6 +1890,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/ton' && method === 'POST') {
           auth.requireAuth(req)
+          const fwBlock = requireChainSupport('ton')
+          if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'ton', body)
@@ -3025,18 +3042,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   const r = await wallet.cosmosGetAddress({ addressNList: addrNList, showDisplay: false })
                   address = typeof r === 'string' ? r : r?.address || ''
                 } else if (coinType === 501) {
-                  // Solana uses ed25519 with 4-element path (m/44'/501'/0'/0') — don't extend to 5
-                  const solNList = p.address_n
-                  const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('solana')) {
+                    const solNList = p.address_n
+                    const r = await wallet.solanaGetAddress({ addressNList: solNList, showDisplay: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 } else if (coinType === 195) {
-                  const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('tron')) {
+                    const r = await wallet.tronGetAddress({ addressNList: addrNList, showDisplay: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 } else if (coinType === 607) {
-                  // TON uses ed25519 with 3-element path (m/44'/607'/0') — don't extend to 5
-                  const tonNList = p.address_n
-                  const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
-                  address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  if (!requireChainSupport('ton')) {
+                    const tonNList = p.address_n
+                    const r = await wallet.tonGetAddress({ addressNList: tonNList, showDisplay: false, bounceable: false })
+                    address = typeof r === 'string' ? r : (r as any)?.address || ''
+                  }
                 }
 
                 if (address) {
