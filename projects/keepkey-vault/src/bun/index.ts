@@ -128,9 +128,9 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
 const PIONEER_PORTFOLIO_CHUNK_SIZE = 8
-const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 90_000
-const PIONEER_PORTFOLIO_MAX_CONCURRENCY = 2
-const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 180_000
+const PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS = 45_000
+const PIONEER_PORTFOLIO_MAX_CONCURRENCY = 4
+const PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS = 120_000
 
 function getPioneerPortfolioErrorMessage(err: any): string {
 	const fields = err?.response?.body?.fields || err?.responseError?.fields
