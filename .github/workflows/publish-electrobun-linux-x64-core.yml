@@ -62,7 +62,12 @@ jobs:
         run: ./scripts/build-electrobun-linux-x64-core.sh
 
       - name: Verify glibc floor of produced tarball
-        shell: bash
+        # `bash {0}` disables the default `-e -o pipefail` so a statically-
+        # linked binary (e.g. Zig's `launcher`) with no `GLIBC_` symbols
+        # produces an empty grep result + exit 1 without killing the whole
+        # step before the per-file table finishes printing. We manage exit
+        # via the `fail` flag below.
+        shell: bash {0}
         run: |
           TAR=artifacts/electrobun-core-linux-x64.tar.gz
           [ -f "$TAR" ] || { echo "::error::Tarball not produced"; exit 1; }
