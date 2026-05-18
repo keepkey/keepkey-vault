@@ -85,10 +85,12 @@ export function DogeEasterEgg() {
 	}, [])
 
 	// Auto-bark shortly after appearing + arm the auto-dismiss timer.
+	// Pick a random phrase so every remount (e.g. when the user navigates
+	// back to Dogecoin from another chain) feels different.
 	useEffect(() => {
 		const id = setTimeout(() => {
 			playBark()
-			flashBubble("wow such doge")
+			flashBubble(PHRASES[Math.floor(Math.random() * PHRASES.length)]!)
 		}, 650)
 		scheduleDismiss()
 		return () => {

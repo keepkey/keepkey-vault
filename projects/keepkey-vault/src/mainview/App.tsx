@@ -21,6 +21,8 @@ import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
 import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
+import { CommandPalette } from "./components/CommandPalette"
+import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
@@ -53,6 +55,8 @@ function App() {
 	const [gridReady, setGridReady] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
+	const [paletteOpen, setPaletteOpen] = useState(false)
+	const paletteBalances = useLatestBalances()
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
@@ -131,6 +135,25 @@ function App() {
 			setUpdateDismissed(false)
 		}
 	}, [update.phase])
+
+	// ── Command Palette (⌘K / Ctrl+K) ───────────────────────────────
+	// Global toggle. Ignore presses while the user is typing in an input or
+	// textarea so we don't hijack search fields elsewhere in the app.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (!((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K"))) return
+			const target = e.target
+			// Allow toggle from inside the palette's own input — only ignore other inputs.
+			if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+				const insidePalette = (target as HTMLElement).closest('[aria-label="Command Palette"]')
+				if (!insidePalette) return
+			}
+			e.preventDefault()
+			setPaletteOpen((o) => !o)
+		}
+		window.addEventListener("keydown", onKey)
+		return () => window.removeEventListener("keydown", onKey)
+	}, [])
 
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
@@ -735,6 +758,12 @@ function App() {
 					updatePhase={update.phase}
 					updateVersion={update.info?.version}
 				/>
+				<CommandPalette
+					open={paletteOpen}
+					onClose={() => setPaletteOpen(false)}
+					onJumpToVault={() => setActiveTab("vault")}
+					balances={paletteBalances}
+				/>
 			</>
 		)
 	}
@@ -890,6 +919,12 @@ function App() {
 				nativeEnabled={walletConnectEnabled}
 			/>
 			<ActivityTracker />
+			<CommandPalette
+				open={paletteOpen}
+				onClose={() => setPaletteOpen(false)}
+				onJumpToVault={() => setActiveTab("vault")}
+				balances={paletteBalances}
+			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
 			<SwapRpcMount />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}

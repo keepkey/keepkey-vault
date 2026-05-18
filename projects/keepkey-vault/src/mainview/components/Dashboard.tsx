@@ -19,11 +19,12 @@ import { DogeEasterEgg } from "./DogeEasterEgg"
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { subscribeVaultCommand, publishBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
 import { categorizeTokens } from "../../shared/spamFilter"
-import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings } from "../../shared/types"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -382,16 +383,16 @@ function TokenSatellite({
 					left="50%"
 					transform="translateX(-50%)"
 					bg="var(--ink-3)"
-					border="1px solid rgba(255,255,255,0.10)"
+					border={`1px solid ${glow}`}
 					px="3"
 					py="1.5"
 					borderRadius="10px"
 					whiteSpace="nowrap"
-					boxShadow="0 8px 24px -8px rgba(0,0,0,0.6)"
+					boxShadow={`inset 0 0 0 1px ${glow}40, 0 8px 24px -8px ${glow}66, 0 8px 24px -8px rgba(0,0,0,0.6)`}
 					pointerEvents="none"
 					zIndex={20}
 				>
-					<Text fontSize="12px" fontWeight="600" color="var(--text-0)" textAlign="center">
+					<Text fontSize="12px" fontWeight="600" color={glow === fallbackColor ? "var(--text-0)" : glow} textAlign="center">
 						{tok.symbol}
 					</Text>
 					<Text fontSize="11px" color="var(--text-2)" textAlign="center">
@@ -590,9 +591,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | undefined>(undefined)
+	const [selectedChainInitialToken, setSelectedChainInitialToken] = useState<TokenBalance | undefined>(undefined)
 	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
 	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
-	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap") => {
+	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap", token?: TokenBalance) => {
 		// Swap routes directly to SwapDialog — skip the AssetPage shell that
 		// would otherwise show the Receive view underneath.
 		if (action === "swap") {
@@ -600,6 +602,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			return
 		}
 		setSelectedChainAction(action)
+		setSelectedChainInitialToken(token)
 		setSelectedChain(chain)
 	}, [])
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
@@ -658,6 +661,33 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			if (pioneerErrorTimerRef.current) clearTimeout(pioneerErrorTimerRef.current)
 		}
 	}, [])
+
+	// Publish balances to the command bus so out-of-tree consumers
+	// (CommandPalette) can render token results without us having to lift
+	// balances state up to App.
+	useEffect(() => {
+		publishBalances(balances)
+	}, [balances])
+
+	// Subscribe to imperative vault commands from CommandPalette (⌘K). These
+	// drive the existing drill/open behavior without exposing Dashboard's
+	// internal state to App.
+	useEffect(() => {
+		return subscribeVaultCommand((cmd) => {
+			if (cmd.type === "open-chain") {
+				setDrilledChainId(cmd.chainId)
+				return
+			}
+			if (cmd.type === "open-token") {
+				const chain = [...CHAINS, ...customChainDefs].find(c => c.id === cmd.chainId)
+				if (!chain) return
+				setDrilledChainId(cmd.chainId)
+				const bal = balances.get(cmd.chainId)
+				const token = bal?.tokens?.find(tk => tk.caip === cmd.tokenCaip)
+				if (token) openChainPage(chain, undefined, token)
+			}
+		})
+	}, [customChainDefs, balances, openChainPage])
 
 	// Load token visibility overrides (for spam filtering). Refetch on
 	// `token-visibility-changed` push so a "mark as scam" action in
@@ -1057,7 +1087,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} />
+				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -1069,7 +1099,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			{/* ── Sidebar: chains list (replaces the cards grid) ───────────── */}
 			{hasUsableBalanceSnapshot && (
 				<Box
-					w={{ base: "220px", md: "260px" }}
+					w={{ base: "260px", md: "320px" }}
 					flexShrink={0}
 					alignSelf="stretch"
 					position="sticky"
@@ -1102,8 +1132,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								</svg>
 							</Box>
 							<Box flex="1" minW="0">
-								<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
-								<Text fontSize="11px" color="var(--text-2)" lineHeight="1.3">
+								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
+								<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
 									${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
 								</Text>
 							</Box>
@@ -1136,25 +1166,25 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								transition="all 0.15s"
 								opacity={hasBalance ? 1 : 0.55}
 							>
-								<Flex align="center" gap="2.5">
-									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="28px" h="28px" borderRadius="full" flexShrink={0} bg={chain.color} />
+								<Flex align="center" gap="3">
+									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg={chain.color} />
 									<Box flex="1" minW="0">
 										<Flex align="baseline" justify="space-between" gap="2">
-											<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
+											<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
 												{chain.coin}
 											</Text>
 											{usdNum > 0 && (
-												<Text fontSize="11px" color="var(--text-1)" fontWeight="500" lineHeight="1.2" flexShrink={0}>
+												<Text fontSize="14px" color="var(--text-0)" fontWeight="500" lineHeight="1.2" letterSpacing="-0.01em" flexShrink={0}>
 													${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}
 												</Text>
 											)}
 										</Flex>
-										<Flex align="baseline" justify="space-between" gap="2">
-											<Text fontSize="10px" color="var(--text-3)" lineHeight="1.3" truncate>
+										<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
+											<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
 												{hasBalance ? `${formatBalance(bal?.balance || '0')} ${chain.symbol}` : t("noBalance")}
 											</Text>
 											{tokenCount > 0 && (
-												<Text fontSize="9px" color={chain.color} fontWeight="600" lineHeight="1.3" flexShrink={0}>
+												<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" flexShrink={0}>
 													+{tokenCount}
 												</Text>
 											)}
@@ -1407,7 +1437,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									nativeBalanceUsd={nativeUsd}
 									cleanTokens={cleanTokens}
 									onSelectChain={() => openChainPage(dchain)}
-									onSelectToken={() => openChainPage(dchain)}
+									onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
 								/>
 							)
 						}
@@ -1582,7 +1612,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 													<Flex
 														key={tok.caip}
 														as="button"
-														onClick={() => openChainPage(dchain)}
+														onClick={() => openChainPage(dchain, undefined, tok)}
 														align="center"
 														gap="2.5"
 														p="2"

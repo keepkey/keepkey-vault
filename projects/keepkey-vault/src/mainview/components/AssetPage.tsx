@@ -48,13 +48,15 @@ interface AssetPageProps {
 	firmwareVersion?: string
 	/** Open the page on a specific action ("send" / "receive" / "swap"). */
 	initialAction?: "send" | "receive" | "swap"
+	/** Pre-select a specific token so the page lands directly on its detail view. */
+	initialToken?: TokenBalance
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : "receive")
-	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null)
+	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
