@@ -13,6 +13,7 @@ import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
 import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
+import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 
 // SwapDialog is heavy (loads swapper providers) — lazy so it doesn't enter the
 // initial Dashboard chunk. Used to open Swap directly from the action row
@@ -1470,6 +1471,43 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								})()
 								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
 							return <HeatmapView tiles={tiles} width={520} height={420} />
+						}
+						if (viewMode === 'stack') {
+							const items: StackedBarItem[] = drilledChainId
+								? (() => {
+									const dchain = visibleChains.find(c => c.id === drilledChainId)
+									if (!dchain) return []
+									const bal = balances.get(dchain.id)
+									const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+									const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+									const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
+									const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd)
+									const tokenPalette = ['#e9c46a', '#8be3c4', '#6c7be8', '#e08c7b', '#9f8ce0', '#f0a85c', '#4eb591', '#4f7fc8']
+									const arr: StackedBarItem[] = []
+									if (nativeUsd > 0) arr.push({ id: `${dchain.id}:native`, label: dchain.symbol, color: dchain.color, value: nativeUsd, onSelect: () => openChainPage(dchain) })
+									cleanTokens
+										.slice()
+										.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+										.forEach((tok, i) => arr.push({
+											id: tok.caip,
+											label: tok.symbol,
+											color: tokenPalette[i % tokenPalette.length]!,
+											value: tok.balanceUsd ?? 0,
+											onSelect: () => openChainPage(dchain, undefined, tok),
+										}))
+									return arr
+								})()
+								: visibleChains.map(chain => ({
+									id: chain.id,
+									label: chain.coin,
+									color: chain.color,
+									value: cleanBalanceUsd.get(chain.id)?.usd ?? 0,
+									onSelect: () => setDrilledChainId(chain.id),
+								})).filter(it => it.value > 0)
+							const stackTotal = drilledChainId
+								? items.reduce((s, it) => s + it.value, 0)
+								: totalUsd
+							return <StackedBarView items={items} total={stackTotal} maxWidth={720} />
 						}
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : (chartData.length > 0 ? 0 : null)
 						return (

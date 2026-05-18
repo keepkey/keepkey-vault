@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 
-export type DashboardView = "orbital" | "donut" | "heatmap"
+export type DashboardView = "orbital" | "donut" | "heatmap" | "stack"
 const STORAGE_KEY = "keepkey.dashboard.view"
 
 interface Ctx {
@@ -14,7 +14,7 @@ export function DashboardViewProvider({ children }: { children: ReactNode }) {
 	const [viewMode, setViewMode] = useState<DashboardView>(() => {
 		try {
 			const saved = localStorage.getItem(STORAGE_KEY)
-			if (saved === "donut" || saved === "heatmap") return saved
+			if (saved === "donut" || saved === "heatmap" || saved === "stack") return saved
 			return "orbital"
 		} catch { return "orbital" }
 	})
