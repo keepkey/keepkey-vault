@@ -375,6 +375,7 @@ export function dismissSwap(txid: string): void {
 // log will show the mismatch so we can extend this map.
 const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
   shapeshiftSwap: 'shapeshift',
+  nearIntents: 'shapeshift',
 }
 
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {

@@ -7,6 +7,7 @@ import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
+import { ActivityPage } from "./ActivityPage"
 import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
@@ -627,6 +628,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | undefined>(undefined)
 	const [selectedChainInitialToken, setSelectedChainInitialToken] = useState<TokenBalance | undefined>(undefined)
+	const [showActivityPage, setShowActivityPage] = useState(false)
+	const [activityDefaultChain, setActivityDefaultChain] = useState('')
+	const handleViewActivity = useCallback((chainId: string) => {
+		setActivityDefaultChain(chainId)
+		setShowActivityPage(true)
+	}, [])
+	// Listen for the global event dispatched by ActivityTracker's panel
+	useEffect(() => {
+		const handler = () => { setActivityDefaultChain(''); setShowActivityPage(true) }
+		window.addEventListener('keepkey-open-activity', handler)
+		return () => window.removeEventListener('keepkey-open-activity', handler)
+	}, [])
 	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
 	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
 	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap", token?: TokenBalance) => {
@@ -1118,11 +1131,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		!cacheUpdatedAt || (Date.now() - cacheUpdatedAt > 86_400_000)
 	)
 
+	if (showActivityPage) {
+		return (
+			<ActivityPage
+				defaultChainId={activityDefaultChain}
+				onBack={() => setShowActivityPage(false)}
+			/>
+		)
+	}
+
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} />
+				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} />
 			</AssetPageErrorBoundary>
 		)
 	}
