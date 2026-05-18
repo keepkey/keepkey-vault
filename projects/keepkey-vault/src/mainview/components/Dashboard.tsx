@@ -406,6 +406,39 @@ function TokenSatellite({
 	)
 }
 
+/** Heatmap canvas wrapper — measures its own top in the viewport on mount
+ *  and on resize, and sets an explicit pixel height so the squarified
+ *  treemap inside fills exactly the visible area (no tiles below the fold). */
+function HeatmapHost({ tiles }: { tiles: Parameters<typeof HeatmapView>[0]["tiles"] }) {
+	const ref = useRef<HTMLDivElement>(null)
+	const [height, setHeight] = useState(0)
+
+	useEffect(() => {
+		const measure = () => {
+			const el = ref.current
+			if (!el) return
+			const rect = el.getBoundingClientRect()
+			const margin = 12 // breathing room above the window's bottom edge
+			const available = window.innerHeight - rect.top - margin
+			setHeight(Math.max(220, Math.floor(available)))
+		}
+		measure()
+		window.addEventListener("resize", measure)
+		// Re-measure on next paint in case parent flex/banner state shifts
+		const raf = requestAnimationFrame(measure)
+		return () => {
+			window.removeEventListener("resize", measure)
+			cancelAnimationFrame(raf)
+		}
+	}, [])
+
+	return (
+		<Box ref={ref} w="100%" alignSelf="stretch" h={height ? `${height}px` : "70vh"}>
+			<HeatmapView tiles={tiles} />
+		</Box>
+	)
+}
+
 /** Chain-detail orbital — chain icon as the sun, tokens orbiting as satellites.
  *  Shown when the user picks a chain from the sidebar list. */
 function ChainDetailOrbital({
@@ -1484,19 +1517,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									return buildChainDetailTiles(dchain, bal, cleanTokens, nativeUsd, (tok) => openChainPage(dchain, undefined, tok))
 								})()
 								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
-							// Full-canvas: the heatmap measures its parent and lays out to fill it.
-							// `maxH` clamps to the visible viewport so smaller tiles never fall
-							// below the fold (TopNav 54px + breathing room).
-							return (
-								<Box
-									w="100%"
-									h="calc(100vh - 90px)"
-									maxH="calc(100vh - 90px)"
-									alignSelf="stretch"
-								>
-									<HeatmapView tiles={tiles} />
-								</Box>
-							)
+							// Full-canvas: dynamically measure where the heatmap container
+							// starts in the viewport and stretch it down to the bottom edge.
+							// Static `calc(100vh - <fudge>)` got the offset wrong because of
+							// banners / utility row variability.
+							return <HeatmapHost tiles={tiles} />
 						}
 						if (viewMode === 'stack') {
 							const items: StackedBarItem[] = drilledChainId
