@@ -9,7 +9,7 @@ html, body, #root {
 	width: 100%;
 	background: transparent;
 	color: #ffffff;
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	font-family: 'Geist Mono', ui-monospace, monospace;
 }
 
 /* Prevent native window drag from capturing form inputs */
