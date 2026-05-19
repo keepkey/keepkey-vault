@@ -2048,7 +2048,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
 								try {
 									const devId = engine.getDeviceState().deviceId
-									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+									// force=true: Pioneer responded for this xpub — write even if balance is 0 to clear stale cache
+									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd, true)
 								} catch { /* non-fatal */ }
 							}
 							continue
@@ -2184,6 +2185,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
 					if (btcConfirmed) confirmedChainIds.add('bitcoin')
 					else confirmedChainIds.delete('bitcoin')
+
+					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
+					if (btcPubkeyEntries.length > 0) btcAccounts.markPioneerFetched()
 
 					{
 						const btcSet = btcAccounts.toAccountSet()
@@ -2942,9 +2946,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!btcAccounts.isInitialized) {
 					await btcAccounts.initialize(engine.wallet as any)
 				}
-				// Hydrate per-xpub balances from DB cache (so pills show values on first load)
+				// Hydrate per-xpub balances from DB cache only on first load (before Pioneer has responded).
+				// Once pioneerFetched=true, the in-memory values are authoritative — don't overwrite with stale DB rows.
 				const devId = engine.getDeviceState().deviceId
-				if (devId) {
+				if (devId && !btcAccounts.pioneerFetched) {
 					const cachedPks = getCachedPubkeys(devId).filter(p => p.chainId === 'bitcoin' && p.xpub)
 					for (const pk of cachedPks) {
 						if (pk.balance !== '0' || pk.balanceUsd > 0) {

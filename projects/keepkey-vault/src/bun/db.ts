@@ -1274,21 +1274,36 @@ export function deleteEmulatorWalletMeta(name: string) {
 
 // ── Cached Pubkeys (watch-only address cache) ───────────────────────
 
-export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string, balance?: string, balanceUsd?: number) {
+export function saveCachedPubkey(deviceId: string, chainId: string, path: string, xpub: string, address: string, scriptType: string, balance?: string, balanceUsd?: number, force?: boolean) {
   try {
     if (!db) return
-    db.run(
-      `INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(device_id, chain_id, path) DO UPDATE SET
-         xpub        = excluded.xpub,
-         address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
-         script_type = excluded.script_type,
-         balance     = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance     ELSE balance     END,
-         balance_usd = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
-         updated_at  = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
-      [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', balance || '0', balanceUsd ?? 0, Date.now()]
-    )
+    if (force) {
+      db.run(
+        `INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(device_id, chain_id, path) DO UPDATE SET
+           xpub        = excluded.xpub,
+           address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+           script_type = excluded.script_type,
+           balance     = excluded.balance,
+           balance_usd = excluded.balance_usd,
+           updated_at  = excluded.updated_at`,
+        [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', balance || '0', balanceUsd ?? 0, Date.now()]
+      )
+    } else {
+      db.run(
+        `INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(device_id, chain_id, path) DO UPDATE SET
+           xpub        = excluded.xpub,
+           address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+           script_type = excluded.script_type,
+           balance     = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance     ELSE balance     END,
+           balance_usd = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
+           updated_at  = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
+        [deviceId, chainId, path || '', xpub || '', address || '', scriptType || '', balance || '0', balanceUsd ?? 0, Date.now()]
+      )
+    }
   } catch (e: any) {
     console.warn('[db] saveCachedPubkey failed:', e.message)
   }
