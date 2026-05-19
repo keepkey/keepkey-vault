@@ -375,7 +375,7 @@ describe('parseQuoteResponse', () => {
       }],
     }
     expect(() => parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 }))
-      .toThrow(/no swap instructions|no quotes/i)
+      .toThrow(/no supported routes|no quotes/i)
   })
 
   test('Relay with data="0x" is NOT a deposit channel — no relayTx created', () => {
@@ -417,7 +417,7 @@ describe('parseQuoteResponse', () => {
       }],
     }
     expect(() => parseQuoteResponse(resp, { fromCaip: btcCaip, toCaip: ethCaip, slippageBps: 300 }))
-      .toThrow(/no swap instructions|no quotes/i)
+      .toThrow(/no supported routes|no quotes/i)
   })
 
   test('NEAR Intents first in list — fallback to Chainflip route selected', () => {

@@ -2177,6 +2177,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// as a single-xpub value; the in-memory manager always has the correct sum.
 					// Use the real address from Pioneer (btcSelectedAddress/btcFallbackAddress) when
 					// available — fall back to xpub only if Pioneer didn't return an address.
+					// confirmedChainIds: chains where Pioneer returned a real response (not a failed chunk).
+					// These are allowed to write 0 to the cache — genuine empty balance, not a transient failure.
+					const confirmedChainIds = new Set(effectivePubkeys.map(p => p.chainId))
+					// BTC is aggregated from multiple pubkeys — it's confirmed only if ALL its pubkeys succeeded.
+					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
+					if (btcConfirmed) confirmedChainIds.add('bitcoin')
+					else confirmedChainIds.delete('bitcoin')
+
 					{
 						const btcSet = btcAccounts.toAccountSet()
 						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
@@ -2189,7 +2197,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									balanceUsd: btcSet.totalBalanceUsd,
 									nativeBalanceUsd: btcSet.totalBalanceUsd,
 									address: btcSelectedAddress || btcFallbackAddress || btcAccounts.getSelectedXpub()?.xpub || '',
-								})
+								}, btcConfirmed)
 							}
 						} catch { /* non-fatal */ }
 					}
@@ -2213,7 +2221,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results, confirmedChainIds)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -2655,6 +2663,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// override string itself (not from getSelectedXpub(), which can drift
 					// between render and RPC handling). Finding 5 fix.
 					const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
+					console.log(`[buildTx] BTC xpub: override=${params.xpubOverride?.slice(0,12)} selected=${btcAccounts.getSelectedXpub()?.xpub?.slice(0,12)} resolved=${resolvedXpub?.slice(0,12)} scriptType=${btcAccounts.getSelectedXpub()?.scriptType}`)
 					xpub = resolvedXpub
 					// Look up the BtcXpub entry that owns this xpub string for scriptType + path
 					let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
@@ -2959,7 +2968,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let receiveIndex = 0
 				let changeIndex = 0
 				try {
-					const resp = await withTimeout(pioneer.GetPubkeyInfo({ network: 'BTC', xpub }), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
+					const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
+					const resp = await withTimeout(pioneer.GetPubkeyInfo({ network: btcNetworkId, xpub }), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
 					const tokens = resp?.data?.tokens || []
 					let maxReceive = -1
 					let maxChange = -1

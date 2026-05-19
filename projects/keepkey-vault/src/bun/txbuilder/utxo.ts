@@ -165,6 +165,7 @@ async function fetchUtxosForXpub(
 ): Promise<any[]> {
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
   const resp = await pioneer.ListUnspent({ network, xpub })
+  console.log(`${TAG} ListUnspent raw: ${JSON.stringify(resp)?.slice(0, 300)}`)
   const utxos = unwrapUtxoResponse(resp)
   for (const u of utxos) {
     u.value = Number(u.value)
@@ -279,7 +280,7 @@ export async function buildUtxoTx(
   } else {
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
   }
-  if (!utxos.length) throw new Error(`No UTXOs found for ${chain.coin}`)
+  if (!utxos.length) throw new Error(`No confirmed UTXOs found for ${chain.coin}. If you recently sent or received ${chain.symbol}, the transaction may still be confirming — please wait and try again.`)
 
   // Diagnostic: dump raw UTXO[0]
   if (utxos.length > 0) {
@@ -414,7 +415,7 @@ export async function buildUtxoTx(
     : [primaryXpub]
   for (const qXpub of xpubsToQuery) {
     try {
-      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.chain, xpub: qXpub }))?.data
+      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: qXpub }))?.data
       if (pubkeyInfo?.tokens) {
         let maxUsed = -1
         for (const token of pubkeyInfo.tokens) {

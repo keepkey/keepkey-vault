@@ -392,15 +392,15 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   }
 }
 
-export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
+// confirmedChainIds: chains where Pioneer returned a real response (even if balance=0).
+// Confirmed entries write unconditionally — a genuine zero overwrites a stale non-zero.
+// Unconfirmed entries (Pioneer failed/timed out for that chunk) keep the existing cached value.
+export function setCachedBalances(deviceId: string, balances: ChainBalance[], confirmedChainIds?: Set<string>) {
   try {
     if (!db) return
     const now = Date.now()
-    // No-walk-backwards upsert: only overwrite a cached non-zero balance if the new value is
-    // also non-zero. This prevents Pioneer cold-cache or transient 0 responses from wiping
-    // a balance the user has actually seen. The updated_at timestamp is only advanced when
-    // the balance is genuinely updated, so the UI accurately shows "from X ago".
-    const stmt = db.prepare(
+    // Guarded upsert: keep existing non-zero if Pioneer didn't respond for this chain.
+    const stmtGuarded = db.prepare(
       `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
@@ -411,10 +411,27 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
          tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
          updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`
     )
+    // Forced upsert: Pioneer confirmed this chain — always write, even if balance=0.
+    const stmtForced = db.prepare(
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, chain_id) DO UPDATE SET
+         symbol      = excluded.symbol,
+         address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+         balance     = excluded.balance,
+         balance_usd = excluded.balance_usd,
+         tokens_json = excluded.tokens_json,
+         updated_at  = excluded.updated_at`
+    )
     const tx = db.transaction(() => {
       for (const b of balances) {
         const tokensJson = b.tokens && b.tokens.length > 0 ? JSON.stringify(b.tokens) : null
-        stmt.run(deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, now)
+        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, now] as const
+        if (confirmedChainIds?.has(b.chainId)) {
+          stmtForced.run(...args)
+        } else {
+          stmtGuarded.run(...args)
+        }
       }
     })
     tx()
@@ -423,23 +440,39 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[]) {
   }
 }
 
-/** Update a single chain's cached balance. Never downgrades a non-zero cached value to zero. */
-export function updateCachedBalance(deviceId: string, balance: ChainBalance) {
+/** Update a single chain's cached balance.
+ *  Pass force=true when Pioneer confirmed the value — allows genuine zeros to overwrite stale data. */
+export function updateCachedBalance(deviceId: string, balance: ChainBalance, force?: boolean) {
   try {
     if (!db) return
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
-    db.run(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(device_id, chain_id) DO UPDATE SET
-         symbol     = excluded.symbol,
-         address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
-         balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
-         balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
-         tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
-         updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
-      [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
-    )
+    if (force) {
+      db.run(
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(device_id, chain_id) DO UPDATE SET
+           symbol      = excluded.symbol,
+           address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+           balance     = excluded.balance,
+           balance_usd = excluded.balance_usd,
+           tokens_json = excluded.tokens_json,
+           updated_at  = excluded.updated_at`,
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+      )
+    } else {
+      db.run(
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(device_id, chain_id) DO UPDATE SET
+           symbol     = excluded.symbol,
+           address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+           balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
+           balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
+           tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
+           updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+      )
+    }
   } catch (e: any) {
     console.warn('[db] updateCachedBalance failed:', e.message)
   }

@@ -1238,7 +1238,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box
 								key={chain.id}
 								as="button"
-								onClick={() => openChainPage(chain)}
+								onClick={() => setDrilledChainId(chain.id)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -1677,7 +1677,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})()}
 
-					{hasAnyBalance && viewMode === 'orbital' && drilledChainId && (() => {
+					{!!drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = balances.get(dchain.id)

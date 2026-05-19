@@ -118,6 +118,8 @@ export class BtcAccountManager extends EventEmitter {
         }
       }
     }
+    const all = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub)
+    console.log(`[btc-accounts] getFundedXpubs: ${result.length}/${all.length} funded — ${all.map(x => `${x.scriptType}=${x.balance}`).join(', ')}`)
     return result
   }
 

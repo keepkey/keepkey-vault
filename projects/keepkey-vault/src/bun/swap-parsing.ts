@@ -219,10 +219,17 @@ export function parseQuoteResponse(
     throw new Error('Quote response missing inbound address')
   }
   if (!memo && !hasPrebuiltTx && !isNativeDeposit) {
-    // A quote with neither memo nor prebuilt calldata has no swap instructions —
-    // it cannot be executed. Throw now so the UI surfaces a clear error at
-    // quote-fetch time rather than a cryptic "Missing swap memo" at preview time.
-    throw new Error('Quote returned no swap instructions (no memo and no calldata) — try a different pair or refresh')
+    console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
+    console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
+    console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   txParams.memo=${txParams.memo!}, quote.memo=${quote.memo!}, raw.memo=${raw.memo!}`)
+    console.error(`${TAG}   rawData=${rawData!}, hasRealCalldata=${hasRealCalldata}, isDepositChannel=${isDepositChannel}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 3000)}`)
+    const swapperLabel = swapper || integration || 'unknown'
+    throw new Error(`No supported routes for this pair — Pioneer returned only "${swapperLabel}" (unsupported). Try a different pair or refresh.`)
   }
 
   // Extract fees — relay uses a different fee structure
