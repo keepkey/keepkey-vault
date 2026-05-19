@@ -775,6 +775,21 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       }
     }
 
+    // Post-Pioneer relay backfill: if the swap just went terminal and the
+    // initial backfill (above) found nothing (tx not indexed yet by relay.link),
+    // try once more now that confirmation has propagated. This closes the race
+    // where polling stops before the ID is available, leaving the tracker button
+    // permanently absent from the submitted page.
+    if (shouldBackfillRelayRequestId(swap) && !swap.relayRequestId && isTerminalSwapStatus(swap.status)) {
+      const id = await fetchRelayRequestIdByHash(swap.txid)
+      if (id) {
+        swap.relayRequestId = id
+        try { setSwapRelayRequestId(swap.txid, id, swap.deviceId, swap.walletId) } catch { /* best-effort */ }
+        pushUpdate(swap)
+        swapLog(`${TAG} Relay requestId backfilled (post-terminal) for ${swap.txid.slice(0, 10)}...: ${id.slice(0, 12)}...`)
+      }
+    }
+
     // Pioneer can remain stuck on Relay swaps even after Relay itself has
     // marked the request successful. Re-apply Relay's direct status last so a
     // stale Pioneer `pending` response cannot downgrade the local tracker.
