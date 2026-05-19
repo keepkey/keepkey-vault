@@ -83,8 +83,14 @@ export function parseQuoteResponse(
   const quotes: any[] = Array.isArray(qInner) ? qInner : [qInner]
   if (quotes.length === 0) throw new Error('No quotes available for this pair')
 
-  // Select first (best) quote
-  const best = quotes[0]
+  // Drop unsupported swappers so a valid fallback route is used when available.
+  // Without this, Pioneer returning NEAR Intents first blocks a supported second route.
+  const UNSUPPORTED_SWAPPER = /^near/i
+  const supported = quotes.filter(q => {
+    const sw = ((q.quote || q).swapper || '').replace(/\s/g, '')
+    return !UNSUPPORTED_SWAPPER.test(sw)
+  })
+  const best = (supported.length > 0 ? supported : quotes)[0]
   const integration = best.integration || 'thorchain'
   const quote = best.quote || best
   // Pioneer wraps THORNode data in quote.raw and tx details in quote.txs[]
