@@ -375,7 +375,6 @@ export function dismissSwap(txid: string): void {
 // log will show the mismatch so we can extend this map.
 const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
   shapeshiftSwap: 'shapeshift',
-  nearIntents: 'shapeshift',
 }
 
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {
@@ -434,7 +433,6 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   if (swap.relayRequestId) {
     body.relayData = { requestId: swap.relayRequestId }
   }
-
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
   const resp = await withTimeout(pioneer.CreatePendingSwap(body), PIONEER_SWAP_TIMEOUT_MS, 'CreatePendingSwap')
@@ -479,12 +477,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Maya pools, which would mis-render as "THORChain via Maya" in the badge.
   // Suppress the override so the badge falls back to `integration`.
   const isNativeVaultRoute = swap.integration === 'mayachain' || swap.integration === 'thorchain'
-  // NEAR Intents: Pioneer misidentifies BTC deposits with no memo as THORChain
-  // (both are memo-less UTXO sends). Block the swapper adoption so 'NEAR Intents'
-  // is not overwritten with 'thorchain' in the DB and UI.
-  const pioneerMisidentifiedAsThorchain = isNearIntentsSwap(swap)
-    && (remoteSwap.details?.protocol?.protocol || '').toLowerCase() === 'thorchain'
-  const detectedSwapper: string | undefined = (isNativeVaultRoute || pioneerMisidentifiedAsThorchain)
+  const detectedSwapper: string | undefined = isNativeVaultRoute
     ? undefined
     : (remoteSwap.details?.protocol?.protocol || remoteSwap.swapper || undefined)
   const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
@@ -783,6 +776,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       const relayStatus = await fetchRelayExecutionStatus(swap)
       applyRelayExecutionStatus(swap, relayStatus)
     }
+
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
@@ -926,17 +920,7 @@ export async function debugSwapLookup(txid: string, deviceId?: string, walletId?
 // swap. The /requests/v2?hash=... endpoint matches against the inbound tx
 // hash directly — no sender lookup or quote-shape parsing needed.
 
-/** NEAR Intents maps to integration='shapeshift' in PIONEER_INTEGRATION_ALIAS
- *  but is NOT routed through Relay. Identify it by swapper so we can skip
- *  Relay-specific code paths that don't apply. */
-function isNearIntentsSwap(swap: PendingSwap): boolean {
-  const swapper = (swap.swapper || '').toLowerCase().replace(/\s/g, '')
-  return swapper === 'nearintents' || swapper.startsWith('near')
-}
-
 function shouldBackfillRelayRequestId(swap: PendingSwap): boolean {
-  // NEAR Intents shares the 'shapeshift' integration alias but is NOT a Relay swap.
-  if (isNearIntentsSwap(swap)) return false
   const integration = (swap.integration || '').toLowerCase()
   // shapeshift may or may not be routing through Relay — the API call is cheap
   // and returns nothing for non-Relay swaps, so we let the lookup decide.

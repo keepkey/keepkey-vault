@@ -288,29 +288,6 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     : (result.integration || 'unknown')
   swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
 
-  // NEAR Intents BTC→EVM: competitive solver network that fronts ETH then claims BTC.
-  // Solvers need 2 BTC confirmations (20-40 min) and must cover ETH gas (~$2-5).
-  // Amounts below ~$50 USD are systematically refunded — no solver finds it profitable.
-  if (result.swapper === 'NEAR Intents' && params.fromCaip.startsWith('bip122:')) {
-    // Block amounts below the protocol's stated minimum
-    if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
-      throw new Error(
-        `Amount too small for NEAR Intents — minimum ${result.minAmountIn} BTC required. ` +
-        `Solvers must front ETH and wait for BTC confirmations; smaller amounts are unprofitable and will be refunded.`
-      )
-    }
-    // Warn if quote deadline is too short for BTC's 2-confirmation requirement (~20-40 min).
-    // A 30-min deadline may expire before BTC even confirms, causing automatic refund.
-    const nowSec = Math.floor(Date.now() / 1000)
-    const minutesUntilExpiry = result.expiry ? (result.expiry - nowSec) / 60 : 0
-    if (result.expiry && minutesUntilExpiry < 60) {
-      console.warn(
-        `${TAG} NEAR Intents BTC→EVM quote expires in ${minutesUntilExpiry.toFixed(0)} min — ` +
-        `BTC requires 2 confirmations (20-40 min). If BTC doesn't confirm in time, swap will be refunded.`
-      )
-    }
-  }
-
   return result
 }
 
@@ -421,10 +398,6 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  // NEAR Intents (memo-less UTXO → EVM): deposit address is the only instruction.
-  // Detected by fromCaip chain family — `swapper` is not in ExecuteSwapParams.
-  // Direction guard: only valid for UTXO sources; EVM → BTC with no calldata
-  // has no way to encode the BTC destination.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
   const isMemolessTransfer = fromIsUtxo && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
@@ -716,7 +689,6 @@ export async function previewSwapBuild(
 
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  // NEAR Intents (memo-less UTXO → EVM): CAIP-based detection (swapper not in ExecuteSwapParams)
   const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
   const isMemolessTransfer = fromIsUtxoPreview && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
@@ -992,17 +964,28 @@ async function buildRelaySwapTx(
   if (nativeBalance === undefined) {
     throw new Error(`Unable to verify ${fromChain.symbol} balance for Relay transaction — refusing to sign. Try refreshing the quote.`)
   }
-  console.log(`${TAG} relay gas check: value=${formatWei(relayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(relayNativeRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
-  if (nativeBalance < relayNativeRequired) {
+  // Deposit-channel sendMax fix: quote was generated with the full balance as the
+  // send amount, but gas must also come from that same balance. Reduce the deposit
+  // value by the gas reserve so the tx fits without requiring a re-quote.
+  // Only applies to native-asset deposit channels (Chainflip) — ERC-20
+  // sources never have value > 0, and standard Relay calldata txs carry exact amounts.
+  let effectiveRelayValue = relayValue
+  if (params.isMax && relay.isDepositChannel && !isErc20Source && nativeBalance > relayGasReserve) {
+    effectiveRelayValue = nativeBalance - relayGasReserve
+    console.log(`${TAG} deposit channel sendMax: adjusted relay value ${formatWei(relayValue, fromChain.decimals)} → ${formatWei(effectiveRelayValue, fromChain.decimals)} ${fromChain.symbol} (gas: ${formatWei(relayGasReserve, fromChain.decimals)})`)
+  }
+  const effectiveRelayRequired = effectiveRelayValue + relayGasReserve + approveGasReserve
+  console.log(`${TAG} relay gas check: value=${formatWei(effectiveRelayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(effectiveRelayRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
+  if (nativeBalance < effectiveRelayRequired) {
     if (params.isMax && !isErc20Source) {
       throw new Error(
-        `Relay quote is stale: updated gas fees require ${formatWei(relayNativeRequired, fromChain.decimals)} ${fromChain.symbol} ` +
+        `Relay quote is stale: updated gas fees require ${formatWei(effectiveRelayRequired, fromChain.decimals)} ${fromChain.symbol} ` +
         `but the wallet has ${formatWei(nativeBalance, fromChain.decimals)}. Refresh the quote so the max send amount can reserve gas before signing.`
       )
     }
     throw new Error(
-      `Insufficient ${fromChain.symbol} for Relay transaction: need ${formatWei(relayNativeRequired, fromChain.decimals)} ` +
-      `(${formatWei(relayValue, fromChain.decimals)} value + ${formatWei(relayGasReserve, fromChain.decimals)} gas), ` +
+      `Insufficient ${fromChain.symbol} for Relay transaction: need ${formatWei(effectiveRelayRequired, fromChain.decimals)} ` +
+      `(${formatWei(effectiveRelayValue, fromChain.decimals)} value + ${formatWei(relayGasReserve, fromChain.decimals)} gas), ` +
       `have ${formatWei(nativeBalance, fromChain.decimals)}.`
     )
   }
@@ -1093,7 +1076,7 @@ async function buildRelaySwapTx(
     nonce: toHex(BigInt(nonce)),
     gasLimit: toHex(BigInt(gasLimit)),
     to: relay.to,
-    value: toHex(relayValue),
+    value: toHex(effectiveRelayValue),
     data: relay.data,
   }
 
@@ -1118,8 +1101,8 @@ async function buildRelaySwapTx(
   // Historical incidents:
   //   - USDT→BTC (Maya, txid 0x8426ca…) — ERC-20 source, dust transfer to non-vault EOA
   //
-  // Cross-chain native-asset swaps (ETH→BTC) via deposit-channel protocols
-  // (Chainflip, NEAR Intents) legitimately use `data = '0x'` — the swap
+  // Cross-chain native-asset swaps via deposit-channel protocols
+  // (Chainflip) legitimately use `data = '0x'` — the swap
   // destination was registered off-chain when the quote/channel was created.
   // These are flagged `relay.isDepositChannel = true` by parseQuoteResponse
   // so we can distinguish them from truly malformed quotes.
