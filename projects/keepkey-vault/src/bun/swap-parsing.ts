@@ -83,14 +83,7 @@ export function parseQuoteResponse(
   const quotes: any[] = Array.isArray(qInner) ? qInner : [qInner]
   if (quotes.length === 0) throw new Error('No quotes available for this pair')
 
-  // Drop unsupported swappers so a valid fallback route is used when available.
-  // Without this, Pioneer returning NEAR Intents first blocks a supported second route.
-  const UNSUPPORTED_SWAPPER = /^near/i
-  const supported = quotes.filter(q => {
-    const sw = ((q.quote || q).swapper || '').replace(/\s/g, '')
-    return !UNSUPPORTED_SWAPPER.test(sw)
-  })
-  const best = (supported.length > 0 ? supported : quotes)[0]
+  const best = quotes[0]
   const integration = best.integration || 'thorchain'
   const quote = best.quote || best
   // Pioneer wraps THORNode data in quote.raw and tx details in quote.txs[]
@@ -151,7 +144,10 @@ export function parseQuoteResponse(
   // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
   // by the pre-existing cross-chain guard.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
-  const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip'])
+  // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
+  // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
+  // path instead (isMemolessTransfer below).
+  const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
   const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
   const hasPrebuiltTx = hasRealCalldata || isDepositChannel
   let relayTx: RelayTxParams | undefined
@@ -218,7 +214,11 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  if (!memo && !hasPrebuiltTx && !isNativeDeposit) {
+  // For memo-less UTXO swaps (NEAR Intents BTC→ETH): the deposit address IS the
+  // only instruction — no memo or calldata needed. fromIsUtxo guards direction:
+  // EVM→BTC with no calldata has no way to encode the BTC destination.
+  const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
+  if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
     console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
     console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)

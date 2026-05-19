@@ -361,7 +361,7 @@ describe('parseQuoteResponse', () => {
     expect(result.swapper).toBe('Chainflip')
   })
 
-  test('NEAR Intents ETH→BTC: filtered out — throws no-swap-instructions', () => {
+  test('NEAR Intents ETH→BTC: EVM source treated as deposit channel', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'
     const resp = {
@@ -374,8 +374,10 @@ describe('parseQuoteResponse', () => {
         },
       }],
     }
-    expect(() => parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 }))
-      .toThrow(/no supported routes|no quotes/i)
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.relayTx?.to).toBe('0xnear_deposit')
+    expect(result.relayTx?.isDepositChannel).toBe(true)
   })
 
   test('Relay with data="0x" is NOT a deposit channel — no relayTx created', () => {
@@ -402,7 +404,7 @@ describe('parseQuoteResponse', () => {
     expect(result.memo).toBe('MEMO')
   })
 
-  test('NEAR Intents BTC→ETH (UTXO source, no memo) — filtered out, throws no-swap-instructions', () => {
+  test('NEAR Intents BTC→ETH (UTXO source, no memo) — memoless transfer succeeds', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'
     const resp = {
@@ -416,11 +418,14 @@ describe('parseQuoteResponse', () => {
         },
       }],
     }
-    expect(() => parseQuoteResponse(resp, { fromCaip: btcCaip, toCaip: ethCaip, slippageBps: 300 }))
-      .toThrow(/no supported routes|no quotes/i)
+    const result = parseQuoteResponse(resp, { fromCaip: btcCaip, toCaip: ethCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.inboundAddress).toBe('bc1qnearintentsdeposit')
+    expect(result.memo).toBe('')
+    expect(result.relayTx).toBeUndefined()
   })
 
-  test('NEAR Intents first in list — fallback to Chainflip route selected', () => {
+  test('NEAR Intents first in list — selected as best (Pioneer ranks it first)', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'
     const resp = {
@@ -440,7 +445,7 @@ describe('parseQuoteResponse', () => {
       ],
     }
     const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
-    expect(result.swapper).toBe('Chainflip')
+    expect(result.swapper).toBe('NEAR Intents')
     expect(result.relayTx?.isDepositChannel).toBe(true)
   })
 
