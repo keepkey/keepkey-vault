@@ -22,7 +22,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
-import { subscribeVaultCommand, publishBalances } from "../lib/commandBus"
+import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
@@ -713,10 +713,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	// Publish balances to the command bus so out-of-tree consumers
 	// (CommandPalette) can render token results without us having to lift
-	// balances state up to App.
+	// balances state up to App. Clear on unmount so stale balances from a
+	// previous wallet session don't persist after disconnect.
 	useEffect(() => {
 		publishBalances(balances)
 	}, [balances])
+	useEffect(() => {
+		return () => { clearBalances() }
+	}, [])
 
 	// Subscribe to imperative vault commands from CommandPalette (⌘K). These
 	// drive the existing drill/open behavior without exposing Dashboard's
