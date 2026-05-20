@@ -75,6 +75,7 @@ export function ViewPickerButton() {
 	const { viewMode, setViewMode } = useDashboardView()
 	const [open, setOpen] = useState(false)
 	const wrapRef = useRef<HTMLDivElement>(null)
+	const activeView = VIEWS.find(v => v.id === viewMode) ?? VIEWS[0]
 
 	// Close on outside click / Esc
 	useEffect(() => {
@@ -99,11 +100,9 @@ export function ViewPickerButton() {
 			<Box
 				as="button"
 				onClick={() => setOpen(o => !o)}
-				display="flex"
-				alignItems="center"
-				justifyContent="center"
-				w="34px"
-				h="26px"
+				position="relative"
+				w="36px"
+				h="36px"
 				borderRadius="999px"
 				bg={open ? "var(--ink-4)" : "var(--ink-2)"}
 				color={open ? "var(--gold)" : "var(--text-2)"}
@@ -114,18 +113,23 @@ export function ViewPickerButton() {
 				title="Switch view"
 				aria-haspopup="menu"
 				aria-expanded={open}
+				overflow="hidden"
 			>
-				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-					<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-					<circle cx="12" cy="12" r="3" />
-				</svg>
+				<Box
+					position="absolute"
+					style={{ transform: "translate(-50%, -50%) scale(0.55)", top: "50%", left: "50%" }}
+					display="flex"
+				>
+					{activeView.preview}
+				</Box>
 			</Box>
 
 			{open && (
 				<Box
 					position="absolute"
 					top="calc(100% + 8px)"
-					right="0"
+					left="50%"
+					style={{ transform: "translateX(-50%)" }}
 					w="260px"
 					bg="var(--ink-1)"
 					border="1px solid var(--line)"

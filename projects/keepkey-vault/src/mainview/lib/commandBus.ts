@@ -70,6 +70,15 @@ export function getLatestBalances(): Map<string, ChainBalance> {
 	return latestBalances
 }
 
+/** Clear the balance cache — call when Dashboard unmounts so stale wallet
+ *  balances don't bleed into the next wallet session or disconnected state. */
+export function clearBalances(): void {
+	latestBalances = new Map()
+	for (const fn of balancesListeners) {
+		try { fn(latestBalances) } catch (e) { console.error("[commandBus] balances listener threw:", e) }
+	}
+}
+
 /** React hook that subscribes to balance updates published by Dashboard. */
 export function useLatestBalances(): Map<string, ChainBalance> {
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(latestBalances)

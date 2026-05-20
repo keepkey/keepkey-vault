@@ -5,10 +5,24 @@
  * Priority: DB setting > PIONEER_API_BASE env var > https://api.keepkey.info
  */
 import Pioneer from '@pioneer-platform/pioneer-client'
-import { getSetting } from './db'
+import { getSetting, setSetting } from './db'
 
 export const DEFAULT_API_BASE = 'https://api.keepkey.info'
-const QUERY_KEY = process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
+
+function getOrCreateQueryKey(): string {
+  const saved = getSetting('pioneer_query_key')
+  if (saved) return saved
+  const key = `vault:${crypto.randomUUID()}`
+  setSetting('pioneer_query_key', key)
+  return key
+}
+
+let _queryKey: string | null = null
+export function getQueryKey(): string {
+  if (!_queryKey) _queryKey = process.env.PIONEER_API_KEY || getOrCreateQueryKey()
+  return _queryKey
+}
+
 const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 
 let pioneerInstance: any = null
@@ -62,10 +76,26 @@ export async function getPioneer(): Promise<any> {
         } catch { /* malformed URL — let Pioneer fail naturally */ }
       }
 
-      const client = new Pioneer(specUrl, { queryKey: QUERY_KEY, timeout: 60000, overrideHost })
+      const qk = getQueryKey()
+      const client = new Pioneer(specUrl, { queryKey: qk, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
       console.log('[Pioneer] Client initialized successfully')
+
+      // Register queryKey with Pioneer so SSE auth passes (best-effort, non-fatal).
+      // Username must be 3-32 chars — derive a stable short slug from the key.
+      const username = qk.startsWith('vault:')
+        ? qk.slice(0, 32)
+        : `vk-${qk.slice(-20)}`.slice(0, 32)
+      fetch(`${base}/api/v1/user/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, queryKey: qk }),
+      }).then(r => {
+        if (r.ok || r.status === 409) console.log('[Pioneer] queryKey registered for SSE auth')
+        else r.text().then(t => console.warn('[Pioneer] SSE registration warning:', r.status, t)).catch(() => {})
+      }).catch(() => { /* non-fatal — SSE degrades gracefully if unregistered */ })
+
       return pioneerInstance
     } catch (err) {
       initPromise = null

@@ -14,7 +14,7 @@ export function DashboardViewProvider({ children }: { children: ReactNode }) {
 	const [viewMode, setViewMode] = useState<DashboardView>(() => {
 		try {
 			const saved = localStorage.getItem(STORAGE_KEY)
-			if (saved === "donut" || saved === "heatmap" || saved === "stack") return saved
+			if (saved === "orbital" || saved === "donut" || saved === "heatmap" || saved === "stack") return saved
 			return "orbital"
 		} catch { return "orbital" }
 	})

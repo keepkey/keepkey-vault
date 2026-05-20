@@ -434,7 +434,6 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   if (swap.relayRequestId) {
     body.relayData = { requestId: swap.relayRequestId }
   }
-
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
   const resp = await withTimeout(pioneer.CreatePendingSwap(body), PIONEER_SWAP_TIMEOUT_MS, 'CreatePendingSwap')
@@ -722,6 +721,26 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     ) return swap
   }
 
+  // NEAR Intents: poll 1Click API for the NEAR tx hash once per swap.
+  if (isNearIntentsSwap(swap) && !swap.nearTxHash && swap.inboundAddress) {
+    try {
+      const resp = await fetch(
+        `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(swap.inboundAddress)}`,
+        { signal: AbortSignal.timeout(8000) },
+      )
+      if (resp.ok) {
+        const data = await resp.json() as any
+        const nearHash: string | undefined = data?.nearTxHashes?.[0]
+        if (nearHash) {
+          swap.nearTxHash = nearHash
+          pushUpdate(swap)
+          if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, { nearTxHash: nearHash })
+          swapLog(`${TAG} NEAR Intents: nearTxHash backfilled for ${txid.slice(0, 10)}... → ${nearHash.slice(0, 12)}...`)
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
   const pioneer = await getPioneer()
   try {
     const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap')
@@ -776,6 +795,21 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       }
     }
 
+    // Post-Pioneer relay backfill: if the swap just went terminal and the
+    // initial backfill (above) found nothing (tx not indexed yet by relay.link),
+    // try once more now that confirmation has propagated. This closes the race
+    // where polling stops before the ID is available, leaving the tracker button
+    // permanently absent from the submitted page.
+    if (shouldBackfillRelayRequestId(swap) && !swap.relayRequestId && isTerminalSwapStatus(swap.status)) {
+      const id = await fetchRelayRequestIdByHash(swap.txid)
+      if (id) {
+        swap.relayRequestId = id
+        try { setSwapRelayRequestId(swap.txid, id, swap.deviceId, swap.walletId) } catch { /* best-effort */ }
+        pushUpdate(swap)
+        swapLog(`${TAG} Relay requestId backfilled (post-terminal) for ${swap.txid.slice(0, 10)}...: ${id.slice(0, 12)}...`)
+      }
+    }
+
     // Pioneer can remain stuck on Relay swaps even after Relay itself has
     // marked the request successful. Re-apply Relay's direct status last so a
     // stale Pioneer `pending` response cannot downgrade the local tracker.
@@ -783,6 +817,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       const relayStatus = await fetchRelayExecutionStatus(swap)
       applyRelayExecutionStatus(swap, relayStatus)
     }
+
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
@@ -912,6 +947,14 @@ export async function debugSwapLookup(txid: string, deviceId?: string, walletId?
     : undefined
 
   return { txid, pioneerBaseUrl, local, pioneer: p1, pioneerRescan: p2, divergence }
+}
+
+/** NEAR Intents maps to integration='shapeshift' in PIONEER_INTEGRATION_ALIAS
+ *  but is NOT routed through Relay. Identify it by swapper so we can skip
+ *  Relay-specific code paths that don't apply. */
+function isNearIntentsSwap(swap: PendingSwap): boolean {
+  const swapper = (swap.swapper || '').toLowerCase().replace(/\s/g, '')
+  return swapper === 'nearintents' || swapper.startsWith('near')
 }
 
 // ── Relay request-id backfill ───────────────────────────────────────
@@ -1150,6 +1193,7 @@ function pushUpdate(swap: PendingSwap): void {
     relayRequestId: swap.relayRequestId,
     outboundChainId: swap.outboundChainId,
     refundReason: swap.refundReason,
+    nearTxHash: swap.nearTxHash,
   }
   swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)

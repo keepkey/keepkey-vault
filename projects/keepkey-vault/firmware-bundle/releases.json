@@ -14,9 +14,9 @@
   },
   "beta": {
     "firmware": {
-      "version": "v7.14.0",
-      "url": "v7.14.0/firmware.keepkey.bin",
-      "hash": "8c1082eca6c6f79b14e84de6d0d21e15eff3c545982d97c9fc6e4b30365513c7"
+      "version": "v7.14.1",
+      "url": "v7.14.1/firmware.keepkey.bin",
+      "hash": "e9586f0ba5fa41893daef541e004bd602c79a2feb11740917cf8b0054b04c88b"
     },
     "bootloader": {
       "version": "v2.1.4",
@@ -50,7 +50,8 @@
     },
     "firmware": {
       "958764cf3baa53eec0002eab9c54e02ce6f5fdab71e7efbbe723f958e26ff419": "v7.10.0",
-      "8c1082eca6c6f79b14e84de6d0d21e15eff3c545982d97c9fc6e4b30365513c7": "v7.14.0"
+      "8c1082eca6c6f79b14e84de6d0d21e15eff3c545982d97c9fc6e4b30365513c7": "v7.14.0",
+      "e9586f0ba5fa41893daef541e004bd602c79a2feb11740917cf8b0054b04c88b": "v7.14.1"
     }
   }
 }

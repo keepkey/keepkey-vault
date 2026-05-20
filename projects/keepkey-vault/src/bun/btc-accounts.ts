@@ -12,6 +12,8 @@ export class BtcAccountManager extends EventEmitter {
   private accounts: BtcAccount[] = []
   private selectedXpub: { accountIndex: number; scriptType: BtcScriptType } = { accountIndex: 0, scriptType: 'p2wpkh' }
   private initPromise: Promise<BtcAccountSet> | null = null
+  /** Set after getBalances calls updateXpubBalance — prevents getBtcAccounts from stomping live data with stale DB rows. */
+  pioneerFetched = false
 
   /** Initialize account 0 with 3 xpubs from the device. Concurrent calls coalesce into one. */
   async initialize(wallet: any): Promise<BtcAccountSet> {
@@ -87,6 +89,11 @@ export class BtcAccountManager extends EventEmitter {
     return entries
   }
 
+  /** Mark that Pioneer has responded at least once — blocks stale DB re-hydration in getBtcAccounts. */
+  markPioneerFetched(): void {
+    this.pioneerFetched = true
+  }
+
   /** Update a specific xpub's balance after Pioneer response. */
   updateXpubBalance(xpubStr: string, balance: string, balanceUsd: number): void {
     for (const account of this.accounts) {
@@ -118,6 +125,8 @@ export class BtcAccountManager extends EventEmitter {
         }
       }
     }
+    const all = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub)
+    console.log(`[btc-accounts] getFundedXpubs: ${result.length}/${all.length} funded — ${all.map(x => `${x.scriptType}=${x.balance}`).join(', ')}`)
     return result
   }
 
@@ -133,6 +142,7 @@ export class BtcAccountManager extends EventEmitter {
     this.accounts = []
     this.selectedXpub = { accountIndex: 0, scriptType: 'p2wpkh' }
     this.initPromise = null
+    this.pioneerFetched = false
   }
 
   /** Whether accounts have been initialized. */

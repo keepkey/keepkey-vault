@@ -109,7 +109,9 @@ import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
-import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE } from "./pioneer"
+import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { PioneerSocket } from "./pioneer-socket"
+import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
@@ -194,6 +196,7 @@ function unwrapPortfolioEntries(resp: any): any[] {
 const GITHUB_REPO = 'keepkey/keepkey-vault'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
+let pioneerSocket: PioneerSocket | null = null
 
 function openReleasePage() {
 	const version = pendingUpdateVersion || Updater.updateInfo()?.version
@@ -2048,7 +2051,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
 								try {
 									const devId = engine.getDeviceState().deviceId
-									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd)
+									// force=true: Pioneer responded for this xpub — write even if balance is 0 to clear stale cache
+									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd, true)
 								} catch { /* non-fatal */ }
 							}
 							continue
@@ -2177,6 +2181,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// as a single-xpub value; the in-memory manager always has the correct sum.
 					// Use the real address from Pioneer (btcSelectedAddress/btcFallbackAddress) when
 					// available — fall back to xpub only if Pioneer didn't return an address.
+					// confirmedChainIds: chains where Pioneer returned a real response (not a failed chunk).
+					// These are allowed to write 0 to the cache — genuine empty balance, not a transient failure.
+					const confirmedChainIds = new Set(effectivePubkeys.map(p => p.chainId))
+					// BTC is aggregated from multiple pubkeys — it's confirmed only if ALL its pubkeys succeeded.
+					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
+					if (btcConfirmed) confirmedChainIds.add('bitcoin')
+					else confirmedChainIds.delete('bitcoin')
+
+					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
+					if (btcPubkeyEntries.length > 0) btcAccounts.markPioneerFetched()
+
 					{
 						const btcSet = btcAccounts.toAccountSet()
 						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
@@ -2189,7 +2204,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									balanceUsd: btcSet.totalBalanceUsd,
 									nativeBalanceUsd: btcSet.totalBalanceUsd,
 									address: btcSelectedAddress || btcFallbackAddress || btcAccounts.getSelectedXpub()?.xpub || '',
-								})
+								}, btcConfirmed)
 							}
 						} catch { /* non-fatal */ }
 					}
@@ -2213,7 +2228,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results)
+						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results, confirmedChainIds)
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -2230,6 +2245,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (r.tokens && r.tokens.length > 0) {
 						console.log(`[getBalances]   ${r.chainId}: ${r.tokens.length} tokens attached`)
 					}
+				}
+
+				// ── Start SSE event stream for real-time tx notifications ──
+				// Build address list: EVM individual accounts + non-UTXO non-EVM chains.
+				// BTC/LTC/DOGE xpubs are excluded — watchtower derives and watches those server-side.
+				const streamAddresses: AddressEntry[] = []
+				for (const a of evmAddresses.toAddressSet().addresses) {
+					if (a.address && a.networkId) streamAddresses.push({ address: a.address, networkId: a.networkId })
+				}
+				for (const p of pubkeys) {
+					if (p.caip.startsWith('bip122:')) continue // UTXO — skip xpubs
+					if (p.pubkey.startsWith('xpub') || p.pubkey.startsWith('ypub') || p.pubkey.startsWith('zpub') ||
+					    p.pubkey.startsWith('dgub') || p.pubkey.startsWith('Ltub') || p.pubkey.startsWith('Mtub')) continue
+					if (p.networkId && p.pubkey) streamAddresses.push({ address: p.pubkey, networkId: p.networkId })
+				}
+				if (streamAddresses.length > 0) {
+					startEventStream(
+						streamAddresses,
+						(event) => {
+							if (event.type === 'tx:incoming') {
+								console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address}`)
+								try { rpc.send['tx-push-received']({ chain: event.data.caip, address: event.data.address, txid: event.data.txid }) } catch { /* webview not ready */ }
+							}
+							if (event.type === 'tx:confirmed') {
+								console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
+								try { rpc.send['tx-push-received']({ txid: event.data.txid }) } catch { /* webview not ready */ }
+							}
+						},
+						(status) => {
+							try { rpc.send['stream-status'](status) } catch { /* webview not ready */ }
+						},
+					)
 				}
 
 				return results
@@ -2655,6 +2702,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// override string itself (not from getSelectedXpub(), which can drift
 					// between render and RPC handling). Finding 5 fix.
 					const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
+					console.log(`[buildTx] BTC xpub: override=${params.xpubOverride?.slice(0,12)} selected=${btcAccounts.getSelectedXpub()?.xpub?.slice(0,12)} resolved=${resolvedXpub?.slice(0,12)} scriptType=${btcAccounts.getSelectedXpub()?.scriptType}`)
 					xpub = resolvedXpub
 					// Look up the BtcXpub entry that owns this xpub string for scriptType + path
 					let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
@@ -2933,9 +2981,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!btcAccounts.isInitialized) {
 					await btcAccounts.initialize(engine.wallet as any)
 				}
-				// Hydrate per-xpub balances from DB cache (so pills show values on first load)
+				// Hydrate per-xpub balances from DB cache only on first load (before Pioneer has responded).
+				// Once pioneerFetched=true, the in-memory values are authoritative — don't overwrite with stale DB rows.
 				const devId = engine.getDeviceState().deviceId
-				if (devId) {
+				if (devId && !btcAccounts.pioneerFetched) {
 					const cachedPks = getCachedPubkeys(devId).filter(p => p.chainId === 'bitcoin' && p.xpub)
 					for (const pk of cachedPks) {
 						if (pk.balance !== '0' || pk.balanceUsd > 0) {
@@ -2959,7 +3008,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let receiveIndex = 0
 				let changeIndex = 0
 				try {
-					const resp = await withTimeout(pioneer.GetPubkeyInfo({ network: 'BTC', xpub }), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
+					const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
+					const resp = await withTimeout(pioneer.GetPubkeyInfo({ network: btcNetworkId, xpub }), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
 					const tokens = resp?.data?.tokens || []
 					let maxReceive = -1
 					let maxChange = -1
@@ -4152,7 +4202,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (est && est.feeSat > 0) {
 								const netBtc = (est.netSat / 1e8).toFixed(8)
 								console.log(`[swap] NEAR Intents sendMax: re-quoting with net amount ${netBtc} BTC (fee=${est.feeSat} sat)`)
-								quote = await getSwapQuote({ ...params, amount: netBtc, isMax: false })
+								quote = { ...await getSwapQuote({ ...params, amount: netBtc, isMax: false }), netFromAmount: netBtc }
 							}
 						}
 					} catch (e: any) {
@@ -4226,7 +4276,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const scope = getWalletDbScope()
 				// Register swap for tracking (non-blocking)
 				try {
-					trackSwap(result, params, {
+					const trackParams = cachedQuote?.netFromAmount
+						? { ...params, amount: cachedQuote.netFromAmount }
+						: params
+					trackSwap(result, trackParams, {
 						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
 						minimumOutput: cachedQuote?.minimumOutput || '0',
 						inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
@@ -5298,10 +5351,31 @@ engine.on('state-change', (state) => {
 			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
 	}
+	if (state.state === 'ready' && !pioneerSocket) {
+		pioneerSocket = new PioneerSocket({
+			queryKey: getPioneerQueryKey(),
+			onEvent: (event, data) => {
+				const REFRESH_EVENTS = new Set(['transaction:incoming', 'balance:update', 'balance:cache:update'])
+				if (!REFRESH_EVENTS.has(event)) return
+				const d = data as any
+				const chain = d?.chain ?? d?.symbol ?? undefined
+				const address = d?.address ?? undefined
+				const txid = d?.txid ?? d?.tx?.txid ?? undefined
+				console.log(`[PioneerSocket] push event '${event}' chain=${chain} → triggering forceRefresh`)
+				try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
+			},
+			onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
+			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
+		})
+		pioneerSocket.start()
+	}
 	if (state.state === 'disconnected') {
 		btcAccounts.reset()
 		evmAddresses.reset()
 		console.log('[Vault] Device disconnected: cleared in-memory account managers')
+		pioneerSocket?.stop()
+		pioneerSocket = null
+		stopEventStream()
 	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)

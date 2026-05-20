@@ -20,7 +20,7 @@ const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ defa
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
 
 import { SweepDialog } from "./SweepDialog"
-import { ActivityRow, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
+import { ActivityTable, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
 import type { RecentActivity } from "../../shared/types"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
@@ -343,6 +343,20 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [showSwapDialog, setShowSwapDialog] = useState(initialAction === "swap")
 	const [showSweep, setShowSweep] = useState(false)
 	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
+
+	// Scoped Pioneer push subscription: only refresh while this page is mounted,
+	// and only when the event chain matches this asset or the active swap output.
+	const [swapOutputChainId, setSwapOutputChainId] = useState<string | null>(null)
+	useEffect(() => {
+		return onRpcMessage("tx-push-received", (payload: { chain?: string }) => {
+			if (payload.chain) {
+				const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
+				const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
+				if (!matches && !matchesOutput) return
+			}
+			handleRefresh()
+		})
+	}, [handleRefresh, chain.id, chain.symbol, swapOutputChainId])
 
 	// Activity preview
 	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])
@@ -973,16 +987,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							)}
 						</Flex>
 					) : (
-						<VStack gap="1.5">
-							{previewActivities.map(a => (
-								<ActivityRow
-									key={a.id}
-									activity={a}
-									nativePrices={previewPrices}
-									onSelect={act => setActivityDetail({ kind: 'activity', activity: act })}
-								/>
-							))}
-						</VStack>
+						<ActivityTable
+							activities={previewActivities}
+							nativePrices={previewPrices}
+							onSelect={act => setActivityDetail({ kind: 'activity', activity: act })}
+						/>
 					)}
 				</Box>
 			</Box>
@@ -1001,6 +1010,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
 							} : activeBalance}
 							address={address}
+							onOutputAssetChange={setSwapOutputChainId}
 						/>
 					</Suspense>
 				</SwapErrorBoundary>

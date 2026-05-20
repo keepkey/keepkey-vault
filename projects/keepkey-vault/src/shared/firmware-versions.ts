@@ -55,6 +55,20 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
     ],
   },
   {
+    version: '7.14.1',
+    date: '2026-05',
+    headline: 'Stability and TON improvements',
+    features: [
+      {
+        title: 'TON Off-Chain Signing',
+        description: 'Support for off-chain message format 2 (extended UTF-8) and improved TON signing.',
+        chains: ['ton'],
+        color: '#0088CC',
+        icon: 'chain',
+      },
+    ],
+  },
+  {
     version: '7.14.0',
     date: '2026-03',
     headline: 'New chains',

@@ -83,7 +83,6 @@ export function parseQuoteResponse(
   const quotes: any[] = Array.isArray(qInner) ? qInner : [qInner]
   if (quotes.length === 0) throw new Error('No quotes available for this pair')
 
-  // Select first (best) quote
   const best = quotes[0]
   const integration = best.integration || 'thorchain'
   const quote = best.quote || best
@@ -132,10 +131,10 @@ export function parseQuoteResponse(
   //
   // Two sub-cases:
   //  A) Real calldata (data.length ≥ 10): encodes the swap instruction (Relay, 0x, …)
-  //  B) Deposit-channel (data = '0x' / empty): Chainflip and NEAR Intents EVM-side
-  //     use a plain ETH transfer to a protocol-controlled address; the swap destination
-  //     was registered off-chain when the quote/channel was created. `data` is empty
-  //     intentionally — do NOT conflate with a malformed Relay quote.
+  //  B) Deposit-channel (data = '0x' / empty): Chainflip uses a plain ETH transfer to a
+  //     protocol-controlled address; the swap destination was registered off-chain when
+  //     the quote/channel was created. `data` is empty intentionally — do NOT conflate
+  //     with a malformed Relay quote.
   const rawData: string | undefined = txParams.data
   const hasRealCalldata = !!rawData && rawData !== '0x' && rawData !== '0x0' && rawData.length >= 10
 
@@ -144,10 +143,10 @@ export function parseQuoteResponse(
   // Allowed list is narrow and explicit — unknown swappers with empty calldata
   // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
   // by the pre-existing cross-chain guard.
+  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
   // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
   // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
   // path instead (isMemolessTransfer below).
-  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
   const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
   const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
   const hasPrebuiltTx = hasRealCalldata || isDepositChannel
@@ -189,16 +188,12 @@ export function parseQuoteResponse(
   }
 
   // Guard: UTXO sources must send to a chain-native address, not an EVM address.
-  // NEAR Intents BTC→ETH falls back to the user's ETH recipientAddress when Pioneer
-  // can't surface a BTC deposit address from step.allowanceContract — that ETH
-  // address would be passed to the firmware as a Bitcoin output and cause
-  // "Failed to compile output" (code 9). Fail loudly here instead.
   if (fromIsUtxo && inboundAddress && inboundAddress.startsWith('0x')) {
-    console.error(`${TAG} NEAR Intents BTC deposit address is missing — Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
+    console.error(`${TAG} Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
     console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2).slice(0, 2000)}`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
-    throw new Error('Swap quote did not provide a valid BTC deposit address — NEAR Intents deposit channel may be unavailable for this pair. Try refreshing the quote.')
+    throw new Error('Swap quote did not provide a valid deposit address for this chain. Try a different pair or refresh the quote.')
   }
 
   // Expiry for depositWithExpiry
@@ -224,10 +219,17 @@ export function parseQuoteResponse(
   // EVM→BTC with no calldata has no way to encode the BTC destination.
   const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
   if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
-    // A quote with neither memo nor prebuilt calldata has no swap instructions —
-    // it cannot be executed. Throw now so the UI surfaces a clear error at
-    // quote-fetch time rather than a cryptic "Missing swap memo" at preview time.
-    throw new Error('Quote returned no swap instructions (no memo and no calldata) — try a different pair or refresh')
+    console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
+    console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
+    console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   txParams.memo=${txParams.memo!}, quote.memo=${quote.memo!}, raw.memo=${raw.memo!}`)
+    console.error(`${TAG}   rawData=${rawData!}, hasRealCalldata=${hasRealCalldata}, isDepositChannel=${isDepositChannel}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 3000)}`)
+    const swapperLabel = swapper || integration || 'unknown'
+    throw new Error(`No supported routes for this pair — Pioneer returned only "${swapperLabel}" (unsupported). Try a different pair or refresh.`)
   }
 
   // Extract fees — relay uses a different fee structure

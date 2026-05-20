@@ -14,6 +14,9 @@
 import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
 import { getLatestDeviceSnapshot, getCachedPubkeys, getSetting } from './db'
 import { getPioneer } from './pioneer'
+import { CHAINS } from '../shared/chains'
+
+const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
 /** Section title prefixes — shared with tax-export.ts for reliable extraction. */
 export const SECTION_TITLES = {
@@ -37,7 +40,7 @@ function safeRoundSats(value: unknown): number {
 
 async function fetchPubkeyInfo(xpub: string): Promise<any> {
 	const pioneer = await getPioneer()
-	const resp = await pioneer.GetPubkeyInfo({ network: 'BTC', xpub })
+	const resp = await pioneer.GetPubkeyInfo({ network: BTC_NETWORK_ID, xpub })
 	const result = resp?.data || resp
 	if (typeof result !== 'object' || result === null) {
 		console.warn('[Report] fetchPubkeyInfo: unexpected response shape, returning empty object')

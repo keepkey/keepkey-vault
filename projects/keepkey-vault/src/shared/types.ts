@@ -713,6 +713,9 @@ export interface SwapQuote {
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
+  /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
+   *  When set, the tracker must record this instead of the original params.amount. */
+  netFromAmount?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -826,6 +829,9 @@ export interface PendingSwap {
   outboundChainId?: string
   /** Reason text from a Maya/Thor refund, when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash returned by 1Click /v0/status for NEAR Intents swaps.
+   *  Drives the "View on NEAR" tracker button (nearblocks.io). */
+  nearTxHash?: string
   /** Set true when classifySwapOutcome (Midgard) has populated this record.
    *  Once set, Pioneer's mapPioneerStatus is no longer authoritative — Pioneer
    *  cannot distinguish "swap completed" from "refund completed", and would
@@ -855,6 +861,8 @@ export interface SwapStatusUpdate {
   outboundChainId?: string
   /** Refund reason surfaced from the source chain (Midgard) when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash returned by 1Click /v0/status polling for NEAR Intents swaps. */
+  nearTxHash?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
@@ -902,6 +910,8 @@ export interface SwapHistoryRecord {
   outboundChainId?: string
   /** Refund reason from Midgard when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash from 1Click /v0/status polling. */
+  nearTxHash?: string
 }
 
 /** Filter params for getSwapHistory RPC */
