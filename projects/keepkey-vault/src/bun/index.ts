@@ -109,7 +109,7 @@ import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
-import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, QUERY_KEY as PIONEER_QUERY_KEY } from "./pioneer"
+import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
@@ -4202,7 +4202,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (est && est.feeSat > 0) {
 								const netBtc = (est.netSat / 1e8).toFixed(8)
 								console.log(`[swap] NEAR Intents sendMax: re-quoting with net amount ${netBtc} BTC (fee=${est.feeSat} sat)`)
-								quote = await getSwapQuote({ ...params, amount: netBtc, isMax: false })
+								quote = { ...await getSwapQuote({ ...params, amount: netBtc, isMax: false }), netFromAmount: netBtc }
 							}
 						}
 					} catch (e: any) {
@@ -4276,7 +4276,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const scope = getWalletDbScope()
 				// Register swap for tracking (non-blocking)
 				try {
-					trackSwap(result, params, {
+					const trackParams = cachedQuote?.netFromAmount
+						? { ...params, amount: cachedQuote.netFromAmount }
+						: params
+					trackSwap(result, trackParams, {
 						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
 						minimumOutput: cachedQuote?.minimumOutput || '0',
 						inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
@@ -5350,7 +5353,7 @@ engine.on('state-change', (state) => {
 	}
 	if (state.state === 'ready' && !pioneerSocket) {
 		pioneerSocket = new PioneerSocket({
-			queryKey: PIONEER_QUERY_KEY,
+			queryKey: getPioneerQueryKey(),
 			onEvent: (event, data) => {
 				const REFRESH_EVENTS = new Set(['transaction:incoming', 'balance:update', 'balance:cache:update'])
 				if (!REFRESH_EVENTS.has(event)) return

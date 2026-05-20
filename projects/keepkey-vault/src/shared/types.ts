@@ -713,6 +713,9 @@ export interface SwapQuote {
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
+  /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
+   *  When set, the tracker must record this instead of the original params.amount. */
+  netFromAmount?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -907,6 +910,8 @@ export interface SwapHistoryRecord {
   outboundChainId?: string
   /** Refund reason from Midgard when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash from 1Click /v0/status polling. */
+  nearTxHash?: string
 }
 
 /** Filter params for getSwapHistory RPC */

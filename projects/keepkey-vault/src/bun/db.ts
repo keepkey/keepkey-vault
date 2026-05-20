@@ -305,6 +305,7 @@ export function initDb() {
     for (const col of ['outbound_chain_id TEXT', 'refund_reason TEXT']) {
       try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN near_tx_hash TEXT`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_device_ts ON api_log(device_id, timestamp DESC)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_wallet_ts ON api_log(wallet_id, timestamp DESC)`) } catch { /* already exists */ }
@@ -1492,6 +1493,7 @@ export function updateSwapHistoryStatus(
     swapper?: string | null
     completedAt?: number
     actualTimeSeconds?: number
+    nearTxHash?: string
   }
 ) {
   try {
@@ -1514,6 +1516,7 @@ export function updateSwapHistoryStatus(
     writeNullable('outbound_chain_id', extra?.outboundChainId)
     writeNullable('refund_reason', extra?.refundReason)
     writeNullable('swapper', extra?.swapper)
+    if (extra?.nearTxHash) setClauses.push({ col: 'near_tx_hash', value: extra.nearTxHash })
     if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
     if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
     if (isFinal) {
@@ -1670,6 +1673,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     relayRequestId: r.relay_request_id || undefined,
     outboundChainId: r.outbound_chain_id || undefined,
     refundReason: r.refund_reason || undefined,
+    nearTxHash: r.near_tx_hash || undefined,
   }
 }
 

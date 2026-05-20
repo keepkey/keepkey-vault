@@ -17,7 +17,12 @@ function getOrCreateQueryKey(): string {
   return key
 }
 
-export const QUERY_KEY = process.env.PIONEER_API_KEY || getOrCreateQueryKey()
+let _queryKey: string | null = null
+export function getQueryKey(): string {
+  if (!_queryKey) _queryKey = process.env.PIONEER_API_KEY || getOrCreateQueryKey()
+  return _queryKey
+}
+
 const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 
 let pioneerInstance: any = null

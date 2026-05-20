@@ -734,6 +734,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         if (nearHash) {
           swap.nearTxHash = nearHash
           pushUpdate(swap)
+          if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, { nearTxHash: nearHash })
           swapLog(`${TAG} NEAR Intents: nearTxHash backfilled for ${txid.slice(0, 10)}... → ${nearHash.slice(0, 12)}...`)
         }
       }
