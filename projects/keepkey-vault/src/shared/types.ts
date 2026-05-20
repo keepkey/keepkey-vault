@@ -826,6 +826,9 @@ export interface PendingSwap {
   outboundChainId?: string
   /** Reason text from a Maya/Thor refund, when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash returned by 1Click /v0/status for NEAR Intents swaps.
+   *  Drives the "View on NEAR" tracker button (nearblocks.io). */
+  nearTxHash?: string
   /** Set true when classifySwapOutcome (Midgard) has populated this record.
    *  Once set, Pioneer's mapPioneerStatus is no longer authoritative — Pioneer
    *  cannot distinguish "swap completed" from "refund completed", and would
@@ -855,6 +858,8 @@ export interface SwapStatusUpdate {
   outboundChainId?: string
   /** Refund reason surfaced from the source chain (Midgard) when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash returned by 1Click /v0/status polling for NEAR Intents swaps. */
+  nearTxHash?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */

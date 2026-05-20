@@ -992,6 +992,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return () => window.removeEventListener('keepkey-swap-completed', handler)
 	}, [refreshBalances])
 
+	// Pioneer push: incoming tx on a watched address → forceRefresh balances
+	useEffect(() => {
+		return onRpcMessage("tx-push-received", () => {
+			console.log('[Dashboard] Pioneer push received — triggering forceRefresh')
+			refreshBalances(true)
+		})
+	}, [refreshBalances])
+
 	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {

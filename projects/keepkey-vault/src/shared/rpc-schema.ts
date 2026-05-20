@@ -372,6 +372,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** Pioneer push notification: a transaction arrived on a watched address.
+       *  Frontend should trigger forceRefresh on affected chain (or all). */
+      'tx-push-received': { chain?: string; address?: string; txid?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }

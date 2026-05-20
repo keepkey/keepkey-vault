@@ -721,6 +721,25 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     ) return swap
   }
 
+  // NEAR Intents: poll 1Click API for the NEAR tx hash once per swap.
+  if (isNearIntentsSwap(swap) && !swap.nearTxHash && swap.inboundAddress) {
+    try {
+      const resp = await fetch(
+        `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(swap.inboundAddress)}`,
+        { signal: AbortSignal.timeout(8000) },
+      )
+      if (resp.ok) {
+        const data = await resp.json() as any
+        const nearHash: string | undefined = data?.nearTxHashes?.[0]
+        if (nearHash) {
+          swap.nearTxHash = nearHash
+          pushUpdate(swap)
+          swapLog(`${TAG} NEAR Intents: nearTxHash backfilled for ${txid.slice(0, 10)}... → ${nearHash.slice(0, 12)}...`)
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
   const pioneer = await getPioneer()
   try {
     const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap')
@@ -1165,6 +1184,7 @@ function pushUpdate(swap: PendingSwap): void {
     relayRequestId: swap.relayRequestId,
     outboundChainId: swap.outboundChainId,
     refundReason: swap.refundReason,
+    nearTxHash: swap.nearTxHash,
   }
   swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)

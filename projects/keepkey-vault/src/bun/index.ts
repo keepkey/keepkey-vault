@@ -109,7 +109,8 @@ import { EngineController, withTimeout } from "./engine-controller"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
-import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE } from "./pioneer"
+import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, QUERY_KEY as PIONEER_QUERY_KEY } from "./pioneer"
+import { PioneerSocket } from "./pioneer-socket"
 import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
@@ -194,6 +195,7 @@ function unwrapPortfolioEntries(resp: any): any[] {
 const GITHUB_REPO = 'keepkey/keepkey-vault'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
+let pioneerSocket: PioneerSocket | null = null
 
 function openReleasePage() {
 	const version = pendingUpdateVersion || Updater.updateInfo()?.version
@@ -5313,10 +5315,30 @@ engine.on('state-change', (state) => {
 			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
 	}
+	if (state.state === 'ready' && !pioneerSocket) {
+		pioneerSocket = new PioneerSocket({
+			queryKey: PIONEER_QUERY_KEY,
+			onEvent: (event, data) => {
+				const REFRESH_EVENTS = new Set(['transaction:incoming', 'balance:update', 'balance:cache:update'])
+				if (!REFRESH_EVENTS.has(event)) return
+				const d = data as any
+				const chain = d?.chain ?? d?.symbol ?? undefined
+				const address = d?.address ?? undefined
+				const txid = d?.txid ?? d?.tx?.txid ?? undefined
+				console.log(`[PioneerSocket] push event '${event}' chain=${chain} → triggering forceRefresh`)
+				try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
+			},
+			onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
+			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
+		})
+		pioneerSocket.start()
+	}
 	if (state.state === 'disconnected') {
 		btcAccounts.reset()
 		evmAddresses.reset()
 		console.log('[Vault] Device disconnected: cleared in-memory account managers')
+		pioneerSocket?.stop()
+		pioneerSocket = null
 	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)
