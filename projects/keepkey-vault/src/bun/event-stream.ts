@@ -10,7 +10,7 @@
  * are subscribed here.
  */
 
-import { getPioneerApiBase, QUERY_KEY } from './pioneer'
+import { getPioneerApiBase, getQueryKey } from './pioneer'
 
 export interface TxIncomingEvent {
   address: string
@@ -81,7 +81,7 @@ async function connect(): Promise<void> {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        'x-api-key': QUERY_KEY,
+        'x-api-key': getQueryKey(),
       },
       body: JSON.stringify({
         addresses: currentAddresses,
