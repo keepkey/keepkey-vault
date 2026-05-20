@@ -26,6 +26,7 @@ import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/co
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
+import { ViewPickerButton } from "./ViewPickerMenu"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
@@ -1249,7 +1250,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box
 								key={chain.id}
 								as="button"
-								onClick={() => openChainPage(chain)}
+								onClick={() => setDrilledChainId(prev => prev === chain.id ? null : chain.id)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -1544,6 +1545,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
 			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "60vh", md: "70vh" } as unknown as string)}>
+				{/* View picker — top center of the hero area */}
+				<Flex justify="center" pt="2" pb="1">
+					<ViewPickerButton />
+				</Flex>
 				{/* Top: orbital widget / donut / welcome — vertically centered */}
 				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'}>
 					{hasAnyBalance ? (() => {
@@ -1577,7 +1582,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									totalDollars={totalDollars}
 									totalCents={totalCents}
 									cleanTokenTotal={cleanTokenTotal}
-									onSelect={(c) => setSelectedChain(c)}
+									onSelect={(c) => setDrilledChainId(c.id)}
 								/>
 							)
 						}
@@ -1648,7 +1653,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									const item = allChainsChartData[i]
 									if (!item) return
 									const chain = allChains.find(c => c.coin === (item as any).name)
-									if (chain) openChainPage(chain)
+									if (chain) setDrilledChainId(chain.id)
 								}}
 							/>
 						)
@@ -1719,14 +1724,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										const item = allChainsChartData[i]
 										if (!item) return
 										const chain = allChains.find(c => c.coin === (item as any).name)
-										if (chain) openChainPage(chain)
+										if (chain) setDrilledChainId(chain.id)
 									}}
 								/>
 							</Box>
 						)
 					})()}
 
-					{hasAnyBalance && viewMode === 'orbital' && drilledChainId && (() => {
+					{hasAnyBalance && drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = balances.get(dchain.id)
