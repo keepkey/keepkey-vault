@@ -111,6 +111,7 @@ import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, QUERY_KEY as PIONEER_QUERY_KEY } from "./pioneer"
 import { PioneerSocket } from "./pioneer-socket"
+import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx } from "./txbuilder/cosmos"
@@ -2244,6 +2245,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (r.tokens && r.tokens.length > 0) {
 						console.log(`[getBalances]   ${r.chainId}: ${r.tokens.length} tokens attached`)
 					}
+				}
+
+				// ── Start SSE event stream for real-time tx notifications ──
+				// Build address list: EVM individual accounts + non-UTXO non-EVM chains.
+				// BTC/LTC/DOGE xpubs are excluded — watchtower derives and watches those server-side.
+				const streamAddresses: AddressEntry[] = []
+				for (const a of evmAddresses.toAddressSet().addresses) {
+					if (a.address && a.networkId) streamAddresses.push({ address: a.address, networkId: a.networkId })
+				}
+				for (const p of pubkeys) {
+					if (p.caip.startsWith('bip122:')) continue // UTXO — skip xpubs
+					if (p.pubkey.startsWith('xpub') || p.pubkey.startsWith('ypub') || p.pubkey.startsWith('zpub') ||
+					    p.pubkey.startsWith('dgub') || p.pubkey.startsWith('Ltub') || p.pubkey.startsWith('Mtub')) continue
+					if (p.networkId && p.pubkey) streamAddresses.push({ address: p.pubkey, networkId: p.networkId })
+				}
+				if (streamAddresses.length > 0) {
+					startEventStream(streamAddresses, (event) => {
+						if (event.type === 'tx:incoming') {
+							console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address}`)
+							try { rpc.send['tx-push-received']({ chain: event.data.caip, address: event.data.address, txid: event.data.txid }) } catch { /* webview not ready */ }
+						}
+						if (event.type === 'tx:confirmed') {
+							console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
+							try { rpc.send['tx-push-received']({ txid: event.data.txid }) } catch { /* webview not ready */ }
+						}
+					})
 				}
 
 				return results
@@ -5339,6 +5366,7 @@ engine.on('state-change', (state) => {
 		console.log('[Vault] Device disconnected: cleared in-memory account managers')
 		pioneerSocket?.stop()
 		pioneerSocket = null
+		stopEventStream()
 	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)

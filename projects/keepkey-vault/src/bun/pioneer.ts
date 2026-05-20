@@ -5,10 +5,19 @@
  * Priority: DB setting > PIONEER_API_BASE env var > https://api.keepkey.info
  */
 import Pioneer from '@pioneer-platform/pioneer-client'
-import { getSetting } from './db'
+import { getSetting, setSetting } from './db'
 
 export const DEFAULT_API_BASE = 'https://api.keepkey.info'
-export const QUERY_KEY = process.env.PIONEER_API_KEY || `key:public-${Date.now()}`
+
+function getOrCreateQueryKey(): string {
+  const saved = getSetting('pioneer_query_key')
+  if (saved) return saved
+  const key = `vault:${crypto.randomUUID()}`
+  setSetting('pioneer_query_key', key)
+  return key
+}
+
+export const QUERY_KEY = process.env.PIONEER_API_KEY || getOrCreateQueryKey()
 const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 
 let pioneerInstance: any = null
@@ -66,6 +75,14 @@ export async function getPioneer(): Promise<any> {
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
       console.log('[Pioneer] Client initialized successfully')
+
+      // Register queryKey so SSE auth works (best-effort, non-fatal)
+      fetch(`${base}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queryKey: QUERY_KEY, username: `vault:${QUERY_KEY}` }),
+      }).catch(() => { /* non-fatal — SSE degrades gracefully if unregistered */ })
+
       return pioneerInstance
     } catch (err) {
       initPromise = null
