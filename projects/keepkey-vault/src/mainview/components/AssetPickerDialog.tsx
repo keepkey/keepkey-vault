@@ -1,10 +1,9 @@
 /**
- * Asset Picker v2 — full redesign from handoff (May 2026).
+ * Asset Picker v2 — redesigned May 2026.
  *
- * FROM side: card grid of held assets, sorted by USD value.
- * TO side:   2-step flow — chain selection grid → asset list in that chain.
- *            Unavailable-route view replaces the asset list when the user taps
- *            a non-routable asset.
+ * FROM side: flat list of held assets ranked by USD value, square tiles, 64px icons, full CAIP.
+ * TO side:   Step 1 — square network tiles (all supported, no same-network, no held-grouping).
+ *            Step 2 — paginated asset list with text search for that network, 64px icons, full CAIP.
  */
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react"
 import { Box, Flex, Text, Input } from "@chakra-ui/react"
@@ -13,16 +12,12 @@ import { AssetIcon } from "./AssetIcon"
 import type { SwapAsset, ChainBalance, CustomToken } from "../../shared/types"
 import {
   buildAssetEntries,
-  buildSearchIndex,
-  searchEntries,
   chainMetaForCaip2,
   networkDisplayName,
   synthesizeSwapAsset,
   type AssetEntry,
-  type SearchIndex,
 } from "../../shared/swap-discovery"
 import { CHAINS } from "../../shared/chains"
-import { PROVIDER_LABEL } from "../../shared/swap-support-matrix"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
 import { rpcRequest } from "../lib/rpc"
@@ -30,9 +25,9 @@ import { rpcRequest } from "../lib/rpc"
 // ── constants ──────────────────────────────────────────────────────────────
 
 const EVM_CONTRACT_RE = /^0x[a-fA-F0-9]{40}$/
-const MAX_RENDER = 150
+const PAGE_SIZE = 20
 
-// ── small icons ────────────────────────────────────────────────────────────
+// ── icons ──────────────────────────────────────────────────────────────────
 
 const SearchIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -82,7 +77,7 @@ function chainFamilyLabel(family: string): string {
   return map[family] ?? family.toUpperCase()
 }
 
-// ── selectability (same as before) ─────────────────────────────────────────
+// ── selectability ───────────────────────────────────────────────────────────
 
 function isRowSelectable(entry: AssetEntry): boolean {
   const s = entry.availability.status
@@ -90,9 +85,8 @@ function isRowSelectable(entry: AssetEntry): boolean {
   return chainMetaForCaip2(entry.chainId) !== null
 }
 
-// ── provider dots ───────────────────────────────────────────────────────────
+// ── provider dots — keys match SwapProvider type ────────────────────────────
 
-// Keys match SwapProvider type from swap-support-matrix
 const PROVIDER_COLORS: Record<string, string> = {
   thorchain:  "#23DCC8",
   mayachain:  "#3B82F6",
@@ -104,23 +98,47 @@ const PROVIDER_COLORS: Record<string, string> = {
 
 function ProviderDots({ providers }: { providers: string[] }) {
   if (!providers.length) return null
-  const show = providers.slice(0, 4)
   return (
-    <Flex gap="1" title={providers.join(", ")}>
-      {show.map(p => (
-        <Box key={p} w="6px" h="6px" borderRadius="full"
-          bg={PROVIDER_COLORS[p] ?? "#888"} />
+    <Flex gap="1" title={providers.join(", ")} align="center">
+      {providers.slice(0, 4).map(p => (
+        <Box key={p} w="6px" h="6px" borderRadius="full" bg={PROVIDER_COLORS[p] ?? "#888"} />
       ))}
-      {providers.length > 4 && <Box w="6px" h="6px" borderRadius="full" bg="var(--text-3)" />}
+      {providers.length > 4 && <Box w="6px" h="6px" borderRadius="full" bg="rgba(255,255,255,0.2)" />}
     </Flex>
   )
 }
 
-// ── chain badge caip helper ─────────────────────────────────────────────────
+// ── chain badge caip (network overlay on token icons) ──────────────────────
 
 function chainBadgeCaip(entry: AssetEntry): string | undefined {
   if (entry.isNative) return undefined
   return chainMetaForCaip2(entry.chainId)?.nativeCaip
+}
+
+// ── shared search bar ───────────────────────────────────────────────────────
+
+function SearchBar({ value, onChange, placeholder, autoFocus }: {
+  value: string; onChange: (v: string) => void; placeholder: string; autoFocus?: boolean
+}) {
+  return (
+    <Flex align="center" gap="2" mx="5" mb="3" px="3" py="2.5"
+      bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="rgba(255,255,255,0.08)"
+      borderRadius="12px" flexShrink={0}
+      _focusWithin={{ borderColor: "rgba(255,255,255,0.18)" }}>
+      <Box color="kk.textMuted" flexShrink={0}><SearchIcon /></Box>
+      <Input value={value} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        bg="transparent" border="none" color="kk.textPrimary" px="0" fontSize="12px"
+        _focus={{ outline: "none", boxShadow: "none" }}
+        autoFocus={autoFocus} />
+      {value && (
+        <Box as="button" color="kk.textMuted" cursor="pointer" onClick={() => onChange("")}
+          _hover={{ color: "kk.textPrimary" }} border="none" bg="transparent" p="0" lineHeight="1">
+          <CloseIcon />
+        </Box>
+      )}
+    </Flex>
+  )
 }
 
 // ── network-switch banner ───────────────────────────────────────────────────
@@ -135,30 +153,27 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
   const same     = fromChainId === toChainId
 
   return (
-    <Flex
-      align="center" gap="3" mx="5" mb="3" p="2.5"
+    <Flex align="center" gap="3" mx="5" mb="3" p="2.5"
       bg={same ? "rgba(139,227,196,0.06)" : "rgba(233,196,106,0.08)"}
       border="1px solid"
       borderColor={same ? "rgba(139,227,196,0.20)" : "rgba(233,196,106,0.20)"}
-      borderRadius="12px" flexShrink={0}
-    >
-      {/* mini route diagram — real chain logos */}
-      <Flex align="center" flexShrink={0}>
+      borderRadius="12px" flexShrink={0}>
+      <Flex align="center" gap="1" flexShrink={0}>
         {fromMeta?.nativeCaip
           ? <AssetIcon caip={fromMeta.nativeCaip} size={20} alt={fromName} />
           : <Box w="20px" h="20px" borderRadius="full" bg={chainColorForCaip2(fromChainId)} />}
-        <Box w="16px" h="2px"
-          bg={`repeating-linear-gradient(90deg, ${same ? "#8be3c4" : "#e9c46a"} 0 4px, transparent 4px 8px)`}
-          mx="1" />
+        <Box w="16px" h="2px" mx="1"
+          bg={`repeating-linear-gradient(90deg,${same ? "#8be3c4" : "#e9c46a"} 0 4px,transparent 4px 8px)`} />
         {toMeta?.nativeCaip
           ? <AssetIcon caip={toMeta.nativeCaip} size={20} alt={toName} />
           : <Box w="20px" h="20px" borderRadius="full" bg={chainColorForCaip2(toChainId)} />}
       </Flex>
-
       <Box flex="1" minW="0">
         <Flex align="center" gap="2">
           <Text fontSize="11px" fontWeight="600" color="kk.textPrimary">
-            {same ? <>Staying on <strong>{fromName}</strong></> : <>Crossing from <strong>{fromName}</strong> to <strong>{toName}</strong></>}
+            {same
+              ? <><strong>{fromName}</strong> → <strong>{toName}</strong></>
+              : <>Crossing <strong>{fromName}</strong> → <strong>{toName}</strong></>}
           </Text>
           {providers.length > 0 && (
             <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" ml="auto">
@@ -168,30 +183,30 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
         </Flex>
         <Text fontSize="10px" color="kk.textMuted" mt="0.5">
           {same
-            ? `Same-network swap · settles in seconds`
-            : `Cross-chain · est. 4–12 min · funds custodied by ${providers[0] ?? "router"} during transit`}
+            ? "Same-network swap · settles in seconds"
+            : `Cross-chain · est. 4–12 min · ${providers[0] ?? "router"} in transit`}
         </Text>
       </Box>
-
-      <Box
-        bg={same ? "var(--teal)" : "var(--gold)"}
-        color="kk.bg" px="2" py="1" borderRadius="6px"
-        fontSize="9px" fontWeight="700" letterSpacing="0.04em"
-        flexShrink={0}
-      >
-        {same ? "Same network" : "Cross-chain"}
+      <Box bg={same ? "var(--teal)" : "var(--gold)"} color="#0b0b0e"
+        px="2" py="1" borderRadius="6px" fontSize="9px" fontWeight="700"
+        letterSpacing="0.04em" flexShrink={0}>
+        {same ? "Same" : "Cross-chain"}
       </Box>
     </Flex>
   )
 }
 
-// ── FROM picker — held assets card grid ─────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// FROM picker — all held assets, ranked by USD value, square tiles
+// ══════════════════════════════════════════════════════════════════════════
 
 function FromPicker({ entries, onSelect, fmtCompact }: {
   entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string
 }) {
   const { t } = useTranslation("swap")
   const [search, setSearch] = useState("")
+
+  // All held assets flat, ranked by USD value
   const held = useMemo(
     () => entries.filter(e => e.balance).sort((a, b) => (b.balance!.usd) - (a.balance!.usd)),
     [entries]
@@ -208,248 +223,200 @@ function FromPicker({ entries, onSelect, fmtCompact }: {
 
   return (
     <>
-      {/* Header */}
-      <Box px="5" pb="3" flexShrink={0}>
-        <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase" mb="0.5">
-          {t("stepOne", "Step 1 of 2 — Pick what you're swapping")}
-        </Text>
-        <Flex align="baseline" justify="space-between">
-          <Flex align="baseline" gap="2">
-            <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase">
-              {t("availableToSwap", "Available to swap")}
-            </Text>
-            <Text fontSize="22px" fontWeight="500" letterSpacing="-0.01em" color="kk.textPrimary" fontVariantNumeric="tabular-nums">
-              {totalUsd > 0 ? fmtCompact(totalUsd) : "—"}
-            </Text>
-          </Flex>
-          <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.04em">
-            {held.length} {t("assetsAcross", "assets across")} {new Set(held.map(e => e.chainId)).size} {t("chains", "chains")}
+      {/* Summary strip */}
+      <Flex align="baseline" justify="space-between" px="5" pb="3" flexShrink={0}>
+        <Flex align="baseline" gap="2">
+          <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase">
+            Available to swap
+          </Text>
+          <Text fontSize="22px" fontWeight="500" letterSpacing="-0.02em" color="kk.textPrimary" fontVariantNumeric="tabular-nums">
+            {totalUsd > 0 ? fmtCompact(totalUsd) : "—"}
           </Text>
         </Flex>
-      </Box>
+        <Text fontSize="10px" color="kk.textMuted">
+          {held.length} assets · {new Set(held.map(e => e.chainId)).size} chains
+        </Text>
+      </Flex>
 
-      {/* Search (only when >5 held) */}
-      {held.length > 5 && (
-        <Flex align="center" gap="2" mx="5" mb="3" px="3" py="2.5"
-          bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border"
-          borderRadius="12px" flexShrink={0} _focusWithin={{ borderColor: "rgba(255,255,255,0.16)" }}>
-          <SearchIcon />
-          <Input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder={t("filterHeld", "Filter held assets…")}
-            bg="transparent" border="none" color="kk.textPrimary" px="0" fontSize="12px"
-            _focus={{ outline: "none", boxShadow: "none" }} />
-        </Flex>
-      )}
+      <SearchBar value={search} onChange={setSearch} placeholder={t("filterHeld", "Filter by symbol, name or network…")} />
 
-      {/* Grid */}
       <Box flex="1" overflowY="auto" px="5" pb="4">
         {filtered.length === 0 ? (
           <Flex direction="column" align="center" py="16" gap="4">
             <Box w="56px" h="56px" borderRadius="full" bg="rgba(255,255,255,0.04)"
-              border="1px dashed rgba(255,255,255,0.10)" display="grid" placeItems="center"
-              color="kk.textMuted">
+              border="1px dashed rgba(255,255,255,0.10)" display="grid" placeItems="center" color="kk.textMuted">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
                 <circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/>
               </svg>
             </Box>
             <Box textAlign="center">
               <Text fontSize="14px" fontWeight="500" color="kk.textSecondary" mb="1">
-                {t("emptyWalletTitle", "Your KeepKey is empty")}
+                {search ? "No held assets match" : t("emptyWalletTitle", "Your KeepKey is empty")}
               </Text>
-              <Text fontSize="11px" color="kk.textMuted" lineHeight="1.6" maxW="340px">
-                {t("emptyWalletSub", "Send some assets to your wallet first — then come back here to swap them.")}
+              <Text fontSize="11px" color="kk.textMuted" lineHeight="1.6" maxW="320px">
+                {search
+                  ? "Try a different search term."
+                  : t("emptyWalletSub", "Send some assets to your wallet first, then come back to swap.")}
               </Text>
             </Box>
           </Flex>
         ) : (
-          <Box
-            display="grid"
-            gridTemplateColumns="repeat(auto-fill, minmax(170px, 1fr))"
-            gap="2.5"
-          >
-            {filtered.map(e => <HeldCard key={e.caip} entry={e} onSelect={onSelect} fmtCompact={fmtCompact} />)}
+          <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(160px, 1fr))" gap="2.5">
+            {filtered.map(e => <HeldTile key={e.caip} entry={e} onSelect={onSelect} fmtCompact={fmtCompact} />)}
           </Box>
         )}
       </Box>
 
-      {/* Footer */}
       <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border"
         justify="space-between" align="center" flexShrink={0}>
-        <Text fontSize="10px" color="kk.textMuted">
-          {t("showingHeld", "Showing only what your KeepKey holds.")}
-        </Text>
-        <Text fontSize="10px" color="kk.textMuted">
-          {filtered.length} {t("of", "of")} {held.length}
-        </Text>
+        <Text fontSize="10px" color="kk.textMuted">Held assets · ranked by value</Text>
+        <Text fontSize="10px" color="kk.textMuted">{filtered.length} of {held.length}</Text>
       </Flex>
     </>
   )
 }
 
-function HeldCard({ entry: e, onSelect, fmtCompact }: {
+function HeldTile({ entry: e, onSelect, fmtCompact }: {
   entry: AssetEntry; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string
 }) {
   const chainName = networkDisplayName(e.chainId)
-  const chainColor = chainColorForCaip2(e.chainId)
-  const providers = e.availability.providers
+  const selectable = isRowSelectable(e)
 
   return (
     <Box
-      as="button" textAlign="left"
-      bg="linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))"
-      border="1px solid rgba(139,227,196,0.18)"
-      borderRadius="14px" p="3.5" cursor="pointer"
-      display="flex" flexDirection="column" gap="2.5"
+      as="button" textAlign="left" fontFamily="inherit"
+      w="100%" aspectRatio="1"
+      display="flex" flexDirection="column" justifyContent="space-between"
+      bg="linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))"
+      border="1px solid rgba(139,227,196,0.20)"
+      borderRadius="16px" p="3.5"
       position="relative" overflow="hidden"
+      cursor={selectable ? "pointer" : "not-allowed"}
+      opacity={selectable ? 1 : 0.5}
+      color="kk.textPrimary"
       transition="all 0.18s"
-      color="kk.textPrimary" fontFamily="inherit"
-      _hover={{ borderColor: "rgba(139,227,196,0.50)", transform: "translateY(-2px)", boxShadow: "0 16px 30px -16px rgba(139,227,196,0.30)" }}
-      _before={{ content: '""', position: "absolute", top: "-1px", right: "-1px", w: "60px", h: "60px", bg: "radial-gradient(circle at top right, rgba(139,227,196,0.18), transparent 70%)", pointerEvents: "none" }}
-      onClick={() => isRowSelectable(e) && onSelect(e)}
-      opacity={isRowSelectable(e) ? 1 : 0.5}
+      _hover={selectable ? {
+        borderColor: "rgba(139,227,196,0.55)",
+        transform: "translateY(-2px)",
+        boxShadow: "0 16px 30px -16px rgba(139,227,196,0.28)",
+      } : {}}
+      _before={{
+        content: '""', position: "absolute", top: "-1px", right: "-1px",
+        w: "70px", h: "70px",
+        bg: "radial-gradient(circle at top right, rgba(139,227,196,0.16), transparent 70%)",
+        pointerEvents: "none",
+      }}
+      onClick={() => selectable && onSelect(e)}
     >
-      {/* Top row: icon + chain + (placeholder pct) */}
-      <Flex justify="space-between" align="flex-start">
-        <AssetIcon caip={e.caip} iconUrl={e.iconUrl} chainCaip={chainBadgeCaip(e)} size={32} alt={e.symbol} />
-      </Flex>
+      {/* Icon — 64px */}
+      <AssetIcon caip={e.caip} iconUrl={e.iconUrl} chainCaip={chainBadgeCaip(e)} size={64} alt={e.symbol} />
 
-      {/* Symbol + chain */}
-      <Box>
-        <Text fontSize="16px" fontWeight="600" letterSpacing="-0.01em">{e.symbol}</Text>
-        <Flex align="center" gap="1" mt="0.5">
-          <Box w="6px" h="6px" borderRadius="full" bg={chainColor} flexShrink={0} />
-          <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" textTransform="uppercase">
-            on {chainName}
-          </Text>
-        </Flex>
-      </Box>
-
-      {/* Balance */}
-      <Box>
-        <Text fontSize="15px" fontVariantNumeric="tabular-nums" letterSpacing="-0.01em">
+      {/* Bottom info */}
+      <Box mt="auto">
+        <Text fontSize="16px" fontWeight="700" letterSpacing="-0.01em" lineHeight="1.2">{e.symbol}</Text>
+        <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" textTransform="uppercase" mt="0.5">
+          {chainName}
+        </Text>
+        <Text fontSize="13px" fontWeight="500" fontVariantNumeric="tabular-nums" mt="1.5" letterSpacing="-0.01em">
           {e.balance!.amount}
         </Text>
-        <Text fontSize="11px" color="kk.textSecondary" fontVariantNumeric="tabular-nums" mt="0.5">
-          {e.balance!.usd > 0 ? fmtCompact(e.balance!.usd) : "—"}
+        <Text fontSize="10px" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{fmtCompact(e.balance!.usd)}</Text>
+        {/* Full CAIP */}
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" isTruncated opacity={0.6}>
+          {e.caip}
         </Text>
       </Box>
-
-      {/* Footer: providers */}
-      <Flex justify="flex-end" align="center"
-        pt="2.5" borderTop="1px solid rgba(255,255,255,0.06)">
-        <ProviderDots providers={providers} />
-      </Flex>
     </Box>
   )
 }
 
-// ── TO picker — chain selection step ────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// TO picker — Step 1: network selection (square tiles)
+// ══════════════════════════════════════════════════════════════════════════
 
 interface ChainInfo {
   caip2: string
   name: string
   family: string
   color: string
-  /** Native asset CAIP-19 for use with AssetIcon (e.g. 'eip155:1/slip44:60') */
   nativeCaip: string | undefined
-  heldCount: number
   totalCount: number
   routableCount: number
   providers: string[]
   isAvailable: boolean
 }
 
-function buildChainInfos(entries: AssetEntry[], fromChainId: string | null, excludeCaip: string | undefined): ChainInfo[] {
+function buildChainInfos(entries: AssetEntry[], excludeCaip: string | undefined): ChainInfo[] {
   const chainIds = new Set(entries.map(e => e.chainId))
   return [...chainIds].map(caip2 => {
     const meta = chainMetaForCaip2(caip2)
     const chain = meta ? CHAINS.find(c => c.id === meta.vaultChainId) : null
     const assetsInChain = entries.filter(e => e.chainId === caip2 && e.caip !== excludeCaip)
-    const heldInChain = assetsInChain.filter(e => e.balance)
     const routableInChain = assetsInChain.filter(e => isRowSelectable(e))
     const providers = new Set<string>()
-    for (const e of routableInChain) {
-      for (const p of e.availability.providers) providers.add(p)
-    }
+    for (const e of routableInChain) for (const p of e.availability.providers) providers.add(p)
     return {
       caip2,
       name: networkDisplayName(caip2),
       family: chainFamilyLabel(meta?.chainFamily ?? ""),
       color: chain?.color ?? "#555",
       nativeCaip: meta?.nativeCaip,
-      heldCount: heldInChain.length,
       totalCount: assetsInChain.length,
       routableCount: routableInChain.length,
       providers: [...providers],
       isAvailable: routableInChain.length > 0,
     }
-  })
+  }).sort((a, b) => b.routableCount - a.routableCount) // most assets first
 }
 
-function ChainStep({ chainInfos, fromChainId, search, onSearchChange, onPickChain }: {
+function ChainStep({ chainInfos, search, onSearchChange, onPickChain }: {
   chainInfos: ChainInfo[]
-  fromChainId: string | null
   search: string
   onSearchChange: (s: string) => void
   onPickChain: (caip2: string) => void
 }) {
-  const { t } = useTranslation("swap")
   const q = search.trim().toLowerCase()
-  const matches = (c: ChainInfo) => !q || c.name.toLowerCase().includes(q) ||
-    c.family.toLowerCase().includes(q)
-
-  const sameChain    = chainInfos.filter(c => c.caip2 === fromChainId && matches(c))
-  const heldChains   = chainInfos.filter(c => c.caip2 !== fromChainId && c.heldCount > 0 && c.isAvailable && matches(c))
-    .sort((a, b) => b.heldCount - a.heldCount)
-  const otherChains  = chainInfos.filter(c => c.caip2 !== fromChainId && c.heldCount === 0 && c.isAvailable && matches(c))
-  const unavailChains = chainInfos.filter(c => !c.isAvailable && matches(c))
+  const available   = chainInfos.filter(c => c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
+  const unavailable = chainInfos.filter(c => !c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
 
   return (
     <>
-      {/* Search */}
-      <Flex align="center" gap="2" mx="5" mb="3" px="3" py="2.5"
-        bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border"
-        borderRadius="12px" flexShrink={0}
-        _focusWithin={{ borderColor: "rgba(255,255,255,0.16)" }}>
-        <SearchIcon />
-        <Input value={search} onChange={e => onSearchChange(e.target.value)}
-          placeholder={t("searchChainPlaceholder", "Search destination — symbol or chain name…")}
-          bg="transparent" border="none" color="kk.textPrimary" px="0" fontSize="12px"
-          _focus={{ outline: "none", boxShadow: "none" }} />
-        <Text fontSize="10px" color="kk.textMuted" px="1.5" py="0.5"
-          border="1px solid" borderColor="kk.border" borderRadius="5px">⌘K</Text>
-      </Flex>
+      <SearchBar value={search} onChange={onSearchChange} placeholder="Search networks…" />
 
       <Box flex="1" overflowY="auto" px="5" pb="4">
-        {/* Same network */}
-        {sameChain.length > 0 && (
-          <ChainSection title={t("sameNetwork", "Stay on the same network")} accent="var(--gold)"
-            meta={t("sameNetMeta", "no bridge, fastest settlement")}>
-            <ChainGrid chains={sameChain} onPick={onPickChain} />
-          </ChainSection>
+        {/* Supported networks */}
+        {available.length > 0 && (
+          <>
+            <Flex align="center" gap="2" mb="3" mt="1">
+              <Box w="12px" h="2px" bg="var(--teal)" borderRadius="1px" />
+              <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
+                Supported networks
+              </Text>
+              <Text fontSize="10px" color="kk.textMuted">· {available.length}</Text>
+            </Flex>
+            <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(150px, 1fr))" gap="2.5" mb="5">
+              {available.map(c => <NetworkTile key={c.caip2} chain={c} onPick={onPickChain} />)}
+            </Box>
+          </>
         )}
-        {/* Held chains */}
-        {heldChains.length > 0 && (
-          <ChainSection title={t("networksYouHold", "Networks you already hold")} accent="var(--teal)"
-            meta={t("heldMeta", "return route via your own funds")}>
-            <ChainGrid chains={heldChains} onPick={onPickChain} />
-          </ChainSection>
-        )}
-        {/* Other chains */}
-        {otherChains.length > 0 && (
-          <ChainSection title={t("allNetworks", "All supported networks")} accent="var(--violet)"
-            meta={`${otherChains.length} ${t("chainsAvail", "chains · cross-chain routes available")}`}>
-            <ChainGrid chains={otherChains} onPick={onPickChain} />
-          </ChainSection>
-        )}
+
         {/* Unavailable */}
-        {unavailChains.length > 0 && (
-          <ChainSection title={t("notRoutable", "Not currently routable")} accent="var(--rose)"
-            meta={`${unavailChains.length} ${t("noProviderYet", "chains · no provider supports this yet")}`}>
-            <ChainGrid chains={unavailChains} onPick={() => {}} unavail />
-          </ChainSection>
+        {unavailable.length > 0 && (
+          <>
+            <Flex align="center" gap="2" mb="3">
+              <Box w="12px" h="2px" bg="var(--rose)" borderRadius="1px" />
+              <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
+                Not currently routable
+              </Text>
+              <Text fontSize="10px" color="kk.textMuted">· {unavailable.length}</Text>
+            </Flex>
+            <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(150px, 1fr))" gap="2.5">
+              {unavailable.map(c => <NetworkTile key={c.caip2} chain={c} onPick={onPickChain} unavail />)}
+            </Box>
+          </>
         )}
-        {sameChain.length + heldChains.length + otherChains.length + unavailChains.length === 0 && (
+
+        {available.length + unavailable.length === 0 && (
           <Flex direction="column" align="center" py="16" gap="2">
             <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No matching networks</Text>
             <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
@@ -460,93 +427,54 @@ function ChainStep({ chainInfos, fromChainId, search, onSearchChange, onPickChai
   )
 }
 
-function ChainSection({ title, accent, meta, children }: {
-  title: string; accent: string; meta: string; children: ReactNode
+function NetworkTile({ chain: c, onPick, unavail }: {
+  chain: ChainInfo; onPick: (caip2: string) => void; unavail?: boolean
 }) {
   return (
-    <Box mt="5" _first={{ mt: "1.5" }}>
-      <Flex align="baseline" justify="space-between" mb="2.5">
-        <Flex align="center" gap="2">
-          <Box w="14px" h="2px" bg={accent} borderRadius="1px" />
-          <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
-            {title}
-          </Text>
-        </Flex>
-        <Text fontSize="10px" color="kk.textMuted">{meta}</Text>
-      </Flex>
-      {children}
+    <Box
+      as="button" textAlign="left" fontFamily="inherit"
+      w="100%" aspectRatio="1"
+      display="flex" flexDirection="column" justifyContent="space-between"
+      bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.07)"
+      borderRadius="16px" p="3.5"
+      cursor={unavail ? "not-allowed" : "pointer"}
+      opacity={unavail ? 0.42 : 1}
+      color="kk.textPrimary"
+      transition="all 0.15s"
+      _hover={unavail ? {} : {
+        bg: "rgba(255,255,255,0.06)",
+        borderColor: "rgba(255,255,255,0.14)",
+        transform: "translateY(-2px)",
+        boxShadow: "0 12px 24px -12px rgba(0,0,0,0.5)",
+      }}
+      onClick={() => !unavail && onPick(c.caip2)}
+    >
+      {/* Chain logo — 44px */}
+      {c.nativeCaip
+        ? <AssetIcon caip={c.nativeCaip} size={44} alt={c.name} />
+        : <Box w="44px" h="44px" borderRadius="full" bg={c.color} />}
+
+      {/* Bottom info */}
+      <Box mt="auto">
+        <Text fontSize="14px" fontWeight="700" letterSpacing="-0.01em" lineHeight="1.2">{c.name}</Text>
+        <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" textTransform="uppercase" mt="0.5">
+          {c.family}
+        </Text>
+        <Text fontSize="10px" color="kk.textSecondary" mt="1.5">
+          {unavail ? "No route" : `${c.routableCount} swappable`}
+        </Text>
+        {/* CAIP-2 */}
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" isTruncated opacity={0.6}>
+          {c.caip2}
+        </Text>
+      </Box>
     </Box>
   )
 }
 
-function ChainGrid({ chains, onPick, unavail }: {
-  chains: ChainInfo[]; onPick: (caip2: string) => void; unavail?: boolean
-}) {
-  return (
-    <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))" gap="2.5">
-      {chains.map(c => (
-        <Box
-          key={c.caip2} as="button" textAlign="left" fontFamily="inherit"
-          display="flex" alignItems="stretch"
-          bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border"
-          borderRadius="14px" p="0" overflow="hidden" cursor={unavail ? "not-allowed" : "pointer"}
-          opacity={unavail ? 0.46 : 1} color="kk.textPrimary"
-          transition="all 0.15s"
-          _hover={unavail ? {} : { bg: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)", transform: "translateY(-1px)" }}
-          onClick={() => !unavail && onPick(c.caip2)}
-        >
-          {/* Color stripe */}
-          <Box w="4px" bg={c.color} flexShrink={0} />
-          {/* Body */}
-          <Box flex="1" minW="0" p="3.5" display="flex" flexDirection="column" gap="1.5">
-            <Flex align="center" gap="2.5">
-              {c.nativeCaip
-                ? <AssetIcon caip={c.nativeCaip} size={22} alt={c.name} />
-                : <Box w="22px" h="22px" borderRadius="full" bg={c.color} flexShrink={0} />}
-              <Text fontSize="13px" fontWeight="600">{c.name}</Text>
-              <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase" ml="auto">
-                {c.family}
-              </Text>
-            </Flex>
-            <Flex align="center" gap="2" flexWrap="wrap">
-              {c.caip2 && c.heldCount > 0 && (
-                <Box bg="rgba(139,227,196,0.15)" color="var(--teal)" px="1.5" py="0.5" borderRadius="4px"
-                  fontSize="9px" fontWeight="600" letterSpacing="0.06em">
-                  {c.heldCount} held
-                </Box>
-              )}
-              {unavail && (
-                <Box bg="rgba(159,140,224,0.15)" color="var(--violet)" px="1.5" py="0.5" borderRadius="4px"
-                  fontSize="9px" fontWeight="600" letterSpacing="0.06em">
-                  No route
-                </Box>
-              )}
-              <Text fontSize="10px" color="kk.textMuted">
-                {c.totalCount} {c.totalCount === 1 ? "asset" : "assets"}
-              </Text>
-              {!unavail && c.providers.length > 0 && (
-                <>
-                  <Text fontSize="10px" color="kk.textMuted">·</Text>
-                  <Flex align="center" gap="1">
-                    <ProviderDots providers={c.providers} />
-                    <Text fontSize="10px" color="kk.textSecondary">
-                      {c.providers.length} {c.providers.length === 1 ? "router" : "routers"}
-                    </Text>
-                  </Flex>
-                </>
-              )}
-              {unavail && (
-                <Text fontSize="10px" color="var(--rose)">no provider routes here yet</Text>
-              )}
-            </Flex>
-          </Box>
-        </Box>
-      ))}
-    </Box>
-  )
-}
-
-// ── TO picker — asset list step ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// TO picker — Step 2: asset list for a network (paginated + search)
+// ══════════════════════════════════════════════════════════════════════════
 
 function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSearchChange,
   onBack, onSelect, onUnavailable }: {
@@ -562,108 +490,102 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
 }) {
   const { t } = useTranslation("swap")
   const chainName = networkDisplayName(chainCaip2)
+  const [page, setPage] = useState(0)
   const q = search.trim().toLowerCase()
+
+  // Reset page when search changes
+  useEffect(() => { setPage(0) }, [search])
 
   const inChain = useMemo(() => entries.filter(e => {
     if (e.chainId !== chainCaip2) return false
     if (e.caip === excludeCaip) return false
     if (q && !`${e.symbol} ${e.name}`.toLowerCase().includes(q)) return false
     return true
+  // Sort: held first (by USD), then selectable, then unavailable
+  }).sort((a, b) => {
+    const aHeld = a.balance ? 1 : 0
+    const bHeld = b.balance ? 1 : 0
+    if (aHeld !== bHeld) return bHeld - aHeld
+    if (aHeld && bHeld) return (b.balance!.usd) - (a.balance!.usd)
+    const aSel = isRowSelectable(a) ? 1 : 0
+    const bSel = isRowSelectable(b) ? 1 : 0
+    return bSel - aSel
   }), [entries, chainCaip2, excludeCaip, q])
 
-  // Collect all providers across routable assets in this chain (for banner)
+  // Collect all providers across routable assets in chain (for banner)
   const allProviders = useMemo(() => {
     const s = new Set<string>()
     for (const e of inChain) if (isRowSelectable(e)) for (const p of e.availability.providers) s.add(p)
     return [...s]
   }, [inChain])
 
-  // Bucket assets
-  const buckets = useMemo(() => {
-    const b: Record<string, AssetEntry[]> = { held: [], native: [], token: [] }
-    for (const e of inChain) {
-      if (e.balance) { b.held.push(e); continue }
-      if (e.isNative) { b.native.push(e); continue }
-      b.token.push(e)
-    }
-    // Sort tokens by provider count desc
-    b.token.sort((a, bE) => bE.availability.providers.length - a.availability.providers.length)
-    return b
-  }, [inChain])
+  const totalPages = Math.ceil(inChain.length / PAGE_SIZE)
+  const pageItems  = inChain.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
   return (
     <>
       {/* Breadcrumb */}
-      <Flex align="center" gap="2" mx="5" mb="2.5" fontSize="11px" color="kk.textMuted" flexShrink={0}>
-        <Box as="button" display="inline-flex" alignItems="center" gap="1"
+      <Flex align="center" gap="2" mx="5" mb="2.5" flexShrink={0}>
+        <Box as="button" display="inline-flex" alignItems="center" gap="1.5"
           bg="transparent" border="none" cursor="pointer" color="kk.textSecondary"
           px="2" py="1" borderRadius="8px" fontFamily="inherit" fontSize="11px"
           _hover={{ color: "kk.textPrimary", bg: "rgba(255,255,255,0.05)" }}
           onClick={onBack}>
           <BackIcon /> Networks
         </Box>
-        <Text color="kk.textMuted">/</Text>
-        <Text color="kk.textPrimary" fontWeight="500">{chainName}</Text>
+        <Text fontSize="11px" color="kk.textMuted">/</Text>
+        <Text fontSize="11px" color="kk.textPrimary" fontWeight="500">{chainName}</Text>
       </Flex>
 
       {/* Network switch banner */}
       {fromChainId && <NetSwitchBanner fromChainId={fromChainId} toChainId={chainCaip2} providers={allProviders} />}
 
       {/* Search */}
-      <Flex align="center" gap="2" mx="5" mb="3" px="3" py="2.5"
-        bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border"
-        borderRadius="12px" flexShrink={0}
-        _focusWithin={{ borderColor: "rgba(255,255,255,0.16)" }}>
-        <SearchIcon />
-        <Input value={search} onChange={e => onSearchChange(e.target.value)}
-          placeholder={t("searchAssetsOnChain", `Search assets on ${chainName}…`)}
-          bg="transparent" border="none" color="kk.textPrimary" px="0" fontSize="12px"
-          _focus={{ outline: "none", boxShadow: "none" }} autoFocus />
-      </Flex>
+      <SearchBar value={search} onChange={v => { onSearchChange(v) }}
+        placeholder={`Search assets on ${chainName}…`} autoFocus />
 
-      {/* Asset list */}
-      <Box flex="1" overflowY="auto" px="5" pb="4">
+      {/* List */}
+      <Box flex="1" overflowY="auto" px="5" pb="2">
         {inChain.length === 0 ? (
-          <Flex direction="column" align="center" py="16" gap="2">
-            <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No matching assets</Text>
-            <Text fontSize="11px" color="kk.textMuted">No asset on {chainName} matches your search.</Text>
+          <Flex direction="column" align="center" py="14" gap="2">
+            <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No assets found</Text>
+            <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
           </Flex>
         ) : (
-          <>
-            {buckets.held.length > 0 && (
-              <AssetSection label={t("alreadyInWallet", "Already in your wallet")} count={buckets.held.length}>
-                {buckets.held.map(e => <AssetListRow key={e.caip} entry={e} onSelect={onSelect} onUnavailable={onUnavailable} />)}
-              </AssetSection>
-            )}
-            {buckets.native.length > 0 && (
-              <AssetSection label={t("nativeAsset", "Native asset")} count={buckets.native.length}>
-                {buckets.native.map(e => <AssetListRow key={e.caip} entry={e} onSelect={onSelect} onUnavailable={onUnavailable} />)}
-              </AssetSection>
-            )}
-            {buckets.token.length > 0 && (
-              <AssetSection label={t("tokens", "Tokens")} count={buckets.token.length}>
-                {buckets.token.map(e => <AssetListRow key={e.caip} entry={e} onSelect={onSelect} onUnavailable={onUnavailable} />)}
-              </AssetSection>
-            )}
-          </>
+          pageItems.map(e => (
+            <AssetListRow key={e.caip} entry={e}
+              onSelect={onSelect} onUnavailable={onUnavailable} />
+          ))
         )}
       </Box>
-    </>
-  )
-}
 
-function AssetSection({ label, count, children }: { label: string; count: number; children: ReactNode }) {
-  return (
-    <Box mt="4" _first={{ mt: "1" }}>
-      <Flex align="center" gap="2.5" mb="2">
-        <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
-          {label}
+      {/* Pagination + footer */}
+      <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border"
+        justify="space-between" align="center" flexShrink={0} bg="#101015">
+        <Text fontSize="10px" color="kk.textMuted">
+          {inChain.length} asset{inChain.length !== 1 ? "s" : ""} on {chainName}
+          {totalPages > 1 && ` · page ${page + 1} of ${totalPages}`}
         </Text>
-        <Text fontSize="9px" color="kk.textSecondary">· {count}</Text>
-        <Box flex="1" h="1px" bg="rgba(255,255,255,0.06)" />
+        {totalPages > 1 && (
+          <Flex gap="2" align="center">
+            <Box as="button" px="2.5" py="1" fontSize="10px" color="kk.textSecondary" fontFamily="inherit"
+              bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="6px"
+              cursor={page > 0 ? "pointer" : "not-allowed"} opacity={page > 0 ? 1 : 0.35}
+              _hover={page > 0 ? { bg: "rgba(255,255,255,0.08)" } : {}}
+              onClick={() => page > 0 && setPage(p => p - 1)}>
+              ← Prev
+            </Box>
+            <Box as="button" px="2.5" py="1" fontSize="10px" color="kk.textSecondary" fontFamily="inherit"
+              bg="rgba(255,255,255,0.04)" border="1px solid" borderColor="kk.border" borderRadius="6px"
+              cursor={page < totalPages - 1 ? "pointer" : "not-allowed"} opacity={page < totalPages - 1 ? 1 : 0.35}
+              _hover={page < totalPages - 1 ? { bg: "rgba(255,255,255,0.08)" } : {}}
+              onClick={() => page < totalPages - 1 && setPage(p => p + 1)}>
+              Next →
+            </Box>
+          </Flex>
+        )}
       </Flex>
-      {children}
-    </Box>
+    </>
   )
 }
 
@@ -672,36 +594,39 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
   onSelect: (e: AssetEntry) => void
   onUnavailable: (e: AssetEntry) => void
 }) {
-  const selectable = isRowSelectable(e)
-  const isTryQuote = e.availability.status === "unknown"
+  const selectable  = isRowSelectable(e)
+  const isTryQuote  = e.availability.status === "unknown"
+  const chainName   = networkDisplayName(e.chainId)
 
   return (
     <Box
       as="button" w="100%" textAlign="left" fontFamily="inherit"
-      display="grid"
-      gridTemplateColumns="40px 1fr auto"
-      alignItems="center"
-      gap="3" px="3.5" py="3"
-      bg={e.balance ? "linear-gradient(180deg, rgba(139,227,196,0.04), rgba(255,255,255,0.02))" : "rgba(255,255,255,0.02)"}
+      display="flex" alignItems="center" gap="3"
+      px="3" py="3"
+      bg={e.balance ? "linear-gradient(90deg, rgba(139,227,196,0.04), rgba(255,255,255,0.01))" : "transparent"}
       border="1px solid"
-      borderColor={e.balance ? "rgba(139,227,196,0.25)" : "rgba(255,255,255,0.06)"}
+      borderColor={e.balance ? "rgba(139,227,196,0.20)" : "rgba(255,255,255,0.05)"}
       borderRadius="12px" mb="1.5"
       cursor={selectable ? "pointer" : "not-allowed"}
-      opacity={selectable ? 1 : 0.5}
+      opacity={selectable ? 1 : 0.45}
       color="kk.textPrimary"
       transition="all 0.12s"
       _hover={selectable ? { bg: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.10)" } : {}}
       onClick={() => selectable ? onSelect(e) : onUnavailable(e)}
     >
-      <AssetIcon caip={e.caip} iconUrl={e.iconUrl} chainCaip={chainBadgeCaip(e)} size={36} alt={e.symbol} />
+      {/* Icon — 64px */}
+      <Box flexShrink={0}>
+        <AssetIcon caip={e.caip} iconUrl={e.iconUrl} chainCaip={chainBadgeCaip(e)} size={64} alt={e.symbol} />
+      </Box>
 
-      <Box minW="0">
-        <Flex align="center" gap="2">
-          <Text fontSize="13px" fontWeight="600">{e.symbol}</Text>
+      {/* Info */}
+      <Box flex="1" minW="0">
+        <Flex align="center" gap="2" flexWrap="wrap">
+          <Text fontSize="14px" fontWeight="700">{e.symbol}</Text>
           {e.balance && (
             <Box bg="rgba(139,227,196,0.12)" color="var(--teal)" px="1.5" py="0.5"
               borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">
-              HELD {e.balance.amount}
+              HELD · {e.balance.amount}
             </Box>
           )}
           {!e.balance && isTryQuote && (
@@ -710,27 +635,41 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
               TRY QUOTE
             </Box>
           )}
-          {!selectable && (
+          {!selectable && !isTryQuote && (
             <Box bg="rgba(255,255,255,0.04)" color="kk.textMuted" px="1.5" py="0.5"
               borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">
               UNAVAILABLE
             </Box>
           )}
         </Flex>
-        <Text fontSize="10px" color="kk.textMuted" mt="0.5" isTruncated>{e.name}</Text>
+        <Text fontSize="11px" color="kk.textMuted" mt="0.5">{e.name}</Text>
+        {/* Full CAIP-19 */}
+        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} isTruncated>
+          {e.caip}
+        </Text>
       </Box>
 
-      <Flex direction="column" align="flex-end" gap="1">
+      {/* Right: balance or routes */}
+      <Flex direction="column" align="flex-end" gap="1" flexShrink={0}>
+        {e.balance && (
+          <Text fontSize="11px" fontVariantNumeric="tabular-nums" color="kk.textSecondary">
+            {e.balance.amount}
+          </Text>
+        )}
         <ProviderDots providers={e.availability.providers} />
-        <Text fontSize="9px" color="kk.textMuted">
-          {e.availability.providers.length} {e.availability.providers.length === 1 ? "route" : "routes"}
-        </Text>
+        {e.availability.providers.length > 0 && (
+          <Text fontSize="9px" color="kk.textMuted">
+            {e.availability.providers.length} {e.availability.providers.length === 1 ? "route" : "routes"}
+          </Text>
+        )}
       </Flex>
     </Box>
   )
 }
 
-// ── Unavailable route view ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// Unavailable route view
+// ══════════════════════════════════════════════════════════════════════════
 
 function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelect }: {
   fromChainId: string | null
@@ -741,23 +680,18 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
 }) {
   const { t } = useTranslation("swap")
   const sym = target.symbol
-  const fromChainName = fromChainId ? networkDisplayName(fromChainId) : "?"
   const targetChainName = networkDisplayName(target.chainId)
 
   const alternatives = useMemo(() =>
-    entries.filter(e =>
-      e.caip !== target.caip &&
-      e.symbol === sym &&
-      isRowSelectable(e)
-    ).sort((a, b) => b.availability.providers.length - a.availability.providers.length),
+    entries.filter(e => e.caip !== target.caip && e.symbol === sym && isRowSelectable(e))
+      .sort((a, b) => b.availability.providers.length - a.availability.providers.length),
     [entries, target, sym]
   )
 
   return (
     <>
-      {/* Breadcrumb */}
-      <Flex align="center" gap="2" mx="5" mb="2.5" fontSize="11px" color="kk.textMuted" flexShrink={0}>
-        <Box as="button" display="inline-flex" alignItems="center" gap="1"
+      <Flex align="center" gap="2" mx="5" mb="2.5" flexShrink={0}>
+        <Box as="button" display="inline-flex" alignItems="center" gap="1.5"
           bg="transparent" border="none" cursor="pointer" color="kk.textSecondary"
           px="2" py="1" borderRadius="8px" fontFamily="inherit" fontSize="11px"
           _hover={{ color: "kk.textPrimary", bg: "rgba(255,255,255,0.05)" }}
@@ -775,33 +709,29 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
             display="grid" placeItems="center" color="var(--rose)">
             <AlertIcon />
           </Box>
-          <Text fontSize="18px" fontWeight="500" letterSpacing="-0.01em" color="kk.textPrimary">
-            {fromChainId ? `${sym} (${fromChainName}) → ${target.symbol} (${targetChainName})` : `${target.symbol} (${targetChainName})`}
+          <Text fontSize="17px" fontWeight="500" letterSpacing="-0.01em" color="kk.textPrimary">
+            {sym} on {targetChainName} isn't routable
           </Text>
-          <Text fontSize="12px" color="kk.textSecondary" lineHeight="1.6" maxW="460px">
-            No swap provider currently routes to{" "}
-            <Text as="strong" color="kk.textPrimary">{sym} on {targetChainName}</Text>.{" "}
+          <Text fontSize="12px" color="kk.textSecondary" lineHeight="1.6" maxW="440px">
             {target.availability.status === "unsupported_token"
               ? `${targetChainName} natives swap fine, but this specific token isn't on any provider's list yet.`
               : `${targetChainName} isn't supported by any of our routers yet (THORChain, Mayachain, Relay, 0x, ChainFlip).`}
           </Text>
-          <Flex gap="2.5" mt="2">
-            <Box as="button" display="inline-flex" alignItems="center" gap="1.5"
-              px="3.5" py="2" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
-              borderRadius="10px" color="var(--gold)" fontFamily="inherit" fontSize="11px" fontWeight="600"
-              cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.18)" }}>
-              <BellIcon /> {t("notifyWhenSupported", "Notify me when supported")}
-            </Box>
-          </Flex>
+          <Box as="button" display="inline-flex" alignItems="center" gap="1.5"
+            px="3.5" py="2" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
+            borderRadius="10px" color="var(--gold)" fontFamily="inherit" fontSize="11px" fontWeight="600"
+            cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.18)" }}>
+            <BellIcon /> {t("notifyWhenSupported", "Notify me when supported")}
+          </Box>
         </Flex>
 
         {/* Alternatives */}
         {alternatives.length > 0 ? (
-          <Box>
+          <>
             <Flex align="center" gap="2" mb="2.5">
               <Text fontSize="10px" color="var(--gold)">◆</Text>
               <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
-                {t("swapToOnOtherChain", `You can swap to ${sym} on another network`)}
+                Swap to {sym} on another network
               </Text>
             </Flex>
             <Flex direction="column" gap="1.5">
@@ -809,16 +739,15 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
                 const chainName = networkDisplayName(a.chainId)
                 return (
                   <Box key={a.caip} as="button" w="100%" textAlign="left" fontFamily="inherit"
-                    display="grid" gridTemplateColumns="40px 1fr auto auto"
-                    gap="3" alignItems="center"
+                    display="flex" alignItems="center" gap="3"
                     px="3.5" py="3"
                     bg="rgba(255,255,255,0.02)" border="1px solid rgba(255,255,255,0.06)"
                     borderRadius="12px" cursor="pointer" color="kk.textPrimary"
                     transition="all 0.15s"
                     _hover={{ bg: "rgba(255,255,255,0.05)", borderColor: "rgba(233,196,106,0.30)", transform: "translateX(2px)" }}
                     onClick={() => onAltSelect(a)}>
-                    <AssetIcon caip={a.caip} iconUrl={a.iconUrl} chainCaip={chainBadgeCaip(a)} size={32} alt={a.symbol} />
-                    <Box>
+                    <AssetIcon caip={a.caip} iconUrl={a.iconUrl} chainCaip={chainBadgeCaip(a)} size={48} alt={a.symbol} />
+                    <Box flex="1" minW="0">
                       <Flex align="center" gap="2">
                         <Text fontSize="13px" fontWeight="600">{a.symbol}</Text>
                         {a.balance && (
@@ -827,41 +756,32 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
                         )}
                       </Flex>
                       <Text fontSize="10px" color="kk.textMuted" mt="0.5">{a.name} · on {chainName}</Text>
+                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} isTruncated>{a.caip}</Text>
                     </Box>
                     <Flex align="center" gap="1.5" px="2.5" py="1"
                       bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.25)"
-                      borderRadius="999px" fontSize="10px" color="var(--teal)" fontWeight="600">
+                      borderRadius="999px" flexShrink={0}>
                       <ProviderDots providers={a.availability.providers} />
-                      {a.availability.providers.length} {a.availability.providers.length === 1 ? "route" : "routes"}
+                      <Text fontSize="10px" color="var(--teal)" fontWeight="600">
+                        {a.availability.providers.length} {a.availability.providers.length === 1 ? "route" : "routes"}
+                      </Text>
                     </Flex>
-                    <Box color="kk.textMuted" transition="all 0.15s"
-                      _groupHover={{ color: "var(--gold)", transform: "translateX(2px)" }}>
-                      <ArrowRight size={14} />
-                    </Box>
+                    <Box color="kk.textMuted" flexShrink={0}><ArrowRight size={14} /></Box>
                   </Box>
                 )
               })}
             </Flex>
-          </Box>
+          </>
         ) : (
-          <Box>
-            <Flex align="center" gap="2" mb="2.5">
-              <Text fontSize="10px" color="kk.textMuted">◇</Text>
-              <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
-                No alternative routes for {sym}
-              </Text>
-            </Flex>
-            <Box p="4" bg="rgba(255,255,255,0.03)" border="1px dashed rgba(255,255,255,0.08)"
-              borderRadius="12px" fontSize="11px" color="kk.textSecondary" lineHeight="1.6">
-              No other supported network lists {sym}. Try a different destination asset, or enable notifications above.
-            </Box>
+          <Box p="4" bg="rgba(255,255,255,0.03)" border="1px dashed rgba(255,255,255,0.08)"
+            borderRadius="12px" fontSize="11px" color="kk.textSecondary" lineHeight="1.6">
+            No other supported network lists {sym}. Try a different destination asset.
           </Box>
         )}
       </Box>
 
-      {/* Footer */}
       <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border"
-        justify="space-between" align="center" flexShrink={0}>
+        justify="space-between" align="center" flexShrink={0} bg="#101015">
         <Text fontSize="10px" color="kk.textMuted">We never sign anything that can't complete.</Text>
         <Box as="button" px="3" py="1.5" bg="rgba(255,255,255,0.05)" border="1px solid" borderColor="kk.border"
           borderRadius="8px" fontSize="11px" color="kk.textSecondary" cursor="pointer" fontFamily="inherit"
@@ -873,7 +793,9 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
   )
 }
 
-// ── Props ───────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// Props + main component
+// ══════════════════════════════════════════════════════════════════════════
 
 interface AssetPickerDialogProps {
   open: boolean
@@ -886,32 +808,21 @@ interface AssetPickerDialogProps {
   side: "from" | "to"
 }
 
-// ── Main component ──────────────────────────────────────────────────────────
-
 export function AssetPickerDialog({
   open, onClose, swappable, balances, customTokens, excludeCaip, onSelect, side,
 }: AssetPickerDialogProps) {
   const { fmtCompact } = useFiat()
-  const { t } = useTranslation("swap")
 
-  // Shared
-  const [entries, setEntries] = useState<AssetEntry[] | null>(null)
-  const [loading, setLoading]  = useState(false)
-
-  // TO-specific navigation
+  const [entries, setEntries]         = useState<AssetEntry[] | null>(null)
+  const [loading, setLoading]         = useState(false)
   const [toChain, setToChain]         = useState<string | null>(null)
   const [unavailEntry, setUnavailEntry] = useState<AssetEntry | null>(null)
   const [search, setSearch]           = useState("")
 
-  // FROM: EVM contract paste
-  const [contractHits, setContractHits]   = useState<SwapAsset[] | null>(null)
-  const [contractLooking, setContractLooking] = useState(false)
-  const [contractError, setContractError] = useState<string | null>(null)
-
-  // Extract FROM chain from excludeCaip (when side=to, excludeCaip is the FROM asset)
+  // FROM chain id (for NetSwitchBanner + excluding self): extracted from excludeCaip when side=to
   const fromChainId = side === "to" && excludeCaip ? excludeCaip.split("/")[0] : null
 
-  // Build entries on open
+  // Build entry list on open
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -926,13 +837,12 @@ export function AssetPickerDialog({
     return () => { cancelled = true }
   }, [open, swappable, balances, customTokens])
 
-  // Reset state on open/close
+  // Reset navigation on open/close
   useEffect(() => {
-    if (!open) { setToChain(null); setUnavailEntry(null); setSearch(""); return }
-    setToChain(null); setUnavailEntry(null); setSearch("")
+    if (open) { setToChain(null); setUnavailEntry(null); setSearch("") }
   }, [open])
 
-  // Escape closes
+  // Escape to close
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); onClose() } }
@@ -940,36 +850,11 @@ export function AssetPickerDialog({
     return () => window.removeEventListener("keydown", onKey)
   }, [open, onClose])
 
-  // EVM contract lookup (FROM side only)
-  useEffect(() => {
-    setContractHits(null); setContractError(null)
-    if (!open || side !== "from") return
-    const q = search.trim()
-    if (!EVM_CONTRACT_RE.test(q)) return
-    let cancelled = false
-    setContractLooking(true)
-    const timer = setTimeout(() => {
-      rpcRequest<{ hits: SwapAsset[]; reason?: string }>("lookupTokenContract", { contractAddress: q }, 12000)
-        .then(res => {
-          if (cancelled) return
-          setContractLooking(false)
-          if (res.hits?.length > 0) setContractHits(res.hits)
-          else setContractError(res.reason || "no-token-found")
-        })
-        .catch(e => {
-          if (cancelled) return
-          setContractLooking(false)
-          setContractError(e?.message || "lookup-failed")
-        })
-    }, 350)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [open, side, search])
-
-  // Chain infos for TO chain step
+  // Chain infos for TO step 1
   const chainInfos = useMemo(() => {
     if (!entries) return []
-    return buildChainInfos(entries, fromChainId, excludeCaip)
-  }, [entries, fromChainId, excludeCaip])
+    return buildChainInfos(entries, excludeCaip)
+  }, [entries, excludeCaip])
 
   const handleSelect = useCallback((entry: AssetEntry) => {
     if (!isRowSelectable(entry)) return
@@ -985,30 +870,20 @@ export function AssetPickerDialog({
 
   if (!open) return null
 
-  // Title depends on side + TO step
-  let title = side === "from"
-    ? t("selectFromAsset", "Select asset to swap from")
-    : toChain
-      ? t("selectToAsset", "Select asset to swap to")
-      : t("chooseNetwork", "Choose destination network")
+  // Title
+  const title = side === "from" ? "Select asset to swap from"
+    : unavailEntry  ? "Route unavailable"
+    : toChain       ? `Assets on ${networkDisplayName(toChain)}`
+    :                 "Select destination network"
 
-  let stepLabel = side === "from"
-    ? t("stepOne", "Step 1 of 2 — Pick what you're swapping")
-    : toChain
-      ? t("stepTwoAsset", `Step 2 of 2 — Pick an asset on ${networkDisplayName(toChain)}`)
-      : t("stepTwoChain", "Step 2 of 2 — Choose destination network")
-
-  // Footer text for TO side
-  const toFooter = toChain
-    ? `${entries?.filter(e => e.chainId === toChain).length ?? 0} assets on ${networkDisplayName(toChain)}`
-    : `${chainInfos.length} networks · ${swappable.length.toLocaleString()} swappable assets`
+  const stepLabel = side === "from" ? "Step 1 of 2 — pick what you're swapping"
+    : toChain       ? `Step 2 of 2 — pick an asset on ${networkDisplayName(toChain)}`
+    :                 "Step 2 of 2 — choose destination network"
 
   return (
-    <Box
-      position="fixed" inset="0" zIndex={Z.assetPicker}
+    <Box position="fixed" inset="0" zIndex={Z.assetPicker}
       display="flex" alignItems="center" justifyContent="center"
-      onClick={onClose}
-    >
+      onClick={onClose}>
       <Box position="absolute" inset="0" bg="blackAlpha.700" />
       <Box
         position="relative"
@@ -1016,7 +891,7 @@ export function AssetPickerDialog({
         border="1px solid rgba(255,255,255,0.10)"
         borderRadius="22px"
         boxShadow="0 1px 0 rgba(255,255,255,0.05) inset, 0 18px 60px -18px rgba(0,0,0,0.9)"
-        w="660px" maxW="94vw" h="680px" maxH="90vh"
+        w="700px" maxW="96vw" h="700px" maxH="92vh"
         display="flex" flexDirection="column"
         overflow="hidden"
         fontFamily="'Geist Mono', ui-monospace, monospace"
@@ -1024,17 +899,17 @@ export function AssetPickerDialog({
         _before={{
           content: '""', position: "absolute", inset: "0",
           bg: "radial-gradient(800px 400px at 50% -10%, rgba(233,196,106,0.04), transparent 60%)",
-          pointerEvents: "none",
+          pointerEvents: "none", zIndex: 0,
         }}
       >
         {/* Header */}
-        <Flex align="center" justify="space-between" px="5" pt="4.5" pb="3.5" flexShrink={0}
-          position="relative" zIndex={1}>
+        <Flex align="center" justify="space-between" px="5" pt="4.5" pb="3.5" flexShrink={0} zIndex={1}>
           <Box>
-            <Text fontSize="10px" letterSpacing="0.12em" textTransform="uppercase"
-              color="kk.textMuted" mb="1">{stepLabel}</Text>
+            <Text fontSize="10px" letterSpacing="0.12em" textTransform="uppercase" color="kk.textMuted" mb="1">
+              {stepLabel}
+            </Text>
             <Text fontSize="16px" fontWeight="600" letterSpacing="-0.01em" color="kk.textPrimary">
-              {unavailEntry ? t("routeUnavailable", "That route isn't available — yet") : title}
+              {title}
             </Text>
           </Box>
           <Box as="button" w="28px" h="28px" borderRadius="8px" bg="transparent" border="none"
@@ -1046,10 +921,10 @@ export function AssetPickerDialog({
         </Flex>
 
         {/* Body */}
-        <Box flex="1" minH="0" display="flex" flexDirection="column" position="relative" zIndex={1}>
+        <Box flex="1" minH="0" display="flex" flexDirection="column" zIndex={1}>
           {loading ? (
             <Flex flex="1" align="center" justify="center">
-              <Text fontSize="12px" color="kk.textMuted">{t("loading", "Loading…")}</Text>
+              <Text fontSize="12px" color="kk.textMuted">Loading…</Text>
             </Flex>
           ) : !entries ? null
           : side === "from" ? (
@@ -1063,41 +938,24 @@ export function AssetPickerDialog({
               onAltSelect={(e) => { setUnavailEntry(null); handleSelect(e) }}
             />
           ) : toChain ? (
-            <>
-              <AssetStep
-                entries={entries}
-                chainCaip2={toChain}
-                fromChainId={fromChainId}
-                excludeCaip={excludeCaip}
-                search={search}
-                onSearchChange={setSearch}
-                onBack={() => { setToChain(null); setSearch("") }}
-                onSelect={handleSelect}
-                onUnavailable={setUnavailEntry}
-              />
-              {/* Footer for asset step */}
-              <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border"
-                justify="space-between" align="center" flexShrink={0} bg="#101015">
-                <Text fontSize="10px" color="kk.textMuted">{toFooter}</Text>
-                <Text fontSize="10px" color="kk.textMuted">Chain → Token</Text>
-              </Flex>
-            </>
+            <AssetStep
+              entries={entries}
+              chainCaip2={toChain}
+              fromChainId={fromChainId}
+              excludeCaip={excludeCaip}
+              search={search}
+              onSearchChange={setSearch}
+              onBack={() => { setToChain(null); setSearch("") }}
+              onSelect={handleSelect}
+              onUnavailable={setUnavailEntry}
+            />
           ) : (
-            <>
-              <ChainStep
-                chainInfos={chainInfos}
-                fromChainId={fromChainId}
-                search={search}
-                onSearchChange={setSearch}
-                onPickChain={(caip2) => { setToChain(caip2); setSearch("") }}
-              />
-              {/* Footer for chain step */}
-              <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border"
-                justify="space-between" align="center" flexShrink={0} bg="#101015">
-                <Text fontSize="10px" color="kk.textMuted">{toFooter}</Text>
-                <Text fontSize="10px" color="kk.textMuted">Pick a network to continue</Text>
-              </Flex>
-            </>
+            <ChainStep
+              chainInfos={chainInfos}
+              search={search}
+              onSearchChange={setSearch}
+              onPickChain={(caip2) => { setToChain(caip2); setSearch("") }}
+            />
           )}
         </Box>
       </Box>
