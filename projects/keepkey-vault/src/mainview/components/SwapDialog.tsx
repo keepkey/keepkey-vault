@@ -66,24 +66,39 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:43114': 0.005,    // Avalanche C-Chain
 }
 const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
+type NativeMaxReserveMode = 'safe' | 'closer'
+const NATIVE_EVM_CLOSER_RESERVE_FACTOR = 0.35
+const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
+  'eip155:1':     0.001,
+  'eip155:8453':  0.00005,
+  'eip155:10':    0.00005,
+  'eip155:42161': 0.00005,
+  'eip155:137':   0.01,
+  'eip155:56':    0.0005,
+  'eip155:43114': 0.001,
+}
+const NATIVE_EVM_CLOSER_RESERVE_DEFAULT = 0.00025
 const NATIVE_TRON_FEE_RESERVE = 1.1
 const NATIVE_SOLANA_FEE_RESERVE = 0.000005
 
-function nativeMaxFeeReserve(asset: SwapAsset): number {
+function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'safe'): number {
   if (asset.contractAddress) return 0
   if (asset.chainFamily === 'tron') return NATIVE_TRON_FEE_RESERVE
   if (asset.chainFamily === 'solana') return NATIVE_SOLANA_FEE_RESERVE
   if (asset.chainFamily !== 'evm') return 0
   const chainDef = CHAINS.find(c => c.id === asset.chainId)
   const reserveKey = chainDef?.networkId ?? asset.chainId
-  return NATIVE_EVM_GAS_RESERVE[reserveKey] ?? NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
+  const safeReserve = NATIVE_EVM_GAS_RESERVE[reserveKey] ?? NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
+  if (mode === 'safe') return safeReserve
+  const floor = NATIVE_EVM_CLOSER_RESERVE_FLOOR[reserveKey] ?? NATIVE_EVM_CLOSER_RESERVE_FLOOR[asset.chainId] ?? NATIVE_EVM_CLOSER_RESERVE_DEFAULT
+  return Math.min(safeReserve, Math.max(floor, safeReserve * NATIVE_EVM_CLOSER_RESERVE_FACTOR))
 }
 
 /** Returns the displayable & spendable max amount for native MAX. For chains
  *  without a frontend reserve, returns the full balance unchanged because the
  *  backend computes their fee-aware MAX amount from chain-specific inputs. */
-function maxSpendableAmount(asset: SwapAsset, balance: string): string {
-  const reserve = nativeMaxFeeReserve(asset)
+function maxSpendableAmount(asset: SwapAsset, balance: string, mode: NativeMaxReserveMode = 'safe'): string {
+  const reserve = nativeMaxFeeReserve(asset, mode)
   if (reserve <= 0) return balance
   const chainDef = CHAINS.find(c => c.id === asset.chainId)
   return nativeMaxSpendableAmount(balance, chainDef?.decimals ?? asset.decimals, reserve)
@@ -656,6 +671,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [fiatAmount, setFiatAmount] = useState("")
   const [inputMode, setInputMode] = useState<'crypto' | 'fiat'>('crypto')
   const [isMax, setIsMax] = useState(false)
+  const [maxReserveMode, setMaxReserveMode] = useState<NativeMaxReserveMode>('safe')
 
   const [swapHealth, setSwapHealth] = useState<SwapHealth | null>(null)
   const [healthDialogOpen, setHealthDialogOpen] = useState(false)
@@ -721,6 +737,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [liveRefundReason, setLiveRefundReason] = useState<string | undefined>()
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
   const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
+  const [liveNearTxHash, setLiveNearTxHash] = useState<string | undefined>()
 
   // ── Countdown timer ───────────────────────────────────────────────
   const [countdown, setCountdown] = useState(0)
@@ -784,6 +801,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
       if (update.refundReason) setLiveRefundReason(update.refundReason)
+      if (update.nearTxHash) setLiveNearTxHash(update.nearTxHash)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -1039,6 +1057,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     // for what is actually an ETH refund tx.
     if (resumeSwap.outboundChainId) setLiveOutboundChainId(resumeSwap.outboundChainId)
     if (resumeSwap.refundReason) setLiveRefundReason(resumeSwap.refundReason)
+    if (resumeSwap.nearTxHash) setLiveNearTxHash(resumeSwap.nearTxHash)
     // Skip stale `swapper` for native-vault integrations — Maya forks Thor's
     // protocol naming and Pioneer historically wrote `swapper='thorchain'`
     // even for Maya pools. The badge would then render "THORChain via Maya".
@@ -1094,8 +1113,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const nativeFeeReservedMaxAmount = useMemo(() => {
     if (!fromAsset || !fromBalance) return null
     if (nativeMaxFeeReserve(fromAsset) <= 0) return null
-    return maxSpendableAmount(fromAsset, fromBalance)
-  }, [fromAsset, fromBalance])
+    return maxSpendableAmount(fromAsset, fromBalance, maxReserveMode)
+  }, [fromAsset, fromBalance, maxReserveMode])
 
   const tokenPrecisionReservedMaxAmount = useMemo(() => {
     if (!fromAsset?.contractAddress || !fromBalance) return null
@@ -1119,6 +1138,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
    * of letting the user submit a 0 swap. */
   const nativeMaxInsufficient = isMax && nativeFeeReservedMaxAmount !== null && parseFloat(nativeFeeReservedMaxAmount) <= 0
   const tokenMaxInsufficient = isMax && tokenPrecisionReservedMaxAmount !== null && parseFloat(tokenPrecisionReservedMaxAmount) <= 0
+  const isFeeReservedNativeMax = isMax && nativeFeeReservedMaxAmount !== null
 
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
@@ -1196,11 +1216,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const hasFromPrice = fromPriceUsd > 0
   const hasToPrice = toPriceUsd > 0
+  const nativeMaxReserveDisplay = useMemo(() => {
+    if (!isFeeReservedNativeMax || !fromAsset || !fromBalance || nativeFeeReservedMaxAmount === null) return null
+    const balanceAmount = parseFloat(fromBalance)
+    const maxAmount = parseFloat(nativeFeeReservedMaxAmount)
+    if (!Number.isFinite(balanceAmount) || !Number.isFinite(maxAmount)) return null
+    const reserveAmount = Math.max(0, balanceAmount - maxAmount)
+    if (reserveAmount <= 0) return null
+    const safeReserve = nativeMaxFeeReserve(fromAsset, 'safe')
+    const closerReserve = nativeMaxFeeReserve(fromAsset, 'closer')
+    return {
+      reserveAmount,
+      reserveUsd: fromPriceUsd > 0 ? reserveAmount * fromPriceUsd : 0,
+      safeReserve,
+      closerReserve,
+      canUseCloser: closerReserve < safeReserve,
+    }
+  }, [isFeeReservedNativeMax, fromAsset, fromBalance, nativeFeeReservedMaxAmount, fromPriceUsd])
 
   // Bidirectional conversion: crypto → fiat
   const handleCryptoChange = useCallback((v: string) => {
     setAmount(v)
     setIsMax(false)
+    setMaxReserveMode('safe')
     if (hasFromPrice && v) {
       const n = parseFloat(v)
       if (!isNaN(n)) setFiatAmount((n * fromPriceUsd).toFixed(2))
@@ -1227,6 +1265,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
     if (balUsd <= 100) {
       setIsMax(true)
+      setMaxReserveMode('safe')
     } else {
       const cryptoAmount = 100 / fromPriceUsd
       const formatted = cryptoAmount < 1
@@ -1240,6 +1279,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const handleFiatChange = useCallback((v: string) => {
     setFiatAmount(v)
     setIsMax(false)
+    setMaxReserveMode('safe')
     if (hasFromPrice && v) {
       const n = parseFloat(v)
       if (!isNaN(n)) {
@@ -1376,7 +1416,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
-  }, [phase, quote, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress])
+  }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress])
 
   const auditPayloadReady = !!previewBuild?.unsignedTx
   const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
@@ -1476,7 +1516,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.asset, toAsset?.asset, amount, isMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
+  }, [fromAsset?.asset, toAsset?.asset, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -1486,6 +1526,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setAmount("")
     setFiatAmount("")
     setIsMax(false)
+    setMaxReserveMode('safe')
     setQuote(null)
     setPhase('input')
     setError(null)
@@ -1526,6 +1567,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           toCaip: toAsset.caip!,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
+          isMax: sendIsMax,
         }, 30000)
         // Block on >1% output drop — quote degraded, user should re-review
         const oldOut = parseFloat(quote.expectedOutput || '0')
@@ -1619,7 +1661,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -1630,6 +1672,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setFiatAmount("")
     setInputMode('crypto')
     setIsMax(false)
+    setMaxReserveMode('safe')
     setQuote(null)
     setError(null)
     setTxid(null)
@@ -1684,7 +1727,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const busy = phase === 'approving' || phase === 'signing' || phase === 'broadcasting'
   const displayAmount = sentAmount ?? sendAmount
-  const isFeeReservedNativeMax = isMax && nativeFeeReservedMaxAmount !== null
 
   // Must be above early return to satisfy Rules of Hooks
   const swappableChainIds = useMemo(() => new Set(assets.map(a => a.chainId)), [assets])
@@ -1786,7 +1828,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       const fields = cmd
       if ('fromAsset' in fields && fields.fromAsset !== undefined) {
         const a = findAssetByKey(fields.fromAsset)
-        if (a) setFromAsset(a)
+        if (a) { setFromAsset(a); setMaxReserveMode('safe') }
         else pendingFromAssetKeyRef.current = fields.fromAsset
       }
       if ('toAsset' in fields && fields.toAsset !== undefined) {
@@ -1795,9 +1837,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         else pendingToAssetKeyRef.current = fields.toAsset
       }
       if ('amount' in fields && fields.amount !== undefined) {
-        setAmount(fields.amount); setIsMax(false)
+        setAmount(fields.amount); setIsMax(false); setMaxReserveMode('safe')
       }
-      if ('isMax' in fields && fields.isMax !== undefined) setIsMax(fields.isMax)
+      if ('isMax' in fields && fields.isMax !== undefined) {
+        setIsMax(fields.isMax)
+        if (fields.isMax) setMaxReserveMode('safe')
+      }
       if ('inputMode' in fields && fields.inputMode !== undefined) setInputMode(fields.inputMode)
       if ('useCustomAddress' in fields && fields.useCustomAddress !== undefined) setUseCustomAddress(fields.useCustomAddress)
       if ('customToAddress' in fields && fields.customToAddress !== undefined) setCustomToAddress(fields.customToAddress)
@@ -1813,7 +1858,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (assets.length === 0) return
     if (pendingFromAssetKeyRef.current) {
       const a = findAssetByKey(pendingFromAssetKeyRef.current)
-      if (a) { setFromAsset(a); pendingFromAssetKeyRef.current = null }
+      if (a) { setFromAsset(a); setMaxReserveMode('safe'); pendingFromAssetKeyRef.current = null }
     }
     if (pendingToAssetKeyRef.current) {
       const a = findAssetByKey(pendingToAssetKeyRef.current)
@@ -2115,7 +2160,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           <Text>{liveOutboundTxid ? '2 hashes' : '1 hash'}</Text>
                           {(() => {
                             const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
                             return tracker ? <Text>· tracker</Text> : null
                           })()}
                           <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -2186,7 +2231,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         {/* Tracker row */}
                         {(() => {
                           const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
                           return tracker ? (
                             <Flex align="center" gap="2.5" py="2" minW="0"
                               style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
@@ -2565,7 +2610,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     // post-broadcast value) over the quote-time parse, which often
                     // misses `swapper` for aggregator routes.
                     const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
                     if (!tracker) return null
                     return (
                       <Button size="xs" flex="1" variant="outline" borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
@@ -2863,8 +2908,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   </Box>
                   <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={40} alt={toAsset.symbol} />
                 </Flex>
-                {isFeeReservedNativeMax && (
-                  <Text fontSize="10px" color="var(--gold)" mt="1.5">{t("sendMaxGasNote")}</Text>
+                {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
+                  <Text fontSize="10px" color="var(--gold)" mt="1.5">
+                    {t("sendMaxGasReserveNote", {
+                      defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                      reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
+                      symbol: fromAsset.symbol,
+                      usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+                    })}
+                  </Text>
                 )}
               </Box>
 
@@ -3334,7 +3386,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
                             borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
                             borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => { setIsMax(true); setAmount(""); setFiatAmount("") }} disabled={busy}>
+                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }} disabled={busy}>
                             {t("max")}
                           </Button>
                         </Flex>
@@ -3346,7 +3398,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         )}
                         <Input
                           value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
-                          onChange={(e) => { if (isMax) setIsMax(false); inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
+                          onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                           placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
                           bg="rgba(0,0,0,0.4)" border="1px solid"
                           borderColor={exceedsBalance ? "kk.error" : "rgba(255,255,255,0.08)"}
@@ -3380,14 +3432,59 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
-                      {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && (
-                        <Text fontSize="10px" color="kk.textMuted" mt="1" fontFamily="mono" letterSpacing="0.02em">
-                          {t("maxReservesGas", { defaultValue: "Reserves ~{{reserve}} {{symbol}} for network fees", reserve: nativeMaxFeeReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
-                        </Text>
+                      {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && nativeMaxReserveDisplay && (
+                        <Box mt="2" p="2" borderRadius="md" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
+                          <Text fontSize="10px" color="kk.textSecondary" fontFamily="mono" lineHeight="1.45">
+                            {t("maxReserveDisclosure", {
+                              defaultValue: "MAX swaps {{amount}} {{symbol}} and keeps ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                              amount: formatBalance(sendAmount),
+                              reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
+                              symbol: fromAsset.symbol,
+                              usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+                            })}
+                          </Text>
+                          {nativeMaxReserveDisplay.canUseCloser && (
+                            <Flex mt="2" align="center" justify="space-between" gap="2" wrap="wrap">
+                              <Flex p="0.5" bg="rgba(0,0,0,0.28)" border="1px solid rgba(255,255,255,0.08)" borderRadius="md" gap="0.5">
+                                {(['safe', 'closer'] as NativeMaxReserveMode[]).map((mode) => {
+                                  const active = maxReserveMode === mode
+                                  return (
+                                    <Button
+                                      key={mode}
+                                      type="button"
+                                      px="2"
+                                      py="0.5"
+                                      h="20px"
+                                      minW="auto"
+                                      borderRadius="sm"
+                                      fontSize="9px"
+                                      fontWeight="700"
+                                      color={active ? "black" : "kk.textSecondary"}
+                                      bg={active ? "kk.gold" : "transparent"}
+                                      border="0"
+                                      _hover={{ bg: active ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
+                                      onClick={() => setMaxReserveMode(mode)}
+                                      disabled={busy}
+                                    >
+                                      {mode === 'safe'
+                                        ? t("maxReserveSafe", "Safe")
+                                        : t("maxReserveCloser", "Closer MAX")}
+                                    </Button>
+                                  )
+                                })}
+                              </Flex>
+                              {maxReserveMode === 'closer' && (
+                                <Text fontSize="9px" color="var(--gold)" fontFamily="mono" flex="1" minW="150px">
+                                  {t("maxReserveCloserWarning", "Tighter gas reserve; swap may fail if gas moves before signing.")}
+                                </Text>
+                              )}
+                            </Flex>
+                          )}
+                        </Box>
                       )}
                       {nativeMaxInsufficient && fromAsset && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">
-                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
+                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset, maxReserveMode).toString(), symbol: fromAsset.symbol })}
                         </Text>
                       )}
                     </Box>
@@ -3446,8 +3543,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
                         </Text>
                       )}
-                      {isFeeReservedNativeMax && (
-                        <Text fontSize="9px" color="var(--gold)" mt="1">{t("sendMaxGasNote")}</Text>
+                      {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
+                        <Text fontSize="9px" color="var(--gold)" mt="1">
+                          {t("sendMaxGasReserveNote", {
+                            defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                            reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
+                            symbol: fromAsset.symbol,
+                            usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+                          })}
+                        </Text>
                       )}
                     </Box>
                   )}
@@ -3818,7 +3922,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
         side={pickerSide || 'from'}
         onSelect={(a) => {
-          if (pickerSide === 'from') setFromAsset(a)
+          if (pickerSide === 'from') { setFromAsset(a); setMaxReserveMode('safe') }
           else if (pickerSide === 'to') setToAsset(a)
           setQuote(null)
           setPhase('input')
