@@ -5,7 +5,8 @@ import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShi
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings } from "../../shared/types"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
+import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance } from "../lib/formatting"
@@ -411,11 +412,33 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
 	const zcashShieldedSupported = isZcash && zcashShieldedDef && isChainSupported(zcashShieldedDef, firmwareVersion)
 
+	// Pre-build a SwapAsset from the selected token so SwapDialog can use it
+	// directly without needing to find it in Pioneer's limited GetAvailableAssets list.
+	const initialFromAsset = useMemo<SwapAsset | undefined>(() => {
+		if (!selectedToken || parseFloat(selectedToken.balance) <= 0) return undefined
+		const chainShort = VAULT_CHAIN_TO_THOR[chain.id] ?? chain.coin.toUpperCase()
+		const contract = selectedToken.contractAddress
+		const thorAsset = contract
+			? `${chainShort}.${selectedToken.symbol}-${contract.toUpperCase()}`
+			: `${chainShort}.${selectedToken.symbol}`
+		return {
+			asset: thorAsset,
+			chainId: chain.id,
+			symbol: selectedToken.symbol,
+			name: selectedToken.name,
+			chainFamily: chain.chainFamily,
+			decimals: selectedToken.decimals ?? 18,
+			caip: selectedToken.caip,
+			icon: selectedToken.icon,
+			contractAddress: selectedToken.contractAddress,
+		}
+	}, [selectedToken, chain])
+
 	const PILLS: { id: AssetView | 'swap'; label: string; icon: typeof FaArrowDown }[] = [
-		{ id: "receive", label: t("receive"), icon: FaArrowDown },
+		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), icon: FaArrowDown }] : []),
 		{ id: "send", label: t("send"), icon: FaArrowUp },
 		...(swapsEnabled && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), icon: FaExchangeAlt }] : []),
-		...(zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
+		...(!selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
 	]
 
 	// Shared token row renderer
@@ -583,7 +606,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					<Flex align="center" gap={{ base: "3", md: "4" }} flex="1" minW="0">
 						<Box
 							as="button"
-							onClick={onBack}
+							onClick={selectedToken ? () => { setSelectedToken(null); setView('receive') } : onBack}
 							w="36px"
 							h="36px"
 							borderRadius="10px"
@@ -604,77 +627,175 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							</svg>
 						</Box>
 
-						<Image
-							src={getAssetIcon(chain.caip)}
-							alt={chain.symbol}
-							w={{ base: "44px", md: "52px" }}
-							h={{ base: "44px", md: "52px" }}
-							borderRadius="full"
-							flexShrink={0}
-							bg="var(--ink-2)"
-							boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
-						/>
-
-						<Box flex="1" minW="0">
-							<Flex align="baseline" gap="2.5">
-								<Text
-									fontWeight="500"
-									fontSize={{ base: "26px", md: "34px" }}
-									letterSpacing="-0.01em"
-									color="var(--text-0)"
-									lineHeight="1.05"
-									truncate
-								>
-									{chain.coin}
-								</Text>
-								<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
-							</Flex>
-							<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" mt="0.5" truncate>
-								{chain.caip}
-							</Text>
-						</Box>
-					</Flex>
-
-					<Flex direction="column" align="flex-end" gap="1.5" flexShrink={0}>
-						{/* Sync status indicator */}
-						{activeBalance ? (
-							<Flex align="center" gap="1" color="var(--teal)">
-								<Box as={FaCheck} fontSize="10px" />
-								<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("synced")}</Text>
-							</Flex>
+						{selectedToken ? (
+							<>
+								<Image
+									src={selectedToken.icon || caipToIcon(selectedToken.caip)}
+									alt={selectedToken.symbol}
+									w={{ base: "44px", md: "52px" }}
+									h={{ base: "44px", md: "52px" }}
+									borderRadius="full"
+									flexShrink={0}
+									bg="var(--ink-2)"
+									boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
+								/>
+								<Box flex="1" minW="0">
+									<Flex align="baseline" gap="2" flexWrap="wrap">
+										<Text fontWeight="500" fontSize={{ base: "22px", md: "28px" }} letterSpacing="-0.01em" color="var(--text-0)" lineHeight="1.05" truncate>
+											{selectedToken.name || selectedToken.symbol}
+										</Text>
+										<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500">{selectedToken.symbol}</Text>
+									</Flex>
+									<Flex align="center" gap="2" mt="0.5" flexWrap="wrap">
+										<Flex align="center" gap="1">
+											<Image src={getAssetIcon(chain.caip)} w="11px" h="11px" borderRadius="full" />
+											<Text fontSize="10px" color="var(--text-3)">on {chain.coin}</Text>
+										</Flex>
+										{selectedToken.contractAddress && (
+											<Flex
+												as="button"
+												align="center"
+												gap="1"
+												cursor="pointer"
+												color="var(--text-3)"
+												_hover={{ color: "var(--text-1)" }}
+												title={selectedToken.contractAddress}
+												onClick={() => {
+													navigator.clipboard.writeText(selectedToken.contractAddress!)
+													setCopiedCaip(selectedToken.caip)
+													setTimeout(() => setCopiedCaip(c => c === selectedToken.caip ? null : c), 1500)
+												}}
+											>
+												<Text fontSize="9px" fontFamily="mono">
+													{selectedToken.contractAddress.slice(0, 6)}…{selectedToken.contractAddress.slice(-4)}
+												</Text>
+												<Box as={copiedCaip === selectedToken.caip ? FaCheck : FaCopy} fontSize="7px" color={copiedCaip === selectedToken.caip ? "green.400" : "inherit"} />
+											</Flex>
+										)}
+										{selectedToken.contractAddress && chain.explorerAddressUrl && (
+											<Box
+												as="button"
+												color="var(--text-3)"
+												_hover={{ color: "var(--teal)" }}
+												cursor="pointer"
+												title="View contract on explorer"
+												onClick={() => rpcRequest("openUrl", { url: chain.explorerAddressUrl!.replace('{{address}}', selectedToken.contractAddress!) }).catch(() => {})}
+											>
+												<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+												</svg>
+											</Box>
+										)}
+									</Flex>
+								</Box>
+							</>
 						) : (
-							<Flex align="center" gap="1" color="var(--rose)">
-								<Box w="7px" h="7px" borderRadius="full" bg="var(--rose)" />
-								<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("outOfSync")}</Text>
-							</Flex>
-						)}
-						{/* Balance display (only when available) */}
-						{activeBalance && (
-							<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
-								<Text
-									fontFamily="mono"
-									fontSize={{ base: "16px", md: "20px" }}
-									fontWeight="500"
-									color="var(--text-0)"
-									letterSpacing="0.01em"
-									lineHeight="1.2"
-								>
-									{activeBalance.balance}
-									<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
-								</Text>
-								{cleanBalanceUsd > 0 && (
-									<AnimatedUsd
-										value={cleanBalanceUsd}
-										prefix="≈ "
-										fontSize="12px"
-										fontFamily="mono"
-										color="var(--text-2)"
-										fontWeight="400"
-									/>
-								)}
-							</Flex>
+							<>
+								<Image
+									src={getAssetIcon(chain.caip)}
+									alt={chain.symbol}
+									w={{ base: "44px", md: "52px" }}
+									h={{ base: "44px", md: "52px" }}
+									borderRadius="full"
+									flexShrink={0}
+									bg="var(--ink-2)"
+									boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
+								/>
+								<Box flex="1" minW="0">
+									<Flex align="baseline" gap="2.5">
+										<Text
+											fontWeight="500"
+											fontSize={{ base: "26px", md: "34px" }}
+											letterSpacing="-0.01em"
+											color="var(--text-0)"
+											lineHeight="1.05"
+											truncate
+										>
+											{chain.coin}
+										</Text>
+										<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
+									</Flex>
+									<Flex align="center" gap="2" mt="0.5" flexWrap="wrap">
+										<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" truncate>
+											{chain.caip}
+										</Text>
+										{address && chain.explorerAddressUrl && (
+											<Box
+												as="button"
+												color="var(--text-3)"
+												_hover={{ color: "var(--teal)" }}
+												cursor="pointer"
+												title="View address on explorer"
+												onClick={() => rpcRequest("openUrl", { url: chain.explorerAddressUrl!.replace('{{address}}', address) }).catch(() => {})}
+											>
+												<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+												</svg>
+											</Box>
+										)}
+									</Flex>
+								</Box>
+							</>
 						)}
 					</Flex>
+
+					{selectedToken ? (
+						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
+							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
+								{formatBalance(selectedToken.balance)}
+								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{selectedToken.symbol}</Box>
+							</Text>
+							{selectedToken.balanceUsd > 0 && (
+								<Text fontSize="12px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
+							)}
+							{selectedToken.priceUsd > 0 && (
+								<Text fontSize="10px" fontFamily="mono" color="var(--text-3)">
+									${selectedToken.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} / {selectedToken.symbol}
+								</Text>
+							)}
+						</Flex>
+					) : (
+						<Flex direction="column" align="flex-end" gap="1.5" flexShrink={0}>
+							{/* Sync status indicator */}
+							{activeBalance ? (
+								<Flex align="center" gap="1" color="var(--teal)">
+									<Box as={FaCheck} fontSize="10px" />
+									<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("synced")}</Text>
+								</Flex>
+							) : (
+								<Flex align="center" gap="1" color="var(--rose)">
+									<Box w="7px" h="7px" borderRadius="full" bg="var(--rose)" />
+									<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("outOfSync")}</Text>
+								</Flex>
+							)}
+							{/* Balance display (only when available) */}
+							{activeBalance && (
+								<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
+									<Text
+										fontFamily="mono"
+										fontSize={{ base: "16px", md: "20px" }}
+										fontWeight="500"
+										color="var(--text-0)"
+										letterSpacing="0.01em"
+										lineHeight="1.2"
+									>
+										{activeBalance.balance}
+										<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
+									</Text>
+									{cleanBalanceUsd > 0 && (
+										<AnimatedUsd
+											value={cleanBalanceUsd}
+											prefix="≈ "
+											fontSize="12px"
+											fontFamily="mono"
+											color="var(--text-2)"
+											fontWeight="400"
+										/>
+									)}
+								</Flex>
+							)}
+						</Flex>
+					)}
 
 					<Box
 						as="button"
@@ -706,7 +827,17 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				</Flex>
 
 				{/* Mobile-only balance row */}
-				{activeBalance && (
+				{selectedToken ? (
+					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
+						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
+							{formatBalance(selectedToken.balance)}
+							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{selectedToken.symbol}</Box>
+						</Text>
+						{selectedToken.balanceUsd > 0 && (
+							<Text fontSize="13px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
+						)}
+					</Flex>
+				) : activeBalance && (
 					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
 						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
 							{activeBalance.balance}
@@ -859,8 +990,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					</Box>
 				)}
 
-				{/* Tokens Section — with spam filter */}
-				{(tokens.length > 0 || isEvmChain) && (
+				{/* Tokens Section — with spam filter. Hidden when viewing a specific token. */}
+				{!selectedToken && (tokens.length > 0 || isEvmChain) && (
 					<Box mt="6">
 						<Flex align="center" justify="space-between" mb="3" px="1">
 							<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
@@ -1011,6 +1142,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							} : activeBalance}
 							address={address}
 							onOutputAssetChange={setSwapOutputChainId}
+							initialFromAsset={initialFromAsset}
+							initialFromCaip={
+								selectedToken && parseFloat(selectedToken.balance) > 0
+									? selectedToken.caip
+									: chain.caip
+							}
 						/>
 					</Suspense>
 				</SwapErrorBoundary>

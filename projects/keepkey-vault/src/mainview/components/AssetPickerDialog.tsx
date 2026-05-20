@@ -229,7 +229,7 @@ function FromPicker({ entries, onSelect, fmtCompact }: {
           <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase">
             Available to swap
           </Text>
-          <Text fontSize="22px" fontWeight="500" letterSpacing="-0.02em" color="kk.textPrimary" fontVariantNumeric="tabular-nums">
+          <Text fontSize="26px" fontWeight="700" letterSpacing="-0.03em" color="kk.textPrimary" fontVariantNumeric="tabular-nums">
             {totalUsd > 0 ? fmtCompact(totalUsd) : "—"}
           </Text>
         </Flex>
@@ -281,14 +281,15 @@ function HeldTile({ entry: e, onSelect, fmtCompact }: {
 }) {
   const chainName = networkDisplayName(e.chainId)
   const selectable = isRowSelectable(e)
+  const color = chainColorForCaip2(e.chainId)
 
   return (
     <Box
       as="button" textAlign="left" fontFamily="inherit"
       w="100%" aspectRatio="1"
       display="flex" flexDirection="column" justifyContent="space-between"
-      bg="linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))"
-      border="1px solid rgba(139,227,196,0.20)"
+      bg={`linear-gradient(135deg, ${color}14 0%, rgba(255,255,255,0.02) 60%)`}
+      border="1px solid" borderColor={`${color}35`}
       borderRadius="16px" p="3.5"
       position="relative" overflow="hidden"
       cursor={selectable ? "pointer" : "not-allowed"}
@@ -296,31 +297,35 @@ function HeldTile({ entry: e, onSelect, fmtCompact }: {
       color="kk.textPrimary"
       transition="all 0.18s"
       _hover={selectable ? {
-        borderColor: "rgba(139,227,196,0.55)",
+        borderColor: `${color}70`,
         transform: "translateY(-2px)",
-        boxShadow: "0 16px 30px -16px rgba(139,227,196,0.28)",
+        boxShadow: `0 16px 30px -16px ${color}44`,
       } : {}}
       _before={{
         content: '""', position: "absolute", top: "-1px", right: "-1px",
         w: "70px", h: "70px",
-        bg: "radial-gradient(circle at top right, rgba(139,227,196,0.16), transparent 70%)",
+        bg: `radial-gradient(circle at top right, ${color}28, transparent 70%)`,
         pointerEvents: "none",
       }}
       onClick={() => selectable && onSelect(e)}
     >
+      {/* Chain color top stripe */}
+      <Box position="absolute" top="0" left="0" right="0" h="2px"
+        borderRadius="16px 16px 0 0" bg={color} opacity={0.75} />
+
       {/* Icon — 64px */}
       <AssetIcon caip={e.caip} iconUrl={e.iconUrl} chainCaip={chainBadgeCaip(e)} size={64} alt={e.symbol} />
 
       {/* Bottom info */}
       <Box mt="auto">
-        <Text fontSize="16px" fontWeight="700" letterSpacing="-0.01em" lineHeight="1.2">{e.symbol}</Text>
+        <Text fontSize="18px" fontWeight="800" letterSpacing="-0.02em" lineHeight="1.2">{e.symbol}</Text>
         <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" textTransform="uppercase" mt="0.5">
           {chainName}
         </Text>
-        <Text fontSize="13px" fontWeight="500" fontVariantNumeric="tabular-nums" mt="1.5" letterSpacing="-0.01em">
+        <Text fontSize="14px" fontWeight="600" fontVariantNumeric="tabular-nums" mt="1.5" letterSpacing="-0.01em">
           {e.balance!.amount}
         </Text>
-        <Text fontSize="10px" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{fmtCompact(e.balance!.usd)}</Text>
+        <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{fmtCompact(e.balance!.usd)}</Text>
         {/* Full CAIP */}
         <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" isTruncated opacity={0.6}>
           {e.caip}
@@ -369,19 +374,37 @@ function buildChainInfos(entries: AssetEntry[], excludeCaip: string | undefined)
   }).sort((a, b) => b.routableCount - a.routableCount) // most assets first
 }
 
-function ChainStep({ chainInfos, search, onSearchChange, onPickChain }: {
+function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, onSelectAsset, onUnavailAsset }: {
   chainInfos: ChainInfo[]
+  entries: AssetEntry[]
   search: string
   onSearchChange: (s: string) => void
   onPickChain: (caip2: string) => void
+  onSelectAsset: (e: AssetEntry) => void
+  onUnavailAsset: (e: AssetEntry) => void
 }) {
   const q = search.trim().toLowerCase()
   const available   = chainInfos.filter(c => c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
   const unavailable = chainInfos.filter(c => !c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
 
+  // When no networks match the query, fall back to token search
+  const noNetworkMatches = q.length > 0 && available.length === 0 && unavailable.length === 0
+  const tokenFallback = useMemo(() => {
+    if (!noNetworkMatches) return []
+    return entries
+      .filter(e => `${e.symbol} ${e.name}`.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aSel = isRowSelectable(a) ? 1 : 0
+        const bSel = isRowSelectable(b) ? 1 : 0
+        if (aSel !== bSel) return bSel - aSel
+        return (b.balance?.usd ?? 0) - (a.balance?.usd ?? 0)
+      })
+      .slice(0, 30)
+  }, [noNetworkMatches, entries, q])
+
   return (
     <>
-      <SearchBar value={search} onChange={onSearchChange} placeholder="Search networks…" />
+      <SearchBar value={search} onChange={onSearchChange} placeholder="Search networks or tokens…" />
 
       <Box flex="1" overflowY="auto" px="5" pb="4">
         {/* Supported networks */}
@@ -416,9 +439,27 @@ function ChainStep({ chainInfos, search, onSearchChange, onPickChain }: {
           </>
         )}
 
-        {available.length + unavailable.length === 0 && (
+        {/* Token fallback — shown when no networks match but tokens do */}
+        {noNetworkMatches && tokenFallback.length > 0 && (
+          <>
+            <Flex align="center" gap="2" mb="3" mt="1">
+              <Box w="12px" h="2px" bg="#9F8CE0" borderRadius="1px" />
+              <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.12em" textTransform="uppercase">
+                Token results
+              </Text>
+              <Text fontSize="10px" color="kk.textMuted">· {tokenFallback.length}</Text>
+            </Flex>
+            <Flex direction="column" gap="0">
+              {tokenFallback.map(e => (
+                <AssetListRow key={e.caip} entry={e} onSelect={onSelectAsset} onUnavailable={onUnavailAsset} />
+              ))}
+            </Flex>
+          </>
+        )}
+
+        {noNetworkMatches && tokenFallback.length === 0 && (
           <Flex direction="column" align="center" py="16" gap="2">
-            <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No matching networks</Text>
+            <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No matching networks or tokens</Text>
             <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
           </Flex>
         )}
@@ -435,20 +476,26 @@ function NetworkTile({ chain: c, onPick, unavail }: {
       as="button" textAlign="left" fontFamily="inherit"
       w="100%" aspectRatio="1"
       display="flex" flexDirection="column" justifyContent="space-between"
-      bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(255,255,255,0.07)"
+      bg={unavail ? "rgba(255,255,255,0.02)" : `${c.color}0e`}
+      border="1px solid" borderColor={unavail ? "rgba(255,255,255,0.06)" : `${c.color}28`}
       borderRadius="16px" p="3.5"
+      position="relative" overflow="hidden"
       cursor={unavail ? "not-allowed" : "pointer"}
       opacity={unavail ? 0.42 : 1}
       color="kk.textPrimary"
       transition="all 0.15s"
       _hover={unavail ? {} : {
-        bg: "rgba(255,255,255,0.06)",
-        borderColor: "rgba(255,255,255,0.14)",
+        bg: `${c.color}18`,
+        borderColor: `${c.color}55`,
         transform: "translateY(-2px)",
-        boxShadow: "0 12px 24px -12px rgba(0,0,0,0.5)",
+        boxShadow: `0 12px 24px -12px ${c.color}40`,
       }}
       onClick={() => !unavail && onPick(c.caip2)}
     >
+      {/* Chain color top stripe */}
+      <Box position="absolute" top="0" left="0" right="0" h="2px"
+        borderRadius="16px 16px 0 0" bg={c.color} opacity={unavail ? 0.3 : 0.8} />
+
       {/* Chain logo — 44px */}
       {c.nativeCaip
         ? <AssetIcon caip={c.nativeCaip} size={44} alt={c.name} />
@@ -456,11 +503,11 @@ function NetworkTile({ chain: c, onPick, unavail }: {
 
       {/* Bottom info */}
       <Box mt="auto">
-        <Text fontSize="14px" fontWeight="700" letterSpacing="-0.01em" lineHeight="1.2">{c.name}</Text>
+        <Text fontSize="15px" fontWeight="800" letterSpacing="-0.02em" lineHeight="1.2">{c.name}</Text>
         <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" textTransform="uppercase" mt="0.5">
           {c.family}
         </Text>
-        <Text fontSize="10px" color="kk.textSecondary" mt="1.5">
+        <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" mt="1.5">
           {unavail ? "No route" : `${c.routableCount} swappable`}
         </Text>
         {/* CAIP-2 */}
@@ -622,7 +669,7 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
       {/* Info */}
       <Box flex="1" minW="0">
         <Flex align="center" gap="2" flexWrap="wrap">
-          <Text fontSize="14px" fontWeight="700">{e.symbol}</Text>
+          <Text fontSize="15px" fontWeight="800">{e.symbol}</Text>
           {e.balance && (
             <Box bg="rgba(139,227,196,0.12)" color="var(--teal)" px="1.5" py="0.5"
               borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">
@@ -642,7 +689,7 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
             </Box>
           )}
         </Flex>
-        <Text fontSize="11px" color="kk.textMuted" mt="0.5">{e.name}</Text>
+        <Text fontSize="12px" color="kk.textMuted" mt="0.5">{e.name}</Text>
         {/* Full CAIP-19 */}
         <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} isTruncated>
           {e.caip}
@@ -908,7 +955,7 @@ export function AssetPickerDialog({
             <Text fontSize="10px" letterSpacing="0.12em" textTransform="uppercase" color="kk.textMuted" mb="1">
               {stepLabel}
             </Text>
-            <Text fontSize="16px" fontWeight="600" letterSpacing="-0.01em" color="kk.textPrimary">
+            <Text fontSize="18px" fontWeight="700" letterSpacing="-0.02em" color="kk.textPrimary">
               {title}
             </Text>
           </Box>
@@ -952,9 +999,12 @@ export function AssetPickerDialog({
           ) : (
             <ChainStep
               chainInfos={chainInfos}
+              entries={entries}
               search={search}
               onSearchChange={setSearch}
               onPickChain={(caip2) => { setToChain(caip2); setSearch("") }}
+              onSelectAsset={handleSelect}
+              onUnavailAsset={setUnavailEntry}
             />
           )}
         </Box>

@@ -646,10 +646,15 @@ interface SwapDialogProps {
   address?: string | null
   resumeSwap?: PendingSwap | null
   onOutputAssetChange?: (chainId: string | null) => void
+  /** CAIP-19 of the asset to pre-select as the FROM side. Falls back to native chain asset. */
+  initialFromCaip?: string
+  /** Pre-built SwapAsset to use as the FROM side — bypasses Pioneer's GetAvailableAssets list.
+   *  Passed by AssetPage when the token may not appear in the ~19-asset Pioneer list. */
+  initialFromAsset?: SwapAsset
 }
 
 // ── Main SwapDialog ─────────────────────────────────────────────────
-export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange }: SwapDialogProps) {
+export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset }: SwapDialogProps) {
   const { t } = useTranslation("swap")
   const { fmtCompact, symbol: fiatSymbol } = useFiat()
 
@@ -992,18 +997,71 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Auto-select from asset when dialog opens with chain context ───
   const hasAutoSelected = useRef(false)
   useEffect(() => {
-    if (hasAutoSelected.current || assets.length === 0 || !chain) return
-    const match = assets.find(a => a.chainId === chain.id && !a.contractAddress)
+    if (hasAutoSelected.current) return
+
+    // Fast path: caller supplied a pre-built SwapAsset (token from AssetPage that
+    // may not appear in Pioneer's GetAvailableAssets list). Use it directly.
+    if (initialFromAsset) {
+      console.log(`[SwapDialog] auto-select initialFromAsset="${initialFromAsset.caip}"`)
+      setFromAsset(initialFromAsset)
+      hasAutoSelected.current = true
+      return
+    }
+
+    if (assets.length === 0) return
+
+    let match: SwapAsset | undefined
+
+    if (initialFromCaip) {
+      const caipLower = initialFromCaip.toLowerCase()
+
+      // 1a. Case-insensitive exact CAIP match (handles checksum address differences)
+      match = assets.find(a => a.caip?.toLowerCase() === caipLower)
+
+      // 1b. Extract contract + network from the CAIP, match both
+      if (!match && initialFromCaip.includes('/')) {
+        const [networkPart = '', assetPart = ''] = initialFromCaip.split('/')
+        const contract = assetPart.includes(':') ? assetPart.split(':')[1]?.toLowerCase() ?? '' : assetPart.toLowerCase()
+        const targetChainId = CHAINS.find(c => c.networkId?.toLowerCase() === networkPart.toLowerCase())?.id
+
+        if (contract) {
+          // Prefer chain-scoped match, fall back to contract-only
+          match = assets.find(a =>
+            a.contractAddress?.toLowerCase() === contract && (!targetChainId || a.chainId === targetChainId)
+          ) ?? assets.find(a => a.contractAddress?.toLowerCase() === contract)
+        }
+      }
+
+      console.log(`[SwapDialog] auto-select initialFromCaip="${initialFromCaip}" → match=${match?.symbol ?? 'none'} (from ${assets.length} assets)`)
+    }
+
+    // 2. Token requested but not in swap assets — open the FROM picker so the
+    //    user can search manually rather than silently landing on the wrong asset.
+    if (!match && initialFromCaip) {
+      hasAutoSelected.current = true
+      setPickerSide('from')
+      return
+    }
+
+    // 3. Fall back to native asset for the context chain
+    if (!match && chain) {
+      match = assets.find(a => a.chainId === chain.id && !a.contractAddress)
+      if (match) console.log(`[SwapDialog] auto-select fallback to native: ${match.symbol}`)
+    }
+
     if (match) {
       setFromAsset(match)
-      const defaultOut = DEFAULT_OUTPUT[chain.id]
-      if (defaultOut) {
-        const outMatch = assets.find(a => a.asset === defaultOut)
-        if (outMatch) setToAsset(outMatch)
+      // Only auto-set a default output for native assets — token swaps let the user pick
+      if (!match.contractAddress) {
+        const defaultOut = DEFAULT_OUTPUT[match.chainId]
+        if (defaultOut) {
+          const outMatch = assets.find(a => a.asset === defaultOut)
+          if (outMatch) setToAsset(outMatch)
+        }
       }
       hasAutoSelected.current = true
     }
-  }, [assets, chain])
+  }, [assets, chain, initialFromCaip, initialFromAsset])
 
   // ── Resume from swap history ──────────────────────────────────────
   const hasResumedRef = useRef<string | null>(null)

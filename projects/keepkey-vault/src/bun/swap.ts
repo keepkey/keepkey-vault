@@ -662,8 +662,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
-      // Insufficient funds: Pioneer fallback will also fail — surface immediately
-      if (directErr.message?.toLowerCase().includes('insufficient funds')) {
+      // For native-asset swaps, "insufficient funds" from the RPC is definitive —
+      // Pioneer will also reject it. Surface immediately.
+      // For ERC-20 relay txs (e.g. NEAR Intents direct transfer), "insufficient funds"
+      // may come from calldata pre-simulation or a solver-side issue, not native gas —
+      // native balance was already verified in buildRelaySwapTx, so fall through to Pioneer.
+      if (!isErc20Source && directErr.message?.toLowerCase().includes('insufficient funds')) {
         throw new Error(
           `Insufficient ${fromChain.symbol} for gas on ${fromChain.id}. ` +
           `Add ${fromChain.symbol} to your wallet to pay for transaction fees and try again.`
@@ -1053,7 +1057,14 @@ async function buildRelaySwapTx(
     // Token contract comes from the CAIP-19 (after the `:` of `/erc20:` or
     // `/bep20:`). CAIP is the only identifier — no separate contract param.
     const tokenContract = (extractContractFromCaip(params.fromCaip) || '').toLowerCase()
-    if (tokenContract && tokenContract.startsWith('0x')) {
+    // NEAR Intents ERC-20 path: relay.to IS the token contract — the calldata encodes
+    // a direct transfer() to a solver address, not transferFrom() via a router.
+    // No approval is needed or valid for this pattern.
+    const isDirectTransfer = relay.to.toLowerCase() === tokenContract
+    if (isDirectTransfer) {
+      console.log(`${TAG} Relay ERC-20: relay.to === token contract (${tokenContract}) — direct transfer(), no approval needed`)
+    }
+    if (tokenContract && tokenContract.startsWith('0x') && !isDirectTransfer) {
       try {
         const tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract).catch(() => undefined)
         if (tokenDecimals !== undefined) {

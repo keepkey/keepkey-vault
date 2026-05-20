@@ -153,8 +153,13 @@ export function parseQuoteResponse(
   let relayTx: RelayTxParams | undefined
 
   if (hasPrebuiltTx) {
+    // Pioneer occasionally returns addresses with a duplicate '0x' prefix (e.g.
+    // "0x0x833589..."). Strip all leading '0x' pairs and re-add exactly one.
+    // Affects NEAR Intents ERC-20 routes where txParams.to is the token contract.
+    const normalizeAddr = (addr: string | undefined): string | undefined =>
+      addr ? addr.replace(/^(0x)+/i, '0x') : addr
     relayTx = {
-      to: txParams.to,
+      to: normalizeAddr(txParams.to) as string,
       data: rawData ?? '0x',
       value: String(txParams.value || '0'),
       // Leave gasLimit undefined when Pioneer omits it so buildRelaySwapTx
