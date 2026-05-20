@@ -31,6 +31,7 @@ export type StreamEvent =
 export interface AddressEntry { address: string; networkId: string }
 
 type EventHandler = (event: StreamEvent) => void
+type StatusHandler = (status: { connected: boolean; watching: number; sessionId?: string }) => void
 
 const RECONNECT_DELAY_MS = 10_000
 const SUBSCRIBE_URL_PATH = '/api/v1/events/subscribe'
@@ -39,9 +40,15 @@ let controller: AbortController | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let currentAddresses: AddressEntry[] = []
 let currentHandler: EventHandler | null = null
+let onStatusChange: StatusHandler | null = null
 
-export function startEventStream(addresses: AddressEntry[], onEvent: EventHandler): void {
+export function startEventStream(
+  addresses: AddressEntry[],
+  onEvent: EventHandler,
+  onStatus?: StatusHandler,
+): void {
   stopEventStream()
+  onStatusChange = onStatus ?? null
 
   if (!addresses.length) return
 
@@ -57,6 +64,8 @@ export function stopEventStream(): void {
   if (controller) { controller.abort(); controller = null }
   currentAddresses = []
   currentHandler = null
+  onStatusChange?.({ connected: false, watching: 0 })
+  onStatusChange = null
 }
 
 async function connect(): Promise<void> {
@@ -83,12 +92,14 @@ async function connect(): Promise<void> {
 
     if (!resp.ok) {
       console.warn(`[event-stream] Subscribe returned ${resp.status} — retrying in ${RECONNECT_DELAY_MS / 1000}s`)
+      onStatusChange?.({ connected: false, watching: 0 })
       scheduleReconnect()
       return
     }
 
     if (!resp.body) {
       console.warn('[event-stream] No response body — retrying')
+      onStatusChange?.({ connected: false, watching: 0 })
       scheduleReconnect()
       return
     }
@@ -116,6 +127,9 @@ async function connect(): Promise<void> {
 
         try {
           const data = JSON.parse(dataStr)
+          if (evLine === 'connected') {
+            onStatusChange?.({ connected: true, watching: data.watching ?? currentAddresses.length, sessionId: data.sessionId })
+          }
           currentHandler?.({ type: evLine as any, data })
         } catch { /* malformed JSON — skip */ }
       }
@@ -123,6 +137,7 @@ async function connect(): Promise<void> {
 
     // Stream ended normally — reconnect
     console.log('[event-stream] Stream closed, reconnecting...')
+    onStatusChange?.({ connected: false, watching: 0 })
     scheduleReconnect()
 
   } catch (err: any) {

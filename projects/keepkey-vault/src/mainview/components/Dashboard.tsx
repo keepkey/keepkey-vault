@@ -81,6 +81,10 @@ const DASHBOARD_ANIMATIONS = `
 		0%, 100% { box-shadow: 0 0 12px rgba(233,196,106,0.4); }
 		50% { box-shadow: 0 0 24px rgba(233,196,106,0.7); }
 	}
+	@keyframes pulseTeal {
+		0%, 100% { opacity: 1; box-shadow: 0 0 4px rgba(80,200,120,0.6); }
+		50% { opacity: 0.5; box-shadow: 0 0 8px rgba(80,200,120,0.9); }
+	}
 	@keyframes glowCta {
 		0% { box-shadow: 0 0 8px rgba(233,196,106,0.3), 0 0 20px rgba(233,196,106,0.1); }
 		50% { box-shadow: 0 0 16px rgba(233,196,106,0.5), 0 0 40px rgba(233,196,106,0.2); }
@@ -665,6 +669,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
+	const [streamStatus, setStreamStatus] = useState<{ connected: boolean; watching: number } | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
@@ -999,6 +1004,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			refreshBalances(true)
 		})
 	}, [refreshBalances])
+
+	// SSE stream status updates from backend
+	useEffect(() => {
+		return onRpcMessage("stream-status", (s) => setStreamStatus(s))
+	}, [])
 
 	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
 	useEffect(() => {
@@ -1388,6 +1398,35 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									: t("refreshPrompt")}
 						</Flex>
 					</Box>
+
+					{/* SSE stream status dot */}
+					{streamStatus !== null && (
+						<Flex
+							align="center"
+							gap="1"
+							px="2"
+							py="1"
+							borderRadius="full"
+							bg={streamStatus.connected ? "rgba(80,200,120,0.08)" : "rgba(255,100,100,0.08)"}
+							border="1px solid"
+							borderColor={streamStatus.connected ? "rgba(80,200,120,0.22)" : "rgba(255,100,100,0.18)"}
+							title={streamStatus.connected
+								? `Live: watching ${streamStatus.watching} address${streamStatus.watching !== 1 ? 'es' : ''}`
+								: 'Event stream disconnected — using polling'}
+							cursor="default"
+							flexShrink={0}
+						>
+							<Box
+								w="6px" h="6px" borderRadius="full" flexShrink={0}
+								bg={streamStatus.connected ? "rgb(80,200,120)" : "rgb(200,80,80)"}
+								style={streamStatus.connected ? { animation: "pulseTeal 2s ease-in-out infinite" } : undefined}
+							/>
+							<Text fontSize="9px" fontWeight="700" letterSpacing="0.04em"
+								color={streamStatus.connected ? "rgb(80,200,120)" : "rgb(200,80,80)"}>
+								{streamStatus.connected ? "LIVE" : "POLL"}
+							</Text>
+						</Flex>
+					)}
 				</Flex>
 			)}
 

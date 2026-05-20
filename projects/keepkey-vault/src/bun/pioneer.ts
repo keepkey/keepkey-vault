@@ -76,11 +76,18 @@ export async function getPioneer(): Promise<any> {
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
       console.log('[Pioneer] Client initialized successfully')
 
-      // Register queryKey so SSE auth works (best-effort, non-fatal)
-      fetch(`${base}/api/v1/auth/register`, {
+      // Register queryKey with Pioneer so SSE auth passes (best-effort, non-fatal).
+      // Username must be 3-32 chars — derive a stable short slug from the key.
+      const username = QUERY_KEY.startsWith('vault:')
+        ? QUERY_KEY.slice(0, 32)
+        : `vk-${QUERY_KEY.slice(-20)}`.slice(0, 32)
+      fetch(`${base}/api/v1/user/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queryKey: QUERY_KEY, username: `vault:${QUERY_KEY}` }),
+        body: JSON.stringify({ username, queryKey: QUERY_KEY }),
+      }).then(r => {
+        if (r.ok || r.status === 409) console.log('[Pioneer] queryKey registered for SSE auth')
+        else r.text().then(t => console.warn('[Pioneer] SSE registration warning:', r.status, t)).catch(() => {})
       }).catch(() => { /* non-fatal — SSE degrades gracefully if unregistered */ })
 
       return pioneerInstance

@@ -2261,16 +2261,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (p.networkId && p.pubkey) streamAddresses.push({ address: p.pubkey, networkId: p.networkId })
 				}
 				if (streamAddresses.length > 0) {
-					startEventStream(streamAddresses, (event) => {
-						if (event.type === 'tx:incoming') {
-							console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address}`)
-							try { rpc.send['tx-push-received']({ chain: event.data.caip, address: event.data.address, txid: event.data.txid }) } catch { /* webview not ready */ }
-						}
-						if (event.type === 'tx:confirmed') {
-							console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
-							try { rpc.send['tx-push-received']({ txid: event.data.txid }) } catch { /* webview not ready */ }
-						}
-					})
+					startEventStream(
+						streamAddresses,
+						(event) => {
+							if (event.type === 'tx:incoming') {
+								console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address}`)
+								try { rpc.send['tx-push-received']({ chain: event.data.caip, address: event.data.address, txid: event.data.txid }) } catch { /* webview not ready */ }
+							}
+							if (event.type === 'tx:confirmed') {
+								console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
+								try { rpc.send['tx-push-received']({ txid: event.data.txid }) } catch { /* webview not ready */ }
+							}
+						},
+						(status) => {
+							try { rpc.send['stream-status'](status) } catch { /* webview not ready */ }
+						},
+					)
 				}
 
 				return results
