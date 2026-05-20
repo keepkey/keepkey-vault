@@ -8,7 +8,9 @@
 		"initChoose": "Wählen Sie Ihre Einrichtungsmethode",
 		"initProgress": "Wallet wird eingerichtet",
 		"initLabel": "Benennen Sie Ihr Gerät",
-		"complete": "Einrichtung abgeschlossen!"
+		"complete": "Einrichtung abgeschlossen!",
+		"verifySeed": "Wiederherstellungsphrase prüfen",
+		"securityTips": "Sicherheitstipps"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Ihr KeepKey führt Sie durch den Update-Vorgang.",
 		"bootloaderDetected": "Bootloader-Modus erkannt",
 		"deviceReadyForUpdate": "Ihr KeepKey befindet sich im Bootloader-Modus und ist bereit für das Update.",
-		"updateBootloaderTo": "Bootloader auf v{{version}} aktualisieren"
+		"updateBootloaderTo": "Bootloader auf v{{version}} aktualisieren",
+		"doNotHoldButton": "Halten Sie beim erneuten Verbinden NICHT die Taste gedrückt. Schließen Sie das Gerät einfach normal an. Wenn Sie die Taste gedrückt halten, startet das Gerät wieder im Bootloader-Modus."
 	},
 	"firmware": {
 		"title": "Firmware-Update",
@@ -107,13 +110,19 @@
 		"rebootTakingLong": "Die Wiederverbindung dauert länger als üblich...",
 		"rebootTakingLongSub": "Das Gerät benötigt möglicherweise einen Moment zum Neustart.",
 		"pleaseDisconnect": "Bitte trennen Sie Ihren KeepKey und schließen Sie ihn erneut an",
-		"disconnectMessage": "Ihr Gerät zeigt \u201EFirmware-Update abgeschlossen\u201C. Ziehen Sie das USB-Kabel ab und stecken Sie es wieder ein, um fortzufahren.",
+		"disconnectMessage": "Ihr Gerät zeigt „Firmware-Update abgeschlossen“. Ziehen Sie das USB-Kabel ab und stecken Sie es wieder ein, um fortzufahren.",
 		"stillWaitingDisconnect": "Warte noch — stellen Sie sicher, dass Sie das USB-Kabel abziehen und wieder einstecken.",
 		"manualReconnectTitle": "Gerät verbindet sich nicht wieder?",
 		"manualReconnectStep1": "1. Trennen Sie Ihren KeepKey",
 		"manualReconnectStep2": "2. Warten Sie 5 Sekunden",
 		"manualReconnectStep3": "3. Schließen Sie ihn wieder an",
-		"manualReconnectNote": "Die Einrichtung wird automatisch fortgesetzt, sobald das Gerät erkannt wird."
+		"manualReconnectNote": "Die Einrichtung wird automatisch fortgesetzt, sobald das Gerät erkannt wird.",
+		"unsignedBootloaderWarning": "Sie installieren unsignierte Firmware (Entwickler-Firmware). Wenn auf diesem Gerät zuvor signierte (offizielle) Firmware lief, werden alle Daten gelöscht. Dies ist eine hardwareseitig erzwungene Sicherheitsgrenze; sie gilt auch beim Zurückwechseln zu signierter Firmware.",
+		"unsignedBootloaderAcknowledge": "Ich verstehe, dass dies das Gerät löschen kann, und ich habe meinen Seed gesichert",
+		"autoRebooting": "Ihr Gerät wird neu gestartet...",
+		"autoRebootingDetail": "Ihre KeepKey startet mit der neuen Firmware automatisch neu. Das dauert normalerweise nur wenige Sekunden.",
+		"waitingForDevice": "Warte auf Ihr Gerät...",
+		"wipeAndFlash": "Löschen & flashen"
 	},
 	"initChoose": {
 		"title": "Wallet einrichten",
@@ -123,7 +132,12 @@
 		"createWallet": "Wallet erstellen",
 		"recoverExistingWallet": "Bestehende Wallet wiederherstellen",
 		"recoverDescription": "Geben Sie Ihre Wiederherstellungs-Seed-Phrase auf dem Gerät ein",
-		"recoverWallet": "Wallet wiederherstellen"
+		"recoverWallet": "Wallet wiederherstellen",
+		"seedLength": "Seed-Länge",
+		"words": "Wörter",
+		"entropyNote": "Eine längere Seed-Länge verbessert die Gesamtentropie der Wallet nicht.",
+		"learnMore": "Mehr erfahren",
+		"howManyWords": "Wie viele Wörter hat Ihr Seed?"
 	},
 	"initProgress": {
 		"creatingWallet": "Wallet wird erstellt...",
@@ -133,7 +147,11 @@
 		"followPrompts": "Folgen Sie den Anweisungen auf Ihrem KeepKey-Bildschirm.",
 		"lookAtDevice": "Schauen Sie auf Ihr KeepKey-Gerät und folgen Sie den Bildschirmanweisungen.",
 		"failedToCreate": "Wallet-Erstellung fehlgeschlagen",
-		"failedToRecover": "Wallet-Wiederherstellung fehlgeschlagen"
+		"failedToRecover": "Wallet-Wiederherstellung fehlgeschlagen",
+		"writeDownWarning": "Schreiben Sie jedes Wort auf!",
+		"writeDownDetail": "Ihre Wiederherstellungsphrase wird auf dem Gerätebildschirm angezeigt. Schreiben Sie jedes Wort auf Papier. Dies ist Ihre EINZIGE Sicherung; Sie werden diese Wörter NICHT erneut sehen.",
+		"deviceLost": "Gerät getrennt. Schließen Sie es wieder an, um fortzufahren, oder gehen Sie zurück und versuchen Sie es erneut.",
+		"goBack": "Zurück"
 	},
 	"initLabel": {
 		"walletCreated": "Wallet erstellt!",
@@ -155,6 +173,65 @@
 		"stepOf": "Schritt {{current}} von {{total}}",
 		"settingUpWallet": "Wallet wird eingerichtet...",
 		"previous": "Zurück",
-		"next": "Weiter"
+		"next": "Weiter",
+		"securityTips": "Sicherheitstipps"
+	},
+	"verifySeed": {
+		"title": "Wiederherstellungsphrase prüfen",
+		"descriptionEmulator": "Wir fragen 3 zufällige Wörter aus Ihrem Seed ab, um zu bestätigen, dass Ihre Sicherung korrekt ist.",
+		"description": "Bestätigen Sie, dass Sie Ihre Wiederherstellungsphrase korrekt notiert haben. Ihr Gerät fordert Sie auf, einige Wörter einzugeben.",
+		"verifyNow": "Jetzt prüfen",
+		"skipForNow": "Überspringen; später prüfen",
+		"enterWords": "Geforderte Wörter eingeben",
+		"enterWordsDetail": "Geben Sie das richtige Wort für jede Position aus Ihrer Wiederherstellungsphrase ein.",
+		"checkWords": "Wörter prüfen",
+		"verifying": "Prüfe...",
+		"checkingAnswers": "Antworten werden geprüft...",
+		"followDevice": "Folgen Sie den Anweisungen auf Ihrer KeepKey, um die geforderten Wörter einzugeben.",
+		"verified": "Wiederherstellungsphrase geprüft!",
+		"verifiedDetail": "Ihre Sicherung ist korrekt. Bewahren Sie sie sicher auf und teilen Sie sie niemals mit anderen.",
+		"continue": "Fortfahren",
+		"failed": "Prüfung fehlgeschlagen",
+		"failedDetail": "Die eingegebenen Wörter stimmen nicht überein. Versuchen Sie es erneut oder prüfen Sie Ihre schriftliche Sicherung.",
+		"tryAgain": "Erneut versuchen"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Ihre PIN ist gemischt",
+				"body": "Ihre KeepKey zeigt ein zufällig angeordnetes Zahlenraster. Ordnen Sie die Positionen auf dem Bildschirm den Zahlen auf dem Gerät zu. Das Layout ändert sich jedes Mal, damit Beobachter Ihre PIN nicht stehlen können."
+			},
+			"words": {
+				"title": "Ihre Wörter = Ihre Wallet",
+				"body": "Schreiben Sie Ihre 12/24 Wörter auf Papier. Bewahren Sie sie sicher auf. Tippen Sie sie niemals in einen Computer, eine Website oder ein Telefon ein. Wer diese Wörter hat, kontrolliert Ihre Guthaben."
+			},
+			"recovery": {
+				"title": "Gemischte Wiederherstellungseingabe",
+				"body": "Bei der Wiederherstellung mischt KeepKey das Alphabet auf dem Gerätebildschirm. Sie geben Wörter nach Position ein, niemals durch Tippen der echten Buchstaben. Keylogger sehen nichts Nützliches."
+			},
+			"deviceScreen": {
+				"title": "Vertrauen Sie dem Gerätebildschirm",
+				"body": "Bestätigen Sie vor dem Freigeben immer Adresse und Betrag auf Ihrer KeepKey. Ihr Computer kann kompromittiert sein; der Gerätebildschirm nicht. Besonders bei großen Transaktionen."
+			},
+			"appConnections": {
+				"title": "App-Verbindungen sind aus",
+				"body": "Drittanbieter-Apps und dApps verbinden sich über die REST-API. Sie ist zu Ihrem Schutz standardmäßig deaktiviert. Aktivieren Sie sie in den Einstellungen nur bei Bedarf."
+			},
+			"hiddenWallets": {
+				"title": "Versteckte Wallets (erweitert)",
+				"body": "Eine Passphrase erstellt aus demselben Seed eine separate versteckte Wallet. Wenn sie aktiviert ist, MÜSSEN Sie sie sich merken: Eine falsche Passphrase öffnet eine andere leere Wallet, keinen Fehler."
+			}
+		},
+		"actions": {
+			"getStarted": "Loslegen",
+			"startUsing": "KeepKey verwenden",
+			"skipIntro": "Einführung überspringen",
+			"skipTips": "Tipps überspringen"
+		},
+		"stepCounter": "{{current}} von {{total}}",
+		"walletLabels": {
+			"visible": "sichtbar",
+			"hidden": "versteckt"
+		}
 	}
 }

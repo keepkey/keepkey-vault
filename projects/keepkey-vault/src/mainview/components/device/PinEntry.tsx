@@ -7,6 +7,7 @@ import { Z } from "../../lib/z-index"
 
 interface PinEntryProps {
 	type?: PinRequestType
+	failed?: boolean
 	onSubmit: (pin: string) => void
 	onCancel: () => void
 	onWipe?: () => void
@@ -39,8 +40,17 @@ const PIN_ANIMATIONS = `
 		100% { transform: scale(1); opacity: 1; }
 	}
 	@keyframes pinLogoGlow {
-		0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.3)); }
-		50%      { filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.6)); }
+		0%, 100% { filter: drop-shadow(0 0 2px rgba(233,196,106, 0.3)); }
+		50%      { filter: drop-shadow(0 0 6px rgba(233,196,106, 0.6)); }
+	}
+	@keyframes pinShake {
+		0%, 100% { transform: translateX(0); }
+		10%, 50%, 90% { transform: translateX(-4px); }
+		30%, 70% { transform: translateX(4px); }
+	}
+	@keyframes pinErrorFadeIn {
+		0%   { opacity: 0; transform: translateY(-4px); }
+		100% { opacity: 1; transform: translateY(0); }
 	}
 `
 
@@ -49,14 +59,20 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEntryProps) {
+export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe }: PinEntryProps) {
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
+	const [showError, setShowError] = useState(false)
 	const [showWipeConfirm, setShowWipeConfirm] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
 	const [wiping, setWiping] = useState(false)
 
-	// Reset pin when type changes (e.g. new-first → new-second)
+	// Show error banner when failed prop becomes true
+	useEffect(() => {
+		if (failed) setShowError(true)
+	}, [failed])
+
+	// Reset pin when type changes (e.g. new-first -> new-second)
 	useEffect(() => {
 		setPin("")
 		setShowWipeConfirm(false)
@@ -70,6 +86,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 	}, [onWipe])
 
 	const handleDigit = useCallback((digit: string) => {
+		setShowError(false)
 		setPin((p) => (p.length < 9 ? p + digit : p))
 	}, [])
 
@@ -129,7 +146,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 				p="8"
 				maxW="360px"
 				w="90%"
-				boxShadow="0 0 20px rgba(255, 215, 0, 0.08), 0 8px 32px rgba(0,0,0,0.6)"
+				boxShadow="0 0 20px rgba(233,196,106, 0.08), 0 8px 32px rgba(0,0,0,0.6)"
 				style={{ animation: "pinFadeIn 0.3s ease-out" }}
 			>
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
@@ -140,12 +157,34 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 				</Text>
 
 				{!showWipeConfirm && (<>
-				{/* PIN display — masked dots */}
+				{/* Incorrect PIN error banner */}
+				{showError && type === "current" && (
+					<Box
+						bg="rgba(255, 59, 48, 0.08)"
+						borderRadius="md"
+						border="1px solid"
+						borderColor="rgba(255, 59, 48, 0.3)"
+						px="3"
+						py="2"
+						mb="4"
+						textAlign="center"
+						style={{ animation: "pinErrorFadeIn 0.25s ease-out" }}
+					>
+						<Text fontSize="sm" fontWeight="600" color="kk.error">
+							{t("pin.incorrectPin")}
+						</Text>
+						<Text fontSize="xs" color="kk.textSecondary" mt="1">
+							{t("pin.tryAgainDescription")}
+						</Text>
+					</Box>
+				)}
+
+				{/* PIN display - masked dots */}
 				<Box
 					bg="kk.bg"
 					borderRadius="md"
 					border="1px solid"
-					borderColor={pin.length > 0 ? "kk.gold" : "rgba(255, 215, 0, 0.3)"}
+					borderColor={showError ? "rgba(255, 59, 48, 0.5)" : pin.length > 0 ? "kk.gold" : "rgba(233,196,106, 0.3)"}
 					p="3"
 					mb="5"
 					textAlign="center"
@@ -153,8 +192,9 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 					fontSize="2xl"
 					letterSpacing="8px"
 					minH="48px"
-					color="kk.gold"
-					transition="border-color 0.2s ease"
+					color={showError ? "kk.error" : "kk.gold"}
+					transition="border-color 0.2s ease, color 0.2s ease"
+					style={showError ? { animation: "pinShake 0.4s ease-out" } : undefined}
 				>
 					{pin.length > 0
 						? pin.split("").map((_, i) => (
@@ -183,7 +223,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 									h="72px"
 									bg="kk.cardBg"
 									border="1px solid"
-									borderColor="rgba(255, 215, 0, 0.25)"
+									borderColor="rgba(233,196,106, 0.25)"
 									color="kk.textPrimary"
 									fontSize="xl"
 									fontWeight="bold"
@@ -206,7 +246,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 						onClick={handleBackspace}
 						size="md"
 						variant="outline"
-						borderColor="rgba(255, 215, 0, 0.2)"
+						borderColor="rgba(233,196,106, 0.2)"
 						color="kk.textSecondary"
 						transition="all 0.15s ease"
 						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
@@ -294,7 +334,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 								checked={wipeAcknowledged}
 								onChange={(e: any) => setWipeAcknowledged(e.target.checked)}
 								mt="1"
-								accentColor="#FFD700"
+								accentColor="var(--gold)"
 							/>
 							<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
 								{t("pin.wipeAcknowledge")}
@@ -304,7 +344,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 							<Button
 								size="sm"
 								variant="outline"
-								borderColor="rgba(255, 215, 0, 0.2)"
+								borderColor="rgba(233,196,106, 0.2)"
 								color="kk.textSecondary"
 								_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
 								flex={1}
@@ -337,7 +377,7 @@ export function PinEntry({ type = "current", onSubmit, onCancel, onWipe }: PinEn
 						p="3px"
 						borderRadius="md"
 						border="1px solid"
-						borderColor="rgba(255, 215, 0, 0.3)"
+						borderColor="rgba(233,196,106, 0.3)"
 						style={{ animation: "pinLogoGlow 3s ease-in-out infinite" }}
 					>
 						<KeepKeyUILogo style={{ opacity: 0.5 }} />

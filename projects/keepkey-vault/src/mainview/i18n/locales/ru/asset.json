@@ -10,7 +10,7 @@
 	"showFiltered_other": "Показать {{count}} отфильтрованных токенов",
 	"hideFiltered_one": "Скрыть {{count}} отфильтрованный токен",
 	"hideFiltered_other": "Скрыть {{count}} отфильтрованных токенов",
-	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Подозрительный спам ({{count}})",
 	"markAsSafe": "Отметить как безопасный",
 	"hideToken": "Скрыть токен",

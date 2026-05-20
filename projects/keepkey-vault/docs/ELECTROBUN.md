@@ -63,9 +63,11 @@ make build-signed   # Full pipeline: build → prune → DMG → sign → notari
 
 ## Entitlements (macOS Production)
 
-Production builds require `entitlements.plist` with JIT, unsigned executable memory, library validation bypass, and dyld env vars. These are needed because Bun uses JIT compilation. Without them, macOS Sequoia kills the process immediately.
+Production builds require `entitlements.plist` with JIT, unsigned executable memory, library validation bypass, and dyld env vars. These are needed because Bun uses JIT compilation.
 
-The `prune-app-bundle.ts` script applies entitlements during the re-signing step.
+`prune-app-bundle.ts` now signs `Contents/MacOS/bun` and `Contents/MacOS/launcher` explicitly with entitlements before signing the outer `.app`. That avoids the macOS 12 / Intel failure mode where the bundle is signed but the Bun binary still lacks JIT entitlements.
+
+For Intel release validation and artifact provenance rules, use [MACOS12-VALIDATION.md](MACOS12-VALIDATION.md).
 
 ## Troubleshooting
 

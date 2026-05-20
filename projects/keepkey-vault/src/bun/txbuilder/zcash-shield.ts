@@ -10,7 +10,7 @@
  *   6. Broadcast via lightwalletd
  */
 
-import { sendCommand, isSidecarReady, startSidecar, getCachedFvk } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
 
 /** Compute P2PKH scriptPubKey from compressed pubkey hex: OP_DUP OP_HASH160 <20> <HASH160> OP_EQUALVERIFY OP_CHECKSIG */
@@ -58,6 +58,10 @@ interface TransparentUtxo {
 	vout: number
 	value: number
 	scriptPubKey: string
+	/** Confirmation count if Pioneer provides one — used by the 10-conf gate. */
+	confirmations?: number
+	/** Block height the UTXO was mined at, if reported. */
+	height?: number
 }
 
 interface TransparentSigningInput {
@@ -84,17 +88,90 @@ interface ShieldBuildResult {
  */
 let shieldInProgress = false
 
+export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
+export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
+
+export const SHIELD_MIN_CONFIRMATIONS = 10
+
+/** UTXO totals at a single transparent ZEC address, split by maturity.
+ *
+ *  - `matureZat` is the only thing shieldZec can actually spend right now;
+ *    the builder enforces the same 10-conf filter (reorgs can move recent
+ *    transparent inputs, so signing against them produces a doomed tx).
+ *  - `pendingZat` covers UTXOs still under 10 conf — exposed so the UI can
+ *    surface "X ZEC pending, available in Y blocks" instead of a silent gap
+ *    between displayed balance and shieldable amount.
+ *
+ *  Uses Pioneer ListUnspent (same source the shield builder uses) scoped to
+ *  one address — chain-level getBalance returns the whole xpub which is the
+ *  wrong frame for the shield flow. */
+export async function getShieldableTransparentBalance(
+	pioneer: any,
+	transparentAddress: string,
+	tipHeight?: number | null,
+): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number }> {
+	const result = await pioneer.ListUnspent({ network: "ZEC", xpub: transparentAddress })
+	const utxoArray = Array.isArray(result) ? result
+		: Array.isArray(result?.data) ? result.data
+		: Array.isArray(result?.utxos) ? result.utxos
+		: []
+
+	let matureZat = 0, pendingZat = 0, matureCount = 0, pendingCount = 0
+	for (const u of utxoArray) {
+		const raw = String(u.value ?? u.amount ?? "0")
+		const value = raw.includes(".")
+			? Math.round(parseFloat(raw) * 1e8)
+			: parseInt(raw, 10)
+		if (isNaN(value) || value <= 0) continue
+
+		// Mirror the shield builder's confirmation gate so Available + Max stay
+		// honest: prefer Pioneer's `confirmations`, fall back to deriving from
+		// `height` against the sidecar's latest scanned tip. If neither is
+		// available, treat as mature (matches the builder's "don't block" rule).
+		let isMature = true
+		if (typeof u.confirmations === "number") {
+			isMature = u.confirmations >= SHIELD_MIN_CONFIRMATIONS
+		} else if (typeof u.height === "number" && tipHeight != null && u.height > 0) {
+			isMature = (tipHeight - u.height + 1) >= SHIELD_MIN_CONFIRMATIONS
+		}
+
+		if (isMature) { matureZat += value; matureCount++ }
+		else          { pendingZat += value; pendingCount++ }
+	}
+	return { matureZat, pendingZat, matureCount, pendingCount }
+}
+
+/** Convert a sidecar-returned txid to explorer/display order.
+ *
+ *  The sidecar (modules/keepkey-zcash) emits txids in the raw blake2b
+ *  internal byte order — Zcash explorers (Blockchair, ZecRocks, etc.)
+ *  show the byte-reversed form, like Bitcoin. There's an upstream fix
+ *  in keepkey-zcash that reverses inside the Rust code before hex-encoding,
+ *  but that lives in a separate repo with its own release cycle. Until
+ *  every shipping vault has a sidecar with the fix baked in, we reverse
+ *  here as the single defensive choke point. Once we can guarantee the
+ *  sidecar emits display order, drop this helper and the call sites. */
+export function txidToDisplayOrder(internalHex: string): string {
+	if (!internalHex || internalHex.length !== 64 || !/^[0-9a-f]+$/i.test(internalHex)) {
+		// Don't silently mangle — surface bad input rather than producing a plausible-looking wrong txid
+		return internalHex
+	}
+	const bytes = internalHex.match(/.{2}/g)!
+	return bytes.reverse().join("").toLowerCase()
+}
+
 export async function shieldZec(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
 ): Promise<{ txid: string }> {
 	if (shieldInProgress) {
 		throw new Error("A shield transaction is already in progress")
 	}
 	shieldInProgress = true
 	try {
-		return await _shieldZecInner(wallet, pioneer, params)
+		return await _shieldZecInner(wallet, pioneer, params, opts)
 	} finally {
 		shieldInProgress = false
 	}
@@ -104,6 +181,7 @@ async function _shieldZecInner(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
 ): Promise<{ txid: string }> {
 	const account = params.account ?? 0
 
@@ -198,11 +276,22 @@ async function _shieldZecInner(
 			const value = raw.includes('.')
 				? Math.round(parseFloat(raw) * 1e8)
 				: parseInt(raw, 10)
+			// Pull a confirmation count when Pioneer provides one. Some UTXO
+			// indexers return `confirmations` directly; others return a `height`
+			// that we'd compare against tip. We defensively keep both forms.
+			const confirmations = typeof u.confirmations === 'number'
+				? u.confirmations
+				: (typeof u.confirmations === 'string' ? parseInt(u.confirmations, 10) : undefined)
+			const height = typeof u.height === 'number'
+				? u.height
+				: (typeof u.height === 'string' ? parseInt(u.height, 10) : undefined)
 			return {
 				txid: u.txid || u.tx_hash,
 				vout: u.vout ?? u.tx_output_n ?? u.index ?? 0,
 				value: isNaN(value) ? 0 : value,
 				scriptPubKey: u.scriptPubKey || u.script || u.scriptpubkey || "",
+				confirmations: Number.isFinite(confirmations as number) ? (confirmations as number) : undefined,
+				height: Number.isFinite(height as number) ? (height as number) : undefined,
 			}
 		})
 	} catch (e: any) {
@@ -213,55 +302,95 @@ async function _shieldZecInner(
 		throw new Error("No transparent UTXOs found for shielding")
 	}
 
-	const totalAvailable = utxos.reduce((sum, u) => sum + u.value, 0)
-	console.log(`[zcash-shield] Found ${utxos.length} UTXOs totaling ${totalAvailable} ZAT`)
-
-	// 3. Coin selection — select UTXOs covering amount + fee
-	// ZIP-317: fee = 5000 × max(grace_actions, logical_actions)
-	// Shield-wrap logical_actions = max(transparent_in, transparent_out) + nActionsOrchard
-	// Orchard always pads to ≥ 2 actions; transparent has ≥ 1 input.
-	// Change output adds 1 transparent output, so: max(nInputs, 1) + 2
-	// We compute this conservatively before coin selection; re-check after.
-	const nOrchardActions = 2 // Builder always pads to minimum 2
-	const estimatedTransparent = 1 // At least 1 input, 1 change output → max(1,1) = 1
-	const logicalActions = estimatedTransparent + nOrchardActions
-	const fee = 5000 * Math.max(2, logicalActions) // ZIP-317
-	const target = params.amount + fee
-
-	if (totalAvailable < target) {
+	// Min-confirmations gate (matches the Orchard 10-conf rule in the sidecar).
+	// Reorgs can move recent transparent inputs the same way they can move recent
+	// shielded notes; signing against an unconfirmed UTXO that later disappears
+	// produces a doomed tx. 10 matches zcashd / ywallet defaults.
+	//
+	// Pioneer's UTXO indexer may report `confirmations` directly OR just `height`.
+	// We prefer `confirmations` (no tip lookup needed); when only `height` is
+	// present we derive confirmations from `synced_to` (the sidecar's latest
+	// scanned block height, ≈ chain tip after the auto-scan that runs upstream
+	// of every send). If neither is present we let the UTXO through rather than
+	// blocking the user — better to broadcast and have the chain reject than to
+	// fail with a confusing UI error when the indexer schema changes.
+	const MIN_CONFIRMATIONS = 10
+	const tipHeight = getScanState().syncedTo
+	const filtered = utxos.filter(u => {
+		if (typeof u.confirmations === 'number') return u.confirmations >= MIN_CONFIRMATIONS
+		if (typeof u.height === 'number' && tipHeight != null && u.height > 0) {
+			const derived = tipHeight - u.height + 1
+			return derived >= MIN_CONFIRMATIONS
+		}
+		// No confirmation info we can use: don't block the send.
+		return true
+	})
+	if (filtered.length === 0 && utxos.length > 0) {
 		throw new Error(
-			`Insufficient transparent balance: have ${totalAvailable} ZAT, need ${target} ZAT ` +
-			`(${params.amount} amount + ${fee} fee)`
+			`All ${utxos.length} transparent UTXOs are within ${MIN_CONFIRMATIONS} confirmations of the chain tip. ` +
+			`Wait a few minutes and retry.`
+		)
+	}
+	if (filtered.length < utxos.length) {
+		const filteredOut = utxos.length - filtered.length
+		console.log(`[zcash-shield] Filtered out ${filteredOut} UTXO(s) below ${MIN_CONFIRMATIONS} confirmations`)
+	}
+	utxos = filtered
+
+	const totalAvailable = utxos.reduce((sum, u) => sum + u.value, 0)
+	console.log(`[zcash-shield] Found ${utxos.length} UTXOs totaling ${totalAvailable} ZAT (after ${MIN_CONFIRMATIONS}-conf filter)`)
+
+	// 3. Coin selection — iteratively add UTXOs and recompute the ZIP-317 fee.
+	//
+	// The fee depends on how many inputs we end up selecting:
+	//   logical_actions = max(transparent_inputs, transparent_outputs=1)
+	//                   + max(orchard_spends, orchard_outputs)         // = 2 (BundleType::DEFAULT pad)
+	//   fee = 5000 * max(grace_actions=2, logical_actions)
+	//
+	// So adding inputs can raise the fee, which can require even more inputs
+	// to cover the new target. The previous greedy version selected against a
+	// fixed (1-input) target and then threw if the recomputed fee outran the
+	// selected total — even when more UTXOs were available. Now we recompute
+	// after each addition and keep going until the running total covers the
+	// running target, only erroring out if the entire set is short.
+	const nOrchardActions = 2 // BundleType::DEFAULT pads to a 2-action minimum
+	const computeFee = (nInputs: number): number => {
+		const transparentActions = Math.max(nInputs, 1) // max(inputs, change_outputs=1)
+		const logical = transparentActions + nOrchardActions
+		return 5000 * Math.max(2, logical)
+	}
+
+	// Cheap fast-path: even with 1 input (cheapest fee shape) we can't cover
+	// `amount + fee`, no point selecting.
+	const minFee = computeFee(1)
+	if (totalAvailable < params.amount + minFee) {
+		throw new Error(
+			`Insufficient transparent balance: have ${totalAvailable} ZAT, need ≥${params.amount + minFee} ZAT ` +
+			`(${params.amount} amount + ${minFee} fee minimum)`
 		)
 	}
 
-	// Simple greedy selection — sort by value descending, take until covered
 	const sorted = [...utxos].sort((a, b) => b.value - a.value)
 	const selected: TransparentUtxo[] = []
 	let selectedTotal = 0
+	let runningFee = computeFee(0)
 	for (const utxo of sorted) {
 		selected.push(utxo)
 		selectedTotal += utxo.value
-		if (selectedTotal >= target) break
+		runningFee = computeFee(selected.length)
+		if (selectedTotal >= params.amount + runningFee) break
 	}
 
-	console.log(`[zcash-shield] Selected ${selected.length} UTXOs totaling ${selectedTotal} ZAT`)
-
-	// Re-check fee after coin selection — more inputs = more logical actions
-	const actualTransparent = Math.max(selected.length, 1) // max(inputs, change_outputs)
-	const actualLogical = actualTransparent + nOrchardActions
-	const actualFee = 5000 * Math.max(2, actualLogical)
-	if (actualFee > fee) {
-		console.log(`[zcash-shield] ZIP-317 fee adjusted: ${fee} → ${actualFee} ZAT (${actualLogical} logical actions)`)
-		// Re-select with higher fee if needed
-		if (selectedTotal < params.amount + actualFee) {
-			throw new Error(
-				`Insufficient balance after ZIP-317 fee adjustment: have ${selectedTotal} ZAT, ` +
-				`need ${params.amount + actualFee} ZAT (${params.amount} + ${actualFee} fee for ${actualLogical} actions)`
-			)
-		}
+	const finalFee = computeFee(selected.length)
+	if (selectedTotal < params.amount + finalFee) {
+		throw new Error(
+			`Insufficient transparent balance after ZIP-317 fee for ${selected.length} input(s): ` +
+			`have ${selectedTotal} ZAT, need ${params.amount + finalFee} ZAT ` +
+			`(${params.amount} amount + ${finalFee} fee for ${selected.length + nOrchardActions} logical actions)`
+		)
 	}
-	const finalFee = Math.max(fee, actualFee)
+
+	console.log(`[zcash-shield] Selected ${selected.length} UTXOs totaling ${selectedTotal} ZAT, fee=${finalFee} ZAT`)
 
 	// Derive scriptPubKey from pubkey if UTXOs don't have it (Pioneer often omits it)
 	const derivedScriptPubKey = await p2pkhScriptPubKey(compressedPubkey!)
@@ -297,6 +426,7 @@ async function _shieldZecInner(
 	// requires firmware support that may not be present. Check first and
 	// fall back to Orchard-only signing with a clear error for transparent.
 	console.log("[zcash-shield] Requesting device signatures...")
+	opts?.onProgress?.("signing")
 
 	const hasTransparentInputs = buildResult.transparent_inputs.length > 0
 
@@ -317,7 +447,8 @@ async function _shieldZecInner(
 
 	let signatures: any
 	try {
-		signatures = await wallet.zcashSignPczt(signingRequest, buildResult.orchard_signing_request.sighash)
+		const signFn = () => wallet.zcashSignPczt(signingRequest, buildResult.orchard_signing_request.sighash)
+		signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 	} catch (e: any) {
 		if (e?.message?.includes("Unknown message") && hasTransparentInputs) {
 			throw new Error(
@@ -351,8 +482,10 @@ async function _shieldZecInner(
 	console.log(`[zcash-shield] raw_tx (first 200): ${raw_tx?.slice(0, 200)}`)
 	console.log(`[zcash-shield] raw_tx length: ${raw_tx?.length / 2} bytes`)
 	console.log("[zcash-shield] Broadcasting...")
+	opts?.onProgress?.("broadcasting")
 	await sendCommand("broadcast", { raw_tx })
 
-	console.log(`[zcash-shield] Shield transaction sent: ${txid}`)
-	return { txid }
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-shield] Shield transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }

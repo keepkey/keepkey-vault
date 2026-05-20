@@ -8,7 +8,9 @@
 		"initChoose": "セットアップ方法を選択",
 		"initProgress": "ウォレットを設定中",
 		"initLabel": "デバイスに名前を付ける",
-		"complete": "セットアップ完了！"
+		"complete": "セットアップ完了！",
+		"verifySeed": "リカバリーフレーズを確認",
+		"securityTips": "セキュリティのヒント"
 	},
 	"visibleSteps": {
 		"bootloader": "ブートローダー",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "KeepKeyが更新プロセスをガイドします。",
 		"bootloaderDetected": "ブートローダーモードを検出しました",
 		"deviceReadyForUpdate": "KeepKeyはブートローダーモードで、更新の準備ができています。",
-		"updateBootloaderTo": "ブートローダーをv{{version}}に更新"
+		"updateBootloaderTo": "ブートローダーをv{{version}}に更新",
+		"doNotHoldButton": "再接続するときにボタンを押し続けないでください。通常どおり接続してください。ボタンを押したままにすると、デバイスが再びブートローダーモードになります。"
 	},
 	"firmware": {
 		"title": "ファームウェアの更新",
@@ -113,7 +116,13 @@
 		"manualReconnectStep1": "1. KeepKeyを抜いてください",
 		"manualReconnectStep2": "2. 5秒待ってください",
 		"manualReconnectStep3": "3. もう一度接続してください",
-		"manualReconnectNote": "デバイスが検出されると、セットアップは自動的に続行されます。"
+		"manualReconnectNote": "デバイスが検出されると、セットアップは自動的に続行されます。",
+		"unsignedBootloaderWarning": "未署名の開発者向けファームウェアをインストールしています。このデバイスで以前に署名済みの公式ファームウェアを実行していた場合、すべてのデータが消去されます。これはハードウェアで強制されるセキュリティ境界であり、署名済みファームウェアへ戻る場合も同じです。",
+		"unsignedBootloaderAcknowledge": "これによりデバイスが消去される可能性があり、seed をバックアップ済みであることを理解しています",
+		"autoRebooting": "デバイスを再起動しています...",
+		"autoRebootingDetail": "KeepKey は新しいファームウェアで自動的に再起動します。通常は数秒で完了します。",
+		"waitingForDevice": "デバイスを待機しています...",
+		"wipeAndFlash": "消去して書き込み"
 	},
 	"initChoose": {
 		"title": "ウォレットをセットアップ",
@@ -123,7 +132,12 @@
 		"createWallet": "ウォレットを作成",
 		"recoverExistingWallet": "既存のウォレットを復元",
 		"recoverDescription": "デバイスでリカバリーシードフレーズを入力",
-		"recoverWallet": "ウォレットを復元"
+		"recoverWallet": "ウォレットを復元",
+		"seedLength": "seed の長さ",
+		"words": "語",
+		"entropyNote": "seed の長さを増やしても、ウォレット全体のエントロピーは向上しません。",
+		"learnMore": "詳細を見る",
+		"howManyWords": "seed は何語ですか？"
 	},
 	"initProgress": {
 		"creatingWallet": "ウォレットを作成中...",
@@ -133,7 +147,11 @@
 		"followPrompts": "KeepKeyデバイスの画面の指示に従ってください。",
 		"lookAtDevice": "KeepKeyデバイスを見て、画面の指示に従ってください。",
 		"failedToCreate": "ウォレットの作成に失敗しました",
-		"failedToRecover": "ウォレットの復元に失敗しました"
+		"failedToRecover": "ウォレットの復元に失敗しました",
+		"writeDownWarning": "すべての単語を書き留めてください！",
+		"writeDownDetail": "リカバリーフレーズがデバイス画面に表示されています。各単語を紙に書き留めてください。これは唯一のバックアップです。この単語は再表示されません。",
+		"deviceLost": "デバイスが切断されました。続行するには再接続するか、戻って再試行してください。",
+		"goBack": "戻る"
 	},
 	"initLabel": {
 		"walletCreated": "ウォレットが作成されました！",
@@ -155,6 +173,65 @@
 		"stepOf": "ステップ {{current}} / {{total}}",
 		"settingUpWallet": "ウォレットを設定中...",
 		"previous": "前へ",
-		"next": "次へ"
+		"next": "次へ",
+		"securityTips": "セキュリティのヒント"
+	},
+	"verifySeed": {
+		"title": "リカバリーフレーズを確認",
+		"descriptionEmulator": "正しいバックアップがあることを確認するため、seed からランダムに3語を尋ねます。",
+		"description": "リカバリーフレーズを正しく書き留めたことを確認します。デバイスがいくつかの単語の入力を求めます。",
+		"verifyNow": "今すぐ確認",
+		"skipForNow": "スキップして後で確認",
+		"enterWords": "要求された単語を入力",
+		"enterWordsDetail": "リカバリーフレーズの各位置に対応する正しい単語を入力してください。",
+		"checkWords": "単語を確認",
+		"verifying": "確認中...",
+		"checkingAnswers": "回答を確認しています...",
+		"followDevice": "KeepKey の指示に従って、要求された単語を入力してください。",
+		"verified": "リカバリーフレーズを確認しました！",
+		"verifiedDetail": "バックアップは正しいです。安全に保管し、誰にも共有しないでください。",
+		"continue": "続行",
+		"failed": "確認に失敗しました",
+		"failedDetail": "入力した単語が一致しません。もう一度試すか、書き留めたバックアップを確認してください。",
+		"tryAgain": "再試行"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "PIN はシャッフルされます",
+				"body": "KeepKey はランダムな数字グリッドを表示します。画面上の位置をデバイス上の数字に対応させてください。配置は毎回変わるため、画面を見られても PIN を盗まれにくくなります。"
+			},
+			"words": {
+				"title": "単語 = ウォレット",
+				"body": "12/24語を紙に書き留め、安全な場所に保管してください。コンピューター、Webサイト、電話には絶対に入力しないでください。これらの単語を持つ人は資金を管理できます。"
+			},
+			"recovery": {
+				"title": "シャッフルされた復元入力",
+				"body": "復元時、KeepKey はデバイス画面のアルファベットをシャッフルします。実際の文字を入力するのではなく、位置で単語を入力します。キーロガーには有用な情報が残りません。"
+			},
+			"deviceScreen": {
+				"title": "デバイス画面を信頼する",
+				"body": "承認前に、KeepKey 上で必ずアドレスと金額を確認してください。コンピューターは侵害される可能性がありますが、デバイス画面は信頼できます。特に大きな取引では重要です。"
+			},
+			"appConnections": {
+				"title": "アプリ接続はオフです",
+				"body": "サードパーティアプリと dApp は REST API 経由で接続します。保護のため既定では無効です。必要なときだけ設定で有効にしてください。"
+			},
+			"hiddenWallets": {
+				"title": "隠しウォレット（上級）",
+				"body": "パスフレーズは同じ seed から別の隠しウォレットを作成します。有効にした場合は必ず覚えてください。間違ったパスフレーズはエラーではなく、別の空のウォレットを開きます。"
+			}
+		},
+		"actions": {
+			"getStarted": "開始",
+			"startUsing": "KeepKey を使い始める",
+			"skipIntro": "紹介をスキップ",
+			"skipTips": "ヒントをスキップ"
+		},
+		"stepCounter": "{{current}} / {{total}}",
+		"walletLabels": {
+			"visible": "表示",
+			"hidden": "非表示"
+		}
 	}
 }

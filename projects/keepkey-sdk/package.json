@@ -1,17 +1,59 @@
 {
   "name": "keepkey-vault-sdk",
-  "version": "2.0.3",
-  "description": "TypeScript SDK for KeepKey Vault REST API — zero dependencies, native fetch",
+  "version": "3.0.1",
+  "description": "Typed TypeScript SDK for the KeepKey REST API — zero dependencies, native fetch, works in browser, Node, Bun, and edge runtimes.",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
-  "files": ["lib"],
-  "scripts": {
-    "build": "tsc",
-    "test": "tsc && node __tests__/test.js"
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./openapi/swagger.json": "./openapi/swagger.json",
+    "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "lib",
+    "openapi",
+    "README.md"
+  ],
+  "scripts": {
+    "bundle:openapi": "node scripts/bundle-openapi.mjs",
+    "build": "npm run bundle:openapi && tsc",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node __tests__/test.js",
+    "test:chain": "npm run build && node tests/run-all.js chain",
+    "test:sweep": "npm run build && node tests/run-all.js sweep",
+    "test:all": "npm run build && node tests/run-all.js",
+    "test:device": "npm run build && node tests/run-all.js"
+  },
+  "keywords": [
+    "keepkey",
+    "hardware-wallet",
+    "hardware",
+    "wallet",
+    "bitcoin",
+    "ethereum",
+    "cosmos",
+    "sdk",
+    "rest",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/keepkey/keepkey-vault.git",
+    "directory": "projects/keepkey-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/keepkey/keepkey-vault/issues"
+  },
+  "homepage": "https://docs.keepkey.com",
+  "author": "KeepKey",
+  "license": "MIT",
   "devDependencies": {
     "typescript": "^5.5.0"
-  },
-  "keywords": ["keepkey", "hardware-wallet", "vault", "sdk"],
-  "license": "MIT"
+  }
 }

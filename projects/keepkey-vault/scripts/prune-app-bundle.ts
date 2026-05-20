@@ -368,6 +368,27 @@ console.log(`[prune-bundle] node_modules: ${(sizeBefore / 1024).toFixed(1)}MB â†
 
 // === RE-PACK ===
 
+// Patch node:buffer bug â€” Bun bundler compiles `export * from 'node:buffer'`
+// to `__reExport(exports, node_buffer)` but never defines `node_buffer`.
+// Electrobun creates the tar.zst BEFORE patch-bundle.ts runs on _build/,
+// so the archive always has the unpatched file. Fix it here after extracting.
+const bunIndexPath = join(appPath, 'Contents', 'Resources', 'app', 'bun', 'index.js')
+if (existsSync(bunIndexPath)) {
+  const { readFileSync: readF, writeFileSync: writeF } = await import('node:fs')
+  let code = readF(bunIndexPath, 'utf8')
+  const patchMarker = '/* node_buffer_patch */'
+  const needle = 'var exports_protocol_import = {};'
+  if (code.includes(needle) && !code.includes(patchMarker)) {
+    code = `${patchMarker}\nimport * as node_buffer from "node:buffer";\n${code}`
+    writeF(bunIndexPath, code)
+    console.log('[prune-bundle] Patched node_buffer bug in bun/index.js')
+  } else if (code.includes(patchMarker)) {
+    console.log('[prune-bundle] node_buffer already patched')
+  } else {
+    console.log('[prune-bundle] No node_buffer patch needed')
+  }
+}
+
 // Re-sign native binaries after pruning (signatures may have been invalidated)
 const DEVELOPER_ID = process.env.ELECTROBUN_DEVELOPER_ID
 const TEAM_ID = process.env.ELECTROBUN_TEAMID
@@ -396,19 +417,48 @@ if (DEVELOPER_ID && TEAM_ID) {
   console.log(`[prune-bundle] Re-signed ${signedCount} native binaries`)
 }
 
-// Re-sign the entire .app bundle with entitlements (JIT required for Bun)
+// Re-sign Mach-O executables in Contents/MacOS/ individually with entitlements.
+// This follows the same pattern as scripts/sign-macos-app.sh (the canonical signing script).
+// codesign --deep only applies --entitlements to the bundle's main executable,
+// so bun (which needs allow-jit for JIT compilation) must be signed individually.
 const entitlementsPath = join(projectRoot, 'entitlements.plist')
-if (DEVELOPER_ID && TEAM_ID) {
-  console.log('[prune-bundle] Re-signing .app bundle with entitlements...')
+const macosDir = join(appPath, 'Contents', 'MacOS')
+if (DEVELOPER_ID && TEAM_ID && existsSync(macosDir)) {
+  const entitlementArgs = existsSync(entitlementsPath)
+    ? ['--entitlements', entitlementsPath]
+    : []
+
+  console.log('[prune-bundle] Re-signing MacOS/ executables with entitlements...')
+  for (const entry of readdirSync(macosDir)) {
+    const fullPath = join(macosDir, entry)
+    if (!statSync(fullPath).isFile()) continue
+    // Check if it's a Mach-O binary
+    const fileCheck = Bun.spawnSync(['file', '-b', fullPath])
+    const fileType = fileCheck.stdout.toString()
+    if (!fileType.includes('Mach-O')) continue
+
+    console.log(`[prune-bundle]   signing ${entry} with entitlements`)
+    const r = Bun.spawnSync([
+      'codesign', '--force', '--verbose', '--timestamp',
+      '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
+      '--options', 'runtime',
+      ...entitlementArgs,
+      fullPath,
+    ])
+    if (r.exitCode !== 0) {
+      console.warn(`[prune-bundle]   WARNING: failed to sign ${entry}: ${r.stderr.toString()}`)
+    }
+  }
+
+  // Now sign the .app bundle itself (without --deep since internals are already signed)
+  console.log('[prune-bundle] Re-signing .app bundle...')
   const signArgs = [
-    'codesign', '--force', '--deep', '--verbose', '--timestamp',
+    'codesign', '--force', '--verbose', '--timestamp',
     '--sign', `Developer ID Application: ${DEVELOPER_ID} (${TEAM_ID})`,
     '--options', 'runtime',
+    ...entitlementArgs,
+    appPath,
   ]
-  if (existsSync(entitlementsPath)) {
-    signArgs.push('--entitlements', entitlementsPath)
-  }
-  signArgs.push(appPath)
   result = Bun.spawnSync(signArgs)
   if (result.exitCode !== 0) {
     console.warn(`[prune-bundle] WARNING: .app re-signing failed: ${result.stderr.toString()}`)

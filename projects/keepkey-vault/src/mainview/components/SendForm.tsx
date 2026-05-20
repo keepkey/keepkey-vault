@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import { formatBalance, formatUsd } from "../lib/formatting"
+import { formatBalance } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import type { ChainDef } from "../../shared/chains"
@@ -12,7 +13,7 @@ import { validateAddress } from "../../shared/address-validation"
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
 // ── Confetti ────────────────────────────────────────────────────────────────
-const CONFETTI_COLORS = ['#4CAF50', '#FFD700', '#23DCC8', '#3b82f6', '#8b5cf6', '#ec4899']
+const CONFETTI_COLORS = ['#8be3c4', '#e9c46a', '#a8efd2', '#9f8ce0', '#e08c7b', '#f2d27e']
 const confettiPieces = Array.from({ length: 40 }, (_, i) => ({
   id: i,
   color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
@@ -41,6 +42,7 @@ interface SendFormProps {
 
 export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
 	const { t } = useTranslation("send")
+	const { fmt, fmtCompact } = useFiat()
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [usdAmount, setUsdAmount] = useState("")
@@ -86,14 +88,17 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
 	// Derive per-unit USD price from available balance data
+	// NOTE: balance.balanceUsd includes token USD — use nativeBalanceUsd for native price
 	const pricePerUnit = useMemo(() => {
 		if (isTokenSend && token?.priceUsd) return token.priceUsd
-		if (!isTokenSend && balance?.balanceUsd && balance.balance) {
+		if (!isTokenSend && balance?.balance) {
 			const bal = parseFloat(balance.balance)
-			if (bal > 0) return balance.balanceUsd / bal
+			if (bal <= 0) return 0
+			const nativeUsd = balance.nativeBalanceUsd ?? balance.balanceUsd ?? 0
+			return nativeUsd > 0 ? nativeUsd / bal : 0
 		}
 		return 0
-	}, [isTokenSend, token?.priceUsd, balance?.balanceUsd, balance?.balance])
+	}, [isTokenSend, token?.priceUsd, balance?.nativeBalanceUsd, balance?.balanceUsd, balance?.balance])
 
 	const hasPrice = pricePerUnit > 0
 
@@ -161,6 +166,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				feeLevel,
 				isMax,
 				caip: isTokenSend ? token!.caip : undefined,
+				nativeBalance: !isTokenSend ? balance?.balance : undefined,
 				tokenBalance: isTokenSend ? token!.balance : undefined,
 				tokenDecimals: isTokenSend && token!.decimals != null ? token!.decimals : undefined,
 				xpubOverride: xpubOverride || undefined,
@@ -174,7 +180,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -258,12 +264,20 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Build explorer URL from assetData
 	const explorerUrl = useMemo(() => {
 		if (!txid) return null
+		// EVM explorers expect 0x prefix; all others do not
+		let normalizedTxid = chain.chainFamily === 'evm'
+			? (txid.startsWith('0x') ? txid : '0x' + txid)
+			: txid.replace(/^0x/i, '')
+		// Tronscan URL routing is case-sensitive — keep the same posture as
+		// shared/chains.ts:getExplorerTxUrl so TRON outbound txids (often emitted
+		// uppercase by THORChain) produce a working tronscan link.
+		if (chain.chainFamily === 'tron') normalizedTxid = normalizedTxid.toLowerCase()
 		const caip = isTokenSend && token?.caip ? token.caip : chain.caip
 		const asset = getAsset(caip)
-		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', txid)
+		if (asset?.explorerTxLink) return asset.explorerTxLink.replace('{{txid}}', normalizedTxid)
 		// Fallback: try the chain's native CAIP
 		const chainAsset = getAsset(chain.caip)
-		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', txid)
+		if (chainAsset?.explorerTxLink) return chainAsset.explorerTxLink.replace('{{txid}}', normalizedTxid)
 		return null
 	}, [txid, chain, token, isTokenSend])
 
@@ -278,7 +292,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		<VStack gap="4" align="stretch" py="2" px="2">
 			{/* Token badge — shown when sending a token */}
 			{isTokenSend && (
-				<Flex align="center" justify="space-between" bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" px="3" py="2" borderRadius="lg">
+				<Flex align="center" justify="space-between" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" px="3" py="2" borderRadius="999px">
 					<Flex align="center" gap="2">
 						<Text fontSize="xs" color="kk.gold" fontWeight="600">{t("sendingToken")}</Text>
 						<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{token!.symbol}</Text>
@@ -293,7 +307,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			)}
 
 			{/* Balance display */}
-			<Flex justify="space-between" align="center" bg="rgba(255,255,255,0.03)" px="3" py="2" borderRadius="lg">
+			<Flex justify="space-between" align="center" bg="var(--ink-0)" border="1px solid var(--line)" px="3.5" py="2.5" borderRadius="12px">
 				<Text fontSize="xs" color="kk.textMuted">{t("available")}</Text>
 				<Flex direction="column" align="flex-end">
 					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
@@ -301,20 +315,42 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					</Text>
 					{hasPrice && (
 						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
-							${formatUsd(parseFloat(displayBalance) * pricePerUnit)}
+							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
 						</Text>
 					)}
 				</Flex>
 			</Flex>
 			{/* Gas balance hint for token sends */}
-			{isTokenSend && balance && (
-				<Flex justify="space-between" align="center" px="3">
-					<Text fontSize="10px" color="kk.textMuted">{t("gas")} ({chain.symbol})</Text>
-					<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
-						{formatBalance(balance.balance)} {chain.symbol}
-					</Text>
-				</Flex>
-			)}
+			{isTokenSend && balance && (() => {
+				const nativeUsd = balance.nativeBalanceUsd ?? 0
+				const isLow = nativeUsd < 1
+				if (isLow) {
+					return (
+						<Box bg="rgba(224,140,123,0.10)" border="1px solid rgba(224,140,123,0.28)" borderRadius="14px" px="3.5" py="3">
+							<Flex align="center" gap="2" mb="1">
+								<svg width="20" height="20" viewBox="0 0 24 24" fill="var(--rose)" xmlns="http://www.w3.org/2000/svg">
+									<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
+								</svg>
+								<Text fontSize="sm" fontWeight="700" color="var(--rose)">Low {chain.symbol} for Gas</Text>
+							</Flex>
+							<Text fontSize="xs" color="var(--rose)">
+								You need {chain.symbol} to pay network fees. Deposit {chain.symbol} to send tokens on {chain.coin}.
+							</Text>
+							<Text fontSize="xs" fontFamily="mono" color="var(--rose)" mt="1">
+								{t("gas")}: {formatBalance(balance.balance)} {chain.symbol}
+							</Text>
+						</Box>
+					)
+				}
+				return (
+					<Flex justify="space-between" align="center" px="3">
+						<Text fontSize="10px" color="kk.textMuted">{t("gas")} ({chain.symbol})</Text>
+						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+							{formatBalance(balance.balance)} {chain.symbol}
+						</Text>
+					</Flex>
+				)
+			})()}
 
 			{/* Phase: Input */}
 			{phase === 'input' && (
@@ -326,10 +362,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								value={recipient}
 								onChange={(e) => setRecipient(e.target.value)}
 								placeholder={t("addressPlaceholder")}
-								bg="kk.bg"
-								border="1px solid"
-								borderColor="kk.border"
-								color="kk.textPrimary"
+								bg="var(--ink-0)"
+								border="1px solid var(--line)"
+								borderRadius="12px"
+								color="var(--text-0)"
 								size="sm"
 								fontFamily="mono"
 								px="3"
@@ -340,7 +376,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								variant="outline"
 								borderColor="kk.border"
 								color="kk.textSecondary"
-								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
 								onClick={() => setShowScanner(true)}
 								px="2"
 								minW="36px"
@@ -368,10 +404,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									value={isMax ? 'MAX' : (inputMode === 'crypto' ? amount : usdAmount)}
 									onChange={(e) => inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleUsdChange(e.target.value)}
 									placeholder={inputMode === 'usd' ? '0.00' : t("amountPlaceholder")}
-									bg="kk.bg"
-									border="1px solid"
-									borderColor="kk.border"
-									color="kk.textPrimary"
+									bg="var(--ink-0)"
+									border="1px solid var(--line)"
+									borderRadius="12px"
+									color="var(--text-0)"
 									size="sm"
 									fontFamily="mono"
 									disabled={isMax}
@@ -381,11 +417,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Button
 								size="sm"
 								variant={isMax ? "solid" : "outline"}
-								bg={isMax ? "kk.gold" : "transparent"}
-								color={isMax ? "black" : "kk.textSecondary"}
-								borderColor="kk.border"
-								_hover={{ bg: isMax ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
-								onClick={() => { setIsMax(!isMax); setAmount(""); setUsdAmount("") }}
+								bg={isMax ? "var(--gold)" : "var(--ink-3)"}
+								color={isMax ? "var(--ink-0)" : "var(--text-1)"}
+								border="1px solid var(--line)"
+								borderRadius="10px"
+								fontWeight="600"
+								fontSize="11px"
+								_hover={{ bg: isMax ? "var(--gold-2)" : "var(--ink-4)" }}
+								onClick={() => { setIsMax(prev => !prev); setAmount(""); setUsdAmount("") }}
 								px="4" py="2"
 								h="32px"
 							>
@@ -408,7 +447,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									<Flex align="center" gap="1">
 										{inputMode === 'crypto' ? (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amountUsdPreview !== null ? `$${formatUsd(amountUsdPreview)}` : '$0.00'}
+												{amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0)}
 											</Text>
 										) : (
 											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
@@ -421,7 +460,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									</Flex>
 								)}
 								{pricePerUnit > 0 && (
-									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = ${formatUsd(pricePerUnit)}</Text>
+									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = {fmtCompact(pricePerUnit)}</Text>
 								)}
 							</Flex>
 						)}
@@ -446,10 +485,12 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 										size="xs"
 										flex="1"
 										variant={feeLevel === opt.val ? "solid" : "outline"}
-										bg={feeLevel === opt.val ? "kk.gold" : "transparent"}
-										color={feeLevel === opt.val ? "black" : "kk.textSecondary"}
-										borderColor="kk.border"
-										_hover={{ bg: feeLevel === opt.val ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
+										bg={feeLevel === opt.val ? "var(--gold)" : "var(--ink-3)"}
+										color={feeLevel === opt.val ? "var(--ink-0)" : "var(--text-1)"}
+										border="1px solid var(--line)"
+										borderRadius="10px"
+										fontWeight="500"
+										_hover={{ bg: feeLevel === opt.val ? "var(--gold-2)" : "var(--ink-4)" }}
 										onClick={() => setFeeLevel(opt.val)}
 									>
 										{opt.label}
@@ -465,9 +506,11 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 					<Button
 						size="sm"
-						bg="kk.gold"
-						color="black"
-						_hover={{ bg: "kk.goldHover" }}
+						bg="var(--gold)"
+						color="var(--ink-0)"
+						fontWeight="600"
+						borderRadius="12px"
+						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
 						disabled={loading || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
 						px="4" py="2"
@@ -481,7 +524,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* Phase: Built — show fee, sign button */}
 			{phase === 'built' && buildResult && (
 				<>
-					<Box bg="rgba(255,215,0,0.06)" border="1px solid" borderColor="kk.gold" borderRadius="lg" p="4">
+					<Box bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="14px" p="4">
 						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
@@ -492,7 +535,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(amountUsdPreview)}</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}
 							</Flex>
 						</Flex>
@@ -501,7 +544,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
 								{buildResult.feeUsd != null && buildResult.feeUsd > 0 && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">${formatUsd(buildResult.feeUsd)}</Text>
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(buildResult.feeUsd)}</Text>
 								)}
 							</Flex>
 						</Flex>
@@ -530,9 +573,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							size="sm"
 							flex="1"
 							variant="outline"
-							color="kk.textSecondary"
-							borderColor="kk.border"
-							_hover={{ bg: "rgba(255,255,255,0.06)" }}
+							color="var(--text-2)"
+							border="1px solid var(--line)"
+							borderRadius="12px"
+							_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
 							onClick={() => setPhase('input')}
 							px="4" py="2"
 						>
@@ -557,8 +601,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* Phase: Signed — show broadcast button */}
 			{phase === 'signed' && signedTx && (
 				<>
-					<Box bg="rgba(35,220,200,0.06)" border="1px solid" borderColor="#23DCC8" borderRadius="lg" p="4">
-						<Text fontSize="xs" color="#23DCC8" mb="1">{t("transactionSigned")}</Text>
+					<Box bg="rgba(139,227,196,0.06)" border="1px solid rgba(139,227,196,0.22)" borderRadius="14px" p="4">
+						<Text fontSize="xs" color="var(--teal)" mb="1">{t("transactionSigned")}</Text>
 						<Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" maxH="80px" overflow="auto" wordBreak="break-all">
 							{typeof signedTx === 'string' ? signedTx : (signedTx?.value?.signatures?.[0]?.serializedTx || signedTx?.serializedTx || signedTx?.serialized || JSON.stringify(signedTx))}
 						</Text>
@@ -569,9 +613,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							size="sm"
 							flex="1"
 							variant="outline"
-							color="kk.textSecondary"
-							borderColor="kk.border"
-							_hover={{ bg: "rgba(255,255,255,0.06)" }}
+							color="var(--text-2)"
+							border="1px solid var(--line)"
+							borderRadius="12px"
+							_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
 							onClick={() => setPhase('input')}
 							px="4" py="2"
 						>
@@ -580,7 +625,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						<Button
 							size="sm"
 							flex="2"
-							bg="#23DCC8"
+							bg="var(--teal)"
 							color="black"
 							_hover={{ opacity: 0.9 }}
 							onClick={handleBroadcast}
@@ -606,8 +651,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					))}
 
 					<VStack gap="3" position="relative" zIndex={1}>
-						<Box bg="rgba(76,175,80,0.08)" border="1px solid" borderColor="#4CAF50" borderRadius="lg" p="3" w="full">
-							<Text fontSize="xs" color="#4CAF50" fontWeight="600" mb="2">{t("sent")}</Text>
+						<Box bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.25)" borderRadius="14px" p="3.5" w="full">
+							<Text fontSize="xs" color="var(--teal)" fontWeight="600" mb="2">{t("sent")}</Text>
 							<Flex justify="space-between" align="center" gap="2">
 								<Flex align="center" gap="1" minW="0" flex="1">
 									<Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{t("tx")}</Text>
@@ -624,7 +669,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						<Flex gap="2" w="full">
 							{explorerUrl && (
 								<Button
-									size="sm" flex="1" bg="#23DCC8" color="black"
+									size="sm" flex="1" bg="var(--teal)" color="black"
 									_hover={{ opacity: 0.9 }}
 									onClick={() => rpcRequest('openUrl', { url: explorerUrl! }).catch(() => {})}
 								>
@@ -632,8 +677,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								</Button>
 							)}
 							<Button
-								size="sm" flex="1" bg="kk.gold" color="black"
-								_hover={{ bg: "kk.goldHover" }}
+								size="sm" flex="1" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" borderRadius="12px"
+								_hover={{ bg: "var(--gold-2)" }}
 								onClick={reset}
 							>
 								{t("sendAnother")}
@@ -645,7 +690,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 			{/* Error display */}
 			{error && (
-				<Box bg="rgba(255,23,68,0.08)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="3">
+				<Box bg="rgba(224,140,123,0.08)" border="1px solid rgba(224,140,123,0.25)" borderRadius="14px" p="3">
 					<Text fontSize="xs" color="kk.error">{error}</Text>
 				</Box>
 			)}
@@ -693,10 +738,10 @@ function Field({ label, value, onChange, placeholder, disabled }: {
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
 				placeholder={placeholder}
-				bg="kk.bg"
-				border="1px solid"
-				borderColor="kk.border"
-				color="kk.textPrimary"
+				bg="var(--ink-0)"
+				border="1px solid var(--line)"
+				borderRadius="12px"
+				color="var(--text-0)"
 				size="sm"
 				fontFamily="mono"
 				disabled={disabled}

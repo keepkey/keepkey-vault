@@ -27,6 +27,35 @@ export function playChaChing() {
   }
 }
 
+/** Synthesize a two-yip bark — no audio file required. */
+export function playBark() {
+  try {
+    const ctx = getCtx()
+    const now = ctx.currentTime
+    barkBurst(ctx, now, 200, 0.14)
+    barkBurst(ctx, now + 0.18, 300, 0.10)
+  } catch {
+    // Audio blocked (e.g. before first user gesture) — silently skip.
+  }
+}
+
+function barkBurst(ctx: AudioContext, startTime: number, freq: number, duration: number) {
+  const osc = ctx.createOscillator()
+  osc.type = "sawtooth"
+  osc.frequency.setValueAtTime(freq * 1.3, startTime)
+  osc.frequency.exponentialRampToValueAtTime(freq * 0.55, startTime + duration)
+
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0.0001, startTime)
+  gain.gain.exponentialRampToValueAtTime(0.32, startTime + 0.012)
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration)
+
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(startTime)
+  osc.stop(startTime + duration)
+}
+
 function playTone(ctx: AudioContext, freq: number, startTime: number, duration: number, volume: number) {
   const osc = ctx.createOscillator()
   const gain = ctx.createGain()

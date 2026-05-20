@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Limpar seu KeepKey apagará todas as chaves e configurações. Você perderá acesso aos seus fundos se não tiver sua frase de recuperação.",
 		"wipeAcknowledge": "Fiz backup da minha frase de recuperação e entendo o que estou fazendo",
 		"wipeDevice": "Limpar dispositivo",
-		"wiping": "Limpando..."
+		"wiping": "Limpando...",
+		"incorrectPin": "PIN incorreto",
+		"tryAgainDescription": "Verifique a tela do seu KeepKey e tente novamente"
 	},
 	"passphrase": {
 		"title": "Inserir frase-senha",

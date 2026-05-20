@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "KeepKeyを消去すると、すべてのキーと設定が削除されます。リカバリーフレーズがない場合、資金へのアクセスを失います。",
 		"wipeAcknowledge": "リカバリーフレーズをバックアップしており、自分が何をしているか理解しています",
 		"wipeDevice": "デバイスを消去",
-		"wiping": "消去中..."
+		"wiping": "消去中...",
+		"incorrectPin": "PINが正しくありません",
+		"tryAgainDescription": "KeepKeyの画面を確認してもう一度お試しください"
 	},
 	"passphrase": {
 		"title": "パスフレーズを入力",

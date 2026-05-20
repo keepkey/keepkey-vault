@@ -11,7 +11,7 @@
 	"showFiltered_other": "{{count}} filtrelenmiş tokeni göster",
 	"hideFiltered_one": "{{count}} filtrelenmiş tokeni gizle",
 	"hideFiltered_other": "{{count}} filtrelenmiş tokeni gizle",
-	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Şüpheli spam ({{count}})",
 	"markAsSafe": "Güvenli olarak işaretle",
 	"hideToken": "Tokeni gizle",

@@ -162,7 +162,7 @@ export function RecoveryWordEntry({
             boxShadow="0 8px 32px rgba(0,0,0,0.6)"
           >
             <VStack gap={4} textAlign="center">
-              <FaExclamationTriangle color="#FFB300" size={48} />
+              <FaExclamationTriangle color="var(--gold)" size={48} />
               <Text fontSize="xl" fontWeight="bold" color="kk.warning">
                 {t('recovery.wordNotFoundTitle')}
               </Text>
@@ -182,7 +182,7 @@ export function RecoveryWordEntry({
       : isCipherError ? t('recovery.incorrectWordsTitle')
       : t('recovery.recoveryFailedTitle')
     const errBorderColor = isPinMismatch ? 'kk.warning' : 'kk.error'
-    const iconColor = isPinMismatch ? '#FFB300' : '#FF1744'
+    const iconColor = isPinMismatch ? 'var(--gold)' : 'var(--rose)'
 
     return (
       <Flex
@@ -298,7 +298,7 @@ export function RecoveryWordEntry({
           gap={4}
           style={{ animation: "kkWordAccepted 0.6s ease-out forwards" }}
         >
-          <FaCheckCircle color="#00C853" size={64} />
+          <FaCheckCircle color="var(--teal)" size={64} />
           <Text fontSize="2xl" fontWeight="bold" color="kk.success">
             {t('recovery.wordAccepted', { number: acceptedWord })}
           </Text>
@@ -421,7 +421,7 @@ export function RecoveryWordEntry({
                 alignItems="center"
                 justifyContent="center"
                 transition="all 0.15s"
-                boxShadow={active ? "0 0 0 3px rgba(255,215,0,0.2)" : "none"}
+                boxShadow={active ? "0 0 0 3px rgba(233,196,106,0.2)" : "none"}
               >
                 {filled && (
                   <Text

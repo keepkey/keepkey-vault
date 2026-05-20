@@ -11,6 +11,11 @@ export default defineConfig({
 		emptyOutDir: true,
 		rollupOptions: {
 			output: {
+				// Fixed filenames — no content hashes. Desktop app loaded via
+				// views:// protocol; hashed names cause WebView2 cache mismatch on upgrade.
+				entryFileNames: "assets/[name].js",
+				chunkFileNames: "assets/[name].js",
+				assetFileNames: "assets/[name][extname]",
 				manualChunks(id) {
 					// Split the large asset data JSON into its own chunk
 					if (id.includes("assetData.json")) return "asset-data";

@@ -11,7 +11,7 @@
  *   5. Sidecar (or Pioneer API) broadcasts
  */
 
-import { sendCommand, isSidecarReady, startSidecar } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded } from "../zcash-sidecar"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -22,6 +22,31 @@ export interface ShieldedSendParams {
 	account?: number
 	/** Optional memo */
 	memo?: string
+}
+
+/**
+ * Optional wrapper around the device-signing call. When the emulator is the
+ * active transport, the caller passes a function that pops the user-approval
+ * UI and pre-writes ButtonAck + DebugLinkDecision into the firmware's confirm
+ * loop. Without this on the emulator, the firmware busy-loops in
+ * confirm_helper() and the watchdog SIGKILLs the bun process.
+ */
+export type DeviceSignWrap = <T>(fn: () => Promise<T>) => Promise<T>
+
+export async function displayOrchardAddressOnDevice(wallet: any, account: number = 0): Promise<{ address: string }> {
+	if (typeof wallet.zcashDisplayAddress !== "function") {
+		throw new Error(
+			"View on device requires firmware 7.15.0+ with ZcashDisplayAddress and a matching hdwallet wrapper"
+		)
+	}
+
+	const H = 0x80000000
+	const result = await wallet.zcashDisplayAddress({
+		addressNList: [H + 32, H + 133, H + account],
+		account,
+	})
+	if (!result?.address) throw new Error("Device did not return a Zcash address")
+	return { address: result.address }
 }
 
 export interface SigningRequest {
@@ -126,7 +151,28 @@ export async function initializeOrchardFromDevice(wallet: any, account: number =
 	// Send FVK components to sidecar
 	console.log("[zcash-shielded] Setting FVK on sidecar...")
 	const result = await sendCommand("set_fvk", { ak: akHex, nk: nkHex, rivk: rivkHex })
+	// Update the in-process cache so hasFvkLoaded() / getCachedFvk() see the
+	// new FVK without each caller having to remember to call setCachedFvk().
+	setCachedFvk(result.address, result.fvk)
 	return { fvk: result.fvk, address: result.address }
+}
+
+/**
+ * Ensure the sidecar is running and the FVK is loaded before any operation
+ * that touches notes (scan, balance, build, send). Direct RPC / REST callers
+ * may not have gone through the Privacy tab's auto-init path, so the FVK
+ * cache could be empty even when the device supports Orchard. Without this,
+ * `scanOrchardNotes` / `buildShieldedTx` etc. would hit a sidecar with no
+ * FVK and fail with "No FVK set".
+ */
+export async function ensureFvkLoaded(wallet: any, account: number = 0): Promise<void> {
+	if (!isSidecarReady()) {
+		await startSidecar()
+	}
+	if (!hasFvkLoaded()) {
+		console.log("[zcash] FVK not loaded — initializing from device before scan/send...")
+		await initializeOrchardFromDevice(wallet, account)
+	}
 }
 
 /**
@@ -151,10 +197,21 @@ export async function scanOrchardNotes(startHeight?: number, fullRescan?: boolea
 
 /**
  * Get the current shielded balance (in zatoshis).
+ *
+ * `confirmed` and `notes_unspent` reflect every unspent note (regardless of
+ * depth). `spendable_confirmed` and `spendable_notes_count` only count notes
+ * deeper than `min_confirmations` from `synced_to` — that's the set the
+ * builder will actually accept, so UI controls (Max button, available-to-send)
+ * should use these.
  */
 export async function getShieldedBalance(): Promise<{
 	confirmed: number
 	pending: number
+	notes_unspent?: number
+	spendable_confirmed?: number
+	spendable_notes_count?: number
+	min_confirmations?: number
+	synced_to?: number | null
 }> {
 	if (!isSidecarReady()) {
 		throw new Error("Sidecar not initialized — call initializeOrchard() first")
@@ -225,13 +282,14 @@ let sendInProgress = false
 export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
+	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
 ): Promise<{ txid: string }> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
 	sendInProgress = true
 	try {
-		return await _sendShieldedInner(wallet, params)
+		return await _sendShieldedInner(wallet, params, opts)
 	} finally {
 		sendInProgress = false
 	}
@@ -240,6 +298,7 @@ export async function sendShielded(
 async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
+	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
 ): Promise<{ txid: string }> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
@@ -267,7 +326,10 @@ async function _sendShieldedInner(
 	//   ZcashSignPCZT (digests + metadata) → ZcashPCZTActionAck
 	//   For each action: ZcashPCZTAction (fields) → ZcashPCZTActionAck | ZcashSignedPCZT
 	console.log("[zcash-shielded] Requesting device signatures...")
-	const signatures = await deviceSign(wallet, signing_request)
+	opts?.onProgress?.("signing")
+	const signatures = opts?.signWrap
+		? await opts.signWrap(() => deviceSign(wallet, signing_request))
+		: await deviceSign(wallet, signing_request)
 	console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
 
 	// 3. Finalize via sidecar (apply sigs + binding sig + serialize)
@@ -276,10 +338,13 @@ async function _sendShieldedInner(
 
 	// 4. Broadcast
 	console.log("[zcash-shielded] Broadcasting...")
+	opts?.onProgress?.("broadcasting")
 	await broadcastShieldedTx(raw_tx)
 
-	console.log(`[zcash-shielded] Transaction sent: ${txid}`)
-	return { txid }
+	const { txidToDisplayOrder } = await import("./zcash-shield")
+	const displayTxid = txidToDisplayOrder(txid)
+	console.log(`[zcash-shielded] Transaction sent: ${displayTxid}`)
+	return { txid: displayTxid }
 }
 
 /**

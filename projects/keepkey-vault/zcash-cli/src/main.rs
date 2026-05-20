@@ -19,6 +19,11 @@ use orchard::keys::FullViewingKey;
 use zcash_address::unified::{self, Container, Encoding};
 use zcash_protocol::consensus::NetworkType;
 
+/// Minimum confirmations required before a note is treated as spendable.
+/// Matches zcashd / ywallet / zecwallet defaults; protects against small
+/// reorgs and lightwalletd tree-state lag (see `wallet_db::get_spendable_notes`).
+const MIN_CONFIRMATIONS: u64 = 10;
+
 /// Global state persisted across IPC commands within a single sidecar session.
 struct State {
     db: Option<wallet_db::WalletDb>,
@@ -27,6 +32,8 @@ struct State {
     pending_pczt: Option<pczt_builder::PcztState>,
     /// Pending shield (transparent → Orchard) PCZT state waiting for signatures
     pending_shield_pczt: Option<pczt_builder::ShieldPcztState>,
+    /// Pending deshield (Orchard → transparent) PCZT state waiting for signatures
+    pending_deshield_pczt: Option<pczt_builder::DeshieldPcztState>,
 }
 
 impl State {
@@ -36,6 +43,7 @@ impl State {
             fvk: None,
             pending_pczt: None,
             pending_shield_pczt: None,
+            pending_deshield_pczt: None,
         }
     }
 
@@ -46,6 +54,7 @@ impl State {
             fvk: None,
             pending_pczt: None,
             pending_shield_pczt: None,
+            pending_deshield_pczt: None,
         }
     }
 
@@ -132,11 +141,16 @@ fn encode_unified_address(addr: &orchard::Address) -> Result<String> {
     Ok(ua.encode(&NetworkType::Main))
 }
 
+/// Parsed recipient — either an Orchard address or a transparent scriptPubKey.
+enum ParsedRecipient {
+    Orchard(orchard::Address),
+    Transparent { script_pubkey: Vec<u8> },
+}
+
 /// Parse a recipient address string into an Orchard Address.
 ///
 /// Supports:
 ///   - Unified Address (`u1...`) — extracts the Orchard receiver
-///   - Transparent (`t1...`) — returns error (deshielding not yet supported)
 ///   - Raw hex (86 chars = 43 bytes) — legacy/debug path
 fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
     let trimmed = addr.trim();
@@ -159,11 +173,11 @@ fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
         return Err(anyhow::anyhow!("Unified Address has no Orchard receiver — cannot send from shielded pool"));
     }
 
-    // Transparent address (t1... / t3...)
+    // Transparent address (t1... / t3...) — use parse_recipient_flexible for deshielding
     if trimmed.starts_with("t1") || trimmed.starts_with("t3") {
         return Err(anyhow::anyhow!(
-            "Deshielding (Orchard → transparent) is not yet supported. \
-             Please send to a Unified Address (u1...) that contains an Orchard receiver."
+            "Transparent addresses require the deshield command. \
+             Use build_deshield_pczt for Orchard → transparent transactions."
         ));
     }
 
@@ -175,6 +189,105 @@ fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
     orchard::Address::from_raw_address_bytes(&arr)
         .into_option()
         .ok_or_else(|| anyhow::anyhow!("Invalid raw Orchard address bytes"))
+}
+
+/// Parse a recipient that may be Orchard or transparent (for deshielding).
+fn parse_recipient_flexible(addr: &str) -> Result<ParsedRecipient> {
+    let trimmed = addr.trim();
+
+    // Transparent address (t1... P2PKH / t3... P2SH)
+    if trimmed.starts_with("t1") || trimmed.starts_with("t3") {
+        let script_pubkey = decode_transparent_address(trimmed)?;
+        return Ok(ParsedRecipient::Transparent { script_pubkey });
+    }
+
+    // Otherwise, try Orchard
+    let orchard_addr = parse_recipient_address(trimmed)?;
+    Ok(ParsedRecipient::Orchard(orchard_addr))
+}
+
+/// Decode a Zcash transparent address (t1=P2PKH, t3=P2SH) into its scriptPubKey.
+fn decode_transparent_address(addr: &str) -> Result<Vec<u8>> {
+    // Base58Check decode
+    const ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut num = vec![0u8; 0];
+
+    // Base58 → big integer → bytes
+    let mut big = vec![0u8; 1];
+    for ch in addr.chars() {
+        let digit = ALPHABET.find(ch)
+            .ok_or_else(|| anyhow::anyhow!("Invalid base58 character: {}", ch))? as u8;
+        // Multiply big by 58 and add digit
+        let mut carry = digit as u32;
+        for byte in big.iter_mut().rev() {
+            carry += (*byte as u32) * 58;
+            *byte = (carry & 0xFF) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            big.insert(0, (carry & 0xFF) as u8);
+            carry >>= 8;
+        }
+    }
+
+    // Count leading '1's → leading zero bytes
+    let leading_zeros = addr.chars().take_while(|&c| c == '1').count();
+    num = vec![0u8; leading_zeros];
+    num.extend_from_slice(&big);
+
+    // Should be 26 bytes: 2 version + 20 hash + 4 checksum
+    if num.len() < 26 {
+        return Err(anyhow::anyhow!("Base58Check decode too short: {} bytes", num.len()));
+    }
+
+    let payload = &num[..num.len() - 4];
+    let expected_checksum = &num[num.len() - 4..];
+
+    // Base58Check: checksum = first 4 bytes of SHA256(SHA256(payload))
+    use sha2::{Sha256, Digest};
+    let first = Sha256::digest(payload);
+    let second = Sha256::digest(&first);
+    if &second[..4] != expected_checksum {
+        return Err(anyhow::anyhow!(
+            "Invalid address checksum — address may contain a typo. \
+             Expected {:02x}{:02x}{:02x}{:02x}, got {:02x}{:02x}{:02x}{:02x}",
+            second[0], second[1], second[2], second[3],
+            expected_checksum[0], expected_checksum[1], expected_checksum[2], expected_checksum[3],
+        ));
+    }
+
+    let version = &payload[..2];
+    let hash = &payload[2..];
+
+    if hash.len() != 20 {
+        return Err(anyhow::anyhow!("Invalid address hash length: {}", hash.len()));
+    }
+
+    match version {
+        // Zcash mainnet P2PKH: 0x1CB8
+        [0x1C, 0xB8] => {
+            // OP_DUP OP_HASH160 <20> <hash160> OP_EQUALVERIFY OP_CHECKSIG
+            let mut script = Vec::with_capacity(25);
+            script.push(0x76); // OP_DUP
+            script.push(0xA9); // OP_HASH160
+            script.push(0x14); // push 20 bytes
+            script.extend_from_slice(hash);
+            script.push(0x88); // OP_EQUALVERIFY
+            script.push(0xAC); // OP_CHECKSIG
+            Ok(script)
+        }
+        // Zcash mainnet P2SH: 0x1CBD
+        [0x1C, 0xBD] => {
+            // OP_HASH160 <20> <hash160> OP_EQUAL
+            let mut script = Vec::with_capacity(23);
+            script.push(0xA9); // OP_HASH160
+            script.push(0x14); // push 20 bytes
+            script.extend_from_slice(hash);
+            script.push(0x87); // OP_EQUAL
+            Ok(script)
+        }
+        _ => Err(anyhow::anyhow!("Unknown address version: {:02x}{:02x}", version[0], version[1])),
+    }
 }
 
 // ── Command handlers ───────────────────────────────────────────────────
@@ -369,14 +482,25 @@ async fn handle_scan(state: &mut State, params: &Value) -> Result<Value> {
 
     let db = state.ensure_db()?;
 
-    // Full rescan: clear DB scan progress so scanner starts from Orchard activation
     if full_rescan {
+        // Full rescan: clear DB scan progress so scanner starts from KeepKey release block
         info!("Full rescan requested — clearing scan progress");
         db.clear_scan_progress()?;
+    } else if let Some(h) = start_height {
+        // Targeted rescan: reset the scan cursor to just before the requested height
+        // so the scanner treats it as contiguous and advances the cursor forward.
+        // Existing notes are preserved (INSERT OR IGNORE on unique nullifier).
+        info!("Targeted rescan from {} — resetting scan cursor", h);
+        if h > 0 {
+            db.set_last_scanned_height(h - 1)?;
+        } else {
+            db.clear_scan_progress()?;
+        }
     }
 
     let mut client = scanner::LightwalletClient::connect(None).await?;
-    let result = client.scan_with_persistence(&fvk, db, start_height).await?;
+    // After cursor reset, the scanner picks up from last_scanned_height + 1 naturally
+    let result = client.scan_with_persistence(&fvk, db, None).await?;
 
     Ok(serde_json::json!({
         "balance": result.total_received,
@@ -391,12 +515,28 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let db = state.ensure_db()?;
     let balance = db.get_balance()?;
     let (total, unspent) = db.get_note_count()?;
+    let synced_to = db.last_scanned_height()?;
+
+    // Spendable view: only notes at depth >= MIN_CONFIRMATIONS from `synced_to`
+    // (proxy for tip — exact when scan is at tip, conservative when behind).
+    // The build_*_pczt paths use the same filter; UI controls (e.g. the deshield
+    // "Max" button) need this view so they don't propose amounts the builder
+    // would later reject as "all unspent notes are within N confs".
+    let max_h = synced_to.unwrap_or(0).saturating_sub(MIN_CONFIRMATIONS);
+    let spendable_notes = db.get_spendable_notes(Some(max_h))?;
+    let spendable_confirmed: u64 = spendable_notes.iter().map(|n| n.value).sum();
+    let spendable_count = spendable_notes.len() as u64;
 
     Ok(serde_json::json!({
         "confirmed": balance,
         "pending": 0,
         "notes_total": total,
         "notes_unspent": unspent,
+        "spendable_confirmed": spendable_confirmed,
+        "spendable_notes_count": spendable_count,
+        "min_confirmations": MIN_CONFIRMATIONS,
+        "synced_to": synced_to,
+        "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
     }))
 }
 
@@ -424,17 +564,34 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
     // Parse recipient address — supports UA (u1...), transparent (t1...), or raw hex
     let recipient = parse_recipient_address(recipient_str)?;
 
-    // Get spendable notes
-    let db = state.ensure_db()?;
-    let notes = db.get_spendable_notes()?;
-    if notes.is_empty() {
-        return Err(anyhow::anyhow!("No spendable notes — scan first"));
-    }
-
-    // Query current consensus branch ID from lightwalletd
+    // Connect first so we can ask the chain for its tip + branch id together.
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
+
+    // Min-confirmations: skip notes mined within the last MIN_CONFIRMATIONS
+    // blocks. A note received in the last few blocks can fail the chain's
+    // Halo2 proof verification on broadcast — its position in the local tree
+    // may differ from the chain's after a small reorg, or lightwalletd's
+    // tree state may lag the cmx scan. 10 matches zcashd / ywallet defaults.
+    let tip = lwd_client.get_latest_block_height().await?;
+    let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
+
+    let db = state.ensure_db()?;
+    let notes = db.get_spendable_notes(Some(max_block_height))?;
+    if notes.is_empty() {
+        // Either truly empty, or every note is too recent. Distinguish so the
+        // user sees an actionable message instead of "no spendable notes".
+        let total_unspent = db.get_spendable_notes(None)?.len();
+        if total_unspent > 0 {
+            return Err(anyhow::anyhow!(
+                "All {} unspent notes are within {} confirmations of the chain tip ({}). \
+                 Wait a few minutes and retry.",
+                total_unspent, MIN_CONFIRMATIONS, tip,
+            ));
+        }
+        return Err(anyhow::anyhow!("No spendable notes — scan first"));
+    }
 
     // Build PCZT with real chain tree data
     let pczt_state = pczt_builder::build_pczt(
@@ -590,6 +747,119 @@ async fn handle_finalize_shield(state: &mut State, params: &Value) -> Result<Val
         &transparent_sigs,
         &orchard_sigs,
         compressed_pubkey.as_deref(),
+    )?;
+
+    Ok(serde_json::json!({
+        "raw_tx": hex::encode(&raw_tx),
+        "txid": txid,
+    }))
+}
+
+// ── Deshield (Orchard → transparent) IPC handlers ────────────────────────
+
+async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result<Value> {
+    let fvk = state.fvk.as_ref()
+        .ok_or_else(|| anyhow::anyhow!("No FVK set — call set_fvk first"))?
+        .clone();
+
+    let recipient_str = params.get("recipient")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing recipient (t1... or t3... address)"))?;
+    let amount = params.get("amount")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
+    let account = params.get("account")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    // Parse recipient — must be a transparent address for deshielding
+    let script_pubkey = match parse_recipient_flexible(recipient_str)? {
+        ParsedRecipient::Transparent { script_pubkey } => script_pubkey,
+        ParsedRecipient::Orchard(_) => {
+            return Err(anyhow::anyhow!(
+                "Deshield requires a transparent address (t1.../t3...). \
+                 For shielded sends (u1...), use build_pczt instead."
+            ));
+        }
+    };
+
+    let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
+    let branch_id = lwd_client.get_consensus_branch_id().await?;
+    info!("Using consensus branch ID: 0x{:08x}", branch_id);
+
+    // Min-confirmations gate (see handle_build_pczt for rationale).
+    let tip = lwd_client.get_latest_block_height().await?;
+    let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
+
+    let db = state.ensure_db()?;
+    let notes = db.get_spendable_notes(Some(max_block_height))?;
+    if notes.is_empty() {
+        let total_unspent = db.get_spendable_notes(None)?.len();
+        if total_unspent > 0 {
+            return Err(anyhow::anyhow!(
+                "All {} unspent notes are within {} confirmations of the chain tip ({}). \
+                 Wait a few minutes and retry.",
+                total_unspent, MIN_CONFIRMATIONS, tip,
+            ));
+        }
+        return Err(anyhow::anyhow!("No spendable notes — scan first"));
+    }
+
+    // Build the transparent output(s)
+    let transparent_output = pczt_builder::DeshieldTransparentOutput {
+        script_pubkey: hex::encode(&script_pubkey),
+        value: amount,
+    };
+
+    let deshield_state = pczt_builder::build_deshield_pczt(
+        &fvk, notes, transparent_output, amount, account, branch_id,
+        &mut lwd_client, db,
+    ).await?;
+
+    // Build the signing request JSON for the TypeScript layer
+    let orchard_json = serde_json::to_value(&deshield_state.orchard_signing_request)
+        .unwrap_or_default();
+
+    let transparent_outputs_json: Vec<Value> = deshield_state.transparent_outputs.iter().map(|o| {
+        serde_json::json!({
+            "value": o.value,
+            "script_pubkey": hex::encode(&o.script_pubkey),
+        })
+    }).collect();
+
+    let signing_request = serde_json::json!({
+        "orchard_signing_request": orchard_json,
+        "transparent_outputs": transparent_outputs_json,
+        "display": {
+            "amount": format!("{:.8} ZEC", amount as f64 / 1e8),
+            "fee": deshield_state.orchard_signing_request.display.fee,
+            "action": "Deshield to transparent"
+        }
+    });
+
+    state.pending_deshield_pczt = Some(deshield_state);
+
+    Ok(signing_request)
+}
+
+async fn handle_finalize_deshield(state: &mut State, params: &Value) -> Result<Value> {
+    let deshield_state = state.pending_deshield_pczt.take()
+        .ok_or_else(|| anyhow::anyhow!("No pending deshield PCZT — call build_deshield_pczt first"))?;
+
+    let orchard_sigs_json = params.get("orchard_signatures")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing orchard_signatures array"))?;
+
+    let mut orchard_sigs: Vec<Vec<u8>> = Vec::new();
+    for sig_val in orchard_sigs_json {
+        let sig_hex = sig_val.as_str()
+            .ok_or_else(|| anyhow::anyhow!("Orchard signature must be hex string"))?;
+        orchard_sigs.push(hex::decode(sig_hex)?);
+    }
+
+    let (raw_tx, txid) = pczt_builder::finalize_deshield_pczt(
+        deshield_state,
+        &orchard_sigs,
     )?;
 
     Ok(serde_json::json!({
@@ -926,7 +1196,9 @@ async fn main() {
         Err(e) => { error!("Failed to auto-load FVK: {}", e); false }
     };
 
-    // Build ready signal with FVK status
+    // Build ready signal with FVK status + scan state
+    let synced_to = state.ensure_db().ok()
+        .and_then(|db| db.last_scanned_height().ok().flatten());
     let ready_data = if has_fvk {
         let fvk = state.fvk.as_ref().unwrap();
         let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
@@ -940,10 +1212,16 @@ async fn main() {
                 "ak": hex::encode(&fvk_bytes[..32]),
                 "nk": hex::encode(&fvk_bytes[32..64]),
                 "rivk": hex::encode(&fvk_bytes[64..96]),
-            }
+            },
+            "synced_to": synced_to,
+            "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
         })
     } else {
-        serde_json::json!({"ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false})
+        serde_json::json!({
+            "ok": true, "ready": true, "version": "0.1.0", "fvk_loaded": false,
+            "synced_to": synced_to,
+            "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
+        })
     };
 
     // Send ready signal
@@ -990,6 +1268,8 @@ async fn main() {
             "finalize" => handle_finalize(&mut state, &request.params).await,
             "build_shield_pczt" => handle_build_shield_pczt(&mut state, &request.params).await,
             "finalize_shield" => handle_finalize_shield(&mut state, &request.params).await,
+            "build_deshield_pczt" => handle_build_deshield_pczt(&mut state, &request.params).await,
+            "finalize_deshield" => handle_finalize_deshield(&mut state, &request.params).await,
             "broadcast" => handle_broadcast(&mut state, &request.params).await,
             "get_transactions" => handle_get_transactions(&mut state, &request.params).await,
             "backfill_memos" => handle_backfill_memos(&mut state, &request.params).await,

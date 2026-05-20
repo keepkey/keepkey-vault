@@ -1,0 +1,81 @@
+/* UI v3 design tokens — source of truth lifted from the design study.
+   Consumed by components in src/mainview/components/v3/. Existing Chakra
+   tokens (theme.ts) remain authoritative for everything not yet migrated. */
+
+:root {
+  /* Surfaces — graphite with a hint of warmth */
+  --ink-0:   #0b0b0e;
+  --ink-1:   #101015;
+  --ink-2:   #16161d;
+  --ink-3:   #1c1c25;
+  --ink-4:   #25252f;
+  --line:    rgba(255, 255, 255, 0.06);
+  --line-2:  rgba(255, 255, 255, 0.10);
+
+  /* Text */
+  --text-0:  #f5f4ef;
+  --text-1:  #c8c7be;
+  --text-2:  #8a8a82;
+  --text-3:  #56564f;
+
+  /* Accents — used sparingly */
+  --gold:    #e9c46a;
+  --gold-2:  #f2d27e;
+  --teal:    #8be3c4;
+  --teal-2:  #a8efd2;
+  --rose:    #e08c7b;
+  --violet:  #9f8ce0;
+
+  /* Token brand swatches */
+  --eth:     #6c7be8;
+  --btc:     #f0a85c;
+  --usdt:    #4eb591;
+  --usdc:    #4f7fc8;
+  --trx:     #d4543c;
+  --sahara:  #d4c75c;
+  --eeth:    #8b7ae0;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+
+  /* Shadows */
+  --shadow-1:    0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2:    0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 0 1px rgba(139, 227, 196, 0.25), 0 0 40px -8px rgba(139, 227, 196, 0.35);
+
+  /* Type stacks — mono is the app-wide default; sans/serif aliases collapse to mono. */
+  --font-mono:  'Geist Mono', ui-monospace, monospace;
+  --font-sans:  var(--font-mono);
+  --font-serif: var(--font-mono);
+}
+
+/* Class-scoped helpers — do NOT bind to body so existing Chakra screens are
+   untouched. v3-rooted subtrees opt in via .v3-root or class utilities. */
+.v3-root {
+  font-family: var(--font-sans);
+  letter-spacing: -0.005em;
+  background: var(--ink-0);
+  color: var(--text-0);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+.v3-mono  { font-family: var(--font-mono);  font-feature-settings: "tnum"; }
+.v3-serif { font-family: var(--font-mono); font-style: normal; }
+
+/* Page enter transition (mirrors study) */
+@keyframes v3-fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.v3-page-enter { animation: v3-fadeUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes v3-pulseGlow {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(233, 196, 106, 0.4)); }
+  50%      { filter: drop-shadow(0 0 12px rgba(233, 196, 106, 0.8)); }
+}
+
+@keyframes v3-spin { to { transform: rotate(360deg); } }

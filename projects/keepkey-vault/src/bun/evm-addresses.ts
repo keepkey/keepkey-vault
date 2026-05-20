@@ -8,7 +8,7 @@
  */
 import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
-import type { EvmTrackedAddress, EvmAddressSet } from '../shared/types'
+import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
 
 /** Build an EVM derivation path for a given address index: m/44'/60'/0'/0/{index} */
 export function evmAddressPath(index: number): number[] {
@@ -21,6 +21,14 @@ export class EvmAddressManager extends EventEmitter {
   private addresses: EvmTrackedAddress[] = []
   private selectedIndex: number = 0
   private initPromise: Promise<EvmAddressSet> | null = null
+
+  /**
+   * Optional gate: when set, persistIndices() is a no-op if this returns false,
+   * and _doInitialize ignores stored indices (uses default [0]).
+   * Prevents passphrase-wallet sessions from reading/writing hidden-wallet
+   * address indices to/from disk.
+   */
+  canPersist: (() => boolean) | null = null
 
   /** Initialize with persisted indices. Concurrent calls coalesce. */
   async initialize(wallet: any): Promise<EvmAddressSet> {
@@ -36,14 +44,19 @@ export class EvmAddressManager extends EventEmitter {
   private async _doInitialize(wallet: any): Promise<EvmAddressSet> {
     this.addresses = []
 
-    // Load persisted indices (default to [0])
-    const stored = getSetting(SETTINGS_KEY)
-    let indices: number[]
-    try {
-      indices = stored ? JSON.parse(stored) : [0]
-      if (!Array.isArray(indices) || indices.length === 0) indices = [0]
-    } catch {
-      indices = [0]
+    // Load persisted indices (default to [0]).
+    // PRIVACY: When canPersist gate returns false (passphrase wallet), ignore
+    // stored indices — they belong to the standard wallet and would leak which
+    // indices it tracks into the hidden wallet's address list.
+    let indices: number[] = [0]
+    if (!this.canPersist || this.canPersist()) {
+      const stored = getSetting(SETTINGS_KEY)
+      try {
+        indices = stored ? JSON.parse(stored) : [0]
+        if (!Array.isArray(indices) || indices.length === 0) indices = [0]
+      } catch {
+        indices = [0]
+      }
     }
 
     // Derive each index
@@ -139,10 +152,31 @@ export class EvmAddressManager extends EventEmitter {
     }
   }
 
-  /** Reset all address balances to 0 (call before portfolio refresh). */
-  resetBalances(): void {
+  /** Store the selected chain's balance for a specific EVM address. */
+  setAddressChainBalance(address: string, chainId: string, balance: EvmAddressChainBalance): void {
+    const lower = address.toLowerCase()
     for (const a of this.addresses) {
-      a.balanceUsd = 0
+      if (a.address.toLowerCase() === lower) {
+        a.chainBalances = {
+          ...(a.chainBalances || {}),
+          [chainId]: balance,
+        }
+        this.recalculateBalanceUsd(a)
+        break
+      }
+    }
+  }
+
+  /** Reset all address balances to 0 (call before portfolio refresh). */
+  resetBalances(chainId?: string): void {
+    for (const a of this.addresses) {
+      if (chainId) {
+        if (a.chainBalances) delete a.chainBalances[chainId]
+        this.recalculateBalanceUsd(a)
+      } else {
+        a.balanceUsd = 0
+        a.chainBalances = {}
+      }
     }
   }
 
@@ -182,7 +216,7 @@ export class EvmAddressManager extends EventEmitter {
         )
         if (hasBalance) {
           // Add this index permanently
-          this.addresses.push({ addressIndex: idx, address, balanceUsd: 0 })
+          this.addresses.push({ addressIndex: idx, address, balanceUsd: 0, chainBalances: {} })
           this.addresses.sort((a, b) => a.addressIndex - b.addressIndex)
           discovered.push(idx)
         }
@@ -234,12 +268,22 @@ export class EvmAddressManager extends EventEmitter {
     // Re-check after await
     if (this.addresses.some(a => a.addressIndex === index)) return
 
-    this.addresses.push({ addressIndex: index, address, balanceUsd: 0 })
+    this.addresses.push({ addressIndex: index, address, balanceUsd: 0, chainBalances: {} })
     // Keep sorted by index
     this.addresses.sort((a, b) => a.addressIndex - b.addressIndex)
   }
 
+  private recalculateBalanceUsd(address: EvmTrackedAddress): void {
+    address.balanceUsd = Object.values(address.chainBalances || {}).reduce(
+      (sum, b) => sum + (Number(b.balanceUsd) || 0),
+      0,
+    )
+  }
+
   private persistIndices(): void {
+    // PRIVACY: If a gate is set and returns false (passphrase wallet session),
+    // skip writing indices to disk — they belong to the hidden wallet.
+    if (this.canPersist && !this.canPersist()) return
     const indices = this.addresses.map(a => a.addressIndex)
     setSetting(SETTINGS_KEY, JSON.stringify(indices))
   }

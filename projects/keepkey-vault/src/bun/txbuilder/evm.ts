@@ -6,6 +6,7 @@
  * Supports native ETH transfers and ERC-20 token transfers.
  */
 import type { ChainDef } from '../../shared/chains'
+import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
@@ -146,7 +147,22 @@ export async function buildEvmTx(
 
   if (feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
   else if (feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
-  if (chainId === 1 && gasPrice < BigInt(1e9)) gasPrice = BigInt(1e9)
+
+  // Enforce 1 gwei floor for known chains — RPC/Pioneer frequently report unrealistically low fees
+  const MIN_GAS_WEI: Record<number, bigint> = {
+    1: BigInt(1e9),      // Ethereum
+    8453: BigInt(1e9),   // Base
+    42161: BigInt(1e9),  // Arbitrum
+    10: BigInt(1e9),     // Optimism
+    56: BigInt(3e9),     // BSC
+    137: BigInt(30e9),   // Polygon
+    43114: BigInt(25e9), // Avalanche
+  }
+  const minGas = MIN_GAS_WEI[chainId]
+  if (minGas && gasPrice < minGas) {
+    console.log(`${TAG} Gas price ${gasPrice} below floor ${minGas} — using floor`)
+    gasPrice = minGas
+  }
 
   // 2. Nonce
   let nonce: number | undefined
@@ -240,7 +256,7 @@ export async function buildEvmTx(
           throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
         }
       }
-      amountBaseUnits = parseUnits(tokBalStr, tokenDecimals)
+      amountBaseUnits = tokenMaxSpendableBaseUnits(tokBalStr, tokenDecimals) ?? 0n
       if (amountBaseUnits <= 0n) throw new Error('Token balance is zero')
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')
@@ -272,8 +288,10 @@ export async function buildEvmTx(
 
   let amountWei: bigint
   if (isMax) {
-    if (nativeBalance <= gasFee) throw new Error('Insufficient funds to cover gas fees')
-    amountWei = nativeBalance - gasFee * 110n / 100n // 10% gas buffer for safety
+    const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
+    if (nativeBalance <= gasReserve) throw new Error('Insufficient funds to cover gas fees')
+    amountWei = nativeBalance - gasReserve
+    if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
   } else {
     amountWei = parseUnits(String(params.amount), 18)
     if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {

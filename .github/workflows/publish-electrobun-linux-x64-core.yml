@@ -1,0 +1,126 @@
+name: Publish Electrobun Linux x64 Core
+
+# Manual workflow. Builds Electrobun's Linux core binaries (libNativeWrapper.so
+# et al.) on Ubuntu 22.04 — giving us a glibc 2.35 floor so Vault works on
+# Debian 12, Ubuntu 22.04 LTS, RHEL/Rocky 9, etc. Uploads the tarball to a
+# release on this repo, mirroring the pattern used for `electrobun-x64-core-v1`
+# (the macOS Intel cross-build).
+#
+# Re-run this workflow whenever:
+#   - The pinned electrobun ref changes (default: v1.13.1, matches npm version)
+#   - The published tag is bumped (TAG input)
+#
+# After republishing, update the X86_64_LINUX_CORE_TAG referenced by the main
+# build workflow if the tag changed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      electrobun_ref:
+        description: 'Electrobun ref to build from (tag or branch)'
+        required: false
+        default: 'v1.13.1'
+      release_tag:
+        description: 'Release tag on this repo (e.g. electrobun-linux-x64-core-v1)'
+        required: false
+        default: 'electrobun-linux-x64-core-v1'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build core (ubuntu-22.04, glibc 2.35)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init electrobun submodule
+        run: git submodule update --init --recursive modules/electrobun
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.5'
+
+      - name: Confirm runner is ubuntu-22.04
+        run: |
+          . /etc/os-release
+          echo "Running on $ID $VERSION_ID"
+          ldd --version | head -1
+          if [ "$VERSION_ID" != "22.04" ]; then
+            echo "::error::This workflow must run on ubuntu-22.04 to lock the glibc floor at 2.35"
+            exit 1
+          fi
+
+      - name: Build Linux core
+        env:
+          ELECTROBUN_REF: ${{ inputs.electrobun_ref }}
+        run: ./scripts/build-electrobun-linux-x64-core.sh
+
+      - name: Verify glibc floor of produced tarball
+        # `bash {0}` disables the default `-e -o pipefail` so a statically-
+        # linked binary (e.g. Zig's `launcher`) with no `GLIBC_` symbols
+        # produces an empty grep result + exit 1 without killing the whole
+        # step before the per-file table finishes printing. We manage exit
+        # via the `fail` flag below.
+        shell: bash {0}
+        run: |
+          TAR=artifacts/electrobun-core-linux-x64.tar.gz
+          [ -f "$TAR" ] || { echo "::error::Tarball not produced"; exit 1; }
+          WORK=$(mktemp -d)
+          tar xzf "$TAR" -C "$WORK"
+          fail=0
+          {
+            echo "## Electrobun Linux core glibc footprint"
+            echo ""
+            echo "| File | Max GLIBC |"
+            echo "|------|-----------|"
+            for f in "$WORK"/*; do
+              max=$(strings "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | uniq | tail -1)
+              max="${max#GLIBC_}"
+              echo "| \`$(basename $f)\` | ${max:-(none)} |"
+              if [ -n "$max" ]; then
+                m_major="${max%.*}"; m_minor="${max#*.}"
+                if [ "$m_major" -gt 2 ] || { [ "$m_major" -eq 2 ] && [ "$m_minor" -gt 35 ]; }; then
+                  echo "::error::$(basename $f) requires GLIBC_$max — exceeds 2.35 floor" >&2
+                  fail=1
+                fi
+              fi
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          rm -rf "$WORK"
+          [ "$fail" = "0" ] || exit 1
+
+      - name: Publish to release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag }}
+          REF: ${{ inputs.electrobun_ref }}
+        run: |
+          set -euo pipefail
+          TAR=artifacts/electrobun-core-linux-x64.tar.gz
+          NOTES="Electrobun Linux x64 core, built from upstream blackboardsh/electrobun @ \`${REF}\` on ubuntu-22.04 (glibc 2.35 floor).
+
+          Contents: launcher, extractor, libNativeWrapper.so, libNativeWrapper_cef.so, libasar.so.
+
+          Used by KeepKey Vault's Linux build to substitute for the upstream electrobun-core-linux-x64 tarball, which currently ships built against glibc 2.38 and excludes Debian 12 / Ubuntu 22.04 / RHEL 9."
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Updating existing release $TAG"
+            gh release upload "$TAG" --clobber "$TAR"
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" \
+              --title "Electrobun Linux x64 Core (glibc 2.35, built from $REF)" \
+              --notes "$NOTES" \
+              "$TAR"
+          fi
+
+          URL="https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          echo "Published: $URL"
+          echo "::notice::Published $TAG → $URL"

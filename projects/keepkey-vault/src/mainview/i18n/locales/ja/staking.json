@@ -11,7 +11,7 @@
 	"topValidatorExamples": "トップバリデーターの例",
 	"browseAllValidators": "すべてのバリデーターを閲覧",
 	"rewardsAvailable": "利用可能な報酬: {{amount}} {{symbol}}",
-	"rewardsAvailableWithUsd": "利用可能な報酬: {{amount}} {{symbol}} (~${{usd}})",
+	"rewardsAvailableWithUsd": "利用可能な報酬: {{amount}} {{symbol}} (~{{fiatValue}})",
 	"amount": "金額",
 	"max": "最大",
 	"memoOptional": "メモ（任意）",

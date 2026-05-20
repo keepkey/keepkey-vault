@@ -29,7 +29,36 @@ use crate::scanner::LightwalletClient;
 use crate::wallet_db::{SpendableNote, WalletDb};
 use crate::zip244;
 
-const DEFAULT_FEE: u64 = 10000; // 0.0001 ZEC
+/// ZIP-317 marginal fee per logical action (5000 zatoshis).
+const ZIP317_MARGINAL_FEE: u64 = 5000;
+/// ZIP-317 grace actions — minimum baseline (2 actions are "free").
+const ZIP317_GRACE_ACTIONS: u64 = 2;
+
+/// Compute ZIP-317 fee for an Orchard-only transaction.
+/// fee = marginal_fee × max(grace_actions, logical_actions)
+/// where logical_actions = max(n_spends, n_outputs) for Orchard.
+fn zip317_fee(n_spends: usize, n_outputs: usize) -> u64 {
+    let logical_actions = std::cmp::max(n_spends, n_outputs) as u64;
+    ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
+}
+
+/// ZIP-317 fee for a deshield tx (Orchard spends → 1 transparent output, 1 change note).
+///
+/// Per ZIP-317 §3, `logical_actions` uses the FINAL Orchard `action_count`
+/// (post-padding) — not the pre-padding `max(n_spends, n_outputs)`.
+/// `BundleType::DEFAULT` pads to a 2-action minimum for the anonymity set,
+/// so a 1-spend deshield has 2 orchard actions on chain.
+///
+/// Underpaying triggers the chain's "Unpaid actions is higher than the limit"
+/// mempool rejection even when the orchard proof verifies cleanly — because
+/// `unpaid_actions = ceil((expected_fee - actual_fee) / marginal_fee) > 0`.
+fn zip317_deshield_fee(n_spends: usize) -> u64 {
+    const N_TRANSPARENT_ACTIONS: u64 = 1; // one transparent output
+    const N_ORCHARD_OUTPUTS: usize = 1;   // change note
+    let orchard_actions = std::cmp::max(2, std::cmp::max(n_spends, N_ORCHARD_OUTPUTS)) as u64;
+    let logical_actions = orchard_actions + N_TRANSPARENT_ACTIONS;
+    ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
+}
 
 /// Per-action fields needed by the device for signing + digest verification.
 #[derive(Debug, Clone, Serialize)]
@@ -134,8 +163,15 @@ pub async fn build_pczt(
     memo: Option<String>,
 ) -> Result<PcztState> {
     let mut rng = OsRng;
-    let fee = DEFAULT_FEE;
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
+
+    // ZIP-317: fee depends on number of Orchard actions.
+    // n_outputs = 1 (recipient) + 1 (change) — but we don't know if there's
+    // change until we compute it, and change depends on fee. Use a two-pass
+    // approach: assume change exists (common case), compute fee, then verify.
+    let n_spends = notes.len();
+    let n_outputs_with_change = 2usize; // recipient + change
+    let fee = zip317_fee(n_spends, n_outputs_with_change);
     let change = total_input.checked_sub(amount + fee)
         .ok_or_else(|| anyhow::anyhow!(
             "Insufficient funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
@@ -1469,6 +1505,496 @@ fn write_compact_size(buf: &mut Vec<u8>, n: u64) {
     }
 }
 
+// ── Deshielding (Orchard → transparent) ──────────────────────────────
+
+/// Transparent output for deshield PCZT construction.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeshieldTransparentOutput {
+    pub script_pubkey: String,  // hex
+    pub value: u64,             // zatoshis
+}
+
+/// Intermediate state for deshield PCZT (between build and finalize).
+pub struct DeshieldPcztState {
+    pub pczt_bundle: orchard::pczt::Bundle,
+    pub sighash: [u8; 32],
+    pub branch_id: u32,
+    pub orchard_signing_request: SigningRequest,
+    pub transparent_outputs: Vec<zip244::TransparentOutput>,
+}
+
+/// Build a deshield PCZT: Orchard spends → transparent output.
+///
+/// Uses the same tree-building + witness extraction as `build_pczt`, but instead
+/// of an Orchard recipient output, the value goes to a transparent output.
+/// Orchard change (if any) goes back to an internal Orchard address.
+pub async fn build_deshield_pczt(
+    fvk: &FullViewingKey,
+    notes: Vec<SpendableNote>,
+    transparent_output: DeshieldTransparentOutput,
+    amount: u64,
+    account: u32,
+    branch_id: u32,
+    lwd_client: &mut crate::scanner::LightwalletClient,
+    _db: &crate::wallet_db::WalletDb,
+) -> Result<DeshieldPcztState> {
+    let mut rng = OsRng;
+    let total_input: u64 = notes.iter().map(|n| n.value).sum();
+
+    let n_spends = notes.len();
+    let fee = zip317_deshield_fee(n_spends);
+
+    let change = total_input.checked_sub(amount + fee)
+        .ok_or_else(|| anyhow::anyhow!(
+            "Insufficient shielded funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
+            total_input, amount + fee, amount, fee
+        ))?;
+
+    info!("Building deshield transaction:");
+    info!("  Inputs:  {} ZAT from {} notes", total_input, notes.len());
+    info!("  Amount:  {} ZAT → transparent", amount);
+    info!("  Fee:     {} ZAT", fee);
+    info!("  Change:  {} ZAT → Orchard", change);
+
+    // Build transparent output
+    let script_pubkey_bytes = hex::decode(&transparent_output.script_pubkey)?;
+    let transparent_outputs = vec![
+        zip244::TransparentOutput {
+            value: amount,
+            script_pubkey: script_pubkey_bytes,
+        },
+    ];
+
+    // ── Tree building: reuse exact same pattern as build_pczt ──────────────
+
+    const SHARD_SIZE: u64 = 1 << 16;
+    let mut note_positions: Vec<u64> = vec![0; notes.len()];
+    let mut found_notes = vec![false; notes.len()];
+    let mut note_shards: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+
+    for (i, spendable) in notes.iter().enumerate() {
+        let approx_pos = if let Some(pos) = spendable.position {
+            pos
+        } else {
+            let tree_size_before = if spendable.block_height > 0 {
+                lwd_client.get_orchard_tree_size_at(spendable.block_height - 1).await?
+            } else { 0 };
+            tree_size_before
+        };
+        note_shards.insert((approx_pos / SHARD_SIZE) as u32);
+        info!("Note {}: block={}, approx_shard={}", i, spendable.block_height, approx_pos / SHARD_SIZE);
+    }
+
+    let lwd_tip_height = lwd_client.get_latest_block_height().await?;
+    let subtree_roots = lwd_client.get_subtree_roots(0, 0).await?;
+    let num_shards = subtree_roots.len();
+
+    if subtree_roots.is_empty() {
+        return Err(anyhow::anyhow!("No Orchard subtree roots available from lightwalletd"));
+    }
+
+    let note_cmx_set: std::collections::HashMap<[u8; 32], usize> = notes.iter().enumerate()
+        .map(|(i, n)| (n.cmx, i))
+        .collect();
+
+    let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
+        ShardTree::new(MemoryShardStore::empty(), 100);
+
+    // Insert completed shard roots (not containing our notes)
+    for (shard_idx, root_hash, completing_height) in &subtree_roots {
+        if note_shards.contains(shard_idx) { continue; }
+        let root = MerkleHashOrchard::from_bytes(&root_hash);
+        if bool::from(root.is_none()) { continue; }
+        let addr = incrementalmerkletree::Address::above_position(
+            16.into(),
+            incrementalmerkletree::Position::from((*shard_idx as u64) * SHARD_SIZE),
+        );
+        tree.insert(addr, root.unwrap())
+            .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx, e))?;
+        debug!("Inserted shard {} root (completing_height={})", shard_idx, completing_height);
+    }
+
+    // For shards containing our notes, fetch all leaves and append
+    for shard_idx in &note_shards {
+        let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
+
+        let (fetch_start_height, actions_to_skip) = if *shard_idx == 0 {
+            (1687104u64, 0u64)
+        } else {
+            let prev_completing = subtree_roots.iter()
+                .find(|(idx, _, _)| *idx == shard_idx - 1)
+                .map(|(_, _, h)| *h)
+                .unwrap_or(1687104);
+            let tree_size_before_completing = if prev_completing > 0 {
+                lwd_client.get_orchard_tree_size_at(prev_completing - 1).await?
+            } else { 0 };
+            let tree_size_after_completing = lwd_client.get_orchard_tree_size_at(prev_completing).await?;
+            let plan = plan_incomplete_shard_fetch(
+                prev_completing, shard_start_pos,
+                tree_size_before_completing, tree_size_after_completing,
+            );
+            (plan.fetch_start_height, plan.actions_to_skip)
+        };
+
+        let is_complete_shard = subtree_roots.iter().any(|(idx, _, _)| idx == shard_idx);
+        let shard_end_height = if is_complete_shard {
+            subtree_roots.iter().find(|(idx, _, _)| idx == shard_idx).map(|(_, _, h)| *h).unwrap()
+        } else { lwd_tip_height };
+        let shard_end_pos = if is_complete_shard {
+            (*shard_idx as u64 + 1) * SHARD_SIZE
+        } else { u64::MAX };
+
+        info!("Fetching leaves for shard {} (heights {} to {})", shard_idx, fetch_start_height, shard_end_height);
+
+        let chunk_size = 10000u64;
+        let mut current_pos = shard_start_pos;
+        let mut current_height = fetch_start_height;
+        let mut global_action_counter = 0u64;
+        'block_fetch: while current_height <= shard_end_height {
+            let end = std::cmp::min(current_height + chunk_size - 1, shard_end_height);
+            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+
+            for (_block_height, txs) in &blocks {
+                for (_tx_idx, cmxs) in txs {
+                    for cmx_bytes in cmxs.iter() {
+                        if global_action_counter < actions_to_skip {
+                            global_action_counter += 1;
+                            continue;
+                        }
+                        global_action_counter += 1;
+                        if current_pos >= shard_end_pos { break 'block_fetch; }
+
+                        let cmx = orchard::note::ExtractedNoteCommitment::from_bytes(cmx_bytes);
+                        if bool::from(cmx.is_none()) { continue; }
+                        let leaf = MerkleHashOrchard::from_cmx(&cmx.unwrap());
+
+                        let retention = if let Some(&note_idx) = note_cmx_set.get(cmx_bytes) {
+                            note_positions[note_idx] = current_pos;
+                            found_notes[note_idx] = true;
+                            info!("Note {} found at pos {}", note_idx, current_pos);
+                            Retention::Marked
+                        } else {
+                            Retention::Ephemeral
+                        };
+
+                        tree.append(leaf, retention)
+                            .context(format!("Failed to append leaf at pos {}", current_pos))?;
+                        current_pos += 1;
+                    }
+                }
+            }
+            current_height = end + 1;
+        }
+    }
+
+    // Extend the local tree past the last completed shard up to the chain
+    // tip, mirroring the shield path's incomplete-shard fetch (lines ~998-1063).
+    // Without this, the tree only reflects state at the end of the last
+    // shard containing a spent note — but the chain's anchor at lwd_tip_height
+    // includes every commitment after that, so the locally-computed root
+    // can never match `get_orchard_anchor(lwd_tip_height)` and the build
+    // fails with "Orchard anchor mismatch".
+    //
+    // Skip this when our notes are already in the latest incomplete shard;
+    // that shard's per-note loop above already walks to the tip (shard_end_pos
+    // = u64::MAX, shard_end_height = lwd_tip_height), so a second pass here
+    // would double-append leaves.
+    let last_completed_shard = subtree_roots.len() as u32;
+    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(1687104);
+    if !note_shards.contains(&last_completed_shard) && lwd_tip_height > last_completed_height {
+        let shard_start_pos = (last_completed_shard as u64) * SHARD_SIZE;
+        let tree_size_before_completing = if last_completed_height > 0 {
+            lwd_client.get_orchard_tree_size_at(last_completed_height - 1).await?
+        } else { 0 };
+        let tree_size_after_completing = lwd_client.get_orchard_tree_size_at(last_completed_height).await?;
+        let plan = plan_incomplete_shard_fetch(
+            last_completed_height, shard_start_pos,
+            tree_size_before_completing, tree_size_after_completing,
+        );
+        info!(
+            "Extending tree past shard {} to chain tip (heights {} to {}, skip {} actions)",
+            last_completed_shard, plan.fetch_start_height, lwd_tip_height, plan.actions_to_skip,
+        );
+
+        let chunk_size = 10000u64;
+        let mut current_pos = shard_start_pos;
+        let mut current_height = plan.fetch_start_height;
+        let mut global_action_counter = 0u64;
+        while current_height <= lwd_tip_height {
+            let end = std::cmp::min(current_height + chunk_size - 1, lwd_tip_height);
+            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+
+            for (_block_height, txs) in &blocks {
+                for (_tx_idx, cmxs) in txs {
+                    for cmx_bytes in cmxs.iter() {
+                        if global_action_counter < plan.actions_to_skip {
+                            global_action_counter += 1;
+                            continue;
+                        }
+                        global_action_counter += 1;
+
+                        let cmx = orchard::note::ExtractedNoteCommitment::from_bytes(cmx_bytes);
+                        if bool::from(cmx.is_none()) { continue; }
+                        let leaf = MerkleHashOrchard::from_cmx(&cmx.unwrap());
+                        // Ephemeral: we never need to spend these — they're frontier-only,
+                        // present so the locally-reconstructed root reflects the chain tip.
+                        tree.append(leaf, Retention::Ephemeral)
+                            .context(format!("Failed to append frontier leaf at pos {}", current_pos))?;
+                        current_pos += 1;
+                    }
+                }
+            }
+            current_height = end + 1;
+        }
+        info!("Frontier extension done: tree size now {}", current_pos);
+    }
+
+    // Reconstruct notes
+    let mut orchard_notes: Vec<Note> = Vec::new();
+    for (i, spendable) in notes.iter().enumerate() {
+        let recipient_arr: [u8; 43] = spendable.recipient.clone().try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid recipient bytes for note {}", i))?;
+        let note_recipient = Address::from_raw_address_bytes(&recipient_arr)
+            .into_option()
+            .ok_or_else(|| anyhow::anyhow!("Invalid Orchard address for note {}", i))?;
+        let rho = Rho::from_bytes(&spendable.rho)
+            .into_option()
+            .ok_or_else(|| anyhow::anyhow!("Invalid rho for note {}", i))?;
+        let rseed = RandomSeed::from_bytes(spendable.rseed, &rho)
+            .into_option()
+            .ok_or_else(|| anyhow::anyhow!("Invalid rseed for note {}", i))?;
+        let note = Note::from_parts(
+            note_recipient, NoteValue::from_raw(spendable.value), rho, rseed,
+        ).into_option()
+            .ok_or_else(|| anyhow::anyhow!("Failed to reconstruct note {}", i))?;
+        orchard_notes.push(note);
+    }
+
+    if found_notes.iter().any(|found| !found) {
+        return Err(anyhow::anyhow!("Not all note cmxs found during tree walk"));
+    }
+
+    // Checkpoint and validate anchor
+    let anchor_checkpoint_id = u32::MAX;
+    tree.checkpoint(anchor_checkpoint_id).context("Failed to checkpoint")?;
+    let root = tree.root_at_checkpoint_id(&anchor_checkpoint_id)
+        .context("Failed to get root")?
+        .ok_or_else(|| anyhow::anyhow!("Empty Merkle tree"))?;
+
+    let computed_anchor_bytes = root.to_bytes();
+    let expected_anchor = lwd_client.get_orchard_anchor(lwd_tip_height).await?;
+    if computed_anchor_bytes != expected_anchor {
+        return Err(anyhow::anyhow!(
+            "Orchard anchor mismatch: computed={} vs expected={}",
+            hex::encode(&computed_anchor_bytes), hex::encode(&expected_anchor),
+        ));
+    }
+    let anchor: Anchor = root.into();
+
+    // ── Build PCZT bundle ──────────────────────────────────────────
+
+    let mut builder = Builder::new(BundleType::DEFAULT, anchor);
+
+    let mut sorted_notes: Vec<(u64, usize)> = note_positions.iter().enumerate()
+        .map(|(i, &pos)| (pos, i)).collect();
+    sorted_notes.sort_by_key(|(pos, _)| *pos);
+
+    for &(pos, orig_idx) in &sorted_notes {
+        let position = incrementalmerkletree::Position::from(pos);
+        let merkle_path = tree.witness_at_checkpoint_id(position, &anchor_checkpoint_id)
+            .context(format!("Failed to get witness for note {} at pos {}", orig_idx, pos))?
+            .ok_or_else(|| anyhow::anyhow!("No witness for note {} at pos {}", orig_idx, pos))?;
+        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), merkle_path.into())
+            .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", orig_idx, e))?;
+    }
+
+    // Change goes to Orchard (internal)
+    if change > 0 {
+        let change_addr = fvk.address_at(0u32, Scope::Internal);
+        let internal_ovk = fvk.to_ovk(Scope::Internal);
+        let empty_memo = { let mut m = [0u8; 512]; m[0] = 0xF6; m };
+        builder.add_output(Some(internal_ovk), change_addr, NoteValue::from_raw(change), empty_memo)
+            .map_err(|e| anyhow::anyhow!("Failed to add change output: {:?}", e))?;
+    }
+
+    let (mut pczt_bundle, _) = builder.build_for_pczt(&mut rng)
+        .map_err(|e| anyhow::anyhow!("Failed to build PCZT: {:?}", e))?;
+
+    // ── Compute ZIP-244 digests (hybrid: transparent outputs + Orchard) ──
+
+    let effects_bundle = pczt_bundle.extract_effects::<i64>()
+        .map_err(|e| anyhow::anyhow!("Failed to extract effects: {:?}", e))?
+        .ok_or_else(|| anyhow::anyhow!("Empty effects bundle"))?;
+
+    let digests = zip244::compute_zip244_digests_hybrid(
+        &effects_bundle, &[], &transparent_outputs, branch_id, 0, 0,
+    );
+    let sighash = zip244::compute_sighash(&digests, branch_id);
+
+    pczt_bundle.finalize_io(sighash, &mut rng)
+        .map_err(|e| anyhow::anyhow!("IO finalization failed: {:?}", e))?;
+
+    info!("Generating Halo2 proof for deshield...");
+    let pk = ProvingKey::build();
+    pczt_bundle.create_proof(&pk, &mut rng)
+        .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
+    info!("Proof generated successfully");
+
+    // ── Extract signing fields ──────────────────────────────────────
+
+    let n_actions = pczt_bundle.actions().len();
+    let mut action_fields: Vec<ActionFields> = Vec::new();
+
+    for i in 0..n_actions {
+        let alpha_bytes = pczt_bundle.actions()[i].spend().alpha()
+            .map(|a| a.to_repr().to_vec())
+            .unwrap_or_else(|| vec![0u8; 32]);
+        let cv_net_bytes = pczt_bundle.actions()[i].cv_net().to_bytes().to_vec();
+        let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
+        let value = pczt_bundle.actions()[i].spend().value()
+            .map(|v| v.inner()).unwrap_or(0);
+
+        let effects_action = &effects_bundle.actions()[i];
+        let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
+        let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let enc = &effects_action.encrypted_note().enc_ciphertext;
+        if enc.len() != 580 {
+            return Err(anyhow::anyhow!("Invalid enc_ciphertext length: {}", enc.len()));
+        }
+        let rk_bytes: [u8; 32] = effects_action.rk().into();
+
+        action_fields.push(ActionFields {
+            index: i as u32,
+            alpha: alpha_bytes,
+            cv_net: cv_net_bytes,
+            nullifier: nullifier_bytes,
+            cmx: cmx_bytes,
+            epk: epk_bytes,
+            enc_compact: enc[..52].to_vec(),
+            enc_memo: enc[52..564].to_vec(),
+            enc_noncompact: enc[564..].to_vec(),
+            rk: rk_bytes.to_vec(),
+            out_ciphertext: effects_action.encrypted_note().out_ciphertext.to_vec(),
+            value,
+            is_spend,
+        });
+    }
+
+    let signing_request = SigningRequest {
+        n_actions: n_actions as u32,
+        account,
+        branch_id,
+        sighash: sighash.to_vec(),
+        digests: DigestFields {
+            header: digests.header_digest.to_vec(),
+            transparent: digests.transparent_digest.to_vec(),
+            sapling: digests.sapling_digest.to_vec(),
+            orchard: digests.orchard_digest.to_vec(),
+        },
+        bundle_meta: BundleMeta {
+            flags: effects_bundle.flags().to_byte() as u32,
+            value_balance: *effects_bundle.value_balance(),
+            anchor: effects_bundle.anchor().to_bytes().to_vec(),
+        },
+        actions: action_fields,
+        display: DisplayInfo {
+            amount: format!("{:.8} ZEC", amount as f64 / 1e8),
+            fee: format!("{:.8} ZEC", fee as f64 / 1e8),
+            to: format!("transparent (deshield)"),
+        },
+    };
+
+    Ok(DeshieldPcztState {
+        pczt_bundle,
+        sighash,
+        branch_id,
+        orchard_signing_request: signing_request,
+        transparent_outputs,
+    })
+}
+
+/// Finalize a deshield PCZT: apply Orchard signatures, serialize hybrid v5 tx.
+///
+/// No transparent signatures needed — deshield has no transparent inputs.
+pub fn finalize_deshield_pczt(
+    state: DeshieldPcztState,
+    orchard_signatures: &[Vec<u8>],
+) -> Result<(Vec<u8>, String)> {
+    let mut rng = OsRng;
+    let mut pczt_bundle = state.pczt_bundle;
+    let sighash = state.sighash;
+
+    let n_actions = pczt_bundle.actions().len();
+    let is_real_spend: Vec<bool> = (0..n_actions)
+        .map(|i| pczt_bundle.actions()[i].spend().spend_auth_sig().is_none())
+        .collect();
+    let signature_plan = plan_orchard_signature_application(&is_real_spend, orchard_signatures.len())?;
+
+    // Apply Orchard signatures
+    for (i, sig_index) in signature_plan.iter().enumerate() {
+        let Some(sig_index) = sig_index else {
+            info!("Action {}: dummy spend — skipping", i);
+            continue;
+        };
+        let sig_bytes = &orchard_signatures[*sig_index];
+        if sig_bytes.len() != 64 {
+            return Err(anyhow::anyhow!("Invalid Orchard sig length for action {}: {}", i, sig_bytes.len()));
+        }
+
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(sig_bytes);
+        let signature: orchard::primitives::redpallas::Signature<orchard::primitives::redpallas::SpendAuth> = sig_arr.into();
+
+        let rk = pczt_bundle.actions()[i].spend().rk();
+        let verify_result = rk.verify(&sighash, &signature);
+        if verify_result.is_err() {
+            return Err(anyhow::anyhow!("Orchard sig verification failed for action {}", i));
+        }
+
+        pczt_bundle.actions_mut()[i]
+            .apply_signature(sighash, signature)
+            .map_err(|e| anyhow::anyhow!("Failed to apply sig for action {}: {}", i, e))?;
+    }
+
+    // Extract final bundle
+    let unbound_bundle = pczt_bundle.extract::<i64>()
+        .map_err(|e| anyhow::anyhow!("Failed to extract bundle: {}", e))?
+        .ok_or_else(|| anyhow::anyhow!("Empty bundle after extraction"))?;
+
+    let authorized_bundle = unbound_bundle.apply_binding_signature(sighash, &mut rng)
+        .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
+
+    // Serialize as hybrid v5 tx: no transparent inputs, transparent outputs, Orchard bundle
+    let tx_bytes = serialize_v5_hybrid_tx(
+        &authorized_bundle,
+        &[],   // no transparent inputs
+        &state.transparent_outputs,
+        &[],   // no transparent signatures
+        state.branch_id,
+        None,  // no pubkey needed (no transparent inputs)
+    )?;
+
+    // Compute txid
+    let header_digest = zip244::digest_header(state.branch_id, 0, 0);
+    let transparent_txid_digest = zip244::digest_transparent_txid(
+        &[],
+        &state.transparent_outputs,
+    );
+    let orchard_digest = zip244::digest_orchard(&authorized_bundle);
+    let txid_digests = zip244::Zip244Digests {
+        header_digest,
+        transparent_digest: transparent_txid_digest,
+        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+        orchard_digest,
+    };
+    let txid_hash = zip244::compute_sighash(&txid_digests, state.branch_id);
+    let txid = hex::encode(&txid_hash);
+
+    info!("Deshield tx built: {} bytes, txid: {}", tx_bytes.len(), txid);
+    Ok((tx_bytes, txid))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1484,6 +2010,25 @@ mod tests {
         buf[..8].copy_from_slice(&i.to_le_bytes());
         // This produces a valid Pallas base field element for all small i
         MerkleHashOrchard::from_bytes(&buf).unwrap()
+    }
+
+    /// ZIP-317 §3 + BundleType::DEFAULT padding. The chain counts orchard
+    /// actions post-padding; we must too, otherwise mempool rejects with
+    /// "Unpaid actions is higher than the limit" even though the orchard
+    /// proof verifies. Regression: production deshield broadcast for
+    /// (1 spend, 0.001 ZEC out, 0.0262 change) hit this with the old
+    /// pre-padding fee of 10000 ZAT — the chain wanted 15000.
+    #[test]
+    fn test_zip317_deshield_fee_post_padding() {
+        use super::zip317_deshield_fee;
+        // 1 real spend + 1 change → padded to 2 actions + 1 transparent = 3 logical.
+        assert_eq!(zip317_deshield_fee(1), 15_000);
+        // 2 real spends + 1 change → max(2, max(2,1)) = 2 actions + 1 transparent = 3.
+        assert_eq!(zip317_deshield_fee(2), 15_000);
+        // 3 real spends + 1 change → 3 actions + 1 transparent = 4 logical.
+        assert_eq!(zip317_deshield_fee(3), 20_000);
+        // 5 real spends + 1 change → 5 actions + 1 transparent = 6 logical.
+        assert_eq!(zip317_deshield_fee(5), 30_000);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -2035,5 +2580,576 @@ mod tests {
         buf[..len].copy_from_slice(&bytes[..len]);
         assert_eq!(len, 512, "Should truncate to 512");
         assert!(buf.iter().all(|&b| b == b'B'));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 4. Witness re-derivation — proves witness_at_checkpoint_id returns a
+    //    path that actually reconstructs the tree's root when applied to its
+    //    leaf. The chain's Orchard verifier checks this same invariant; if
+    //    our tests assert it, we'll catch "could not validate orchard proof"
+    //    failures locally instead of after a device confirm + Halo2 prove +
+    //    broadcast round-trip.
+    //
+    //    Existing tests only assert that witness_at_checkpoint_id returns
+    //    `Some(_)` — that's necessary but not sufficient. A path can exist
+    //    but be wrong.
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Helper: extract a witness for `pos` against `ckpt`, then verify that
+    /// applying the path to the leaf at that position re-computes the tree's
+    /// root at the same checkpoint. Panics with a descriptive message if the
+    /// witness exists but is wrong (the dangerous case the original tests
+    /// missed). Generic over tree dimensions so tests can use small trees
+    /// (`<_, 8, 4>` = 16 leaves/shard) for fast `cargo test` runs while
+    /// still exercising the same code paths as production (`<_, 32, 16>`).
+    fn assert_witness_recomputes_root<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+        tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+        pos: u64,
+        leaf: MerkleHashOrchard,
+        ckpt: u32,
+        ctx: &str,
+    ) where
+        S: shardtree::store::ShardStore<H = MerkleHashOrchard, CheckpointId = u32>,
+        S::Error: std::fmt::Debug,
+    {
+        let position = incrementalmerkletree::Position::from(pos);
+        let path = tree
+            .witness_at_checkpoint_id(position, &ckpt)
+            .unwrap_or_else(|e| panic!("[{}] witness query at pos {} failed: {:?}", ctx, pos, e))
+            .unwrap_or_else(|| panic!("[{}] no witness for pos {}", ctx, pos));
+        let computed = path.root(leaf);
+        let expected = tree
+            .root_at_checkpoint_id(&ckpt)
+            .unwrap()
+            .unwrap_or_else(|| panic!("[{}] tree root unavailable at ckpt {}", ctx, ckpt));
+        assert_eq!(
+            computed.to_bytes(),
+            expected.to_bytes(),
+            "[{}] witness for pos {} does NOT recompute tree root — \
+             this is the silent failure mode the chain reports as 'could not validate orchard proof'",
+            ctx,
+            pos,
+        );
+    }
+
+    // Tests below use ShardTree<_, 8, 4> (depth 8, shard height 4 = 16 leaves
+    // per shard, 256 leaves total max) — same approach as the existing tree
+    // tests in this file. Production uses <_, 32, 16> (65k leaves/shard) but
+    // the witness invariant we're checking is identical at any depth, and
+    // shrinking dimensions takes `cargo test` from minutes to milliseconds.
+
+    /// Sanity: witness for a marked leaf in a tree of all-appended leaves
+    /// must verify against the tree's root.
+    #[test]
+    fn test_witness_recomputes_root_pure_append() {
+        let n_leaves = 50u64;
+        let note_pos = 20u64;
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        for i in 0..n_leaves {
+            let retention = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(i), retention).unwrap();
+        }
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "pure_append");
+    }
+
+    /// Mirrors the deshield builder's tree shape: insert N-1 completed shard
+    /// roots, walk shard N from leaves marking the note, no frontier. This
+    /// is the case where notes live in the latest incomplete shard.
+    #[test]
+    fn test_witness_recomputes_root_incomplete_shard_with_marked_note() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 4; // 16
+        let n_complete_shards = 3u64;
+        let leaves_in_incomplete = 10u64;
+        let note_pos = n_complete_shards * shard_size + 5; // mid-incomplete
+
+        // Insert completed-shard roots
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        for s in 0..n_complete_shards {
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size {
+                sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
+            }
+            sub.checkpoint(0u32).unwrap();
+            let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+            let addr = Address::above_position(4.into(), Position::from(s * shard_size));
+            tree.insert(addr, root).unwrap();
+        }
+
+        // Walk shard N's leaves, marking the note when we hit it
+        let incomplete_start = n_complete_shards * shard_size;
+        for i in 0..leaves_in_incomplete {
+            let pos = incomplete_start + i;
+            let retention = if pos == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(pos), retention).unwrap();
+        }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "incomplete_shard");
+    }
+
+    /// User's exact case (deshield Orchard → transparent):
+    ///   - Notes in shards we walk fully (Marked)
+    ///   - Plus an Ephemeral frontier extension past the last note-bearing
+    ///     shard up to chain tip
+    ///
+    /// Asserts:
+    ///   1. Tree root after extension equals what a single all-append walk
+    ///      would produce (anchor sanity)
+    ///   2. The marked note's witness recomputes that root
+    ///
+    /// If (1) passes but (2) fails, the bug is in how ShardTree handles
+    /// witness extraction for marked notes when an Ephemeral frontier sits
+    /// above them. That's exactly the failure pattern we hit in production.
+    #[test]
+    fn test_witness_recomputes_root_after_frontier_extension() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 4; // 16
+        let n_complete_shards = 2u64;
+        let leaves_in_walked_shard = shard_size; // shard 2 is also "complete" but contains our note
+        let frontier_extension = 12u64;
+        let note_pos = 2 * shard_size + 7;
+
+        // Reference: build everything via plain append
+        let mut ref_tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        let total = n_complete_shards * shard_size + leaves_in_walked_shard + frontier_extension;
+        for i in 0..total {
+            let retention = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            ref_tree.append(test_leaf(i), retention).unwrap();
+        }
+        let ref_ckpt = u32::MAX;
+        ref_tree.checkpoint(ref_ckpt).unwrap();
+        let ref_root = ref_tree.root_at_checkpoint_id(&ref_ckpt).unwrap().unwrap();
+
+        // Production: insert completed-shard roots, walk note-bearing shard,
+        // then ephemeral frontier extension (mirrors build_deshield_pczt).
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+
+        for s in 0..n_complete_shards {
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size {
+                sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
+            }
+            sub.checkpoint(0u32).unwrap();
+            let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+            let addr = Address::above_position(4.into(), Position::from(s * shard_size));
+            tree.insert(addr, root).unwrap();
+        }
+
+        let walked_start = n_complete_shards * shard_size;
+        for i in 0..leaves_in_walked_shard {
+            let pos = walked_start + i;
+            let retention = if pos == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(pos), retention).unwrap();
+        }
+
+        let frontier_start = walked_start + leaves_in_walked_shard;
+        for i in 0..frontier_extension {
+            tree.append(test_leaf(frontier_start + i), Retention::Ephemeral).unwrap();
+        }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        let prod_root = tree.root_at_checkpoint_id(&ckpt).unwrap().unwrap();
+
+        // Invariant 1: production tree root must match the reference (anchor sanity)
+        assert_eq!(
+            prod_root.to_bytes(),
+            ref_root.to_bytes(),
+            "Tree built via insert+walk+frontier-extension must match all-append reference",
+        );
+
+        // Invariant 2: witness for the marked note must recompute that root
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "frontier_extension");
+    }
+
+    /// Two marked notes — one in a shard we walk (well-confirmed),
+    /// one in the frontier-extended region (recently mined). The frontier
+    /// extension uses Retention::Ephemeral; this test verifies that the
+    /// older marked note's witness still recomputes the root despite the
+    /// ephemeral leaves above it.
+    #[test]
+    fn test_witness_recomputes_root_two_marked_notes_split() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 4; // 16
+        let n_complete_shards = 2u64;
+        let walked_leaves = shard_size;
+        let frontier_extension = 8u64;
+        let walked_note_pos = n_complete_shards * shard_size + 6;
+
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+
+        for s in 0..n_complete_shards {
+            let mut sub: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size {
+                sub.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap();
+            }
+            sub.checkpoint(0u32).unwrap();
+            let root = sub.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+            let addr = Address::above_position(4.into(), Position::from(s * shard_size));
+            tree.insert(addr, root).unwrap();
+        }
+
+        let walked_start = n_complete_shards * shard_size;
+        for i in 0..walked_leaves {
+            let pos = walked_start + i;
+            let retention = if pos == walked_note_pos { Retention::Marked } else { Retention::Ephemeral };
+            tree.append(test_leaf(pos), retention).unwrap();
+        }
+
+        let frontier_start = walked_start + walked_leaves;
+        for i in 0..frontier_extension {
+            tree.append(test_leaf(frontier_start + i), Retention::Ephemeral).unwrap();
+        }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+
+        assert_witness_recomputes_root(
+            &mut tree, walked_note_pos, test_leaf(walked_note_pos), ckpt,
+            "split: walked note",
+        );
+    }
+}
+
+// ── v5 transaction round-trip tests ───────────────────────────────────────
+//
+// Production private sends and shield txs broadcast successfully, but deshield
+// (orchard spends → transparent output) fails at broadcast with "could not
+// validate orchard proof" — even though the per-action redpallas signature
+// and the orchard binding signature both verify locally before serialization.
+//
+// One way that pattern can occur: the bytes we hand to lightwalletd parse to a
+// transaction whose canonical txid / digests differ from what we computed
+// internally. That would produce a bundle whose embedded Halo2 public inputs
+// disagree with what the chain extracts from the wire, so consensus rejects
+// the proof.
+//
+// These tests round-trip our v5 serializers through `zcash_primitives`'
+// canonical reader and check (a) the bytes parse, (b) per-action Orchard
+// fields survive the round-trip, and (c) our computed txid matches what
+// `Transaction::read` reconstructs.
+//
+// `roundtrip_v5_shielded_only` is a canary — production private sends use this
+// path successfully, so it MUST pass. If it doesn't, the test infra (synthetic
+// bundle, fixture bytes, comparison helpers) is what's broken.
+//
+// `roundtrip_v5_hybrid_shield` exercises the `inputs=[real], outputs=[]`
+// direction that production shield uses successfully — also expected to pass.
+//
+// `roundtrip_v5_hybrid_deshield` exercises `inputs=[], outputs=[real]` — the
+// unique combination only deshield uses. If a serializer or zip244 digest bug
+// is direction-specific, this is where it shows up.
+
+#[cfg(test)]
+mod roundtrip_v5_tests {
+    use super::{serialize_v5_hybrid_tx, serialize_v5_shielded_tx};
+    use crate::zip244::{
+        self, Zip244Digests, EMPTY_SAPLING_DIGEST, EMPTY_TRANSPARENT_DIGEST,
+        TransparentInput, TransparentOutput,
+    };
+    use nonempty::NonEmpty;
+    use orchard::{
+        bundle::{Authorized, Flags},
+        note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+        primitives::redpallas,
+        value::ValueCommitment,
+        Action, Anchor, Proof,
+    };
+    use zcash_primitives::transaction::Transaction;
+    // zcash_primitives 0.19 pins zcash_protocol 0.4; its `Transaction::read`
+    // signature wants that exact BranchId. Our crate also depends on
+    // zcash_protocol 0.7 (used elsewhere). Pull the 0.4 alias here.
+    use zcash_protocol_v04::consensus::BranchId;
+
+    /// NU5 consensus branch id. Picked because deshield txs ship under NU5+
+    /// rules and `Transaction::read` for v5 ignores the branch_id parameter
+    /// anyway — what matters is matching the value encoded in the tx header.
+    const NU5_BRANCH_ID: u32 = 0xc2d6_d0b4;
+
+    // ── Test vector bytes ────────────────────────────────────────────────
+    // Pulled from `orchard-0.12.0/src/test_vectors/note_encryption.rs` TV[0].
+    // Real, on-curve Pallas points known to round-trip through the canonical
+    // reader. We only need on-curve-ness — the values themselves are
+    // arbitrary for serialization tests.
+
+    const TV_CV_NET: [u8; 32] = [
+        0xdd, 0xba, 0x24, 0xf3, 0x9f, 0x70, 0x8e, 0xd7, 0xa7, 0x48, 0x57, 0x13, 0x71, 0x11,
+        0x42, 0xc2, 0x38, 0x51, 0x38, 0x15, 0x30, 0x2d, 0xf0, 0xf4, 0x83, 0x04, 0x21, 0xa6,
+        0xc1, 0x3e, 0x71, 0x01,
+    ];
+    const TV_NF_OLD: [u8; 32] = [
+        0xc5, 0x96, 0xfb, 0xd3, 0x2e, 0xbb, 0xcb, 0xad, 0xae, 0x60, 0xd2, 0x85, 0xc7, 0xd7,
+        0x5f, 0xa8, 0x36, 0xf9, 0xd2, 0xfa, 0x86, 0x10, 0x0a, 0xb8, 0x58, 0xea, 0x2d, 0xe1,
+        0xf1, 0x1c, 0x83, 0x06,
+    ];
+    const TV_CMX: [u8; 32] = [
+        0xa5, 0x70, 0x6f, 0x3d, 0x1b, 0x68, 0x8e, 0x9d, 0xc6, 0x34, 0xee, 0xe4, 0xe6, 0x5b,
+        0x02, 0x8a, 0x43, 0xee, 0xae, 0xd2, 0x43, 0x5b, 0xea, 0x2a, 0xe3, 0xd5, 0x16, 0x05,
+        0x75, 0xc1, 0x1a, 0x3b,
+    ];
+    const TV_EPK: [u8; 32] = [
+        0xad, 0xdb, 0x47, 0xb6, 0xac, 0x5d, 0xfc, 0x16, 0x55, 0x89, 0x23, 0xd3, 0xa8, 0xf3,
+        0x76, 0x09, 0x5c, 0x69, 0x5c, 0x04, 0x7c, 0x4e, 0x32, 0x66, 0xae, 0x67, 0x69, 0x87,
+        0xf7, 0xe3, 0x13, 0x81,
+    ];
+    const TV_C_OUT: [u8; 80] = [
+        0xcb, 0xdf, 0x68, 0xa5, 0x7f, 0xb4, 0xa4, 0x6f, 0x34, 0x60, 0xff, 0x22, 0x7b, 0xc6,
+        0x18, 0xda, 0xe1, 0x12, 0x29, 0x45, 0xb3, 0x80, 0xc7, 0xe5, 0x49, 0xcf, 0x4a, 0x6e,
+        0x8b, 0xf3, 0x75, 0x49, 0xba, 0xe1, 0x89, 0x1f, 0xd8, 0xd1, 0xa4, 0x94, 0x4f, 0xdf,
+        0x41, 0x0f, 0x07, 0x02, 0xed, 0xa5, 0x44, 0x2f, 0x0e, 0xa0, 0x1a, 0x5d, 0xf0, 0x12,
+        0xa0, 0xae, 0x4d, 0x84, 0xed, 0x79, 0x80, 0x33, 0x28, 0xbd, 0x1f, 0xd5, 0xfa, 0xc7,
+        0x19, 0x21, 0x6a, 0x77, 0x6d, 0xe6, 0x4f, 0xd1, 0x67, 0xdb,
+    ];
+
+    /// 580-byte enc_ciphertext from TV[0]. Initialized at runtime to keep the
+    /// const table small; the orchard reader doesn't validate its contents.
+    fn tv_c_enc() -> [u8; 580] {
+        let raw: &[u8] = &[
+            0x1a, 0x9a, 0xdb, 0x14, 0x24, 0x98, 0xe3, 0xdc, 0xc7, 0x6f, 0xed, 0x77, 0x86, 0x14,
+            0xdd, 0x31, 0x6c, 0x02, 0xfb, 0xb8, 0xba, 0x92, 0x44, 0xae, 0x4c, 0x2e, 0x32, 0xa0,
+            0x7d, 0xae, 0xec, 0xa4, 0x12, 0x26, 0xb9, 0x8b, 0xfe, 0x74, 0xf9, 0xfc, 0xb2, 0x28,
+            0xcf, 0xc1, 0x00, 0xf3, 0x18, 0x0f, 0x57, 0x75, 0xec, 0xe3, 0x8b, 0xe7, 0xed, 0x45,
+            0xd9, 0x40, 0x21, 0xf4, 0x40, 0x1b, 0x2a, 0x4d, 0x75, 0x82, 0xb4, 0x28, 0xd4, 0x9e,
+            0xc7, 0xf5, 0xb5, 0xa4, 0x98, 0x97, 0x3e, 0x60, 0xe3, 0x8e, 0x74, 0xf5, 0xc3, 0xe5,
+            0x77, 0x82, 0x7c, 0x38, 0x28, 0x57, 0xd8, 0x16, 0x6b, 0x54, 0xe6, 0x4f, 0x66, 0xef,
+            0x5c, 0x7e, 0x8c, 0x9b, 0xaa, 0x2a, 0x3f, 0xa9, 0xe3, 0x7d, 0x08, 0x77, 0x17, 0xd5,
+            0xe9, 0x6b, 0xc2, 0xf7, 0x3d, 0x03, 0x14, 0x50, 0xdc, 0x24, 0x32, 0xba, 0x49, 0xd8,
+            0xb7, 0x4d, 0xb2, 0x13, 0x09, 0x9e, 0xa9, 0xba, 0x04, 0xeb, 0x63, 0xb6, 0x57, 0x4d,
+            0x46, 0xc0, 0x3c, 0xe7, 0x90, 0x0d, 0x4a, 0xc4, 0xbb, 0x18, 0x8e, 0xe9, 0x03, 0x0d,
+            0x7f, 0x69, 0xc8, 0x95, 0xa9, 0x4f, 0xc1, 0x82, 0xf2, 0x25, 0xa9, 0x4f, 0x0c, 0xde,
+            0x1b, 0x49, 0x88, 0x68, 0x71, 0xa3, 0x76, 0x34, 0x1e, 0xa9, 0x41, 0x71, 0xbe, 0xfd,
+            0x95, 0xa8, 0x30, 0xfa, 0x18, 0x40, 0x70, 0x97, 0xdc, 0xa5, 0x11, 0x02, 0x54, 0x63,
+            0xd4, 0x37, 0xe9, 0x69, 0x5c, 0xaa, 0x07, 0x9a, 0x2f, 0x68, 0xcd, 0xc7, 0xf2, 0xc1,
+            0x32, 0x67, 0xbf, 0xf4, 0x19, 0x51, 0x37, 0xfa, 0x89, 0x53, 0x25, 0x2a, 0x81, 0xb2,
+            0xaf, 0xa1, 0x58, 0x2b, 0x9b, 0xfb, 0x4a, 0xc9, 0x60, 0x37, 0xed, 0x29, 0x91, 0xd3,
+            0xcb, 0xc7, 0xd5, 0x4a, 0xff, 0x6e, 0x62, 0x1b, 0x06, 0xa7, 0xb2, 0xb9, 0xca, 0xf2,
+            0x95, 0x5e, 0xfa, 0xf4, 0xea, 0x8e, 0xfc, 0xfd, 0x02, 0x3a, 0x3c, 0x17, 0x48, 0xdf,
+            0x3c, 0xbd, 0x43, 0xe0, 0xb9, 0xa8, 0xb0, 0x94, 0x56, 0x88, 0xd5, 0x20, 0x56, 0xc1,
+            0xd1, 0x6e, 0xea, 0x37, 0xe7, 0x98, 0xba, 0x31, 0xdc, 0x3e, 0x5d, 0x49, 0x52, 0xbd,
+            0x51, 0xec, 0x76, 0x9d, 0x57, 0x88, 0xb6, 0xe3, 0x5f, 0xe9, 0x04, 0x2b, 0x95, 0xd4,
+            0xd2, 0x17, 0x81, 0x40, 0x0e, 0xaf, 0xf5, 0x86, 0x16, 0xad, 0x56, 0x27, 0x96, 0x63,
+            0x6a, 0x50, 0xb8, 0xed, 0x6c, 0x7f, 0x98, 0x1d, 0xc7, 0xba, 0x81, 0x4e, 0xff, 0x15,
+            0x2c, 0xb2, 0x28, 0xa2, 0xea, 0xd2, 0xf8, 0x32, 0x66, 0x2f, 0xa4, 0xa4, 0xa5, 0x07,
+            0x97, 0xb0, 0xf8, 0x5b, 0x62, 0xd0, 0x8b, 0x1d, 0xd2, 0xd8, 0xe4, 0x3b, 0x4a, 0x5b,
+            0xfb, 0xb1, 0x59, 0xed, 0x57, 0x8e, 0xf7, 0x47, 0x5d, 0xe0, 0xad, 0xa1, 0x3e, 0x17,
+            0xad, 0x87, 0xcc, 0x23, 0x05, 0x67, 0x2b, 0xcc, 0x55, 0xa8, 0x88, 0x13, 0x17, 0xfd,
+            0xc1, 0xbf, 0xc4, 0x59, 0xb6, 0x8b, 0x2d, 0xf7, 0x0c, 0xad, 0x37, 0x70, 0xed, 0x0f,
+            0xd0, 0x2d, 0x64, 0xb9, 0x6f, 0x2b, 0xbf, 0x6f, 0x8f, 0x63, 0x2e, 0x86, 0x6c, 0xa5,
+            0xd1, 0x96, 0xd2, 0x48, 0xad, 0x05, 0xc3, 0xde, 0x64, 0x41, 0x48, 0xa8, 0x0b, 0x51,
+            0xad, 0xa9, 0x5b, 0xd0, 0x8d, 0x73, 0xcd, 0xbb, 0x45, 0x26, 0x4f, 0x3b, 0xd1, 0x13,
+            0x83, 0x5b, 0x46, 0xf9, 0xbe, 0x7b, 0x6d, 0x23, 0xa4, 0x3b, 0xdd, 0xfe, 0x1e, 0x74,
+            0x08, 0xc9, 0x70, 0x31, 0xe1, 0xa8, 0x21, 0x4b, 0xab, 0x46, 0x39, 0x10, 0x44, 0xb7,
+            0x00, 0xd3, 0x8f, 0x51, 0x92, 0xc5, 0x7f, 0xe6, 0xf8, 0x71, 0x59, 0xb5, 0x55, 0x12,
+            0x09, 0x4e, 0x29, 0xd2, 0xce, 0xba, 0xb8, 0x68, 0xc8, 0xf1, 0xad, 0xba, 0xd5, 0x70,
+            0x77, 0xcb, 0xeb, 0x5e, 0x69, 0x65, 0x85, 0x82, 0xbf, 0x98, 0xd1, 0x9d, 0x64, 0xf4,
+            0x4b, 0x0d, 0x50, 0xc7, 0xe2, 0x20, 0x9a, 0xb3, 0xfc, 0x56, 0xb4, 0xf4, 0x09, 0x12,
+            0x3a, 0xae, 0xb0, 0x26, 0x3a, 0x22, 0x45, 0x1b, 0xc1, 0x4e, 0xd7, 0x56, 0xd0, 0x48,
+            0x38, 0x5a, 0xed, 0xbb, 0x86, 0xa8, 0x46, 0x77, 0xbb, 0x2d, 0x21, 0xc5, 0x2c, 0xc9,
+            0x49, 0x41, 0x47, 0xbf, 0x0f, 0xb1, 0x02, 0x74, 0x52, 0x82, 0x99, 0x09, 0x09, 0x72,
+            0x62, 0x28, 0x18, 0x6e, 0x02, 0xc8,
+        ];
+        let mut buf = [0u8; 580];
+        buf.copy_from_slice(raw);
+        buf
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    /// One synthetic Orchard action with on-curve Pallas points + arbitrary sig.
+    fn synthetic_action() -> Action<redpallas::Signature<redpallas::SpendAuth>> {
+        let cv_net = ValueCommitment::from_bytes(&TV_CV_NET).unwrap();
+        let nf = Nullifier::from_bytes(&TV_NF_OLD).unwrap();
+        // `rk` is a randomized SpendAuth verification key — same compressed-Pallas
+        // encoding as a Nullifier, so a valid nf byte string is also valid as rk.
+        let rk = redpallas::VerificationKey::<redpallas::SpendAuth>::try_from(TV_NF_OLD)
+            .expect("TV nf bytes must round-trip as a redpallas SpendAuth VerificationKey");
+        let cmx = ExtractedNoteCommitment::from_bytes(&TV_CMX).unwrap();
+        let encrypted_note = TransmittedNoteCiphertext {
+            epk_bytes: TV_EPK,
+            enc_ciphertext: tv_c_enc(),
+            out_ciphertext: TV_C_OUT,
+        };
+        let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
+        Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, spend_auth_sig)
+    }
+
+    fn synthetic_bundle(n_actions: usize, value_balance: i64)
+        -> orchard::Bundle<Authorized, i64>
+    {
+        assert!(n_actions >= 1);
+        let actions: Vec<_> = (0..n_actions).map(|_| synthetic_action()).collect();
+        let actions_ne = NonEmpty::from_vec(actions).unwrap();
+        let flags = Flags::from_byte(0x03).unwrap();
+        let anchor = Anchor::from_bytes(TV_CMX).unwrap();
+        let proof = Proof::new(vec![0u8; 1500]);
+        let binding_sig: redpallas::Signature<redpallas::Binding> = [0xcd; 64].into();
+        let auth = Authorized::from_parts(proof, binding_sig);
+        orchard::Bundle::from_parts(actions_ne, flags, value_balance, anchor, auth)
+    }
+
+    /// Recompute the txid the way `finalize_pczt` (shielded-only) does.
+    fn our_txid_shielded(bundle: &orchard::Bundle<Authorized, i64>, branch_id: u32) -> [u8; 32] {
+        let digests = Zip244Digests {
+            header_digest: zip244::digest_header(branch_id, 0, 0),
+            transparent_digest: EMPTY_TRANSPARENT_DIGEST,
+            sapling_digest: EMPTY_SAPLING_DIGEST,
+            orchard_digest: zip244::digest_orchard(bundle),
+        };
+        zip244::compute_sighash(&digests, branch_id)
+    }
+
+    /// Recompute the txid the way `finalize_shield_pczt` / `finalize_deshield_pczt`
+    /// do (hybrid path with non-empty transparent component).
+    fn our_txid_hybrid(
+        bundle: &orchard::Bundle<Authorized, i64>,
+        inputs: &[TransparentInput],
+        outputs: &[TransparentOutput],
+        branch_id: u32,
+    ) -> [u8; 32] {
+        let digests = Zip244Digests {
+            header_digest: zip244::digest_header(branch_id, 0, 0),
+            transparent_digest: zip244::digest_transparent_txid(inputs, outputs),
+            sapling_digest: EMPTY_SAPLING_DIGEST,
+            orchard_digest: zip244::digest_orchard(bundle),
+        };
+        zip244::compute_sighash(&digests, branch_id)
+    }
+
+    // Note on cross-version comparison: `zcash_primitives 0.19` pins
+    // `orchard 0.10`, while we directly depend on `orchard 0.12`. The two
+    // `orchard::Bundle` types are distinct in the type system (different crate
+    // versions), so we can't pass our 0.12 bundle to a comparator that takes
+    // the 0.10 bundle the parser returns. Fortunately, txid = BLAKE2b(header
+    // || transparent_digest || sapling_digest || orchard_digest), so any
+    // per-action byte divergence shows up as an `orchard_digest` divergence
+    // → txid mismatch — making the txid assertion sufficient. If we ever need
+    // field-level diagnostics on failure, collect `cv_net().to_bytes()` etc.
+    // into `Vec<[u8; 32]>` on each side (raw bytes have no version skew).
+
+    fn p2pkh_script(hash160: [u8; 20]) -> Vec<u8> {
+        let mut s = Vec::with_capacity(25);
+        s.extend_from_slice(&[0x76, 0xa9, 0x14]); // OP_DUP OP_HASH160 PUSH20
+        s.extend_from_slice(&hash160);
+        s.extend_from_slice(&[0x88, 0xac]); // OP_EQUALVERIFY OP_CHECKSIG
+        s
+    }
+
+    // ── Tests ────────────────────────────────────────────────────────────
+
+    /// Canary — the all-orchard path that production private sends use.
+    /// Production confirms these on-chain, so this MUST pass.
+    #[test]
+    fn roundtrip_v5_shielded_only() {
+        let bundle = synthetic_bundle(1, 0);
+        let tx_bytes = serialize_v5_shielded_tx(&bundle, NU5_BRANCH_ID).unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu5)
+            .expect("canonical reader must accept our v5 shielded tx bytes");
+        assert!(parsed.orchard_bundle().is_some(), "orchard bundle present in parsed tx");
+        assert_eq!(
+            parsed.orchard_bundle().unwrap().actions().len(),
+            bundle.actions().len(),
+            "orchard action count round-tripped",
+        );
+
+        let ours = our_txid_shielded(&bundle, NU5_BRANCH_ID);
+        assert_eq!(
+            *parsed.txid().as_ref(), ours,
+            "shielded txid mismatch — our zip244 digests disagree with the canonical reference"
+        );
+    }
+
+    /// Hybrid with transparent INPUTS and no outputs — the direction that
+    /// production shield uses successfully. Expected to pass.
+    #[test]
+    fn roundtrip_v5_hybrid_shield() {
+        let bundle = synthetic_bundle(1, 100_000);
+        let inputs = vec![TransparentInput {
+            prevout_hash: [0x11; 32],
+            prevout_index: 0,
+            value: 105_000,
+            script_pubkey: p2pkh_script([0xde; 20]),
+            sequence: 0xffff_ffff,
+        }];
+        // 71-byte synthetic DER signature payload (the +1 SIGHASH_ALL byte is
+        // appended by serialize_v5_hybrid_tx itself).
+        let synth_sig = vec![0u8; 71];
+        let synth_pubkey = [0x02u8; 33];
+        let tx_bytes = serialize_v5_hybrid_tx(
+            &bundle, &inputs, &[], &[synth_sig], NU5_BRANCH_ID, Some(&synth_pubkey),
+        ).unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu5)
+            .expect("canonical reader must accept our v5 hybrid (shield) bytes");
+        let parsed_transparent = parsed.transparent_bundle()
+            .expect("transparent bundle present");
+        assert_eq!(parsed_transparent.vin.len(), 1, "exactly one transparent input");
+        assert_eq!(parsed_transparent.vout.len(), 0, "no transparent outputs");
+        assert_eq!(
+            parsed.orchard_bundle().expect("orchard bundle present").actions().len(),
+            bundle.actions().len(),
+            "orchard action count round-tripped",
+        );
+
+        let ours = our_txid_hybrid(&bundle, &inputs, &[], NU5_BRANCH_ID);
+        assert_eq!(
+            *parsed.txid().as_ref(), ours,
+            "shield txid mismatch — txid digest differs from canonical even though \
+             production shield works on-chain (test infra bug?)"
+        );
+    }
+
+    /// Hybrid with no transparent INPUTS and one transparent OUTPUT — the
+    /// unique combination only deshield uses. Production fails at broadcast
+    /// with "could not validate orchard proof" on this shape. If the bug is
+    /// in our serializer or zip244 digest computation, this test will pin it
+    /// down at field level.
+    #[test]
+    fn roundtrip_v5_hybrid_deshield() {
+        let bundle = synthetic_bundle(1, -190_000);
+        let outputs = vec![TransparentOutput {
+            value: 185_000,
+            script_pubkey: p2pkh_script([0xbe; 20]),
+        }];
+        let tx_bytes = serialize_v5_hybrid_tx(
+            &bundle, &[], &outputs, &[], NU5_BRANCH_ID, None,
+        ).unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu5)
+            .expect("canonical reader must accept our v5 hybrid (deshield) bytes");
+        let parsed_transparent = parsed.transparent_bundle()
+            .expect("transparent bundle present");
+        assert_eq!(parsed_transparent.vin.len(), 0, "no transparent inputs");
+        assert_eq!(parsed_transparent.vout.len(), 1, "exactly one transparent output");
+        let parsed_out = &parsed_transparent.vout[0];
+        assert_eq!(u64::from(parsed_out.value), outputs[0].value, "vout value");
+        assert_eq!(parsed_out.script_pubkey.0, outputs[0].script_pubkey, "vout script");
+        assert_eq!(
+            parsed.orchard_bundle().expect("orchard bundle present").actions().len(),
+            bundle.actions().len(),
+            "orchard action count round-tripped",
+        );
+
+        let ours = our_txid_hybrid(&bundle, &[], &outputs, NU5_BRANCH_ID);
+        assert_eq!(
+            *parsed.txid().as_ref(), ours,
+            "deshield txid mismatch — our serializer or zip244 digest disagrees \
+             with the canonical reference; this is the bug deshield broadcasts hit"
+        );
     }
 }

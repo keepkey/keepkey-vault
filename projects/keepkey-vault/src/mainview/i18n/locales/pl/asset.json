@@ -11,7 +11,7 @@
 	"showFiltered_other": "Pokaż {{count}} odfiltrowanych tokenów",
 	"hideFiltered_one": "Ukryj {{count}} odfiltrowany token",
 	"hideFiltered_other": "Ukryj {{count}} odfiltrowanych tokenów",
-	"zeroValueTokens": "$0,00 USD ({{count}})",
+	"zeroValueTokens": "{{zeroValue}} ({{count}})",
 	"suspectedSpam": "Podejrzany spam ({{count}})",
 	"markAsSafe": "Oznacz jako bezpieczny",
 	"hideToken": "Ukryj token",

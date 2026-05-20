@@ -3,15 +3,90 @@
  */
 import type { ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
-import { buildUtxoTx, type BuildUtxoParams } from './utxo'
+import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
+import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
+import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
 // Pioneer SDK instance is passed as parameter to buildTx()
 
 export type { BuildTxParams }
+export { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
+
+const TRON_SUN_PER_TRX = 1_000_000n
+const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n
+const TRON_TOKEN_CONTRACT_RE = /^tron:[^/]+\/(?:token|trc20):(T[1-9A-HJ-NP-Za-km-z]{33})$/
+
+async function fetchTronNativeBalanceSun(address: string): Promise<bigint> {
+  const resp = await fetch('https://api.trongrid.io/wallet/getaccount', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, visible: true }),
+  })
+  const data = await resp.json() as any
+  if (data?.Error) throw new Error(data.Error)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return BigInt(data?.balance ?? 0)
+}
+
+/**
+ * Inject a memo into a TronGrid `triggersmartcontract` response so the
+ * THORChain swap memo lands in `Transaction.raw_data.data`. Returns a
+ * shallow-cloned `tronGridTx` with `raw_data_hex`, `raw_data.data`, and
+ * `txID` updated.
+ *
+ * Why protobuf splicing instead of a TronGrid parameter: `createtransaction`
+ * exposes `extra_data` which sets `raw_data.data` natively, but
+ * `triggersmartcontract` silently drops it. We have to inject the field
+ * ourselves, AND it must be in canonical tag-order position (field 10,
+ * before contract/11) — appending at the end produces a different sha256
+ * than what TronGrid computes after canonicalization, so the device's
+ * signature would not verify at broadcast time.
+ */
+export async function injectTronMemo(tronGridTx: any, memo: string): Promise<any> {
+  const protobuf = (await import('protobufjs/light')).default
+  const memoBytes = Buffer.from(memo, 'utf8')
+  const origBytes = Buffer.from(tronGridTx.raw_data_hex, 'hex')
+
+  // Walk top-level wire format to find where field >= 11 starts (canonical
+  // insertion point for field 10). All TRON Transaction.raw fields below 10
+  // must precede us; everything from contract(11) onwards must follow.
+  const reader = new protobuf.Reader(origBytes)
+  let insertAt: number | null = null
+  while (reader.pos < reader.len) {
+    const fieldStart = reader.pos
+    const tag = reader.uint32()
+    const fieldNum = tag >>> 3
+    if (fieldNum >= 11 && insertAt === null) {
+      insertAt = fieldStart
+      break
+    }
+    reader.skipType(tag & 7)
+  }
+  if (insertAt === null) insertAt = origBytes.length
+
+  const writer = new protobuf.Writer()
+  writer.uint32((10 << 3) | 2).bytes(memoBytes) // field 10, wire type 2 (length-delimited bytes)
+  const dataFieldBytes = Buffer.from(writer.finish())
+
+  const newBytes = Buffer.concat([
+    origBytes.subarray(0, insertAt),
+    dataFieldBytes,
+    origBytes.subarray(insertAt),
+  ])
+  const newTxID = Buffer.from(await crypto.subtle.digest('SHA-256', newBytes)).toString('hex')
+
+  return {
+    ...tronGridTx,
+    raw_data_hex: newBytes.toString('hex'),
+    raw_data: { ...tronGridTx.raw_data, data: memoBytes.toString('hex') },
+    txID: newTxID,
+  }
+}
 
 /**
  * Build an unsigned transaction for any supported chain.
@@ -20,7 +95,7 @@ export type { BuildTxParams }
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
@@ -31,6 +106,7 @@ export async function buildTx(
         feeLevel: params.feeLevel,
         isMax: params.isMax,
         xpub: params.xpub,
+        allXpubs: params.allXpubs,
         scriptTypeOverride: params.scriptTypeOverride,
         accountPath: params.accountPath,
       })
@@ -104,17 +180,12 @@ export async function buildTx(
         const tokenDecimals = params.tokenDecimals
         // For MAX send, use frontend-provided tokenBalance (same pattern as EVM)
         const sendAmount = params.isMax && params.tokenBalance && parseFloat(params.tokenBalance) > 0
-          ? params.tokenBalance
+          ? tokenMaxSpendableAmount(params.tokenBalance, tokenDecimals)
           : params.amount
         if (params.isMax && (!sendAmount || parseFloat(sendAmount) <= 0)) {
           throw new Error('Token balance is zero — cannot send max')
         }
-        const tokenAmountBase = (() => {
-          const parts = sendAmount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, tokenDecimals).padEnd(tokenDecimals, '0')
-          return String(BigInt(whole) * BigInt(10 ** tokenDecimals) + BigInt(frac))
-        })()
+        const tokenAmountBase = decimalToBaseUnitsStrict(sendAmount, tokenDecimals).toString()
 
         console.debug(`[buildTx:solana] SPL token: decimals=${tokenDecimals}`)
         try {
@@ -137,15 +208,33 @@ export async function buildTx(
           throw new Error(`SPL token tx build failed: ${e.message}`)
         }
       } else {
-        // Native SOL transfer — convert to lamports (9 decimals)
-        const solAmountLamports = (() => {
-          const parts = params.amount.split('.')
-          const whole = parts[0] || '0'
-          const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-          return String(BigInt(whole) * 1000000000n + BigInt(frac))
-        })()
+        // Native SOL transfer — convert to lamports (9 decimals). For regular
+        // Send MAX the UI submits amount='0' + isMax=true, so resolve the
+        // native balance here before subtracting the signature fee.
+        let solAmount = params.amount
+        if (params.isMax) {
+          try {
+            // Pioneer's GetBalanceAddressByNetwork uses the /evm/balance/ endpoint
+            // which rejects non-Ethereum addresses. Use Solana JSON-RPC directly.
+            const rpcResp = await fetch('https://api.mainnet-beta.solana.com', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [params.fromAddress, { commitment: 'confirmed' }] }),
+            })
+            const rpcJson = await rpcResp.json() as any
+            if (rpcJson.error) throw new Error(rpcJson.error.message || String(rpcJson.error))
+            const lamports: number = rpcJson.result?.value ?? 0
+            // Integer arithmetic to avoid floating-point precision loss
+            const whole = Math.floor(lamports / 1_000_000_000)
+            const frac = String(lamports % 1_000_000_000).padStart(9, '0')
+            solAmount = `${whole}.${frac}`
+          } catch (e: any) {
+            throw new Error(`Cannot fetch live SOL balance for max send: ${e.message}`)
+          }
+        }
+        const solAmountLamports = String(solanaTransferLamportsForAmount(solAmount, !!params.isMax))
 
-        console.debug(`[buildTx:solana] Native SOL transfer`)
+        console.debug(`[buildTx:solana] Native SOL transfer${params.isMax ? ` (max, reserved ${SOLANA_LAMPORTS_PER_SIGNATURE} lamports for fee)` : ''}`)
         try {
           const resp = await pioneer.BuildSolanaTransfer({
             from: params.fromAddress,
@@ -176,34 +265,185 @@ export async function buildTx(
     }
 
     case 'tron': {
-      // Tron — TronGrid builds the raw protobuf tx (raw_data_hex), device signs
+      // Tron — TronGrid builds the raw protobuf tx (raw_data_hex), device signs.
+      // Two paths:
+      //   • TRC-20 token (caip contains `/token:T...` or `/trc20:T...`) — triggersmartcontract
+      //     calling `transfer(address,uint256)` on the token contract. Used for
+      //     USDT THORChain swaps.
+      //   • Native TRX — createtransaction (TransferContract).
+      // For both, an optional `params.memo` (THORChain swap memo) is written
+      // into `Transaction.raw_data.data` via TronGrid's `extra_data` field.
       if (!params.fromAddress) throw new Error('fromAddress required for Tron')
 
-      // Convert TRX amount to sun (6 decimals)
-      const sunAmount = (() => {
-        const parts = params.amount.split('.')
-        const whole = parts[0] || '0'
-        const frac = (parts[1] || '').slice(0, 6).padEnd(6, '0')
-        // Keep as Number — TronGrid expects integer, and TRX max supply (99B) fits safely in Number
-        const sun = BigInt(whole) * 1000000n + BigInt(frac)
-        if (sun > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('TRX amount too large')
-        return Number(sun)
+      // TRC-20 detection: pioneer-router quote returns `txParams.token: "USDT-T..."`
+      // for tokens, and upstream CAIPs may use `tron:.../token:T...` or
+      // `tron:.../trc20:T...`.
+      const tokenContractFromCaip = (() => {
+        if (!params.caip) return null
+        const m = params.caip.match(TRON_TOKEN_CONTRACT_RE)
+        return m ? m[1] : null
       })()
+      const isTrc20 = !!tokenContractFromCaip
+
+      // ── TRC-20 path (TriggerSmartContract → transfer(address,uint256)) ──
+      if (isTrc20) {
+        // USDT-on-TRON has 6 decimals. If we add other TRC-20s later, look the
+        // value up rather than hard-coding — but for the THORChain MVP, USDT is
+        // the only token in scope.
+        const tokenDecimals = params.tokenDecimals ?? 6
+
+        // ABI-encode the `transfer(address,uint256)` parameter pair.
+        // TronGrid's `function_selector` field tells it to prepend the 4-byte
+        // selector (0xa9059cbb) automatically, so `parameter` is just the
+        // 64 hex chars of the address slot + 64 hex chars of the amount slot.
+        // TRON's base58check address: [0x41][20 bytes hash][4 byte checksum].
+        // Strip prefix + checksum to get the 20-byte EVM-style address slot.
+        const base58 = await import('bs58')
+        const tronAddressHashHex = (address: string): string => {
+          const decoded = base58.default.decode(address)
+          if (decoded.length !== 25 || decoded[0] !== 0x41) {
+            throw new Error(`Invalid TRON address: ${address}`)
+          }
+          return Buffer.from(decoded.slice(1, 21)).toString('hex')
+        }
+
+        let tokenAmountBase: bigint
+        if (params.isMax) {
+          if (params.tokenBalance && parseFloat(params.tokenBalance) > 0) {
+            tokenAmountBase = tokenMaxSpendableBaseUnits(params.tokenBalance, tokenDecimals) ?? 0n
+          } else {
+            const ownerHashHex = tronAddressHashHex(params.fromAddress)
+            const ownerParameter = ownerHashHex.padStart(64, '0')
+            try {
+              const resp = await fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  owner_address: params.fromAddress,
+                  contract_address: tokenContractFromCaip,
+                  function_selector: 'balanceOf(address)',
+                  parameter: ownerParameter,
+                  visible: true,
+                }),
+              })
+              const respJson = await resp.json() as any
+              if (respJson?.Error) throw new Error(respJson.Error)
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+              const balanceHex = respJson?.constant_result?.[0]
+              if (!balanceHex) throw new Error('missing constant_result')
+              tokenAmountBase = BigInt(`0x${balanceHex}`)
+            } catch (e: any) {
+              throw new Error(`Cannot fetch TRC-20 balance for max send: ${e.message}`)
+            }
+          }
+          if (tokenAmountBase <= 0n) throw new Error('Token balance is zero — cannot send max')
+        } else {
+          tokenAmountBase = decimalToBaseUnitsStrict(params.amount, tokenDecimals)
+          if (tokenAmountBase <= 0n) throw new Error('Amount must be greater than zero')
+        }
+
+        const recipientHashHex = tronAddressHashHex(params.to)
+        const amountHex = tokenAmountBase.toString(16).padStart(64, '0')
+        const parameter = recipientHashHex.padStart(64, '0') + amountHex
+
+        // fee_limit caps the energy/TRX a smart contract call can burn — 30 TRX
+        // is generous for a USDT.transfer() (typical cost is ~14 TRX) and
+        // matches what TronLink defaults to for unknown contracts.
+        const FEE_LIMIT_SUN = 30_000_000
+
+        let tronGridTx: any
+        try {
+          console.debug(`[buildTx] TRON triggersmartcontract: USDT.transfer(${params.to}, ${tokenAmountBase.toString()}) at ${tokenContractFromCaip}`)
+          const resp = await fetch('https://api.trongrid.io/wallet/triggersmartcontract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              owner_address: params.fromAddress,
+              contract_address: tokenContractFromCaip,
+              function_selector: 'transfer(address,uint256)',
+              parameter,
+              fee_limit: FEE_LIMIT_SUN,
+              call_value: 0,
+              visible: true,
+            }),
+          })
+          const respJson = await resp.json() as any
+          if (respJson?.Error) throw new Error(respJson.Error)
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+          // triggersmartcontract returns { transaction: {...}, ... }
+          tronGridTx = respJson.transaction
+          if (!tronGridTx?.raw_data_hex) {
+            throw new Error('TronGrid triggersmartcontract did not return a transaction with raw_data_hex')
+          }
+        } catch (e: any) {
+          throw new Error(`Tron TRC-20 build failed: ${e.message}`)
+        }
+
+        // Inject memo into raw_data.data. TronGrid's `triggersmartcontract`
+        // endpoint silently ignores `extra_data` (unlike `createtransaction`),
+        // so we have to splice the protobuf ourselves. The memo MUST land in
+        // canonical tag-order position (field 10, before contract/11) — if we
+        // appended at the end, TronGrid would re-canonicalize and the txID it
+        // computes would not match the one the device signed, breaking
+        // signature verification.
+        if (params.memo) {
+          tronGridTx = await injectTronMemo(tronGridTx, params.memo)
+        }
+
+        // Intentionally do NOT pass `toAddress`/`amount` for TRC-20.
+        // Firmware 7.14's TRON FSM has only a TransferContract clear-sign
+        // path — given those fields it shows "Send <amount> TRX to
+        // <to_address>" regardless of the actual contract being called. For a
+        // TRC-20 transfer that means the device shows "Send 1 TRX to <USDT
+        // contract>" when the user is actually sending 1 USDT to a recipient
+        // — accurate to the bytes signed but a misleading interpretation. By
+        // omitting the hint fields the firmware falls back to the generic
+        // "Really sign this TRON transaction?" prompt, which matches the
+        // SwapDialog blind-sign warning text. Once firmware adds TRC-20
+        // clear-signing, populate proper hint fields here.
+        const tronUnsignedTx = {
+          addressNList: chain.defaultPath,
+          rawTx: tronGridTx.raw_data_hex,
+          tronGridTx,
+        }
+        return { unsignedTx: tronUnsignedTx, fee: String(FEE_LIMIT_SUN / 1_000_000) }
+      }
+
+      // ── Native TRX path (TransferContract) ──
+      // Convert TRX amount to sun (6 decimals)
+      const sunAmountBig = params.isMax
+        ? await (async () => {
+            const balanceSun = await fetchTronNativeBalanceSun(params.fromAddress!)
+            const spendableSun = balanceSun - TRON_NATIVE_MAX_RESERVE_SUN
+            if (spendableSun <= 0n) {
+              throw new Error(`Insufficient TRX for max send after reserving ${Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000} TRX for network fees`)
+            }
+            return spendableSun
+          })()
+        : decimalToBaseUnitsStrict(params.amount, 6)
+      if (sunAmountBig <= 0n) throw new Error('Amount must be greater than zero')
+      if (sunAmountBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('TRX amount too large')
+      // Keep as Number — TronGrid expects integer, and TRX max supply (99B) fits safely in Number.
+      const sunAmount = Number(sunAmountBig)
 
       let tronGridTx: any
       try {
         // Use TronGrid's createtransaction — it returns raw_data_hex (serialized protobuf)
-        // which is exactly what the KeepKey firmware needs to sign.
-        console.debug(`[buildTx] TRON createtransaction: amount=${sunAmount} SUN`)
+        // which is exactly what the KeepKey firmware needs to sign. `extra_data`
+        // (when present) lands in `raw_data.data` verbatim — that's where THORChain's
+        // TRON observer reads the swap memo from.
+        console.debug(`[buildTx] TRON createtransaction: amount=${sunAmount} SUN${params.memo ? `, memo=${params.memo.length}b` : ''}`)
+        const body: any = {
+          owner_address: params.fromAddress,
+          to_address: params.to,
+          amount: sunAmount,
+          visible: true,
+        }
+        if (params.memo) body.extra_data = params.memo
         const resp = await fetch('https://api.trongrid.io/wallet/createtransaction', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            owner_address: params.fromAddress,
-            to_address: params.to,
-            amount: sunAmount,
-            visible: true,
-          }),
+          body: JSON.stringify(body),
         })
         tronGridTx = await resp.json() as any
         if (tronGridTx?.Error) {
@@ -228,7 +468,7 @@ export async function buildTx(
         tronGridTx,
       }
       // Tron: bandwidth is typically free for TRX transfers
-      return { unsignedTx: tronUnsignedTx, fee: '0' }
+      return { unsignedTx: tronUnsignedTx, fee: params.isMax ? String(Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000) : '0' }
     }
 
     case 'ton': {
@@ -319,15 +559,87 @@ export async function signTx(
     case 'xrp':
       return wallet.rippleSignTx(unsignedTx)
     case 'solana': {
-      console.debug(`[signTx:solana] signing tx`)
-      const solResult = await wallet.solanaSignTx(unsignedTx)
-      console.debug(`[signTx:solana] result: hasSig=${!!solResult?.signature} hasSerializedTx=${!!solResult?.serializedTx}`)
-      return solResult
+      // KeepKey firmware message type 752 (SolanaSignTx) parses LEGACY messages
+      // only. For versioned (v0) messages we route the exact message bytes
+      // through type 754 (SolanaSignMessage), preserving the 0x80 prefix and
+      // payload. Same logic as the solanaSignTx RPC handler in bun/index.ts —
+      // duplicated here because the swap path calls hdwallet directly and
+      // bypasses the RPC wrapper. Without this, Pioneer-built v0 swap txs
+      // (Solana inbound to THORChain etc.) hit "Malformed Solana transaction"
+      // from the device.
+      const fullTx = Buffer.from(
+        typeof unsignedTx.rawTx === 'string'
+          ? unsignedTx.rawTx
+          : Buffer.from(unsignedTx.rawTx).toString('base64'),
+        'base64',
+      )
+      let parsed
+      try {
+        parsed = parseSolanaTx(fullTx)
+      } catch (err) {
+        if (err instanceof SolanaTxParseError) throw new Error(`[signTx:solana] ${err.message}`)
+        throw err
+      }
+      console.debug(`[signTx:solana] signing tx versioned=${parsed.isVersioned} sigCount=${parsed.sigCount} fullTx=${fullTx.length}B`)
+
+      let sigBytes: Uint8Array
+      if (parsed.isVersioned) {
+        const messageBytes = solanaMessageSlice(fullTx, parsed)
+        console.debug(`[signTx:solana] v0 — routing through solanaSignMessage (${messageBytes.length}B incl. 0x80 prefix)`)
+        const msgRes = await wallet.solanaSignMessage({
+          addressNList: unsignedTx.addressNList,
+          message: messageBytes,
+          showDisplay: true,
+        })
+        const sig = msgRes?.signature
+        if (!sig) throw new Error('[signTx:solana] v0: device returned no signature')
+        sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
+      } else {
+        // Legacy: hdwallet expects the message bytes (no sig section), not the full tx.
+        const deviceParams = {
+          ...unsignedTx,
+          rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
+        }
+        const result = await wallet.solanaSignTx(deviceParams)
+        if (!result?.signature) {
+          // Device returned a non-signature result — pass through (preserves
+          // the existing legacy behaviour for callers expecting that shape).
+          console.debug(`[signTx:solana] legacy result has no signature, passing through`)
+          return result
+        }
+        sigBytes = result.signature instanceof Uint8Array
+          ? result.signature
+          : Buffer.from(result.signature, 'base64')
+      }
+
+      if (sigBytes.length !== 64) {
+        throw new Error(`[signTx:solana] Unexpected signature length ${sigBytes.length}`)
+      }
+      // Splice the signature into the first sig slot of the original wire-format tx.
+      const rawBytes = Buffer.from(fullTx)
+      if (rawBytes.length < parsed.sigStart + 64) {
+        throw new Error('[signTx:solana] Raw tx too short to hold signature')
+      }
+      for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
+      const serializedTx = rawBytes.toString('base64')
+      console.debug(`[signTx:solana] assembled signed tx ${rawBytes.length}B (versioned=${parsed.isVersioned})`)
+      return { signature: sigBytes, serializedTx }
     }
-    case 'tron':
-      return wallet.tronSignTx(unsignedTx)
-    case 'ton':
-      return wallet.tonSignTx(unsignedTx)
+    case 'tron': {
+      // hdwallet returns { signature, serializedTx, ... } but does NOT echo
+      // tronGridTx — and broadcastTx() reassembles the broadcast envelope by
+      // splicing the signature into tronGridTx. Without re-merging here, the
+      // swap orchestrator hits "Tron broadcast requires tronGridTx and
+      // signature" because tronGridTx was lost between build and broadcast.
+      const tronResult = await wallet.tronSignTx(unsignedTx)
+      return { ...tronResult, tronGridTx: unsignedTx.tronGridTx }
+    }
+    case 'ton': {
+      // Same pattern as Tron: preserve tonBuildResult through signing so the
+      // BOC-assembly step in broadcastTx has the build context it needs.
+      const tonResult = await wallet.tonSignTx(unsignedTx)
+      return { ...tonResult, tonBuildResult: unsignedTx.tonBuildResult }
+    }
     case 'zcash-shielded':
       // Shielded signing is handled by the zcash-shielded module (sidecar + device)
       // The full flow is orchestrated by sendShielded() — this should not be called directly
@@ -377,8 +689,23 @@ export async function broadcastTx(
   // Tron: broadcast via TronGrid's broadcasttransaction (JSON format, needs raw_data + signature)
   if (chain.chainFamily === 'tron') {
     const tronGridTx = signedTx?.tronGridTx
-    const sigHex = signedTx?.signature
-    if (!tronGridTx || !sigHex) throw new Error('Tron broadcast requires tronGridTx and signature')
+    const rawSig = signedTx?.signature
+    if (!tronGridTx || !rawSig) throw new Error('Tron broadcast requires tronGridTx and signature')
+
+    // hdwallet's tronSignTx returns `signature` as a Uint8Array. TronGrid
+    // expects a hex string in the `signature` array — JSON.stringify on a
+    // Uint8Array produces `{"0":n,"1":n,...}` (array-like-as-object), which
+    // TronGrid's parser chokes on with a Java NullPointerException. Normalize
+    // to lowercase hex regardless of the input shape.
+    const sigHex =
+      rawSig instanceof Uint8Array || Buffer.isBuffer(rawSig)
+        ? Buffer.from(rawSig).toString('hex')
+        : typeof rawSig === 'string'
+          ? rawSig.replace(/^0x/, '')
+          : null
+    if (!sigHex || !/^[0-9a-fA-F]+$/.test(sigHex)) {
+      throw new Error(`Tron broadcast: signature is malformed (got ${typeof rawSig}, length=${(rawSig as any)?.length ?? 'n/a'})`)
+    }
 
     const broadcastBody = { ...tronGridTx, signature: [sigHex] }
     const resp = await fetch('https://api.trongrid.io/wallet/broadcasttransaction', {
@@ -388,11 +715,36 @@ export async function broadcastTx(
     })
     const data = await resp.json() as any
     if (data?.result === true && data?.txid) return { txid: data.txid }
-    // TronGrid returns error messages as hex-encoded strings
-    let errMsg = data?.code || 'Unknown error'
-    if (data?.message) {
-      try { errMsg = Buffer.from(data.message, 'hex').toString('utf8') } catch { errMsg = data.message }
-    }
+
+    // Diagnostic: TronGrid uses several error shapes:
+    //   { result: false, code: "CONTRACT_VALIDATE_ERROR", message: "<hex>" }
+    //   { result: false, message: "<hex or utf8>" }
+    //   { Error: "..." }                  (uppercase, validation failure)
+    //   { code: "...", message: "<hex>" }
+    //   { error: "..." }                   (generic HTTP-style)
+    // The hex-encoded `message` is the human-readable failure reason.
+    // Falling back to JSON.stringify so we never throw a bare "Unknown error".
+    const errMsgFromHexMessage = (() => {
+      const raw = data?.message
+      if (typeof raw !== 'string' || raw.length === 0) return null
+      // Hex string: even-length, all 0-9a-fA-F
+      if (/^[0-9a-fA-F]+$/.test(raw) && raw.length % 2 === 0) {
+        try {
+          const decoded = Buffer.from(raw, 'hex').toString('utf8')
+          if (decoded && /[\x20-\x7e]/.test(decoded)) return decoded
+        } catch { /* fall through */ }
+      }
+      return raw
+    })()
+    const errMsg =
+      errMsgFromHexMessage ||
+      data?.Error ||                                           // capitalized: validation
+      data?.error ||                                           // generic
+      data?.code ||                                            // category
+      (resp.status !== 200 ? `HTTP ${resp.status} ${resp.statusText}` : null) ||
+      `unparseable response: ${JSON.stringify(data).slice(0, 240)}`
+    console.error('[broadcast:tron] TronGrid rejected. body:', JSON.stringify(broadcastBody).slice(0, 400))
+    console.error('[broadcast:tron] TronGrid response:', JSON.stringify(data).slice(0, 400))
     throw new Error(`Tron broadcast failed: ${errMsg}`)
   }
 

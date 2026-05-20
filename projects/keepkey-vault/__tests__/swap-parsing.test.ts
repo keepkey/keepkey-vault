@@ -119,17 +119,25 @@ const FIXTURE_SINGLE_QUOTE = {
   },
 }
 
-/** Assets response from Pioneer GetAvailableAssets */
+/** Assets response from Pioneer GetAvailableAssets — every entry includes
+ *  caip per pioneer-server's swap-config controller contract (the response is
+ *  built from a CAIP-keyed whitelist). The token-without-caip fixture below
+ *  pins the malformed-response defense. */
 const FIXTURE_ASSETS_RESPONSE = {
   data: {
     success: true,
     data: {
       assets: [
-        { asset: 'BTC.BTC', symbol: 'BTC', name: 'Bitcoin', decimals: 8 },
-        { asset: 'ETH.ETH', symbol: 'ETH', name: 'Ethereum', decimals: 18 },
-        { asset: 'ETH.USDT-0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
-        { asset: 'GAIA.ATOM', symbol: 'ATOM', name: 'Cosmos Hub', decimals: 6 },
-        { asset: 'BASE.ETH', symbol: 'ETH', name: 'Base ETH', decimals: 18 },
+        { asset: 'BTC.BTC', symbol: 'BTC', name: 'Bitcoin', decimals: 8,
+          caip: 'bip122:000000000019d6689c085ae165831e93/slip44:0' },
+        { asset: 'ETH.ETH', symbol: 'ETH', name: 'Ethereum', decimals: 18,
+          caip: 'eip155:1/slip44:60' },
+        { asset: 'ETH.USDT-0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', name: 'Tether USD', decimals: 6,
+          caip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7' },
+        { asset: 'GAIA.ATOM', symbol: 'ATOM', name: 'Cosmos Hub', decimals: 6,
+          caip: 'cosmos:cosmoshub-4/slip44:118' },
+        { asset: 'BASE.ETH', symbol: 'ETH', name: 'Base ETH', decimals: 18,
+          caip: 'eip155:8453/slip44:60' },
         { asset: 'UNKNOWN.FOO', symbol: 'FOO' }, // unknown chain — should be filtered out
       ],
     },
@@ -147,7 +155,8 @@ const FIXTURE_ASSETS_FLAT = {
 // ── Quote parsing tests ─────────────────────────────────────────────
 
 describe('parseQuoteResponse', () => {
-  const baseParams = { fromAsset: 'BASE.ETH', toAsset: 'ETH.ETH', slippageBps: 300 }
+  // CAIP-only — Pioneer's Quote endpoint is the source of truth for routing.
+  const baseParams = { fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
 
   test('BASE → ETH: extracts memo from txParams', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
@@ -206,39 +215,33 @@ describe('parseQuoteResponse', () => {
     expect(result.minimumOutput).toBe('0.00238')
   })
 
-  test('BASE → ETH: preserves fromAsset/toAsset from params', () => {
-    const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
-    expect(result.fromAsset).toBe('BASE.ETH')
-    expect(result.toAsset).toBe('ETH.ETH')
-  })
-
   // BTC → ETH (no router, memo in txParams)
   test('BTC → ETH: extracts memo from txParams', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.memo).toBe('=:ETH.ETH:0xdest456:125000')
   })
 
   test('BTC → ETH: inboundAddress from txParams.vaultAddress', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.inboundAddress).toBe('bc1qvaultaddress')
   })
 
   test('BTC → ETH: router is undefined (UTXO chains have no router)', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.router).toBeUndefined()
   })
 
   test('BTC → ETH: estimatedTime from raw.total_swap_seconds', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     expect(result.estimatedTime).toBe(900)
   })
 
   test('BTC → ETH: minimumOutput calculated from slippage when no amountOutMin', () => {
-    const params = { fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH', slippageBps: 300 }
+    const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     // 1.25 * (1 - 85/10000) = 1.25 * 0.9915 = 1.239375
     expect(parseFloat(result.minimumOutput)).toBeCloseTo(1.239375, 4)
@@ -246,7 +249,7 @@ describe('parseQuoteResponse', () => {
 
   // Minimal response (fields at top-level quote, no raw/txs)
   test('minimal: extracts fields from top-level quote properties', () => {
-    const params = { fromAsset: 'ETH.ETH', toAsset: 'BTC.BTC', slippageBps: 300 }
+    const params = { fromCaip: 'eip155:1/slip44:60', toCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_MINIMAL_QUOTE, params)
     expect(result.memo).toBe('swap:ETH.ETH:0xdest')
     expect(result.inboundAddress).toBe('0xvault789')
@@ -259,7 +262,7 @@ describe('parseQuoteResponse', () => {
 
   // Single object (not array)
   test('single object response: wraps in array and parses', () => {
-    const params = { fromAsset: 'ETH.ETH', toAsset: 'BTC.BTC', slippageBps: 300 }
+    const params = { fromCaip: 'eip155:1/slip44:60', toCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_SINGLE_QUOTE, params)
     expect(result.expectedOutput).toBe('0.5')
     expect(result.memo).toBe('cf:swap')
@@ -276,13 +279,198 @@ describe('parseQuoteResponse', () => {
   test('throws on missing output amount', () => {
     const badResp = { data: [{ quote: { inbound_address: '0x123' } }] }
     expect(() => parseQuoteResponse(badResp, baseParams))
-      .toThrow('Quote response missing output amount')
+      .toThrow(/No quote output for/)
+  })
+
+  test('throws on zero output amount (Pioneer schema drift / no liquidity)', () => {
+    const badResp = { data: [{ quote: { buyAmount: '0', inbound_address: '0x123' } }] }
+    expect(() => parseQuoteResponse(badResp, baseParams))
+      .toThrow(/No quote output for/)
+  })
+
+  test('accepts new Pioneer field names (expectedAmountOut, amount_out)', () => {
+    const camel = { data: [{ quote: { expectedAmountOut: '2.5', inbound_address: '0xv', memo: '=:ETH.ETH:0xdest' } }] }
+    expect(parseQuoteResponse(camel, baseParams).expectedOutput).toBe('2.5')
+    const snake = { data: [{ quote: { amount_out: '3.7', inbound_address: '0xv', memo: '=:ETH.ETH:0xdest' } }] }
+    expect(parseQuoteResponse(snake, baseParams).expectedOutput).toBe('3.7')
   })
 
   test('throws on missing inbound address', () => {
     const badResp = { data: [{ quote: { buyAmount: '1.0' } }] }
     expect(() => parseQuoteResponse(badResp, baseParams))
       .toThrow('Quote response missing inbound address')
+  })
+
+  test('native THORChain RUNE deposit: missing inbound is OK (uses MsgDeposit)', () => {
+    // The check that previously string-compared `params.fromAsset === 'THOR.RUNE'`
+    // is now CAIP-driven. Pin the canonical CAIP so anyone who renames or moves
+    // the constant in swap-parsing.ts has to also update this test.
+    const RUNE_CAIP = 'cosmos:thorchain-mainnet-v1/slip44:931'
+    const resp = { data: [{ quote: { buyAmount: '1.0' } }] }
+    const params = { fromCaip: RUNE_CAIP, toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
+    expect(() => parseQuoteResponse(resp, params)).not.toThrow()
+  })
+
+  test('native Mayachain CACAO deposit: missing inbound is OK (uses MsgDeposit)', () => {
+    const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
+    const resp = { data: [{ quote: { buyAmount: '1.0' } }] }
+    const params = { fromCaip: CACAO_CAIP, toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
+    expect(() => parseQuoteResponse(resp, params)).not.toThrow()
+  })
+
+  test('error message uses CAIPs (not THORChain asset strings)', () => {
+    // The "Unsupported THORChain chain" class of errors is gone — vault is
+    // CAIP-native — so error messages must reference CAIPs.
+    const params = {
+      fromCaip: 'eip155:1/slip44:60',
+      toCaip: 'eip155:10/erc20:0x9560e827af36c94d2ac33a39bce1fe78631088db', // VELO
+      slippageBps: 300,
+    }
+    const noOutput = { data: [{ quote: { inbound_address: '0xv' } }] }
+    expect(() => parseQuoteResponse(noOutput, params))
+      .toThrow(/eip155:10\/erc20:0x9560/)
+  })
+
+  // ── Deposit-channel protocols (Chainflip, NEAR Intents EVM side) ───
+
+  test('Chainflip ETH→BTC: data="0x" creates deposit-channel relayTx (not rejected)', () => {
+    // The real Pioneer response for ETH→BTC when THORChain is offline: Chainflip
+    // via ShapeShift. Chainflip uses a deposit-channel model — the BTC destination
+    // was registered when the quote was created; the user just sends a plain ETH
+    // transfer to the deposit contract address. `data = '0x'` is intentional.
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshiftSwap',
+        quote: {
+          swapper: 'Chainflip',
+          buyAmount: '0.0002685',
+          txs: [{ txParams: {
+            to: '0xd054199c7c2d30a38cebae7a9c1ca238f932be80',
+            data: '0x',
+            value: '10000000000000000',
+          } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.relayTx).toBeDefined()
+    expect(result.relayTx!.data).toBe('0x')
+    expect(result.relayTx!.isDepositChannel).toBe(true)
+    expect(result.swapper).toBe('Chainflip')
+  })
+
+  test('NEAR Intents ETH→BTC: EVM source treated as deposit channel', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'NEAR Intents',
+          buyAmount: '0.002',
+          txs: [{ txParams: { data: '0x', to: '0xnear_deposit', value: '10000000000000000' } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.relayTx?.to).toBe('0xnear_deposit')
+    expect(result.relayTx?.isDepositChannel).toBe(true)
+  })
+
+  test('Relay with data="0x" is NOT a deposit channel — no relayTx created', () => {
+    // Relay is a pure calldata protocol; empty calldata = malformed quote.
+    // Without isDepositChannel, the guard in buildRelaySwapTx will catch it.
+    const ethCaip = 'eip155:1/slip44:60'
+    const usdcCaip = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100.0',
+          memo: 'MEMO',
+          inbound_address: '0xvault',
+          txs: [{ txParams: { data: '0x', to: '0xdest', value: '1000' } }],
+        },
+      }],
+    }
+    // data='0x' with swapper=Relay → not a deposit channel, relayTx not created
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: usdcCaip, slippageBps: 100 })
+    expect(result.relayTx).toBeUndefined()
+    // Memo path used instead
+    expect(result.memo).toBe('MEMO')
+  })
+
+  test('NEAR Intents BTC→ETH (UTXO source, no memo) — memoless transfer succeeds', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'NEAR Intents',
+          buyAmount: '0.05',
+          inbound_address: 'bc1qnearintentsdeposit',
+          txs: [{ txParams: { to: 'bc1qnearintentsdeposit' } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: btcCaip, toCaip: ethCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.inboundAddress).toBe('bc1qnearintentsdeposit')
+    expect(result.memo).toBe('')
+    expect(result.relayTx).toBeUndefined()
+  })
+
+  test('NEAR Intents first in list — selected as best (Pioneer ranks it first)', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [
+        {
+          integration: 'shapeshift',
+          quote: { swapper: 'NEAR Intents', buyAmount: '0.0001', txs: [{ txParams: { data: '0x', to: '0xnear' } }] },
+        },
+        {
+          integration: 'shapeshiftSwap',
+          quote: {
+            swapper: 'Chainflip',
+            buyAmount: '0.0002685',
+            txs: [{ txParams: { to: '0xchainflip_deposit', data: '0x', value: '10000000000000000' } }],
+          },
+        },
+      ],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.relayTx?.isDepositChannel).toBe(true)
+  })
+
+  test('relayTx with real calldata to EVM destination is still accepted', () => {
+    // Relay ETH → USDC (same chain, EVM destination) should work fine.
+    const ethCaip = 'eip155:1/slip44:60'
+    const usdcCaip = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100.0',
+          txs: [{ txParams: {
+            data: '0x12345678000000000000000000000000000000000000000000',
+            to: '0xrelayRouter', value: '1000000000000000',
+            chainId: 1, gasLimit: '300000',
+          } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: usdcCaip, slippageBps: 300 })
+    expect(result.relayTx).toBeDefined()
+    expect(result.relayTx!.isDepositChannel).toBeUndefined()
+    expect(result.relayTx!.data).toBe('0x12345678000000000000000000000000000000000000000000')
   })
 })
 
@@ -339,6 +527,41 @@ describe('parseAssetsResponse', () => {
     const assets = parseAssetsResponse(FIXTURE_ASSETS_RESPONSE)
     const unknown = assets.find(a => a.asset === 'UNKNOWN.FOO')
     expect(unknown).toBeUndefined()
+  })
+
+  test('preserves token caip from pioneer-server (case-sensitive)', () => {
+    // pioneer-server's swap-config controller emits caip with lowercase
+    // contract for EVM tokens (CAIP-19 spec) — vault must NOT silently
+    // fall back to the native chain CAIP when raw.caip is present.
+    const assets = parseAssetsResponse(FIXTURE_ASSETS_RESPONSE)
+    const usdt = assets.find(a => a.symbol === 'USDT' && a.contractAddress)
+    expect(usdt).toBeTruthy()
+    expect(usdt!.caip).toBe('eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7')
+    expect(usdt!.caip).not.toBe('eip155:1/slip44:60') // would be the bug — token attached to native CAIP
+  })
+
+  test('drops malformed token assets (missing caip) instead of falling back to native', () => {
+    // If pioneer-server ever emits a token entry without caip, the previous
+    // `raw.caip || chainDef.caip` fallback would make the token quote against
+    // the chain's NATIVE CAIP — silent corruption. Defense: drop + warn.
+    const malformed = {
+      data: {
+        success: true,
+        data: {
+          assets: [
+            { asset: 'ETH.ETH', symbol: 'ETH', decimals: 18,
+              caip: 'eip155:1/slip44:60' }, // native — fine
+            { asset: 'ETH.USDT-0xdAC17F958D2ee523a2206206994597C13D831ec7',
+              symbol: 'USDT', decimals: 6 }, // token without caip — should be dropped
+          ],
+        },
+      },
+    }
+    const assets = parseAssetsResponse(malformed)
+    expect(assets.length).toBe(1)
+    expect(assets[0].asset).toBe('ETH.ETH')
+    // The token was dropped, not silently keyed under native CAIP.
+    expect(assets.find(a => a.symbol === 'USDT')).toBeUndefined()
   })
 
   test('parses flat array response (single unwrap)', () => {

@@ -8,18 +8,50 @@
 import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 
+function directorySizeBytes(dirPath: string): number {
+  let total = 0
+  try {
+    for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+      const fullPath = join(dirPath, entry.name)
+      try {
+        if (entry.isDirectory()) {
+          total += directorySizeBytes(fullPath)
+        } else if (entry.isFile()) {
+          total += statSync(fullPath).size
+        }
+      } catch {}
+    }
+  } catch {}
+  return total
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}M`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}K`
+  return `${bytes}B`
+}
+
+// Only packages left external by scripts/bundle-backend.ts.
+// Everything else (ethers, pioneer, swagger, cosmjs, protobuf, @keepkey/*)
+// is pre-bundled into a single index.js. This reduces installed file count
+// from ~13,400 to ~100, cutting Windows Defender first-launch scan from 56s to ~5s.
 const EXTERNALS = [
-  '@keepkey/hdwallet-core',
-  '@keepkey/hdwallet-keepkey',
-  '@keepkey/hdwallet-keepkey-nodehid',
-  '@keepkey/hdwallet-keepkey-nodewebusb',
-  '@keepkey/device-protocol',
-  '@keepkey/proto-tx-builder',
-  'google-protobuf',
   'node-hid',
   'usb',
-  'ethers',
-  '@pioneer-platform/pioneer-client',
+  'google-protobuf',
+  '@keepkey/proto-tx-builder',
+  'swagger-client',
+  // WalletConnect: marked external in bundle-backend.ts (ESM/CJS dual-package
+  // resolution breaks in Bun bundler). Must be present at runtime.
+  '@walletconnect/web3wallet',
+  '@walletconnect/core',
+  '@walletconnect/types',
+  '@walletconnect/utils',
+  '@walletconnect/jsonrpc-utils',
+  // Transitive deps of version-differing nested WC packages (not hoisted to top level)
+  '@stablelib/ed25519',
+  'fast-redact',
+  'duplexify',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
@@ -122,10 +154,14 @@ const DEV_BLOCKLIST = new Set([
   'node-int64', 'parse5',
   // --- Dead chain SDK (Binance Beacon Chain is decommissioned) ---
   'bnb-javascript-sdk-nobroadcast',
+  // --- TypeScript type packages (not needed at runtime) ---
+  'types-ramda',
 ])
 
 // Read deps from a nested package dir and add them to allDeps (so they get collected at top level).
 // Uses DEV_BLOCKLIST to prevent pulling in dev-time packages.
+// Recursively walks the nested package's OWN nested node_modules to find deps
+// (e.g. @walletconnect/logger/node_modules/pino needs its own fast-redact).
 function addNestedDeps(nestedPkgDir: string) {
   try {
     const pjPath = join(nestedPkgDir, 'package.json')
@@ -135,6 +171,22 @@ function addNestedDeps(nestedPkgDir: string) {
       if (!allDeps.has(dep) && !DEV_BLOCKLIST.has(dep)) {
         allDeps.add(dep)
         addDeps(dep)
+      }
+    }
+    // Also recurse into THIS nested package's own node_modules —
+    // e.g. @walletconnect/logger/node_modules/pino has its own deps.
+    const innerNm = join(nestedPkgDir, 'node_modules')
+    if (existsSync(innerNm)) {
+      for (const entry of readdirSync(innerNm, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const innerPkgDir = join(innerNm, entry.name)
+        if (entry.name.startsWith('@')) {
+          for (const sub of readdirSync(innerPkgDir, { withFileTypes: true })) {
+            if (sub.isDirectory()) addNestedDeps(join(innerPkgDir, sub.name))
+          }
+        } else {
+          addNestedDeps(innerPkgDir)
+        }
       }
     }
   } catch {}
@@ -233,27 +285,20 @@ for (const dep of sorted) {
 
 console.log(`[collect-externals] Copied ${copiedCount} packages to ${nmDest}`)
 
-// Strip node_modules from @keepkey/* packages (file: deps).
-// These are lerna monorepo artifacts — Bun copies the entire directory including
-// node_modules when resolving file: references. All their deps are already
-// collected at top-level by this script, so the nested copies are pure bloat.
-const keepkeyDir = join(nmDest, '@keepkey')
-if (existsSync(keepkeyDir)) {
-  let strippedKK = 0
-  for (const entry of readdirSync(keepkeyDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const nestedNm = join(keepkeyDir, entry.name, 'node_modules')
-    if (existsSync(nestedNm)) {
-      const result = Bun.spawnSync(['du', '-sk', nestedNm])
-      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
-      try { rmSync(nestedNm, { recursive: true }) } catch { /* already removed */ }
-      strippedKK += kb
-    }
-  }
-  if (strippedKK > 0) {
-    console.log(`[collect-externals] Stripped ${(strippedKK / 1024).toFixed(1)}MB from @keepkey/*/node_modules (file: dep artifacts)`)
+// Strip node_modules from file:-linked packages in the staging area.
+// npm/bun may have installed transitive deps INSIDE the source directory
+// (e.g. modules/proto-tx-builder/node_modules/). These should be resolved
+// at top level, not nested. Leaving them causes Inno Setup MAX_PATH failures.
+for (const [name] of fileLinkedPaths) {
+  const nestedNm = join(nmDest, name, 'node_modules')
+  if (existsSync(nestedNm)) {
+    rmSync(nestedNm, { recursive: true })
+    console.log(`[collect-externals] Stripped nested node_modules from file:-linked ${name}`)
   }
 }
+
+// device-protocol is now bundled into index.js by bundle-backend.ts,
+// so we no longer need to verify messages_pb.js here.
 
 // Copy nested node_modules (version-differing deps that packages need)
 let nestedCount = 0
@@ -359,19 +404,28 @@ console.log(`[collect-externals] Pruned ${prunedCount} files/dirs (${(prunedSize
 
 // Remove prebuilds for OTHER platforms, build artifacts, and native source files
 const REMOVE_DIRS = ['node_gyp_bins', 'gyp', 'binding.gyp']
-// Platform-aware: keep prebuilds for the current build platform, strip the rest
+// Platform + architecture aware: keep prebuilds only for the current build target
 const isWindows = process.platform === 'win32'
 const isMac = process.platform === 'darwin'
+const isArm64 = process.arch === 'arm64'
+const isX64 = process.arch === 'x64'
+console.log(`[collect-externals] Platform: ${process.platform}, Arch: ${process.arch}`)
 const REMOVE_PREBUILD_PREFIXES = isWindows
   ? ['linux', 'darwin', 'android']
   : isMac
     ? ['linux', 'win32', 'android']
     : ['darwin', 'win32', 'android'] // linux build
 // HID prebuild directory prefixes (node-hid uses HID-{platform}-{arch} naming)
-const REMOVE_HID_PREFIXES = isWindows
+// On macOS, filter by architecture so only the matching HID binary is bundled.
+const REMOVE_HID_PREFIXES: string[] = isWindows
   ? ['HID-linux', 'HID-darwin', 'HID_hidraw-linux']
   : isMac
-    ? ['HID-win', 'HID-linux', 'HID_hidraw-linux']
+    ? [
+        'HID-win', 'HID-linux', 'HID_hidraw-linux',
+        // Strip the OTHER macOS architecture to reduce bundle size
+        ...(isArm64 ? ['HID-darwin-x64'] : []),
+        ...(isX64 ? ['HID-darwin-arm64'] : []),
+      ]
     : ['HID-win', 'HID-darwin']
 // C/C++ source and build artifacts not needed at runtime (~7MB)
 const NATIVE_PRUNE_EXTENSIONS = ['.o', '.c', '.h', '.cc', '.cpp', '.gyp', '.gypi', '.vcxproj', '.m4', '.mk', '.am', '.in']
@@ -386,10 +440,7 @@ function cleanNativeArtifacts(dirPath: string) {
         // Remove prebuilds for other platforms (HID-win32-*, linux-x64-*, etc.)
         if (REMOVE_PREBUILD_PREFIXES.some(p => entry.name.startsWith(p)) ||
             REMOVE_HID_PREFIXES.some(p => entry.name.startsWith(p))) {
-          try {
-            const result = Bun.spawnSync(['du', '-sk', fullPath])
-            nativePrunedSize += parseInt(result.stdout.toString().split('\t')[0] || '0', 10) * 1024
-          } catch {}
+          nativePrunedSize += directorySizeBytes(fullPath)
           rmSync(fullPath, { recursive: true })
           continue
         }
@@ -480,6 +531,9 @@ const STRIP_DIRS = [
   // --- node-notifier: test/dev utility, contains unsigned macOS binary (terminal-notifier.app) ---
   'node-notifier',
   '@keepkey/proto-tx-builder/node_modules/node-notifier',
+
+  // --- types-ramda: TypeScript types, not needed at runtime ---
+  'types-ramda',
 ]
 
 // Remove nested node_modules that duplicate top-level packages at the SAME version.
@@ -516,7 +570,12 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
                 const nestedVer = getPackageVersion(scopedPath)
                 const topVer = getPackageVersion(join(nmDest, scopedName))
                 if (nestedVer && topVer && nestedVer === topVer) {
-                  rmSync(scopedPath, { recursive: true })
+                  // On Windows, removing very deep duplicate node_modules can
+                  // partially delete packages and leave broken shadow dirs
+                  // (for example uint8arrays without cjs/src). Keep them.
+                  if (process.platform !== 'win32') {
+                    rmSync(scopedPath, { recursive: true, force: true })
+                  }
                 } else if (nestedVer && topVer && nestedVer !== topVer) {
                   console.log(`  Keeping nested: ${scopedName}@${nestedVer} (top-level: ${topVer})`)
                 }
@@ -529,7 +588,11 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
               const nestedVer = getPackageVersion(nestedPkgPath)
               const topVer = getPackageVersion(join(nmDest, pkg.name))
               if (nestedVer && topVer && nestedVer === topVer) {
-                rmSync(nestedPkgPath, { recursive: true })
+                // See scoped-package case above: partial deletion on Windows
+                // is worse than a slightly larger bundle.
+                if (process.platform !== 'win32') {
+                  rmSync(nestedPkgPath, { recursive: true, force: true })
+                }
               } else if (nestedVer && topVer && nestedVer !== topVer) {
                 console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
               }
@@ -539,9 +602,15 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
           try {
             if (readdirSync(fullPath).length === 0) rmSync(fullPath, { recursive: true })
           } catch {}
-        } catch {
-          // If we can't read it, remove it
-          rmSync(fullPath, { recursive: true })
+        } catch (e) {
+          // On Windows, very deep nested node_modules paths can fail to read
+          // even though Bun still needs files inside them at runtime.
+          if (process.platform === 'win32') {
+            console.warn(`  WARN: Preserving unreadable nested node_modules on Windows: ${fullPath}: ${e}`)
+          } else {
+            // If we can't read it elsewhere, remove it.
+            rmSync(fullPath, { recursive: true })
+          }
         }
       } else {
         stripDuplicateNestedNodeModules(fullPath)
@@ -556,11 +625,10 @@ for (const dir of STRIP_DIRS) {
   const target = join(nmDest, dir)
   if (existsSync(target)) {
     try {
-      const result = Bun.spawnSync(['du', '-sk', target])
-      const kb = parseInt(result.stdout.toString().split('\t')[0] || '0', 10)
+      const bytes = directorySizeBytes(target)
       rmSync(target, { recursive: true })
-      strippedSize += kb * 1024
-      console.log(`  Stripped: ${dir} (${(kb / 1024).toFixed(1)}MB)`)
+      strippedSize += bytes
+      console.log(`  Stripped: ${dir} (${(bytes / 1024 / 1024).toFixed(1)}MB)`)
     } catch {}
   }
 }
@@ -656,5 +724,4 @@ function removeDanglingSymlinks(dirPath: string) {
 removeDanglingSymlinks(nmDest)
 
 // Report final size
-const { stdout } = Bun.spawnSync(['du', '-sh', nmDest])
-console.log(`[collect-externals] Final size: ${stdout.toString().trim().split('\t')[0]}`)
+console.log(`[collect-externals] Final size: ${formatBytes(directorySizeBytes(nmDest))}`)

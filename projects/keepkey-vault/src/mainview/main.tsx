@@ -3,10 +3,12 @@ import { createRoot } from "react-dom/client"
 import { ChakraProvider } from "@chakra-ui/react"
 import { system } from "./theme"
 import "./index.css"
+import "./styles/tokens.css"
 import "./i18n"
 import splashBg from "./assets/splash-bg.png"
 import App from "./App"
 import { FiatProvider } from "./lib/fiat-context"
+import { DashboardViewProvider } from "./lib/dashboardViewContext"
 
 // Global error handler — prevent stray promise rejections from crashing the WebView
 window.addEventListener('unhandledrejection', (e) => {
@@ -21,7 +23,9 @@ createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<ChakraProvider value={system}>
 			<FiatProvider>
-				<App />
+				<DashboardViewProvider>
+					<App />
+				</DashboardViewProvider>
 			</FiatProvider>
 		</ChakraProvider>
 	</StrictMode>,

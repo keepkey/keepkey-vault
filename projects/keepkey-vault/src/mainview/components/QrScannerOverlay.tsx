@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import jsQR from "jsqr"
-import { rpcRequest, onRpcMessage } from "../lib/rpc"
 
 interface QrScannerOverlayProps {
 	onScan: (data: string) => void
@@ -36,84 +35,73 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 	const [error, setError] = useState<string | null>(null)
 	const [loading, setLoading] = useState(false)
 	const [dragOver, setDragOver] = useState(false)
+	const videoRef = useRef<HTMLVideoElement>(null)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
-	const imgRef = useRef<HTMLImageElement>(null)
 	const fileInputRef = useRef<HTMLInputElement>(null)
 	const foundRef = useRef(false)
-	const modeRef = useRef<ScanMode>("starting")
-	const decoderImgRef = useRef(new Image())
+	const streamRef = useRef<MediaStream | null>(null)
+	const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-	// Keep modeRef in sync
-	useEffect(() => { modeRef.current = mode }, [mode])
-
-	// Start camera on mount, stop on unmount
+	// Start browser camera on mount
 	useEffect(() => {
 		foundRef.current = false
+		let cancelled = false
 
-		rpcRequest("startQrScan", undefined, 10000).catch((err: any) => {
-			console.warn("[QrScanner] startQrScan failed:", err.message)
-			setError(err.message)
-			setMode("fallback")
-		})
+		async function startCamera() {
+			try {
+				const stream = await navigator.mediaDevices.getUserMedia({
+					video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+					audio: false,
+				})
+				if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+				streamRef.current = stream
+				if (videoRef.current) {
+					videoRef.current.srcObject = stream
+					videoRef.current.play().catch(() => {})
+				}
+				setMode("streaming")
 
-		// Timeout: if no frame arrives within 5s, fall back to file upload
-		const startTimeout = setTimeout(() => {
-			if (modeRef.current === "starting") {
-				setError("Camera did not start. Try uploading an image instead.")
+				// Scan frames for QR codes at ~10fps
+				scanIntervalRef.current = setInterval(() => {
+					if (foundRef.current || !videoRef.current || !canvasRef.current) return
+					const video = videoRef.current
+					if (video.readyState < video.HAVE_ENOUGH_DATA) return
+
+					const canvas = canvasRef.current
+					canvas.width = video.videoWidth
+					canvas.height = video.videoHeight
+					const ctx = canvas.getContext("2d", { willReadFrequently: true })
+					if (!ctx) return
+					ctx.drawImage(video, 0, 0)
+					const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+					const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
+					if (code?.data) {
+						foundRef.current = true
+						if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
+						if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+						onScan(code.data)
+					}
+				}, 100)
+			} catch (err: any) {
+				if (cancelled) return
+				console.warn("[QrScanner] getUserMedia failed:", err.message)
+				setError("Camera not available. Upload a QR code image instead.")
 				setMode("fallback")
-				rpcRequest("stopQrScan").catch(() => {})
 			}
-		}, 5000)
+		}
+
+		startCamera()
 
 		return () => {
-			clearTimeout(startTimeout)
-			rpcRequest("stopQrScan").catch(() => {})
+			cancelled = true
+			if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
+			if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
 		}
-	}, [])
-
-	// Listen for camera frames — no mode dependency to avoid re-subscriptions
-	useEffect(() => {
-		const decoderImg = decoderImgRef.current
-
-		const unsubFrame = onRpcMessage("camera-frame", (base64: string) => {
-			if (foundRef.current) return
-			if (modeRef.current === "starting") setMode("streaming")
-
-			// Display frame
-			if (imgRef.current) {
-				imgRef.current.src = `data:image/jpeg;base64,${base64}`
-			}
-
-			// Decode QR from frame (reuse single Image object)
-			decoderImg.onload = () => {
-				if (foundRef.current) return
-				const canvas = canvasRef.current || document.createElement("canvas")
-				canvas.width = decoderImg.width
-				canvas.height = decoderImg.height
-				const ctx = canvas.getContext("2d", { willReadFrequently: true })
-				if (!ctx) return
-				ctx.drawImage(decoderImg, 0, 0)
-				const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-				const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
-				if (code?.data) {
-					foundRef.current = true
-					rpcRequest("stopQrScan").catch(() => {})
-					onScan(code.data)
-				}
-			}
-			decoderImg.src = `data:image/jpeg;base64,${base64}`
-		})
-
-		const unsubError = onRpcMessage("camera-error", (message: string) => {
-			setError(message)
-			setMode("fallback")
-		})
-
-		return () => { unsubFrame(); unsubError() }
 	}, [onScan])
 
 	const handleClose = useCallback(() => {
-		rpcRequest("stopQrScan").catch(() => {})
+		if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
+		if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
 		onClose()
 	}, [onClose])
 
@@ -177,14 +165,15 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 								<Text fontSize="sm" color="gray.500">Starting camera...</Text>
 							</Flex>
 						)}
-						<img
-							ref={imgRef}
+						<video
+							ref={videoRef}
+							playsInline
+							muted
 							style={{
 								width: "100%",
 								display: mode === "streaming" ? "block" : "none",
 								background: "#000",
 							}}
-							alt=""
 						/>
 						{/* Scan target overlay */}
 						{mode === "streaming" && (
@@ -192,7 +181,7 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 								position="absolute" top="50%" left="50%"
 								transform="translate(-50%, -50%)"
 								w="60%" h="60%"
-								border="2px solid rgba(255,215,0,0.5)"
+								border="2px solid rgba(233,196,106,0.5)"
 								borderRadius="md"
 								pointerEvents="none"
 							/>
@@ -208,7 +197,11 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 					<Button
 						size="xs" variant="ghost" color="gray.600" mt="2"
 						_hover={{ color: "gray.400" }}
-						onClick={() => { rpcRequest("stopQrScan").catch(() => {}); setMode("fallback") }}
+						onClick={() => {
+							if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
+							if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+							setMode("fallback")
+						}}
 					>
 						Use image file instead
 					</Button>
@@ -229,17 +222,17 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 						border="2px dashed"
 						borderColor={dragOver ? "kk.gold" : "gray.600"}
 						borderRadius="lg"
-						bg={dragOver ? "rgba(255,215,0,0.06)" : "rgba(255,255,255,0.03)"}
+						bg={dragOver ? "rgba(233,196,106,0.06)" : "rgba(255,255,255,0.03)"}
 						cursor="pointer"
 						transition="all 0.15s"
-						_hover={{ borderColor: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+						_hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
 						onClick={() => fileInputRef.current?.click()}
 						onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
 						onDragLeave={() => setDragOver(false)}
 						onDrop={handleDrop}
 					>
 						<Flex direction="column" align="center" justify="center" h="100%" gap="2" px="4">
-							<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={dragOver ? "#FFD700" : "#888"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={dragOver ? "var(--gold)" : "#888"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 								<polyline points="17 8 12 3 7 8" />
 								<line x1="12" y1="3" x2="12" y2="15" />

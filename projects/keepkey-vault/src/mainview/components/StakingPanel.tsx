@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import type { ChainDef } from "../../shared/chains"
 import type { BuildTxResult, BroadcastResult, StakingPosition } from "../../shared/types"
 import { rpcRequest } from "../lib/rpc"
+import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 
 interface StakingPanelProps {
@@ -53,6 +54,7 @@ interface DelegateDialogProps {
 
 function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount, rewardUsd, onSuccess, watchOnly }: DelegateDialogProps) {
 	const { t } = useTranslation("staking")
+	const { fmtCompact } = useFiat()
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState(t('defaultDelegationMemo'))
@@ -287,7 +289,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 								{rewardAmount && (
 									<Text fontSize="10px" color="kk.textMuted" mt="2">
 										{rewardUsd && rewardUsd > 0
-											? t('rewardsAvailableWithUsd', { amount: rewardAmount, symbol: chain.symbol, usd: rewardUsd.toFixed(2) })
+											? t('rewardsAvailableWithUsd', { amount: rewardAmount, symbol: chain.symbol, fiatValue: fmtCompact(rewardUsd) })
 											: t('rewardsAvailable', { amount: rewardAmount, symbol: chain.symbol })}
 									</Text>
 								)}
@@ -389,7 +391,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 				)}
 
 				{phase === "broadcast" && (
-					<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.3)" borderRadius="md" mb="3">
+					<Box p="3" bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="md" mb="3">
 						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">{t('delegationSubmitted')}</Text>
 						{txid ? (
 							<Flex justify="space-between" align="center">
@@ -596,7 +598,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 
 				{phase === "input" && (
 					<VStack align="stretch" gap="3">
-						<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.2)" borderRadius="md">
+						<Box p="3" bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.2)" borderRadius="md">
 							<Text fontSize="xs" color="kk.gold" fontWeight="600">{t('unbondingPeriod', { period: t(unbondingPeriodKey) })}</Text>
 							<Text fontSize="xs" color="kk.textMuted">{t('tokensLockedDuringUnbonding')}</Text>
 						</Box>
@@ -724,7 +726,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 				)}
 
 				{phase === "broadcast" && (
-					<Box p="3" bg="rgba(255,215,0,0.08)" border="1px solid" borderColor="rgba(255,215,0,0.3)" borderRadius="md" mb="3">
+					<Box p="3" bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="md" mb="3">
 						<Text fontSize="xs" color="kk.gold" fontWeight="600" mb="1">{t('undelegationSubmitted')}</Text>
 						{txid ? (
 							<Flex justify="space-between" align="center">
@@ -835,7 +837,7 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 					<Box as={FaCoins} color="kk.gold" />
 					<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{t('title')}</Text>
 					{totalUsd > 0 && (
-						<Badge colorScheme="yellow" variant="subtle">${totalUsd.toFixed(2)}</Badge>
+						<Badge colorScheme="yellow" variant="subtle">{fmtCompact(totalUsd)}</Badge>
 					)}
 				</HStack>
 				<IconButton
@@ -925,7 +927,7 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 											</Text>
 										</VStack>
 										<VStack align="end" gap="0">
-											<Text fontSize="xs" color="kk.gold">${(pos.valueUsd || 0).toFixed(2)}</Text>
+											<Text fontSize="xs" color="kk.gold">{fmtCompact(pos.valueUsd || 0)}</Text>
 											{pos.status && <Text fontSize="10px" color="kk.textMuted">{pos.status}</Text>}
 										</VStack>
 									</Flex>

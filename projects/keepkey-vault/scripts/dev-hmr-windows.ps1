@@ -106,7 +106,10 @@ if ($i -eq $maxWait) {
 # ── Build ────────────────────────────────────────────────────────────────
 Push-Location $ProjectDir
 try {
-    Write-Step "Building app (vite + collect-externals + electrobun)"
+    Write-Step "Building app (bundle-backend + vite + collect-externals + electrobun + patch-bundle)"
+    bun scripts/bundle-backend.ts
+    if ($LASTEXITCODE -ne 0) { throw "bundle-backend failed" }
+
     bunx vite build
     if ($LASTEXITCODE -ne 0) { throw "vite build failed" }
 
@@ -115,6 +118,9 @@ try {
 
     bunx electrobun build
     # electrobun build may warn about rcedit/zcash-cli — non-fatal
+
+    bun scripts/patch-bundle.ts
+    if ($LASTEXITCODE -ne 0) { throw "patch-bundle failed" }
 
     Write-Success "Build complete"
 

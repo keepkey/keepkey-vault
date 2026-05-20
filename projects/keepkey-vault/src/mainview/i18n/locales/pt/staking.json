@@ -11,7 +11,7 @@
 	"topValidatorExamples": "Exemplos de principais validadores",
 	"browseAllValidators": "Ver todos os validadores",
 	"rewardsAvailable": "Recompensas disponiveis: {{amount}} {{symbol}}",
-	"rewardsAvailableWithUsd": "Recompensas disponiveis: {{amount}} {{symbol}} (~${{usd}})",
+	"rewardsAvailableWithUsd": "Recompensas disponiveis: {{amount}} {{symbol}} (~{{fiatValue}})",
 	"amount": "Quantia",
 	"max": "MAX",
 	"memoOptional": "Memo (opcional)",

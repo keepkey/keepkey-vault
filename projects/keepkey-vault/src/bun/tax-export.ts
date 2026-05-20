@@ -65,10 +65,18 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 		useDetailed = false
 	}
 
-	if (!txSection || txSection.type !== 'table') return txs
+	if (!txSection || txSection.type !== 'table') {
+		console.warn('[TaxExport] No transaction table found in report sections. Available sections:', data.sections.map(s => `${s.title} (${s.type})`).join(', '))
+		return txs
+	}
 
 	const rows = txSection.data.rows || []
 	const headers = txSection.data.headers || []
+
+	if (rows.length === 0) {
+		console.warn('[TaxExport] Transaction table found but has 0 rows')
+		return txs
+	}
 
 	for (const row of rows) {
 		if (useDetailed) {

@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Das Löschen Ihres KeepKey entfernt alle Schlüssel und Einstellungen. Sie verlieren den Zugang zu Ihren Mitteln, wenn Sie Ihre Wiederherstellungsphrase nicht haben.",
 		"wipeAcknowledge": "Ich habe meine Wiederherstellungsphrase gesichert und verstehe, was ich tue",
 		"wipeDevice": "Gerät löschen",
-		"wiping": "Lösche..."
+		"wiping": "Lösche...",
+		"incorrectPin": "Falsche PIN",
+		"tryAgainDescription": "Prüfen Sie den Bildschirm Ihres KeepKey und versuchen Sie es erneut"
 	},
 	"passphrase": {
 		"title": "Passphrase eingeben",

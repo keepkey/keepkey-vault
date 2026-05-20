@@ -12,11 +12,16 @@ import { join, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 
 const projectRoot = join(import.meta.dir, '..')
-const extModules = join(projectRoot, 'build', '_ext_modules')
 const artifactsDir = join(projectRoot, 'artifacts')
 
-if (!existsSync(extModules)) {
-  console.error(`[audit-deps] ERROR: ${extModules} not found. Run 'bun run build' first.`)
+// collect-externals outputs to _build/_ext_modules (Electrobun build dir)
+const candidates = [
+  join(projectRoot, '_build', '_ext_modules'),
+  join(projectRoot, 'build', '_ext_modules'),
+]
+const extModules = candidates.find(p => existsSync(p))
+if (!extModules) {
+  console.error(`[audit-deps] ERROR: _ext_modules not found in _build/ or build/. Run 'bun run build' first.`)
   process.exit(1)
 }
 

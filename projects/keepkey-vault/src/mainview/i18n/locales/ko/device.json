@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "KeepKey를 초기화하면 모든 키와 설정이 삭제됩니다. 복구 문구가 없으면 자금에 접근할 수 없게 됩니다.",
 		"wipeAcknowledge": "복구 문구를 백업했으며 제가 무엇을 하고 있는지 이해합니다",
 		"wipeDevice": "기기 초기화",
-		"wiping": "초기화 중..."
+		"wiping": "초기화 중...",
+		"incorrectPin": "잘못된 PIN",
+		"tryAgainDescription": "KeepKey 화면을 확인하고 다시 시도하세요"
 	},
 	"passphrase": {
 		"title": "비밀번호 구문 입력",

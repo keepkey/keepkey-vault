@@ -37,17 +37,13 @@ UninstallDisplayIcon={app}\Resources\app-real.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
+SetupLogging=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-
-[InstallDelete]
-; Clean stale hashed assets from prior versions — Vite generates unique filenames
-; per build, and old files accumulate causing slow WebView2 startup.
-Type: filesandordirs; Name: "{app}\Resources\app\views\mainview\assets"
 
 [Files]
 Source: "{#MySourceDir}\KeepKeyVault.exe"; DestDir: "{app}"; Flags: ignoreversion

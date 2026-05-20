@@ -1,6 +1,6 @@
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus, FaTimes } from "react-icons/fa"
-import { formatUsd } from "../lib/formatting"
+import { useFiat } from "../lib/fiat-context"
 import type { EvmAddressSet } from "../../shared/types"
 
 interface EvmAddressSelectorProps {
@@ -12,6 +12,7 @@ interface EvmAddressSelectorProps {
 }
 
 export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, onRemoveIndex, adding }: EvmAddressSelectorProps) {
+  const { fmtCompact } = useFiat()
   const { addresses, selectedIndex } = evmAddresses
 
   // Don't render if only one address tracked
@@ -37,7 +38,7 @@ export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, on
               position="relative"
               as="button"
               onClick={() => onSelectIndex(addr.addressIndex)}
-              bg={isSelected ? "rgba(255,215,0,0.12)" : "rgba(255,255,255,0.03)"}
+              bg={isSelected ? "rgba(233,196,106,0.12)" : "rgba(255,255,255,0.03)"}
               border="1px solid"
               borderColor={isSelected ? "kk.gold" : "kk.border"}
               borderRadius="lg"
@@ -45,7 +46,7 @@ export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, on
               py="1.5"
               cursor="pointer"
               transition="all 0.15s"
-              _hover={{ borderColor: "kk.gold", bg: "rgba(255,215,0,0.06)" }}
+              _hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
             >
               <Flex direction="column" align="center" gap="0.5">
                 <Text fontSize="11px" fontWeight="600" color={isSelected ? "kk.gold" : "kk.textPrimary"} lineHeight="1.2">
@@ -56,7 +57,7 @@ export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, on
                 </Text>
                 {addr.balanceUsd > 0 && (
                   <Text fontSize="9px" color="kk.textMuted" lineHeight="1.2">
-                    ${formatUsd(addr.balanceUsd)}
+                    {fmtCompact(addr.balanceUsd)}
                   </Text>
                 )}
               </Flex>

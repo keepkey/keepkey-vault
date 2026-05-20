@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Text, Button, Flex } from "@chakra-ui/react"
+import { Box, Text, Flex } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaEye, FaSpinner, FaPlus, FaMinus } from "react-icons/fa"
 import { generateQRSvg } from "../lib/qr"
 import { rpcRequest } from "../lib/rpc"
@@ -31,57 +31,113 @@ interface ReceiveViewProps {
 	onTonBounceableChange?: (bounceable: boolean) => void
 }
 
+/** Eyebrow + ink-0 mono block + copy chip on the right.
+ *  Click anywhere on the block (or the chip) to copy. */
 function CopyableField({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
 	const { t } = useTranslation("common")
 	const [copied, setCopied] = useState(false)
 	const copy = () => {
 		navigator.clipboard.writeText(value)
-			.then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+			.then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })
 			.catch(() => console.warn('[CopyableField] Clipboard not available'))
 	}
 	return (
 		<Box w="100%">
-			<Flex align="center" justify="space-between" mb="1">
-				<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">{label}</Text>
+			<Flex align="center" justify="space-between" mb="2">
+				<Text
+					fontSize="10px"
+					color="var(--text-3)"
+					textTransform="uppercase"
+					letterSpacing="0.18em"
+					fontWeight="500"
+				>
+					{label}
+				</Text>
 				<Box
 					as="button"
 					onClick={copy}
 					cursor="pointer"
-					color={copied ? "kk.gold" : "kk.textMuted"}
-					_hover={{ color: "kk.gold" }}
+					color={copied ? "var(--teal)" : "var(--text-2)"}
+					_hover={{ color: copied ? "var(--teal)" : "var(--text-0)" }}
 					transition="color 0.15s"
 					display="flex"
 					alignItems="center"
-					gap="1"
-					fontSize="10px"
+					gap="1.5"
+					fontSize="11px"
+					letterSpacing="0.04em"
+					textTransform="uppercase"
+					fontFamily="mono"
+					className="electrobun-webkit-app-region-no-drag"
 				>
 					<Box as={copied ? FaCheck : FaCopy} fontSize="10px" />
 					{copied ? t("copied") : t("copy")}
 				</Box>
 			</Flex>
 			<Box
-				bg="kk.bg"
-				border="1px solid"
-				borderColor="kk.border"
-				borderRadius="md"
-				px="2.5"
-				py="1.5"
-				cursor="pointer"
-				_hover={{ borderColor: "kk.gold" }}
-				transition="border-color 0.15s"
+				as="button"
 				onClick={copy}
+				w="100%"
+				textAlign="left"
+				bg="var(--ink-0)"
+				border="1px solid var(--line)"
+				borderRadius="12px"
+				px="3.5"
+				py="3"
+				cursor="pointer"
+				_hover={{ borderColor: "var(--line-2)" }}
+				transition="border-color 0.15s"
+				className="electrobun-webkit-app-region-no-drag"
 			>
 				<Text
-					fontSize="11px"
+					fontSize="13px"
 					fontFamily={mono ? "mono" : undefined}
-					color="kk.textPrimary"
+					color="var(--text-0)"
 					wordBreak="break-all"
-					lineHeight="1.4"
+					lineHeight="1.5"
+					letterSpacing="0.02em"
 				>
 					{value}
 				</Text>
 			</Box>
 		</Box>
+	)
+}
+
+/** Inline pill toggle — used for BTC receive/change and TON bounceable controls. */
+function PillToggle<T extends string | number>({
+	options, value, onChange,
+}: {
+	options: ReadonlyArray<{ value: T; label: string }>
+	value: T
+	onChange: (v: T) => void
+}) {
+	return (
+		<Flex gap="2px" bg="var(--ink-0)" border="1px solid var(--line)" p="2px" borderRadius="999px">
+			{options.map(opt => {
+				const isActive = value === opt.value
+				return (
+					<Box
+						key={String(opt.value)}
+						as="button"
+						className="electrobun-webkit-app-region-no-drag"
+						onClick={() => onChange(opt.value)}
+						px="3.5"
+						py="1.5"
+						borderRadius="999px"
+						fontSize="11px"
+						fontWeight="500"
+						letterSpacing="-0.005em"
+						color={isActive ? "var(--ink-0)" : "var(--text-2)"}
+						bg={isActive ? "var(--gold)" : "transparent"}
+						_hover={isActive ? {} : { color: "var(--text-0)", bg: "var(--ink-3)" }}
+						transition="all 0.18s"
+						cursor="pointer"
+					>
+						{opt.label}
+					</Box>
+				)
+			})}
+		</Flex>
 	)
 }
 
@@ -129,20 +185,48 @@ export function ReceiveView({
 
 	if (!address && !loading) {
 		return (
-			<Flex direction="column" align="center" py="8" gap="4">
+			<Flex direction="column" align="center" py="10" gap="4">
 				{error ? (
 					<>
-						<Text fontSize="sm" color="kk.error">{error}</Text>
-						<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
+						<Text fontSize="13px" color="var(--rose)" letterSpacing="-0.005em">{error}</Text>
+						<Box
+							as="button"
+							className="electrobun-webkit-app-region-no-drag"
+							onClick={() => onDerive()}
+							bg="var(--gold)"
+							color="var(--ink-0)"
+							fontWeight="600"
+							fontSize="13px"
+							px="5"
+							py="2.5"
+							borderRadius="12px"
+							cursor="pointer"
+							_hover={{ bg: "var(--gold-2)" }}
+							transition="all 0.18s"
+						>
 							{t("retry", { ns: "common" })}
-						</Button>
+						</Box>
 					</>
 				) : (
 					<>
-						<Text fontSize="sm" color="kk.textMuted">{t("noAddressDerived")}</Text>
-						<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} onClick={() => onDerive()}>
+						<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">{t("noAddressDerived")}</Text>
+						<Box
+							as="button"
+							className="electrobun-webkit-app-region-no-drag"
+							onClick={() => onDerive()}
+							bg="var(--gold)"
+							color="var(--ink-0)"
+							fontWeight="600"
+							fontSize="13px"
+							px="5"
+							py="2.5"
+							borderRadius="12px"
+							cursor="pointer"
+							_hover={{ bg: "var(--gold-2)" }}
+							transition="all 0.18s"
+						>
 							{t("deriveAddress")}
-						</Button>
+						</Box>
 					</>
 				)}
 			</Flex>
@@ -151,8 +235,9 @@ export function ReceiveView({
 
 	if (loading) {
 		return (
-			<Flex align="center" justify="center" py="8">
-				<Text fontSize="sm" color="kk.textMuted">{t("derivingAddress")}</Text>
+			<Flex align="center" justify="center" py="10" gap="2">
+				<Box as={FaSpinner} fontSize="12px" color="var(--gold)" style={{ animation: "v3-spin 1s linear infinite" }} />
+				<Text fontSize="12px" color="var(--text-2)" letterSpacing="-0.005em">{t("derivingAddress")}</Text>
 			</Flex>
 		)
 	}
@@ -168,191 +253,231 @@ export function ReceiveView({
 
 	return (
 		<>
-			{/* Horizontal layout: QR left, details right */}
-			<Flex gap="5" py="3" align="flex-start" direction={{ base: "column", sm: "row" }}>
-				{/* Left column: QR + verify */}
-				<Flex direction="column" align="center" gap="2" flexShrink={0}>
+			<Flex gap={{ base: "5", md: "8" }} py="2" align="flex-start" direction={{ base: "column", sm: "row" }}>
+				{/* Left column: framed QR + verify chip */}
+				<Flex direction="column" align="center" gap="3" flexShrink={0}>
 					<Box
 						bg="white"
-						borderRadius="lg"
-						dangerouslySetInnerHTML={{ __html: qrSvg }}
-						w="160px"
-						h="160px"
-						overflow="hidden"
-					/>
-					<Button
-						size="xs"
-						variant="outline"
-						borderColor="kk.border"
-						color="kk.textSecondary"
-						_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+						borderRadius="12px"
+						p="3"
+						boxShadow="var(--shadow-2)"
+						w="184px"
+						h="184px"
+					>
+						<Box
+							w="100%"
+							h="100%"
+							dangerouslySetInnerHTML={{ __html: qrSvg }}
+							sx={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
+						/>
+					</Box>
+					<Box
+						as="button"
+						className="electrobun-webkit-app-region-no-drag"
 						onClick={showOnDevice}
 						disabled={showing}
 						display="flex"
 						alignItems="center"
-						gap="1.5"
-						w="160px"
+						justifyContent="center"
+						gap="2"
+						w="184px"
+						py="2"
+						borderRadius="999px"
+						bg="var(--ink-3)"
+						border="1px solid var(--line)"
+						color="var(--text-1)"
+						fontSize="12px"
+						fontWeight="500"
+						letterSpacing="-0.005em"
+						_hover={showing ? {} : { color: "var(--gold)", borderColor: "rgba(233,196,106,0.3)" }}
+						transition="all 0.18s"
+						cursor={showing ? "default" : "pointer"}
 					>
-						<Box as={showing ? FaSpinner : FaEye} fontSize="11px" />
+						<Box as={showing ? FaSpinner : FaEye} fontSize="11px" style={showing ? { animation: "v3-spin 1s linear infinite" } : undefined} />
 						{showing ? t("checkDevice") : t("verifyOnDevice")}
-					</Button>
+					</Box>
 				</Flex>
 
-				{/* Right column: address, xpub, path, controls */}
-				<Flex direction="column" gap="3" flex="1" minW="0" w="100%">
-					<Text fontSize="xs" color="kk.textMuted">{t("sendToAddress", { symbol: chain.symbol })}</Text>
+				{/* Right column: address + xpub + path + chips */}
+				<Flex direction="column" gap="4" flex="1" minW="0" w="100%">
+					<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">
+						{t("sendToAddress", { symbol: chain.symbol })}
+					</Text>
 
-					{/* BTC: Receive / Change toggle + index */}
+					{/* BTC: receive/change toggle + index stepper */}
 					{isBtc && onBtcChangeIndex && (
 						<Flex align="center" gap="3" flexWrap="wrap">
-							<Flex gap="1" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg">
-								{([
-									{ value: 0 as const, label: t("receive") },
-									{ value: 1 as const, label: t("change", { ns: "common" }) },
-								]).map(opt => (
-									<Button
-										key={opt.value}
-										size="xs"
-										variant="ghost"
-										color={btcChangeIndex === opt.value ? "kk.gold" : "kk.textSecondary"}
-										bg={btcChangeIndex === opt.value ? "rgba(255,215,0,0.1)" : "transparent"}
-										_hover={{ bg: "rgba(255,255,255,0.06)" }}
-										fontWeight={btcChangeIndex === opt.value ? "600" : "400"}
-										fontSize="12px"
-										px="4"
-										py="1"
-										borderRadius="md"
-										onClick={() => onBtcChangeIndex(opt.value)}
-									>
-										{opt.label}
-									</Button>
-								))}
-							</Flex>
+							<PillToggle
+								options={[
+									{ value: 0, label: t("receive") },
+									{ value: 1, label: t("change", { ns: "common" }) },
+								]}
+								value={btcChangeIndex}
+								onChange={(v) => onBtcChangeIndex(v as 0 | 1)}
+							/>
 
-							{/* Address index — inline */}
 							{onBtcAddressIndex && (
-								<Flex align="center" gap="1.5">
-									<Text fontSize="10px" color="kk.textMuted">{t("index")}</Text>
+								<Flex align="center" gap="2">
+									<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500">
+										{t("index")}
+									</Text>
 									<Box
 										as="button"
+										className="electrobun-webkit-app-region-no-drag"
 										onClick={handlePrevAddress}
 										disabled={btcAddressIndex <= 0}
+										w="26px"
+										h="26px"
+										borderRadius="full"
+										display="grid"
+										placeItems="center"
 										cursor={btcAddressIndex <= 0 ? "not-allowed" : "pointer"}
 										opacity={btcAddressIndex <= 0 ? 0.3 : 1}
-										color="kk.textSecondary"
-										_hover={btcAddressIndex > 0 ? { color: "kk.gold" } : {}}
-										transition="color 0.15s"
-										display="flex"
-										alignItems="center"
-										p="0.5"
+										color="var(--text-2)"
+										bg="transparent"
+										_hover={btcAddressIndex > 0 ? { bg: "var(--ink-3)", color: "var(--text-0)" } : {}}
+										transition="all 0.15s"
 									>
 										<Box as={FaMinus} fontSize="9px" />
 									</Box>
 									<Box
-										bg="kk.bg"
-										border="1px solid"
-										borderColor="kk.border"
-										borderRadius="md"
-										px="2"
+										bg="var(--ink-0)"
+										border="1px solid var(--line)"
+										borderRadius="8px"
+										px="2.5"
 										py="0.5"
-										minW="32px"
+										minW="36px"
 										textAlign="center"
 									>
-										<Text fontSize="xs" fontFamily="mono" fontWeight="600" color="kk.gold">{btcAddressIndex}</Text>
+										<Text fontSize="12px" fontFamily="mono" fontWeight="500" color="var(--gold)" letterSpacing="0.02em">
+											{btcAddressIndex}
+										</Text>
 									</Box>
 									<Box
 										as="button"
+										className="electrobun-webkit-app-region-no-drag"
 										onClick={handleNextAddress}
 										disabled={remaining <= 0}
+										w="26px"
+										h="26px"
+										borderRadius="full"
+										display="grid"
+										placeItems="center"
 										cursor={remaining <= 0 ? "not-allowed" : "pointer"}
 										opacity={remaining <= 0 ? 0.3 : 1}
-										color="kk.textSecondary"
-										_hover={remaining > 0 ? { color: "kk.gold" } : {}}
-										transition="color 0.15s"
-										display="flex"
-										alignItems="center"
-										p="0.5"
+										color="var(--text-2)"
+										bg="transparent"
+										_hover={remaining > 0 ? { bg: "var(--ink-3)", color: "var(--text-0)" } : {}}
+										transition="all 0.15s"
 									>
 										<Box as={FaPlus} fontSize="9px" />
 									</Box>
-									<Text fontSize="9px" color="kk.textMuted">({t("remaining", { remaining })})</Text>
+									<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em">
+										({t("remaining", { remaining })})
+									</Text>
 								</Flex>
 							)}
 						</Flex>
 					)}
 
-					{/* TON: bounceable / non-bounceable toggle */}
+					{/* TON: bounceable / non-bounceable */}
 					{isTon && onTonBounceableChange && (
 						<Box>
-							<Flex align="center" gap="2" mb="1">
-								<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">
-									Address Type
-								</Text>
-							</Flex>
-							<Flex gap="1" bg="rgba(255,255,255,0.03)" p="1" borderRadius="lg">
-								<Button
-									size="xs" variant="ghost" fontSize="11px" px="3" py="1" borderRadius="md"
-									color={!tonBounceable ? "kk.gold" : "kk.textSecondary"}
-									bg={!tonBounceable ? "rgba(255,215,0,0.1)" : "transparent"}
-									fontWeight={!tonBounceable ? "600" : "400"}
-									_hover={{ bg: "rgba(255,255,255,0.06)" }}
-									onClick={() => onTonBounceableChange(false)}
-								>
-									UQ (Safe)
-								</Button>
-								<Button
-									size="xs" variant="ghost" fontSize="11px" px="3" py="1" borderRadius="md"
-									color={tonBounceable ? "kk.gold" : "kk.textSecondary"}
-									bg={tonBounceable ? "rgba(255,215,0,0.1)" : "transparent"}
-									fontWeight={tonBounceable ? "600" : "400"}
-									_hover={{ bg: "rgba(255,255,255,0.06)" }}
-									onClick={() => onTonBounceableChange(true)}
-								>
-									EQ (Bounceable)
-								</Button>
-							</Flex>
+							<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">
+								Address Type
+							</Text>
+							<PillToggle
+								options={[
+									{ value: 0, label: "UQ (Safe)" },
+									{ value: 1, label: "EQ (Bounceable)" },
+								]}
+								value={tonBounceable ? 1 : 0}
+								onChange={(v) => onTonBounceableChange(v === 1)}
+							/>
 							{!tonBounceable && (
-								<Text fontSize="10px" color="kk.textMuted" mt="1">
+								<Text fontSize="11px" color="var(--text-3)" mt="2" letterSpacing="-0.005em">
 									Non-bounceable — funds won't bounce back if wallet is uninitialized
 								</Text>
 							)}
 							{tonBounceable && (
-								<Text fontSize="10px" color="kk.warning" mt="1">
+								<Text fontSize="11px" color="var(--gold)" mt="2" letterSpacing="-0.005em">
 									Bounceable — funds will bounce back if wallet contract is not deployed
 								</Text>
 							)}
 						</Box>
 					)}
 
-					{/* Address — copyable */}
+					{/* Address + (UTXO) xpub */}
 					<CopyableField label={t("address")} value={address!} />
-
-					{/* xpub — copyable (BTC only) */}
 					{xpub && (
 						<CopyableField label={t("extendedPublicKey")} value={xpub} />
 					)}
 
 					{/* Derivation path */}
-					<Flex align="center" gap="1.5">
-						<Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" fontWeight="600">{t("path")}</Text>
-						<Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">
-							{pathToString(currentPath)}
+					<Box>
+						<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">
+							{t("path")}
 						</Text>
-						<Box
-							as="button"
-							onClick={() => setPathDialogOpen(true)}
-							cursor="pointer"
-							color="kk.textMuted"
-							_hover={{ color: "kk.gold" }}
-							transition="color 0.15s"
-							title={t("editDerivationPath")}
-							display="flex"
-							alignItems="center"
-						>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-							</svg>
-						</Box>
+						<Flex align="center" gap="2">
+							<Text fontSize="12px" fontFamily="mono" color="var(--text-1)" letterSpacing="0.02em">
+								{pathToString(currentPath)}
+							</Text>
+							<Box
+								as="button"
+								className="electrobun-webkit-app-region-no-drag"
+								onClick={() => setPathDialogOpen(true)}
+								cursor="pointer"
+								color="var(--text-3)"
+								_hover={{ color: "var(--gold)", bg: "var(--ink-2)" }}
+								transition="all 0.15s"
+								title={String(t("editDerivationPath"))}
+								display="grid"
+								placeItems="center"
+								w="22px"
+								h="22px"
+								borderRadius="6px"
+								bg="transparent"
+							>
+								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+									<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+									<path d="M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"/>
+								</svg>
+							</Box>
+						</Flex>
+					</Box>
+
+					{/* Chain identifier chips — caip + slip44 (informational) */}
+					<Flex gap="2" mt="1" flexWrap="wrap">
+						{chain.caip && (
+							<Text
+								fontSize="10px"
+								fontFamily="mono"
+								color="var(--text-3)"
+								bg="var(--ink-3)"
+								border="1px solid var(--line)"
+								px="2.5"
+								py="1"
+								borderRadius="999px"
+								letterSpacing="0.02em"
+							>
+								{chain.caip}
+							</Text>
+						)}
+						{(scriptType || chain.scriptType) && (
+							<Text
+								fontSize="10px"
+								fontFamily="mono"
+								color="var(--text-3)"
+								bg="var(--ink-3)"
+								border="1px solid var(--line)"
+								px="2.5"
+								py="1"
+								borderRadius="999px"
+								letterSpacing="0.02em"
+							>
+								{scriptType || chain.scriptType}
+							</Text>
+						)}
 					</Flex>
 				</Flex>
 			</Flex>

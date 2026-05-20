@@ -12,8 +12,11 @@
  */
 
 import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
-import { getLatestDeviceSnapshot, getCachedPubkeys } from './db'
+import { getLatestDeviceSnapshot, getCachedPubkeys, getSetting } from './db'
 import { getPioneer } from './pioneer'
+import { CHAINS } from '../shared/chains'
+
+const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
 /** Section title prefixes — shared with tax-export.ts for reliable extraction. */
 export const SECTION_TITLES = {
@@ -37,7 +40,7 @@ function safeRoundSats(value: unknown): number {
 
 async function fetchPubkeyInfo(xpub: string): Promise<any> {
 	const pioneer = await getPioneer()
-	const resp = await pioneer.GetPubkeyInfo({ network: 'BTC', xpub })
+	const resp = await pioneer.GetPubkeyInfo({ network: BTC_NETWORK_ID, xpub })
 	const result = resp?.data || resp
 	if (typeof result !== 'object' || result === null) {
 		console.warn('[Report] fetchPubkeyInfo: unexpected response shape, returning empty object')
@@ -48,14 +51,48 @@ async function fetchPubkeyInfo(xpub: string): Promise<any> {
 
 async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
 	const pioneer = await getPioneer()
-	const resp = await pioneer.GetTxHistory({ queries: [{ pubkey: xpub, caip }] })
-	const data = resp?.data || resp
-	if (typeof data !== 'object' || data === null) {
-		console.warn('[Report] fetchTxHistory: unexpected response shape, returning empty array')
-		return []
+
+	// Pioneer's tx history is async: first call triggers a background worker and
+	// returns { transactions: [], loading: true }. We poll up to 3 times (5s apart)
+	// to wait for the worker to finish fetching from Blockbook.
+	const MAX_RETRIES = 3
+	const RETRY_DELAY = 5000
+
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		const resp = await pioneer.GetTransactionHistory({ queries: [{ pubkey: xpub, caip }] })
+		const data = resp?.data || resp
+		if (typeof data !== 'object' || data === null) {
+			console.warn('[Report] fetchTxHistory: unexpected response shape:', typeof data)
+			return []
+		}
+
+		const histories = data.histories || data?.data?.histories || []
+		const hist = histories[0]
+		const candidate = hist?.transactions
+			|| data.transactions
+			|| data?.data?.transactions
+		const txs = Array.isArray(candidate) ? candidate : []
+
+		// If we got transactions, return them
+		if (txs.length > 0) {
+			console.log(`[Report] fetchTxHistory: ${txs.length} txs for xpub=${xpub.substring(0, 20)}... (attempt ${attempt + 1})`)
+			return txs
+		}
+
+		// If Pioneer says it's still loading, wait and retry
+		const isLoading = hist?.loading || hist?.cached === false
+		if (isLoading && attempt < MAX_RETRIES) {
+			console.log(`[Report] fetchTxHistory: loading (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY / 1000}s...`)
+			await new Promise(r => setTimeout(r, RETRY_DELAY))
+			continue
+		}
+
+		// Not loading, just no transactions
+		console.warn(`[Report] fetchTxHistory: 0 transactions for xpub=${xpub.substring(0, 20)}... cached=${hist?.cached} loading=${hist?.loading}`)
+		return txs
 	}
-	const histories = data.histories || data?.data?.histories || []
-	return histories[0]?.transactions || []
+
+	return []
 }
 
 // ── Section Builders ─────────────────────────────────────────────────
@@ -288,8 +325,8 @@ async function buildBtcSections(
 			title: 'XPUB Summaries',
 			type: 'table',
 			data: {
-				headers: ['Script Type', 'XPUB', 'Balance (BTC)', 'Received (BTC)', 'Sent (BTC)', 'TXs', 'Used Addrs'],
-				widths: ['10%', '30%', '14%', '14%', '14%', '8%', '10%'],
+				headers: ['Script Type', 'XPUB', 'Balance (BTC)', 'Received', 'Sent', 'TXs', 'Addrs'],
+				widths: ['8%', '42%', '12%', '12%', '12%', '7%', '7%'],
 				rows: xpubInfos.map(x => [
 					x.scriptType,
 					x.xpub,
@@ -733,6 +770,9 @@ function sanitize(text: string): string {
 
 export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib')
+	const reportLocale = getSetting('number_locale') || 'en-US'
+	// Stored values are always USD — use USD currency label with user's number locale for separators
+	const reportCurrency = 'USD'
 
 	console.log('[reports] Starting PDF generation...')
 
@@ -763,21 +803,37 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		if (y - needed < MARGIN_BOTTOM) newPage()
 	}
 
+	/** Break text into lines that each fit within maxW pixels. */
+	function wrapText(text: string, f: any, s: number, maxW: number): string[] {
+		if (!text || !maxW || maxW <= 0) return [text || '']
+		if (f.widthOfTextAtSize(text, s) <= maxW) return [text]
+		const lines: string[] = []
+		let remaining = text
+		while (remaining.length > 0) {
+			let lo = 0, hi = remaining.length
+			while (lo < hi) {
+				const mid = (lo + hi + 1) >> 1
+				if (f.widthOfTextAtSize(remaining.slice(0, mid), s) <= maxW) lo = mid
+				else hi = mid - 1
+			}
+			if (lo === 0) lo = 1 // at least one char per line
+			lines.push(remaining.slice(0, lo))
+			remaining = remaining.slice(lo)
+		}
+		return lines
+	}
+
 	function safeDrawText(text: string, x: number, yPos: number, f: any, s: number, c: { r: number; g: number; b: number }, maxW?: number) {
 		let t = sanitize(text)
 		if (maxW && maxW > 0 && t.length > 0 && f.widthOfTextAtSize(t, s) > maxW) {
-			// Binary search for the longest string that fits
+			// Truncate to fit — no ellipsis, no dots. Used for single-line contexts.
 			let lo = 0, hi = t.length
 			while (lo < hi) {
 				const mid = (lo + hi + 1) >> 1
 				if (f.widthOfTextAtSize(t.slice(0, mid), s) <= maxW) lo = mid
 				else hi = mid - 1
 			}
-			if (lo < t.length && lo > 2) {
-				t = t.slice(0, lo - 2) + '..'
-			} else if (lo < t.length) {
-				t = t.slice(0, lo)
-			}
+			t = t.slice(0, lo)
 		}
 		if (!t) return
 		try {
@@ -847,7 +903,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	y -= 30
 
 	// ── Total Portfolio Value (big number) ──
-	const totalStr = `$${totalPortfolioUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+	const totalStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalPortfolioUsd)
 	const totalLabel = 'Total Portfolio Value'
 	const totalLabelW = font.widthOfTextAtSize(totalLabel, 11)
 	const totalValW = bold.widthOfTextAtSize(totalStr, 28)
@@ -908,7 +964,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 		for (const slice of slices.slice(0, 12)) {
 			const pct = ((slice.usd / totalPortfolioUsd) * 100).toFixed(1)
-			const usdStr = `$${slice.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+			const usdStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(slice.usd)
 
 			// Color swatch
 			page.drawRectangle({
@@ -924,7 +980,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		}
 
 		if (slices.length > 12) {
-			safeDrawText(`... and ${slices.length - 12} more`, legendX + 18, legendY, font, 9, MUTED_COLOR)
+			safeDrawText(`+ ${slices.length - 12} more chains`, legendX + 18, legendY, font, 9, MUTED_COLOR)
 		}
 
 		y = pieCenterY - pieRadius - 30
@@ -996,23 +1052,38 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 				}
 				y -= ROW_HEIGHT + 2
 
-				// Data rows
+				// Data rows — with text wrapping for cells that overflow
+				const LINE_HEIGHT = 9 // line height within wrapped cells
 				for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
-					needSpace(ROW_HEIGHT)
+					const row = rows[rowIdx]
+					// Pre-calculate wrapped lines for each cell to determine row height
+					const cellLines: string[][] = []
+					let maxLines = 1
+					for (let i = 0; i < row.length && i < headers.length; i++) {
+						const cellText = sanitize(String(row[i] ?? ''))
+						const lines = wrapText(cellText, font, 7, colWidths[i] - 4)
+						cellLines.push(lines)
+						if (lines.length > maxLines) maxLines = lines.length
+					}
+					const rowH = Math.max(ROW_HEIGHT, maxLines * LINE_HEIGHT + 4)
+					needSpace(rowH)
 					if (rowIdx % 2 === 0) {
 						page.drawRectangle({
-							x: MARGIN_LEFT - 2, y: y - 4,
-							width: contentW + 4, height: ROW_HEIGHT,
+							x: MARGIN_LEFT - 2, y: y - (rowH - ROW_HEIGHT) - 4,
+							width: contentW + 4, height: rowH,
 							color: rgb(ALT_ROW.r, ALT_ROW.g, ALT_ROW.b),
 						})
 					}
 					colX = MARGIN_LEFT
-					const row = rows[rowIdx]
-					for (let i = 0; i < row.length && i < headers.length; i++) {
-						safeDrawText(String(row[i] ?? ''), colX + 2, y, font, 7, TEXT_COLOR, colWidths[i] - 4)
+					for (let i = 0; i < cellLines.length; i++) {
+						let lineY = y
+						for (const line of cellLines[i]) {
+							safeDrawText(line, colX + 2, lineY, font, 7, TEXT_COLOR)
+							lineY -= LINE_HEIGHT
+						}
 						colX += colWidths[i]
 					}
-					y -= ROW_HEIGHT
+					y -= rowH
 				}
 				y -= 6
 				break

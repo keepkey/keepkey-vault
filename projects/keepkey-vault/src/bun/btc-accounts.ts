@@ -12,6 +12,8 @@ export class BtcAccountManager extends EventEmitter {
   private accounts: BtcAccount[] = []
   private selectedXpub: { accountIndex: number; scriptType: BtcScriptType } = { accountIndex: 0, scriptType: 'p2wpkh' }
   private initPromise: Promise<BtcAccountSet> | null = null
+  /** Set after getBalances calls updateXpubBalance — prevents getBtcAccounts from stomping live data with stale DB rows. */
+  pioneerFetched = false
 
   /** Initialize account 0 with 3 xpubs from the device. Concurrent calls coalesce into one. */
   async initialize(wallet: any): Promise<BtcAccountSet> {
@@ -87,6 +89,11 @@ export class BtcAccountManager extends EventEmitter {
     return entries
   }
 
+  /** Mark that Pioneer has responded at least once — blocks stale DB re-hydration in getBtcAccounts. */
+  markPioneerFetched(): void {
+    this.pioneerFetched = true
+  }
+
   /** Update a specific xpub's balance after Pioneer response. */
   updateXpubBalance(xpubStr: string, balance: string, balanceUsd: number): void {
     for (const account of this.accounts) {
@@ -108,6 +115,21 @@ export class BtcAccountManager extends EventEmitter {
     return account?.xpubs.find(x => x.scriptType === this.selectedXpub.scriptType)
   }
 
+  /** Get ALL xpubs with non-zero balance (for UTXO aggregation in sends/swaps). */
+  getFundedXpubs(): Array<{ xpub: string; scriptType: string; accountPath: number[] }> {
+    const result: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+    for (const account of this.accounts) {
+      for (const xp of account.xpubs) {
+        if (xp.xpub && parseFloat(xp.balance) > 0) {
+          result.push({ xpub: xp.xpub, scriptType: xp.scriptType, accountPath: xp.path })
+        }
+      }
+    }
+    const all = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub)
+    console.log(`[btc-accounts] getFundedXpubs: ${result.length}/${all.length} funded — ${all.map(x => `${x.scriptType}=${x.balance}`).join(', ')}`)
+    return result
+  }
+
   /** Change the selected xpub. */
   setSelectedXpub(accountIndex: number, scriptType: BtcScriptType): void {
     this.selectedXpub = { accountIndex, scriptType }
@@ -120,6 +142,7 @@ export class BtcAccountManager extends EventEmitter {
     this.accounts = []
     this.selectedXpub = { accountIndex: 0, scriptType: 'p2wpkh' }
     this.initPromise = null
+    this.pioneerFetched = false
   }
 
   /** Whether accounts have been initialized. */

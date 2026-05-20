@@ -8,7 +8,9 @@
 		"initChoose": "Choose your setup method",
 		"initProgress": "Setting up your wallet",
 		"initLabel": "Name your device",
-		"complete": "Setup complete!"
+		"complete": "Setup complete!",
+		"verifySeed": "Verify your recovery phrase",
+		"securityTips": "Security tips"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -62,7 +64,8 @@
 		"deviceWillGuide": "Your KeepKey will guide you through the update process.",
 		"bootloaderDetected": "Bootloader Mode Detected",
 		"deviceReadyForUpdate": "Your KeepKey is in bootloader mode and ready for update.",
-		"updateBootloaderTo": "Update Bootloader to v{{version}}"
+		"updateBootloaderTo": "Update Bootloader to v{{version}}",
+		"doNotHoldButton": "DO NOT hold down the button when reconnecting! Just plug it in normally. Holding the button will put the device back into bootloader mode."
 	},
 	"firmware": {
 		"title": "Firmware Update",
@@ -103,7 +106,7 @@
 		"size": "Size",
 		"willWipeWarning": "Crossing the signed/unsigned firmware boundary will WIPE ALL DATA on the device. Make sure your recovery seed is backed up before proceeding.",
 		"unsignedWarning": "This is unsigned developer firmware. It may cause unexpected behavior.",
-		"unsignedBootloaderWarning": "You are flashing unsigned (developer) firmware. If this device was previously running signed (official) firmware, all data will be erased. This is a hardware-enforced security boundary — the same applies when going back to signed firmware.",
+		"unsignedBootloaderWarning": "You are flashing unsigned (developer) firmware. If this device was previously running signed (official) firmware, all data will be erased. This is a hardware-enforced security boundary - the same applies when going back to signed firmware.",
 		"unsignedBootloaderAcknowledge": "I understand this may wipe the device and I have my seed backed up",
 		"customFlashFailed": "Custom firmware flash failed",
 		"rebootTakingLong": "Reconnection is taking longer than usual...",
@@ -115,7 +118,11 @@
 		"manualReconnectStep1": "1. Unplug your KeepKey",
 		"manualReconnectStep2": "2. Wait 5 seconds",
 		"manualReconnectStep3": "3. Plug it back in",
-		"manualReconnectNote": "Setup will continue automatically when the device is detected."
+		"manualReconnectNote": "Setup will continue automatically when the device is detected.",
+		"autoRebooting": "Your device is restarting...",
+		"autoRebootingDetail": "Your KeepKey will restart automatically with the new firmware. This usually takes a few seconds.",
+		"waitingForDevice": "Waiting for your device...",
+		"wipeAndFlash": "Wipe & Flash"
 	},
 	"initChoose": {
 		"title": "Set Up Your Wallet",
@@ -125,7 +132,12 @@
 		"createWallet": "Create Wallet",
 		"recoverExistingWallet": "Recover Existing Wallet",
 		"recoverDescription": "Enter your recovery seed phrase on the device",
-		"recoverWallet": "Recover Wallet"
+		"recoverWallet": "Recover Wallet",
+		"seedLength": "Seed length",
+		"words": "words",
+		"entropyNote": "Added seed length does not improve overall wallet entropy.",
+		"learnMore": "Learn more",
+		"howManyWords": "How many words in your seed?"
 	},
 	"initProgress": {
 		"creatingWallet": "Creating Wallet...",
@@ -135,7 +147,11 @@
 		"followPrompts": "Follow the prompts on your KeepKey device screen.",
 		"lookAtDevice": "Look at your KeepKey device and follow the on-screen instructions.",
 		"failedToCreate": "Failed to create wallet",
-		"failedToRecover": "Failed to recover wallet"
+		"failedToRecover": "Failed to recover wallet",
+		"writeDownWarning": "Write down every word!",
+		"writeDownDetail": "Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup - you will NOT see these words again.",
+		"deviceLost": "Device disconnected. Plug it back in to continue, or go back to try again.",
+		"goBack": "Go Back"
 	},
 	"initLabel": {
 		"walletCreated": "Wallet Created!",
@@ -157,6 +173,65 @@
 		"stepOf": "Step {{current}} of {{total}}",
 		"settingUpWallet": "Setting up wallet...",
 		"previous": "Previous",
-		"next": "Next"
+		"next": "Next",
+		"securityTips": "Security Tips"
+	},
+	"verifySeed": {
+		"title": "Verify Your Recovery Phrase",
+		"descriptionEmulator": "We'll ask you for 3 random words from your seed to confirm you have a correct backup.",
+		"description": "Confirm that you wrote down your recovery phrase correctly. Your device will ask you to enter some of the words.",
+		"verifyNow": "Verify Now",
+		"skipForNow": "Skip - I'll verify later",
+		"enterWords": "Enter the requested words",
+		"enterWordsDetail": "Type the correct word for each position from your recovery phrase.",
+		"checkWords": "Check Words",
+		"verifying": "Verifying...",
+		"checkingAnswers": "Checking your answers...",
+		"followDevice": "Follow the prompts on your KeepKey to enter the requested words.",
+		"verified": "Recovery Phrase Verified!",
+		"verifiedDetail": "Your backup is correct. Keep it safe - never share it with anyone.",
+		"continue": "Continue",
+		"failed": "Verification Failed",
+		"failedDetail": "The words you entered did not match. Please try again or check your written backup.",
+		"tryAgain": "Try Again"
+	},
+	"tutorial": {
+		"cards": {
+			"pin": {
+				"title": "Your PIN is Scrambled",
+				"body": "Your KeepKey shows a randomized number grid. Match positions on screen to numbers on device. The layout changes every time so screen-watchers can't steal your PIN."
+			},
+			"words": {
+				"title": "Your Words = Your Wallet",
+				"body": "Write your 12/24 words on paper. Store them somewhere safe. Never type them into a computer, website, or phone. Anyone with these words controls your funds."
+			},
+			"recovery": {
+				"title": "Scrambled Recovery Entry",
+				"body": "When recovering, KeepKey scrambles the alphabet on the device screen. You enter words by position - never by typing actual letters. Keyloggers see nothing useful."
+			},
+			"deviceScreen": {
+				"title": "Trust Your Device Screen",
+				"body": "Always confirm the address and amount on your KeepKey before approving. Your computer can be compromised; your device screen cannot. Especially for large transactions."
+			},
+			"appConnections": {
+				"title": "App Connections Are Off",
+				"body": "Third-party apps and dApps connect via the REST API. It's disabled by default for your protection. Only enable it in Settings when you need it."
+			},
+			"hiddenWallets": {
+				"title": "Hidden Wallets (Advanced)",
+				"body": "Passphrase creates a separate hidden wallet from the same seed. If enabled, you MUST remember it - a wrong passphrase opens a different empty wallet, not an error."
+			}
+		},
+		"actions": {
+			"getStarted": "Get Started",
+			"startUsing": "Start Using KeepKey",
+			"skipIntro": "Skip intro",
+			"skipTips": "Skip tips"
+		},
+		"stepCounter": "{{current}} of {{total}}",
+		"walletLabels": {
+			"visible": "visible",
+			"hidden": "hidden"
+		}
 	}
 }

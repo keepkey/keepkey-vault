@@ -1,7 +1,7 @@
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
-export type ActiveTransport = 'hid' | 'webusb' | null
+export type ActiveTransport = 'hid' | 'webusb' | 'tcp' | 'emulator' | null
 
 // PIN request types — maps to KeepKey PinMatrixRequestType
 export type PinRequestType = 'current' | 'new-first' | 'new-second'
@@ -37,11 +37,30 @@ export interface DeviceStateInfo {
   firmwareVerified?: boolean
   bootloaderVerified?: boolean
   error?: string | null
+  isEmulator: boolean
+  /** True when using a hidden wallet (non-empty passphrase). Reports and chain
+   *  history are unavailable; no data is persisted to disk for privacy. */
+  isHiddenWallet: boolean
+  /** Linux only — set when a KeepKey is enumerated on the USB bus but neither
+   *  WebUSB nor HID could open it. Almost always means /etc/udev/rules.d
+   *  is missing the 51-keepkey.rules entry. The UI surfaces an auto-fix flow
+   *  (writes the rule via pkexec, reloads udev). */
+  linuxUdevPermissionDenied?: boolean
 }
 
 export interface FirmwareProgress {
   percent: number
   message: string
+  /** Present when the update failed. UI should show retry UX; the app itself stays alive. */
+  error?: string
+}
+
+/** Emitted when the Bun side hits an uncaught error — the UI should show a recovery prompt
+ *  rather than silently staring at a frozen screen. */
+export interface FatalEvent {
+  source: 'uncaught-exception' | 'unhandled-rejection'
+  message: string
+  stack?: string
 }
 
 // Remote firmware manifest (from GitHub)
@@ -96,9 +115,11 @@ export interface ChainBalance {
   chainId: string
   symbol: string
   balance: string       // human-readable (e.g. "0.001")
-  balanceUsd: number
+  balanceUsd: number    // total USD (native + tokens)
+  nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
+  updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
 }
 
 export interface BuildTxParams {
@@ -110,6 +131,7 @@ export interface BuildTxParams {
   isMax?: boolean
   isSwapDeposit?: boolean // THORChain/Maya: use MsgDeposit instead of MsgSend (for swaps/LP)
   caip?: string        // Token CAIP-19 — triggers token transfer mode when contains 'erc20'
+  nativeBalance?: string // human-readable native balance (from frontend) — avoids re-fetch on max send
   tokenBalance?: string  // human-readable token balance (from frontend) — avoids re-fetch on max send
   tokenDecimals?: number // token decimals (from frontend) — avoids re-fetch
   xpubOverride?: string        // BTC multi-account: use this xpub instead of default
@@ -177,10 +199,20 @@ export interface BtcAccountSet {
 }
 
 // ── EVM multi-address types ─────────────────────────────────────────
+export interface EvmAddressChainBalance {
+  chainId: string
+  symbol: string
+  balance: string
+  balanceUsd: number
+  nativeBalanceUsd: number
+  tokens?: TokenBalance[]
+}
+
 export interface EvmTrackedAddress {
   addressIndex: number     // derivation index (m/44'/60'/0'/0/{index})
   address: string          // 0x-prefixed checksummed address
   balanceUsd: number       // aggregate USD across all EVM chains
+  chainBalances?: Record<string, EvmAddressChainBalance>
 }
 
 export interface EvmAddressSet {
@@ -207,6 +239,7 @@ export interface CustomToken {
   name: string
   decimals: number
   networkId: string       // CAIP-2 (e.g. 'eip155:137')
+  iconUrl?: string        // resolved logo (TrustWallet/CoinGecko); undefined when neither matched
 }
 
 export interface CustomChain {
@@ -273,6 +306,46 @@ export interface EIP712DecodedInfo {
   isKnownType: boolean
 }
 
+/**
+ * Decoded form of an EIP-191 `personal_sign` payload for the approval UI.
+ *
+ * The `/eth/sign` REST endpoint accepts `message` as a hex string per the
+ * Ethereum JSON-RPC spec. In practice that hex almost always encodes UTF-8
+ * text (SIWE auth, dApp login challenges, etc.) — the user needs to see
+ * that text to know what they're signing. We surface both forms so the UI
+ * can show the decoded string prominently while still giving access to the
+ * raw bytes for hash comparison.
+ */
+export interface EthMessageDecodedInfo {
+  /** Signer address (from the request body) — shown so the user confirms which account. */
+  address: string
+  /** Raw message exactly as received on the wire (typically `0x`-prefixed hex). */
+  messageRaw: string
+  /** Message interpreted as UTF-8 text. Undefined when the bytes are not valid UTF-8. */
+  messageText?: string
+  /** True when `messageRaw` looked like hex and successfully round-tripped to UTF-8. */
+  isUtf8Text: boolean
+}
+
+export interface SolanaMessageDecodedInfo {
+  /** Signer pubkey/address shown so the user confirms which account is signing. */
+  signer?: string
+  /** Raw message value exactly as supplied by the caller. */
+  messageRaw: string
+  /** Best-effort input encoding used to turn `messageRaw` into bytes for display checks. */
+  encoding: 'base58' | 'base64' | 'hex' | 'utf8'
+  /** Message interpreted as UTF-8 text. Undefined when the bytes are not valid UTF-8. */
+  messageText?: string
+  /** Raw bytes as hex for byte-for-byte inspection. */
+  messageHex: string
+  /** Number of message bytes being signed. */
+  byteLength: number
+  /** Best-effort sanity check: raw text, opaque bytes, or something shaped like a Solana tx. */
+  classification: 'text-message' | 'binary-message' | 'solana-transaction' | 'solana-transaction-message'
+  /** Diagnostic from the transaction/message shape check, shown only when useful. */
+  sanityCheck?: string
+}
+
 // ── Calldata clear-signing types ─────────────────────────────────────────
 
 export interface CalldataDecodedField {
@@ -308,16 +381,73 @@ export interface SigningRequestInfo {
   chainId?: number
   typedDataDecoded?: EIP712DecodedInfo
   calldataDecoded?: CalldataDecodedInfo   // Clear-signing: decoded contract calldata
+  /** Clear-signing: decoded EIP-191 personal_sign message. Always set for /eth/sign requests. */
+  ethMessageDecoded?: EthMessageDecodedInfo
+  /** Clear-signing: decoded raw Solana message signing payload. */
+  solanaMessageDecoded?: SolanaMessageDecodedInfo
+  /** Clear-signing: decoded Solana tx — per-instruction rows + resolved ALT accounts */
+  solanaDecoded?: SolanaTxDecodedInfo
+  /**
+   * Populated when a Solana transaction was received but clear-sign decoding
+   * failed (malformed wire layout, unsupported message version, RPC outage,
+   * etc.). The UI uses this to show an explicit "could not clear-sign"
+   * warning instead of silently downgrading the approval dialog to the
+   * generic simple-transfer view.
+   */
+  solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
+  /** true when the UI must enable AdvancedMode before allowing approval */
+  requiresAdvancedMode?: boolean
   /** true when device AdvancedMode policy is currently enabled */
   advancedModeEnabled?: boolean
+  /** Device firmware version string e.g. "7.14.0" — used to gate blind-signing UI */
+  firmwareVersion?: string
   /** Full raw request body from the REST API caller — shown in UI for debugging/transparency */
   rawRequestBody?: Record<string, unknown>
 }
 
+/**
+ * Clear-signing output for a Solana transaction. Produced by the
+ * Vault-side decoder (src/bun/solana-instruction-decoder.ts) and surfaced
+ * in SigningApproval so the user sees human-readable per-instruction rows
+ * instead of opaque program ids and raw hex. Mirrors the structure used
+ * by the future firmware Insight metadata path.
+ */
+export interface SolanaTxDecodedInstructionArg {
+  name: string
+  type: 'u8' | 'u16' | 'u32' | 'u64' | 'bool' | 'pubkey' | 'string' | 'bytes'
+  value: string
+}
+export interface SolanaTxDecodedInstructionAccount {
+  label?: string
+  pubkey: string
+}
+export interface SolanaTxDecodedInstruction {
+  status: 'known' | 'known-program-unknown-ix' | 'unknown-program'
+  programId: string
+  programName: string
+  programCategory?: string
+  instructionName?: string
+  args: SolanaTxDecodedInstructionArg[]
+  accounts: SolanaTxDecodedInstructionAccount[]
+  note?: string
+}
+export interface SolanaTxDecodedInfo {
+  version: 'legacy' | 'v0'
+  instructions: SolanaTxDecodedInstruction[]
+  /** base58 ALT pubkeys referenced by the tx. Empty for legacy. */
+  altPubkeys: string[]
+  /** True when at least one ALT couldn't be resolved — UI should warn. */
+  altResolutionIncomplete?: boolean
+  /** True when at least one instruction is from an unknown program. */
+  hasUnknownProgram?: boolean
+}
+
 export interface ApiLogEntry {
   id?: number            // SQLite rowid (set after DB insert)
+  deviceId?: string      // active hardware device id at the time of the log
+  walletId?: string      // device+seed scope at the time of the log
   method: string
   route: string
   timestamp: number
@@ -351,10 +481,59 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
+  emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
+  alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
+}
+
+// ── WalletConnect types ─────────────────────────────────────────────────
+export interface WcSessionInfo {
+  topic: string
+  peerName: string
+  peerUrl: string
+  peerIcon: string
+  chains: string[]
+  expiry: number
+}
+
+// ── Emulator types (macOS only — encrypted flash with Keychain) ────────
+export type EmulatorProcessState = 'stopped' | 'starting' | 'running' | 'error'
+
+export interface EmulatorStatus {
+  state: EmulatorProcessState
+  bridgeReady: boolean            // true when emulator is loaded and responding
+  host: string                    // transport description
+  error?: string
+  paired: boolean                 // true when Keychain key exists
+  platform: string                // 'darwin' for macOS
+  flashImages: string[]           // available encrypted flash images
+  storagePath: string             // ~/.keepkey/emulator/
+}
+
+/** Info about a single emulator wallet profile (flash image + optional seed). */
+export interface EmulatorWalletInfo {
+  name: string
+  hasMnemonic: boolean
+  isActive: boolean
+  /** On-device label (Settings → Label). Populated after first connect. */
+  label?: string
+  /** Hardware-style deviceId returned by Features. Used to join cached balances. */
+  deviceId?: string
+  /** Sum of cached balance USD across chains for this wallet's deviceId. */
+  totalUsd?: number
+}
+
+/** Persisted device snapshot — one per device_id, stored in SQLite. */
+export interface RegisteredDevice {
+  deviceId: string
+  label: string
+  firmwareVer: string
+  updatedAt: number
+  totalUsd: number       // sum of cached balance_usd across all chains
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
@@ -495,6 +674,21 @@ export interface SwapAsset {
   contractAddress?: string // for ERC-20 tokens
 }
 
+/** Pre-built EVM transaction from relay/bridge integrations (no memo needed) */
+export interface RelayTxParams {
+  to: string
+  data: string
+  value: string              // wei as decimal string
+  gasLimit: string
+  maxFeePerGas?: string
+  maxPriorityFeePerGas?: string
+  chainId: number
+  /** True for deposit-channel protocols (Chainflip, NEAR Intents EVM side) where
+   *  `data` is intentionally empty — the swap destination was registered off-chain
+   *  when the quote/channel was created. Skips the empty-calldata cross-chain guard. */
+  isDepositChannel?: boolean
+}
+
 /** Quote response from Pioneer (aggregated across DEXes) */
 export interface SwapQuote {
   expectedOutput: string     // human-readable amount out
@@ -511,44 +705,76 @@ export interface SwapQuote {
   estimatedTime: number      // seconds
   warning?: string           // streaming swap note, dust threshold, etc.
   slippageBps: number        // actual slippage in bps
-  fromAsset: string          // THORChain asset identifier
-  toAsset: string            // THORChain asset identifier
-  integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", etc.
+  integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
+  /** Underlying protocol when `integration` is an aggregator. ShapeShift's swapper
+   *  routes through Relay / THORChain / 0x / Uniswap / Curve / etc.; this names
+   *  which one will actually execute so the user sees it before signing.
+   *  Undefined for non-aggregator integrations (use `integration` directly). */
+  swapper?: string
+  relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
+  minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
 }
 
-/** Parameters for getSwapQuote RPC */
+/** Parameters for getSwapQuote RPC.
+ *
+ *  CAIP is the only identifier the swap stack accepts. Pioneer's Quote
+ *  endpoint takes CAIP directly and dispatches to the right swapper
+ *  (THORChain / Mayachain / ShapeShift / Relay / 0x). Symbols and
+ *  THORChain-style asset names are display concerns — derived from CAIP
+ *  by the tracker, not passed as parameters. */
 export interface SwapQuoteParams {
-  fromAsset: string   // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
-  toAsset: string     // THORChain asset id (converted to CAIP in swap.ts for Pioneer)
-  amount: string      // human-readable amount
-  fromAddress: string // sender address
-  toAddress: string   // destination address
-  slippageBps?: number // slippage tolerance (default 300 = 3%)
+  fromCaip: string         // CAIP-19 of the sell asset
+  toCaip: string           // CAIP-19 of the buy asset
+  amount: string           // human-readable amount
+  fromAddress: string      // sender address
+  toAddress: string        // destination address
+  slippageBps?: number     // slippage tolerance (default 300 = 3%)
+  isMax?: boolean          // true when sending full balance (UTXO fee must be deducted before quoting)
+  feeLevel?: number        // 1=slow, 3=avg, 5=fast — passed to UTXO fee estimator
 }
 
-/** Parameters for executeSwap RPC */
+/** Parameters for executeSwap RPC. CAIP-only identification — the tracker
+ *  resolves symbol/name/asset-string for display from the CAIP via
+ *  pioneer-discovery. Caller never specifies a token via symbol. */
 export interface ExecuteSwapParams {
-  fromChainId: string       // our chain id
-  toChainId: string         // our chain id
-  fromAsset: string         // THORChain asset id
-  toAsset: string           // THORChain asset id
-  amount: string            // human-readable amount
-  memo: string              // THORChain routing memo
-  inboundAddress: string    // vault address
-  router?: string           // EVM router (for token approvals)
-  expiry?: number           // unix timestamp for depositWithExpiry
-  expectedOutput: string    // for display
+  fromChainId: string             // our chain id (resolves to ChainDef for signing)
+  toChainId: string               // our chain id
+  fromCaip: string                // CAIP-19 — primary identifier
+  toCaip: string                  // CAIP-19 — primary identifier
+  amount: string                  // human-readable amount
+  memo: string                    // THORChain routing memo (empty for memoless integrations)
+  inboundAddress: string          // vault address
+  router?: string                 // EVM router (for token approvals)
+  expiry?: number                 // unix timestamp for depositWithExpiry
+  expectedOutput: string          // for display
   isMax?: boolean
   feeLevel?: number
-  fromAddressOverride?: string  // pre-resolved sender address (skips defaultPath derivation)
-  toAddressOverride?: string    // pre-resolved destination address (skips defaultPath derivation)
+  fromAddressOverride?: string    // pre-resolved sender address (skips defaultPath derivation)
+  toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
+  integration?: string            // DEX source (relay quotes skip memo+router flow)
+  relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
+}
+
+export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
+
+export interface SwapIntegrationHealth {
+  key: string               // 'thorchain' | 'mayachain' | 'shapeshift' | 'relay' | 'chainflip'
+  label: string
+  status: SwapProviderStatus
+  haltedPools?: string[]    // CAIP-19s of suspended/staged pools
+  detail?: string           // one-line reason, e.g. "2 pools halted or suspended"
+}
+
+export interface SwapHealth {
+  fetchedAt: number
+  integrations: SwapIntegrationHealth[]
 }
 
 /** Result of executeSwap RPC */
 export interface SwapResult {
   txid: string
-  fromAsset: string
-  toAsset: string
+  fromCaip: string
+  toCaip: string
   fromAmount: string
   expectedOutput: string
   approvalTxid?: string
@@ -559,6 +785,8 @@ export interface SwapResult {
 export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
 
 export interface PendingSwap {
+  deviceId?: string      // active hardware device id when the swap was submitted
+  walletId?: string      // device+seed scope when the swap was submitted
   txid: string
   fromAsset: string       // THORChain asset id (e.g. "BASE.ETH")
   toAsset: string         // THORChain asset id (e.g. "ETH.ETH")
@@ -566,12 +794,16 @@ export interface PendingSwap {
   toSymbol: string
   fromChainId: string     // our chain id
   toChainId: string
+  fromCaip?: string       // CAIP-19 — preserved so the resumed dialog can render the asset logo
+  toCaip?: string
   fromAmount: string      // human-readable
-  expectedOutput: string  // human-readable
+  expectedOutput: string  // human-readable (quote-time estimate; replaced with actual when received)
+  receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string
   inboundAddress: string
   router?: string
   integration: string     // "thorchain", "shapeshift", etc.
+  swapper?: string        // underlying protocol when integration is an aggregator (e.g. "Relay", "Thorchain", "0x")
   status: SwapTrackingStatus
   confirmations: number
   outboundConfirmations?: number
@@ -579,8 +811,26 @@ export interface PendingSwap {
   outboundTxid?: string
   createdAt: number       // unix ms
   updatedAt: number       // unix ms
+  completedAt?: number    // unix ms — when terminal status reached
   estimatedTime: number   // seconds
   error?: string
+  slippageBps?: number    // slippage tolerance used at quote time (preserved across resumes)
+  /** Relay's bytes32 request id (lowercase, 0x-prefixed). Extracted from the
+   *  inbound deposit calldata at trackSwap time, or backfilled lazily by
+   *  refreshSwap via api.relay.link. Drives the "Relay Track" external link
+   *  on relay/shapeshift integrations. */
+  relayRequestId?: string
+  /** Vault chain id of the actual outbound (refunds outbound on the source chain,
+   *  not the destination). Populated by the Maya/Thor classifier — used to route
+   *  the explorer link to the correct chain. Falls back to toChainId when absent. */
+  outboundChainId?: string
+  /** Reason text from a Maya/Thor refund, when status='refunded'. */
+  refundReason?: string
+  /** Set true when classifySwapOutcome (Midgard) has populated this record.
+   *  Once set, Pioneer's mapPioneerStatus is no longer authoritative — Pioneer
+   *  cannot distinguish "swap completed" from "refund completed", and would
+   *  otherwise ping-pong status with Midgard on every refresh. */
+  midgardClassified?: boolean
 }
 
 export interface SwapStatusUpdate {
@@ -591,11 +841,27 @@ export interface SwapStatusUpdate {
   outboundRequiredConfirmations?: number
   outboundTxid?: string
   error?: string
+  /** Underlying protocol detected by the tracker (e.g. "thorchain", "mayachain",
+   *  "Relay"). Pioneer surfaces this in `details.protocol.protocol` even when
+   *  the original quote response didn't include it — most reliable post-broadcast. */
+  swapper?: string
+  /** Relay request id (bytes32 hex). Set when the lazy backfill in refreshSwap
+   *  resolves it via api.relay.link, so the UI can render the tracker link
+   *  without a full re-fetch. */
+  relayRequestId?: string
+  /** Vault chain id of the actual outbound. Refunds outbound on the source
+   *  chain, completions on the destination chain — Midgard's action.out asset
+   *  is the only authority. UI uses this to pick the explorer URL. */
+  outboundChainId?: string
+  /** Refund reason surfaced from the source chain (Midgard) when status='refunded'. */
+  refundReason?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
 export interface SwapHistoryRecord {
   id: string                     // unique row id (UUID)
+  deviceId?: string              // active hardware device id when the swap was submitted
+  walletId?: string              // device+seed scope when the swap was submitted
   txid: string                   // inbound transaction hash
   fromAsset: string              // THORChain asset id
   toAsset: string
@@ -603,6 +869,8 @@ export interface SwapHistoryRecord {
   toSymbol: string
   fromChainId: string
   toChainId: string
+  fromCaip?: string              // CAIP-19 (preserved for icon resolution on resume)
+  toCaip?: string
   fromAmount: string             // human-readable amount sent
   quotedOutput: string           // expected output at quote time
   minimumOutput: string          // minimum after slippage at quote time
@@ -611,6 +879,7 @@ export interface SwapHistoryRecord {
   feeBps: number                 // total fee in basis points
   feeOutbound: string            // outbound gas fee quoted
   integration: string            // "thorchain", "shapeshift", "chainflip"
+  swapper?: string               // underlying protocol when integration is an aggregator
   memo: string
   inboundAddress: string         // vault address
   router?: string
@@ -623,10 +892,22 @@ export interface SwapHistoryRecord {
   estimatedTimeSeconds: number   // estimated time at quote time
   actualTimeSeconds?: number     // actual duration (completedAt - createdAt)
   approvalTxid?: string          // ERC-20 approval tx (if applicable)
+  /** Relay request id (bytes32 hex, lowercase). Persisted so the resume path
+   *  can render the "Relay Track" external link without re-querying. */
+  relayRequestId?: string
+  /** Chain id of the actual outbound. For refunds this is the source chain
+   *  (Maya returns the inbound asset on the inbound chain), so the explorer
+   *  link must use this — not toChainId. Populated by the Maya midgard
+   *  classifier in swap-tracker; falls back to toChainId when absent. */
+  outboundChainId?: string
+  /** Refund reason from Midgard when status='refunded'. */
+  refundReason?: string
 }
 
 /** Filter params for getSwapHistory RPC */
 export interface SwapHistoryFilter {
+  deviceId?: string
+  walletId?: string
   status?: SwapTrackingStatus | 'all'
   fromDate?: number       // unix ms
   toDate?: number         // unix ms
@@ -644,6 +925,60 @@ export interface SwapHistoryStats {
   pending: number
 }
 
+// ── Swap UI mirror (REST → UI control) ────────────────────────────────
+
+export type SwapUiPhase = 'closed' | 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
+
+/** Snapshot of the SwapDialog visible state. Published by the WebView on every
+ *  meaningful state change so REST clients (and Bun internals) can observe what
+ *  the user sees without scraping the DOM. */
+export interface SwapUiState {
+  phase: SwapUiPhase
+  fromAsset: string | null      // THORChain asset id (e.g. 'BTC.BTC')
+  toAsset: string | null
+  amount: string                // crypto-denominated user input
+  fiatAmount: string
+  inputMode: 'crypto' | 'fiat'
+  isMax: boolean
+  slippageBps: number
+  fromAddress: string
+  toAddress: string
+  useCustomAddress: boolean
+  customToAddress: string
+  quote: SwapQuote | null
+  /** Unsigned tx(s) built ahead of confirm — populated when phase==='review'.
+   *  `allowance` describes the current ERC-20 allowance state vs required —
+   *  populated for ERC-20 source swaps so the UI can show "approval needed"
+   *  vs "✓ already approved" without ambiguity. */
+  previewBuild: {
+    approveTx?: any
+    unsignedTx: any
+    allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
+    balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
+  } | null
+  error: string | null
+  txid: string | null
+  trackingStatus?: SwapTrackingStatus | null
+  confirmations?: number
+  outboundConfirmations?: number
+  outboundRequiredConfirmations?: number
+  outboundTxid?: string | null
+  relayRequestId?: string | null
+  refundReason?: string | null
+}
+
+/** Bun → WebView commands: nudge the SwapDialog the same way a user click
+ *  would. The physical KeepKey button press still requires the user — REST
+ *  can drive every UI button up to the device prompt, then the user must
+ *  confirm on hardware. */
+export type SwapUiCommand =
+  | { kind: 'open'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'set'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; inputMode?: 'crypto' | 'fiat'; isMax?: boolean; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'requote' }
+  | { kind: 'advance' }   // input → review (UI navigation only)
+  | { kind: 'confirm' }   // click "Confirm Swap" → kicks off executeSwap
+  | { kind: 'close' }
+
 // ── Recent Activity types ──────────────────────────────────────────────
 
 export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve'
@@ -651,6 +986,8 @@ export type ActivitySource = 'app' | 'api' | 'scan'
 
 export interface RecentActivity {
   id: string
+  deviceId?: string
+  walletId?: string
   txid?: string              // blockchain txid (may be absent for sign-only before broadcast)
   chain: string              // chain symbol (BTC, ETH, ATOM, etc.)
   chainId?: string           // internal chain id (bitcoin, ethereum, etc.) — for explorer links
@@ -661,6 +998,13 @@ export interface RecentActivity {
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities
   status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
+  swapStatus?: SwapTrackingStatus  // detailed swap lifecycle status (only for type === 'swap')
+  // ── Swap-only output side (only set when type === 'swap') ──
+  outAmount?: string         // received_output if completed, else quoted_output
+  outAsset?: string          // toSymbol
+  outChainId?: string        // toChainId — for the output asset's chain badge / explorer
+  fromCaip?: string          // CAIP-19 for input asset (icon resolution)
+  toCaip?: string            // CAIP-19 for output asset (icon resolution)
   createdAt: number
   // ── On-chain confirmation data (populated by scan, updated on rescan) ──
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)

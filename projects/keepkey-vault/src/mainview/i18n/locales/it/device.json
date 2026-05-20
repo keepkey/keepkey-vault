@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "Cancellare il tuo KeepKey eliminerà tutte le chiavi e le impostazioni. Perderai l'accesso ai tuoi fondi se non hai la tua frase di recupero.",
 		"wipeAcknowledge": "Ho fatto il backup della mia frase di recupero e capisco cosa sto facendo",
 		"wipeDevice": "Cancella dispositivo",
-		"wiping": "Cancellazione..."
+		"wiping": "Cancellazione...",
+		"incorrectPin": "PIN errato",
+		"tryAgainDescription": "Controlla lo schermo del tuo KeepKey e riprova"
 	},
 	"passphrase": {
 		"title": "Inserisci passphrase",

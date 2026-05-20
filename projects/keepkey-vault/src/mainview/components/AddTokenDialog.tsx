@@ -118,7 +118,7 @@ export function AddTokenDialog({ defaultChainId, onClose, onAdded }: AddTokenDia
 
 				{/* Result */}
 				{result && (
-					<Box p="3" bg="rgba(255,215,0,0.08)" borderRadius="md" mb="3">
+					<Box p="3" bg="rgba(233,196,106,0.08)" borderRadius="md" mb="3">
 						<Text fontSize="sm" fontWeight="600" color="kk.gold">{result.symbol}</Text>
 						<Text fontSize="xs" color="kk.textMuted">{result.name}</Text>
 						<Text fontSize="xs" color="kk.textMuted">{result.decimals} {t('addToken.decimals')}</Text>

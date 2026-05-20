@@ -20,7 +20,20 @@ import staking from "./locales/en/staking.json"
 
 const STORAGE_KEY = "keepkey-vault-lang"
 
-const savedLang = localStorage.getItem(STORAGE_KEY) || "en"
+const SUPPORTED_LANGS = ["en","es","fr","de","ja","zh","ko","pt","ru","it","pl","nl","th","tr","vi"]
+
+function detectInitialLang(): string {
+	try {
+		const saved = localStorage.getItem(STORAGE_KEY)
+		if (saved) return saved
+		// Auto-detect from browser on first launch
+		const browserLang = (navigator.language || '').split('-')[0]
+		if (browserLang && SUPPORTED_LANGS.includes(browserLang)) return browserLang
+	} catch { /* private browsing / blocked */ }
+	return "en"
+}
+
+let savedLang = detectInitialLang()
 
 i18n
 	.use(initReactI18next)
@@ -28,7 +41,21 @@ i18n
 		resourcesToBackend((language: string, namespace: string) => {
 			// English is bundled synchronously above – skip dynamic import
 			if (language === "en") return undefined
-			return import(`./locales/${language}/${namespace}.json`)
+			return import(`./locales/${language}/${namespace}.json`).catch((err: unknown) => {
+				// Vite's dynamic-import helper throws "Unknown variable dynamic import: <path>"
+				// when the requested file isn't in the generated map (i.e. the translation
+				// file doesn't exist for this locale). Suppress that one case so a single
+				// missing namespace (e.g. swap.json for staking-only locales) doesn't abort
+				// the whole changeLanguage(); i18next falls back to English via fallbackLng.
+				// Any other failure (chunk-load, network, malformed JSON) is rethrown so it
+				// surfaces as a real error.
+				const msg = err instanceof Error ? err.message : String(err)
+				if (msg.includes("Unknown variable dynamic import")) {
+					console.warn(`[i18n] Missing translation file: ${language}/${namespace}.json — falling back to English`)
+					return { default: {} }
+				}
+				throw err
+			})
 		}),
 	)
 	.init({
@@ -76,7 +103,7 @@ i18n
 
 // Persist language changes
 i18n.on("languageChanged", (lng) => {
-	localStorage.setItem(STORAGE_KEY, lng)
+	try { localStorage.setItem(STORAGE_KEY, lng) } catch { /* private browsing / blocked */ }
 })
 
 export default i18n

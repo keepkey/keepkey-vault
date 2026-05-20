@@ -13,7 +13,9 @@
 		"wipeWarningDescription": "擦除您的 KeepKey 将删除所有密钥和设置。如果您没有恢复短语，将无法访问您的资金。",
 		"wipeAcknowledge": "我已备份恢复短语，并了解我正在做什么",
 		"wipeDevice": "擦除设备",
-		"wiping": "正在擦除..."
+		"wiping": "正在擦除...",
+		"incorrectPin": "PIN码错误",
+		"tryAgainDescription": "请查看KeepKey屏幕并重试"
 	},
 	"passphrase": {
 		"title": "输入密码短语",

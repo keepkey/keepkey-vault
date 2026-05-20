@@ -158,6 +158,118 @@ export const TonSignRequest = z.object({
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
 }).strip()
 
+// ── Message-signing surface (firmware 7.14.1+) ──────────────────────
+
+// 65-byte recoverable secp256k1 signature, hex with optional 0x prefix.
+const HEX_SIG_65 = /^(0x)?[0-9a-fA-F]{130}$/
+
+/** POST /tron/sign-message — TIP-191 personal_sign */
+export const TronSignMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
+  message: z.string().min(1),
+  /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
+  is_text: z.boolean().optional(),
+  show_display: z.boolean().optional(),
+}).strip()
+
+/** POST /tron/verify-message — TIP-191 verify */
+export const TronVerifyMessageRequest = z.object({
+  address: z.string().min(1),
+  /** 65-byte recoverable signature (r || s || v), hex with optional 0x. */
+  signature: z.string().regex(HEX_SIG_65),
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
+  message: z.string().min(1),
+  /** Default: true. Pass false to interpret `message` as raw hex bytes instead of UTF-8. */
+  is_text: z.boolean().optional(),
+}).strip()
+
+/** POST /tron/sign-typed-hash — TIP-712 hash mode */
+export const TronSignTypedHashRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** 32-byte domainSeparator hash, hex (with or without 0x) */
+  domain_separator_hash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+  /** 32-byte message hash, hex; omit for primaryType=EIP712Domain */
+  message_hash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+}).strip()
+
+/** POST /ton/sign-message — bare Ed25519 (firmware fences behind AdvancedMode) */
+export const TonSignMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
+   *  expect hex (with or without 0x prefix). */
+  message: z.string().min(1),
+  /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
+  is_text: z.boolean().optional(),
+  show_display: z.boolean().optional(),
+}).strip()
+
+/** POST /solana/sign-offchain-message — domain-separated envelope */
+export const SolanaSignOffchainMessageRequest = z.object({
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: encoded as UTF-8 bytes (max 1212 chars).
+   *  If is_text=false, expect hex (max 2424 chars = 1212 bytes; with or
+   *  without 0x prefix). 1212 is the spec ceiling for formats 0 and 1;
+   *  firmware rejects above this anyway, but enforcing here surfaces the
+   *  error pre-USB-roundtrip. */
+  message: z.string().min(1).max(2424),
+  /** Default: true. Pass false to send `message` as raw hex bytes instead of UTF-8. */
+  is_text: z.boolean().optional(),
+  /** Off-chain spec version. Only 0 is currently defined. */
+  version: z.number().int().min(0).max(0).optional(),
+  /** 0 = restricted ASCII, 1 = UTF-8 limited (max 1212 bytes). 2 is rejected device-side. */
+  message_format: z.number().int().min(0).max(1).optional(),
+  show_display: z.boolean().optional(),
+}).strip()
+
+/**
+ * POST /ton/build-transfer — build an unsigned TON v4R2 transfer.
+ * Returns the 32-byte body hash (hex) the device should sign plus the
+ * internal state the vault needs to assemble the signed BOC after.
+ * Clients don't need BOC/Cell awareness — they just pipe the result's
+ * `bodyHash` into /ton/sign-transaction and the full build object into
+ * /ton/finalize-transfer.
+ *
+ * `amountNano` is a decimal string (BigInt-compatible) — floats drop
+ * precision past ~15 digits and a v4R2 transfer can easily exceed that.
+ * `publicKeyHex` is only needed when the wallet isn't activated yet;
+ * TON's first tx carries a StateInit that deploys the v4R2 contract.
+ */
+export const TonBuildTransferRequest = z.object({
+  fromAddress: z.string().min(1),
+  toAddress: z.string().min(1),
+  amountNano: z.string().min(1),
+  memo: z.string().optional(),
+  publicKeyHex: z.string().optional(),
+}).strip()
+
+/**
+ * POST /ton/finalize-transfer — assemble the signed BOC from a prior
+ * build + device signature and broadcast to TonCenter. Collapses the
+ * two-step "assemble then broadcast" flow into one call so clients don't
+ * have to re-serialize the build object twice over the wire.
+ *
+ * `signature` is 64 bytes of Ed25519 output, hex-encoded (matches what
+ * /ton/sign-transaction returns).
+ */
+export const TonFinalizeTransferRequest = z.object({
+  // tonBuildResult — shape mirrors TonBuildResult in txbuilder/ton.ts.
+  // We don't re-validate every internal field here because the client
+  // just echoes back what /ton/build-transfer produced; Zod's passthrough
+  // preserves _internal verbatim. Any tampering breaks the cellHash
+  // check implicitly during assembly, which is a safer failure mode than
+  // a schema diff drifting out of sync with the builder.
+  build: z.object({}).passthrough(),
+  signature: z.string().regex(/^[0-9a-fA-F]{128}$/, 'signature must be 64-byte hex'),
+  broadcast: z.boolean().optional(),
+}).strip()
+
 /** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
 export const SolanaSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
@@ -224,9 +336,17 @@ export const ZcashInitRequest = z.object({
   account: z.number().int().min(0).optional(),
 }).passthrough()
 
+/** POST /api/zcash/shielded/display-address */
+export const ZcashDisplayAddressRequest = z.object({
+  account: z.number().int().min(0).optional(),
+}).passthrough()
+
 /** POST /api/zcash/shielded/scan */
 export const ZcashScanRequest = z.object({
   start_height: z.number().int().min(0).optional(),
+  // Discard the cached note set and re-derive from `start_height` (or the
+  // KeepKey release block when omitted). Used by the "Repair wallet" flow.
+  full_rescan: z.boolean().optional(),
 }).passthrough()
 
 /** POST /api/zcash/shielded/build */
@@ -295,3 +415,101 @@ export const FeaturesResponse = z.object({
 export const GetPublicKeyResponse = z.object({
   xpub: z.string(),
 }).passthrough()
+
+// ═══════════════════════════════════════════════════════════════════════
+// REST v2 data schemas (balances, market, UTXOs, tx, network, swap)
+// ═══════════════════════════════════════════════════════════════════════
+
+export const PortfolioBalancesRequest = z.object({
+  pubkeys: z.array(z.object({ caip: z.string(), pubkey: z.string() })).min(1),
+}).passthrough()
+
+export const MarketInfoRequest = z.object({
+  caips: z.array(z.string()).min(1),
+}).passthrough()
+
+export const SearchAssetsRequest = z.object({
+  q: z.string().min(1),
+  limit: z.number().int().positive().optional(),
+}).passthrough()
+
+export const ListUnspentRequest = z.object({
+  network: z.string(),
+  xpub: z.string(),
+}).passthrough()
+
+export const PubkeyInfoRequest = z.object({
+  network: z.string(),
+  xpub: z.string(),
+}).passthrough()
+
+export const TxHistoryRequest = z.object({
+  queries: z.array(z.object({ pubkey: z.string(), caip: z.string() })).min(1),
+}).passthrough()
+
+export const BroadcastRequest = z.object({
+  networkId: z.string(),
+  serialized: z.string(),
+}).passthrough()
+
+export const NetworkIdRequest = z.object({
+  networkId: z.string(),
+}).passthrough()
+
+export const NetworkAddressRequest = z.object({
+  networkId: z.string(),
+  address: z.string(),
+}).passthrough()
+
+export const TokenDecimalsRequest = z.object({
+  networkId: z.string(),
+  contractAddress: z.string(),
+}).passthrough()
+
+export const StakingRequest = z.object({
+  network: z.string(),
+  address: z.string(),
+}).passthrough()
+
+export const SwapQuoteRequest = z.object({
+  sellAsset: z.string(),
+  buyAsset: z.string(),
+  sellAmount: z.string(),
+  senderAddress: z.string(),
+  recipientAddress: z.string(),
+  slippage: z.number().optional(),
+}).passthrough()
+
+// ── Swap UI control (REST → SwapDialog) ────────────────────────────────
+// Mirrors SwapUiCommand discriminated union in shared/types.ts.
+
+const SwapSeedFields = {
+  fromAsset: z.string().optional(),
+  toAsset: z.string().optional(),
+  amount: z.string().optional(),
+  slippageBps: z.number().int().min(10).max(5000).optional(),
+  inputMode: z.enum(['crypto', 'fiat']).optional(),
+  isMax: z.boolean().optional(),
+  useCustomAddress: z.boolean().optional(),
+  customToAddress: z.string().optional(),
+}
+
+export const SwapUiOpenRequest = z.object(SwapSeedFields).passthrough()
+export const SwapUiSetRequest = z.object(SwapSeedFields).passthrough()
+
+// ═══════════════════════════════════════════════════════════════════════
+// Sweep tool schemas
+// ═══════════════════════════════════════════════════════════════════════
+
+export const SweepScanRequest = z.object({
+  accountRange: z.tuple([z.number().int().min(0), z.number().int().max(9)]).optional(),
+  mismatchAccounts: z.number().int().min(0).max(5).optional(),
+  currentMaxAccount: z.number().int().min(0).max(19).optional(),
+  higherAccountScanLimit: z.number().int().min(0).max(19).optional(),
+}).passthrough()
+
+export const SweepExecuteRequest = z.object({
+  scanId: z.string(),
+  destinationAddress: z.string().optional(),
+  dryRun: z.boolean().optional(),
+}).strip()
