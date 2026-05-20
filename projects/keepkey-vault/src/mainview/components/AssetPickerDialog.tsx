@@ -92,10 +92,14 @@ function isRowSelectable(entry: AssetEntry): boolean {
 
 // ── provider dots ───────────────────────────────────────────────────────────
 
+// Keys match SwapProvider type from swap-support-matrix
 const PROVIDER_COLORS: Record<string, string> = {
-  THORChain: "#23DCC8", Mayachain: "#3B82F6", Relay: "#9F8CE0",
-  "0x": "#5C6BC0", CowSwap: "#F0B90B", ChainFlip: "#E84142",
-  Osmosis: "#9C27FF", ShapeShift: "#00C3FF",
+  thorchain:  "#23DCC8",
+  mayachain:  "#3B82F6",
+  relay:      "#9F8CE0",
+  zeroex:     "#5C6BC0",
+  chainflip:  "#E84142",
+  shapeshift: "#00C3FF",
 }
 
 function ProviderDots({ providers }: { providers: string[] }) {
@@ -124,11 +128,11 @@ function chainBadgeCaip(entry: AssetEntry): string | undefined {
 function NetSwitchBanner({ fromChainId, toChainId, providers }: {
   fromChainId: string; toChainId: string; providers: string[]
 }) {
-  const fromColor = chainColorForCaip2(fromChainId)
-  const toColor   = chainColorForCaip2(toChainId)
-  const fromName  = networkDisplayName(fromChainId)
-  const toName    = networkDisplayName(toChainId)
-  const same      = fromChainId === toChainId
+  const fromMeta = chainMetaForCaip2(fromChainId)
+  const toMeta   = chainMetaForCaip2(toChainId)
+  const fromName = networkDisplayName(fromChainId)
+  const toName   = networkDisplayName(toChainId)
+  const same     = fromChainId === toChainId
 
   return (
     <Flex
@@ -138,23 +142,17 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
       borderColor={same ? "rgba(139,227,196,0.20)" : "rgba(233,196,106,0.20)"}
       borderRadius="12px" flexShrink={0}
     >
-      {/* mini route diagram */}
+      {/* mini route diagram — real chain logos */}
       <Flex align="center" flexShrink={0}>
-        <Box w="18px" h="18px" borderRadius="full"
-          bg={fromColor} border="2px solid var(--kk-bg)"
-          display="grid" placeItems="center"
-          fontSize="8px" fontWeight="700" color="white">
-          {fromName.slice(0, 1)}
-        </Box>
+        {fromMeta?.nativeCaip
+          ? <AssetIcon caip={fromMeta.nativeCaip} size={20} alt={fromName} />
+          : <Box w="20px" h="20px" borderRadius="full" bg={chainColorForCaip2(fromChainId)} />}
         <Box w="16px" h="2px"
           bg={`repeating-linear-gradient(90deg, ${same ? "#8be3c4" : "#e9c46a"} 0 4px, transparent 4px 8px)`}
-          mx="-3px" />
-        <Box w="18px" h="18px" borderRadius="full"
-          bg={toColor} border="2px solid var(--kk-bg)"
-          display="grid" placeItems="center"
-          fontSize="8px" fontWeight="700" color="white">
-          {toName.slice(0, 1)}
-        </Box>
+          mx="1" />
+        {toMeta?.nativeCaip
+          ? <AssetIcon caip={toMeta.nativeCaip} size={20} alt={toName} />
+          : <Box w="20px" h="20px" borderRadius="full" bg={chainColorForCaip2(toChainId)} />}
       </Flex>
 
       <Box flex="1" minW="0">
@@ -352,6 +350,8 @@ interface ChainInfo {
   name: string
   family: string
   color: string
+  /** Native asset CAIP-19 for use with AssetIcon (e.g. 'eip155:1/slip44:60') */
+  nativeCaip: string | undefined
   heldCount: number
   totalCount: number
   routableCount: number
@@ -376,6 +376,7 @@ function buildChainInfos(entries: AssetEntry[], fromChainId: string | null, excl
       name: networkDisplayName(caip2),
       family: chainFamilyLabel(meta?.chainFamily ?? ""),
       color: chain?.color ?? "#555",
+      nativeCaip: meta?.nativeCaip,
       heldCount: heldInChain.length,
       totalCount: assetsInChain.length,
       routableCount: routableInChain.length,
@@ -499,7 +500,9 @@ function ChainGrid({ chains, onPick, unavail }: {
           {/* Body */}
           <Box flex="1" minW="0" p="3.5" display="flex" flexDirection="column" gap="1.5">
             <Flex align="center" gap="2.5">
-              <Box w="18px" h="18px" borderRadius="full" bg={c.color} flexShrink={0} />
+              {c.nativeCaip
+                ? <AssetIcon caip={c.nativeCaip} size={22} alt={c.name} />
+                : <Box w="22px" h="22px" borderRadius="full" bg={c.color} flexShrink={0} />}
               <Text fontSize="13px" fontWeight="600">{c.name}</Text>
               <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase" ml="auto">
                 {c.family}
@@ -803,8 +806,7 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
             </Flex>
             <Flex direction="column" gap="1.5">
               {alternatives.map(a => {
-                const chainColor = chainColorForCaip2(a.chainId)
-                const chainName  = networkDisplayName(a.chainId)
+                const chainName = networkDisplayName(a.chainId)
                 return (
                   <Box key={a.caip} as="button" w="100%" textAlign="left" fontFamily="inherit"
                     display="grid" gridTemplateColumns="40px 1fr auto auto"
@@ -824,10 +826,7 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
                             borderRadius="4px" fontSize="9px" fontWeight="600">HELD</Box>
                         )}
                       </Flex>
-                      <Flex align="center" gap="1.5" mt="0.5">
-                        <Box w="6px" h="6px" borderRadius="full" bg={chainColor} />
-                        <Text fontSize="10px" color="kk.textMuted">{a.name} · on {chainName}</Text>
-                      </Flex>
+                      <Text fontSize="10px" color="kk.textMuted" mt="0.5">{a.name} · on {chainName}</Text>
                     </Box>
                     <Flex align="center" gap="1.5" px="2.5" py="1"
                       bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.25)"
