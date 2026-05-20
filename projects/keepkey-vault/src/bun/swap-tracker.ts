@@ -969,6 +969,14 @@ function isNearIntentsSwap(swap: PendingSwap): boolean {
 // swap. The /requests/v2?hash=... endpoint matches against the inbound tx
 // hash directly — no sender lookup or quote-shape parsing needed.
 
+/** NEAR Intents maps to integration='shapeshift' in PIONEER_INTEGRATION_ALIAS
+ *  but is NOT routed through Relay. Identify it by swapper so we can skip
+ *  Relay-specific code paths that don't apply. */
+function isNearIntentsSwap(swap: PendingSwap): boolean {
+  const swapper = (swap.swapper || '').toLowerCase().replace(/\s/g, '')
+  return swapper === 'nearintents' || swapper.startsWith('near')
+}
+
 function shouldBackfillRelayRequestId(swap: PendingSwap): boolean {
   // NEAR Intents shares the 'shapeshift' integration alias but is NOT a Relay swap.
   if (isNearIntentsSwap(swap)) return false

@@ -15,7 +15,6 @@ import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
 import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
 import { StackedBarView, type StackedBarItem } from "./StackedBarView"
-import { ViewPickerButton } from "./ViewPickerMenu"
 
 // SwapDialog is heavy (loads swapper providers) — lazy so it doesn't enter the
 // initial Dashboard chunk. Used to open Swap directly from the action row
@@ -1250,7 +1249,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box
 								key={chain.id}
 								as="button"
-								onClick={() => setDrilledChainId(chain.id)}
+								onClick={() => openChainPage(chain)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -1319,11 +1318,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			)}
 
 			<Flex flex="1" direction="column" minW="0" px={{ base: 2, md: 4 }} w="100%">
-
-			{/* View picker — centered at the top of the main panel */}
-			<Flex justify="center" pt="2" pb="1">
-				<ViewPickerButton />
-			</Flex>
 
 			{/* Top-right utility row: Reports + Refresh (sits above all main content) */}
 			{!watchOnly && (
@@ -1732,7 +1726,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})()}
 
-					{!!drilledChainId && (() => {
+					{hasAnyBalance && viewMode === 'orbital' && drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = balances.get(dchain.id)

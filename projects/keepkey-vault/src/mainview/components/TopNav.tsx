@@ -4,6 +4,7 @@ import { Z } from "../lib/z-index"
 import { IS_WINDOWS, IS_MAC } from "../lib/platform"
 import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
+import { ViewPickerButton } from "./ViewPickerMenu"
 import kkIcon from "../assets/icon.png"
 import { NAV_HEIGHT } from "../layout"
 
@@ -345,8 +346,9 @@ export function TopNav({
 				})}
 			</HStack>
 
-			{/* Right: walletconnect + mobile + settings */}
+			{/* Right: portfolio view picker (vault tab only) + walletconnect + mobile + settings */}
 			<Flex flex="1" justify="flex-end" align="center" gap="2">
+				{activeTab === "vault" && <ViewPickerButton />}
 				{onWalletConnectToggle && (
 					<IconButton
 						aria-label={t("walletConnect", { defaultValue: "WalletConnect" })}
