@@ -645,10 +645,11 @@ interface SwapDialogProps {
   balance?: ChainBalance
   address?: string | null
   resumeSwap?: PendingSwap | null
+  onOutputAssetChange?: (chainId: string | null) => void
 }
 
 // ── Main SwapDialog ─────────────────────────────────────────────────
-export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap }: SwapDialogProps) {
+export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange }: SwapDialogProps) {
   const { t } = useTranslation("swap")
   const { fmtCompact, symbol: fiatSymbol } = useFiat()
 
@@ -664,6 +665,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  useEffect(() => { onOutputAssetChange?.(toAsset?.chainId ?? null) }, [toAsset?.chainId, onOutputAssetChange])
   // Which side opened the asset picker — null when closed. Single shared
   // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
   const [pickerSide, setPickerSide] = useState<'from' | 'to' | null>(null)

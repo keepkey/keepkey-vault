@@ -526,6 +526,82 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
   )
 }
 
+export function ActivityTableRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
+  const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
+  const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
+  const chainSymbol = chainDef?.symbol || activity.chain
+  const nativePrice = chainDef ? nativePrices[chainDef.id] : undefined
+  const explorerUrl = activity.txid ? getExplorerUrl(activity.chainId || activity.chain, activity.txid) : null
+  const nativeAmount = formatNativeValue(activity.amount, chainDef, activity.source, nativePrice)
+  const nativeFee = formatNativeValue(activity.fee, chainDef, activity.source, nativePrice)
+  const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
+    ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' → ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
+    : nativeAmount || nativeFee
+      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? `fee: ${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` : ''}`
+      : (activity.txid ? truncateTxid(activity.txid) : null)
+
+  return (
+    <Flex
+      align="center" gap="2" px="3" py="1.5"
+      cursor="pointer"
+      _hover={{ bg: 'rgba(255,255,255,0.04)' }}
+      transition="background 0.1s"
+      onClick={() => onSelect(activity)}
+    >
+      {chainDef ? (
+        <Image src={caipToIcon(chainDef.caip)} w="18px" h="18px" borderRadius="full" flexShrink={0}
+          fallback={<Box w="18px" h="18px" borderRadius="full" bg={chainDef.color} flexShrink={0} />}
+        />
+      ) : (
+        <Box w="18px" h="18px" borderRadius="full" bg="whiteAlpha.200" flexShrink={0} />
+      )}
+      <HStack gap="1.5" w="170px" flexShrink={0} minW="0">
+        <Text fontSize="xs" fontWeight="600" color="white" truncate>{chainDef?.coin || activity.chain} ({chainSymbol})</Text>
+        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeConf.label}</Box>
+      </HStack>
+      <Text flex="1" fontSize="xs" color="whiteAlpha.500" truncate minW="0" fontFamily={amountLine && activity.txid && !nativeAmount ? 'mono' : undefined}>
+        {amountLine || '—'}
+      </Text>
+      <Box flexShrink={0} w="90px" display="flex" justifyContent="flex-end">
+        {activity.type === 'swap' && activity.swapStatus ? (
+          <SwapStatusBadge status={activity.swapStatus} />
+        ) : (
+          <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
+        )}
+      </Box>
+      <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} w="50px" textAlign="right">{timeAgo(activity.createdAt)}</Text>
+      {explorerUrl ? (
+        <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: 'var(--teal)' }} flexShrink={0} w="50px" textAlign="right"
+          onClick={e => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }).catch(() => {}) }}>
+          Explorer
+        </Text>
+      ) : (
+        <Box w="50px" flexShrink={0} />
+      )}
+    </Flex>
+  )
+}
+
+export function ActivityTable({ activities, nativePrices, onSelect }: { activities: RecentActivity[]; nativePrices: Record<string, number>; onSelect: (a: RecentActivity) => void }) {
+  return (
+    <Box border="1px solid" borderColor="rgba(255,255,255,0.08)" borderRadius="lg" overflow="hidden">
+      <Flex align="center" gap="2" px="3" py="1.5" borderBottom="1px solid" borderColor="rgba(255,255,255,0.08)" bg="rgba(255,255,255,0.02)">
+        <Box w="18px" flexShrink={0} />
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="170px" flexShrink={0}>Asset</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" flex="1">Amount</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="90px" textAlign="right">Status</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="50px" textAlign="right">Time</Text>
+        <Box w="50px" flexShrink={0} />
+      </Flex>
+      {activities.map((a, i) => (
+        <Box key={a.id} borderBottom={i < activities.length - 1 ? '1px solid' : undefined} borderColor="rgba(255,255,255,0.06)">
+          <ActivityTableRow activity={a} nativePrices={nativePrices} onSelect={onSelect} />
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
 export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingSwap) => void }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }

@@ -288,23 +288,54 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     : (result.integration || 'unknown')
   swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
 
-  // NEAR Intents BTC→EVM: competitive solver network that fronts ETH then claims BTC.
-  // Solvers need 2 BTC confirmations (20-40 min) and must cover ETH gas (~$2-5).
-  // Amounts below ~$50 USD are systematically refunded — no solver finds it profitable.
-  if (result.swapper === 'NEAR Intents' && params.fromCaip.startsWith('bip122:')) {
-    if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
-      throw new Error(
-        `Amount too small for NEAR Intents — minimum ${result.minAmountIn} BTC required. ` +
-        `Solvers must front ETH and wait for BTC confirmations; smaller amounts are unprofitable and will be refunded.`
-      )
+  // NEAR Intents: solver-network minimum amount check for ALL source chains.
+  // Solvers must front the destination-chain gas and wait for source confirmations;
+  // amounts below their profitability floor are systematically refunded.
+  //
+  // Two guards:
+  //   A) BTC→EVM: explicit minAmountIn field from the quote.
+  //   B) EVM→* deposit-channel: relay.value >> requested amount means the provider
+  //      returned its minimum (not the user's amount). Detect and throw early so the
+  //      user sees "too small" at quote time instead of "insufficient balance" at build.
+  if (result.swapper === 'NEAR Intents') {
+    if (params.fromCaip.startsWith('bip122:')) {
+      // BTC source: explicit minimum check
+      if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
+        throw new Error(
+          `Amount too small for NEAR Intents — minimum ${result.minAmountIn} BTC required. ` +
+          `Solvers must front ETH and wait for BTC confirmations; smaller amounts are unprofitable and will be refunded.`
+        )
+      }
+      const nowSec = Math.floor(Date.now() / 1000)
+      const minutesUntilExpiry = result.expiry ? (result.expiry - nowSec) / 60 : 0
+      if (result.expiry && minutesUntilExpiry < 60) {
+        console.warn(
+          `${TAG} NEAR Intents BTC→EVM quote expires in ${minutesUntilExpiry.toFixed(0)} min — ` +
+          `BTC requires 2 confirmations (20-40 min). If BTC doesn't confirm in time, swap will be refunded.`
+        )
+      }
     }
-    const nowSec = Math.floor(Date.now() / 1000)
-    const minutesUntilExpiry = result.expiry ? (result.expiry - nowSec) / 60 : 0
-    if (result.expiry && minutesUntilExpiry < 60) {
-      console.warn(
-        `${TAG} NEAR Intents BTC→EVM quote expires in ${minutesUntilExpiry.toFixed(0)} min — ` +
-        `BTC requires 2 confirmations (20-40 min). If BTC doesn't confirm in time, swap will be refunded.`
-      )
+
+    // EVM/non-BTC deposit-channel: detect when relay.value >> requested amount.
+    // NEAR Intents returns its solver minimum when the user's amount is too small.
+    // relay.value is in native-chain base units (wei for ETH).
+    if (result.relayTx?.isDepositChannel && result.relayTx?.value && !parseCaip(params.fromCaip).isToken) {
+      const ns = params.fromCaip.split('/')[0]
+      const srcDecimals = ns.startsWith('eip155:') ? 18 : ns.startsWith('solana:') ? 9 : 6
+      const requestedBaseUnits = params.amount ? parseUnits(params.amount, srcDecimals) : 0n
+      if (requestedBaseUnits > 0n) {
+        const quotedBaseUnits = BigInt(result.relayTx.value)
+        // If quoted deposit is >20% above requested, Pioneer returned the provider's
+        // minimum (not the user's amount). Throw before build so the error lands at
+        // quote time, not "insufficient balance" at sign time.
+        if (quotedBaseUnits > requestedBaseUnits * 12n / 10n) {
+          const minHuman = formatWei(quotedBaseUnits, srcDecimals)
+          throw new Error(
+            `Amount too small for NEAR Intents — minimum deposit on this route is ~${minHuman}. ` +
+            `Increase the swap amount or choose a different route.`
+          )
+        }
+      }
     }
   }
 

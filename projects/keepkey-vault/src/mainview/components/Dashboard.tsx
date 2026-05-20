@@ -15,6 +15,7 @@ import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
 import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
 import { StackedBarView, type StackedBarItem } from "./StackedBarView"
+import { ViewPickerButton } from "./ViewPickerMenu"
 
 // SwapDialog is heavy (loads swapper providers) — lazy so it doesn't enter the
 // initial Dashboard chunk. Used to open Swap directly from the action row
@@ -997,13 +998,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return () => window.removeEventListener('keepkey-swap-completed', handler)
 	}, [refreshBalances])
 
-	// Pioneer push: incoming tx on a watched address → forceRefresh balances
-	useEffect(() => {
-		return onRpcMessage("tx-push-received", () => {
-			console.log('[Dashboard] Pioneer push received — triggering forceRefresh')
-			refreshBalances(true)
-		})
-	}, [refreshBalances])
 
 	// SSE stream status updates from backend
 	useEffect(() => {
@@ -1326,6 +1320,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			<Flex flex="1" direction="column" minW="0" px={{ base: 2, md: 4 }} w="100%">
 
+			{/* View picker — centered at the top of the main panel */}
+			<Flex justify="center" pt="2" pb="1">
+				<ViewPickerButton />
+			</Flex>
+
 			{/* Top-right utility row: Reports + Refresh (sits above all main content) */}
 			{!watchOnly && (
 				<Flex justify="flex-end" align="center" gap="3" mb="2" pt="1">
@@ -1644,13 +1643,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								: totalUsd
 							return <StackedBarView items={items} total={stackTotal} maxWidth={720} />
 						}
-						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : (chartData.length > 0 ? 0 : null)
+						const safeIndex = activeSliceIndex !== null && activeSliceIndex < allChainsChartData.length ? activeSliceIndex : (allChainsChartData.length > 0 ? 0 : null)
 						return (
 							<DonutChart
-								data={chartData}
+								data={allChainsChartData}
 								size={380}
 								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
+								onClickSlice={(i) => {
+									const item = allChainsChartData[i]
+									if (!item) return
+									const chain = allChains.find(c => c.coin === (item as any).name)
+									if (chain) openChainPage(chain)
+								}}
 							/>
 						)
 					})() : !loadingBalances && initialLoaded && !pioneerError ? (
@@ -1707,18 +1712,21 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
 					gap="3"
 				>
-					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
-						const donutTotal = drilledChainId
-							? chartData.reduce((s, d) => s + d.value, 0)
-							: totalUsd
-						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
+					{hasAnyBalance && viewMode === 'donut' && allChainsChartData.length > 0 && (() => {
+						const safeIndex = activeSliceIndex !== null && activeSliceIndex < allChainsChartData.length ? activeSliceIndex : 0
 						return (
 							<Box w="100%" maxW="440px">
 								<ChartLegend
-									data={chartData}
-									total={donutTotal}
+									data={allChainsChartData}
+									total={totalUsd}
 									activeIndex={safeIndex}
 									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
+									onClickItem={(i) => {
+										const item = allChainsChartData[i]
+										if (!item) return
+										const chain = allChains.find(c => c.coin === (item as any).name)
+										if (chain) openChainPage(chain)
+									}}
 								/>
 							</Box>
 						)

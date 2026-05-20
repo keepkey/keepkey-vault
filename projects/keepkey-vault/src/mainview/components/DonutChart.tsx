@@ -12,9 +12,10 @@ interface DonutChartProps {
 	size?: number
 	activeIndex: number | null
 	onHoverSlice: (index: number | null) => void
+	onClickSlice?: (index: number) => void
 }
 
-export function DonutChart({ data, size = 210, activeIndex, onHoverSlice }: DonutChartProps) {
+export function DonutChart({ data, size = 210, activeIndex, onHoverSlice, onClickSlice }: DonutChartProps) {
 	const total = data.reduce((sum, d) => sum + d.value, 0)
 	if (total === 0) return null
 
@@ -69,9 +70,10 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice }: Donu
 								stroke="rgba(255,255,255,0.13)"
 								strokeWidth={1.5}
 								opacity={activeIndex !== null && !isActive ? 0.6 : 1}
-								style={{ transition: "all 0.15s ease-in-out", cursor: "pointer" }}
+								style={{ transition: "all 0.15s ease-in-out", cursor: onClickSlice ? "pointer" : "default" }}
 								onMouseEnter={() => onHoverSlice(index)}
 								onMouseLeave={() => onHoverSlice(null)}
+								onClick={() => onClickSlice?.(index)}
 							/>
 						</g>
 					)
@@ -126,9 +128,10 @@ interface ChartLegendProps {
 	total: number
 	activeIndex: number | null
 	onHoverItem: (index: number | null) => void
+	onClickItem?: (index: number) => void
 }
 
-export function ChartLegend({ data, total, activeIndex, onHoverItem: _onHoverItem }: ChartLegendProps) {
+export function ChartLegend({ data, total, activeIndex, onHoverItem: _onHoverItem, onClickItem }: ChartLegendProps) {
 	if (activeIndex === null || !data[activeIndex]) {
 		return <Box h="40px" />
 	}
@@ -149,6 +152,9 @@ export function ChartLegend({ data, total, activeIndex, onHoverItem: _onHoverIte
 			w="100%"
 			gap="4"
 			transition="border-color 0.2s"
+			cursor={onClickItem ? "pointer" : undefined}
+			onClick={onClickItem ? () => onClickItem(activeIndex) : undefined}
+			_hover={onClickItem ? { borderColor: "var(--line-2)" } : undefined}
 		>
 			<Flex align="center" gap="3" minW="0" flex="1">
 				<Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} boxShadow={`0 0 14px -2px ${item.color}`} />
