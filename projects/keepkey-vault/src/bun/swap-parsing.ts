@@ -262,6 +262,14 @@ export function parseQuoteResponse(
   const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
   const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
 
+  // For NEAR Intents ERC-20 routes, Pioneer embeds the 1Click deposit address in
+  // txParams.recipientAddress (same as quote.meta.depositAddress). This is the
+  // address funds are actually sent to — distinct from inboundAddress which may
+  // resolve to the token contract for relay routes.
+  const nearIntentsDepositAddress = swapper === 'NEAR Intents'
+    ? (txParams.recipientAddress || (quote.meta as any)?.depositAddress || undefined)
+    : undefined
+
   return {
     expectedOutput: expectedOutputStr,
     minimumOutput: minOutStr,
@@ -281,6 +289,7 @@ export function parseQuoteResponse(
     swapper,
     relayTx,
     minAmountIn,
+    nearIntentsDepositAddress,
   }
 }
 

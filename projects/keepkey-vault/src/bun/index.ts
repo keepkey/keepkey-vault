@@ -4291,6 +4291,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						slippageBps: cachedQuote?.slippageBps || 300,
 						integration: cachedQuote?.integration || 'thorchain',
 						swapper: cachedQuote?.swapper,
+						nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
 					}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)

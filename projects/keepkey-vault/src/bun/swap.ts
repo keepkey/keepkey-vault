@@ -473,11 +473,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   let unsignedTx: any
   let approvalTxid: string | undefined
+  let fromAmountBaseUnits: string | undefined
 
   // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt tx ──
   if (hasPrebuiltTx) {
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
     unsignedTx = result.unsignedTx
+    fromAmountBaseUnits = result.fromAmountBaseUnits
 
     // ERC-20 relay txs may need an approval to the router (THORChain Router,
     // 0x exchange proxy, etc.) — without it the router's transferFrom call
@@ -704,6 +706,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
+    ...(fromAmountBaseUnits ? { fromAmountBaseUnits } : {}),
   }
 }
 
@@ -1054,34 +1057,18 @@ async function buildRelaySwapTx(
   let balanceInfo: { current: string; required: string; sufficient: boolean; tokenContract?: string } | undefined
 
   if (isErc20Source && rpcUrl) {
-    // Token contract comes from the CAIP-19 (after the `:` of `/erc20:` or
-    // `/bep20:`). CAIP is the only identifier — no separate contract param.
     const tokenContract = (extractContractFromCaip(params.fromCaip) || '').toLowerCase()
-    // NEAR Intents ERC-20 path: relay.to IS the token contract — the calldata encodes
-    // a direct transfer() to a solver address, not transferFrom() via a router.
-    // No approval is needed or valid for this pattern.
+    // NEAR Intents ERC-20: relay.to IS the token contract (direct transfer to solver).
+    // No approval needed, but balance must still be checked.
     const isDirectTransfer = relay.to.toLowerCase() === tokenContract
-    if (isDirectTransfer) {
-      console.log(`${TAG} Relay ERC-20: relay.to === token contract (${tokenContract}) — direct transfer(), no approval needed`)
-    }
-    if (tokenContract && tokenContract.startsWith('0x') && !isDirectTransfer) {
+    if (tokenContract && tokenContract.startsWith('0x')) {
       try {
         const tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract).catch(() => undefined)
         if (tokenDecimals !== undefined) {
           const amountBaseUnits = parseUnits(params.amount, tokenDecimals)
-          const [currentAllowance, currentBalance] = await Promise.all([
-            getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n),
-            getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null),
-          ])
-          const sufficient = currentAllowance >= amountBaseUnits
 
-          allowanceInfo = {
-            current: currentAllowance.toString(),
-            required: amountBaseUnits.toString(),
-            sufficient,
-            spender: relay.to,
-            tokenContract,
-          }
+          // Always check balance — direct transfers revert on-chain if insufficient.
+          const currentBalance = await getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null)
           if (currentBalance !== null) {
             const balSufficient = currentBalance >= amountBaseUnits
             balanceInfo = {
@@ -1095,38 +1082,44 @@ async function buildRelaySwapTx(
               throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
             }
           }
-          swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
 
-          if (!sufficient) {
-            // Build approveTx — same pattern as buildEvmSwapTx (exact-amount,
-            // for hardware-wallet safety; not MaxUint256).
-            const approveData = encodeApprove(relay.to, amountBaseUnits)
-            const approveGasLimit = 80000n
-            const approveTx: any = {
-              chainId,
-              addressNList: fromChain.defaultPath,
-              nonce: toHex(BigInt(nonce)),
-              gasLimit: toHex(approveGasLimit),
-              to: tokenContract,
-              value: '0x0',
-              data: approveData,
+          // Approval only needed when routing through a spender contract.
+          if (!isDirectTransfer) {
+            const currentAllowance = await getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n)
+            const sufficient = currentAllowance >= amountBaseUnits
+            allowanceInfo = {
+              current: currentAllowance.toString(),
+              required: amountBaseUnits.toString(),
+              sufficient,
+              spender: relay.to,
+              tokenContract,
             }
-            if (maxFeePerGas) {
-              // Use signedFeePerGas (relay's quoted cap) to match the balance check and the swap tx.
-              approveTx.maxFeePerGas = toHex(signedFeePerGas)
-              approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
-            } else if (gasPrice) {
-              approveTx.gasPrice = gasPrice
+            swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
+            if (!sufficient) {
+              const approveData = encodeApprove(relay.to, amountBaseUnits)
+              const approveGasLimit = 80000n
+              const approveTx: any = {
+                chainId,
+                addressNList: fromChain.defaultPath,
+                nonce: toHex(BigInt(nonce)),
+                gasLimit: toHex(approveGasLimit),
+                to: tokenContract,
+                value: '0x0',
+                data: approveData,
+              }
+              if (maxFeePerGas) {
+                approveTx.maxFeePerGas = toHex(signedFeePerGas)
+                approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
+              } else if (gasPrice) {
+                approveTx.gasPrice = gasPrice
+              }
+              pendingApproveTx = approveTx
+              nonce += 1
             }
-            pendingApproveTx = approveTx
-            // Caller (executeSwap) handles the gate + sign + broadcast + receipt
-            // wait for the approve. We just project the nonce here so the
-            // returned relay tx uses the post-approval nonce.
-            nonce += 1
           }
         }
       } catch (e: any) {
-        console.warn(`${TAG} Relay allowance check failed (non-fatal): ${e?.message}`)
+        console.warn(`${TAG} Relay ERC-20 check failed (non-fatal): ${e?.message}`)
       }
     }
   }
@@ -1189,7 +1182,21 @@ async function buildRelaySwapTx(
   }
 
   swapLog(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
-  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
+
+  // Compute base units for the sell amount — needed by the swap tracker so
+  // registerWithPioneer can send an integer amountBaseUnits to Pioneer's API.
+  // Non-direct path: balanceInfo.required already has it (set above).
+  // Direct transfer (NEAR Intents ERC-20): decode transfer(address,uint256) calldata.
+  let fromAmountBaseUnits: string | undefined = balanceInfo?.required
+  if (!fromAmountBaseUnits && isErc20Source) {
+    const data = relay.data || ''
+    // transfer(address,uint256): 0xa9059cbb + 32-byte addr + 32-byte amount = 138 hex chars
+    if (data.length === 138 && data.toLowerCase().startsWith('0xa9059cbb')) {
+      try { fromAmountBaseUnits = BigInt('0x' + data.slice(74)).toString() } catch {}
+    }
+  }
+
+  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────

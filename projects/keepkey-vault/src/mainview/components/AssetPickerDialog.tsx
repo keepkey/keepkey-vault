@@ -5,7 +5,7 @@
  * TO side:   Step 1 — square network tiles (all supported, no same-network, no held-grouping).
  *            Step 2 — paginated asset list with text search for that network, 64px icons, full CAIP.
  */
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Box, Flex, Text, Input } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { AssetIcon } from "./AssetIcon"
@@ -20,11 +20,8 @@ import {
 import { CHAINS } from "../../shared/chains"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
-import { rpcRequest } from "../lib/rpc"
-
 // ── constants ──────────────────────────────────────────────────────────────
 
-const EVM_CONTRACT_RE = /^0x[a-fA-F0-9]{40}$/
 const PAGE_SIZE = 20
 
 // ── icons ──────────────────────────────────────────────────────────────────
@@ -327,7 +324,7 @@ function HeldTile({ entry: e, onSelect, fmtCompact }: {
         </Text>
         <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{fmtCompact(e.balance!.usd)}</Text>
         {/* Full CAIP */}
-        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" isTruncated opacity={0.6}>
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
           {e.caip}
         </Text>
       </Box>
@@ -392,7 +389,7 @@ function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, o
   const tokenFallback = useMemo(() => {
     if (!noNetworkMatches) return []
     return entries
-      .filter(e => `${e.symbol} ${e.name}`.toLowerCase().includes(q))
+      .filter(e => e.caip !== excludeCaip && `${e.symbol} ${e.name}`.toLowerCase().includes(q))
       .sort((a, b) => {
         const aSel = isRowSelectable(a) ? 1 : 0
         const bSel = isRowSelectable(b) ? 1 : 0
@@ -511,7 +508,7 @@ function NetworkTile({ chain: c, onPick, unavail }: {
           {unavail ? "No route" : `${c.routableCount} swappable`}
         </Text>
         {/* CAIP-2 */}
-        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" isTruncated opacity={0.6}>
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
           {c.caip2}
         </Text>
       </Box>
@@ -535,7 +532,6 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
   onSelect: (e: AssetEntry) => void
   onUnavailable: (e: AssetEntry) => void
 }) {
-  const { t } = useTranslation("swap")
   const chainName = networkDisplayName(chainCaip2)
   const [page, setPage] = useState(0)
   const q = search.trim().toLowerCase()
@@ -546,7 +542,12 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
   const inChain = useMemo(() => entries.filter(e => {
     if (e.chainId !== chainCaip2) return false
     if (e.caip === excludeCaip) return false
-    if (q && !`${e.symbol} ${e.name}`.toLowerCase().includes(q)) return false
+    if (q) {
+      const text = `${e.symbol} ${e.name}`.toLowerCase()
+      const caipLower = (e.caip || '').toLowerCase()
+      const contract = ((e as any).contractAddress || '').toLowerCase()
+      if (!text.includes(q) && !caipLower.includes(q) && !contract.includes(q)) return false
+    }
     return true
   // Sort: held first (by USD), then selectable, then unavailable
   }).sort((a, b) => {
@@ -691,7 +692,7 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
         </Flex>
         <Text fontSize="12px" color="kk.textMuted" mt="0.5">{e.name}</Text>
         {/* Full CAIP-19 */}
-        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} isTruncated>
+        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
           {e.caip}
         </Text>
       </Box>
@@ -764,11 +765,11 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
               ? `${targetChainName} natives swap fine, but this specific token isn't on any provider's list yet.`
               : `${targetChainName} isn't supported by any of our routers yet (THORChain, Mayachain, Relay, 0x, ChainFlip).`}
           </Text>
-          <Box as="button" display="inline-flex" alignItems="center" gap="1.5"
-            px="3.5" py="2" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
+          <Box display="inline-flex" alignItems="center" gap="1.5"
+            px="3.5" py="2" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.20)"
             borderRadius="10px" color="var(--gold)" fontFamily="inherit" fontSize="11px" fontWeight="600"
-            cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.18)" }}>
-            <BellIcon /> {t("notifyWhenSupported", "Notify me when supported")}
+            opacity={0.5} cursor="not-allowed" title="Notifications coming soon">
+            <BellIcon /> Notify me when supported
           </Box>
         </Flex>
 
@@ -803,7 +804,7 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
                         )}
                       </Flex>
                       <Text fontSize="10px" color="kk.textMuted" mt="0.5">{a.name} · on {chainName}</Text>
-                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} isTruncated>{a.caip}</Text>
+                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">{a.caip}</Text>
                     </Box>
                     <Flex align="center" gap="1.5" px="2.5" py="1"
                       bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.25)"
