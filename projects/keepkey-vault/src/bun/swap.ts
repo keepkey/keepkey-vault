@@ -905,11 +905,19 @@ async function buildRelaySwapTx(
   console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
+  // Firmware EIP-1559 signing is broken for chainId >= 256: the firmware hashes
+  // only the LSB of chainId instead of the full big-endian RLP encoding, so the
+  // signature recovers to a wrong address on Base (8453), Arbitrum (42161), and
+  // Avalanche (43114). Chains with chainId <= 255 (ETH=1, OP=10, BSC=56, Polygon=137)
+  // happen to be correct. Force legacy gasPrice for affected chains until the
+  // firmware bug is fixed in ethereum.c (hash_rlp_number vs hash_rlp_field).
+  const eip1559Ok = chainId < 256
+
   let gasPrice: string | undefined
   let maxFeePerGas: string | undefined
   let maxPriorityFeePerGas: string | undefined
 
-  if (relay.maxFeePerGas) {
+  if (relay.maxFeePerGas && eip1559Ok) {
     // EIP-1559 tx — start from Relay's quote, but cross-check against our own
     // locally-computed buffer (nextBaseFee * 3 + 1.5 gwei priority floor). Relay
     // can ship a maxFeePerGas that was current at quote time but stale by
@@ -940,7 +948,8 @@ async function buildRelaySwapTx(
   } else if (rpcUrl) {
     // Quote shipped only legacy gasPrice (or nothing) — prefer EIP-1559 from RPC
     // since legacy gasPrice on EIP-1559 chains often comes back below base fee.
-    const feeData = await getEvmFeeData(rpcUrl)
+    // Skip EIP-1559 for chainId >= 256 (firmware signing bug, see eip1559Ok above).
+    const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       // Floor maxFeePerGas at 2x chain min (so we still beat base on quiet chains)
       const floor1559 = fallbackGasPrice * 2n
@@ -990,7 +999,7 @@ async function buildRelaySwapTx(
   // estimated caps that block valid swaps on tight balances. If the relay's cap proves
   // insufficient for inclusion, the tx will be mined anyway at priority-fee level once
   // the base fee drops — or the user can refresh the quote to get a fresh cap.
-  const signedFeePerGas: bigint = relay.maxFeePerGas
+  const signedFeePerGas: bigint = (relay.maxFeePerGas && eip1559Ok)
     ? BigInt(relay.maxFeePerGas)
     : BigInt(relayFeePerGas)  // no quoted fee → fall back to live (gasPrice path)
   const signedPrioFeePerGas: bigint = relay.maxPriorityFeePerGas
@@ -1138,7 +1147,8 @@ async function buildRelaySwapTx(
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
   // matches the balance check above. Using the live-bumped cap here while checking
   // against the quoted cap would allow a tx that the account cannot cover.
-  if (relay.maxFeePerGas) {
+  // Skip EIP-1559 for chainId >= 256 (firmware signing bug, see eip1559Ok above).
+  if (relay.maxFeePerGas && eip1559Ok) {
     unsignedTx.maxFeePerGas = toHex(signedFeePerGas)
     unsignedTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
   } else if (gasPrice) {
@@ -1227,6 +1237,12 @@ async function buildEvmSwapTx(
   // Fetch gas price (preferring EIP-1559), nonce, native balance.
   // EIP-1559 path: maxFeePerGas + maxPriorityFeePerGas, used on chains that support eth_feeHistory.
   // Legacy path: gasPrice, used as fallback. Both paths enforce a chain-specific floor.
+  //
+  // Firmware EIP-1559 signing bug: chainId >= 256 hashes only the LSB of chainId.
+  // Force legacy gasPrice for Base (8453), Arbitrum (42161), Avalanche (43114), etc.
+  // See buildRelaySwapTx comment and ethereum.c for details.
+  const eip1559Ok = chainId < 256
+
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
   let gasPrice: bigint = fallbackGasPrice
@@ -1234,7 +1250,7 @@ async function buildEvmSwapTx(
   let maxPriorityFeePerGas: bigint | undefined
 
   if (rpcUrl) {
-    const feeData = await getEvmFeeData(rpcUrl)
+    const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       const floor1559 = fallbackGasPrice * 2n
       maxFeePerGas = feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559
