@@ -4,7 +4,7 @@ import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/r
 import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC } from "../lib/platform"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
@@ -201,6 +201,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			.catch(() => {})
 	}, [open, deviceState.state])
 
+	// Keep window-focus indicator live — bun pushes this whenever alwaysOnTop changes
+	useEffect(() => onRpcMessage('window-focus-changed', (state) => setWindowFocusState(state)), [])
+
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
 	useEffect(() => { if (!open) { setWipeConfirm(false); setRemovePinConfirm(false); setResetConfirm(false) } }, [open])
 
@@ -284,6 +287,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setWindowFocusState(updated)
 		} catch (e: any) { console.error("forceReleaseWindowFocus:", e) }
 		setReleasingWindowFocus(false)
+	}, [])
+
+	const toggleWindowAlwaysOnTop = useCallback(async (enabled: boolean) => {
+		try {
+			await rpcRequest("setWindowAlwaysOnTop", { enabled }, 5000)
+		} catch (e: any) { console.error("setWindowAlwaysOnTop:", e) }
 	}, [])
 
 	const toggleRestApi = useCallback(async (enabled: boolean) => {
@@ -1205,7 +1214,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)}
 							</Box>
 
-							{/* Always on Top status + override */}
+							{/* Always on Top toggle */}
 							<Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
 								<Flex align="center" justify="space-between">
 									<Flex align="center" gap="3">
@@ -1227,29 +1236,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											</Text>
 										</Box>
 									</Flex>
-									{windowFocusState?.alwaysOnTop && (
-										<Box
-											as="button"
-											px="3"
-											py="1.5"
-											borderRadius="full"
-											bg="rgba(255,100,60,0.12)"
-											color="#FF6B6B"
-											fontSize="xs"
-											fontWeight="500"
-											cursor={releasingWindowFocus ? "not-allowed" : "pointer"}
-											opacity={releasingWindowFocus ? 0.5 : 1}
-											_hover={{ bg: "rgba(255,100,60,0.22)" }}
-											transition="all 0.15s"
-											onClick={forceReleaseWindowFocus}
-										>
-											{releasingWindowFocus ? "..." : "Force Release"}
-										</Box>
-									)}
+									<Toggle
+										checked={windowFocusState?.alwaysOnTop ?? false}
+										onChange={toggleWindowAlwaysOnTop}
+									/>
 								</Flex>
 								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">
 									Vault raises itself to the front when a signing or pairing request arrives.
-									Use Force Release if the window is stuck on top after a cancelled request.
 								</Text>
 							</Box>
 

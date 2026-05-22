@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
-import { FaArrowDown, FaArrowUp, FaExchangeAlt, FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
+import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
@@ -49,8 +49,8 @@ interface AssetPageProps {
 	balance?: ChainBalance
 	onBack: () => void
 	firmwareVersion?: string
-	/** Open the page on a specific action ("send" / "receive" / "swap"). */
-	initialAction?: "send" | "receive" | "swap"
+	/** Open the page on a specific action ("send" / "receive" / "swap" / "privacy"). */
+	initialAction?: "send" | "receive" | "swap" | "privacy"
 	/** Pre-select a specific token so the page lands directly on its detail view. */
 	initialToken?: TokenBalance
 	/** Navigate to the full Activity page filtered by this chain */
@@ -60,7 +60,7 @@ interface AssetPageProps {
 export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
-	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : "receive")
+	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : initialAction === "privacy" ? "privacy" : "receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
@@ -96,9 +96,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [swapsEnabled, setSwapsEnabled] = useState(false)
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
+	const settingsLoaded = useRef(false)
 	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => {
+				settingsLoaded.current = true
 				setSwapsEnabled(s.swapsEnabled)
 				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
 				if (s.swapsEnabled) {
@@ -117,9 +119,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
 	}, [refreshFeatureFlags])
 
-	// Reset view if user is on privacy tab but flag got turned off
+	// Reset view if user is on privacy tab but flag got turned off — skip until settings are loaded
+	// to avoid race where zcashPrivacyEnabled starts false and stomps the initialAction
 	useEffect(() => {
-		if (view === "privacy" && !zcashPrivacyEnabled) setView("receive")
+		if (settingsLoaded.current && view === "privacy" && !zcashPrivacyEnabled) setView("receive")
 	}, [view, zcashPrivacyEnabled])
 
 	// EVM multi-address support
@@ -436,11 +439,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 	}, [selectedToken, chain])
 
-	const PILLS: { id: AssetView | 'swap'; label: string; icon: typeof FaArrowDown }[] = [
-		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), icon: FaArrowDown }] : []),
-		{ id: "send", label: t("send"), icon: FaArrowUp },
-		...(swapsEnabled && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), icon: FaExchangeAlt }] : []),
-		...(!selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: FaShieldAlt }] : []),
+	const PILLS: { id: AssetView | 'swap'; label: string; color: string; bg: string; icon: JSX.Element }[] = [
+		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
+		) }] : []),
+		{ id: "send", label: t("send"), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+		) },
+		...(swapsEnabled && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+		) }] : []),
+		...(!selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+		) }] : []),
 	]
 
 	// Shared token row renderer
@@ -851,7 +862,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					</Flex>
 				)}
 
-				{/* Action tabs — v3 pill toggle, gold active fill */}
+				{/* Action tabs — colorful pill toggle */}
 				<Flex justify="center" mb="5">
 					<Flex gap="2px" bg="var(--ink-2)" border="1px solid var(--line)" p="3px" borderRadius="999px">
 						{PILLS.map((p) => {
@@ -867,22 +878,24 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									}}
 									display="flex"
 									alignItems="center"
-									gap="2"
-									px={{ base: "5", md: "6" }}
-									py="2.5"
+									gap="1.5"
+									px="4"
+									py="2"
 									borderRadius="999px"
 									fontSize="13px"
-									fontWeight="500"
-									letterSpacing="-0.005em"
-									color={isActive ? "var(--ink-0)" : "var(--text-2)"}
-									bg={isActive ? "var(--gold)" : "transparent"}
-									_hover={isActive ? {} : { color: "var(--text-0)", bg: "var(--ink-3)" }}
-									transition="all 0.18s"
+									fontWeight="600"
+									letterSpacing="-0.01em"
+									color={p.color}
+									bg={isActive ? p.bg : "transparent"}
+									border="1px solid"
+									borderColor={isActive ? p.color : "transparent"}
+									_hover={{ bg: p.bg, borderColor: p.color }}
+									transition="all 0.15s"
 									cursor="pointer"
-									minW="110px"
+									minW="100px"
 									justifyContent="center"
 								>
-									<Box as={p.icon} fontSize="12px" />
+									{p.icon}
 									{p.label}
 								</Box>
 							)

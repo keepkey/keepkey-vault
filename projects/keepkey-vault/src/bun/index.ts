@@ -1753,7 +1753,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (chain.chainFamily === 'ton') addrParams.bounceable = false
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 						const result = await wallet[method](addrParams)
-						const address = typeof result === 'string' ? result : result?.address || ''
+						const address = typeof result === 'string' ? result : result?.address || result?.publicKey || ''
 						const ms = Date.now() - t0
 						if (address) {
 							console.log(`[getBalances] ${chain.id} address derived in ${ms}ms: ${address.substring(0, 20)}... caip=${chain.caip}`)
