@@ -295,6 +295,8 @@ export function trackSwap(
     estimatedTime: quote.estimatedTime,
     slippageBps: quote.slippageBps,
     relayRequestId,
+    nearIntentsDepositAddress: quote.nearIntentsDepositAddress,
+    fromAmountBaseUnits: result.fromAmountBaseUnits,
   }
 
   pendingSwaps.set(result.txid, swap)
@@ -392,6 +394,16 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
 
   const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
 
+  // CAIP-2 is the first segment of the CAIP-19 ("eip155:8453" from "eip155:8453/erc20:0x...").
+  // Using it directly avoids the legacy chain-id string bug (networkId: "base" → monitor falls
+  // back to Ethereum mainnet RPC and never finds the Base tx).
+  const sellNetworkId = sellCaip.split('/')[0]
+  const buyNetworkId  = buyCaip.split('/')[0]
+
+  // For NEAR Intents ERC-20, the address that actually receives the funds is the 1Click
+  // depositAddress — NOT the token contract stored in inboundAddress.
+  const sellAddress = swap.nearIntentsDepositAddress || swap.inboundAddress || ''
+
   const body: Record<string, any> = {
     txHash: swap.txid,
     addresses: [],
@@ -399,21 +411,19 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
       caip: sellCaip,
       symbol: swap.fromSymbol,
       amount: swap.fromAmount,
-      amountBaseUnits: swap.fromAmount,
-      address: swap.inboundAddress || '',
-      networkId: swap.fromChainId,
+      amountBaseUnits: swap.fromAmountBaseUnits || swap.fromAmount,
+      address: sellAddress,
+      networkId: sellNetworkId,
     },
     buyAsset: {
       caip: buyCaip,
       symbol: swap.toSymbol,
       amount: swap.expectedOutput,
       amountBaseUnits: swap.expectedOutput,
-      // For EVM destinations, the receive address is the ETH address embedded in walletId
-      // (format: "deviceId:0x..."). Pioneer's swap-monitor needs this to verify ETH delivery.
       address: buyCaip.startsWith('eip155:') && swap.walletId?.includes(':')
         ? swap.walletId.slice(swap.walletId.indexOf(':') + 1)
         : '',
-      networkId: swap.toChainId,
+      networkId: buyNetworkId,
     },
     quote: {
       id: swap.txid,
@@ -433,6 +443,9 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   // for Relay's off-chain settlement model.
   if (swap.relayRequestId) {
     body.relayData = { requestId: swap.relayRequestId }
+  }
+  if (swap.swapper === 'NEAR Intents' && sellAddress) {
+    body.nearIntentsData = { depositAddress: sellAddress }
   }
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 

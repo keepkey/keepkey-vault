@@ -427,6 +427,7 @@ let zcashBackgroundVerifyInFlight = false
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
+let privateModeEnabled = false
 
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
@@ -437,6 +438,7 @@ function loadSettings() {
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
+	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 
 	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
 	// only work on darwin, and the Settings toggle is hidden on other platforms
@@ -511,11 +513,15 @@ export function resetSwapUiState(): void {
 // elevated; using the raw API per-event drops the window prematurely when
 // any one source dismisses while another is still pending.
 let _alwaysOnTopRefs = 0
+function _emitWindowFocusChanged() {
+	try { rpc.send['window-focus-changed']({ refs: _alwaysOnTopRefs, alwaysOnTop: _alwaysOnTopRefs > 0 }) } catch { /* webview not ready */ }
+}
 function acquireWindowFocus() {
 	_alwaysOnTopRefs++
 	if (_alwaysOnTopRefs === 1) {
 		try { mainWindow.setAlwaysOnTop(true); mainWindow.focus() } catch { /* window not ready */ }
 	}
+	_emitWindowFocusChanged()
 }
 function releaseWindowFocus() {
 	if (_alwaysOnTopRefs === 0) return // defensive: never go negative
@@ -523,6 +529,7 @@ function releaseWindowFocus() {
 	if (_alwaysOnTopRefs === 0) {
 		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 	}
+	_emitWindowFocusChanged()
 }
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
@@ -735,6 +742,7 @@ function getAppSettings() {
 		emulatorEnabled,
 		preReleaseUpdates,
 		alphaFirmware,
+		privateModeEnabled,
 	}
 }
 
@@ -1617,6 +1625,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { publicKey: bytesToHex(result.publicKey), signature: bytesToHex(result.signature) }
 			},
 
+			// ── Hive (Graphene) ───────────────────────────────────────────
+			hiveGetPublicKey: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await (engine.wallet as any).hiveGetPublicKey(params)
+				if (!result) throw new Error('hiveGetPublicKey returned no result')
+				return result
+			},
+			hiveSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await (engine.wallet as any).hiveSignTx(params)
+				if (!result) throw new Error('hiveSignTx returned no result')
+				return {
+					signature: result.signature instanceof Uint8Array
+						? Buffer.from(result.signature).toString('hex')
+						: result.signature,
+					serializedTx: result.serializedTx instanceof Uint8Array
+						? Buffer.from(result.serializedTx).toString('hex')
+						: result.serializedTx,
+				}
+			},
+
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async ({ forceRefresh = false } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -1724,7 +1753,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (chain.chainFamily === 'ton') addrParams.bounceable = false
 						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 						const result = await wallet[method](addrParams)
-						const address = typeof result === 'string' ? result : result?.address || ''
+						const address = typeof result === 'string' ? result : result?.address || result?.publicKey || ''
 						const ms = Date.now() - t0
 						if (address) {
 							console.log(`[getBalances] ${chain.id} address derived in ${ms}ms: ${address.substring(0, 20)}... caip=${chain.caip}`)
@@ -3591,6 +3620,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn(`[window-focus] Force-releasing stuck always-on-top (refs was ${_alwaysOnTopRefs})`)
 					_alwaysOnTopRefs = 0
 					try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+					_emitWindowFocusChanged()
+				}
+			},
+			setWindowAlwaysOnTop: async (params) => {
+				if (params.enabled) {
+					acquireWindowFocus()
+				} else {
+					// Force-release all refs when manually toggling off
+					if (_alwaysOnTopRefs > 0) {
+						_alwaysOnTopRefs = 0
+						try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+						_emitWindowFocusChanged()
+					}
 				}
 			},
 
@@ -3740,6 +3782,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				engine.setAlphaFirmware(params.enabled)
 				// Re-derive device state so needs_firmware_update reflects the new channel
 				engine.syncState().catch(e => console.warn('[settings] syncState after alpha toggle failed:', e))
+				return getAppSettings()
+			},
+			setPrivateModeEnabled: async (params) => {
+				privateModeEnabled = params.enabled
+				setSetting('private_mode_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Private mode:', params.enabled)
 				return getAppSettings()
 			},
 			// ── Factory Reset ─────────────────────────────────────────
@@ -4021,14 +4069,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
 				const assets = await getSwapAssets()
-				// Deduplicate: return unique chain IDs that have at least one native (non-token) asset
-				const chainIds = new Set(assets.filter(a => !a.contractAddress).map(a => a.chainId))
+				const fw = engine.getDeviceState().firmwareVersion
+				const chainMap = new Map(getAllChains().map(c => [c.id, c]))
+				const chainIds = new Set(
+					assets
+						.filter(a => !a.contractAddress)
+						.filter(a => { const c = chainMap.get(a.chainId); return c ? isChainSupported(c, fw) : false })
+						.map(a => a.chainId)
+				)
 				return [...chainIds]
 			},
 			getSwapAssets: async () => {
 				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
-				return await getSwapAssets()
+				const assets = await getSwapAssets()
+				const fw = engine.getDeviceState().firmwareVersion
+				const chainMap = new Map(getAllChains().map(c => [c.id, c]))
+				return assets.filter(a => {
+					const chain = chainMap.get(a.chainId)
+					return chain ? isChainSupported(chain, fw) : false
+				})
 			},
 
 			getSwapHealth: async () => {
@@ -4291,6 +4351,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						slippageBps: cachedQuote?.slippageBps || 300,
 						integration: cachedQuote?.integration || 'thorchain',
 						swapper: cachedQuote?.swapper,
+						nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
 					}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
 				} catch (e: any) {
 					console.warn('[index] Failed to register swap for tracking:', e.message)
@@ -4557,7 +4618,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.log('[cache-health] Cache OK — no staleness detected')
 				}
 
-				return { balances: result.balances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
+				// Strip balances for chains the current firmware doesn't support.
+				// Stale cache from a prior 7.14+ session can contain Solana/TRON/TON
+				// entries — without this filter they bleed into the swap FROM picker,
+				// letting the user select them and then hitting a device signing error.
+				const filteredBalances = result.balances.filter(b => {
+					const chain = getAllChains().find(c => c.id === b.chainId)
+					return chain ? isChainSupported(chain, fwVersion) : true // keep unknowns (tokens)
+				})
+				return { balances: filteredBalances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
@@ -5352,6 +5421,8 @@ engine.on('state-change', (state) => {
 		}
 	}
 	if (state.state === 'ready' && !pioneerSocket) {
+		// Debounce Pioneer push events per chain — rapid-fire cache pings coalesce into one refresh.
+		const pioneerEventDebounce = new Map<string, ReturnType<typeof setTimeout>>()
 		pioneerSocket = new PioneerSocket({
 			queryKey: getPioneerQueryKey(),
 			onEvent: (event, data) => {
@@ -5361,8 +5432,16 @@ engine.on('state-change', (state) => {
 				const chain = d?.chain ?? d?.symbol ?? undefined
 				const address = d?.address ?? undefined
 				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				console.log(`[PioneerSocket] push event '${event}' chain=${chain} → triggering forceRefresh`)
-				try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
+				// Only forward events with a known chain — chain-less cache pings can't be scoped
+				if (!chain) return
+				const key = chain
+				const existing = pioneerEventDebounce.get(key)
+				if (existing) clearTimeout(existing)
+				pioneerEventDebounce.set(key, setTimeout(() => {
+					pioneerEventDebounce.delete(key)
+					console.log(`[PioneerSocket] push event '${event}' chain=${chain} → forwarding`)
+					try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
+				}, 2000))
 			},
 			onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
 			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),

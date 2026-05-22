@@ -26,6 +26,8 @@ import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/co
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
+import { useFiat } from "../lib/fiat-context"
+import { ViewPickerButton } from "./ViewPickerMenu"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
@@ -120,6 +122,7 @@ function OrbitalView({
 	totalCents,
 	cleanTokenTotal,
 	onSelect,
+	privateModeEnabled,
 }: {
 	chains: ChainDef[]
 	balances: Map<string, ChainBalance>
@@ -129,6 +132,7 @@ function OrbitalView({
 	totalCents: string
 	cleanTokenTotal: number
 	onSelect: (c: ChainDef) => void
+	privateModeEnabled: boolean
 }) {
 	const [hover, setHover] = useState<string | null>(null)
 	const [size, setSize] = useState(440)
@@ -189,25 +193,39 @@ function OrbitalView({
 					Total
 				</Text>
 				<Flex align="baseline" justify="center" gap="0">
-					<Text
-						fontSize={{ base: "38px", md: "48px" }}
-						fontWeight="500"
-						color="var(--text-0)"
-						letterSpacing="-0.04em"
-						lineHeight="1"
-					>
-						${totalDollars.toLocaleString()}
-					</Text>
-					<Text
-						fontSize={{ base: "20px", md: "24px" }}
-						fontWeight="400"
-						color="var(--text-2)"
-						letterSpacing="-0.02em"
-						lineHeight="1"
-						ml="1"
-					>
-						.{totalCents}
-					</Text>
+					{privateModeEnabled ? (
+						<Text
+							fontSize={{ base: "38px", md: "48px" }}
+							fontWeight="500"
+							color="var(--text-0)"
+							letterSpacing="-0.04em"
+							lineHeight="1"
+						>
+							••••••
+						</Text>
+					) : (
+						<>
+							<Text
+								fontSize={{ base: "38px", md: "48px" }}
+								fontWeight="500"
+								color="var(--text-0)"
+								letterSpacing="-0.04em"
+								lineHeight="1"
+							>
+								${totalDollars.toLocaleString()}
+							</Text>
+							<Text
+								fontSize={{ base: "20px", md: "24px" }}
+								fontWeight="400"
+								color="var(--text-2)"
+								letterSpacing="-0.02em"
+								lineHeight="1"
+								ml="1"
+							>
+								.{totalCents}
+							</Text>
+						</>
+					)}
 				</Flex>
 				<Text
 					fontSize="10px"
@@ -630,7 +648,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
-	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | undefined>(undefined)
+	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | "privacy" | undefined>(undefined)
 	const [selectedChainInitialToken, setSelectedChainInitialToken] = useState<TokenBalance | undefined>(undefined)
 	const [showActivityPage, setShowActivityPage] = useState(false)
 	const [activityDefaultChain, setActivityDefaultChain] = useState('')
@@ -647,7 +665,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	}, [])
 	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
 	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
-	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap", token?: TokenBalance) => {
+	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap" | "privacy", token?: TokenBalance) => {
 		// Swap routes directly to SwapDialog — skip the AssetPage shell that
 		// would otherwise show the Receive view underneath.
 		if (action === "swap") {
@@ -1107,6 +1125,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	 * in the TopNav can drive Dashboard's rendering. Persistence happens in
 	 * the provider. */
 	const { viewMode } = useDashboardView()
+	const { privateModeEnabled } = useFiat()
 
 	/* Splits totalUsd into dollars + cents so the orbital can render the
 	 * cents in a smaller weight (matches handoff layout). */
@@ -1191,19 +1210,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					maxH="calc(100vh - 110px)"
 					overflowY="auto"
 					pr="1"
-					css={{
-						scrollbarWidth: "none",
-						"&::-webkit-scrollbar": { width: "0px", background: "transparent" },
-						"&:hover": { scrollbarWidth: "thin" },
-						"&:hover::-webkit-scrollbar": { width: "6px" },
-						"&:hover::-webkit-scrollbar-thumb": {
-							background: "rgba(255,255,255,0.18)",
-							borderRadius: "3px",
-						},
-						"&:hover::-webkit-scrollbar-thumb:hover": {
-							background: "rgba(255,255,255,0.32)",
-						},
-					}}
 				>
 					{/* "All Chains" reset row */}
 					<Box
@@ -1231,7 +1237,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box flex="1" minW="0">
 								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
 								<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
-									${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+									{privateModeEnabled ? "••••••" : `$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
 								</Text>
 							</Box>
 						</Flex>
@@ -1249,7 +1255,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box
 								key={chain.id}
 								as="button"
-								onClick={() => openChainPage(chain)}
+								onClick={() => setDrilledChainId(prev => prev === chain.id ? null : chain.id)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -1272,7 +1278,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											</Text>
 											{usdNum > 0 && (
 												<Text fontSize="14px" color="var(--text-0)" fontWeight="500" lineHeight="1.2" letterSpacing="-0.01em" flexShrink={0}>
-													${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+													{privateModeEnabled ? "••••" : `$${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
 												</Text>
 											)}
 										</Flex>
@@ -1544,8 +1550,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
 			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "60vh", md: "70vh" } as unknown as string)}>
-				{/* Top: orbital widget / donut / welcome — vertically centered */}
-				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'}>
+				{/* View picker — top center of the hero area */}
+				<Flex justify="center" pt="2" pb="1">
+					<ViewPickerButton />
+				</Flex>
+				{/* Top: orbital widget / donut / welcome — vertically centered.
+				    overflow:hidden prevents the orbital box from visually and
+				    pointer-event-wise spilling into the action button row below. */}
+				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'} overflow="hidden" position="relative" zIndex={1}>
 					{hasAnyBalance ? (() => {
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -1577,7 +1589,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									totalDollars={totalDollars}
 									totalCents={totalCents}
 									cleanTokenTotal={cleanTokenTotal}
-									onSelect={(c) => setSelectedChain(c)}
+									onSelect={(c) => setDrilledChainId(c.id)}
+									privateModeEnabled={privateModeEnabled}
 								/>
 							)
 						}
@@ -1648,7 +1661,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									const item = allChainsChartData[i]
 									if (!item) return
 									const chain = allChains.find(c => c.coin === (item as any).name)
-									if (chain) openChainPage(chain)
+									if (chain) setDrilledChainId(chain.id)
 								}}
 							/>
 						)
@@ -1693,7 +1706,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 
 				{/* Below the sun: token list / action buttons / donut legend / empty.
-				    Fixed min-height keeps the sun's y-position stable across modes. */}
+				    Fixed min-height keeps the sun's y-position stable across modes.
+				    position+zIndex ensures this row sits above any orbital overflow. */}
 				<Flex
 					direction="column"
 					align="center"
@@ -1701,6 +1715,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					maxW="540px"
 					mx="auto"
 					px="3"
+					position="relative"
+					zIndex={2}
 					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '200px'}
 					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
 					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
@@ -1719,14 +1735,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										const item = allChainsChartData[i]
 										if (!item) return
 										const chain = allChains.find(c => c.coin === (item as any).name)
-										if (chain) openChainPage(chain)
+										if (chain) setDrilledChainId(chain.id)
 									}}
 								/>
 							</Box>
 						)
 					})()}
 
-					{hasAnyBalance && viewMode === 'orbital' && drilledChainId && (() => {
+					{hasAnyBalance && drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = balances.get(dchain.id)
@@ -1748,44 +1764,47 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									borderRadius="999px"
 								>
 									{([
-										{ id: 'receive' as const, label: 'Receive', icon: (
-											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
+										{ id: 'receive' as const, label: 'Receive', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
+											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 										) },
-										{ id: 'send' as const, label: 'Send', icon: (
-											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+										{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 										) },
-										{ id: 'swap' as const, label: 'Swap', icon: (
-											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+										{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 										) },
-									]).map((p) => {
-										const isPrimary = p.id === 'receive'
-										return (
-											<Box
-												key={p.id}
-												as="button"
-												onClick={() => openChainPage(dchain, p.id)}
-												display="flex"
-												alignItems="center"
-												gap="2"
-												px="5"
-												py="2.5"
-												borderRadius="999px"
-												fontSize="13px"
-												fontWeight="500"
-												letterSpacing="-0.005em"
-												color={isPrimary ? "var(--ink-0)" : "var(--text-2)"}
-												bg={isPrimary ? "var(--gold)" : "transparent"}
-												_hover={isPrimary ? {} : { color: "var(--text-0)", bg: "var(--ink-3)" }}
-												transition="all 0.18s"
-												cursor="pointer"
-												minW="110px"
-												justifyContent="center"
-											>
-												{p.icon}
-												{p.label}
-											</Box>
-										)
-									})}
+										...(dchain.id === 'zcash' && zcashEnabled ? [{
+											id: 'privacy' as const, label: 'Privacy', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+											),
+										}] : []),
+									]).map((p) => (
+										<Box
+											key={p.id}
+											as="button"
+											onClick={() => openChainPage(dchain, p.id)}
+											display="flex"
+											alignItems="center"
+											gap="1.5"
+											px="4"
+											py="2"
+											borderRadius="999px"
+											fontSize="13px"
+											fontWeight="600"
+											letterSpacing="-0.01em"
+											color={p.color}
+											bg={p.bg}
+											border="1px solid transparent"
+											_hover={{ borderColor: p.color, bg: p.bg, opacity: 0.9 }}
+											transition="all 0.15s"
+											cursor="pointer"
+											minW="100px"
+											justifyContent="center"
+										>
+											{p.icon}
+											{p.label}
+										</Box>
+									))}
 								</Flex>
 
 								{/* Token list (only when the chain has clean tokens). */}

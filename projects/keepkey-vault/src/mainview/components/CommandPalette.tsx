@@ -5,6 +5,7 @@ import { getAssetIcon } from "../../shared/assetLookup"
 import type { ChainBalance, TokenBalance } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { dispatchVaultCommand } from "../lib/commandBus"
+import { useFiat } from "../lib/fiat-context"
 
 interface CommandPaletteProps {
 	open: boolean
@@ -45,6 +46,7 @@ function scoreMatch(query: string, fields: { symbol?: string; coin?: string; nam
 }
 
 export function CommandPalette({ open, onClose, onJumpToVault, balances }: CommandPaletteProps) {
+	const { privateModeEnabled } = useFiat()
 	const [query, setQuery] = useState("")
 	const [activeIdx, setActiveIdx] = useState(0)
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -161,9 +163,8 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 			aria-label="Command Palette"
 		>
 			<Box
-				bg="kk.cardBg"
-				border="1px solid"
-				borderColor="kk.border"
+				bg="#101015"
+				border="1px solid rgba(255,255,255,0.12)"
 				borderRadius="xl"
 				w="560px"
 				maxW="92vw"
@@ -171,9 +172,9 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 				display="flex"
 				flexDirection="column"
 				overflow="hidden"
-				boxShadow="0 24px 64px rgba(0,0,0,0.55)"
+				boxShadow="0 24px 64px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.05) inset"
 				onClick={(e) => e.stopPropagation()}
-				style={{ fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)" }}
+				style={{ fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)", color: "#f5f4ef" }}
 			>
 				{/* Search row */}
 				<Flex
@@ -181,11 +182,10 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 					gap="3"
 					px="4"
 					py="3.5"
-					borderBottom="1px solid"
-					borderColor="kk.border"
-					bg="rgba(0,0,0,0.35)"
+					borderBottom="1px solid rgba(255,255,255,0.08)"
+					bg="rgba(0,0,0,0.4)"
 				>
-					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#56564f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
 						<circle cx="11" cy="11" r="8" />
 						<path d="M21 21l-4.35-4.35" />
 					</svg>
@@ -197,18 +197,19 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 						variant="unstyled"
 						border="0"
 						outline="none"
-						color="var(--text-0)"
+						bg="transparent"
+						color="#f5f4ef"
 						fontSize="14px"
 						lineHeight="1.4"
 						py="0"
 						minH="0"
 						h="auto"
-						_placeholder={{ color: "var(--text-3)" }}
+						_placeholder={{ color: "#56564f" }}
 						_focus={{ outline: "none", boxShadow: "none", borderColor: "transparent" }}
 						_focusVisible={{ outline: "none", boxShadow: "none", borderColor: "transparent" }}
 						spellCheck={false}
 						autoComplete="off"
-						style={{ fontFamily: "inherit" }}
+						style={{ fontFamily: "inherit", background: "transparent" }}
 					/>
 					<Box
 						fontSize="10px"
@@ -228,10 +229,10 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 				</Flex>
 
 				{/* Result list */}
-				<Box ref={listRef} overflowY="auto" flex="1" minH="0" py="1">
+				<Box ref={listRef} overflowY="auto" flex="1" minH="0" py="1" bg="#101015">
 					{results.length === 0 ? (
 						<Flex align="center" justify="center" py="10">
-							<Text fontSize="13px" color="kk.textMuted">No matches</Text>
+							<Text fontSize="13px" color="#8a8a82">No matches</Text>
 						</Flex>
 					) : (
 						results.map((r, idx) => {
@@ -242,11 +243,13 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 							const secondary = r.kind === "chain"
 								? r.chain.symbol
 								: `${r.token.symbol} on ${r.chain.coin}`
-							const trailing = r.kind === "chain" && r.balanceUsd > 0
-								? `$${r.balanceUsd.toFixed(2)}`
-								: r.kind === "token" && r.token.balanceUsd > 0
-									? `$${r.token.balanceUsd.toFixed(2)}`
-									: ""
+							const trailing = privateModeEnabled
+								? (r.kind === "chain" && r.balanceUsd > 0) || (r.kind === "token" && r.token.balanceUsd > 0) ? "••••••" : ""
+								: r.kind === "chain" && r.balanceUsd > 0
+									? `$${r.balanceUsd.toFixed(2)}`
+									: r.kind === "token" && r.token.balanceUsd > 0
+										? `$${r.token.balanceUsd.toFixed(2)}`
+										: ""
 							return (
 								<Flex
 									key={`${r.kind}:${r.kind === "chain" ? r.chain.id : r.token.caip}:${idx}`}
@@ -256,13 +259,13 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 									px="4"
 									py="2.5"
 									cursor="pointer"
-									bg={isActive ? "kk.cardBgHover" : "transparent"}
+									bg={isActive ? "#16161d" : "transparent"}
 									borderLeft="2px solid"
-									borderColor={isActive ? "kk.gold" : "transparent"}
+									borderColor={isActive ? "#e9c46a" : "transparent"}
 									onMouseEnter={() => setActiveIdx(idx)}
 									onClick={() => select(r)}
 								>
-									<Box w="22px" h="22px" flexShrink={0} borderRadius="full" overflow="hidden" bg="rgba(255,255,255,0.04)">
+									<Box w="22px" h="22px" flexShrink={0} borderRadius="full" overflow="hidden" bg="rgba(255,255,255,0.06)">
 										<Image
 											src={icon}
 											alt=""
@@ -273,15 +276,15 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 										/>
 									</Box>
 									<Flex direction="column" flex="1" minW="0" gap="0">
-										<Text fontSize="13px" color="kk.textPrimary" lineHeight="1.3" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" style={{ fontFamily: "inherit" }}>
+										<Text fontSize="13px" color="#f5f4ef" lineHeight="1.3" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" style={{ fontFamily: "inherit" }}>
 											{primary}
 										</Text>
-										<Text fontSize="11px" color="kk.textMuted" lineHeight="1.3" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" style={{ fontFamily: "inherit" }}>
+										<Text fontSize="11px" color="#8a8a82" lineHeight="1.3" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" style={{ fontFamily: "inherit" }}>
 											{secondary}
 										</Text>
 									</Flex>
 									{trailing && (
-										<Text fontSize="11px" color="kk.textSecondary" flexShrink={0} style={{ fontFamily: "inherit" }}>
+										<Text fontSize="11px" color="#c8c7be" flexShrink={0} style={{ fontFamily: "inherit" }}>
 											{trailing}
 										</Text>
 									)}

@@ -16,6 +16,10 @@ interface FiatContextValue {
   setCurrency: (currency: FiatCurrency) => void
   /** Update number locale preference */
   setLocale: (locale: string) => void
+  /** When true, all portfolio totals should be masked */
+  privateModeEnabled: boolean
+  /** Toggle private mode */
+  setPrivateMode: (enabled: boolean) => void
 }
 
 const FiatContext = createContext<FiatContextValue>({
@@ -26,6 +30,8 @@ const FiatContext = createContext<FiatContextValue>({
   symbol: '$',
   setCurrency: () => {},
   setLocale: () => {},
+  privateModeEnabled: false,
+  setPrivateMode: () => {},
 })
 
 export function useFiat() {
@@ -43,6 +49,11 @@ export function FiatProvider({ children }: { children: React.ReactNode }) {
       return localStorage.getItem('keepkey-vault-locale') || 'en-US'
     } catch { return 'en-US' }
   })
+  const [privateModeEnabled, setPrivateModeState] = useState(() => {
+    try {
+      return localStorage.getItem('keepkey-vault-private-mode') === '1'
+    } catch { return false }
+  })
 
   // Load from backend settings on mount
   useEffect(() => {
@@ -50,6 +61,7 @@ export function FiatProvider({ children }: { children: React.ReactNode }) {
       .then(s => {
         if (s.fiatCurrency) setCurrencyState(s.fiatCurrency)
         if (s.numberLocale) setLocaleState(s.numberLocale)
+        setPrivateModeState(!!s.privateModeEnabled)
       })
       .catch(() => {})
   }, [])
@@ -67,6 +79,12 @@ export function FiatProvider({ children }: { children: React.ReactNode }) {
     rpcRequest('setNumberLocale', { locale: l }).catch(() => {})
   }, [])
 
+  const setPrivateMode = useCallback((enabled: boolean) => {
+    setPrivateModeState(enabled)
+    try { localStorage.setItem('keepkey-vault-private-mode', enabled ? '1' : '0') } catch {}
+    rpcRequest('setPrivateModeEnabled', { enabled }).catch(() => {})
+  }, [])
+
   const cfg = getFiatConfig(currency)
 
   const fmt = useCallback((usdValue: number | string | null | undefined) => {
@@ -78,7 +96,7 @@ export function FiatProvider({ children }: { children: React.ReactNode }) {
   }, [currency, locale])
 
   return (
-    <FiatContext.Provider value={{ currency, locale, fmt, fmtCompact, symbol: cfg.symbol, setCurrency, setLocale }}>
+    <FiatContext.Provider value={{ currency, locale, fmt, fmtCompact, symbol: cfg.symbol, setCurrency, setLocale, privateModeEnabled, setPrivateMode }}>
       {children}
     </FiatContext.Provider>
   )

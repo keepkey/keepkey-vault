@@ -488,6 +488,7 @@ export interface AppSettings {
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
+  privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)
 }
 
 // ── WalletConnect types ─────────────────────────────────────────────────
@@ -716,6 +717,10 @@ export interface SwapQuote {
   /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
    *  When set, the tracker must record this instead of the original params.amount. */
   netFromAmount?: string
+  /** NEAR Intents 1Click deposit address — the address funds are actually sent to.
+   *  Distinct from inboundAddress (which may be the token contract for ERC-20 routes).
+   *  Used by the swap monitor to poll 1click.chaindefuser.com/v0/status. */
+  nearIntentsDepositAddress?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -781,6 +786,9 @@ export interface SwapResult {
   fromAmount: string
   expectedOutput: string
   approvalTxid?: string
+  /** Sell amount as an integer base-units string (e.g. "61280000" for 61.28 USDC).
+   *  Populated when the build step knows the token decimals (relay ERC-20 path). */
+  fromAmountBaseUnits?: string
 }
 
 // ── Swap tracking types ───────────────────────────────────────────────
@@ -832,6 +840,11 @@ export interface PendingSwap {
   /** First NEAR transaction hash returned by 1Click /v0/status for NEAR Intents swaps.
    *  Drives the "View on NEAR" tracker button (nearblocks.io). */
   nearTxHash?: string
+  /** NEAR Intents 1Click deposit address (from quote.meta.depositAddress).
+   *  Used by registerWithPioneer as sellAsset.address and nearIntentsData.depositAddress. */
+  nearIntentsDepositAddress?: string
+  /** Sell amount as an integer base-units string. Populated for relay ERC-20 swaps. */
+  fromAmountBaseUnits?: string
   /** Set true when classifySwapOutcome (Midgard) has populated this record.
    *  Once set, Pioneer's mapPioneerStatus is no longer authoritative — Pioneer
    *  cannot distinguish "swap completed" from "refund completed", and would

@@ -153,8 +153,13 @@ export function parseQuoteResponse(
   let relayTx: RelayTxParams | undefined
 
   if (hasPrebuiltTx) {
+    // Pioneer occasionally returns addresses with a duplicate '0x' prefix (e.g.
+    // "0x0x833589..."). Strip all leading '0x' pairs and re-add exactly one.
+    // Affects NEAR Intents ERC-20 routes where txParams.to is the token contract.
+    const normalizeAddr = (addr: string | undefined): string | undefined =>
+      addr ? addr.replace(/^(0x)+/i, '0x') : addr
     relayTx = {
-      to: txParams.to,
+      to: normalizeAddr(txParams.to) as string,
       data: rawData ?? '0x',
       value: String(txParams.value || '0'),
       // Leave gasLimit undefined when Pioneer omits it so buildRelaySwapTx
@@ -257,6 +262,14 @@ export function parseQuoteResponse(
   const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
   const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
 
+  // For NEAR Intents ERC-20 routes, Pioneer embeds the 1Click deposit address in
+  // txParams.recipientAddress (same as quote.meta.depositAddress). This is the
+  // address funds are actually sent to — distinct from inboundAddress which may
+  // resolve to the token contract for relay routes.
+  const nearIntentsDepositAddress = swapper === 'NEAR Intents'
+    ? (txParams.recipientAddress || (quote.meta as any)?.depositAddress || undefined)
+    : undefined
+
   return {
     expectedOutput: expectedOutputStr,
     minimumOutput: minOutStr,
@@ -276,6 +289,7 @@ export function parseQuoteResponse(
     swapper,
     relayTx,
     minAmountIn,
+    nearIntentsDepositAddress,
   }
 }
 

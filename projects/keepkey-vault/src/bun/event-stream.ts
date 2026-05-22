@@ -33,7 +33,12 @@ export interface AddressEntry { address: string; networkId: string }
 type EventHandler = (event: StreamEvent) => void
 type StatusHandler = (status: { connected: boolean; watching: number; sessionId?: string }) => void
 
-const RECONNECT_DELAY_MS = 10_000
+// Exponential backoff: 10s → doubles each failure → 5-min hard cap.
+// 404 skips straight to 60s (endpoint absent during blue/green deploy is not transient).
+// Jitter ±10% spreads thundering-herd across a fleet of concurrent retries.
+const RECONNECT_BASE_MS = 10_000
+const RECONNECT_MAX_MS  = 300_000 // 5 min — covers any realistic blue/green window
+const RECONNECT_404_MS  = 60_000  // start here on 404 — the route is gone, not glitching
 const SUBSCRIBE_URL_PATH = '/api/v1/events/subscribe'
 
 let controller: AbortController | null = null
@@ -41,6 +46,8 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let currentAddresses: AddressEntry[] = []
 let currentHandler: EventHandler | null = null
 let onStatusChange: StatusHandler | null = null
+let reconnectDelay = RECONNECT_BASE_MS
+let consecutiveFailures = 0
 
 export function startEventStream(
   addresses: AddressEntry[],
@@ -55,6 +62,8 @@ export function startEventStream(
   currentAddresses = addresses
   currentHandler = onEvent
   controller = new AbortController()
+  reconnectDelay = RECONNECT_BASE_MS
+  consecutiveFailures = 0
 
   connect()
 }
@@ -91,19 +100,29 @@ async function connect(): Promise<void> {
     })
 
     if (!resp.ok) {
-      console.warn(`[event-stream] Subscribe returned ${resp.status} — retrying in ${RECONNECT_DELAY_MS / 1000}s`)
+      consecutiveFailures++
+      // 404 = endpoint absent (blue/green gap, version mismatch) — jump to longer tier immediately
+      if (resp.status === 404) reconnectDelay = Math.max(reconnectDelay, RECONNECT_404_MS)
+      // Only log on first failure then every power-of-2 to avoid log spam
+      if (consecutiveFailures === 1 || (consecutiveFailures & (consecutiveFailures - 1)) === 0) {
+        console.warn(`[event-stream] Subscribe returned ${resp.status} — retrying in ${Math.round(reconnectDelay / 1000)}s (attempt ${consecutiveFailures})`)
+      }
       onStatusChange?.({ connected: false, watching: 0 })
       scheduleReconnect()
       return
     }
 
     if (!resp.body) {
+      consecutiveFailures++
       console.warn('[event-stream] No response body — retrying')
       onStatusChange?.({ connected: false, watching: 0 })
       scheduleReconnect()
       return
     }
 
+    // Successful connection — reset backoff state
+    reconnectDelay = RECONNECT_BASE_MS
+    consecutiveFailures = 0
     console.log(`[event-stream] Connected — watching ${currentAddresses.length} addresses`)
 
     const reader = resp.body.getReader()
@@ -142,7 +161,10 @@ async function connect(): Promise<void> {
 
   } catch (err: any) {
     if (err.name === 'AbortError') return // intentional close — do not reconnect
-    console.warn('[event-stream] Connection error:', err.message, `— retrying in ${RECONNECT_DELAY_MS / 1000}s`)
+    consecutiveFailures++
+    if (consecutiveFailures === 1 || (consecutiveFailures & (consecutiveFailures - 1)) === 0) {
+      console.warn('[event-stream] Connection error:', err.message, `— retrying in ${Math.round(reconnectDelay / 1000)}s (attempt ${consecutiveFailures})`)
+    }
     scheduleReconnect()
   }
 }
@@ -150,5 +172,9 @@ async function connect(): Promise<void> {
 function scheduleReconnect(): void {
   if (!controller) return // already stopped
   if (reconnectTimer) clearTimeout(reconnectTimer)
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, RECONNECT_DELAY_MS)
+  // Jitter ±10% to spread retries across concurrent clients
+  const jitter = reconnectDelay * 0.1 * (Math.random() * 2 - 1)
+  const delay = Math.max(RECONNECT_BASE_MS, Math.round(reconnectDelay + jitter))
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, delay)
+  reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS)
 }

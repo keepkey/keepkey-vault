@@ -473,11 +473,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   let unsignedTx: any
   let approvalTxid: string | undefined
+  let fromAmountBaseUnits: string | undefined
 
   // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt tx ──
   if (hasPrebuiltTx) {
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
     unsignedTx = result.unsignedTx
+    fromAmountBaseUnits = result.fromAmountBaseUnits
 
     // ERC-20 relay txs may need an approval to the router (THORChain Router,
     // 0x exchange proxy, etc.) — without it the router's transferFrom call
@@ -662,8 +664,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
-      // Insufficient funds: Pioneer fallback will also fail — surface immediately
-      if (directErr.message?.toLowerCase().includes('insufficient funds')) {
+      // For native-asset swaps, "insufficient funds" from the RPC is definitive —
+      // Pioneer will also reject it. Surface immediately.
+      // For ERC-20 relay txs (e.g. NEAR Intents direct transfer), "insufficient funds"
+      // may come from calldata pre-simulation or a solver-side issue, not native gas —
+      // native balance was already verified in buildRelaySwapTx, so fall through to Pioneer.
+      if (!isErc20Source && directErr.message?.toLowerCase().includes('insufficient funds')) {
         throw new Error(
           `Insufficient ${fromChain.symbol} for gas on ${fromChain.id}. ` +
           `Add ${fromChain.symbol} to your wallet to pay for transaction fees and try again.`
@@ -700,6 +706,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
+    ...(fromAmountBaseUnits ? { fromAmountBaseUnits } : {}),
   }
 }
 
@@ -838,7 +845,7 @@ async function buildRelaySwapTx(
   getRpcUrl: (chain: ChainDef) => string | undefined,
   isErc20Source = false,
   _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
-): Promise<{ unsignedTx: any; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 
@@ -898,11 +905,19 @@ async function buildRelaySwapTx(
   console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
+  // Firmware EIP-1559 signing is broken for chainId >= 256: the firmware hashes
+  // only the LSB of chainId instead of the full big-endian RLP encoding, so the
+  // signature recovers to a wrong address on Base (8453), Arbitrum (42161), and
+  // Avalanche (43114). Chains with chainId <= 255 (ETH=1, OP=10, BSC=56, Polygon=137)
+  // happen to be correct. Force legacy gasPrice for affected chains until the
+  // firmware bug is fixed in ethereum.c (hash_rlp_number vs hash_rlp_field).
+  const eip1559Ok = chainId < 256
+
   let gasPrice: string | undefined
   let maxFeePerGas: string | undefined
   let maxPriorityFeePerGas: string | undefined
 
-  if (relay.maxFeePerGas) {
+  if (relay.maxFeePerGas && eip1559Ok) {
     // EIP-1559 tx — start from Relay's quote, but cross-check against our own
     // locally-computed buffer (nextBaseFee * 3 + 1.5 gwei priority floor). Relay
     // can ship a maxFeePerGas that was current at quote time but stale by
@@ -933,7 +948,8 @@ async function buildRelaySwapTx(
   } else if (rpcUrl) {
     // Quote shipped only legacy gasPrice (or nothing) — prefer EIP-1559 from RPC
     // since legacy gasPrice on EIP-1559 chains often comes back below base fee.
-    const feeData = await getEvmFeeData(rpcUrl)
+    // Skip EIP-1559 for chainId >= 256 (firmware signing bug, see eip1559Ok above).
+    const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       // Floor maxFeePerGas at 2x chain min (so we still beat base on quiet chains)
       const floor1559 = fallbackGasPrice * 2n
@@ -983,7 +999,7 @@ async function buildRelaySwapTx(
   // estimated caps that block valid swaps on tight balances. If the relay's cap proves
   // insufficient for inclusion, the tx will be mined anyway at priority-fee level once
   // the base fee drops — or the user can refresh the quote to get a fresh cap.
-  const signedFeePerGas: bigint = relay.maxFeePerGas
+  const signedFeePerGas: bigint = (relay.maxFeePerGas && eip1559Ok)
     ? BigInt(relay.maxFeePerGas)
     : BigInt(relayFeePerGas)  // no quoted fee → fall back to live (gasPrice path)
   const signedPrioFeePerGas: bigint = relay.maxPriorityFeePerGas
@@ -1050,27 +1066,18 @@ async function buildRelaySwapTx(
   let balanceInfo: { current: string; required: string; sufficient: boolean; tokenContract?: string } | undefined
 
   if (isErc20Source && rpcUrl) {
-    // Token contract comes from the CAIP-19 (after the `:` of `/erc20:` or
-    // `/bep20:`). CAIP is the only identifier — no separate contract param.
     const tokenContract = (extractContractFromCaip(params.fromCaip) || '').toLowerCase()
+    // NEAR Intents ERC-20: relay.to IS the token contract (direct transfer to solver).
+    // No approval needed, but balance must still be checked.
+    const isDirectTransfer = relay.to.toLowerCase() === tokenContract
     if (tokenContract && tokenContract.startsWith('0x')) {
       try {
         const tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract).catch(() => undefined)
         if (tokenDecimals !== undefined) {
           const amountBaseUnits = parseUnits(params.amount, tokenDecimals)
-          const [currentAllowance, currentBalance] = await Promise.all([
-            getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n),
-            getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null),
-          ])
-          const sufficient = currentAllowance >= amountBaseUnits
 
-          allowanceInfo = {
-            current: currentAllowance.toString(),
-            required: amountBaseUnits.toString(),
-            sufficient,
-            spender: relay.to,
-            tokenContract,
-          }
+          // Always check balance — direct transfers revert on-chain if insufficient.
+          const currentBalance = await getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null)
           if (currentBalance !== null) {
             const balSufficient = currentBalance >= amountBaseUnits
             balanceInfo = {
@@ -1084,38 +1091,44 @@ async function buildRelaySwapTx(
               throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
             }
           }
-          swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
 
-          if (!sufficient) {
-            // Build approveTx — same pattern as buildEvmSwapTx (exact-amount,
-            // for hardware-wallet safety; not MaxUint256).
-            const approveData = encodeApprove(relay.to, amountBaseUnits)
-            const approveGasLimit = 80000n
-            const approveTx: any = {
-              chainId,
-              addressNList: fromChain.defaultPath,
-              nonce: toHex(BigInt(nonce)),
-              gasLimit: toHex(approveGasLimit),
-              to: tokenContract,
-              value: '0x0',
-              data: approveData,
+          // Approval only needed when routing through a spender contract.
+          if (!isDirectTransfer) {
+            const currentAllowance = await getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n)
+            const sufficient = currentAllowance >= amountBaseUnits
+            allowanceInfo = {
+              current: currentAllowance.toString(),
+              required: amountBaseUnits.toString(),
+              sufficient,
+              spender: relay.to,
+              tokenContract,
             }
-            if (maxFeePerGas) {
-              // Use signedFeePerGas (relay's quoted cap) to match the balance check and the swap tx.
-              approveTx.maxFeePerGas = toHex(signedFeePerGas)
-              approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
-            } else if (gasPrice) {
-              approveTx.gasPrice = gasPrice
+            swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
+            if (!sufficient) {
+              const approveData = encodeApprove(relay.to, amountBaseUnits)
+              const approveGasLimit = 80000n
+              const approveTx: any = {
+                chainId,
+                addressNList: fromChain.defaultPath,
+                nonce: toHex(BigInt(nonce)),
+                gasLimit: toHex(approveGasLimit),
+                to: tokenContract,
+                value: '0x0',
+                data: approveData,
+              }
+              if (maxFeePerGas) {
+                approveTx.maxFeePerGas = toHex(signedFeePerGas)
+                approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
+              } else if (gasPrice) {
+                approveTx.gasPrice = gasPrice
+              }
+              pendingApproveTx = approveTx
+              nonce += 1
             }
-            pendingApproveTx = approveTx
-            // Caller (executeSwap) handles the gate + sign + broadcast + receipt
-            // wait for the approve. We just project the nonce here so the
-            // returned relay tx uses the post-approval nonce.
-            nonce += 1
           }
         }
       } catch (e: any) {
-        console.warn(`${TAG} Relay allowance check failed (non-fatal): ${e?.message}`)
+        console.warn(`${TAG} Relay ERC-20 check failed (non-fatal): ${e?.message}`)
       }
     }
   }
@@ -1134,7 +1147,8 @@ async function buildRelaySwapTx(
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
   // matches the balance check above. Using the live-bumped cap here while checking
   // against the quoted cap would allow a tx that the account cannot cover.
-  if (relay.maxFeePerGas) {
+  // Skip EIP-1559 for chainId >= 256 (firmware signing bug, see eip1559Ok above).
+  if (relay.maxFeePerGas && eip1559Ok) {
     unsignedTx.maxFeePerGas = toHex(signedFeePerGas)
     unsignedTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
   } else if (gasPrice) {
@@ -1178,7 +1192,21 @@ async function buildRelaySwapTx(
   }
 
   swapLog(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
-  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
+
+  // Compute base units for the sell amount — needed by the swap tracker so
+  // registerWithPioneer can send an integer amountBaseUnits to Pioneer's API.
+  // Non-direct path: balanceInfo.required already has it (set above).
+  // Direct transfer (NEAR Intents ERC-20): decode transfer(address,uint256) calldata.
+  let fromAmountBaseUnits: string | undefined = balanceInfo?.required
+  if (!fromAmountBaseUnits && isErc20Source) {
+    const data = relay.data || ''
+    // transfer(address,uint256): 0xa9059cbb + 32-byte addr + 32-byte amount = 138 hex chars
+    if (data.length === 138 && data.toLowerCase().startsWith('0xa9059cbb')) {
+      try { fromAmountBaseUnits = BigInt('0x' + data.slice(74)).toString() } catch {}
+    }
+  }
+
+  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────
@@ -1209,6 +1237,12 @@ async function buildEvmSwapTx(
   // Fetch gas price (preferring EIP-1559), nonce, native balance.
   // EIP-1559 path: maxFeePerGas + maxPriorityFeePerGas, used on chains that support eth_feeHistory.
   // Legacy path: gasPrice, used as fallback. Both paths enforce a chain-specific floor.
+  //
+  // Firmware EIP-1559 signing bug: chainId >= 256 hashes only the LSB of chainId.
+  // Force legacy gasPrice for Base (8453), Arbitrum (42161), Avalanche (43114), etc.
+  // See buildRelaySwapTx comment and ethereum.c for details.
+  const eip1559Ok = chainId < 256
+
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
   let gasPrice: bigint = fallbackGasPrice
@@ -1216,7 +1250,7 @@ async function buildEvmSwapTx(
   let maxPriorityFeePerGas: bigint | undefined
 
   if (rpcUrl) {
-    const feeData = await getEvmFeeData(rpcUrl)
+    const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       const floor1559 = fallbackGasPrice * 2n
       maxFeePerGas = feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559
