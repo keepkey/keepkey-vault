@@ -26,6 +26,7 @@ import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/co
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
+import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { categorizeTokens } from "../../shared/spamFilter"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance } from "../../shared/types"
@@ -121,6 +122,7 @@ function OrbitalView({
 	totalCents,
 	cleanTokenTotal,
 	onSelect,
+	privateModeEnabled,
 }: {
 	chains: ChainDef[]
 	balances: Map<string, ChainBalance>
@@ -130,6 +132,7 @@ function OrbitalView({
 	totalCents: string
 	cleanTokenTotal: number
 	onSelect: (c: ChainDef) => void
+	privateModeEnabled: boolean
 }) {
 	const [hover, setHover] = useState<string | null>(null)
 	const [size, setSize] = useState(440)
@@ -190,25 +193,39 @@ function OrbitalView({
 					Total
 				</Text>
 				<Flex align="baseline" justify="center" gap="0">
-					<Text
-						fontSize={{ base: "38px", md: "48px" }}
-						fontWeight="500"
-						color="var(--text-0)"
-						letterSpacing="-0.04em"
-						lineHeight="1"
-					>
-						${totalDollars.toLocaleString()}
-					</Text>
-					<Text
-						fontSize={{ base: "20px", md: "24px" }}
-						fontWeight="400"
-						color="var(--text-2)"
-						letterSpacing="-0.02em"
-						lineHeight="1"
-						ml="1"
-					>
-						.{totalCents}
-					</Text>
+					{privateModeEnabled ? (
+						<Text
+							fontSize={{ base: "38px", md: "48px" }}
+							fontWeight="500"
+							color="var(--text-0)"
+							letterSpacing="-0.04em"
+							lineHeight="1"
+						>
+							••••••
+						</Text>
+					) : (
+						<>
+							<Text
+								fontSize={{ base: "38px", md: "48px" }}
+								fontWeight="500"
+								color="var(--text-0)"
+								letterSpacing="-0.04em"
+								lineHeight="1"
+							>
+								${totalDollars.toLocaleString()}
+							</Text>
+							<Text
+								fontSize={{ base: "20px", md: "24px" }}
+								fontWeight="400"
+								color="var(--text-2)"
+								letterSpacing="-0.02em"
+								lineHeight="1"
+								ml="1"
+							>
+								.{totalCents}
+							</Text>
+						</>
+					)}
 				</Flex>
 				<Text
 					fontSize="10px"
@@ -1108,6 +1125,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	 * in the TopNav can drive Dashboard's rendering. Persistence happens in
 	 * the provider. */
 	const { viewMode } = useDashboardView()
+	const { privateModeEnabled } = useFiat()
 
 	/* Splits totalUsd into dollars + cents so the orbital can render the
 	 * cents in a smaller weight (matches handoff layout). */
@@ -1219,7 +1237,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Box flex="1" minW="0">
 								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
 								<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
-									${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+									{privateModeEnabled ? "••••••" : `$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
 								</Text>
 							</Box>
 						</Flex>
@@ -1260,7 +1278,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											</Text>
 											{usdNum > 0 && (
 												<Text fontSize="14px" color="var(--text-0)" fontWeight="500" lineHeight="1.2" letterSpacing="-0.01em" flexShrink={0}>
-													${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+													{privateModeEnabled ? "••••" : `$${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
 												</Text>
 											)}
 										</Flex>
@@ -1570,6 +1588,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									totalCents={totalCents}
 									cleanTokenTotal={cleanTokenTotal}
 									onSelect={(c) => setDrilledChainId(c.id)}
+									privateModeEnabled={privateModeEnabled}
 								/>
 							)
 						}

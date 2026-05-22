@@ -427,6 +427,7 @@ let zcashBackgroundVerifyInFlight = false
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
+let privateModeEnabled = false
 
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
@@ -437,6 +438,7 @@ function loadSettings() {
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
+	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 
 	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
 	// only work on darwin, and the Settings toggle is hidden on other platforms
@@ -735,6 +737,7 @@ function getAppSettings() {
 		emulatorEnabled,
 		preReleaseUpdates,
 		alphaFirmware,
+		privateModeEnabled,
 	}
 }
 
@@ -3742,6 +3745,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				engine.syncState().catch(e => console.warn('[settings] syncState after alpha toggle failed:', e))
 				return getAppSettings()
 			},
+			setPrivateModeEnabled: async (params) => {
+				privateModeEnabled = params.enabled
+				setSetting('private_mode_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Private mode:', params.enabled)
+				return getAppSettings()
+			},
 			// ── Factory Reset ─────────────────────────────────────────
 			factoryReset: async () => {
 				console.log('[factory-reset] Starting full app reset...')
@@ -4021,14 +4030,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
 				const assets = await getSwapAssets()
-				// Deduplicate: return unique chain IDs that have at least one native (non-token) asset
-				const chainIds = new Set(assets.filter(a => !a.contractAddress).map(a => a.chainId))
+				const fw = engine.getDeviceState().firmwareVersion
+				const chainMap = new Map(getAllChains().map(c => [c.id, c]))
+				const chainIds = new Set(
+					assets
+						.filter(a => !a.contractAddress)
+						.filter(a => { const c = chainMap.get(a.chainId); return c ? isChainSupported(c, fw) : false })
+						.map(a => a.chainId)
+				)
 				return [...chainIds]
 			},
 			getSwapAssets: async () => {
 				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
-				return await getSwapAssets()
+				const assets = await getSwapAssets()
+				const fw = engine.getDeviceState().firmwareVersion
+				const chainMap = new Map(getAllChains().map(c => [c.id, c]))
+				return assets.filter(a => {
+					const chain = chainMap.get(a.chainId)
+					return chain ? isChainSupported(chain, fw) : false
+				})
 			},
 
 			getSwapHealth: async () => {
@@ -4558,7 +4579,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.log('[cache-health] Cache OK — no staleness detected')
 				}
 
-				return { balances: result.balances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
+				// Strip balances for chains the current firmware doesn't support.
+				// Stale cache from a prior 7.14+ session can contain Solana/TRON/TON
+				// entries — without this filter they bleed into the swap FROM picker,
+				// letting the user select them and then hitting a device signing error.
+				const filteredBalances = result.balances.filter(b => {
+					const chain = getAllChains().find(c => c.id === b.chainId)
+					return chain ? isChainSupported(chain, fwVersion) : true // keep unknowns (tokens)
+				})
+				return { balances: filteredBalances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
@@ -5353,6 +5382,8 @@ engine.on('state-change', (state) => {
 		}
 	}
 	if (state.state === 'ready' && !pioneerSocket) {
+		// Debounce Pioneer push events per chain — rapid-fire cache pings coalesce into one refresh.
+		const pioneerEventDebounce = new Map<string, ReturnType<typeof setTimeout>>()
 		pioneerSocket = new PioneerSocket({
 			queryKey: getPioneerQueryKey(),
 			onEvent: (event, data) => {
@@ -5362,8 +5393,16 @@ engine.on('state-change', (state) => {
 				const chain = d?.chain ?? d?.symbol ?? undefined
 				const address = d?.address ?? undefined
 				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				console.log(`[PioneerSocket] push event '${event}' chain=${chain} → triggering forceRefresh`)
-				try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
+				// Only forward events with a known chain — chain-less cache pings can't be scoped
+				if (!chain) return
+				const key = chain
+				const existing = pioneerEventDebounce.get(key)
+				if (existing) clearTimeout(existing)
+				pioneerEventDebounce.set(key, setTimeout(() => {
+					pioneerEventDebounce.delete(key)
+					console.log(`[PioneerSocket] push event '${event}' chain=${chain} → forwarding`)
+					try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
+				}, 2000))
 			},
 			onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
 			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),

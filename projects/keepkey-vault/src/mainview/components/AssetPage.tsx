@@ -350,11 +350,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [swapOutputChainId, setSwapOutputChainId] = useState<string | null>(null)
 	useEffect(() => {
 		return onRpcMessage("tx-push-received", (payload: { chain?: string }) => {
-			if (payload.chain) {
-				const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
-				const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
-				if (!matches && !matchesOutput) return
-			}
+			if (!payload.chain) return // chain-less cache pings (balance:cache:update) are not actionable
+			const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
+			const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
+			if (!matches && !matchesOutput) return
 			handleRefresh()
 		})
 	}, [handleRefresh, chain.id, chain.symbol, swapOutputChainId])

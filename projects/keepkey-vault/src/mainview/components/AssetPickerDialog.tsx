@@ -371,7 +371,7 @@ function buildChainInfos(entries: AssetEntry[], excludeCaip: string | undefined)
   }).sort((a, b) => b.routableCount - a.routableCount) // most assets first
 }
 
-function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, onSelectAsset, onUnavailAsset }: {
+function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, onSelectAsset, onUnavailAsset, excludeCaip }: {
   chainInfos: ChainInfo[]
   entries: AssetEntry[]
   search: string
@@ -379,6 +379,7 @@ function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, o
   onPickChain: (caip2: string) => void
   onSelectAsset: (e: AssetEntry) => void
   onUnavailAsset: (e: AssetEntry) => void
+  excludeCaip?: string
 }) {
   const q = search.trim().toLowerCase()
   const available   = chainInfos.filter(c => c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
@@ -397,7 +398,7 @@ function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, o
         return (b.balance?.usd ?? 0) - (a.balance?.usd ?? 0)
       })
       .slice(0, 30)
-  }, [noNetworkMatches, entries, q])
+  }, [noNetworkMatches, entries, q, excludeCaip])
 
   return (
     <>
@@ -1006,6 +1007,7 @@ export function AssetPickerDialog({
               onPickChain={(caip2) => { setToChain(caip2); setSearch("") }}
               onSelectAsset={handleSelect}
               onUnavailAsset={setUnavailEntry}
+              excludeCaip={excludeCaip}
             />
           )}
         </Box>

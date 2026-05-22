@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useFiat } from "../lib/fiat-context"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
@@ -160,7 +161,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -171,6 +172,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
+	const [togglingPrivateMode, setTogglingPrivateMode] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
 	const [newServerUrl, setNewServerUrl] = useState("")
@@ -356,6 +358,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { console.error("setAlphaFirmware:", e) }
 		setTogglingAlphaFirmware(false)
 	}, [])
+
+	const { setPrivateMode } = useFiat()
+	const togglePrivateMode = useCallback(async (enabled: boolean) => {
+		setTogglingPrivateMode(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setPrivateModeEnabled", { enabled }, 10000)
+			setAppSettings(result)
+			setPrivateMode(enabled)
+		} catch (e: any) { console.error("setPrivateModeEnabled:", e) }
+		setTogglingPrivateMode(false)
+	}, [setPrivateMode])
 
 	const openSwagger = useCallback(async () => {
 		try {
@@ -920,6 +933,29 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								))}
 							</Flex>
 						</Box>
+
+						{/* Private Mode toggle */}
+						<Flex justify="space-between" align="center">
+							<Flex align="center" gap="3">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(148,163,184,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+										<line x1="1" y1="1" x2="23" y2="23" />
+									</svg>
+								</Flex>
+								<Box>
+									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Private Mode</Text>
+									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+										Hide portfolio totals and balances from the screen
+									</Text>
+								</Box>
+							</Flex>
+							<Toggle
+								checked={appSettings.privateModeEnabled}
+								onChange={togglePrivateMode}
+								disabled={togglingPrivateMode}
+							/>
+						</Flex>
 					</Section>
 
 					{/* ── Signing Policy ─────────────────────────────── */}
