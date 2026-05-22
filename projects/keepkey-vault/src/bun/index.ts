@@ -810,6 +810,16 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
+	setPioneerApiBase: async (url: string) => {
+		const { url: trimmed } = { url: url.trim() }
+		setSetting('pioneer_api_base', trimmed)
+		resetPioneer()
+		chainCatalog = []
+		catalogLoadedAt = 0
+		const { clearSwapCache } = await import('./swap')
+		clearSwapCache()
+		console.log('[rest-api] Pioneer URL set to:', trimmed || '(default)')
+	},
 }
 
 /** Check if a port is already in use by trying to connect to it */
@@ -2724,7 +2734,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 					console.debug(`[buildTx] Deriving ${chain.coin} address`)
 					const addrResult = await wallet[walletMethod](addrParams)
-					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address || addrResult?.publicKey
 					console.debug(`[buildTx] Derived ${chain.coin} address OK`)
 				} else if (chain.id === 'bitcoin') {
 					// BTC multi-account: resolve xpub, scriptType, and accountPath from the
@@ -2856,6 +2866,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					rpcUrl,
 					evmAddressIndex: evmIdx,
 					publicKeyHex,
+					pioneerBaseUrl: getPioneerApiBase(),
 				})
 
 				return { unsignedTx: result.unsignedTx, fee: result.fee }

@@ -4865,6 +4865,74 @@
         ]
       }
     },
+    "/api/pioneer/status": {
+      "get": {
+        "operationId": "GetPioneerStatus",
+        "summary": "Get current Pioneer API URL",
+        "description": "Returns the active Pioneer API base URL and whether it is the default.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": { "type": "string" },
+                    "is_default": { "type": "boolean" }
+                  },
+                  "required": ["url", "is_default"]
+                }
+              }
+            }
+          }
+        },
+        "tags": ["System"]
+      }
+    },
+    "/api/pioneer/url": {
+      "post": {
+        "operationId": "SetPioneerUrl",
+        "summary": "Switch Pioneer API URL",
+        "description": "Set a custom Pioneer API base URL (e.g. http://localhost:9001). Send empty string to reset to default. Immediately resets the Pioneer client and swap cache.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": { "type": "string", "example": "http://localhost:9001" }
+                },
+                "required": ["url"]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": { "type": "string" },
+                    "is_default": { "type": "boolean" }
+                  },
+                  "required": ["url", "is_default"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid URL" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["System"]
+      }
+    },
     "/api/cache/status": {
       "get": {
         "operationId": "GetCacheStatus",

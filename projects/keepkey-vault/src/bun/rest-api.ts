@@ -62,6 +62,8 @@ export interface RestApiCallbacks {
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
   getPioneerApiBase?: () => string
+  /** Set Pioneer API base URL (empty string = reset to default) */
+  setPioneerApiBase?: (url: string) => Promise<any>
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -2725,6 +2727,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         // ── DEBUG PORTFOLIO ENDPOINTS ────────────────────────────────────
         // Verbose read-only views into cached balances, spam analysis, and
+        // ── PIONEER URL MANAGEMENT ────────────────────────────────────
+        if (path === '/api/pioneer/status' && method === 'GET') {
+          const base = callbacks.getPioneerApiBase?.() ?? 'unknown'
+          return json({ url: base, is_default: base === 'https://api.keepkey.info' || base === 'unknown' })
+        }
+
+        if (path === '/api/pioneer/url' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json().catch(() => ({})) as any
+          const url = (body.url ?? '').trim()
+          if (url && !/^https?:\/\//i.test(url)) return json({ error: 'URL must start with http:// or https://' }, 400)
+          await callbacks.setPioneerApiBase?.(url)
+          const newBase = callbacks.getPioneerApiBase?.() ?? 'unknown'
+          return json({ url: newBase, is_default: !url })
+        }
+
         // token visibility overrides. Useful for diagnosing balance/spam issues
         // without needing to dig through the SQLite DB directly.
 
