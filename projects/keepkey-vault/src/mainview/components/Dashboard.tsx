@@ -1554,8 +1554,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				<Flex justify="center" pt="2" pb="1">
 					<ViewPickerButton />
 				</Flex>
-				{/* Top: orbital widget / donut / welcome — vertically centered */}
-				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'}>
+				{/* Top: orbital widget / donut / welcome — vertically centered.
+				    overflow:hidden prevents the orbital box from visually and
+				    pointer-event-wise spilling into the action button row below. */}
+				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'} overflow="hidden" position="relative" zIndex={1}>
 					{hasAnyBalance ? (() => {
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -1704,7 +1706,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 
 				{/* Below the sun: token list / action buttons / donut legend / empty.
-				    Fixed min-height keeps the sun's y-position stable across modes. */}
+				    Fixed min-height keeps the sun's y-position stable across modes.
+				    position+zIndex ensures this row sits above any orbital overflow. */}
 				<Flex
 					direction="column"
 					align="center"
@@ -1712,6 +1715,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					maxW="540px"
 					mx="auto"
 					px="3"
+					position="relative"
+					zIndex={2}
 					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '200px'}
 					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
 					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
