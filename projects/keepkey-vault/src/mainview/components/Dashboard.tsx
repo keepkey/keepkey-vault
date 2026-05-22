@@ -1119,6 +1119,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	const chartData = drilledChainId ? drilledChainTokensChartData : allChainsChartData
 
+	// Reset active slice whenever the drill target changes so the index never
+	// points at a stale item from the previous dataset.
+	useEffect(() => { setActiveSliceIndex(0) }, [drilledChainId])
+
 	const hasAnyBalance = allChainsChartData.length > 0
 
 	/* Portfolio view mode — pulled from a shared context so the toggle living
@@ -1650,18 +1654,31 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								: totalUsd
 							return <StackedBarView items={items} total={stackTotal} maxWidth={720} />
 						}
-						const safeIndex = activeSliceIndex !== null && activeSliceIndex < allChainsChartData.length ? activeSliceIndex : (allChainsChartData.length > 0 ? 0 : null)
+						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : (chartData.length > 0 ? 0 : null)
 						return (
 							<DonutChart
-								data={allChainsChartData}
+								data={chartData}
 								size={380}
 								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 								onClickSlice={(i) => {
-									const item = allChainsChartData[i]
-									if (!item) return
-									const chain = allChains.find(c => c.coin === (item as any).name)
-									if (chain) setDrilledChainId(chain.id)
+									if (drilledChainId) {
+										// Drilled view: slices are tokens — open their AssetPage
+										const dchain = visibleChains.find(c => c.id === drilledChainId)
+										const bal = dchain ? balances.get(dchain.id) : undefined
+										const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+										const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+										const item = chartData[i]
+										if (!item) return
+										if (item.name === dchain?.symbol) { openChainPage(dchain!); return }
+										const tok = cleanTokens.find(t => t.symbol === item.name)
+										if (tok && dchain) openChainPage(dchain, undefined, tok)
+									} else {
+										const item = allChainsChartData[i]
+										if (!item) return
+										const chain = allChains.find(c => c.coin === (item as any).name)
+										if (chain) setDrilledChainId(chain.id)
+									}
 								}}
 							/>
 						)
@@ -1722,20 +1739,36 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
 					gap="3"
 				>
-					{hasAnyBalance && viewMode === 'donut' && allChainsChartData.length > 0 && (() => {
-						const safeIndex = activeSliceIndex !== null && activeSliceIndex < allChainsChartData.length ? activeSliceIndex : 0
+					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
+						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
+						const legendTotal = drilledChainId
+							? chartData.reduce((s, d) => s + d.value, 0)
+							: totalUsd
 						return (
 							<Box w="100%" maxW="440px">
 								<ChartLegend
-									data={allChainsChartData}
-									total={totalUsd}
+									data={chartData}
+									total={legendTotal}
 									activeIndex={safeIndex}
 									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 									onClickItem={(i) => {
-										const item = allChainsChartData[i]
-										if (!item) return
-										const chain = allChains.find(c => c.coin === (item as any).name)
-										if (chain) setDrilledChainId(chain.id)
+										if (drilledChainId) {
+											// Drilled view: legend items are tokens
+											const dchain = visibleChains.find(c => c.id === drilledChainId)
+											const bal = dchain ? balances.get(dchain.id) : undefined
+											const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+											const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+											const item = chartData[i]
+											if (!item) return
+											if (item.name === dchain?.symbol) { openChainPage(dchain!); return }
+											const tok = cleanTokens.find(t => t.symbol === item.name)
+											if (tok && dchain) openChainPage(dchain, undefined, tok)
+										} else {
+											const item = allChainsChartData[i]
+											if (!item) return
+											const chain = allChains.find(c => c.coin === (item as any).name)
+											if (chain) setDrilledChainId(chain.id)
+										}
 									}}
 								/>
 							</Box>
