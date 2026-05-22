@@ -349,11 +349,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// and only when the event chain matches this asset or the active swap output.
 	const [swapOutputChainId, setSwapOutputChainId] = useState<string | null>(null)
 	useEffect(() => {
-		return onRpcMessage("tx-push-received", (payload: { chain?: string }) => {
-			if (!payload.chain) return // chain-less cache pings (balance:cache:update) are not actionable
-			const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
-			const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
-			if (!matches && !matchesOutput) return
+		return onRpcMessage("tx-push-received", (payload: { chain?: string; txid?: string }) => {
+			if (!payload.chain && !payload.txid) return // truly empty pings are not actionable
+			if (payload.chain) {
+				// Chain-scoped push: only refresh if it matches this asset or the active swap output
+				const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
+				const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
+				if (!matches && !matchesOutput) return
+			}
 			handleRefresh()
 		})
 	}, [handleRefresh, chain.id, chain.symbol, swapOutputChainId])

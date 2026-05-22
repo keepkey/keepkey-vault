@@ -197,8 +197,8 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
 // FROM picker — all held assets, ranked by USD value, square tiles
 // ══════════════════════════════════════════════════════════════════════════
 
-function FromPicker({ entries, onSelect, fmtCompact }: {
-  entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string
+function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled }: {
+  entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string; privateModeEnabled: boolean
 }) {
   const { t } = useTranslation("swap")
   const [search, setSearch] = useState("")
@@ -227,7 +227,7 @@ function FromPicker({ entries, onSelect, fmtCompact }: {
             Available to swap
           </Text>
           <Text fontSize="26px" fontWeight="700" letterSpacing="-0.03em" color="kk.textPrimary" fontVariantNumeric="tabular-nums">
-            {totalUsd > 0 ? fmtCompact(totalUsd) : "—"}
+            {totalUsd > 0 ? (privateModeEnabled ? "••••••" : fmtCompact(totalUsd)) : "—"}
           </Text>
         </Flex>
         <Text fontSize="10px" color="kk.textMuted">
@@ -259,7 +259,7 @@ function FromPicker({ entries, onSelect, fmtCompact }: {
           </Flex>
         ) : (
           <Box display="grid" gridTemplateColumns="repeat(auto-fill, minmax(160px, 1fr))" gap="2.5">
-            {filtered.map(e => <HeldTile key={e.caip} entry={e} onSelect={onSelect} fmtCompact={fmtCompact} />)}
+            {filtered.map(e => <HeldTile key={e.caip} entry={e} onSelect={onSelect} fmtCompact={fmtCompact} privateModeEnabled={privateModeEnabled} />)}
           </Box>
         )}
       </Box>
@@ -273,8 +273,8 @@ function FromPicker({ entries, onSelect, fmtCompact }: {
   )
 }
 
-function HeldTile({ entry: e, onSelect, fmtCompact }: {
-  entry: AssetEntry; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string
+function HeldTile({ entry: e, onSelect, fmtCompact, privateModeEnabled }: {
+  entry: AssetEntry; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string; privateModeEnabled: boolean
 }) {
   const chainName = networkDisplayName(e.chainId)
   const selectable = isRowSelectable(e)
@@ -322,7 +322,7 @@ function HeldTile({ entry: e, onSelect, fmtCompact }: {
         <Text fontSize="14px" fontWeight="600" fontVariantNumeric="tabular-nums" mt="1.5" letterSpacing="-0.01em">
           {e.balance!.amount}
         </Text>
-        <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{fmtCompact(e.balance!.usd)}</Text>
+        <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{privateModeEnabled ? "••••••" : fmtCompact(e.balance!.usd)}</Text>
         {/* Full CAIP */}
         <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
           {e.caip}
@@ -860,7 +860,7 @@ interface AssetPickerDialogProps {
 export function AssetPickerDialog({
   open, onClose, swappable, balances, customTokens, excludeCaip, onSelect, side,
 }: AssetPickerDialogProps) {
-  const { fmtCompact } = useFiat()
+  const { fmtCompact, privateModeEnabled } = useFiat()
 
   const [entries, setEntries]         = useState<AssetEntry[] | null>(null)
   const [loading, setLoading]         = useState(false)
@@ -977,7 +977,7 @@ export function AssetPickerDialog({
             </Flex>
           ) : !entries ? null
           : side === "from" ? (
-            <FromPicker entries={entries} onSelect={handleSelect} fmtCompact={fmtCompact} />
+            <FromPicker entries={entries} onSelect={handleSelect} fmtCompact={fmtCompact} privateModeEnabled={privateModeEnabled} />
           ) : unavailEntry ? (
             <UnavailableRouteView
               fromChainId={fromChainId}

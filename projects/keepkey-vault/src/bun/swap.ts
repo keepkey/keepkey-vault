@@ -845,7 +845,7 @@ async function buildRelaySwapTx(
   getRpcUrl: (chain: ChainDef) => string | undefined,
   isErc20Source = false,
   _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
-): Promise<{ unsignedTx: any; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 

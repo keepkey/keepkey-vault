@@ -5,6 +5,7 @@ import { getAssetIcon } from "../../shared/assetLookup"
 import type { ChainBalance, TokenBalance } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { dispatchVaultCommand } from "../lib/commandBus"
+import { useFiat } from "../lib/fiat-context"
 
 interface CommandPaletteProps {
 	open: boolean
@@ -45,6 +46,7 @@ function scoreMatch(query: string, fields: { symbol?: string; coin?: string; nam
 }
 
 export function CommandPalette({ open, onClose, onJumpToVault, balances }: CommandPaletteProps) {
+	const { privateModeEnabled } = useFiat()
 	const [query, setQuery] = useState("")
 	const [activeIdx, setActiveIdx] = useState(0)
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -241,11 +243,13 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 							const secondary = r.kind === "chain"
 								? r.chain.symbol
 								: `${r.token.symbol} on ${r.chain.coin}`
-							const trailing = r.kind === "chain" && r.balanceUsd > 0
-								? `$${r.balanceUsd.toFixed(2)}`
-								: r.kind === "token" && r.token.balanceUsd > 0
-									? `$${r.token.balanceUsd.toFixed(2)}`
-									: ""
+							const trailing = privateModeEnabled
+								? (r.kind === "chain" && r.balanceUsd > 0) || (r.kind === "token" && r.token.balanceUsd > 0) ? "••••••" : ""
+								: r.kind === "chain" && r.balanceUsd > 0
+									? `$${r.balanceUsd.toFixed(2)}`
+									: r.kind === "token" && r.token.balanceUsd > 0
+										? `$${r.token.balanceUsd.toFixed(2)}`
+										: ""
 							return (
 								<Flex
 									key={`${r.kind}:${r.kind === "chain" ? r.chain.id : r.token.caip}:${idx}`}
