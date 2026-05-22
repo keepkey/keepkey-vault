@@ -119,7 +119,7 @@ export function parseQuoteResponse(
     console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
     console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
-    console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2)}`)
     throw new Error(`No quote output for ${params.fromCaip} → ${params.toCaip} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
   }
   const expectedOutputStr = String(expectedOutput)
@@ -135,6 +135,32 @@ export function parseQuoteResponse(
   //     protocol-controlled address; the swap destination was registered off-chain when
   //     the quote/channel was created. `data` is empty intentionally — do NOT conflate
   //     with a malformed Relay quote.
+  // ── Solana instruction-based tx (Relay SOL→EVM) ─────────────────────
+  // Relay returns txs[0].type='SOLANA' with txParams.instructions[] instead of
+  // EVM calldata. The vault has no @solana/web3.js to compile these into a
+  // serialized transaction — Pioneer must fetch the recent blockhash, build the
+  // VersionedTransaction, and return txParams.serializedTx (base64) instead.
+  // Until Pioneer does that, we surface a clear error rather than "MISSING memo".
+  const txType: string = quote.txs?.[0]?.type || 'EVM'
+  const isSolanaTx = txType === 'SOLANA'
+  if (isSolanaTx && !txParams.serializedTx) {
+    console.error(`${TAG} Relay Solana tx — instructions-only format not yet supported`)
+    console.error(`${TAG}   Pioneer must compile the VersionedTransaction and return txParams.serializedTx`)
+    console.error(`${TAG}   instructions count: ${txParams.instructions?.length ?? 0}`)
+    console.error(`${TAG}   ALTs: ${JSON.stringify(txParams.addressLookupTableAddresses ?? [])}`)
+    console.error(`${TAG}   full txParams: ${JSON.stringify(txParams)}`)
+    throw new Error(
+      'Solana→EVM swaps via Relay are not yet supported. ' +
+      'Pioneer needs to serialize the Solana VersionedTransaction before the vault can sign it. ' +
+      'See handoff doc: projects/keepkey-vault/docs/handoff-relay-solana-swap.md'
+    )
+  }
+
+  // Solana path with pre-serialized tx from Pioneer
+  const solanaTxParams = isSolanaTx && txParams.serializedTx
+    ? { serializedTx: txParams.serializedTx as string, senderAddress: txParams.senderAddress as string }
+    : undefined
+
   const rawData: string | undefined = txParams.data
   const hasRealCalldata = !!rawData && rawData !== '0x' && rawData !== '0x0' && rawData.length >= 10
 
@@ -149,7 +175,7 @@ export function parseQuoteResponse(
   // path instead (isMemolessTransfer below).
   const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
   const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
-  const hasPrebuiltTx = hasRealCalldata || isDepositChannel
+  const hasPrebuiltTx = hasRealCalldata || isDepositChannel || !!solanaTxParams
   let relayTx: RelayTxParams | undefined
 
   if (hasPrebuiltTx) {
@@ -196,7 +222,7 @@ export function parseQuoteResponse(
   if (fromIsUtxo && inboundAddress && inboundAddress.startsWith('0x')) {
     console.error(`${TAG} Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
-    console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2).slice(0, 2000)}`)
+    console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2)}`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
     throw new Error('Swap quote did not provide a valid deposit address for this chain. Try a different pair or refresh the quote.')
   }
@@ -216,7 +242,7 @@ export function parseQuoteResponse(
     console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
     console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
-    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2)}`)
     throw new Error('Quote response missing inbound address')
   }
   // For memo-less UTXO swaps (NEAR Intents BTC→ETH): the deposit address IS the
@@ -232,7 +258,7 @@ export function parseQuoteResponse(
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
     console.error(`${TAG}   txParams.memo=${txParams.memo!}, quote.memo=${quote.memo!}, raw.memo=${raw.memo!}`)
     console.error(`${TAG}   rawData=${rawData!}, hasRealCalldata=${hasRealCalldata}, isDepositChannel=${isDepositChannel}`)
-    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 3000)}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2)}`)
     const swapperLabel = swapper || integration || 'unknown'
     throw new Error(`No supported routes for this pair — Pioneer returned only "${swapperLabel}" (unsupported). Try a different pair or refresh.`)
   }
