@@ -82,6 +82,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       tronSignTypedHash: { params: any; response: any }
       tonSignTx: { params: any; response: any }
       tonSignMessage: { params: any; response: any }
+      hiveGetPublicKey: { params: any; response: any }
+      hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
@@ -168,6 +170,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Window Focus ──────────────────────────────────────────────────
       getWindowFocusState: { params: void; response: { refs: number; alwaysOnTop: boolean } }
       forceReleaseWindowFocus: { params: void; response: void }
+      setWindowAlwaysOnTop: { params: { enabled: boolean }; response: void }
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
@@ -391,6 +394,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */
       'fatal': FatalEvent
+      'window-focus-changed': { refs: number; alwaysOnTop: boolean }
     }
   }
   webview: {

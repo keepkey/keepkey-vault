@@ -513,11 +513,15 @@ export function resetSwapUiState(): void {
 // elevated; using the raw API per-event drops the window prematurely when
 // any one source dismisses while another is still pending.
 let _alwaysOnTopRefs = 0
+function _emitWindowFocusChanged() {
+	try { rpc.send['window-focus-changed']({ refs: _alwaysOnTopRefs, alwaysOnTop: _alwaysOnTopRefs > 0 }) } catch { /* webview not ready */ }
+}
 function acquireWindowFocus() {
 	_alwaysOnTopRefs++
 	if (_alwaysOnTopRefs === 1) {
 		try { mainWindow.setAlwaysOnTop(true); mainWindow.focus() } catch { /* window not ready */ }
 	}
+	_emitWindowFocusChanged()
 }
 function releaseWindowFocus() {
 	if (_alwaysOnTopRefs === 0) return // defensive: never go negative
@@ -525,6 +529,7 @@ function releaseWindowFocus() {
 	if (_alwaysOnTopRefs === 0) {
 		try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
 	}
+	_emitWindowFocusChanged()
 }
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
@@ -1618,6 +1623,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					: await engine.wallet.solanaSignOffchainMessage(params)
 				if (!result) throw new Error('solanaSignOffchainMessage returned no result')
 				return { publicKey: bytesToHex(result.publicKey), signature: bytesToHex(result.signature) }
+			},
+
+			// ── Hive (Graphene) ───────────────────────────────────────────
+			hiveGetPublicKey: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await (engine.wallet as any).hiveGetPublicKey(params)
+				if (!result) throw new Error('hiveGetPublicKey returned no result')
+				return result
+			},
+			hiveSignTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const result = await (engine.wallet as any).hiveSignTx(params)
+				if (!result) throw new Error('hiveSignTx returned no result')
+				return {
+					signature: result.signature instanceof Uint8Array
+						? Buffer.from(result.signature).toString('hex')
+						: result.signature,
+					serializedTx: result.serializedTx instanceof Uint8Array
+						? Buffer.from(result.serializedTx).toString('hex')
+						: result.serializedTx,
+				}
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
@@ -3594,6 +3620,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn(`[window-focus] Force-releasing stuck always-on-top (refs was ${_alwaysOnTopRefs})`)
 					_alwaysOnTopRefs = 0
 					try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+					_emitWindowFocusChanged()
+				}
+			},
+			setWindowAlwaysOnTop: async (params) => {
+				if (params.enabled) {
+					acquireWindowFocus()
+				} else {
+					// Force-release all refs when manually toggling off
+					if (_alwaysOnTopRefs > 0) {
+						_alwaysOnTopRefs = 0
+						try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
+						_emitWindowFocusChanged()
+					}
 				}
 			},
 
