@@ -1117,7 +1117,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return out.filter(d => d.value > 0)
 	}, [drilledChainId, allChains, balances, visibilityMap])
 
-	const chartData = drilledChainId ? drilledChainTokensChartData : allChainsChartData
+	// When drilled but no balance data yet, synthesise a single placeholder slice
+	// so the donut always renders something for the selected chain.
+	const drilledPlaceholder = useMemo<DonutChartItem[]>(() => {
+		if (!drilledChainId || drilledChainTokensChartData.length > 0) return drilledChainTokensChartData
+		const chain = allChains.find(c => c.id === drilledChainId)
+		if (!chain) return []
+		return [{ name: chain.symbol, value: 1, color: chain.color + '55' }]
+	}, [drilledChainId, drilledChainTokensChartData, allChains])
+
+	const chartData = drilledChainId ? drilledPlaceholder : allChainsChartData
 
 	// Reset active slice whenever the drill target changes so the index never
 	// points at a stale item from the previous dataset.
@@ -1741,8 +1750,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				>
 					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
+						// Use real token sum when drilled; placeholder has value:1 so use real balance sum
 						const legendTotal = drilledChainId
-							? chartData.reduce((s, d) => s + d.value, 0)
+							? drilledChainTokensChartData.reduce((s, d) => s + d.value, 0)
 							: totalUsd
 						return (
 							<Box w="100%" maxW="440px">
