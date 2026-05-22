@@ -837,6 +837,55 @@
         ]
       }
     },
+    "/addresses/hive": {
+      "post": {
+        "operationId": "HiveGetPublicKey",
+        "summary": "Get Hive Public Key",
+        "description": "Get a Hive STM-prefixed public key at the given BIP-32 path, optionally displaying it on-device. Requires firmware v7.14.0+.",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "show_display": { "type": "boolean", "example": false },
+                  "address_n": {
+                    "$ref": "#/components/schemas/types.AddressNList",
+                    "example": [2147483692, 2147485179, 2147483648, 0, 0]
+                  }
+                },
+                "required": ["address_n"],
+                "example": {
+                  "address_n": [2147483692, 2147485179, 2147483648, 0, 0],
+                  "coin": "Hive",
+                  "show_display": false
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "address": { "type": "string" } },
+                  "required": ["address"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Bad request" },
+          "500": { "description": "Error processing request" }
+        },
+        "security": [{ "apiKey": [] }],
+        "tags": ["Address"]
+      }
+    },
     "/addresses/xrp": {
       "post": {
         "operationId": "XrpGetAddress",

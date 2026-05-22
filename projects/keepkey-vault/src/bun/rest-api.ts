@@ -1910,6 +1910,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/addresses/hive' && method === 'POST') {
+          auth.requireAuth(req)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = scopedKey(engine, 'hive', body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => (wallet as any).hiveGetPublicKey({
+            addressNList: body.address_n,
+            showDisplay: sd,
+            coin: 'Hive',
+          }), { operation: 'hiveGetPublicKey', chain: 'HIVE' }, sd)
+          const address = result?.publicKey || ''
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
