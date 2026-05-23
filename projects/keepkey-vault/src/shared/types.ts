@@ -713,6 +713,7 @@ export interface SwapQuote {
    *  Undefined for non-aggregator integrations (use `integration` directly). */
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
+  solanaTxParams?: { serializedTx: string; senderAddress: string }  // pre-built Solana v0 VersionedTransaction (base64)
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
   /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
    *  When set, the tracker must record this instead of the original params.amount. */
@@ -761,6 +762,7 @@ export interface ExecuteSwapParams {
   toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
+  solanaTxParams?: { serializedTx: string; senderAddress: string }  // pre-built Solana v0 VersionedTransaction (base64)
 }
 
 export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'

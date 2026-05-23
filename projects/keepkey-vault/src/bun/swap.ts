@@ -446,7 +446,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // Calldata-based integrations (relay, shapeshiftSwap, …) ship the full
   // tx in `relayTx` — no memo or inbound address needed. Anything else is
   // memo+vault-routed (THORChain/Maya).
-  const hasPrebuiltTx = !!params.relayTx
+  const hasPrebuiltTx = !!params.relayTx || !!params.solanaTxParams
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
@@ -461,7 +461,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   swapLog(`${TAG} Executing: ${params.fromCaip} → ${params.toCaip}, amount=${params.amount}`)
-  if (hasPrebuiltTx) {
+  if (params.solanaTxParams) {
+    swapLog(`${TAG} ${params.integration} — using pre-built Solana v0 tx (serializedTx length=${params.solanaTxParams.serializedTx.length})`)
+  } else if (hasPrebuiltTx) {
     swapLog(`${TAG} ${params.integration} — using pre-built tx (to=${params.relayTx!.to}, chainId=${params.relayTx!.chainId})`)
   } else {
     swapLog(`${TAG} Chain family: ${fromChain.chainFamily}, vault: ${params.inboundAddress || 'MsgDeposit'}, router: ${params.router || 'none'}`)
@@ -475,8 +477,15 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   let approvalTxid: string | undefined
   let fromAmountBaseUnits: string | undefined
 
-  // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt tx ──
-  if (hasPrebuiltTx) {
+  // ── Solana prebuilt tx (Relay SOL→EVM): Pioneer compiled the VersionedTransaction ──
+  if (params.solanaTxParams) {
+    unsignedTx = {
+      addressNList: fromChain.defaultPath,
+      rawTx: params.solanaTxParams.serializedTx,
+    }
+
+  // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt EVM tx ──
+  } else if (hasPrebuiltTx) {
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
     unsignedTx = result.unsignedTx
     fromAmountBaseUnits = result.fromAmountBaseUnits

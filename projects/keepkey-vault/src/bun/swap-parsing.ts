@@ -314,6 +314,7 @@ export function parseQuoteResponse(
     integration,
     swapper,
     relayTx,
+    solanaTxParams,
     minAmountIn,
     nearIntentsDepositAddress,
   }
