@@ -178,7 +178,7 @@ export function parseQuoteResponse(
   const hasPrebuiltTx = hasRealCalldata || isDepositChannel || !!solanaTxParams
   let relayTx: RelayTxParams | undefined
 
-  if (hasPrebuiltTx) {
+  if (hasPrebuiltTx && !solanaTxParams) {
     // Pioneer occasionally returns addresses with a duplicate '0x' prefix (e.g.
     // "0x0x833589..."). Strip all leading '0x' pairs and re-add exactly one.
     // Affects NEAR Intents ERC-20 routes where txParams.to is the token contract.
@@ -212,8 +212,10 @@ export function parseQuoteResponse(
     || best.inbound_address || best.inboundAddress
 
   // Last-resort fallback: for UTXO swaps, THORChain's "router" IS the vault address
-  // (EVM router is a contract, but UTXO "router" is the inbound vault)
-  if (!inboundAddress && router) {
+  // (EVM router is a contract, but UTXO "router" is the inbound vault).
+  // Solana prebuilt txs don't need an inbound address — the destination is baked
+  // into the serialized tx. Assigning an EVM router address here would be wrong.
+  if (!inboundAddress && router && !solanaTxParams) {
     console.warn(`${TAG} No explicit inbound_address — falling back to router: ${router}`)
     inboundAddress = router
   }

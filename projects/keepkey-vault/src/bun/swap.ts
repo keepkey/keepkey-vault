@@ -11,7 +11,7 @@
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
-import { getPioneer } from './pioneer'
+import { getPioneer, getPioneerApiBase } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
@@ -479,9 +479,42 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── Solana prebuilt tx (Relay SOL→EVM): Pioneer compiled the VersionedTransaction ──
   if (params.solanaTxParams) {
+    // Refresh the serialized tx immediately before signing so the Relay quote
+    // deadline (embedded in instruction data) hasn't expired by the time the
+    // user confirms on device. Falls back to quote-time tx if Pioneer returns
+    // an error (e.g. Relay temporarily unavailable).
+    let freshSerializedTx = params.solanaTxParams.serializedTx
+    try {
+      const refreshBody = {
+        sellAsset: params.fromCaip,
+        sellAmount: params.amount,
+        buyAsset: params.toCaip,
+        senderAddress: params.solanaTxParams.senderAddress,
+        recipientAddress: toAddress,
+      }
+      const refreshResp = await fetch(`${getPioneerApiBase()}/api/v1/quote/solana-tx-refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(refreshBody),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (refreshResp.ok) {
+        const refreshData = await refreshResp.json() as { serializedTx?: string }
+        if (refreshData.serializedTx) {
+          console.log(`${TAG} Solana tx refreshed (fresh serializedTx len=${refreshData.serializedTx.length})`)
+          freshSerializedTx = refreshData.serializedTx
+        } else {
+          console.log(`${TAG} Solana tx refresh returned no serializedTx — using quote-time tx`)
+        }
+      } else {
+        console.log(`${TAG} Solana tx refresh failed (${refreshResp.status}) — using quote-time tx`)
+      }
+    } catch (err: any) {
+      console.log(`${TAG} Solana tx refresh error: ${err?.message} — using quote-time tx`)
+    }
     unsignedTx = {
       addressNList: fromChain.defaultPath,
-      rawTx: params.solanaTxParams.serializedTx,
+      rawTx: freshSerializedTx,
     }
 
   // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt EVM tx ──

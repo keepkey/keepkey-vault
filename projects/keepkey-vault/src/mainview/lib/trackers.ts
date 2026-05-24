@@ -9,6 +9,10 @@
 // is shown.
 // Relay needs its bytes32 request id, which vault now persists at trackSwap
 // time (extracted from the deposit calldata) or backfills via api.relay.link.
+// NEAR Intents: uses explorer.near-intents.org — the official Defuse swap
+// tracker. Primary key is the NEAR settlement tx hash (backfilled via 1Click
+// API); falls back to the deposit address so the button is visible immediately
+// after broadcast while the nearTxHash is still in flight.
 // CoW / Across still return null (with a one-time console warn) until their
 // equivalent IDs are plumbed through.
 
@@ -23,7 +27,7 @@ export type ProviderTrackerOpts = {
    *  branch — falls through to null when missing so the lazy-backfill path
    *  in swap-tracker has time to populate it without flashing a dead link. */
   relayRequestId?: string
-  /** NEAR transaction hash from 1Click /v0/status polling. Required for the
+  /** NEAR settlement tx hash from 1Click /v0/status polling. Required for the
    *  NEAR Intents branch — falls through to null while polling is in flight. */
   nearTxHash?: string
 }
@@ -100,8 +104,8 @@ export function providerTrackerUrl(
 
   if (s.includes('near')) {
     const hash = opts?.nearTxHash
-    if (!hash) return null // 1Click polling in flight; re-renders when it lands
-    return { url: `https://nearblocks.io/txns/${hash}`, label: 'View on NEAR', iconUrl: ICON.near }
+    if (!hash) return null // 1Click polling in flight; re-renders when nearTxHash lands
+    return { url: `https://explorer.near-intents.org/transactions/${hash}`, label: 'NEAR Intents Track', iconUrl: ICON.near }
   }
 
   if (RELAY_KEYS.has(s)) {

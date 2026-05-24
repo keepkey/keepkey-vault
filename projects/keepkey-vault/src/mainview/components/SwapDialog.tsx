@@ -79,7 +79,7 @@ const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
 }
 const NATIVE_EVM_CLOSER_RESERVE_DEFAULT = 0.00025
 const NATIVE_TRON_FEE_RESERVE = 1.1
-const NATIVE_SOLANA_FEE_RESERVE = 0.000005
+const NATIVE_SOLANA_FEE_RESERVE = 0.001
 
 function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'safe'): number {
   if (asset.contractAddress) return 0
@@ -1473,6 +1473,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       toAddressOverride: toAddress,
       integration: quote.integration,
       relayTx: quote.relayTx,
+      solanaTxParams: quote.solanaTxParams,
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
@@ -1694,6 +1695,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         toAddressOverride: toAddress,
         integration: liveQuote.integration,
         relayTx: liveQuote.relayTx,
+        solanaTxParams: liveQuote.solanaTxParams,
       }, 600000)
 
       setTxid(result.txid)
@@ -2220,7 +2222,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text>{liveOutboundTxid ? '2 hashes' : '1 hash'}</Text>
                           {(() => {
                             const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
+                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash, nearDepositAddress: quote?.nearIntentsDepositAddress })
                             return tracker ? <Text>· tracker</Text> : null
                           })()}
                           <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -2291,7 +2293,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {/* Tracker row */}
                         {(() => {
                           const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
+                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash, nearDepositAddress: quote?.nearIntentsDepositAddress })
                           return tracker ? (
                             <Flex align="center" gap="2.5" py="2" minW="0"
                               style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
@@ -2670,7 +2672,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     // post-broadcast value) over the quote-time parse, which often
                     // misses `swapper` for aggregator routes.
                     const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
+                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash, nearDepositAddress: quote?.nearIntentsDepositAddress })
                     if (!tracker) return null
                     return (
                       <Button size="xs" flex="1" variant="outline" borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
