@@ -754,7 +754,7 @@ export async function previewSwapBuild(
   }
   if (!fromAddress) throw new Error('Could not derive sender address')
 
-  const hasPrebuiltTx = !!params.relayTx
+  const hasPrebuiltTx = !!params.relayTx || !!params.solanaTxParams
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
   const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
   const isMemolessTransfer = fromIsUtxoPreview && !!params.inboundAddress && !params.memo
@@ -763,6 +763,14 @@ export async function previewSwapBuild(
 
   const pioneer = await getPioneer()
 
+  if (params.solanaTxParams) {
+    return {
+      unsignedTx: {
+        addressNList: fromChain.defaultPath,
+        rawTx: params.solanaTxParams.serializedTx,
+      }
+    }
+  }
   if (hasPrebuiltTx) {
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ true)
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
