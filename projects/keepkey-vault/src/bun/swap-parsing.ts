@@ -122,7 +122,20 @@ export function parseQuoteResponse(
     console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error(`No quote output for ${params.fromCaip} → ${params.toCaip} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
   }
-  const expectedOutputStr = String(expectedOutput)
+  // Pioneer normalises THOR-family output amounts using 8 decimal places (same as
+  // RUNE on THORChain). CACAO on MayaChain has 10 decimal places, so Pioneer's
+  // value is 10^(10−8) = 100× too large for any mayachain buy asset with more
+  // than 8 decimals. Correct before expectedNum is used for the min-output calc.
+  let expectedOutputStr = String(expectedOutput)
+  if (integration === 'mayachain') {
+    const toChain = CHAINS.find(c => c.caip === params.toCaip)
+    const THOR_BASE = 8
+    if (toChain && toChain.decimals > THOR_BASE) {
+      const scale = 10 ** (toChain.decimals - THOR_BASE)
+      const corrected = parseFloat(expectedOutputStr) / scale
+      if (corrected > 0) expectedOutputStr = corrected.toFixed(toChain.decimals).replace(/\.?0+$/, '')
+    }
+  }
 
   // ── Pre-built calldata integrations (relay, shapeshiftSwap, …) ──
   // Any integration that hands us calldata gets the same treatment: we sign
