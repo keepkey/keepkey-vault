@@ -706,7 +706,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				const next = prev.filter(s => s.txid !== update.txid)
 				if (!TERMINAL.has(update.status)) {
 					const existing = prev.find(s => s.txid === update.txid)
-					if (existing) next.push({ ...existing, ...update })
+					if (existing) {
+						next.push({ ...existing, ...update })
+					} else {
+						// New swap started after mount — fetch full details
+						rpcRequest<PendingSwap[]>('getPendingSwaps', undefined, 5000)
+							.then(r => { if (r) setActiveSwaps(r.filter(s => !TERMINAL.has(s.status))) })
+							.catch(() => {})
+					}
 				}
 				return next
 			})

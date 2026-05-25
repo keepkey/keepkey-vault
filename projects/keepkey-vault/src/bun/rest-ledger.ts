@@ -107,16 +107,17 @@ export async function handleLedgerRoute(
     const db = getDb()
     if (!db) return json({ accounts: [] })
 
-    type Row = { id: string; type: string; asset: string; chain_id: string; created_at: number }
+    type Row = { id: string; type: string; asset: string; chain_id: string; created_at: number; balance: number }
+    // Group by (account_id, asset) so ETH and USDC on the same chain are never summed together.
     const accounts = db.query(
-      `SELECT a.id, a.type, a.asset, a.chain_id, a.created_at,
+      `SELECT a.id, a.type, p.asset, a.chain_id, a.created_at,
          COALESCE(SUM(p.amount), 0) AS balance
        FROM ledger_accounts a
-       LEFT JOIN postings p ON p.account_id = a.id
+       JOIN postings p ON p.account_id = a.id
        WHERE a.device_id = ?
-       GROUP BY a.id
-       ORDER BY a.type, a.asset`
-    ).all(deviceId) as Array<Row & { balance: number }>
+       GROUP BY a.id, p.asset
+       ORDER BY a.type, p.asset`
+    ).all(deviceId) as Row[]
 
     return json({ count: accounts.length, accounts: accounts.map(a => ({ id: a.id, type: a.type, asset: a.asset, chainId: a.chain_id, balance: a.balance, createdAt: a.created_at })) })
   }

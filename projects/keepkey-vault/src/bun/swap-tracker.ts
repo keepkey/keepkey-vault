@@ -803,6 +803,20 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
             })
           }
           pushUpdate(swap)
+          if (swap.deviceId) {
+            try {
+              recordSwap({
+                deviceId: swap.deviceId,
+                txid: swap.txid,
+                fromAsset: swap.fromSymbol,
+                fromChainId: swap.fromChainId,
+                fromAmount: parseFloat(swap.fromAmount) || 0,
+                toAsset: swap.toSymbol,
+                toChainId: swap.toChainId,
+                toAmount: parseFloat(swap.receivedOutput || swap.expectedOutput) || 0,
+              })
+            } catch { /* non-fatal */ }
+          }
           pushComplete(swap)
           swapLog(`${TAG} NEAR Intents: completed via 1Click for ${txid.slice(0, 10)}... outbound=${outboundHash?.slice(0, 12)}...`)
           return swap

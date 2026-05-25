@@ -186,7 +186,7 @@ export function rectifyWallet(deviceId: string, balances: ChainBalance[]): void 
   if (!getDb()) return
   for (const b of balances) {
     const current = parseFloat(b.balance) || 0
-    if (!Number.isFinite(current) || current <= 0) continue
+    if (!Number.isFinite(current)) continue
 
     const assetAccountId = `Assets:Wallet:${b.chainId}`
     const equityAccountId = `Equity:Opening:${b.chainId}`

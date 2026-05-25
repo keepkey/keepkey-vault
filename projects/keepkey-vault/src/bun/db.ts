@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
 
-const SCHEMA_VERSION = '9'
+const SCHEMA_VERSION = '10'
 
 let db: Database | null = null
 
@@ -319,12 +319,13 @@ export function initDb() {
     // ── Double-entry accounting ledger (additive — never dropped on version bump) ──
     db.exec(`
       CREATE TABLE IF NOT EXISTS ledger_accounts (
-        id         TEXT PRIMARY KEY,
-        type       TEXT NOT NULL,
+        id         TEXT NOT NULL,
         device_id  TEXT NOT NULL,
+        type       TEXT NOT NULL,
         asset      TEXT NOT NULL,
         chain_id   TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (id, device_id)
       )
     `)
     db.exec(`
@@ -340,7 +341,7 @@ export function initDb() {
       CREATE TABLE IF NOT EXISTS postings (
         id               TEXT PRIMARY KEY,
         journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id),
-        account_id       TEXT NOT NULL REFERENCES ledger_accounts(id),
+        account_id       TEXT NOT NULL,
         amount           REAL NOT NULL,
         asset            TEXT NOT NULL,
         created_at       INTEGER NOT NULL
@@ -363,6 +364,29 @@ export function initDb() {
     // Migrations — additive only, never drop
     try { db.exec(`ALTER TABLE journal_entries ADD COLUMN txid TEXT`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_journal_entries_txid ON journal_entries(txid)`) } catch { /* already exists */ }
+    // v10: rebuild ledger_accounts with composite PK (id, device_id) to fix per-device isolation.
+    // The old table had id as sole PK, so the first device owned every account name forever.
+    // Safe to drop: ledger data is fully re-derivable via POST /api/v1/ledger/replay.
+    try {
+      const hasBadPk = db.query(`SELECT COUNT(*) AS c FROM pragma_table_info('ledger_accounts') WHERE pk=1 AND name='id'`).get() as { c: number } | null
+      if (hasBadPk?.c) {
+        db.exec(`DROP TABLE IF EXISTS ledger_accounts_old`)
+        db.exec(`ALTER TABLE ledger_accounts RENAME TO ledger_accounts_old`)
+        db.exec(`CREATE TABLE ledger_accounts (
+          id         TEXT NOT NULL,
+          device_id  TEXT NOT NULL,
+          type       TEXT NOT NULL,
+          asset      TEXT NOT NULL,
+          chain_id   TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (id, device_id)
+        )`)
+        db.exec(`INSERT INTO ledger_accounts SELECT id, device_id, type, asset, chain_id, created_at FROM ledger_accounts_old`)
+        db.exec(`DROP TABLE ledger_accounts_old`)
+        // Dependent postings are unaffected — account_id is still TEXT, no FK constraint to drop.
+        console.log('[db] Migrated ledger_accounts to composite PK (id, device_id)')
+      }
+    } catch (e) { console.warn('[db] ledger_accounts v10 migration skipped:', e) }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
