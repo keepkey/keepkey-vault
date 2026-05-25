@@ -124,6 +124,7 @@ import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
+import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -2257,7 +2258,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// PRIVACY: Skip for passphrase wallets (hidden wallet data must not hit disk).
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
-						if (results.length > 0 && !engine.isPassphraseWallet) setCachedBalances(deviceId, results, confirmedChainIds)
+						if (results.length > 0 && !engine.isPassphraseWallet) {
+							setCachedBalances(deviceId, results, confirmedChainIds)
+							rectifyWallet(deviceId, results)
+						}
 					} catch { /* never block on cache failure */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -2659,7 +2663,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					if (!engine.isPassphraseWallet) updateCachedBalance(deviceId, result)
+					if (!engine.isPassphraseWallet) {
+						updateCachedBalance(deviceId, result)
+						rectifyWallet(deviceId, [result])
+					}
 				} catch { /* never block on cache failure */ }
 				try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
 				// Push updated EVM per-address balances so address selector stays current
@@ -3883,6 +3890,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			clearApiLogs: async () => {
 				const scope = getWalletDbScope()
 				if (scope) clearApiLogs(scope.deviceId, scope.walletId)
+			},
+
+			// ── Accounting ledger ────────────────────────────────────
+			getLedgerSummary: async () => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) return []
+				return getLedgerSummary(deviceId)
+			},
+			getLedgerJournals: async ({ limit }: { limit?: number }) => {
+				const deviceId = engine.getDeviceState().deviceId
+				if (!deviceId) return []
+				return getLedgerJournals(deviceId, limit ?? 50)
 			},
 
 			// ── Reports ─────────────────────────────────────────────
@@ -5718,6 +5737,17 @@ if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
 engine.setAlphaFirmware(alphaFirmware)
 await engine.start()
+
+// Age out pending swaps older than 24h — prevents accumulation of test/failed
+// swaps as permanent dashboard banners. Deferred 5s so the DB is fully open.
+setTimeout(() => {
+	import('./swap-tracker').then(({ cleanupStalePendingSwaps }) => {
+		cleanupStalePendingSwaps()
+	}).catch((e: any) => console.warn('[Vault] swap cleanup failed:', e.message))
+	setInterval(() => {
+		import('./swap-tracker').then(({ cleanupStalePendingSwaps }) => cleanupStalePendingSwaps()).catch(() => {})
+	}, 60 * 60 * 1000)
+}, 5_000)
 
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
 

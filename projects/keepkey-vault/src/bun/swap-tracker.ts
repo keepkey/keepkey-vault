@@ -19,6 +19,7 @@ import { withTimeout } from './engine-controller'
 
 const PIONEER_SWAP_TIMEOUT_MS = 30_000
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid, setSwapRelayRequestId } from './db'
+import { recordSwap } from './ledger'
 import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
@@ -363,6 +364,28 @@ export function getPendingSwaps(deviceId?: string, walletId?: string): PendingSw
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
+/** Age out pending swaps that have been stuck for more than 24 hours.
+ *  Called at startup and periodically so old test/failed swaps don't
+ *  accumulate as permanent dashboard banners. */
+export function cleanupStalePendingSwaps(): void {
+  const now = Date.now()
+  const STALE_MS = 24 * 60 * 60 * 1000
+  try {
+    const records = getSwapHistory({ status: 'pending', limit: 100 })
+    for (const r of records) {
+      if (now - r.createdAt < STALE_MS) continue
+      updateSwapHistoryStatus(r.txid, 'failed', {
+        deviceId: r.deviceId,
+        walletId: r.walletId,
+        error: 'Timed out — check explorer',
+      })
+      pendingSwaps.delete(r.txid)
+    }
+  } catch (e: any) {
+    console.warn(`${TAG} cleanupStalePendingSwaps failed: ${e.message}`)
+  }
+}
+
 /** Dismiss a swap from the tracker (user clicked dismiss) */
 export function dismissSwap(txid: string): void {
   pendingSwaps.delete(txid)
@@ -571,6 +594,20 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     pushUpdate(swap)
 
     if (isFinal) {
+      if (newStatus === 'completed' && swap.deviceId) {
+        try {
+          recordSwap({
+            deviceId: swap.deviceId,
+            txid: swap.txid,
+            fromAsset: swap.fromSymbol,
+            fromChainId: swap.fromChainId,
+            fromAmount: parseFloat(swap.fromAmount) || 0,
+            toAsset: swap.toSymbol,
+            toChainId: swap.toChainId,
+            toAmount: parseFloat(swap.receivedOutput || swap.expectedOutput) || 0,
+          })
+        } catch { /* non-fatal */ }
+      }
       pushComplete(swap)
     }
   }
@@ -734,8 +771,11 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     ) return swap
   }
 
-  // NEAR Intents: poll 1Click API for the NEAR tx hash once per swap.
-  if (isNearIntentsSwap(swap) && !swap.nearTxHash && swap.inboundAddress) {
+  // NEAR Intents: poll 1Click directly for status + NEAR tx hash.
+  // Pioneer registration often fails for NEAR Intents swaps (400 at broadcast
+  // time), so GetPendingSwap returns not_found forever. 1Click is the
+  // authoritative source — check it on every refresh until terminal.
+  if ((isNearIntentsSwap(swap) || swap.integration === 'nearIntents') && !isTerminalSwapStatus(swap.status) && swap.inboundAddress) {
     try {
       const resp = await fetch(
         `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(swap.inboundAddress)}`,
@@ -743,8 +783,61 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       )
       if (resp.ok) {
         const data = await resp.json() as any
-        const nearHash: string | undefined = data?.nearTxHashes?.[0]
-        if (nearHash) {
+        const oneClickStatus: string = data?.status || ''
+        const nearHash: string | undefined = data?.swapDetails?.nearTxHashes?.[0] ?? data?.nearTxHashes?.[0]
+        const outboundHash: string | undefined = data?.swapDetails?.destinationChainTxHashes?.[0]?.hash
+        swapLog(`${TAG} NEAR Intents: 1Click status=${oneClickStatus} for ${txid.slice(0, 10)}...`)
+
+        if (oneClickStatus === 'SUCCESS') {
+          swap.status = 'completed'
+          swap.outboundTxid = outboundHash || swap.outboundTxid
+          swap.outboundChainId = swap.toChainId
+          if (nearHash) swap.nearTxHash = nearHash
+          swap.updatedAt = Date.now()
+          if (!noPersistSwaps.has(swap.txid)) {
+            updateSwapHistoryStatus(swap.txid, 'completed', {
+              outboundTxid: outboundHash,
+              outboundChainId: swap.toChainId,
+              nearTxHash: nearHash,
+              completedAt: Date.now(),
+            })
+          }
+          pushUpdate(swap)
+          if (swap.deviceId) {
+            try {
+              recordSwap({
+                deviceId: swap.deviceId,
+                txid: swap.txid,
+                fromAsset: swap.fromSymbol,
+                fromChainId: swap.fromChainId,
+                fromAmount: parseFloat(swap.fromAmount) || 0,
+                toAsset: swap.toSymbol,
+                toChainId: swap.toChainId,
+                toAmount: parseFloat(swap.receivedOutput || swap.expectedOutput) || 0,
+              })
+            } catch { /* non-fatal */ }
+          }
+          pushComplete(swap)
+          swapLog(`${TAG} NEAR Intents: completed via 1Click for ${txid.slice(0, 10)}... outbound=${outboundHash?.slice(0, 12)}...`)
+          return swap
+        } else if (oneClickStatus === 'REFUNDED') {
+          const refundReason = data?.swapDetails?.refundReason || 'REFUNDED'
+          swap.status = 'refunded'
+          swap.refundReason = refundReason
+          if (nearHash) swap.nearTxHash = nearHash
+          swap.updatedAt = Date.now()
+          if (!noPersistSwaps.has(swap.txid)) {
+            updateSwapHistoryStatus(swap.txid, 'refunded', {
+              nearTxHash: nearHash,
+              refundReason,
+              completedAt: Date.now(),
+            })
+          }
+          pushUpdate(swap)
+          pushComplete(swap)
+          swapLog(`${TAG} NEAR Intents: refunded via 1Click for ${txid.slice(0, 10)}... reason=${refundReason}`)
+          return swap
+        } else if (nearHash && !swap.nearTxHash) {
           swap.nearTxHash = nearHash
           pushUpdate(swap)
           if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, { nearTxHash: nearHash })
@@ -960,14 +1053,6 @@ export async function debugSwapLookup(txid: string, deviceId?: string, walletId?
     : undefined
 
   return { txid, pioneerBaseUrl, local, pioneer: p1, pioneerRescan: p2, divergence }
-}
-
-/** NEAR Intents maps to integration='shapeshift' in PIONEER_INTEGRATION_ALIAS
- *  but is NOT routed through Relay. Identify it by swapper so we can skip
- *  Relay-specific code paths that don't apply. */
-function isNearIntentsSwap(swap: PendingSwap): boolean {
-  const swapper = (swap.swapper || '').toLowerCase().replace(/\s/g, '')
-  return swapper === 'nearintents' || swapper.startsWith('near')
 }
 
 // ── Relay request-id backfill ───────────────────────────────────────
