@@ -298,7 +298,71 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   //      returned its minimum (not the user's amount). Detect and throw early so the
   //      user sees "too small" at quote time instead of "insufficient balance" at build.
   if (result.swapper === 'NEAR Intents') {
-    if (params.fromCaip.startsWith('bip122:')) {
+    if (params.fromCaip.startsWith('bip122:') || params.fromCaip.startsWith('solana:')) {
+      // ── Refund-address safety validation (two independent layers) ──────────────
+      // A confirmed fund loss occurred when 1Click was given keepkey.near as the
+      // refundTo address instead of the user's BTC address (commit 4d748b82).
+      // We now verify the refundTo from both Pioneer's response AND directly from
+      // the 1Click API before the user ever sees the Confirm button.
+
+      const senderAddr = params.fromAddress?.toLowerCase().trim()
+      const depositAddr = result.inboundAddress || result.nearIntentsDepositAddress
+
+      // Layer 1: Pioneer's parsed refundTo must exist and match senderAddress.
+      const pioneerRefundTo = result.nearIntentsRefundTo?.toLowerCase().trim()
+      if (!pioneerRefundTo) {
+        throw new Error(
+          'NEAR Intents quote is missing refundTo — cannot verify refund safety. ' +
+          'Do not proceed: if the swap fails, funds may go to an uncontrolled address.'
+        )
+      }
+      if (senderAddr && pioneerRefundTo !== senderAddr) {
+        throw new Error(
+          `NEAR Intents refundTo mismatch — Pioneer registered "${result.nearIntentsRefundTo}" ` +
+          `as refund address but your wallet address is "${params.fromAddress}". ` +
+          `Do not proceed: a refund would not return to your wallet.`
+        )
+      }
+      swapLog(`${TAG} NEAR Intents Layer 1 OK: refundTo=${result.nearIntentsRefundTo} matches senderAddress`)
+
+      // Layer 2: Independently verify refundTo by calling 1Click directly.
+      // This does not trust Pioneer — it reads the intent that NEAR Intents
+      // actually created. A 404 means the deposit address wasn't registered with
+      // 1Click (different fund-loss path) — also blocked.
+      if (depositAddr) {
+        try {
+          const oneClickResp = await fetch(
+            `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddr)}`,
+            { signal: AbortSignal.timeout(8000) },
+          )
+          if (!oneClickResp.ok) {
+            throw new Error(
+              `NEAR Intents: 1Click returned ${oneClickResp.status} for deposit address — ` +
+              `cannot verify refund address. Do not proceed.`
+            )
+          }
+          const oneClickData = await oneClickResp.json() as any
+          const oneClickRefundTo = (oneClickData?.quoteResponse?.quoteRequest?.refundTo as string | undefined)?.toLowerCase().trim()
+          if (!oneClickRefundTo) {
+            throw new Error(
+              'NEAR Intents: 1Click response missing quoteRequest.refundTo — cannot verify refund safety.'
+            )
+          }
+          if (senderAddr && oneClickRefundTo !== senderAddr) {
+            throw new Error(
+              `NEAR Intents 1Click refundTo mismatch — 1Click has "${oneClickData?.quoteResponse?.quoteRequest?.refundTo}" ` +
+              `but your wallet address is "${params.fromAddress}". ` +
+              `Do not proceed: a refund would not return to your wallet.`
+            )
+          }
+          swapLog(`${TAG} NEAR Intents Layer 2 OK: 1Click refundTo=${oneClickData?.quoteResponse?.quoteRequest?.refundTo} matches senderAddress`)
+        } catch (e: any) {
+          if (e.message.startsWith('NEAR Intents')) throw e
+          throw new Error(`NEAR Intents: failed to verify refund address with 1Click API: ${e.message}`)
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
       // BTC source: explicit minimum check
       if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
         throw new Error(
@@ -450,7 +514,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
-  const isMemolessTransfer = fromIsUtxo && !!params.inboundAddress && !params.memo
+  const fromIsSolana = params.fromCaip.startsWith('solana:')
+  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   if (params.memo) {
@@ -477,38 +542,58 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt tx ──
   if (hasPrebuiltTx) {
-    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
-    unsignedTx = result.unsignedTx
-    fromAmountBaseUnits = result.fromAmountBaseUnits
+    // Relay Solana bridge: serializedTx is already a fully-assembled Solana wire tx.
+    // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
+    if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
+      swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
+      unsignedTx = { addressNList: fromChain.defaultPath, rawTx: params.relayTx.serializedTx }
+    } else if (fromChain.chainFamily === 'tron') {
+      // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
+      swapLog(`${TAG} Relay Tron prebuilt tx — bypassing EVM relay builder`)
+      const knownAssets = await getSwapAssets()
+      const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
+      const buildResult = await txb.buildTx(pioneer, fromChain, {
+        chainId: fromChain.id,
+        to: params.relayTx!.to || params.inboundAddress,
+        amount: params.amount, memo: params.memo || '', feeLevel: params.feeLevel, isMax: params.isMax,
+        isSwapDeposit: true, fromAddress,
+        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+      })
+      unsignedTx = buildResult.unsignedTx
+    } else {
+      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
+      unsignedTx = result.unsignedTx
+      fromAmountBaseUnits = result.fromAmountBaseUnits
 
-    // ERC-20 relay txs may need an approval to the router (THORChain Router,
-    // 0x exchange proxy, etc.) — without it the router's transferFrom call
-    // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
-    if (result.approveTx) {
-      swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
-      stage('approve-signing')
-      const signedApprove = await wallet.ethSignTx(result.approveTx)
-      swapLog(`${TAG} Device signed approveTx`)
-      let approveHex: string = typeof signedApprove === 'string'
-        ? signedApprove
-        : (signedApprove?.serializedTx || signedApprove?.serialized || '')
-      if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
-      if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
-      const rpcUrl = getRpcUrl(fromChain)
-      stage('approve-broadcasting')
-      if (rpcUrl) {
-        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
-        swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
-        stage('approve-waiting-receipt')
-        const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
-        if (receipt && !receipt.status) {
-          throw new Error(`Relay-path ERC-20 approve reverted (txid: ${approvalTxid}). Swap aborted — no relay tx sent.`)
+      // ERC-20 relay txs may need an approval to the router (THORChain Router,
+      // 0x exchange proxy, etc.) — without it the router's transferFrom call
+      // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
+      if (result.approveTx) {
+        swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
+        stage('approve-signing')
+        const signedApprove = await wallet.ethSignTx(result.approveTx)
+        swapLog(`${TAG} Device signed approveTx`)
+        let approveHex: string = typeof signedApprove === 'string'
+          ? signedApprove
+          : (signedApprove?.serializedTx || signedApprove?.serialized || '')
+        if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
+        if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
+        const rpcUrl = getRpcUrl(fromChain)
+        stage('approve-broadcasting')
+        if (rpcUrl) {
+          approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+          swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
+          stage('approve-waiting-receipt')
+          const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
+          if (receipt && !receipt.status) {
+            throw new Error(`Relay-path ERC-20 approve reverted (txid: ${approvalTxid}). Swap aborted — no relay tx sent.`)
+          }
+          if (!receipt) console.warn(`${TAG} Relay-path approve receipt not confirmed in 180s — proceeding (nonce gap risk)`)
+        } else {
+          const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
+          approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
+          swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
         }
-        if (!receipt) console.warn(`${TAG} Relay-path approve receipt not confirmed in 180s — proceeding (nonce gap risk)`)
-      } else {
-        const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
-        approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
-        swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
       }
     }
 
@@ -748,13 +833,30 @@ export async function previewSwapBuild(
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
   const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
-  const isMemolessTransfer = fromIsUtxoPreview && !!params.inboundAddress && !params.memo
+  const fromIsSolanaPreview = params.fromCaip.startsWith('solana:')
+  const isMemolessTransfer = (fromIsUtxoPreview || fromIsSolanaPreview) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
 
   const pioneer = await getPioneer()
 
   if (hasPrebuiltTx) {
+    if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
+      return { unsignedTx: { addressNList: fromChain.defaultPath, rawTx: params.relayTx.serializedTx } }
+    }
+    if (fromChain.chainFamily === 'tron') {
+      // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
+      const knownAssets = await getSwapAssets()
+      const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
+      const buildResult = await txb.buildTx(pioneer, fromChain, {
+        chainId: fromChain.id,
+        to: params.relayTx!.to || params.inboundAddress,
+        amount: params.amount, memo: params.memo || '', feeLevel: params.feeLevel, isMax: params.isMax,
+        isSwapDeposit: true, fromAddress,
+        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+      })
+      return { unsignedTx: buildResult.unsignedTx }
+    }
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ true)
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
