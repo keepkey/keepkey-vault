@@ -561,9 +561,17 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       swap.estimatedTime = timeEstimate.total_swap_seconds
     }
 
-    const receivedOutput = (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
+    let receivedOutput: string | undefined = (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
       ? remoteSwap.buyAsset.amount
       : undefined
+    // Same 100× correction as parseQuoteResponse: Pioneer uses 8 decimal places
+    // for CACAO (should be 10). Guard on exact CAIP so Maya-routed ETH/ARB are
+    // not affected.
+    const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
+    if (receivedOutput && swap.toCaip === CACAO_CAIP) {
+      const corrected = parseFloat(receivedOutput) / 100
+      if (corrected > 0) receivedOutput = corrected.toFixed(10).replace(/\.?0+$/, '')
+    }
     if (receivedOutput) {
       swap.receivedOutput = receivedOutput
       // Backward-compat: display still reads expectedOutput in some places.
