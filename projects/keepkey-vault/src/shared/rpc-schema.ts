@@ -190,6 +190,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       removePioneerServer: { params: { url: string }; response: AppSettings }
       setActivePioneerServer: { params: { url: string }; response: AppSettings }
 
+      // ── Accounting ledger ─────────────────────────────────────────────
+      /** Current balances per ledger account (asset wallet accounts, equity, income, expenses). */
+      getLedgerSummary: { params: void; response: Array<{ accountId: string; accountType: string; asset: string; chainId: string; balance: number }> }
+      /** Recent journal entries with their postings. */
+      getLedgerJournals: { params: { limit?: number }; response: Array<{ id: string; deviceId: string; description: string; entryType: string; createdAt: number; postings: Array<{ accountId: string; amount: number; asset: string }> }> }
+
       // ── Reports ──────────────────────────────────────────────────────
       generateReport: { params: void; response: ReportMeta }
       listReports: { params: void; response: ReportMeta[] }

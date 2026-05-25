@@ -2656,7 +2656,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Flex>
                 <Flex gap="2">
                   {(() => {
-                    const url = getExplorerTxUrl(fromAsset.chainId, txid)
+                    const safeTxid = txid ?? ''
+                    console.log('[explorer-debug]', fromAsset.chainId, safeTxid)
+                    const url = getExplorerTxUrl(fromAsset.chainId, safeTxid)
                     return url ? (
                       <Button size="xs" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                         _hover={{ bg: "rgba(255,255,255,0.06)", color: "kk.textPrimary" }}

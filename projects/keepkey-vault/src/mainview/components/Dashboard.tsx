@@ -29,7 +29,7 @@ import { useDashboardView } from "../lib/dashboardViewContext"
 import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { categorizeTokens } from "../../shared/spamFilter"
-import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance } from "../../shared/types"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -691,6 +691,29 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
+	const [activeSwaps, setActiveSwaps] = useState<PendingSwap[]>([])
+
+	// Fetch pending swaps on mount and keep them live via swap-update messages.
+	// Non-terminal swaps mean funds are in-flight — we surface a banner so the
+	// user knows their balance isn't missing, it's in a swap.
+	useEffect(() => {
+		const TERMINAL = new Set(['completed', 'failed', 'refunded'])
+		rpcRequest<PendingSwap[]>('getPendingSwaps', undefined, 5000)
+			.then(r => { if (r) setActiveSwaps(r.filter(s => !TERMINAL.has(s.status))) })
+			.catch(() => {})
+		const unsub = onRpcMessage('swap-update', (update: SwapStatusUpdate) => {
+			setActiveSwaps(prev => {
+				const next = prev.filter(s => s.txid !== update.txid)
+				if (!TERMINAL.has(update.status)) {
+					const existing = prev.find(s => s.txid === update.txid)
+					if (existing) next.push({ ...existing, ...update })
+				}
+				return next
+			})
+		})
+		return unsub
+	}, [])
+
 	const pioneerErrorFirstSeenRef = useRef<number | null>(null)
 	const pioneerErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hasUsableBalanceSnapshot = balances.size > 0 || cacheUpdatedAt !== null
@@ -1465,6 +1488,37 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					</Text>
 				</Flex>
 			)}
+
+			{/* In-flight swap banners — shown when funds are in a pending swap so
+			    users don't think their balance is missing */}
+			{activeSwaps.map(swap => (
+				<Box
+					key={swap.txid}
+					mb="2"
+					px="3"
+					py="2.5"
+					bg="rgba(139,227,196,0.06)"
+					border="1px solid"
+					borderColor="rgba(139,227,196,0.22)"
+					borderRadius="lg"
+					cursor="pointer"
+					_hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "rgba(139,227,196,0.40)" }}
+					onClick={() => setActivityResumeSwap(swap)}
+				>
+					<Flex align="center" gap="2">
+						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+							<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+						</svg>
+						<Text fontSize="11px" color="var(--teal)" fontWeight="600" flex="1">
+							{swap.fromAmount} {swap.fromSymbol} → {swap.toSymbol} swap in progress
+						</Text>
+						<Text fontSize="10px" color="kk.textMuted" textTransform="capitalize">{swap.status.replace(/_/g, ' ')}</Text>
+						<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--teal)' }}>
+							<polyline points="9 18 15 12 9 6"/>
+						</svg>
+					</Flex>
+				</Box>
+			))}
 
 			{/* Pioneer connection error banner */}
 			{pioneerError && (

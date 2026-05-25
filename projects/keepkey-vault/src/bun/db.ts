@@ -10,9 +10,11 @@ import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
 
-const SCHEMA_VERSION = '8'
+const SCHEMA_VERSION = '9'
 
 let db: Database | null = null
+
+export function getDb(): Database | null { return db }
 
 // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -313,6 +315,54 @@ export function initDb() {
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_device_txid ON swap_history(device_id, txid)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_wallet_created ON swap_history(wallet_id, created_at DESC)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_wallet_txid ON swap_history(wallet_id, txid)`) } catch { /* already exists */ }
+
+    // ── Double-entry accounting ledger (additive — never dropped on version bump) ──
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ledger_accounts (
+        id         TEXT PRIMARY KEY,
+        type       TEXT NOT NULL,
+        device_id  TEXT NOT NULL,
+        asset      TEXT NOT NULL,
+        chain_id   TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS journal_entries (
+        id          TEXT PRIMARY KEY,
+        device_id   TEXT NOT NULL,
+        description TEXT NOT NULL,
+        entry_type  TEXT NOT NULL,
+        created_at  INTEGER NOT NULL
+      )
+    `)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS postings (
+        id               TEXT PRIMARY KEY,
+        journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id),
+        account_id       TEXT NOT NULL REFERENCES ledger_accounts(id),
+        amount           REAL NOT NULL,
+        asset            TEXT NOT NULL,
+        created_at       INTEGER NOT NULL
+      )
+    `)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ledger_checkpoints (
+        id          TEXT PRIMARY KEY,
+        device_id   TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        snapshot    TEXT NOT NULL,
+        created_at  INTEGER NOT NULL
+      )
+    `)
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_postings_account ON postings(account_id, asset)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_postings_journal ON postings(journal_entry_id)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_journal_entries_device ON journal_entries(device_id, created_at DESC)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_journal_entries_type ON journal_entries(device_id, entry_type)`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_ledger_checkpoints_device ON ledger_checkpoints(device_id, created_at DESC)`) } catch { /* already exists */ }
+    // Migrations — additive only, never drop
+    try { db.exec(`ALTER TABLE journal_entries ADD COLUMN txid TEXT`) } catch { /* already exists */ }
+    try { db.exec(`CREATE INDEX IF NOT EXISTS idx_journal_entries_txid ON journal_entries(txid)`) } catch { /* already exists */ }
 
     console.log(`[db] SQLite cache ready at ${dbPath}`)
   } catch (e: any) {
