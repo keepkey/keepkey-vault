@@ -25,7 +25,6 @@ import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-disco
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
-import { CHAINS } from '../shared/chains'
 
 /** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
  *  layer accepts; symbols / asset names / display names are derived here for
@@ -565,16 +564,13 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     let receivedOutput: string | undefined = (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
       ? remoteSwap.buyAsset.amount
       : undefined
-    // Same correction as in parseQuoteResponse: Pioneer normalises MayaChain
-    // amounts using 8 decimals but CACAO has 10, making the value 100× too large.
-    if (receivedOutput && swap.integration === 'mayachain') {
-      const toChain = CHAINS.find(c => c.caip === swap.toCaip)
-      const THOR_BASE = 8
-      if (toChain && toChain.decimals > THOR_BASE) {
-        const scale = 10 ** (toChain.decimals - THOR_BASE)
-        const corrected = parseFloat(receivedOutput) / scale
-        if (corrected > 0) receivedOutput = corrected.toFixed(toChain.decimals).replace(/\.?0+$/, '')
-      }
+    // Same 100× correction as parseQuoteResponse: Pioneer uses 8 decimal places
+    // for CACAO (should be 10). Guard on exact CAIP so Maya-routed ETH/ARB are
+    // not affected.
+    const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
+    if (receivedOutput && swap.toCaip === CACAO_CAIP) {
+      const corrected = parseFloat(receivedOutput) / 100
+      if (corrected > 0) receivedOutput = corrected.toFixed(10).replace(/\.?0+$/, '')
     }
     if (receivedOutput) {
       swap.receivedOutput = receivedOutput
