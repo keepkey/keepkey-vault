@@ -14,12 +14,14 @@ use serde::Serialize;
 use orchard::{
     builder::{Builder, BundleType},
     circuit::ProvingKey,
-    keys::{FullViewingKey, Scope},
+    keys::{FullViewingKey, PreparedIncomingViewingKey, Scope},
     note::{ExtractedNoteCommitment, RandomSeed, Rho},
+    note_encryption::OrchardDomain,
     tree::MerkleHashOrchard,
     value::NoteValue,
     Note, Address, Anchor,
 };
+use zcash_note_encryption::try_note_decryption;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use ff::PrimeField;
 use incrementalmerkletree::Retention;
@@ -87,6 +89,23 @@ pub struct ActionFields {
     pub out_ciphertext: Vec<u8>,
     pub value: u64,
     pub is_spend: bool,
+    // Clear-signing fields (firmware >= 7.15 clear-signing protocol)
+    // Only present for output actions (is_spend = false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,  // hex-encoded 43-byte Orchard receiver (d || pk_d)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rseed: Option<String>,      // hex-encoded 32-byte note randomness seed
+}
+
+/// Plaintext Zcash v5 transaction header fields needed by clear-signing firmware.
+/// Firmware recomputes the ZIP-244 header digest from these and verifies it matches
+/// the provided header_digest before signing.
+#[derive(Debug, Serialize)]
+pub struct HeaderFields {
+    pub tx_version: u32,
+    pub version_group_id: u32,
+    pub lock_time: u32,
+    pub expiry_height: u32,
 }
 
 /// The signing request sent to Electrobun, which forwards fields to the device.
@@ -98,6 +117,7 @@ pub struct SigningRequest {
     #[serde(with = "hex_bytes")]
     pub sighash: Vec<u8>,
     pub digests: DigestFields,
+    pub header_fields: HeaderFields,
     pub bundle_meta: BundleMeta,
     pub actions: Vec<ActionFields>,
     pub display: DisplayInfo,
@@ -109,8 +129,7 @@ pub struct DigestFields {
     pub header: Vec<u8>,
     #[serde(with = "hex_bytes")]
     pub transparent: Vec<u8>,
-    #[serde(with = "hex_bytes")]
-    pub sapling: Vec<u8>,
+    // sapling omitted — clear-signing firmware rejects sapling_digest if set
     #[serde(with = "hex_bytes")]
     pub orchard: Vec<u8>,
 }
@@ -632,6 +651,8 @@ pub async fn build_pczt(
             out_ciphertext,
             value,
             is_spend,
+            recipient: None,
+            rseed: None,
         });
     }
 
@@ -647,8 +668,13 @@ pub async fn build_pczt(
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
-            sapling: digests.sapling_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+        },
+        header_fields: HeaderFields {
+            tx_version: 5,
+            version_group_id: 0x26A7270A,
+            lock_time: 0,
+            expiry_height: 0,
         },
         bundle_meta: BundleMeta {
             flags: orchard_flags,
@@ -872,9 +898,14 @@ pub struct ShieldSigningRequest {
 pub struct TransparentSigningInput {
     pub index: u32,
     #[serde(with = "hex_bytes")]
-    pub sighash: Vec<u8>,       // 32-byte per-input sighash
+    pub sighash: Vec<u8>,       // 32-byte per-input sighash (kept for finalize; firmware computes own)
     pub address_path: Vec<u32>, // BIP44 path [44', 133', 0', 0, 0]
-    pub amount: u64,            // zatoshis (for display)
+    pub amount: u64,            // zatoshis
+    // Plaintext fields for clear-signing firmware (firmware >= 7.15 clear-signing protocol)
+    pub prevout_txid: String,   // hex-encoded 32-byte txid (internal/LE byte order)
+    pub prevout_index: u32,
+    pub sequence: u32,
+    pub script_pubkey: String,  // hex-encoded scriptPubKey
 }
 
 #[derive(Debug, Serialize)]
@@ -1143,7 +1174,7 @@ pub async fn build_shield_pczt(
     ];
 
     let mut transparent_signing: Vec<TransparentSigningInput> = Vec::new();
-    for (i, _input) in zip_inputs.iter().enumerate() {
+    for (i, input) in zip_inputs.iter().enumerate() {
         let input_sighash = zip244::compute_transparent_sig_hash(
             i,
             &zip_inputs,
@@ -1158,7 +1189,11 @@ pub async fn build_shield_pczt(
             index: i as u32,
             sighash: input_sighash.to_vec(),
             address_path: bip44_path.clone(),
-            amount: zip_inputs[i].value,
+            amount: input.value,
+            prevout_txid: hex::encode(input.prevout_hash),
+            prevout_index: input.prevout_index,
+            sequence: input.sequence,
+            script_pubkey: hex::encode(&input.script_pubkey),
         });
     }
 
@@ -1172,7 +1207,11 @@ pub async fn build_shield_pczt(
         .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
     info!("Proof generated");
 
-    // Extract Orchard signing fields (same as existing build_pczt)
+    // Prepare IVK for output note decryption (to extract rseed for clear-signing)
+    let ivk = fvk.to_ivk(Scope::External);
+    let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
+
+    // Extract Orchard signing fields
     let n_actions = pczt_bundle.actions().len();
     let mut action_fields: Vec<ActionFields> = Vec::new();
 
@@ -1197,6 +1236,23 @@ pub async fn build_shield_pczt(
         let rk_bytes: [u8; 32] = effects_action.rk().into();
         let out_ciphertext = effects_action.encrypted_note().out_ciphertext.to_vec();
 
+        // For output actions, decrypt to recover recipient + rseed for clear-signing firmware.
+        // The shield output is always to our own Orchard address, so IVK decryption succeeds.
+        let (orchard_recipient, orchard_rseed) = if !is_spend {
+            let domain = OrchardDomain::for_action(effects_action);
+            if let Some((note, _, _)) = try_note_decryption(&domain, &prepared_ivk, effects_action) {
+                (
+                    Some(hex::encode(note.recipient().to_raw_address_bytes())),
+                    Some(hex::encode(note.rseed().as_bytes())),
+                )
+            } else {
+                debug!("IVK decryption failed for output action {} — recipient/rseed will be absent", i);
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
         action_fields.push(ActionFields {
             index: i as u32,
             alpha: alpha_bytes,
@@ -1211,6 +1267,8 @@ pub async fn build_shield_pczt(
             out_ciphertext,
             value,
             is_spend,
+            recipient: orchard_recipient,
+            rseed: orchard_rseed,
         });
     }
 
@@ -1226,8 +1284,13 @@ pub async fn build_shield_pczt(
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
-            sapling: digests.sapling_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+        },
+        header_fields: HeaderFields {
+            tx_version: 5,
+            version_group_id: 0x26A7270A,
+            lock_time: 0,
+            expiry_height: 0,
         },
         bundle_meta: BundleMeta {
             flags: orchard_flags,
@@ -1878,6 +1941,8 @@ pub async fn build_deshield_pczt(
             out_ciphertext: effects_action.encrypted_note().out_ciphertext.to_vec(),
             value,
             is_spend,
+            recipient: None,
+            rseed: None,
         });
     }
 
@@ -1889,8 +1954,13 @@ pub async fn build_deshield_pczt(
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
-            sapling: digests.sapling_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+        },
+        header_fields: HeaderFields {
+            tx_version: 5,
+            version_group_id: 0x26A7270A,
+            lock_time: 0,
+            expiry_height: 0,
         },
         bundle_meta: BundleMeta {
             flags: effects_bundle.flags().to_byte() as u32,

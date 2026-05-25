@@ -26,7 +26,8 @@ interface DeshieldBuildResult {
 		account: number
 		branch_id: number
 		sighash: string
-		digests: { header: string; transparent: string; sapling: string; orchard: string }
+		digests: { header: string; transparent: string; orchard: string }
+		header_fields?: { tx_version: number; version_group_id: number; lock_time: number; expiry_height: number }
 		bundle_meta: { flags: number; value_balance: number; anchor: string }
 		actions: Array<{
 			index: number; alpha: string; cv_net: string; nullifier: string
