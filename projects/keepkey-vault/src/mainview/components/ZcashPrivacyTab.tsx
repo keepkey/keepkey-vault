@@ -9,12 +9,13 @@ import { generateQRSvg } from "../lib/qr"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import { ZCASH_V2_CSS } from "./zcash-v2-styles"
 
-/** Validate Zcash recipient: unified (u1...), Sapling (zs1...), or transparent (t1.../t3...) */
+/** Validate Zcash recipient: unified (u1...) or transparent (t1.../t3...) only.
+ *  Sapling (zs1...) is explicitly rejected — only Orchard is supported. */
 function validateZcashRecipient(addr: string): { valid: boolean; error?: string } {
 	const s = addr.trim()
 	if (!s) return { valid: false }
 	if (s.startsWith('u1') && s.length >= 70) return { valid: true }
-	if (s.startsWith('zs1') && s.length >= 70) return { valid: true }
+	if (s.startsWith('zs1')) return { valid: false, error: 'saplingNotSupported' }
 	const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
 	if ((s.startsWith('t1') || s.startsWith('t3')) && s.length === 35 && BASE58.test(s)) return { valid: true }
 	return { valid: false, error: 'invalidZcashRecipient' }
@@ -530,9 +531,10 @@ export function ZcashPrivacyTab() {
 		if (!balance) return 0
 		const spendable = balance.spendable_confirmed ?? 0
 		if (spendable <= 0) return 0
+		// ZIP-317: logical_actions = max(n_spends, n_outputs=2); fee = 5000 * max(2, logical_actions)
+		// With 2 outputs (recipient + change), this simplifies to 5000 * max(2, n_spends)
 		const nSpends = Math.max(1, balance.spendable_notes_count ?? 1)
-		const orchardActions = Math.max(2, nSpends)
-		const fee = 5000 * Math.max(2, orchardActions + 1)
+		const fee = 5000 * Math.max(2, nSpends)
 		return Math.max(0, spendable - fee)
 	}, [balance])
 
@@ -851,7 +853,7 @@ export function ZcashPrivacyTab() {
 							<div className="aside-card">
 								<h5>Summary</h5>
 								<div className="kv"><span>Amount</span><span className="v">{amount || "—"} ZEC</span></div>
-								<div className="kv"><span>Network fee</span><span className="v">~0.00005</span></div>
+								<div className="kv"><span>Network fee</span><span className="v">~{formatZec(5000 * Math.max(2, Math.max(1, balance?.spendable_notes_count ?? 1)))} ZEC</span></div>
 								<div className="kv"><span>Privacy</span><span className="v gold">Maximum</span></div>
 							</div>
 							<div className="aside-card">
