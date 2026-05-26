@@ -73,9 +73,18 @@ impl LightwalletClient {
                         endpoint.connect(),
                     ).await {
                         Ok(Ok(channel)) => {
-                            let client = CompactTxStreamerClient::new(channel);
-                            info!("Connected to lightwalletd: {}", url);
-                            return Ok(Self { client });
+                            let mut client = CompactTxStreamerClient::new(channel);
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                client.get_lightd_info(proto::Empty {}),
+                            ).await {
+                                Ok(Ok(_)) => {
+                                    info!("Connected to lightwalletd: {}", url);
+                                    return Ok(Self { client });
+                                }
+                                Ok(Err(e)) => info!("GetLightdInfo failed for {}: {}", url, e),
+                                Err(_) => info!("GetLightdInfo timeout for {}", url),
+                            }
                         }
                         Ok(Err(e)) => info!("Failed to connect to {}: {}", url, e),
                         Err(_) => info!("Timeout connecting to {}", url),

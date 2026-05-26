@@ -63,9 +63,10 @@ sha2 = "0.10"
 [dev-dependencies]
 tempfile = "3.10"
 nonempty = "0.11"
-# zcash_primitives 0.19 internally pins zcash_protocol 0.4, so its public
-# `Transaction::read(_, BranchId)` API expects the 0.4 BranchId. Our crate
-# uses 0.7 elsewhere; alias the 0.4 version for tests only.
+# Alias orchard 0.10.2 for BatchValidator — same version zcash_primitives uses,
+# so Cargo reuses the same compiled crate. Types are compatible with Transaction::read output.
+orchard_v010 = { package = "orchard", version = "0.10", features = ["circuit"] }
+# zcash_primitives 0.19 pins zcash_protocol 0.4; Transaction::read wants the 0.4 BranchId.
 zcash_protocol_v04 = { package = "zcash_protocol", version = "0.4" }
 
 [build-dependencies]

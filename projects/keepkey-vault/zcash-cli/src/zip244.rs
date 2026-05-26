@@ -382,9 +382,29 @@ pub fn digest_transparent_sig_for_orchard(
 
 /// Compute ZIP-244 digests for a hybrid (transparent + Orchard) transaction.
 ///
-/// The transparent_digest field contains the transparent_sig_digest (ZIP-244 §4.7),
-/// NOT the txid transparent_digest (§4.5), because it feeds into compute_sighash()
-/// which produces the Orchard spend authorization sighash.
+/// Per ZIP-244 §4.9 and zcash_primitives `v5_signature_hash(SignableInput::Shielded)`:
+/// when there are transparent inputs (non-empty vin), the transparent_digest for the
+/// Orchard sighash is the S.2 form — hash_type(0x01) || prevouts || amounts || scripts
+/// || sequences || outputs || empty_txin_hash — NOT the T.1 txid form.
+///
+/// T.1 form is only correct when vin is empty (deshield / private-send), per the
+/// special case `if bundle.vin.is_empty() { return hash_transparent_txid_data(...) }`
+/// in zcash_primitives. `digest_transparent_sig_for_orchard` handles this automatically.
+///
+/// Per-transparent-input ECDSA sighashes use the fully per-input S.2 form (with
+/// non-empty txin_sig_digest), computed separately by `compute_transparent_sig_hash`.
+/// Transparent digest used in the Orchard sighash of a hybrid tx (S.2 or T.1).
+///
+/// Exposed separately so tests can verify the correct form is used without
+/// needing to construct an `orchard::Bundle`. This is exactly what
+/// `compute_zip244_digests_hybrid` puts in `Zip244Digests::transparent_digest`.
+pub(crate) fn hybrid_orchard_transparent_digest(
+    transparent_inputs: &[TransparentInput],
+    transparent_outputs: &[TransparentOutput],
+) -> [u8; 32] {
+    digest_transparent_sig_for_orchard(transparent_inputs, transparent_outputs)
+}
+
 pub fn compute_zip244_digests_hybrid<V>(
     bundle: &orchard::Bundle<orchard::bundle::EffectsOnly, V>,
     transparent_inputs: &[TransparentInput],
@@ -398,7 +418,7 @@ where
 {
     Zip244Digests {
         header_digest: digest_header(branch_id, lock_time, expiry_height),
-        transparent_digest: digest_transparent_sig_for_orchard(transparent_inputs, transparent_outputs),
+        transparent_digest: hybrid_orchard_transparent_digest(transparent_inputs, transparent_outputs),
         sapling_digest: EMPTY_SAPLING_DIGEST,
         orchard_digest: digest_orchard_effects(bundle),
     }
@@ -591,6 +611,55 @@ mod tests {
              transparent_sig_digest must equal transparent_txid_digest. \
              A divergence here is exactly what makes deshield broadcasts \
              fail consensus while the bundle verifies locally."
+        );
+    }
+
+    /// Shield txs (transparent → Orchard) must use the S.2 sig form for the
+    /// Orchard sighash transparent component, NOT the T.1 txid form.
+    ///
+    /// ZIP-244 §4.9 and zcash_primitives `v5_signature_hash(SignableInput::Shielded)`
+    /// both use S.2 when vin is non-empty: hash_type(0x01) || prevouts || amounts
+    /// || scripts || sequences || outputs || empty_txin_hash.
+    ///
+    /// T.1 is only correct for empty-vin transactions (deshield, private-send).
+    /// Using T.1 for shield makes the network's BatchValidator fail because the
+    /// spend auth sigs and binding sig are bound to the wrong transparent digest,
+    /// which surfaces as "could not validate orchard proof".
+    #[test]
+    fn test_hybrid_shield_sighash_must_use_s2_not_t1() {
+        // Shield shape: transparent inputs present (non-empty vin)
+        let inputs = vec![TransparentInput {
+            prevout_hash: [0xAA; 32],
+            prevout_index: 0,
+            script_pubkey: vec![
+                0x76, 0xa9, 0x14,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0x88, 0xac,
+            ],
+            value: 100_000,
+            sequence: 0xFFFF_FFFF,
+        }];
+        let outputs = vec![TransparentOutput {
+            value: 5_000,
+            script_pubkey: vec![
+                0x76, 0xa9, 0x14,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0x88, 0xac,
+            ],
+        }];
+
+        let t1 = digest_transparent_txid(&inputs, &outputs);
+
+        // hybrid_orchard_transparent_digest is exactly what
+        // compute_zip244_digests_hybrid puts in transparent_digest. If that
+        // function is regressed back to digest_transparent_txid, this will
+        // equal t1 and the assert_ne fails.
+        let hybrid = hybrid_orchard_transparent_digest(&inputs, &outputs);
+
+        assert_ne!(
+            hybrid, t1,
+            "compute_zip244_digests_hybrid.transparent_digest must be S.2, not T.1, \
+             for shield txs — Zebra verifies Orchard sigs with S.2"
         );
     }
 
