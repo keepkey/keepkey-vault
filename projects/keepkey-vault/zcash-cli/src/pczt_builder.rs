@@ -14,14 +14,12 @@ use serde::Serialize;
 use orchard::{
     builder::{Builder, BundleType},
     circuit::{ProvingKey, VerifyingKey},
-    keys::{FullViewingKey, PreparedIncomingViewingKey, Scope},
+    keys::{FullViewingKey, Scope},
     note::{ExtractedNoteCommitment, RandomSeed, Rho},
-    note_encryption::OrchardDomain,
     tree::MerkleHashOrchard,
     value::NoteValue,
     Note, Address, Anchor,
 };
-use zcash_note_encryption::try_note_decryption;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use ff::PrimeField;
 use incrementalmerkletree::Retention;
@@ -605,10 +603,6 @@ pub async fn build_pczt(
     let n_actions = pczt_bundle.actions().len();
     let mut action_fields: Vec<ActionFields> = Vec::new();
 
-    // IVK for decrypting output notes to recover recipient + rseed (clear-signing, firmware 7.15+)
-    let ivk = fvk.to_ivk(Scope::External);
-    let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
-
     for i in 0..n_actions {
         let alpha_bytes = pczt_bundle.actions()[i].spend().alpha()
             .map(|a| a.to_repr().to_vec())
@@ -641,20 +635,14 @@ pub async fn build_pczt(
         let rk_bytes: [u8; 32] = effects_action.rk().into();
         let out_ciphertext = effects_action.encrypted_note().out_ciphertext.to_vec();
 
-        // Every Orchard action has a spend+output pair. Decrypt the output component
-        // to recover recipient+rseed for clear-signing firmware, regardless of is_spend.
-        // Dummy outputs won't decrypt under our IVK; for those, None is correct.
-        let domain = OrchardDomain::for_action(effects_action);
-        let (orchard_recipient, orchard_rseed) =
-            if let Some((note, _, _)) = try_note_decryption(&domain, &prepared_ivk, effects_action) {
-                (
-                    Some(hex::encode(note.recipient().to_raw_address_bytes())),
-                    Some(hex::encode(note.rseed().as_bytes())),
-                )
-            } else {
-                debug!("IVK decryption failed for action {} — dummy output or not ours", i);
-                (None, None)
-            };
+        // Every Orchard action has a spend+output pair. The PCZT stores plaintext
+        // recipient+rseed in the output fields — read them directly, same as build_shield_pczt.
+        let out = pczt_bundle.actions()[i].output();
+        let orchard_recipient = out.recipient().as_ref().map(|addr| hex::encode(addr.to_raw_address_bytes()));
+        let orchard_rseed = out.rseed().as_ref().map(|rs| hex::encode(rs.as_bytes()));
+        if orchard_recipient.is_none() {
+            debug!("Action {} output has no recipient in PCZT — dummy output", i);
+        }
 
         action_fields.push(ActionFields {
             index: i as u32,
