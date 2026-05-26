@@ -614,7 +614,9 @@ pub async fn build_pczt(
         // spend_auth_sig=None, waiting for the device signature.
         // alpha().is_some() is NOT reliable — builder sets alpha for ALL actions.
         let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
-        let value = pczt_bundle.actions()[i].spend().value()
+        // Firmware uses value to verify the OUTPUT note commitment (cmx = commit(recipient, value, rseed, rho)).
+        // Always send output.value(), not spend.value().
+        let value = pczt_bundle.actions()[i].output().value()
             .map(|v| v.inner())
             .unwrap_or(0);
 
