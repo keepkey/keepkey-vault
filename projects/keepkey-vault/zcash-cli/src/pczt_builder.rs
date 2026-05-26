@@ -641,21 +641,20 @@ pub async fn build_pczt(
         let rk_bytes: [u8; 32] = effects_action.rk().into();
         let out_ciphertext = effects_action.encrypted_note().out_ciphertext.to_vec();
 
-        // For output actions, decrypt to recover recipient + rseed for clear-signing firmware.
-        let (orchard_recipient, orchard_rseed) = if !is_spend {
-            let domain = OrchardDomain::for_action(effects_action);
+        // Every Orchard action has a spend+output pair. Decrypt the output component
+        // to recover recipient+rseed for clear-signing firmware, regardless of is_spend.
+        // Dummy outputs won't decrypt under our IVK; for those, None is correct.
+        let domain = OrchardDomain::for_action(effects_action);
+        let (orchard_recipient, orchard_rseed) =
             if let Some((note, _, _)) = try_note_decryption(&domain, &prepared_ivk, effects_action) {
                 (
                     Some(hex::encode(note.recipient().to_raw_address_bytes())),
                     Some(hex::encode(note.rseed().as_bytes())),
                 )
             } else {
-                debug!("IVK decryption failed for output action {} — recipient/rseed will be absent", i);
+                debug!("IVK decryption failed for action {} — dummy output or not ours", i);
                 (None, None)
-            }
-        } else {
-            (None, None)
-        };
+            };
 
         action_fields.push(ActionFields {
             index: i as u32,
