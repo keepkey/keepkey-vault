@@ -4472,6 +4472,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					estimatedTime: record.estimatedTimeSeconds,
 					slippageBps: record.slippageBps,
 					relayRequestId: live?.relayRequestId ?? record.relayRequestId,
+					nearTxHash: live?.nearTxHash ?? record.nearTxHash,
+					outboundChainId: live?.outboundChainId ?? record.outboundChainId,
+					refundReason: live?.refundReason ?? record.refundReason,
 				}
 			},
 			refreshSwap: async (params) => {

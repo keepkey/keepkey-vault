@@ -656,6 +656,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     // status mapping out from regression on the first refresh.
     outboundChainId: r.outboundChainId,
     refundReason: r.refundReason,
+    nearTxHash: r.nearTxHash,
     midgardClassified: !!(r.outboundChainId || r.refundReason),
   }
 }
