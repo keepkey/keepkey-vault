@@ -414,7 +414,7 @@ describe('parseQuoteResponse', () => {
           swapper: 'NEAR Intents',
           buyAmount: '0.05',
           inbound_address: 'bc1qnearintentsdeposit',
-          txs: [{ txParams: { to: 'bc1qnearintentsdeposit' } }],
+          txs: [{ txParams: { to: 'bc1qnearintentsdeposit', senderAddress: 'bc1qmysender' } }],
         },
       }],
     }
@@ -423,6 +423,27 @@ describe('parseQuoteResponse', () => {
     expect(result.inboundAddress).toBe('bc1qnearintentsdeposit')
     expect(result.memo).toBe('')
     expect(result.relayTx).toBeUndefined()
+    expect(result.nearIntentsRefundTo).toBe('bc1qmysender')
+  })
+
+  test('NEAR Intents ZEC→ETH (UTXO source) — extracts nearIntentsRefundTo from senderAddress', () => {
+    const zecCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+    const ethCaip = 'eip155:1/slip44:60'
+    const userZecAddr = 't1Rv7QGamKCVGQgUvJNLYYaxPMq5t4cBgua'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'NEAR Intents',
+          buyAmount: '0.05',
+          inbound_address: 'zec_deposit_addr',
+          txs: [{ txParams: { to: 'zec_deposit_addr', senderAddress: userZecAddr } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: zecCaip, toCaip: ethCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.nearIntentsRefundTo).toBe(userZecAddr)
   })
 
   test('NEAR Intents first in list — selected as best (Pioneer ranks it first)', () => {

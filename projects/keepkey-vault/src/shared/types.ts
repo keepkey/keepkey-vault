@@ -721,6 +721,10 @@ export interface SwapQuote {
    *  Distinct from inboundAddress (which may be the token contract for ERC-20 routes).
    *  Used by the swap monitor to poll 1click.chaindefuser.com/v0/status. */
   nearIntentsDepositAddress?: string
+  /** For NEAR Intents UTXO/Solana swaps: the refund address Pioneer registered with
+   *  1Click (= the sender's source-chain address). Verified pre-sign by swap.ts to
+   *  ensure a failed swap refunds to the user's own wallet. */
+  nearIntentsRefundTo?: string
 }
 
 /** Parameters for getSwapQuote RPC.

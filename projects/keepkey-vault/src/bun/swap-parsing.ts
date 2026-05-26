@@ -281,6 +281,13 @@ export function parseQuoteResponse(
     ? (txParams.recipientAddress || (quote.meta as any)?.depositAddress || undefined)
     : undefined
 
+  // For NEAR Intents UTXO/Solana swaps, Pioneer sets refundTo = senderAddress and
+  // includes it in txParams.senderAddress. Extracting it here lets swap.ts verify
+  // the refund destination before the user signs (Layer 1 of the refund-safety check).
+  const nearIntentsRefundTo = swapper === 'NEAR Intents'
+    ? (txParams.senderAddress as string | undefined) || undefined
+    : undefined
+
   return {
     expectedOutput: expectedOutputStr,
     minimumOutput: minOutStr,
@@ -301,6 +308,7 @@ export function parseQuoteResponse(
     relayTx,
     minAmountIn,
     nearIntentsDepositAddress,
+    nearIntentsRefundTo,
   }
 }
 
