@@ -183,12 +183,15 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           status: r.status,
           confirmations: inferConfirmationsFromStatus(r.status),
           outboundTxid: r.outboundTxid,
+          outboundChainId: r.outboundChainId,
+          refundReason: r.refundReason,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
           completedAt: r.completedAt,
           estimatedTime: r.estimatedTimeSeconds,
           slippageBps: r.slippageBps,
           relayRequestId: r.relayRequestId,
+          nearTxHash: r.nearTxHash,
         }
         pendingSwaps.set(r.txid, swap)
       }
@@ -653,6 +656,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     // status mapping out from regression on the first refresh.
     outboundChainId: r.outboundChainId,
     refundReason: r.refundReason,
+    nearTxHash: r.nearTxHash,
     midgardClassified: !!(r.outboundChainId || r.refundReason),
   }
 }

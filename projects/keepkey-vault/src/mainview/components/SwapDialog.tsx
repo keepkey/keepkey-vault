@@ -838,7 +838,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     let timer: ReturnType<typeof setTimeout> | null = null
     const tick = async () => {
       if (cancelled) return
-      try { await rpcRequest('refreshSwap', { txid }) } catch { /* swap-update push will retry on next tick */ }
+      try {
+        const snap = await rpcRequest<any>('refreshSwap', { txid })
+        // Guard after the await — dialog may have closed or switched txids.
+        if (cancelled) return
+        // Apply fields that the tracker only pushes once (nearTxHash, relayRequestId)
+        // so the dialog is always current even if it opened after the initial push.
+        if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
+        if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+      } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
       const s = liveStatusRef.current
       if (s === 'completed' || s === 'failed' || s === 'refunded') return
@@ -865,6 +873,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setLiveRefundReason(undefined)
       setLiveSwapper(undefined)
       setLiveRelayRequestId(undefined)
+      setLiveNearTxHash(undefined)
       setAfterFromBal(null)
       setAfterToBal(null)
       setShowConfetti(false)

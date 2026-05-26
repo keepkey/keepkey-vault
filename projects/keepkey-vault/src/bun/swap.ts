@@ -305,11 +305,13 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
       // We now verify the refundTo from both Pioneer's response AND directly from
       // the 1Click API before the user ever sees the Confirm button.
 
-      const senderAddr = params.fromAddress?.toLowerCase().trim()
+      // bip122 (BTC/ZEC/DOGE) and solana addresses are case-sensitive base58 —
+      // never lowercase them. EVM is not in this branch.
+      const senderAddr = params.fromAddress?.trim()
       const depositAddr = result.inboundAddress || result.nearIntentsDepositAddress
 
       // Layer 1: Pioneer's parsed refundTo must exist and match senderAddress.
-      const pioneerRefundTo = result.nearIntentsRefundTo?.toLowerCase().trim()
+      const pioneerRefundTo = result.nearIntentsRefundTo?.trim()
       if (!pioneerRefundTo) {
         throw new Error(
           'NEAR Intents quote is missing refundTo — cannot verify refund safety. ' +
@@ -342,7 +344,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
             )
           }
           const oneClickData = await oneClickResp.json() as any
-          const oneClickRefundTo = (oneClickData?.quoteResponse?.quoteRequest?.refundTo as string | undefined)?.toLowerCase().trim()
+          const oneClickRefundTo = (oneClickData?.quoteResponse?.quoteRequest?.refundTo as string | undefined)?.trim()
           if (!oneClickRefundTo) {
             throw new Error(
               'NEAR Intents: 1Click response missing quoteRequest.refundTo — cannot verify refund safety.'
