@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRe
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
-import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
@@ -364,6 +364,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					? (payload.chain === outputDef.caip || payload.chain.startsWith(`${outputDef.networkId}/`))
 					: false
 				if (!matches && !matchesOutput) return
+				// Output-chain match without current-chain match: refresh the output chain,
+				// not this page's chain (handleRefresh only fetches chain.id).
+				if (matchesOutput && !matches) {
+					rpcFire('getBalance', { chainId: swapOutputChainId! })
+					return
+				}
 			}
 			handleRefresh()
 		})

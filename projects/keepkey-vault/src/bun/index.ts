@@ -5485,22 +5485,30 @@ engine.on('state-change', (state) => {
 				const d = data as any
 				const address = d?.address ?? undefined
 				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				// Normalize chain to a CAIP-19 string the UI can match unambiguously.
-				// Pioneer may send d.chain (already CAIP) or only d.symbol (e.g. "ETH").
-				let chain: string | undefined = d?.chain
-				if (!chain && d?.symbol) {
-					const allChains = [...CHAINS, ...customChainDefs]
-					const def = allChains.find(c => c.symbol === d.symbol)
-					chain = def?.caip
+				// Normalize whatever Pioneer sends into a canonical CAIP-19 string.
+				// Pioneer may send: CAIP-19 (has "/"), CAIP-2 ("eip155:1"), internal id
+				// ("ethereum"), or raw symbol ("ETH"). Symbol is ambiguous (ETH = Ethereum,
+				// Arbitrum, Optimism, Base) so we never fall back to it.
+				const allChains = [...CHAINS, ...customChainDefs]
+				let chain: string | undefined
+				const raw: string | undefined = d?.chain
+				if (raw) {
+					if (raw.includes('/')) {
+						chain = raw // already CAIP-19
+					} else {
+						// CAIP-2 (networkId like "eip155:1") or internal id like "ethereum"
+						const def = allChains.find(c => c.networkId === raw || c.id === raw)
+						chain = def?.caip
+					}
 				}
-				// Only forward events with a resolvable CAIP chain — symbol-only events we
-				// couldn't map are dropped rather than forwarded as raw symbols.
 				if (!chain) return
-				const key = chain
-				const existing = pioneerEventDebounce.get(key)
+				// Debounce per network (CAIP-2 prefix) so multiple token pushes on the same
+				// EVM network collapse into a single refresh rather than bypassing the debounce.
+				const networkId = chain.split('/')[0]
+				const existing = pioneerEventDebounce.get(networkId)
 				if (existing) clearTimeout(existing)
-				pioneerEventDebounce.set(key, setTimeout(() => {
-					pioneerEventDebounce.delete(key)
+				pioneerEventDebounce.set(networkId, setTimeout(() => {
+					pioneerEventDebounce.delete(networkId)
 					console.log(`[PioneerSocket] push event '${event}' chain=${chain} → forwarding`)
 					try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
 				}, 2000))

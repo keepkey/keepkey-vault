@@ -694,6 +694,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [activeSwaps, setActiveSwaps] = useState<PendingSwap[]>([])
 	const dismissedSwapTxids = useRef(new Set<string>())
 	const refreshGenRef = useRef(0)
+	const loadingBalancesRef = useRef(false)
+	// Records when each chain's balance was last set via a single-chain balance-updated event.
+	// Used by full refreshes to skip chains that received a fresher per-chain update while
+	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
+	const chainLastUpdatedRef = useRef(new Map<string, number>())
 
 	// Fetch pending swaps on mount and keep them live via swap-update messages.
 	// Non-terminal swaps mean funds are in-flight — we surface a banner so the
@@ -973,8 +978,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	const refreshBalances = useCallback(async (forceRefresh = false) => {
 		if (watchOnly) return
-		// Generation counter: if a newer call completes first, discard this stale response.
+		// Non-forced calls yield to any in-progress refresh (avoids non-forced swap-complete
+		// poll superseding an already-running forced user refresh).
+		if (!forceRefresh && loadingBalancesRef.current) return
+		// Generation counter: discard responses from older concurrent full refreshes.
 		const gen = ++refreshGenRef.current
+		const refreshStartedAt = Date.now()
+		loadingBalancesRef.current = true
 		setLoadingBalances(true)
 
 		try {
@@ -992,12 +1002,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				// Merge into current state via functional updater (avoids stale closure).
-				// Confirmed chains always win — zero is a valid balance.
-				// Chains absent from `result` (failed Pioneer chunks) are preserved as-is.
+				// Merge: skip chains where a per-chain balance-updated arrived AFTER this
+				// full refresh started — that single-chain data is fresher than our bulk result.
 				setBalances(prev => {
 					const map = new Map(prev)
-					for (const b of result) map.set(b.chainId, b)
+					for (const b of result) {
+						if ((chainLastUpdatedRef.current.get(b.chainId) ?? 0) > refreshStartedAt) continue
+						map.set(b.chainId, b)
+					}
 					return map
 				})
 				setCacheUpdatedAt(Date.now())
@@ -1012,7 +1024,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 		}
 
-		if (gen === refreshGenRef.current) setLoadingBalances(false)
+		if (gen === refreshGenRef.current) {
+			loadingBalancesRef.current = false
+			setLoadingBalances(false)
+		}
 	}, [watchOnly, clearPioneerError, stagePioneerError])
 
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session
@@ -1056,6 +1071,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
+			const receivedAt = Date.now()
+			chainLastUpdatedRef.current.set(updated.chainId, receivedAt)
 			setBalances(prev => {
 				const old = prev.get(updated.chainId)
 				const oldUsd = old?.balanceUsd ?? 0
@@ -1068,7 +1085,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				next.set(updated.chainId, updated)
 				return next
 			})
-			setCacheUpdatedAt(Date.now())
+			setCacheUpdatedAt(receivedAt)
 		})
 	}, [])
 
