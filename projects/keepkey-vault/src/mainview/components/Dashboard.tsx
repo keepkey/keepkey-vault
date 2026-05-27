@@ -1640,11 +1640,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    centered) and a fixed-min-height "below" area. The split anchors
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
-			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "60vh", md: "70vh" } as unknown as string)}>
-				{/* View picker — top center of the hero area */}
-				<Flex justify="center" pt="2" pb="1">
+			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "44vh", md: "50vh" } as unknown as string)} position="relative">
+				{/* View picker — absolute top-right of the canvas */}
+				<Box position="absolute" top="2" right="2" zIndex={3}>
 					<ViewPickerButton />
-				</Flex>
+				</Box>
 				{/* Top: orbital widget / donut / welcome — vertically centered.
 				    overflow:hidden prevents the orbital box from visually and
 				    pointer-event-wise spilling into the action button row below. */}
@@ -1745,7 +1745,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						return (
 							<DonutChart
 								data={chartData}
-								size={380}
+								size={300}
 								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 								onClickSlice={(i) => {
@@ -1821,10 +1821,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					px="3"
 					position="relative"
 					zIndex={2}
-					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '200px'}
-					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
-					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
-					gap="3"
+					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '160px'}
+					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '1'}
+					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '2'}
+					gap="2"
 				>
 					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
