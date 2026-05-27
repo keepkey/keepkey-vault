@@ -63,6 +63,8 @@ export interface RestApiCallbacks {
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
   getPioneerApiBase?: () => string
+  /** Set Pioneer API base URL (empty string = reset to default) */
+  setPioneerApiBase?: (url: string) => Promise<any>
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -1911,6 +1913,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/addresses/hive' && method === 'POST') {
+          auth.requireAuth(req)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = scopedKey(engine, 'hive', body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => (wallet as any).hiveGetPublicKey({
+            addressNList: body.address_n,
+            showDisplay: sd,
+            coin: 'Hive',
+          }), { operation: 'hiveGetPublicKey', chain: 'HIVE' }, sd)
+          const address = result?.publicKey || ''
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
@@ -2707,6 +2731,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         // ── DEBUG PORTFOLIO ENDPOINTS ────────────────────────────────────
         // Verbose read-only views into cached balances, spam analysis, and
+        // ── PIONEER URL MANAGEMENT ────────────────────────────────────
+        if (path === '/api/pioneer/status' && method === 'GET') {
+          const base = callbacks.getPioneerApiBase?.() ?? 'unknown'
+          return json({ url: base, is_default: base === 'https://api.keepkey.info' || base === 'unknown' })
+        }
+
+        if (path === '/api/pioneer/url' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json().catch(() => ({})) as any
+          const url = (body.url ?? '').trim()
+          if (url && !/^https?:\/\//i.test(url)) return json({ error: 'URL must start with http:// or https://' }, 400)
+          await callbacks.setPioneerApiBase?.(url)
+          const newBase = callbacks.getPioneerApiBase?.() ?? 'unknown'
+          return json({ url: newBase, is_default: !url })
+        }
+
         // token visibility overrides. Useful for diagnosing balance/spam issues
         // without needing to dig through the SQLite DB directly.
 
