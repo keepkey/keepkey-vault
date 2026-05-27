@@ -23,17 +23,6 @@ export function useEvmAddresses() {
       .catch(() => {}) // Device may not be connected yet
   }, [])
 
-  // Re-fetch after any balance update so per-address chainBalances stay current.
-  // balance-updated fires once per chain after getBalance/getBalances — refreshing
-  // here ensures chainBalances never stay stale after a reset+refetch cycle.
-  useEffect(() => {
-    return onRpcMessage('balance-updated', () => {
-      rpcRequest<EvmAddressSet>('getEvmAddresses')
-        .then(setEvmAddresses)
-        .catch(() => {})
-    })
-  }, [])
-
   const addIndex = useCallback(async (index?: number) => {
     setLoading(true)
     try {

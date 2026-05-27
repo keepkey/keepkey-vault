@@ -695,7 +695,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const dismissedSwapTxids = useRef<Set<string>>((() => {
 		try {
 			const stored = localStorage.getItem('kk-dismissed-swaps')
-			return new Set<string>(stored ? JSON.parse(stored) : [])
+			const parsed = stored ? JSON.parse(stored) : []
+			return new Set<string>(Array.isArray(parsed) ? parsed.filter((x: unknown) => typeof x === 'string') : [])
 		} catch { return new Set<string>() }
 	})())
 	const refreshGenRef = useRef(0)

@@ -314,12 +314,14 @@ export const PROVIDER_LABEL: Record<SwapProvider, string> = {
 
 type DynamicChains = Record<SwapProvider, Set<string>>
 let dynamicChains: DynamicChains | null = null
+let dynamicChainsBase = ''
 
 /** Fetch provider chain coverage from Pioneer and cache for the session.
- *  Safe to call multiple times — only fetches once.
+ *  Re-fetches if pioneerBase changed (e.g. user switches Pioneer host in settings).
  *  Falls back silently to the static sets if Pioneer is unreachable. */
 export async function loadSupportedChains(pioneerBase: string): Promise<void> {
-  if (dynamicChains) return
+  if (dynamicChains && pioneerBase === dynamicChainsBase) return
+  dynamicChains = null
   try {
     const res = await fetch(`${pioneerBase}/api/v1/swappers/supported-chains`, {
       signal: AbortSignal.timeout(5000),
@@ -334,6 +336,7 @@ export async function loadSupportedChains(pioneerBase: string): Promise<void> {
       chainflip:  new Set(data.chainflip  || []),
       shapeshift: new Set(data.shapeshift || []),
     }
+    dynamicChainsBase = pioneerBase
     console.log('[swap-matrix] Dynamic chain coverage loaded from Pioneer')
   } catch (e: any) {
     console.warn('[swap-matrix] Pioneer unreachable — using static fallback:', e.message)
@@ -341,7 +344,7 @@ export async function loadSupportedChains(pioneerBase: string): Promise<void> {
 }
 
 /** Exposed for tests only. */
-export function _resetDynamicChains(): void { dynamicChains = null }
+export function _resetDynamicChains(): void { dynamicChains = null; dynamicChainsBase = '' }
 export function _setDynamicChains(chains: Record<SwapProvider, string[]>): void {
   dynamicChains = Object.fromEntries(
     Object.entries(chains).map(([k, v]) => [k, new Set(v as string[])])
