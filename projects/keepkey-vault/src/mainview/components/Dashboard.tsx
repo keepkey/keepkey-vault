@@ -1211,7 +1211,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (!drilledChainId || drilledChainTokensChartData.length > 0) return drilledChainTokensChartData
 		const chain = allChains.find(c => c.id === drilledChainId)
 		if (!chain) return []
-		return [{ name: chain.symbol, value: 1, color: chain.color + '55' }]
+		return [{ name: chain.symbol, value: 0, color: chain.color + '55' }]
 	}, [drilledChainId, drilledChainTokensChartData, allChains])
 
 	const chartData = drilledChainId ? drilledPlaceholder : allChainsChartData
@@ -2067,7 +2067,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				>
 					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
-						// Use real token sum when drilled; placeholder has value:1 so use real balance sum
+						// Use real token sum when drilled; placeholder has value:0 so use real balance sum
 						const legendTotal = drilledChainId
 							? drilledChainTokensChartData.reduce((s, d) => s + d.value, 0)
 							: totalUsd

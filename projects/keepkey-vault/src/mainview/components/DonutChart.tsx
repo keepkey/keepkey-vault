@@ -17,12 +17,26 @@ interface DonutChartProps {
 
 export function DonutChart({ data, size = 210, activeIndex, onHoverSlice, onClickSlice }: DonutChartProps) {
 	const total = data.reduce((sum, d) => sum + d.value, 0)
-	if (total === 0) return null
-
 	const cx = size / 2
 	const cy = size / 2
 	const outerR = size * 0.45
 	const innerR = size * 0.29
+
+	if (total === 0) {
+		const ringR = (outerR + innerR) / 2
+		const ringW = outerR - innerR
+		return (
+			<Box position="relative" w={`${size}px`} h={`${size}px`}>
+				<svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+					<circle cx={cx} cy={cy} r={ringR} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={ringW} />
+				</svg>
+				<Flex position="absolute" top="0" left="0" right="0" bottom="0" align="center" justify="center" direction="column" pointerEvents="none" gap="1">
+					<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" fontWeight="500" lineHeight="1">Total</Text>
+					<AnimatedUsd value={0} fontSize={`${Math.round(size * 0.10)}px`} color="var(--text-0)" fontWeight="500" lineHeight="1.1" />
+				</Flex>
+			</Box>
+		)
+	}
 	const hoverOuterR = outerR * 1.05
 	const gap = 0.02 // radians gap between slices
 
