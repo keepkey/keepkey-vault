@@ -136,6 +136,48 @@ export function clearSwapCache(): void {
   assetCacheTime = 0
 }
 
+/** Search Pioneer's full asset discovery database (not just swap-pool tokens).
+ *  Uses the SearchAssets swagger operation (/discovery/search).
+ *  Returns SwapAsset[] so the frontend can show them with assessAvailability. */
+export async function searchDiscoveryAssets(query: string): Promise<SwapAsset[]> {
+  const pioneer = await getPioneer()
+  let resp: any
+  try {
+    resp = await pioneer.SearchAssets({ q: query, limit: 30 })
+  } catch (e: any) {
+    console.warn(`[swap] SearchAssets failed: ${e.message}`)
+    return []
+  }
+  const results: any[] = resp?.data ?? []
+  const assets: SwapAsset[] = []
+  for (const item of results) {
+    const caip: string = item.assetId
+    if (!caip) continue
+    const chainCaip2: string = item.chainId
+    if (!chainCaip2) continue
+    const chain = CHAINS.find(c => c.networkId === chainCaip2)
+    if (!chain) continue
+    const slashIdx = caip.indexOf('/')
+    const tokenPart = slashIdx >= 0 ? caip.slice(slashIdx + 1) : ''
+    const contractAddress = tokenPart.startsWith('erc20:') ? tokenPart.slice(6)
+      : tokenPart.startsWith('token:') ? tokenPart.slice(6)
+      : tokenPart.startsWith('bep20:') ? tokenPart.slice(6)
+      : undefined
+    assets.push({
+      asset: `${chain.id.toUpperCase()}.${item.symbol}`,
+      chainId: chain.id,
+      symbol: item.symbol,
+      name: item.name,
+      chainFamily: chain.chainFamily,
+      decimals: typeof item.precision === 'number' ? item.precision : chain.decimals,
+      caip,
+      contractAddress,
+      icon: item.icon,
+    })
+  }
+  return assets
+}
+
 /** Fetch available swap assets from Pioneer GetAvailableAssets */
 export async function getSwapAssets(): Promise<SwapAsset[]> {
   if (assetCache.length > 0 && Date.now() - assetCacheTime < ASSET_CACHE_TTL) {

@@ -110,6 +110,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
@@ -372,6 +373,7 @@ function deferredInit() {
 	// the persisted flag. Without this, tracker won't rehydrate pending swaps
 	// from history on cold boot — they'd stall until executeSwap lazy-init kicks in.
 	loadSettings()
+	loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
 	if (swapsEnabled) {
 		import('./swap-tracker').then(async ({ initSwapTracker }) => {
 			await initSwapTracker((msg: string, data: any) => {
@@ -4108,6 +4110,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const chain = chainMap.get(a.chainId)
 					return chain ? isChainSupported(chain, fw) : false
 				})
+			},
+			searchSwapAssets: async (params) => {
+				if (!swapsEnabled) return []
+				const { searchDiscoveryAssets } = await import('./swap')
+				return searchDiscoveryAssets(params.query)
 			},
 
 			getSwapHealth: async () => {

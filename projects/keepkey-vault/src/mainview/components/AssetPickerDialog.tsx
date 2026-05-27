@@ -17,6 +17,8 @@ import {
   synthesizeSwapAsset,
   type AssetEntry,
 } from "../../shared/swap-discovery"
+import { assessAvailability } from "../../shared/swap-support-matrix"
+import { rpcRequest } from "../lib/rpc"
 import { CHAINS } from "../../shared/chains"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
@@ -540,6 +542,38 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
   // Reset page when search changes
   useEffect(() => { setPage(0) }, [search])
 
+  // Discovery search — fires when in-chain list is empty and query is long enough
+  const [discoveryHits, setDiscoveryHits] = useState<AssetEntry[]>([])
+  const [discoveryLoading, setDiscoveryLoading] = useState(false)
+  useEffect(() => {
+    if (q.length < 2) { setDiscoveryHits([]); return }
+    // Only search once the in-chain results are known (after inChain memo runs)
+    const timer = setTimeout(async () => {
+      setDiscoveryLoading(true)
+      try {
+        const hits = await rpcRequest<SwapAsset[]>('searchSwapAssets', { query: q })
+        // Convert SwapAsset → AssetEntry using caip-derived chainId (CAIP-2)
+        const entries: AssetEntry[] = (hits ?? []).flatMap(a => {
+          const caip2 = a.caip.split('/')[0]
+          if (!caip2) return []
+          return [{
+            caip: a.caip,
+            symbol: a.symbol,
+            name: a.name,
+            chainId: caip2,
+            decimals: a.decimals,
+            iconUrl: a.icon,
+            isNative: !a.contractAddress,
+            availability: assessAvailability(a.caip),
+          }]
+        })
+        setDiscoveryHits(entries)
+      } catch { setDiscoveryHits([]) }
+      finally { setDiscoveryLoading(false) }
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [q])
+
   const inChain = useMemo(() => entries.filter(e => {
     if (e.chainId !== chainCaip2) return false
     if (e.caip === excludeCaip) return false
@@ -595,16 +629,31 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
 
       {/* List */}
       <Box flex="1" overflowY="auto" px="5" pb="2">
-        {inChain.length === 0 ? (
+        {inChain.length === 0 && discoveryHits.length === 0 ? (
           <Flex direction="column" align="center" py="14" gap="2">
-            <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No assets found</Text>
-            <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
+            {discoveryLoading
+              ? <Text fontSize="11px" color="kk.textMuted">Searching all networks…</Text>
+              : <>
+                  <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No assets found</Text>
+                  <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
+                </>
+            }
           </Flex>
-        ) : (
+        ) : inChain.length > 0 ? (
           pageItems.map(e => (
             <AssetListRow key={e.caip} entry={e}
               onSelect={onSelect} onUnavailable={onUnavailable} />
           ))
+        ) : (
+          <>
+            <Text fontSize="10px" color="kk.textMuted" mb="2" letterSpacing="0.06em" textTransform="uppercase">
+              Other networks — will cross-chain swap
+            </Text>
+            {discoveryHits.map(e => (
+              <AssetListRow key={e.caip} entry={e}
+                onSelect={onSelect} onUnavailable={onUnavailable} />
+            ))}
+          </>
         )}
       </Box>
 

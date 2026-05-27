@@ -206,6 +206,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }
       getSwapAssets: { params: void; response: SwapAsset[] }
+      /** Search Pioneer's full asset discovery DB — includes tokens not in swap pools.
+       *  Frontend uses this as a fallback when the in-chain list returns no results. */
+      searchSwapAssets: { params: { query: string }; response: SwapAsset[] }
       /** Look up an unknown token by contract address across common chains.
        *  When no chainId is provided, candidate EVM chains are queried in
        *  parallel and any with metadata are returned. The frontend uses this
