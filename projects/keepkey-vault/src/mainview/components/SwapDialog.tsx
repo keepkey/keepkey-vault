@@ -6,7 +6,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-ui/react"
+import { Box, Flex, Text, VStack, Button, Input, Image, HStack, Spinner } from "@chakra-ui/react"
 import CountUp from "react-countup"
 import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
@@ -3567,7 +3567,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             {evmAddresses.addresses.map(addr => {
                               const isSelected = addr.addressIndex === effectiveEvmIndex
                               const chainBal = addr.chainBalances?.[fromAsset.chainId]
-                              const bal = chainBal ? parseFloat(chainBal.balance) : 0
+                              const chainBalLoading = chainBal === undefined
+                              // For selected address fall back to global balances when chainBal not yet loaded
+                              let bal = 0
+                              if (chainBal) {
+                                bal = parseFloat(chainBal.balance)
+                              } else if (isSelected) {
+                                const gb = balances.find(b => b.chainId === fromAsset.chainId)
+                                bal = gb ? parseFloat(gb.balance) : 0
+                              }
                               const snippet = addr.address ? `${addr.address.slice(0, 6)}…${addr.address.slice(-4)}` : `#${addr.addressIndex}`
                               return (
                                 <Box
@@ -3588,9 +3596,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                                     <Text fontSize="9px" fontFamily="mono" color={isSelected ? "kk.gold" : "kk.textSecondary"} fontWeight="600" lineHeight="1.3">
                                       {snippet}
                                     </Text>
-                                    <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1.3">
-                                      {bal > 0 ? `${bal.toFixed(4)} ${fromAsset.symbol}` : 'empty'}
-                                    </Text>
+                                    {chainBalLoading && !isSelected
+                                      ? <Spinner size="xs" color="kk.textMuted" />
+                                      : <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1.3">
+                                          {bal > 0 ? `${bal.toFixed(4)} ${fromAsset.symbol}` : `0 ${fromAsset.symbol}`}
+                                        </Text>
+                                    }
                                   </Flex>
                                 </Box>
                               )

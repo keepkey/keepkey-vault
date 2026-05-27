@@ -168,17 +168,16 @@ const CHAINFLIP_CHAINS = new Set<string>([
 ])
 
 /** ShapeShift Swapper — pioneer-server's `shapeshiftSwap` integration which
- *  aggregates LiFi/Squid/Across solvers across the broader EVM landscape.
- *  Currently mirrors RELAY_CHAINS at the chain level (Relay is the dominant
- *  underlying solver as of 2026-05); kept as a separate set so we can extend
- *  to non-Relay coverage as the integration grows. Confirmed against
- *  pioneer-server's swappers/shapeshift-swap module. */
+ *  aggregates LiFi/Squid/Across solvers. LiFi covers Solana (thousands of SPL
+ *  tokens), confirmed 2026-05. Kept separate from RELAY_CHAINS so non-EVM
+ *  coverage can grow independently. */
 const SHAPESHIFT_CHAINS = new Set<string>([
   'eip155:1', 'eip155:10', 'eip155:56', 'eip155:100',
   'eip155:137', 'eip155:143', 'eip155:146', 'eip155:169',
   'eip155:324', 'eip155:5000', 'eip155:8453', 'eip155:34443',
   'eip155:42161', 'eip155:42220', 'eip155:43114', 'eip155:59144',
   'eip155:80094', 'eip155:81457', 'eip155:534352',
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',               // SOL — LiFi
 ])
 
 // ── Well-known stablecoins per chain (CAIP-19 token IDs) ────────────────
@@ -250,12 +249,12 @@ export function assessAvailability(caip: string): AvailabilityAssessment {
 
   if (!isToken) {
     // Native asset: whole-chain support sets apply.
-    if (THORCHAIN_CHAINS.has(chainId)) providers.push('thorchain')
-    if (MAYACHAIN_CHAINS.has(chainId)) providers.push('mayachain')
-    if (RELAY_CHAINS.has(chainId))     providers.push('relay')
-    if (ZEROEX_CHAINS.has(chainId))    providers.push('zeroex')
-    if (CHAINFLIP_CHAINS.has(chainId)) providers.push('chainflip')
-    if (SHAPESHIFT_CHAINS.has(chainId)) providers.push('shapeshift')
+    if (has('thorchain',  chainId)) providers.push('thorchain')
+    if (has('mayachain',  chainId)) providers.push('mayachain')
+    if (has('relay',      chainId)) providers.push('relay')
+    if (has('zeroex',     chainId)) providers.push('zeroex')
+    if (has('chainflip',  chainId)) providers.push('chainflip')
+    if (has('shapeshift', chainId)) providers.push('shapeshift')
 
     if (providers.length > 0) return { status: 'swappable', providers }
     return {
@@ -269,15 +268,15 @@ export function assessAvailability(caip: string): AvailabilityAssessment {
   // chain-normalized CAIP for the well-known stablecoin lookup so TRON USDT
   // matches whether the input encoded TRON as base58 or hex.
   if (STABLECOIN_TOKENS.has(normalizedCaip)) {
-    if (RELAY_CHAINS.has(chainId))  providers.push('relay')
-    if (ZEROEX_CHAINS.has(chainId)) providers.push('zeroex')
+    if (has('relay',  chainId)) providers.push('relay')
+    if (has('zeroex', chainId)) providers.push('zeroex')
     if (THORCHAIN_TOKEN_PREFIXES.some(p => normalizedCaip.startsWith(p))) providers.push('thorchain')
     if (providers.length > 0) return { status: 'swappable', providers }
   }
 
   // Token on a chain Relay/0x/ShapeShift cover → unknown (try a quote — most
   // ERC-20s on these chains route fine through the aggregator solvers).
-  if (RELAY_CHAINS.has(chainId) || ZEROEX_CHAINS.has(chainId) || SHAPESHIFT_CHAINS.has(chainId)) {
+  if (has('relay', chainId) || has('zeroex', chainId) || has('shapeshift', chainId)) {
     return {
       status: 'unknown',
       providers: [],
@@ -286,7 +285,7 @@ export function assessAvailability(caip: string): AvailabilityAssessment {
   }
 
   // Token on a chain we route natives for, but no aggregator presence.
-  if (THORCHAIN_CHAINS.has(chainId) || MAYACHAIN_CHAINS.has(chainId) || CHAINFLIP_CHAINS.has(chainId)) {
+  if (has('thorchain', chainId) || has('mayachain', chainId) || has('chainflip', chainId)) {
     return {
       status: 'unsupported_token',
       providers: [],
@@ -309,4 +308,54 @@ export const PROVIDER_LABEL: Record<SwapProvider, string> = {
   zeroex:     '0x',
   chainflip:  'ChainFlip',
   shapeshift: 'ShapeShift',
+}
+
+// ── Dynamic chain coverage (loaded from Pioneer at startup) ─────────────────
+
+type DynamicChains = Record<SwapProvider, Set<string>>
+let dynamicChains: DynamicChains | null = null
+
+/** Fetch provider chain coverage from Pioneer and cache for the session.
+ *  Safe to call multiple times — only fetches once.
+ *  Falls back silently to the static sets if Pioneer is unreachable. */
+export async function loadSupportedChains(pioneerBase: string): Promise<void> {
+  if (dynamicChains) return
+  try {
+    const res = await fetch(`${pioneerBase}/api/v1/swappers/supported-chains`, {
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json() as Record<string, string[]>
+    dynamicChains = {
+      thorchain:  new Set(data.thorchain  || []),
+      mayachain:  new Set(data.mayachain  || []),
+      relay:      new Set(data.relay      || []),
+      zeroex:     new Set(data.zeroex     || []),
+      chainflip:  new Set(data.chainflip  || []),
+      shapeshift: new Set(data.shapeshift || []),
+    }
+    console.log('[swap-matrix] Dynamic chain coverage loaded from Pioneer')
+  } catch (e: any) {
+    console.warn('[swap-matrix] Pioneer unreachable — using static fallback:', e.message)
+  }
+}
+
+/** Exposed for tests only. */
+export function _resetDynamicChains(): void { dynamicChains = null }
+export function _setDynamicChains(chains: Record<SwapProvider, string[]>): void {
+  dynamicChains = Object.fromEntries(
+    Object.entries(chains).map(([k, v]) => [k, new Set(v as string[])])
+  ) as DynamicChains
+}
+
+function has(provider: SwapProvider, chainId: string): boolean {
+  if (dynamicChains) return dynamicChains[provider].has(chainId)
+  switch (provider) {
+    case 'thorchain':  return THORCHAIN_CHAINS.has(chainId)
+    case 'mayachain':  return MAYACHAIN_CHAINS.has(chainId)
+    case 'relay':      return RELAY_CHAINS.has(chainId)
+    case 'zeroex':     return ZEROEX_CHAINS.has(chainId)
+    case 'chainflip':  return CHAINFLIP_CHAINS.has(chainId)
+    case 'shapeshift': return SHAPESHIFT_CHAINS.has(chainId)
+  }
 }

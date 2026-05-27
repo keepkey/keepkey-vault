@@ -692,7 +692,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [activeSwaps, setActiveSwaps] = useState<PendingSwap[]>([])
-	const dismissedSwapTxids = useRef(new Set<string>())
+	const dismissedSwapTxids = useRef<Set<string>>((() => {
+		try {
+			const stored = localStorage.getItem('kk-dismissed-swaps')
+			return new Set<string>(stored ? JSON.parse(stored) : [])
+		} catch { return new Set<string>() }
+	})())
 	const refreshGenRef = useRef(0)
 	const loadingBalancesRef = useRef(false)
 	// Records when each chain's balance was last set via a single-chain balance-updated event.
@@ -1052,14 +1057,24 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		}
 	}, [forceRefresh, initialLoaded, hasEverRefreshed, loadingBalances, refreshBalances, onForceRefreshConsumed])
 
-	// Auto-refresh balances when a swap completes (both chains affected)
+	// Auto-refresh balances when a swap completes (both chains affected).
+	// Force-refresh bypasses Pioneer's balance cache since we know balances changed.
+	// Delayed retries catch Pioneer's indexer lag (1-2 blocks after confirmation).
 	useEffect(() => {
+		let t1: ReturnType<typeof setTimeout>
+		let t2: ReturnType<typeof setTimeout>
 		const handler = () => {
-			console.log('[Dashboard] Swap completed — refreshing balances')
-			refreshBalances()
+			console.log('[Dashboard] Swap completed — force-refreshing balances')
+			refreshBalances(true)
+			t1 = setTimeout(() => refreshBalances(true), 30000)
+			t2 = setTimeout(() => refreshBalances(true), 90000)
 		}
 		window.addEventListener('keepkey-swap-completed', handler)
-		return () => window.removeEventListener('keepkey-swap-completed', handler)
+		return () => {
+			window.removeEventListener('keepkey-swap-completed', handler)
+			clearTimeout(t1)
+			clearTimeout(t2)
+		}
 	}, [refreshBalances])
 
 
@@ -1552,7 +1567,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							justifyContent="center"
 							color="whiteAlpha.400"
 							_hover={{ color: "var(--rose)" }}
-							onClick={(e) => { e.stopPropagation(); dismissedSwapTxids.current.add(swap.txid); setActiveSwaps(prev => prev.filter(s => s.txid !== swap.txid)) }}
+							onClick={(e) => { e.stopPropagation(); dismissedSwapTxids.current.add(swap.txid); try { localStorage.setItem('kk-dismissed-swaps', JSON.stringify([...dismissedSwapTxids.current])) } catch {} ; setActiveSwaps(prev => prev.filter(s => s.txid !== swap.txid)) }}
 							title="Dismiss"
 						>
 							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
