@@ -680,7 +680,7 @@ export interface RelayTxParams {
   to: string
   data: string
   value: string              // wei as decimal string
-  gasLimit: string
+  gasLimit?: string
   maxFeePerGas?: string
   maxPriorityFeePerGas?: string
   chainId: number
@@ -688,6 +688,9 @@ export interface RelayTxParams {
    *  `data` is intentionally empty — the swap destination was registered off-chain
    *  when the quote/channel was created. Skips the empty-calldata cross-chain guard. */
   isDepositChannel?: boolean
+  /** Base64-encoded Solana v0 VersionedTransaction (Relay SOL→EVM bridge).
+   *  When present, swap.ts uses rawTx path instead of EVM calldata path. */
+  serializedTx?: string
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */

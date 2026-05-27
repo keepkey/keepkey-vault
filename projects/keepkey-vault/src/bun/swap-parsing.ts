@@ -159,10 +159,23 @@ export function parseQuoteResponse(
   // path instead (isMemolessTransfer below).
   const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
   const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
-  const hasPrebuiltTx = hasRealCalldata || isDepositChannel
+  // Solana prebuilt tx: Relay SOL→EVM bridge ships serializedTx (base64 wire tx) instead
+  // of EVM calldata. No `data` or `to` field — detected by serializedTx presence.
+  const hasSolanaPrebuiltTx = !!txParams.serializedTx && params.fromCaip.startsWith('solana:')
+  const hasPrebuiltTx = hasRealCalldata || isDepositChannel || hasSolanaPrebuiltTx
   let relayTx: RelayTxParams | undefined
 
-  if (hasPrebuiltTx) {
+  if (hasSolanaPrebuiltTx) {
+    relayTx = {
+      to: txParams.recipientAddress || '',
+      data: '0x',
+      value: '0',
+      gasLimit: undefined,
+      chainId: 0,
+      serializedTx: txParams.serializedTx,
+    }
+    console.log(`${TAG} ${integration} (${swapper}) — Solana prebuilt tx extracted (recipient=${txParams.recipientAddress})`)
+  } else if (hasPrebuiltTx) {
     // Pioneer occasionally returns addresses with a duplicate '0x' prefix (e.g.
     // "0x0x833589..."). Strip all leading '0x' pairs and re-add exactly one.
     // Affects NEAR Intents ERC-20 routes where txParams.to is the token contract.
