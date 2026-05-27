@@ -1513,6 +1513,23 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					onClick={() => setActivityResumeSwap(swap)}
 				>
 					<Flex align="center" gap="2">
+						<Box
+							as="button"
+							flexShrink={0}
+							w="14px"
+							h="14px"
+							display="flex"
+							alignItems="center"
+							justifyContent="center"
+							color="whiteAlpha.400"
+							_hover={{ color: "var(--rose)" }}
+							onClick={(e) => { e.stopPropagation(); setActiveSwaps(prev => prev.filter(s => s.txid !== swap.txid)) }}
+							title="Dismiss"
+						>
+							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+								<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+							</svg>
+						</Box>
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
 							<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
 						</svg>
