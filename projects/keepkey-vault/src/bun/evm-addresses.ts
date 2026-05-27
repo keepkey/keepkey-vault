@@ -10,12 +10,26 @@ import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
 import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
 
-/** Build an EVM derivation path for a given address index: m/44'/60'/0'/0/{index} */
+/**
+ * Build an EVM derivation path for a given BIP44 account index.
+ *
+ * Path: m/44'/60'/{index}'/0/0
+ *
+ * This matches MetaMask / ShapeShift / keepkey-client — each "account" is a
+ * separate hardened branch at the third path component, so account 1's address
+ * is independent of account 0. Earlier versions of this file derived
+ * m/44'/60'/0'/0/{index} (varying the receive-address index inside account 0),
+ * which would not find balances on MetaMask account #1. See SETTINGS_VERSION.
+ */
 export function evmAddressPath(index: number): number[] {
-  return [0x8000002C, 0x8000003C, 0x80000000, 0, index]
+  return [0x8000002C, 0x8000003C, 0x80000000 + index, 0, 0]
 }
 
 const SETTINGS_KEY = 'evm_tracked_indices'
+// Bump when the derivation scheme changes so persisted indices > 0 (which were
+// derived under the old path) are dropped and re-discovered.
+const SETTINGS_VERSION_KEY = 'evm_tracked_indices_version'
+const SETTINGS_VERSION = 2
 
 export class EvmAddressManager extends EventEmitter {
   private addresses: EvmTrackedAddress[] = []
@@ -50,6 +64,14 @@ export class EvmAddressManager extends EventEmitter {
     // indices it tracks into the hidden wallet's address list.
     let indices: number[] = [0]
     if (!this.canPersist || this.canPersist()) {
+      // Drop persisted indices > 0 when the derivation scheme version
+      // has changed — they refer to addresses that no longer exist under the
+      // new path. Index 0 is identical across both schemes.
+      const storedVersion = parseInt(getSetting(SETTINGS_VERSION_KEY) || '1', 10)
+      if (storedVersion < SETTINGS_VERSION) {
+        setSetting(SETTINGS_KEY, JSON.stringify([0]))
+        setSetting(SETTINGS_VERSION_KEY, String(SETTINGS_VERSION))
+      }
       const stored = getSetting(SETTINGS_KEY)
       try {
         indices = stored ? JSON.parse(stored) : [0]
