@@ -4334,7 +4334,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
 				}
-				const result = await executeSwap(params, {
+				// Look up cached quote BEFORE executing so we can use netFromAmount to
+				// override the send amount for NEAR Intents bip122 sendMax swaps.
+				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
+				for (const [key, val] of swapQuoteCache) {
+					// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
+					const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
+					if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
+						cachedQuote = val
+						break
+					}
+				}
+				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
+
+				// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
+				// (balance - estimated fee). Use it with isMax=false so buildTx's
+				// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
+				// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
+				let execParams = params
+				if (
+					cachedQuote?.netFromAmount
+					&& params.isMax
+					&& params.fromCaip.startsWith('bip122:')
+					&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
+				) {
+					execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
+					console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
+				}
+
+				const result = await executeSwap(execParams, {
 					wallet: engine.wallet,
 					getAllChains,
 					getRpcUrl,
@@ -4356,25 +4384,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
 					},
 				})
-				// Look up cached quote for real tracker data
-				// Match by CAIP pair + amount + inboundAddress to avoid collisions between
-				// quotes that share the same pair/amount but differ in slippage/addresses
-				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
-				for (const [key, val] of swapQuoteCache) {
-					// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
-					const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
-					if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
-						cachedQuote = val
-						break
-					}
-				}
-				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
 				const scope = getWalletDbScope()
 				// Register swap for tracking (non-blocking)
 				try {
 					const trackParams = cachedQuote?.netFromAmount
-						? { ...params, amount: cachedQuote.netFromAmount }
-						: params
+						? { ...execParams, amount: cachedQuote.netFromAmount }
+						: execParams
 					trackSwap(result, trackParams, {
 						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
 						minimumOutput: cachedQuote?.minimumOutput || '0',
