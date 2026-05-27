@@ -4254,10 +4254,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				let quote = await getSwapQuote(params)
 
-				// NEAR Intents sendMax BTC fix: the first quote commits NEAR Intents to
-				// receiving `params.amount` (full balance), but the UTXO tx only delivers
-				// `balance - miner_fee`. NEAR Intents hard-fails (PARTIAL_DEPOSIT refund)
-				// on any shortfall. Fix: re-quote with the actual net delivery amount.
+				// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
+				// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
+				// only delivers `balance - miner_fee`. NEAR Intents hard-fails on any
+				// shortfall. Fix: re-quote with the actual net delivery amount.
 				if (
 					quote.swapper === 'NEAR Intents'
 					&& params.isMax
@@ -4268,20 +4268,37 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const { estimateUtxoFee } = await import('./txbuilder/utxo')
 						const { getPioneer: getPio } = await import('./pioneer')
 						const pio = await getPio()
-						const btcChain = getAllChains().find(c => c.id === 'bitcoin')
-						const xpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
-						if (btcChain && xpubs.length > 0) {
-							const est = await estimateUtxoFee(pio, btcChain, {
+						const fromChain = getAllChains().find(c => c.caip === params.fromCaip)
+						let estXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+						let estXpub: string | undefined
+						let estAccountPath: number[] | undefined
+						if (fromChain?.id === 'bitcoin') {
+							estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
+						} else if (fromChain) {
+							const results = await (engine.wallet as any).getPublicKeys([{
+								addressNList: fromChain.defaultPath.slice(0, 3),
+								coin: fromChain.coin,
+								scriptType: fromChain.scriptType || 'p2pkh',
+								curve: 'secp256k1',
+							}])
+							estXpub = results?.[0]?.xpub
+							estAccountPath = fromChain.defaultPath.slice(0, 3)
+						}
+						const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
+						if (fromChain && hasXpub) {
+							const est = await estimateUtxoFee(pio, fromChain, {
 								to: quote.inboundAddress || params.fromAddress,
 								amount: params.amount,
 								isMax: true,
 								feeLevel: params.feeLevel,
-								allXpubs: xpubs,
+								...(estXpubs && estXpubs.length > 0
+									? { allXpubs: estXpubs }
+									: { xpub: estXpub, accountPath: estAccountPath }),
 							})
 							if (est && est.feeSat > 0) {
-								const netBtc = (est.netSat / 1e8).toFixed(8)
-								console.log(`[swap] NEAR Intents sendMax: re-quoting with net amount ${netBtc} BTC (fee=${est.feeSat} sat)`)
-								quote = { ...await getSwapQuote({ ...params, amount: netBtc, isMax: false }), netFromAmount: netBtc }
+								const netAmount = (est.netSat / 1e8).toFixed(8)
+								console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
+								quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
 							}
 						}
 					} catch (e: any) {
