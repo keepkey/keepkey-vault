@@ -1703,6 +1703,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         fromAddressOverride: fromAddress,
         toAddressOverride: toAddress,
         integration: liveQuote.integration,
+        swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
       }, 600000)
 

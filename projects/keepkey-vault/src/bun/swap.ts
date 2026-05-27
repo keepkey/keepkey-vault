@@ -689,7 +689,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // before the device is ever asked to sign. Pioneer re-quotes to the adjusted
     // amount, but if that re-quote was skipped for any reason, this catches the
     // shortfall here instead of producing a PARTIAL_DEPOSIT refund.
-    if (result.swapper === 'NEAR Intents' && params.inboundAddress) {
+    if ((params.swapper === 'NEAR Intents' || params.integration === 'nearIntents') && params.inboundAddress) {
       const outputs = unsignedTx.outputs as Array<{ address?: string; value: number }> | undefined
       const depositOut = outputs?.find(o => o.address === params.inboundAddress)
       if (!depositOut || depositOut.value <= 0) {
