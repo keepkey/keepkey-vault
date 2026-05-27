@@ -491,6 +491,10 @@ function GreenCountUp({ value, prefix = '', suffix = '', color = 'var(--teal)', 
 }
 
 const DIALOG_CSS = `
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
   @keyframes kkSwapPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(139,227,196,0.5); }
     50% { box-shadow: 0 0 0 8px rgba(35,220,200,0); }
@@ -746,6 +750,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
   const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
   const [liveNearTxHash, setLiveNearTxHash] = useState<string | undefined>()
+  const [rechecking, setRechecking] = useState(false)
 
   // ── Countdown timer ───────────────────────────────────────────────
   const [countdown, setCountdown] = useState(0)
@@ -856,6 +861,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [txid, phase])
+
+  // ── Manual recheck — fires a single immediate poll on demand ──────
+  const handleRecheck = useCallback(async () => {
+    if (!txid || rechecking) return
+    setRechecking(true)
+    try {
+      const snap = await rpcRequest<any>('refreshSwap', { txid })
+      if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
+      if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+    } catch { /* swap-update push covers the failure */ }
+    setRechecking(false)
+  }, [txid, rechecking])
 
   // Reset live tracking when phase changes away from submitted.
   // ALL live-* fields must clear here; otherwise values from a prior
@@ -2683,6 +2700,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </Button>
                 </Flex>
                 <Flex gap="2">
+                  {!isSwapComplete && !isSwapFailed && (
+                    <Button size="xs" flex="1" variant="outline"
+                      borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
+                      _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
+                      isDisabled={rechecking}
+                      onClick={handleRecheck}>
+                      <HStack gap="1">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                          style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
+                          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                        </svg>
+                        <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
+                      </HStack>
+                    </Button>
+                  )}
                   {(() => {
                     const safeTxid = txid ?? ''
                     console.log('[explorer-debug]', fromAsset.chainId, safeTxid)
