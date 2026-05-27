@@ -1770,6 +1770,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					justify="center"
 					w="100%"
 					px="3"
+					pt="6"
 					overflow="hidden"
 					position="relative"
 					zIndex={1}
