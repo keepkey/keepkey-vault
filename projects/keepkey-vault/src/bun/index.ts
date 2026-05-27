@@ -5526,9 +5526,13 @@ engine.on('state-change', (state) => {
 		pioneerSocket.start()
 	}
 	if (state.state === 'disconnected') {
-		btcAccounts.reset()
-		evmAddresses.reset()
-		console.log('[Vault] Device disconnected: cleared in-memory account managers')
+		// Keep btcAccounts + evmAddresses in memory across disconnect so the
+		// watch-only / cache-only UI (sidebar account drop-down, per-account
+		// balances) keeps rendering the last-known per-account data after the
+		// device is unplugged. They get re-derived on reconnect via
+		// initialize(wallet); a real seed change resets them via the
+		// seed-changed handler below.
+		console.log('[Vault] Device disconnected: keeping in-memory account managers for watch-only')
 		pioneerSocket?.stop()
 		pioneerSocket = null
 		stopEventStream()

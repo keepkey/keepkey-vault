@@ -71,11 +71,18 @@ const VIEWS: Array<{ id: DashboardView; label: string; description: string; prev
 	},
 ]
 
-export function ViewPickerButton() {
+/** assetCount is the number of items the current view would render (chains in
+ *  All Chains view, or native + clean tokens in a drilled chain). When < 2,
+ *  comparison views (heatmap, stack) are hidden because they can't compare
+ *  one thing. */
+export function ViewPickerButton({ assetCount }: { assetCount?: number } = {}) {
 	const { viewMode, setViewMode } = useDashboardView()
 	const [open, setOpen] = useState(false)
 	const wrapRef = useRef<HTMLDivElement>(null)
-	const activeView = VIEWS.find(v => v.id === viewMode) ?? VIEWS[0]
+	const visibleViews = assetCount !== undefined && assetCount < 2
+		? VIEWS.filter(v => v.id === 'orbital' || v.id === 'donut')
+		: VIEWS
+	const activeView = visibleViews.find(v => v.id === viewMode) ?? visibleViews[0]
 
 	// Close on outside click / Esc
 	useEffect(() => {
@@ -139,7 +146,7 @@ export function ViewPickerButton() {
 					zIndex={Z.nav + 1}
 					role="menu"
 				>
-					{VIEWS.map((v) => {
+					{visibleViews.map((v) => {
 						const isActive = viewMode === v.id
 						return (
 							<Box

@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
+import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
@@ -29,6 +29,8 @@ import { useDashboardView } from "../lib/dashboardViewContext"
 import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { categorizeTokens } from "../../shared/spamFilter"
+import { useBtcAccounts } from "../hooks/useBtcAccounts"
+import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
 
@@ -135,10 +137,14 @@ function OrbitalView({
 	privateModeEnabled: boolean
 }) {
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(440)
+	const [size, setSize] = useState(540)
 
 	useEffect(() => {
-		const compute = () => setSize(Math.min(440, Math.max(280, window.innerWidth - 80)))
+		const compute = () => {
+			const w = window.innerWidth - 420 // minus sidebar
+			const h = window.innerHeight - 220 // minus topnav + utility row
+			setSize(Math.max(320, Math.min(640, w, h)))
+		}
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
@@ -429,34 +435,13 @@ function TokenSatellite({
 	)
 }
 
-/** Heatmap canvas wrapper — measures its own top in the viewport on mount
- *  and on resize, and sets an explicit pixel height so the squarified
- *  treemap inside fills exactly the visible area (no tiles below the fold). */
-function HeatmapHost({ tiles }: { tiles: Parameters<typeof HeatmapView>[0]["tiles"] }) {
-	const ref = useRef<HTMLDivElement>(null)
-	const [height, setHeight] = useState(0)
-
-	useEffect(() => {
-		const measure = () => {
-			const el = ref.current
-			if (!el) return
-			const rect = el.getBoundingClientRect()
-			const margin = 12 // breathing room above the window's bottom edge
-			const available = window.innerHeight - rect.top - margin
-			setHeight(Math.max(220, Math.floor(available)))
-		}
-		measure()
-		window.addEventListener("resize", measure)
-		// Re-measure on next paint in case parent flex/banner state shifts
-		const raf = requestAnimationFrame(measure)
-		return () => {
-			window.removeEventListener("resize", measure)
-			cancelAnimationFrame(raf)
-		}
-	}, [])
-
+/** Heatmap canvas — fills the chart-slot height set by the Dashboard.
+ *  When drilled (sharing space with the token list), caps at a smaller maxW
+ *  for visual consistency with the other view modes. In All Chains view, the
+ *  chart slot is full-pane so the heatmap expands wider too. */
+function HeatmapHost({ tiles, drilled }: { tiles: Parameters<typeof HeatmapView>[0]["tiles"]; drilled: boolean }) {
 	return (
-		<Box ref={ref} w="100%" alignSelf="stretch" h={height ? `${height}px` : "70vh"}>
+		<Box w="100%" maxW={drilled ? "640px" : "1100px"} mx="auto" h="100%">
 			<HeatmapView tiles={tiles} />
 		</Box>
 	)
@@ -480,10 +465,10 @@ function ChainDetailOrbital({
 	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
 }) {
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(440)
+	const [size, setSize] = useState(380)
 
 	useEffect(() => {
-		const compute = () => setSize(Math.min(520, Math.max(320, window.innerWidth - 420)))
+		const compute = () => setSize(Math.min(380, Math.max(280, window.innerWidth - 420)))
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
@@ -677,6 +662,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setSelectedChain(chain)
 	}, [])
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
+	// Per-account (BTC) and per-address (EVM) balances for the sidebar account drop-down.
+	// The Bun side already derives + tracks these; we only render what's already there.
+	const { btcAccounts: btcAccountSet, selectXpub: btcSelectXpub } = useBtcAccounts()
+	const { evmAddresses: evmAddressSet, selectIndex: evmSelectIndex } = useEvmAddresses()
 	const [loadingBalances, setLoadingBalances] = useState(false)
 	const [initialLoaded, setInitialLoaded] = useState(false)
 	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
@@ -1125,6 +1114,30 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	const allChains = useMemo(() => [...CHAINS, ...customChainDefs], [customChainDefs])
 
+	// Per-account scoping for drilled-view rendering. When an EVM account is
+	// selected in the sidebar drop-down, the center chart, native ETH balance,
+	// and token list should show ONLY that account's holdings — not the
+	// chain-wide aggregate. Non-EVM chains and absent per-account data fall
+	// back to the aggregate balance.
+	const getEffectiveBalance = useCallback((chainId: string): ChainBalance | undefined => {
+		const agg = balances.get(chainId)
+		const chain = allChains.find(c => c.id === chainId)
+		if (!chain || chain.chainFamily !== 'evm') return agg
+		const selected = evmAddressSet.addresses.find(a => a.addressIndex === evmAddressSet.selectedIndex)
+		const cb = selected?.chainBalances?.[chainId]
+		if (!cb || !selected) return agg
+		return {
+			chainId,
+			symbol: agg?.symbol || chain.symbol,
+			balance: cb.balance,
+			balanceUsd: cb.balanceUsd,
+			nativeBalanceUsd: cb.nativeBalanceUsd,
+			address: selected.address,
+			tokens: cb.tokens,
+			updatedAt: agg?.updatedAt,
+		}
+	}, [balances, allChains, evmAddressSet])
+
 	// Warm the browser-level image cache + hold live Image references so chain
 	// and token logos don't visibly re-fetch when the user switches between
 	// chains in the sidebar.
@@ -1158,7 +1171,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const drilledChainTokensChartData = useMemo<DonutChartItem[]>(() => {
 		if (!drilledChainId) return []
 		const chain = allChains.find(c => c.id === drilledChainId)
-		const bal = balances.get(drilledChainId)
+		const bal = getEffectiveBalance(drilledChainId)
 		if (!chain || !bal) return []
 		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 		const cleanTokens = bal.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
@@ -1174,7 +1187,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				out.push({ name: tok.symbol, value: tok.balanceUsd ?? 0, color: TOKEN_PALETTE[i % TOKEN_PALETTE.length] })
 			})
 		return out.filter(d => d.value > 0)
-	}, [drilledChainId, allChains, balances, visibilityMap])
+	}, [drilledChainId, allChains, getEffectiveBalance, visibilityMap])
 
 	// When drilled but no balance data yet, synthesise a single placeholder slice
 	// so the donut always renders something for the selected chain.
@@ -1353,15 +1366,54 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const hasBalance = balNum > 0 || usdNum > 0
 						const tokenCount = clean?.cleanTokenCount || 0
 						const isActive = drilledChainId === chain.id
+						// Per-account (BIP44) sub-rows: BTC accountIndex or EVM addressIndex.
+						// Only chains that have multiple funded accounts/addresses get a drop-down.
+						const evmSelectedIndex = evmAddressSet.selectedIndex
+						const btcSelected = btcAccountSet.selectedXpub
+						const accountRows: Array<{
+							key: string; index: number; balance: number; balanceUsd: number;
+							isSelected: boolean; address: string; onSelect: () => void;
+						}> = chain.id === 'bitcoin'
+							? btcAccountSet.accounts
+								.map(acc => {
+									const xp = acc.xpubs.find(x => x.scriptType === (btcSelected?.scriptType ?? 'p2wpkh')) || acc.xpubs[0]
+									return {
+										key: `btc-${acc.accountIndex}`,
+										index: acc.accountIndex,
+										balance: acc.xpubs.reduce((s, x) => s + parseFloat(x.balance || '0'), 0),
+										balanceUsd: acc.totalBalanceUsd,
+										isSelected: btcSelected?.accountIndex === acc.accountIndex,
+										address: xp?.xpub || '',
+										onSelect: () => btcSelectXpub(acc.accountIndex, btcSelected?.scriptType ?? 'p2wpkh'),
+									}
+								})
+								.filter(a => a.balanceUsd > 0 || a.balance > 0)
+							: chain.chainFamily === 'evm'
+								? evmAddressSet.addresses
+									.map(addr => ({
+										key: `evm-${addr.addressIndex}`,
+										index: addr.addressIndex,
+										balance: parseFloat(addr.chainBalances?.[chain.id]?.balance || '0'),
+										balanceUsd: addr.chainBalances?.[chain.id]?.balanceUsd || 0,
+										isSelected: evmSelectedIndex === addr.addressIndex,
+										address: addr.address,
+										onSelect: () => evmSelectIndex(addr.addressIndex),
+									}))
+									.filter(a => a.balanceUsd > 0 || a.balance > 0)
+								: []
+						// Show the per-account drop-down only for the currently drilled
+						// chain and only when there are 2+ funded accounts — a single
+						// funded account is already represented by the chain row itself.
+						const showAccountRows = isActive && accountRows.length > 1
 						return (
+							<Fragment key={chain.id}>
 							<Box
-								key={chain.id}
 								as="button"
 								onClick={() => setDrilledChainId(prev => prev === chain.id ? null : chain.id)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
-								mb="1.5"
+								mb={showAccountRows ? "1" : "1.5"}
 								borderRadius="lg"
 								bg={isActive ? "kk.cardBgHover" : "transparent"}
 								border="1px solid"
@@ -1397,6 +1449,60 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									</Box>
 								</Flex>
 							</Box>
+							{showAccountRows && (
+								<Box pl="2" mb="1.5" ml="5">
+									{accountRows.map(acc => {
+										const snippet = acc.address
+											? (acc.address.startsWith('0x')
+												? `${acc.address.slice(0, 6)}…${acc.address.slice(-4)}`
+												: `${acc.address.slice(0, 6)}…${acc.address.slice(-4)}`)
+											: ''
+										return (
+											<Flex
+												key={acc.key}
+												as="button"
+												onClick={acc.onSelect}
+												w="100%"
+												align="center"
+												justify="space-between"
+												gap="2"
+												py="1.5"
+												pl="2.5"
+												pr="2"
+												mb="0.5"
+												borderRadius="md"
+												bg={acc.isSelected ? `${chain.color}15` : "transparent"}
+												borderLeft="2px solid"
+												borderLeftColor={acc.isSelected ? chain.color : `${chain.color}25`}
+												cursor="pointer"
+												transition="all 0.15s"
+												_hover={{ bg: acc.isSelected ? `${chain.color}22` : "kk.cardBg", borderLeftColor: chain.color }}
+												textAlign="left"
+											>
+												<Box minW="0" flex="1">
+													<Text fontSize="11px" color={acc.isSelected ? "var(--text-0)" : "var(--text-1)"} fontWeight={acc.isSelected ? "600" : "500"} lineHeight="1.2">
+														Account #{acc.index}
+													</Text>
+													{snippet && (
+														<Text fontSize="9px" color="var(--text-2)" lineHeight="1.2" fontFamily="mono" mt="0.5">
+															{snippet}
+														</Text>
+													)}
+												</Box>
+												<Box textAlign="right" flexShrink={0}>
+													<Text fontSize="11px" color="var(--text-0)" fontWeight={acc.isSelected ? "600" : "500"} lineHeight="1.2">
+														{privateModeEnabled ? "••••" : `$${acc.balanceUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+													</Text>
+													<Text fontSize="9px" color="var(--text-2)" lineHeight="1.2" mt="0.5">
+														{formatBalance(String(acc.balance))} {chain.symbol}
+													</Text>
+												</Box>
+											</Flex>
+										)
+									})}
+								</Box>
+							)}
+							</Fragment>
 						)
 					})}
 
@@ -1699,20 +1805,40 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    centered) and a fixed-min-height "below" area. The split anchors
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
-			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "60vh", md: "70vh" } as unknown as string)}>
-				{/* View picker — top center of the hero area */}
-				<Flex justify="center" pt="2" pb="1">
-					<ViewPickerButton />
-				</Flex>
+			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"} position="relative">
+				{/* View picker — absolute top-right of the canvas */}
+				<Box position="absolute" top="2" right="2" zIndex={3}>
+					<ViewPickerButton assetCount={(() => {
+						if (drilledChainId) {
+							const dchain = visibleChains.find(c => c.id === drilledChainId)
+							const bal = dchain ? getEffectiveBalance(dchain.id) : undefined
+							const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+							const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+							const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0))
+							return (nativeUsd > 0 ? 1 : 0) + cleanTokens.filter(t => (t.balanceUsd ?? 0) > 0).length
+						}
+						return Array.from(cleanBalanceUsd.values()).filter(b => b.usd > 0).length
+					})()} />
+				</Box>
 				{/* Top: orbital widget / donut / welcome — vertically centered.
 				    overflow:hidden prevents the orbital box from visually and
 				    pointer-event-wise spilling into the action button row below. */}
-				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'} overflow="hidden" position="relative" zIndex={1}>
+				<Flex
+					h={drilledChainId ? "380px" : "62vh"}
+					align="center"
+					justify="center"
+					w="100%"
+					px="3"
+					pt="6"
+					overflow="hidden"
+					position="relative"
+					zIndex={1}
+				>
 					{hasAnyBalance ? (() => {
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
 							if (!dchain) return null
-							const bal = balances.get(dchain.id)
+							const bal = getEffectiveBalance(dchain.id)
 							const overrides = new Map(
 								Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
 							)
@@ -1749,7 +1875,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								? (() => {
 									const dchain = visibleChains.find(c => c.id === drilledChainId)
 									if (!dchain) return []
-									const bal = balances.get(dchain.id)
+									const bal = getEffectiveBalance(dchain.id)
 									const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 									const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
 									const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
@@ -1757,18 +1883,56 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									return buildChainDetailTiles(dchain, bal, cleanTokens, nativeUsd, (tok) => openChainPage(dchain, undefined, tok))
 								})()
 								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
+							// Heatmap is a comparison view — needs 2+ tiles to be meaningful.
+							// Fall back to the orbital view when there's only one (or zero)
+							// asset, since a single-tile heatmap (or single-slice donut) is
+							// visually meaningless. Orbital still reads well with one item.
+							if (tiles.length < 2) {
+								if (drilledChainId) {
+									const dchain = visibleChains.find(c => c.id === drilledChainId)
+									if (dchain) {
+										const bal = getEffectiveBalance(dchain.id)
+										const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+										const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+										const nativeUsd = bal?.nativeBalanceUsd ?? bal?.balanceUsd ?? 0
+										return (
+											<ChainDetailOrbital
+												chain={dchain}
+												balance={bal}
+												nativeBalanceUsd={nativeUsd}
+												cleanTokens={cleanTokens}
+												onSelectChain={() => openChainPage(dchain)}
+												onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
+											/>
+										)
+									}
+								}
+								return (
+									<OrbitalView
+										chains={visibleChains}
+										balances={balances}
+										cleanBalanceUsd={cleanBalanceUsd}
+										totalUsd={totalUsd}
+										totalDollars={totalDollars}
+										totalCents={totalCents}
+										cleanTokenTotal={cleanTokenTotal}
+										onSelect={(c) => setDrilledChainId(c.id)}
+										privateModeEnabled={privateModeEnabled}
+									/>
+								)
+							}
 							// Full-canvas: dynamically measure where the heatmap container
 							// starts in the viewport and stretch it down to the bottom edge.
 							// Static `calc(100vh - <fudge>)` got the offset wrong because of
 							// banners / utility row variability.
-							return <HeatmapHost tiles={tiles} />
+							return <HeatmapHost tiles={tiles} drilled={!!drilledChainId} />
 						}
 						if (viewMode === 'stack') {
 							const items: StackedBarItem[] = drilledChainId
 								? (() => {
 									const dchain = visibleChains.find(c => c.id === drilledChainId)
 									if (!dchain) return []
-									const bal = balances.get(dchain.id)
+									const bal = getEffectiveBalance(dchain.id)
 									const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 									const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
 									const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
@@ -1804,14 +1968,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						return (
 							<DonutChart
 								data={chartData}
-								size={380}
+								size={220}
 								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 								onClickSlice={(i) => {
 									if (drilledChainId) {
 										// Drilled view: slices are tokens — open their AssetPage
 										const dchain = visibleChains.find(c => c.id === drilledChainId)
-										const bal = dchain ? balances.get(dchain.id) : undefined
+										const bal = dchain ? getEffectiveBalance(dchain.id) : undefined
 										const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 										const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
 										const item = chartData[i]
@@ -1880,10 +2044,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					px="3"
 					position="relative"
 					zIndex={2}
-					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '200px'}
-					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
-					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '3'}
-					gap="3"
+					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '140px'}
+					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '0'}
+					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '2'}
+					gap="1"
 				>
 					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
@@ -1902,7 +2066,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										if (drilledChainId) {
 											// Drilled view: legend items are tokens
 											const dchain = visibleChains.find(c => c.id === drilledChainId)
-											const bal = dchain ? balances.get(dchain.id) : undefined
+											const bal = dchain ? getEffectiveBalance(dchain.id) : undefined
 											const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 											const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
 											const item = chartData[i]
@@ -1925,7 +2089,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					{hasAnyBalance && drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
-						const bal = balances.get(dchain.id)
+						const bal = getEffectiveBalance(dchain.id)
 						const overrides = new Map(
 							Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),
 						)
@@ -1987,13 +2151,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									))}
 								</Flex>
 
-								{/* Token list (only when the chain has clean tokens). */}
+								{/* Token list (only when the chain has clean tokens).
+								    maxH + overflowY="auto" keep the chart+actions pinned while
+								    the user scrolls through a long token list independently. */}
 								{cleanTokens.length > 0 && (
-									<Box w="100%">
-										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="2" px="1">
+									<Box w="100%" mt="-1">
+										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="1" px="1">
 											{t("tokensCount", { count: cleanTokens.length })}
 										</Text>
-										<Flex direction="column" gap="1">
+										<Flex direction="column" gap="0.5" maxH="38vh" overflowY="auto" pr="1" className="kk-tokens-scroll">
 											{cleanTokens
 												.slice()
 												.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
@@ -2004,7 +2170,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 														onClick={() => openChainPage(dchain, undefined, tok)}
 														align="center"
 														gap="2.5"
-														p="2"
+														px="2"
+														py="1.5"
 														borderRadius="md"
 														bg="transparent"
 														_hover={{ bg: "kk.cardBg" }}

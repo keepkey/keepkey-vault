@@ -187,8 +187,10 @@ export function ActivityTracker() {
     <>
       <style>{TRACKER_CSS}</style>
 
-      {/* Floating bubble — always visible */}
-      <Box position="fixed" bottom="20px" right="20px" zIndex={Z.nav + 1}>
+      {/* Floating bubble — always visible.
+          transform-origin pins growth to the bottom-right corner so the
+          bounce/hover scale doesn't push the pill past the viewport edge. */}
+      <Box position="fixed" bottom="28px" right="28px" zIndex={Z.nav + 1}>
         <Box
           as="button"
           display="flex"
@@ -201,10 +203,11 @@ export function ActivityTracker() {
           px="3"
           py="1.5"
           cursor="pointer"
+          transformOrigin="bottom right"
           _hover={{ bg: displayCount > 0 ? "rgba(35,220,200,0.25)" : "rgba(255,255,255,0.1)", transform: "scale(1.05)" }}
           transition="all 0.2s"
           onClick={handleOpen}
-          style={{ animation: bubbleAnimation }}
+          style={{ animation: bubbleAnimation, transformOrigin: "bottom right" }}
         >
           {activeSwapCount > 0 ? (
             <Box w="8px" h="8px" borderRadius="full" bg="#23DCC8" style={{ animation: 'kkActivityPulse 1.5s ease-in-out infinite' }} />
