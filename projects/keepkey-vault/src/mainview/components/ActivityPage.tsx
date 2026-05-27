@@ -292,10 +292,11 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
 
   // Stats
   const stats = useMemo(() => {
-    const total = activities.length + pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded').length
+    const activeSwaps = pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded')
+    const total = activities.length + activeSwaps.length
     const sent = activities.filter(a => a.type === 'send').length
     const received = activities.filter(a => a.type === 'receive').length
-    const swaps = pendingSwaps.length
+    const swaps = activeSwaps.length
     return { total, sent, received, swaps }
   }, [activities, pendingSwaps])
 

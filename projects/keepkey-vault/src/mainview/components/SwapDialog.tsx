@@ -951,6 +951,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       .catch(() => {})
   }, [open])
 
+  // ── Live balance sync — keep sendMax math current ──────────────────
+  // Dashboard subscribes to balance-updated; SwapDialog must too, or
+  // sendMax calculations run against the snapshot from dialog-open time.
+  useEffect(() => {
+    if (!open) return
+    return onRpcMessage('balance-updated', (updated: ChainBalance) => {
+      setBalances(prev => {
+        const idx = prev.findIndex(b => b.chainId === updated.chainId)
+        if (idx === -1) return [...prev, updated]
+        const next = [...prev]
+        next[idx] = updated
+        return next
+      })
+    })
+  }, [open])
+
   // ── Load user-added custom tokens ─────────────────────────────────
   // Refetch each time the picker is opened so a token added in the previous
   // picker session (via the paste-contract Add lane) is visible immediately.

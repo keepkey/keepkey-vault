@@ -21,7 +21,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 // without routing through AssetPage.
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
-import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
@@ -692,6 +692,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [activeSwaps, setActiveSwaps] = useState<PendingSwap[]>([])
+	const dismissedSwapTxids = useRef(new Set<string>())
+	const refreshGenRef = useRef(0)
+	const loadingBalancesRef = useRef(false)
+	// Records when each chain's balance was last set via a single-chain balance-updated event.
+	// Used by full refreshes to skip chains that received a fresher per-chain update while
+	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
+	const chainLastUpdatedRef = useRef(new Map<string, number>())
 
 	// Fetch pending swaps on mount and keep them live via swap-update messages.
 	// Non-terminal swaps mean funds are in-flight — we surface a banner so the
@@ -699,9 +706,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	useEffect(() => {
 		const TERMINAL = new Set(['completed', 'failed', 'refunded'])
 		rpcRequest<PendingSwap[]>('getPendingSwaps', undefined, 5000)
-			.then(r => { if (r) setActiveSwaps(r.filter(s => !TERMINAL.has(s.status))) })
+			.then(r => { if (r) setActiveSwaps(r.filter(s => !TERMINAL.has(s.status) && !dismissedSwapTxids.current.has(s.txid))) })
 			.catch(() => {})
 		const unsub = onRpcMessage('swap-update', (update: SwapStatusUpdate) => {
+			if (dismissedSwapTxids.current.has(update.txid)) return
 			setActiveSwaps(prev => {
 				const next = prev.filter(s => s.txid !== update.txid)
 				if (!TERMINAL.has(update.status)) {
@@ -711,7 +719,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					} else {
 						// New swap started after mount — fetch full details
 						rpcRequest<PendingSwap[]>('getPendingSwaps', undefined, 5000)
-							.then(r => { if (r) setActiveSwaps(r.filter(s => !TERMINAL.has(s.status))) })
+							.then(r => { if (r) setActiveSwaps(r.filter(s => !TERMINAL.has(s.status) && !dismissedSwapTxids.current.has(s.txid))) })
 							.catch(() => {})
 					}
 				}
@@ -969,12 +977,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Manual refresh: fetch live data from Pioneer API
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	const refreshBalances = useCallback(async (forceRefresh = false) => {
-		if (loadingBalances || watchOnly) return
+		if (watchOnly) return
+		// Non-forced calls yield to any in-progress refresh (avoids non-forced swap-complete
+		// poll superseding an already-running forced user refresh).
+		if (!forceRefresh && loadingBalancesRef.current) return
+		// Generation counter: discard responses from older concurrent full refreshes.
+		const gen = ++refreshGenRef.current
+		const refreshStartedAt = Date.now()
+		loadingBalancesRef.current = true
 		setLoadingBalances(true)
 
 		try {
 			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
-			if (result) {
+			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
 				console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)}`)
@@ -987,31 +1002,33 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				// No-walk-backwards merge: start from current displayed balances so chains
-				// from failed Pioneer chunks (which are absent from `result`) stay visible.
-				// Only update a chain if the new value is non-zero, or if we had no prior data.
-				const map = new Map<string, ChainBalance>(balances)
-				for (const b of result) {
-					const prev = map.get(b.chainId)
-					if (!prev || b.balanceUsd > 0 || parseFloat(b.balance || '0') > 0) {
+				// Merge: skip chains where a per-chain balance-updated arrived AFTER this
+				// full refresh started — that single-chain data is fresher than our bulk result.
+				setBalances(prev => {
+					const map = new Map(prev)
+					for (const b of result) {
+						if ((chainLastUpdatedRef.current.get(b.chainId) ?? 0) > refreshStartedAt) continue
 						map.set(b.chainId, b)
-					} else {
-						console.log(`[Dashboard] Preserving prior ${b.chainId} balance — Pioneer returned 0`)
 					}
-				}
-				setBalances(map)
+					return map
+				})
 				setCacheUpdatedAt(Date.now())
 				setHasEverRefreshed(true)
 				clearPioneerError()
 			}
 		} catch (e: any) {
-			const message = e?.message || 'Unable to refresh balances'
-			console.warn('[Dashboard] getBalances failed:', message)
-			stagePioneerError({ message, url: 'the configured balance server' })
+			if (gen === refreshGenRef.current) {
+				const message = e?.message || 'Unable to refresh balances'
+				console.warn('[Dashboard] getBalances failed:', message)
+				stagePioneerError({ message, url: 'the configured balance server' })
+			}
 		}
 
-		setLoadingBalances(false)
-	}, [loadingBalances, watchOnly, clearPioneerError, stagePioneerError])
+		if (gen === refreshGenRef.current) {
+			loadingBalancesRef.current = false
+			setLoadingBalances(false)
+		}
+	}, [watchOnly, clearPioneerError, stagePioneerError])
 
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session
 	const prevZcashRef = useRef(zcashEnabled)
@@ -1054,6 +1071,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
+			const receivedAt = Date.now()
+			chainLastUpdatedRef.current.set(updated.chainId, receivedAt)
 			setBalances(prev => {
 				const old = prev.get(updated.chainId)
 				const oldUsd = old?.balanceUsd ?? 0
@@ -1066,9 +1085,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				next.set(updated.chainId, updated)
 				return next
 			})
-			setCacheUpdatedAt(Date.now())
+			setCacheUpdatedAt(receivedAt)
 		})
 	}, [])
+
+	// SSE push notifications: trigger single-chain refresh when an inbound tx is detected
+	useEffect(() => {
+		return onRpcMessage('tx-push-received', (payload: { chain?: string; txid?: string }) => {
+			if (!payload.chain) return
+			const allChains = [...CHAINS, ...customChainDefs]
+			const hit = allChains.find(c => payload.chain === c.caip || payload.chain?.startsWith(`${c.networkId}/`))
+			if (hit) rpcFire('getBalance', { chainId: hit.id })
+		})
+	}, [customChainDefs])
 
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(
@@ -1523,7 +1552,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							justifyContent="center"
 							color="whiteAlpha.400"
 							_hover={{ color: "var(--rose)" }}
-							onClick={(e) => { e.stopPropagation(); setActiveSwaps(prev => prev.filter(s => s.txid !== swap.txid)) }}
+							onClick={(e) => { e.stopPropagation(); dismissedSwapTxids.current.add(swap.txid); setActiveSwaps(prev => prev.filter(s => s.txid !== swap.txid)) }}
 							title="Dismiss"
 						>
 							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">

@@ -1170,15 +1170,20 @@ async function buildRelaySwapTx(
   if (nativeBalance === undefined) {
     throw new Error(`Unable to verify ${fromChain.symbol} balance for Relay transaction — refusing to sign. Try refreshing the quote.`)
   }
-  // Deposit-channel sendMax fix: quote was generated with the full balance as the
-  // send amount, but gas must also come from that same balance. Reduce the deposit
-  // value by the gas reserve so the tx fits without requiring a re-quote.
-  // Only applies to native-asset deposit channels (Chainflip) — ERC-20
-  // sources never have value > 0, and standard Relay calldata txs carry exact amounts.
+  // Deposit-channel sendMax fix: for Chainflip / NEAR Intents the deposited
+  // value is what we control — adjust it to fit the live balance when needed.
+  // Two cases covered:
+  //   (a) isMax=true: frontend sent full balance, no gas reserve subtracted yet
+  //   (b) isMax=false: frontend pre-subtracted a gas reserve, but live balance
+  //       has since changed (stale cache) — trim to what we actually have
+  // Standard Relay calldata txs are NOT adjustable here; they fail at line 1192+.
   let effectiveRelayValue = relayValue
-  if (params.isMax && relay.isDepositChannel && !isErc20Source && nativeBalance > relayGasReserve) {
-    effectiveRelayValue = nativeBalance - relayGasReserve
-    console.log(`${TAG} deposit channel sendMax: adjusted relay value ${formatWei(relayValue, fromChain.decimals)} → ${formatWei(effectiveRelayValue, fromChain.decimals)} ${fromChain.symbol} (gas: ${formatWei(relayGasReserve, fromChain.decimals)})`)
+  if (relay.isDepositChannel && !isErc20Source && nativeBalance > relayGasReserve) {
+    const wouldExceed = relayValue + relayGasReserve > nativeBalance
+    if (params.isMax || wouldExceed) {
+      effectiveRelayValue = nativeBalance - relayGasReserve
+      console.log(`${TAG} deposit channel value trim (isMax=${params.isMax}, stale=${wouldExceed && !params.isMax}): ${formatWei(relayValue, fromChain.decimals)} → ${formatWei(effectiveRelayValue, fromChain.decimals)} ${fromChain.symbol} (live bal: ${formatWei(nativeBalance, fromChain.decimals)}, gas: ${formatWei(relayGasReserve, fromChain.decimals)})`)
+    }
   }
   const effectiveRelayRequired = effectiveRelayValue + relayGasReserve + approveGasReserve
   console.log(`${TAG} relay gas check: value=${formatWei(effectiveRelayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(effectiveRelayRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
@@ -1192,7 +1197,8 @@ async function buildRelaySwapTx(
     throw new Error(
       `Insufficient ${fromChain.symbol} for Relay transaction: need ${formatWei(effectiveRelayRequired, fromChain.decimals)} ` +
       `(${formatWei(effectiveRelayValue, fromChain.decimals)} value + ${formatWei(relayGasReserve, fromChain.decimals)} gas), ` +
-      `have ${formatWei(nativeBalance, fromChain.decimals)}.`
+      `have ${formatWei(nativeBalance, fromChain.decimals)}. ` +
+      `If you used MAX, your balance may have changed — go back and re-enter MAX with your current balance.`
     )
   }
 

@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRe
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
-import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
@@ -355,14 +355,25 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		return onRpcMessage("tx-push-received", (payload: { chain?: string; txid?: string }) => {
 			if (!payload.chain && !payload.txid) return // truly empty pings are not actionable
 			if (payload.chain) {
-				// Chain-scoped push: only refresh if it matches this asset or the active swap output
-				const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
-				const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
+				// Chain-scoped push: only refresh if it matches this asset or the active swap output.
+				// payload.chain is CAIP-19 (e.g. "eip155:1/slip44:60") — match against exact caip or
+				// networkId with trailing slash to avoid eip155:1 matching eip155:10 (Optimism).
+				const matches = payload.chain === chain.caip || payload.chain.startsWith(`${chain.networkId}/`)
+				const outputDef = swapOutputChainId ? CHAINS.find(c => c.id === swapOutputChainId) : null
+				const matchesOutput = outputDef
+					? (payload.chain === outputDef.caip || payload.chain.startsWith(`${outputDef.networkId}/`))
+					: false
 				if (!matches && !matchesOutput) return
+				// Output-chain match without current-chain match: refresh the output chain,
+				// not this page's chain (handleRefresh only fetches chain.id).
+				if (matchesOutput && !matches) {
+					rpcFire('getBalance', { chainId: swapOutputChainId! })
+					return
+				}
 			}
 			handleRefresh()
 		})
-	}, [handleRefresh, chain.id, chain.symbol, swapOutputChainId])
+	}, [handleRefresh, chain.caip, chain.networkId, swapOutputChainId])
 
 	// Activity preview
 	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])

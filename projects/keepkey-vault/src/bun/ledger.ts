@@ -182,9 +182,16 @@ export function recordJournalEntry(params: {
   return id
 }
 
+const lastRectifyMs = new Map<string, number>()
+const RECTIFY_INTERVAL_MS = 5 * 60 * 1000
+
 export function rectifyWallet(deviceId: string, balances: ChainBalance[]): void {
   if (!getDb()) return
+  const now = Date.now()
   for (const b of balances) {
+    const throttleKey = `${deviceId}:${b.chainId}`
+    if (now - (lastRectifyMs.get(throttleKey) ?? 0) < RECTIFY_INTERVAL_MS) continue
+
     const current = parseFloat(b.balance) || 0
     if (!Number.isFinite(current)) continue
 
@@ -193,7 +200,10 @@ export function rectifyWallet(deviceId: string, balances: ChainBalance[]): void 
     const ledgerBal = accountBalanceAt(assetAccountId, b.symbol)
     const diff = current - ledgerBal
 
+    // Only stamp the throttle after confirming there's a real diff to write.
+    // A no-op (diff ≈ 0) must not consume the 5-minute window.
     if (Math.abs(diff) < 1e-12) continue
+    lastRectifyMs.set(throttleKey, now)
 
     recordJournalEntry({
       deviceId,

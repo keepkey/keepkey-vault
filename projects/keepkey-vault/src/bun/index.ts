@@ -5483,16 +5483,32 @@ engine.on('state-change', (state) => {
 				const REFRESH_EVENTS = new Set(['transaction:incoming', 'balance:update', 'balance:cache:update'])
 				if (!REFRESH_EVENTS.has(event)) return
 				const d = data as any
-				const chain = d?.chain ?? d?.symbol ?? undefined
 				const address = d?.address ?? undefined
 				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				// Only forward events with a known chain — chain-less cache pings can't be scoped
+				// Normalize whatever Pioneer sends into a canonical CAIP-19 string.
+				// Pioneer may send: CAIP-19 (has "/"), CAIP-2 ("eip155:1"), internal id
+				// ("ethereum"), or raw symbol ("ETH"). Symbol is ambiguous (ETH = Ethereum,
+				// Arbitrum, Optimism, Base) so we never fall back to it.
+				const allChains = [...CHAINS, ...customChainDefs]
+				let chain: string | undefined
+				const raw: string | undefined = d?.chain
+				if (raw) {
+					if (raw.includes('/')) {
+						chain = raw // already CAIP-19
+					} else {
+						// CAIP-2 (networkId like "eip155:1") or internal id like "ethereum"
+						const def = allChains.find(c => c.networkId === raw || c.id === raw)
+						chain = def?.caip
+					}
+				}
 				if (!chain) return
-				const key = chain
-				const existing = pioneerEventDebounce.get(key)
+				// Debounce per network (CAIP-2 prefix) so multiple token pushes on the same
+				// EVM network collapse into a single refresh rather than bypassing the debounce.
+				const networkId = chain.split('/')[0]
+				const existing = pioneerEventDebounce.get(networkId)
 				if (existing) clearTimeout(existing)
-				pioneerEventDebounce.set(key, setTimeout(() => {
-					pioneerEventDebounce.delete(key)
+				pioneerEventDebounce.set(networkId, setTimeout(() => {
+					pioneerEventDebounce.delete(networkId)
 					console.log(`[PioneerSocket] push event '${event}' chain=${chain} → forwarding`)
 					try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
 				}, 2000))
