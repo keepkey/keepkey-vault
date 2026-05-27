@@ -182,8 +182,14 @@ export function recordJournalEntry(params: {
   return id
 }
 
+const lastRectifyMs = new Map<string, number>()
+const RECTIFY_INTERVAL_MS = 5 * 60 * 1000
+
 export function rectifyWallet(deviceId: string, balances: ChainBalance[]): void {
   if (!getDb()) return
+  const now = Date.now()
+  if (now - (lastRectifyMs.get(deviceId) ?? 0) < RECTIFY_INTERVAL_MS) return
+  lastRectifyMs.set(deviceId, now)
   for (const b of balances) {
     const current = parseFloat(b.balance) || 0
     if (!Number.isFinite(current)) continue

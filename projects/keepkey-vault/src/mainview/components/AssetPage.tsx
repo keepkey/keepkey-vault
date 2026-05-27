@@ -355,14 +355,15 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		return onRpcMessage("tx-push-received", (payload: { chain?: string; txid?: string }) => {
 			if (!payload.chain && !payload.txid) return // truly empty pings are not actionable
 			if (payload.chain) {
-				// Chain-scoped push: only refresh if it matches this asset or the active swap output
-				const matches = payload.chain.includes(chain.id) || payload.chain === chain.symbol
-				const matchesOutput = swapOutputChainId ? payload.chain.includes(swapOutputChainId) : false
+				// Chain-scoped push: only refresh if it matches this asset or the active swap output.
+				// payload.chain is CAIP-19 (e.g. "eip155:1/slip44:60") — match against caip or networkId prefix.
+				const matches = payload.chain === chain.caip || payload.chain.startsWith(chain.networkId) || payload.chain.includes(chain.id) || payload.chain === chain.symbol
+				const matchesOutput = swapOutputChainId ? (payload.chain.includes(swapOutputChainId) || payload.chain.startsWith(swapOutputChainId)) : false
 				if (!matches && !matchesOutput) return
 			}
 			handleRefresh()
 		})
-	}, [handleRefresh, chain.id, chain.symbol, swapOutputChainId])
+	}, [handleRefresh, chain.id, chain.symbol, chain.caip, chain.networkId, swapOutputChainId])
 
 	// Activity preview
 	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])

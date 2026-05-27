@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, rpcFire } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
@@ -209,6 +209,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			}, 60000)
 			setTxid(result.txid)
 			setPhase('broadcast')
+			rpcFire('getBalance', { chainId: chain.id })
 		} catch (e: any) {
 			setError(e.message || t("broadcastFailed"))
 		}
