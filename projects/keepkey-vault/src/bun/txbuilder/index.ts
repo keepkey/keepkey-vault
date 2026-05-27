@@ -16,6 +16,7 @@ import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana
 
 export type { BuildTxParams }
 export { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
+export { normalizeBchAddress } from './utxo'
 
 const TRON_SUN_PER_TRX = 1_000_000n
 const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n

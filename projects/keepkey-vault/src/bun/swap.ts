@@ -15,6 +15,7 @@ import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
+import { normalizeBchAddress } from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
 // assetToCaip is exported for backwards-compat (legacy code that hydrates old
 // history rows without CAIP). The swap quote/execute path no longer uses it —
@@ -308,6 +309,11 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
       // bip122 (BTC/ZEC/DOGE) and solana addresses are case-sensitive base58 —
       // never lowercase them. EVM is not in this branch.
       const senderAddr = params.fromAddress?.trim()
+      // BCH cashaddr can appear with or without the "bitcoincash:" prefix — Pioneer/1Click
+      // strips it, so normalize both sides before comparing (same pattern as lines ~234, ~505).
+      const stripBchPrefix = (a: string | undefined) =>
+        a?.startsWith('bitcoincash:') ? a.slice('bitcoincash:'.length) : a
+      const senderAddrNorm = stripBchPrefix(senderAddr)
       const depositAddr = result.inboundAddress || result.nearIntentsDepositAddress
 
       // Layer 1: Pioneer's parsed refundTo must exist and match senderAddress.
@@ -318,7 +324,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
           'Do not proceed: if the swap fails, funds may go to an uncontrolled address.'
         )
       }
-      if (senderAddr && pioneerRefundTo !== senderAddr) {
+      if (senderAddrNorm && stripBchPrefix(pioneerRefundTo) !== senderAddrNorm) {
         throw new Error(
           `NEAR Intents refundTo mismatch — Pioneer registered "${result.nearIntentsRefundTo}" ` +
           `as refund address but your wallet address is "${params.fromAddress}". ` +
@@ -350,7 +356,7 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
               'NEAR Intents: 1Click response missing quoteRequest.refundTo — cannot verify refund safety.'
             )
           }
-          if (senderAddr && oneClickRefundTo !== senderAddr) {
+          if (senderAddrNorm && stripBchPrefix(oneClickRefundTo) !== senderAddrNorm) {
             throw new Error(
               `NEAR Intents 1Click refundTo mismatch — 1Click has "${oneClickData?.quoteResponse?.quoteRequest?.refundTo}" ` +
               `but your wallet address is "${params.fromAddress}". ` +
@@ -691,7 +697,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // No network call needed — we already know both numbers locally.
     if ((params.swapper === 'NEAR Intents' || params.integration === 'nearIntents') && params.inboundAddress) {
       const outputs = unsignedTx.outputs as Array<{ address?: string; value: number }> | undefined
-      const depositOut = outputs?.find(o => o.address === params.inboundAddress)
+      // Normalize BCH addresses for comparison: buildUtxoTx may have converted
+      // the legacy inboundAddress to cashaddr, so compare normalized forms.
+      const normInbound = fromChain.id === 'bitcoincash'
+        ? normalizeBchAddress(params.inboundAddress)
+        : params.inboundAddress
+      const depositOut = outputs?.find(o => o.address === normInbound)
       if (!depositOut || depositOut.value <= 0) {
         throw new Error(
           `NEAR Intents: deposit output to ${params.inboundAddress} not found in built tx — aborting to prevent fund loss`

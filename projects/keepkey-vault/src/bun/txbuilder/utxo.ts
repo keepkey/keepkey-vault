@@ -13,6 +13,29 @@ import * as bech32 from 'bech32'
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
 
+// @ts-ignore — CJS module, no types
+const cashaddrLib = require('@shapeshiftoss/bitcoinjs-lib/src/cashaddr')
+
+/** Convert a legacy BCH P2PKH/P2SH address (1... or 3...) to cashaddr format.
+ *  No-op for addresses already in cashaddr format or that aren't BCH legacy addresses. */
+export function normalizeBchAddress(address: string): string {
+  if (!address) return address
+  const lower = address.toLowerCase()
+  // Already cashaddr (with or without 'bitcoincash:' prefix, or q/p bare)
+  if (lower.startsWith('bitcoincash:') || lower.startsWith('q') || lower.startsWith('p')) return address
+  // Attempt Base58Check decode (legacy BCH P2PKH/P2SH)
+  let payload: Buffer
+  try { payload = bs58check.decode(address) } catch { return address }
+  if (payload.length !== 21) return address
+  const version = payload[0]
+  const hash = new Uint8Array(payload.slice(1))
+  let type: string
+  if (version === 0x00) type = 'P2PKH'
+  else if (version === 0x05) type = 'P2SH'
+  else return address
+  try { return cashaddrLib.encode('bitcoincash', type, hash) } catch { return address }
+}
+
 /** String-based decimal→integer to avoid floating-point precision loss */
 function parseDecimalToInt(amount: string, decimals: number): number {
   const [whole = '0', frac = ''] = amount.split('.')
@@ -244,7 +267,11 @@ export async function buildUtxoTx(
   chain: ChainDef,
   params: BuildUtxoParams,
 ) {
-  const { to, memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath } = params
+  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath } = params
+  // BCH: NEAR Intents (and some other providers) return legacy P2PKH/P2SH addresses
+  // (starting with '1'/'3'). The KeepKey firmware requires cashaddr format — convert.
+  const to = chain.id === 'bitcoincash' ? normalizeBchAddress(params.to) : params.to
+  if (to !== params.to) console.log(`${TAG} BCH address normalized: ${params.to} → ${to}`)
 
   if (!xpub && (!allXpubs || !allXpubs.length)) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
 
@@ -578,7 +605,7 @@ export async function buildUtxoTx(
     console.log(`${TAG}   INPUT txid=${inp.txid?.slice(0, 12)}... vout=${inp.vout} scriptType=${inp.scriptType} path=[${inp.addressNList.join(',')}] amount=${inp.amount} hasHex=${!!inp.hex}`)
   }
   for (const out of preparedOutputs) {
-    console.log(`${TAG}   OUTPUT type=${out.addressType} scriptType=${out.scriptType || 'n/a'} amount=${out.amount} addr=${out.address?.slice(0, 20) || 'change'}`)
+    console.log(`${TAG}   OUTPUT type=${out.addressType} scriptType=${out.scriptType || 'n/a'} amount=${out.amount} addr=${out.address || 'change'}`)
   }
 
   return {
