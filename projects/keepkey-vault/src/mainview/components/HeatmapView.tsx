@@ -40,7 +40,7 @@ function layoutSquarified(
 	y: number,
 	w: number,
 	h: number,
-	valueExponent: number = 0.65,
+	valueExponent: number = 0.45,
 ): Array<{ tile: HeatmapTile; x: number; y: number; w: number; h: number }> {
 	if (items.length === 0) return []
 	// Apply the compression curve once. We treat the transformed value as the
@@ -230,7 +230,7 @@ export function HeatmapView({ tiles, width, height }: HeatmapViewProps) {
 	}, [tiles, measured.w, measured.h])
 
 	return (
-		<Box ref={wrapRef} position="relative" w="100%" h="100%" minH="0" minW="0">
+		<Box ref={wrapRef} position="relative" w="100%" h="100%" minH="0" minW="0" overflow="hidden">
 			{laid.map((rect) => (
 				<HeatmapTileBox key={rect.tile.id} rect={rect} />
 			))}
@@ -239,16 +239,22 @@ export function HeatmapView({ tiles, width, height }: HeatmapViewProps) {
 }
 
 /** Helpers to build the tile lists from Dashboard's existing state. */
+/** Cap how many individual tiles the heatmap renders before grouping the
+ *  remainder into one "Others" tile. With 20+ chains, the squarified treemap
+ *  squeezes the smallest tiles into unreadable slivers; grouping keeps each
+ *  rendered tile legible. */
+const MAX_HEATMAP_TILES = 8
+
 export function buildAllChainsTiles(
 	chains: ChainDef[],
 	cleanBalanceUsd: Map<string, { usd: number }>,
 	onSelectChain: (chainId: string) => void,
 ): HeatmapTile[] {
-	const tiles: HeatmapTile[] = []
+	const all: HeatmapTile[] = []
 	for (const chain of chains) {
 		const usd = cleanBalanceUsd.get(chain.id)?.usd ?? 0
 		if (usd <= 0) continue
-		tiles.push({
+		all.push({
 			id: chain.id,
 			label: chain.coin,
 			subLabel: chain.symbol,
@@ -258,7 +264,31 @@ export function buildAllChainsTiles(
 			onSelect: () => onSelectChain(chain.id),
 		})
 	}
-	return tiles
+	all.sort((a, b) => b.value - a.value)
+	const total = all.reduce((s, t) => s + t.value, 0)
+	if (total <= 0) return []
+	// Two-stage filter: keep tiles whose share is large enough to render as a
+	// real tile (≥3% of portfolio), capped at MAX_HEATMAP_TILES. Anything
+	// smaller folds into "Others", which itself only renders if it would be
+	// at least 3% of portfolio. This prevents the squarified treemap from
+	// producing 1-pixel slivers at the bottom of the canvas.
+	const MIN_TILE_SHARE = 0.03
+	const minValue = total * MIN_TILE_SHARE
+	const significant = all.filter(t => t.value >= minValue).slice(0, MAX_HEATMAP_TILES - 1)
+	const restTiles = all.filter(t => !significant.includes(t))
+	const restValue = restTiles.reduce((s, t) => s + t.value, 0)
+	if (restValue > 0 && restValue >= minValue) {
+		significant.push({
+			id: '__others__',
+			label: 'Others',
+			subLabel: `${restTiles.length} smaller`,
+			icon: '',
+			color: '#6b7280',
+			value: restValue,
+			onSelect: () => { /* no-op: cumulative tile is not drillable */ },
+		})
+	}
+	return significant
 }
 
 const TOKEN_PALETTE = ["#e9c46a", "#8be3c4", "#6c7be8", "#e08c7b", "#9f8ce0", "#f0a85c", "#4eb591", "#4f7fc8"]
@@ -284,18 +314,32 @@ export function buildChainDetailTiles(
 		})
 	}
 	const sorted = cleanTokens.slice().sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
-	sorted.forEach((tok, i) => {
-		const usd = tok.balanceUsd ?? 0
-		if (usd <= 0) return
+	// Reserve one tile for native + leave room for "Others" overflow.
+	const tokenLimit = MAX_HEATMAP_TILES - (nativeUsd > 0 ? 2 : 1)
+	const top = sorted.filter(t => (t.balanceUsd ?? 0) > 0).slice(0, tokenLimit)
+	top.forEach((tok, i) => {
 		tiles.push({
 			id: tok.caip,
 			label: tok.symbol,
 			subLabel: tok.name || chain.coin,
 			icon: tok.icon || getAssetIcon(tok.caip),
 			color: TOKEN_PALETTE[i % TOKEN_PALETTE.length]!,
-			value: usd,
+			value: tok.balanceUsd ?? 0,
 			onSelect: () => onSelectToken(tok),
 		})
 	})
+	const restTokens = sorted.filter(t => (t.balanceUsd ?? 0) > 0).slice(tokenLimit)
+	const restValue = restTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
+	if (restValue > 0) {
+		tiles.push({
+			id: `${chain.id}:__others__`,
+			label: 'Others',
+			subLabel: `${restTokens.length} smaller`,
+			icon: '',
+			color: '#6b7280',
+			value: restValue,
+			onSelect: () => { /* no-op */ },
+		})
+	}
 	return tiles
 }

@@ -137,10 +137,14 @@ function OrbitalView({
 	privateModeEnabled: boolean
 }) {
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(440)
+	const [size, setSize] = useState(540)
 
 	useEffect(() => {
-		const compute = () => setSize(Math.min(440, Math.max(280, window.innerWidth - 80)))
+		const compute = () => {
+			const w = window.innerWidth - 420 // minus sidebar
+			const h = window.innerHeight - 220 // minus topnav + utility row
+			setSize(Math.max(320, Math.min(640, w, h)))
+		}
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
@@ -431,34 +435,13 @@ function TokenSatellite({
 	)
 }
 
-/** Heatmap canvas wrapper — measures its own top in the viewport on mount
- *  and on resize, and sets an explicit pixel height so the squarified
- *  treemap inside fills exactly the visible area (no tiles below the fold). */
-function HeatmapHost({ tiles }: { tiles: Parameters<typeof HeatmapView>[0]["tiles"] }) {
-	const ref = useRef<HTMLDivElement>(null)
-	const [height, setHeight] = useState(0)
-
-	useEffect(() => {
-		const measure = () => {
-			const el = ref.current
-			if (!el) return
-			const rect = el.getBoundingClientRect()
-			const margin = 12 // breathing room above the window's bottom edge
-			const available = window.innerHeight - rect.top - margin
-			setHeight(Math.max(220, Math.floor(available)))
-		}
-		measure()
-		window.addEventListener("resize", measure)
-		// Re-measure on next paint in case parent flex/banner state shifts
-		const raf = requestAnimationFrame(measure)
-		return () => {
-			window.removeEventListener("resize", measure)
-			cancelAnimationFrame(raf)
-		}
-	}, [])
-
+/** Heatmap canvas — fills the chart-slot height set by the Dashboard.
+ *  When drilled (sharing space with the token list), caps at a smaller maxW
+ *  for visual consistency with the other view modes. In All Chains view, the
+ *  chart slot is full-pane so the heatmap expands wider too. */
+function HeatmapHost({ tiles, drilled }: { tiles: Parameters<typeof HeatmapView>[0]["tiles"]; drilled: boolean }) {
 	return (
-		<Box ref={ref} w="100%" alignSelf="stretch" h={height ? `${height}px` : "70vh"}>
+		<Box w="100%" maxW={drilled ? "640px" : "1100px"} mx="auto" h="100%">
 			<HeatmapView tiles={tiles} />
 		</Box>
 	)
@@ -482,10 +465,10 @@ function ChainDetailOrbital({
 	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
 }) {
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(440)
+	const [size, setSize] = useState(380)
 
 	useEffect(() => {
-		const compute = () => setSize(Math.min(520, Math.max(320, window.innerWidth - 420)))
+		const compute = () => setSize(Math.min(380, Math.max(280, window.innerWidth - 420)))
 		compute()
 		window.addEventListener('resize', compute)
 		return () => window.removeEventListener('resize', compute)
@@ -1763,15 +1746,34 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    centered) and a fixed-min-height "below" area. The split anchors
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
-			<Flex flex="1" direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : ({ base: "44vh", md: "50vh" } as unknown as string)} position="relative">
+			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"} position="relative">
 				{/* View picker — absolute top-right of the canvas */}
 				<Box position="absolute" top="2" right="2" zIndex={3}>
-					<ViewPickerButton />
+					<ViewPickerButton assetCount={(() => {
+						if (drilledChainId) {
+							const dchain = visibleChains.find(c => c.id === drilledChainId)
+							const bal = dchain ? getEffectiveBalance(dchain.id) : undefined
+							const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+							const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+							const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0))
+							return (nativeUsd > 0 ? 1 : 0) + cleanTokens.filter(t => (t.balanceUsd ?? 0) > 0).length
+						}
+						return Array.from(cleanBalanceUsd.values()).filter(b => b.usd > 0).length
+					})()} />
 				</Box>
 				{/* Top: orbital widget / donut / welcome — vertically centered.
 				    overflow:hidden prevents the orbital box from visually and
 				    pointer-event-wise spilling into the action button row below. */}
-				<Flex flex="1" align={viewMode === 'heatmap' ? 'stretch' : 'center'} justify="center" w="100%" minH="0" px={viewMode === 'heatmap' ? '2' : '3'} overflow="hidden" position="relative" zIndex={1}>
+				<Flex
+					h={drilledChainId ? "380px" : "62vh"}
+					align="center"
+					justify="center"
+					w="100%"
+					px="3"
+					overflow="hidden"
+					position="relative"
+					zIndex={1}
+				>
 					{hasAnyBalance ? (() => {
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -1821,11 +1823,49 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									return buildChainDetailTiles(dchain, bal, cleanTokens, nativeUsd, (tok) => openChainPage(dchain, undefined, tok))
 								})()
 								: buildAllChainsTiles(visibleChains, cleanBalanceUsd, (chainId) => setDrilledChainId(chainId))
+							// Heatmap is a comparison view — needs 2+ tiles to be meaningful.
+							// Fall back to the orbital view when there's only one (or zero)
+							// asset, since a single-tile heatmap (or single-slice donut) is
+							// visually meaningless. Orbital still reads well with one item.
+							if (tiles.length < 2) {
+								if (drilledChainId) {
+									const dchain = visibleChains.find(c => c.id === drilledChainId)
+									if (dchain) {
+										const bal = getEffectiveBalance(dchain.id)
+										const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+										const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+										const nativeUsd = bal?.nativeBalanceUsd ?? bal?.balanceUsd ?? 0
+										return (
+											<ChainDetailOrbital
+												chain={dchain}
+												balance={bal}
+												nativeBalanceUsd={nativeUsd}
+												cleanTokens={cleanTokens}
+												onSelectChain={() => openChainPage(dchain)}
+												onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
+											/>
+										)
+									}
+								}
+								return (
+									<OrbitalView
+										chains={visibleChains}
+										balances={balances}
+										cleanBalanceUsd={cleanBalanceUsd}
+										totalUsd={totalUsd}
+										totalDollars={totalDollars}
+										totalCents={totalCents}
+										cleanTokenTotal={cleanTokenTotal}
+										onSelect={(c) => setDrilledChainId(c.id)}
+										privateModeEnabled={privateModeEnabled}
+									/>
+								)
+							}
 							// Full-canvas: dynamically measure where the heatmap container
 							// starts in the viewport and stretch it down to the bottom edge.
 							// Static `calc(100vh - <fudge>)` got the offset wrong because of
 							// banners / utility row variability.
-							return <HeatmapHost tiles={tiles} />
+							return <HeatmapHost tiles={tiles} drilled={!!drilledChainId} />
 						}
 						if (viewMode === 'stack') {
 							const items: StackedBarItem[] = drilledChainId
@@ -1868,7 +1908,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						return (
 							<DonutChart
 								data={chartData}
-								size={300}
+								size={220}
 								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 								onClickSlice={(i) => {
@@ -1944,10 +1984,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					px="3"
 					position="relative"
 					zIndex={2}
-					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '160px'}
-					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '1'}
+					minH={viewMode === 'heatmap' && !drilledChainId ? '0' : '140px'}
+					pt={viewMode === 'heatmap' && !drilledChainId ? '0' : '0'}
 					pb={viewMode === 'heatmap' && !drilledChainId ? '0' : '2'}
-					gap="2"
+					gap="1"
 				>
 					{hasAnyBalance && viewMode === 'donut' && chartData.length > 0 && (() => {
 						const safeIndex = activeSliceIndex !== null && activeSliceIndex < chartData.length ? activeSliceIndex : 0
@@ -2051,13 +2091,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									))}
 								</Flex>
 
-								{/* Token list (only when the chain has clean tokens). */}
+								{/* Token list (only when the chain has clean tokens).
+								    maxH + overflowY="auto" keep the chart+actions pinned while
+								    the user scrolls through a long token list independently. */}
 								{cleanTokens.length > 0 && (
-									<Box w="100%">
-										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="2" px="1">
+									<Box w="100%" mt="-1">
+										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="1" px="1">
 											{t("tokensCount", { count: cleanTokens.length })}
 										</Text>
-										<Flex direction="column" gap="1">
+										<Flex direction="column" gap="0.5" maxH="38vh" overflowY="auto" pr="1" className="kk-tokens-scroll">
 											{cleanTokens
 												.slice()
 												.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
@@ -2068,7 +2110,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 														onClick={() => openChainPage(dchain, undefined, tok)}
 														align="center"
 														gap="2.5"
-														p="2"
+														px="2"
+														py="1.5"
 														borderRadius="md"
 														bg="transparent"
 														_hover={{ bg: "kk.cardBg" }}
