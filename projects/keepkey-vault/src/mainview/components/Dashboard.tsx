@@ -1821,9 +1821,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			    centered) and a fixed-min-height "below" area. The split anchors
 			    the sun and the donut center at the same y-coordinate regardless
 			    of how much below content is rendered. */}
-			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"} position="relative">
-				{/* View picker — absolute top-right of the canvas */}
-				<Box position="absolute" top="2" right="2" zIndex={3}>
+			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"}>
+				{/* View picker — top center of the hero area */}
+				<Flex justify="center" pt="2" pb="1">
 					<ViewPickerButton assetCount={(() => {
 						if (drilledChainId) {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -1835,7 +1835,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 						return Array.from(cleanBalanceUsd.values()).filter(b => b.usd > 0).length
 					})()} />
-				</Box>
+				</Flex>
 				{/* Top: orbital widget / donut / welcome — vertically centered.
 				    overflow:hidden prevents the orbital box from visually and
 				    pointer-event-wise spilling into the action button row below. */}
