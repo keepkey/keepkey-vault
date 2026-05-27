@@ -3680,6 +3680,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// sticky after the user repoints to a server that lists more.
 				const { clearSwapCache } = await import('./swap')
 				clearSwapCache()
+				loadSupportedChains(getPioneerApiBase()).catch(() => {})
 				console.log('[settings] Pioneer API base set to:', url || '(default)')
 				return getAppSettings()
 			},
@@ -3888,6 +3889,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				catalogLoadedAt = 0
 				const { clearSwapCache } = await import('./swap')
 				clearSwapCache()
+				loadSupportedChains(getPioneerApiBase()).catch(() => {})
 				console.log('[settings] Active Pioneer server set to:', url)
 				return getAppSettings()
 			},

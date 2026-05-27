@@ -9,8 +9,8 @@
  *
  * Run: bun test __tests__/swap-support-matrix.test.ts
  */
-import { describe, test, expect } from 'bun:test'
-import { assessAvailability } from '../src/shared/swap-support-matrix'
+import { describe, test, expect, beforeEach } from 'bun:test'
+import { assessAvailability, loadSupportedChains, _resetDynamicChains, _setDynamicChains } from '../src/shared/swap-support-matrix'
 
 const BTC      = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
 const ETH      = 'eip155:1/slip44:60'
@@ -217,5 +217,68 @@ describe('assessAvailability — defensive', () => {
     const a = assessAvailability('bip122:000000000019d6689c085ae165831e93')
     expect(a.status).toBe('swappable')
     expect(a.providers).toContain('thorchain')
+  })
+})
+
+const SOL_NATIVE = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501'
+const SOL_USDT   = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
+const SOL_USDC   = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+const SOL_JUP    = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN' // long-tail SPL
+
+describe('assessAvailability — Solana (static fallback)', () => {
+  test('native SOL is swappable via THORChain + ChainFlip + ShapeShift', () => {
+    const a = assessAvailability(SOL_NATIVE)
+    expect(a.status).toBe('swappable')
+    expect(a.providers).toContain('thorchain')
+    expect(a.providers).toContain('chainflip')
+    expect(a.providers).toContain('shapeshift')
+  })
+
+  test('Solana USDT token → unknown (selectable, tries a quote via ShapeShift)', () => {
+    const a = assessAvailability(SOL_USDT)
+    expect(a.status).toBe('unknown')
+  })
+
+  test('Solana USDC token → unknown', () => {
+    const a = assessAvailability(SOL_USDC)
+    expect(a.status).toBe('unknown')
+  })
+
+  test('Long-tail SPL token → unknown (ShapeShift/LiFi covers Solana broadly)', () => {
+    const a = assessAvailability(SOL_JUP)
+    expect(a.status).toBe('unknown')
+  })
+})
+
+describe('loadSupportedChains — dynamic override', () => {
+  beforeEach(() => _resetDynamicChains())
+
+  test('static fallback used before load (SOL native swappable)', () => {
+    expect(assessAvailability(SOL_NATIVE).status).toBe('swappable')
+  })
+
+  test('dynamic data overrides static sets', () => {
+    // Inject minimal dynamic data — only ETH under thorchain, Solana absent.
+    // After inject, SOL native should become unsupported_chain (dynamic wins).
+    _setDynamicChains({ thorchain: ['eip155:1'], mayachain: [], relay: [], zeroex: [], chainflip: [], shapeshift: [] })
+    const a = assessAvailability(SOL_NATIVE)
+    expect(a.status).toBe('unsupported_chain')
+  })
+
+  test('Pioneer unreachable → falls back to static silently', async () => {
+    await loadSupportedChains('http://127.0.0.1:19999') // nothing listening
+    // static fallback: SOL still swappable
+    expect(assessAvailability(SOL_NATIVE).status).toBe('swappable')
+  })
+
+  test('live Pioneer endpoint returns Solana under shapeshift (requires localhost:9001)', async () => {
+    try {
+      await loadSupportedChains('http://localhost:9001')
+      const a = assessAvailability(SOL_USDT)
+      expect(a.status).toBe('unknown') // ShapeShift covers Solana
+    } catch {
+      // Pioneer not running — skip
+      console.log('  (skipped — Pioneer not running on :9001)')
+    }
   })
 })

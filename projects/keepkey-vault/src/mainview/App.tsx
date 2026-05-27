@@ -29,6 +29,7 @@ import { UpdateBanner } from "./components/UpdateBanner"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
+import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
@@ -87,7 +88,10 @@ function App() {
 			.catch(() => {})
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
-				.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+				.then((s) => {
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled)
+					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
+				})
 				.catch(() => {})
 		}
 		refreshSettings()
