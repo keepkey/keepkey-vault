@@ -1205,12 +1205,19 @@ async function setRelayRequestIdOnPioneer(swap: PendingSwap): Promise<boolean> {
     const isDuplicate = e?.status === 409
       || e?.statusCode === 409
       || /already exists|duplicate|409/i.test(msg)
+    const isNotFound = e?.status === 404
+      || e?.statusCode === 404
+      || /not.found|404/i.test(msg)
     if (isDuplicate) {
       console.warn(`${TAG} Pioneer rejected Relay-id (re-)registration for ${swap.txid.slice(0, 10)}... as duplicate (${msg.slice(0, 80)}). Pioneer needs an UpdatePendingSwap endpoint — opening a tracking issue on pioneer-server.`)
       // Burn the remaining attempts so the caller's bounded loop stops on
       // the next refresh — there's no recovery from a permanent 409 without
       // a Pioneer-side change.
       relayRegisterAttempts.set(swap.txid, MAX_RELAY_REGISTER_ATTEMPTS)
+    } else if (isNotFound) {
+      // Swap not registered in Pioneer yet — race condition between broadcast
+      // and CreatePendingSwap completing. refreshSwap will retry automatically.
+      swapLog(`${TAG} Pioneer Relay-id registration: swap not yet registered (404) for ${swap.txid.slice(0, 10)}... will retry`)
     } else {
       console.warn(`${TAG} Pioneer Relay-id registration call failed for ${swap.txid.slice(0, 10)}...: ${msg.slice(0, 200)}`)
     }
