@@ -356,14 +356,18 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			if (!payload.chain && !payload.txid) return // truly empty pings are not actionable
 			if (payload.chain) {
 				// Chain-scoped push: only refresh if it matches this asset or the active swap output.
-				// payload.chain is CAIP-19 (e.g. "eip155:1/slip44:60") — match against caip or networkId prefix.
-				const matches = payload.chain === chain.caip || payload.chain.startsWith(chain.networkId) || payload.chain.includes(chain.id) || payload.chain === chain.symbol
-				const matchesOutput = swapOutputChainId ? (payload.chain.includes(swapOutputChainId) || payload.chain.startsWith(swapOutputChainId)) : false
+				// payload.chain is CAIP-19 (e.g. "eip155:1/slip44:60") — match against exact caip or
+				// networkId with trailing slash to avoid eip155:1 matching eip155:10 (Optimism).
+				const matches = payload.chain === chain.caip || payload.chain.startsWith(`${chain.networkId}/`)
+				const outputDef = swapOutputChainId ? CHAINS.find(c => c.id === swapOutputChainId) : null
+				const matchesOutput = outputDef
+					? (payload.chain === outputDef.caip || payload.chain.startsWith(`${outputDef.networkId}/`))
+					: false
 				if (!matches && !matchesOutput) return
 			}
 			handleRefresh()
 		})
-	}, [handleRefresh, chain.id, chain.symbol, chain.caip, chain.networkId, swapOutputChainId])
+	}, [handleRefresh, chain.caip, chain.networkId, swapOutputChainId])
 
 	// Activity preview
 	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])

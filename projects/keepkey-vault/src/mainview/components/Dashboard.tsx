@@ -1072,7 +1072,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return onRpcMessage('tx-push-received', (payload: { chain?: string; txid?: string }) => {
 			if (!payload.chain) return
 			const allChains = [...CHAINS, ...customChainDefs]
-			const hit = allChains.find(c => payload.chain === c.caip || payload.chain?.startsWith(c.networkId))
+			const hit = allChains.find(c => payload.chain === c.caip || payload.chain?.startsWith(`${c.networkId}/`))
 			if (hit) rpcFire('getBalance', { chainId: hit.id })
 		})
 	}, [customChainDefs])
