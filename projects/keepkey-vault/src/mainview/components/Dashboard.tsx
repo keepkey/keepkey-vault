@@ -693,6 +693,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [activeSwaps, setActiveSwaps] = useState<PendingSwap[]>([])
 	const dismissedSwapTxids = useRef(new Set<string>())
+	const refreshGenRef = useRef(0)
 
 	// Fetch pending swaps on mount and keep them live via swap-update messages.
 	// Non-terminal swaps mean funds are in-flight — we surface a banner so the
@@ -972,11 +973,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	const refreshBalances = useCallback(async (forceRefresh = false) => {
 		if (watchOnly) return
+		// Generation counter: if a newer call completes first, discard this stale response.
+		const gen = ++refreshGenRef.current
 		setLoadingBalances(true)
 
 		try {
 			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
-			if (result) {
+			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
 				console.log(`[Dashboard] Live: ${result.length} chains, ${tokenTotal} tokens, $${balTotal.toFixed(2)}`)
@@ -1002,12 +1005,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				clearPioneerError()
 			}
 		} catch (e: any) {
-			const message = e?.message || 'Unable to refresh balances'
-			console.warn('[Dashboard] getBalances failed:', message)
-			stagePioneerError({ message, url: 'the configured balance server' })
+			if (gen === refreshGenRef.current) {
+				const message = e?.message || 'Unable to refresh balances'
+				console.warn('[Dashboard] getBalances failed:', message)
+				stagePioneerError({ message, url: 'the configured balance server' })
+			}
 		}
 
-		setLoadingBalances(false)
+		if (gen === refreshGenRef.current) setLoadingBalances(false)
 	}, [watchOnly, clearPioneerError, stagePioneerError])
 
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session

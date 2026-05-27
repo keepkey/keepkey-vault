@@ -5483,10 +5483,18 @@ engine.on('state-change', (state) => {
 				const REFRESH_EVENTS = new Set(['transaction:incoming', 'balance:update', 'balance:cache:update'])
 				if (!REFRESH_EVENTS.has(event)) return
 				const d = data as any
-				const chain = d?.chain ?? d?.symbol ?? undefined
 				const address = d?.address ?? undefined
 				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				// Only forward events with a known chain — chain-less cache pings can't be scoped
+				// Normalize chain to a CAIP-19 string the UI can match unambiguously.
+				// Pioneer may send d.chain (already CAIP) or only d.symbol (e.g. "ETH").
+				let chain: string | undefined = d?.chain
+				if (!chain && d?.symbol) {
+					const allChains = [...CHAINS, ...customChainDefs]
+					const def = allChains.find(c => c.symbol === d.symbol)
+					chain = def?.caip
+				}
+				// Only forward events with a resolvable CAIP chain — symbol-only events we
+				// couldn't map are dropped rather than forwarded as raw symbols.
 				if (!chain) return
 				const key = chain
 				const existing = pioneerEventDebounce.get(key)
