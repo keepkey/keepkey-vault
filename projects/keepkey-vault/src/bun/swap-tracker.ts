@@ -20,7 +20,6 @@ import { withTimeout } from './engine-controller'
 const PIONEER_SWAP_TIMEOUT_MS = 30_000
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid, setSwapRelayRequestId } from './db'
 import { recordSwap } from './ledger'
-import { getTxReceiptOnce, EVM_RPC_URLS } from './evm-rpc'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 import { extractRelayRequestId } from '../shared/relay-utils'
@@ -78,8 +77,6 @@ function chainIdToVaultId(caip2: string): string {
   }
   return map[caip2] || caip2
 }
-import { decideRevertOutcome } from '../shared/swap-revert'
-export { decideRevertOutcome } from '../shared/swap-revert'
 import {
   isTerminalSwapStatus,
   mapRelayExecutionStatus,
@@ -672,49 +669,6 @@ function hydrateFromDb(txid: string, deviceId?: string, walletId?: string): Pend
   return swap
 }
 
-// Vault stores fromChainId in mixed formats — historical 'ethereum', current
-// 'eip155:1', or sometimes the bare numeric. Map any of them to the EVM_RPC_URLS
-// numeric key. Anything not in this table is treated as non-EVM.
-const EVM_CHAIN_TO_NUMERIC: Record<string, string> = {
-  ethereum: '1', polygon: '137', arbitrum: '42161', optimism: '10',
-  avalanche: '43114', bsc: '56', base: '8453',
-}
-function evmRpcUrlFor(fromChainId: string): string | undefined {
-  if (!fromChainId) return undefined
-  // CAIP form: "eip155:1" → "1"
-  if (fromChainId.startsWith('eip155:')) return EVM_RPC_URLS[fromChainId.slice('eip155:'.length)]
-  // Legacy slug: "ethereum" → "1" → URL
-  if (EVM_CHAIN_TO_NUMERIC[fromChainId]) return EVM_RPC_URLS[EVM_CHAIN_TO_NUMERIC[fromChainId]]
-  // Bare numeric: "1" → URL
-  return EVM_RPC_URLS[fromChainId]
-}
-
-/** Check the EVM source receipt directly. If status=0x0 the tx reverted on-chain
- *  (allowance failed, contract revert, etc.) — the swap will NEVER complete and
- *  the user is just being lied to with "waiting for confirmations". Mark failed
- *  + push update so the UI flips to a failure state.
- *
- *  Returns true if we definitively flagged the swap as failed (caller should
- *  short-circuit any further status polling). */
-async function detectEvmRevert(swap: PendingSwap): Promise<boolean> {
-  const rpcUrl = evmRpcUrlFor(swap.fromChainId || '')
-  if (!rpcUrl) return false
-  try {
-    const receipt = await getTxReceiptOnce(rpcUrl, swap.txid)
-    const decision = decideRevertOutcome(swap.status, receipt)
-    if (!decision) return false
-    console.warn(`${TAG} EVM source tx REVERTED on-chain: ${swap.txid} (block ${decision.blockNumber}) — marking failed`)
-    swap.status = decision.status
-    swap.error = decision.error
-    swap.updatedAt = Date.now()
-    try { updateSwapHistoryStatus(swap.txid, 'failed', { deviceId: swap.deviceId, walletId: swap.walletId }) } catch { /* ignore */ }
-    pushUpdate(swap)
-    return true
-  } catch (e: any) {
-    console.warn(`${TAG} EVM receipt check failed for ${swap.txid.slice(0, 10)}...: ${e.message}`)
-  }
-  return false
-}
 
 /** Single on-demand Pioneer poll for one swap.
  *  Called by the SwapDialog while the user has it open (there is no background
@@ -726,12 +680,6 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
     return null
   }
-
-  // Detect EVM revert FIRST — Pioneer's THORChain/Maya queries return "still
-  // processing" forever for reverted txs because the protocol never observed
-  // them. Without this check the user sees "waiting for confirmations" until
-  // the heat-death of the universe.
-  if (await detectEvmRevert(swap)) return swap
 
   // Relay request-id backfill is two phases, both retry-safe:
   //   1. Local backfill: api.relay.link/requests/v2?hash= once we don't have

@@ -685,6 +685,42 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     })
     unsignedTx = buildResult.unsignedTx
 
+    // NEAR Intents fail-fast: verify the deposit VOUT matches what 1Click expects
+    // before the device is ever asked to sign. Pioneer re-quotes to the adjusted
+    // amount, but if that re-quote was skipped for any reason, this catches the
+    // shortfall here instead of producing a PARTIAL_DEPOSIT refund.
+    if (result.swapper === 'NEAR Intents' && params.inboundAddress) {
+      const outputs = unsignedTx.outputs as Array<{ address?: string; value: number }> | undefined
+      const depositOut = outputs?.find(o => o.address === params.inboundAddress)
+      if (!depositOut || depositOut.value <= 0) {
+        throw new Error(
+          `NEAR Intents: deposit output to ${params.inboundAddress} not found in built tx — aborting to prevent fund loss`
+        )
+      }
+      try {
+        const statusResp = await fetch(
+          `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(params.inboundAddress)}`,
+          { signal: AbortSignal.timeout(5000) },
+        )
+        if (statusResp.ok) {
+          const statusData = await statusResp.json() as any
+          const expectedSat = parseInt(statusData?.quoteResponse?.quoteRequest?.amount || '0', 10)
+          if (expectedSat > 0 && depositOut.value < expectedSat) {
+            const shortfall = expectedSat - depositOut.value
+            throw new Error(
+              `NEAR Intents: deposit shortfall — tx delivers ${depositOut.value} sat but ` +
+              `1Click expects ${expectedSat} sat (short by ${shortfall} sat). ` +
+              `Pioneer should have corrected this — try the swap again.`
+            )
+          }
+          swapLog(`[swap] NEAR Intents deposit verified: ${depositOut.value} sat (1Click expects ${expectedSat || '?'} sat)`)
+        }
+      } catch (e: any) {
+        if (e.message.startsWith('NEAR Intents:')) throw e
+        swapLog(`[swap] NEAR Intents deposit check non-fatal: ${e.message}`)
+      }
+    }
+
   // ── All other chains (Cosmos, XRP, Solana, Tron, TON): send to vault with memo ──
   } else {
     // Resolve the canonical CAIP for the source asset and pull token decimals

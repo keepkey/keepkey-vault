@@ -4,7 +4,7 @@
  * Phases: input → review → approving/signing/broadcasting → success
  * Replaces the old inline SwapView with a proper modal experience.
  */
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
+import React, { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-ui/react"
 import CountUp from "react-countup"
@@ -20,7 +20,7 @@ import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
-import { ProviderBadge, resolveProvider } from "./ProviderBadge"
+import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { AssetPickerDialog } from "./AssetPickerDialog"
@@ -683,6 +683,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [swapHealth, setSwapHealth] = useState<SwapHealth | null>(null)
   const [healthDialogOpen, setHealthDialogOpen] = useState(false)
   const [healthRefreshing, setHealthRefreshing] = useState(false)
+  const [quoteDetailsOpen, setQuoteDetailsOpen] = useState(false)
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   // ts when the current quote was received — used to detect staleness on Confirm
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
@@ -1757,6 +1758,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     prevAutoDefaultAsset.current = null
     setUseCustomAddress(false)
     setCustomToAddress("")
+    setQuoteDetailsOpen(false)
   }, [])
 
   const handleClose = useCallback(() => {
@@ -3857,8 +3859,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
             <Box minW="0" flex="1">
               {quote ? (
-                <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={14} variant="detailed" />
-              ) : null /* don't claim a provider before we have a quote — was hardcoding THORChain even for Maya-only pairs (e.g. ZEC) */}
+                <ProverChip
+                  swapper={quote.swapper}
+                  integration={quote.integration}
+                  onClick={() => setQuoteDetailsOpen(true)}
+                />
+              ) : null /* don't claim a provider before we have a quote */}
             </Box>
             <Box
               as="a"
@@ -3980,6 +3986,65 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </Text>
               <Text fontSize="10px" color="kk.textMuted">via Pioneer</Text>
             </Flex>
+          </Box>
+        </Box>
+      )}
+
+      {/* ── Quote details modal (ProverChip click) ─────────────────── */}
+      {quoteDetailsOpen && quote && fromAsset && toAsset && (
+        <Box position="fixed" inset="0" zIndex={Z.assetPicker}
+          display="flex" alignItems="center" justifyContent="center"
+          bg="rgba(0,0,0,0.65)" onClick={() => setQuoteDetailsOpen(false)}>
+          <Box
+            bg="kk.bg" borderRadius="16px" border="1px solid" borderColor="kk.border"
+            w="340px"
+            boxShadow="0 24px 64px rgba(0,0,0,0.7)"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            style={{ animation: 'kkSwapFadeIn 0.15s ease-out' }}
+          >
+            {(() => {
+              const info = resolveProvider(quote.swapper || quote.integration)
+              return (
+                <>
+                  <Flex px="5" py="4" borderBottom="1px solid" borderColor="kk.border" align="center" gap="3">
+                    <Box w="40px" h="40px" borderRadius="full" overflow="hidden" flexShrink={0}
+                      style={{ boxShadow: `0 0 14px ${info.color}55` }}>
+                      <img src={info.icon} alt={info.label} width="40" height="40"
+                        style={{ borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
+                    </Box>
+                    <Box flex="1">
+                      <Text fontSize="15px" fontWeight="700" color="kk.textPrimary">{info.label}</Text>
+                      <Text fontSize="11px" color="kk.textMuted">Route details</Text>
+                    </Box>
+                    <Box as="button" fontSize="20px" lineHeight="1" color="kk.textMuted" px="1"
+                      cursor="pointer"
+                      onClick={() => setQuoteDetailsOpen(false)}
+                      style={{ background: 'none', border: 'none' }}>×</Box>
+                  </Flex>
+                  <VStack gap="0" align="stretch" px="4" py="3">
+                    <ReviewRow label={t("rate")}>
+                      1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(sendAmount || '1')).toString())} {toAsset.symbol}
+                    </ReviewRow>
+                    <ReviewRow label={t("expectedAfterFees", "Expected")}>
+                      {formatBalance(quote.expectedOutput)} {toAsset.symbol}
+                      {hasToPrice ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
+                    </ReviewRow>
+                    <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>
+                      {formatBalance(quote.minimumOutput)} {toAsset.symbol}
+                    </ReviewRow>
+                    <ReviewRow label={t("protocolFee", "Protocol fee")}>
+                      {(quote.fees.totalBps / 100).toFixed(2)}%
+                    </ReviewRow>
+                    <ReviewRow label={t("slippageTolerance", "Slippage")}>
+                      {(slippageBps / 100).toFixed(2)}% max
+                    </ReviewRow>
+                    <ReviewRow label={t("estimatedTime")}>
+                      {formatTime(quote.estimatedTime)}
+                    </ReviewRow>
+                  </VStack>
+                </>
+              )
+            })()}
           </Box>
         </Box>
       )}

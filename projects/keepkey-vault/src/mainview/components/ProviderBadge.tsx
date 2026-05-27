@@ -9,6 +9,7 @@
 // When both are present and differ, callers can opt in to a "via {integration}"
 // suffix so the user sees both the executor and the aggregator that surfaced it.
 
+import React from "react"
 import { Box, Flex, HStack, Image, Text } from "@chakra-ui/react"
 
 import logoThorchain from "../assets/providers/thorchain.png"
@@ -25,6 +26,7 @@ import logoLifi from "../assets/providers/lifi.svg"
 import logoChainflip from "../assets/providers/chainflip.svg"
 import logoAcross from "../assets/providers/across.svg"
 import logoCurve from "../assets/providers/curve.svg"
+import logoNear from "../assets/providers/near.svg"
 
 export type ProviderInfo = {
   key: string        // canonical lowercase id
@@ -66,6 +68,7 @@ const REGISTRY: Array<{ match: (s: string) => boolean; info: ProviderInfo }> = [
   { match: (s) => s === "curve" || s === "curvefi", info: { key: "curve", label: "Curve", icon: logoCurve, color: "#a4c8ff" } },
   { match: (s) => s === "balancer", info: { key: "balancer", label: "Balancer", icon: logoBalancer, color: "#536dfe" } },
   { match: (s) => s === "sushi" || s === "sushiswap", info: { key: "sushi", label: "Sushi", icon: logoSushi, color: "#fa52a0" } },
+  { match: (s) => s.includes("near"), info: { key: "near", label: "NEAR Intents", icon: logoNear, color: "#00ec97" } },
 ]
 
 /**
@@ -171,5 +174,64 @@ export function ProviderBadge({
         <Text fontSize="10px" color="kk.textMuted">via {integrationInfo!.label}</Text>
       )}
     </HStack>
+  )
+}
+
+export type ProverChipProps = {
+  swapper?: string | null
+  integration?: string | null
+  onClick?: () => void
+}
+
+/**
+ * Branded, clickable provider chip for the swap footer and other prominent
+ * placement. Shows the provider logo with a brand-color glow, the provider
+ * name, and an ⓘ indicator when a click handler is provided.
+ */
+export function ProverChip({ swapper, integration, onClick }: ProverChipProps) {
+  const provider = resolveProvider(swapper || integration)
+  const c = provider.color
+  return (
+    <Flex
+      as={onClick ? "button" : "div"}
+      align="center"
+      gap="1.5"
+      px="2.5"
+      py="1.5"
+      borderRadius="full"
+      cursor={onClick ? "pointer" : "default"}
+      onClick={onClick}
+      flexShrink={0}
+      style={{
+        border: `1px solid ${c}2a`,
+        background: `${c}0d`,
+        transition: 'border-color 0.15s, background 0.15s',
+      } as React.CSSProperties}
+      onMouseEnter={onClick ? (e: React.MouseEvent<HTMLElement>) => {
+        e.currentTarget.style.borderColor = `${c}55`
+        e.currentTarget.style.background = `${c}1a`
+      } : undefined}
+      onMouseLeave={onClick ? (e: React.MouseEvent<HTMLElement>) => {
+        e.currentTarget.style.borderColor = `${c}2a`
+        e.currentTarget.style.background = `${c}0d`
+      } : undefined}
+    >
+      <Box w="18px" h="18px" borderRadius="full" overflow="hidden" flexShrink={0}
+        style={{ boxShadow: `0 0 7px ${c}55` } as React.CSSProperties}>
+        <Image src={provider.icon} alt={provider.label} w="18px" h="18px" />
+      </Box>
+      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary" lineHeight="1">
+        {provider.label}
+      </Text>
+      {onClick && (
+        <Box color="kk.textMuted" flexShrink={0} opacity={0.55} style={{ marginTop: 1 }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </Box>
+      )}
+    </Flex>
   )
 }
