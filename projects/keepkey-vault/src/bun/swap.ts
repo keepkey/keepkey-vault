@@ -685,10 +685,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     })
     unsignedTx = buildResult.unsignedTx
 
-    // NEAR Intents fail-fast: verify the deposit VOUT matches what 1Click expects
-    // before the device is ever asked to sign. Pioneer re-quotes to the adjusted
-    // amount, but if that re-quote was skipped for any reason, this catches the
-    // shortfall here instead of producing a PARTIAL_DEPOSIT refund.
+    // NEAR Intents fail-fast: verify the deposit VOUT matches the quoted amount
+    // before the device is ever asked to sign. params.amount is the amount 1Click
+    // committed to receive; if the built tx delivers less, that's PARTIAL_DEPOSIT.
+    // No network call needed — we already know both numbers locally.
     if ((params.swapper === 'NEAR Intents' || params.integration === 'nearIntents') && params.inboundAddress) {
       const outputs = unsignedTx.outputs as Array<{ address?: string; value: number }> | undefined
       const depositOut = outputs?.find(o => o.address === params.inboundAddress)
@@ -697,28 +697,16 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           `NEAR Intents: deposit output to ${params.inboundAddress} not found in built tx — aborting to prevent fund loss`
         )
       }
-      try {
-        const statusResp = await fetch(
-          `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(params.inboundAddress)}`,
-          { signal: AbortSignal.timeout(5000) },
+      const quotedSat = Math.round(parseFloat(params.amount) * Math.pow(10, fromChain.decimals))
+      if (quotedSat > 0 && quotedSat - depositOut.value > 1) {
+        const shortfall = quotedSat - depositOut.value
+        throw new Error(
+          `NEAR Intents: deposit shortfall — tx delivers ${depositOut.value} sat but ` +
+          `quote expects ${quotedSat} sat (short by ${shortfall} sat). ` +
+          `Refresh the quote and try again.`
         )
-        if (statusResp.ok) {
-          const statusData = await statusResp.json() as any
-          const expectedSat = parseInt(statusData?.quoteResponse?.quoteRequest?.amount || '0', 10)
-          if (expectedSat > 0 && depositOut.value < expectedSat) {
-            const shortfall = expectedSat - depositOut.value
-            throw new Error(
-              `NEAR Intents: deposit shortfall — tx delivers ${depositOut.value} sat but ` +
-              `1Click expects ${expectedSat} sat (short by ${shortfall} sat). ` +
-              `Pioneer should have corrected this — try the swap again.`
-            )
-          }
-          swapLog(`[swap] NEAR Intents deposit verified: ${depositOut.value} sat (1Click expects ${expectedSat || '?'} sat)`)
-        }
-      } catch (e: any) {
-        if (e.message.startsWith('NEAR Intents:')) throw e
-        swapLog(`[swap] NEAR Intents deposit check non-fatal: ${e.message}`)
       }
+      swapLog(`[swap] NEAR Intents deposit verified: ${depositOut.value} sat (quote expects ${quotedSat} sat)`)
     }
 
   // ── All other chains (Cosmos, XRP, Solana, Tron, TON): send to vault with memo ──
