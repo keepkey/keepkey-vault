@@ -1282,6 +1282,36 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					maxH="calc(100vh - 110px)"
 					overflowY="auto"
 					pr="1"
+					style={{ colorScheme: "dark" }}
+					css={{
+						"&::-webkit-scrollbar": {
+							width: "6px",
+							height: "6px",
+							background: "transparent",
+						},
+						"&::-webkit-scrollbar-track": {
+							background: "transparent",
+							border: "0",
+						},
+						"&::-webkit-scrollbar-thumb": {
+							background: "transparent",
+							borderRadius: "3px",
+							border: "0",
+							transition: "background-color 0.2s ease",
+						},
+						"&::-webkit-scrollbar-corner": { background: "transparent" },
+						"&:hover::-webkit-scrollbar-thumb": {
+							background: "rgba(255,255,255,0.08)",
+						},
+						"&::-webkit-scrollbar-thumb:hover": {
+							background: "rgba(255,255,255,0.18)",
+						},
+						"@supports (-moz-appearance: none)": {
+							scrollbarWidth: "thin",
+							scrollbarColor: "transparent transparent",
+							"&:hover": { scrollbarColor: "rgba(255,255,255,0.10) transparent" },
+						},
+					}}
 				>
 					{/* "All Chains" reset row */}
 					<Box
