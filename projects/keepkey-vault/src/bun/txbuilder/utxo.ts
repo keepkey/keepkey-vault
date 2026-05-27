@@ -255,7 +255,16 @@ export async function estimateUtxoFee(
 
     if (!result?.inputs || result.fee == null) return null
     const totalIn = result.inputs.reduce((s: number, i: any) => s + i.value, 0)
-    const feeSat: number = result.fee
+    let feeSat: number = result.fee
+    // ZIP-317: coinSelectSplit uses sat/byte which produces fees far below the
+    // ZIP-317 floor. Apply the same enforcement here so netSat matches what
+    // buildUtxoTx will actually produce — otherwise the re-quote under-estimates
+    // the fee and the deposit address is quoted for more than we can deliver.
+    if (chain.id === 'zcash') {
+      const logicalActions = Math.max(result.inputs.length, result.outputs?.length ?? 1)
+      const zip317Fee = 5000 * Math.max(2, logicalActions)
+      if (feeSat < zip317Fee) feeSat = zip317Fee
+    }
     return { feeSat, netSat: totalIn - feeSat }
   } catch {
     return null
