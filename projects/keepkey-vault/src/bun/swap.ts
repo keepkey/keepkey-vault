@@ -467,11 +467,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // CAIP-driven: '/erc20:' / '/bep20:' namespaces are tokens; '/slip44:' is native.
   const isErc20Source = isTokenCaip(params.fromCaip) && fromChain.chainFamily === 'evm'
 
-  // 1. Get sender address (use override if provided, otherwise derive from defaultPath)
+  // 1. Get sender address (use override if provided, otherwise derive from path)
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
+    const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
+      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      : fromChain.defaultPath
     const addrParams: any = {
-      addressNList: fromChain.defaultPath,
+      addressNList: fromPath,
       showDisplay: false,
       coin: fromChain.chainFamily === 'evm' ? 'Ethereum' : fromChain.coin,
     }
@@ -855,8 +858,11 @@ export async function previewSwapBuild(
 
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
+    const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
+      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      : fromChain.defaultPath
     const addrParams: any = {
-      addressNList: fromChain.defaultPath,
+      addressNList: fromPath,
       showDisplay: false,
       coin: fromChain.chainFamily === 'evm' ? 'Ethereum' : fromChain.coin,
     }
@@ -986,6 +992,9 @@ async function buildRelaySwapTx(
   _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
 ): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
+  const evmSigningPath = params.fromEvmAddressIndex != null
+    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    : fromChain.defaultPath
   console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 
   // Guard: when the quote ships a chainId, it MUST match the locally-resolved
@@ -1170,13 +1179,13 @@ async function buildRelaySwapTx(
   if (nativeBalance === undefined) {
     throw new Error(`Unable to verify ${fromChain.symbol} balance for Relay transaction — refusing to sign. Try refreshing the quote.`)
   }
-  // Deposit-channel sendMax fix: for Chainflip / NEAR Intents the deposited
-  // value is what we control — adjust it to fit the live balance when needed.
-  // Two cases covered:
-  //   (a) isMax=true: frontend sent full balance, no gas reserve subtracted yet
-  //   (b) isMax=false: frontend pre-subtracted a gas reserve, but live balance
-  //       has since changed (stale cache) — trim to what we actually have
-  // Standard Relay calldata txs are NOT adjustable here; they fail at line 1192+.
+  // sendMax trim for deposit-channel swaps (Chainflip / NEAR Intents):
+  // For these the deposited value is fully under our control. Trim to fit when:
+  //   (a) isMax=true — frontend sent full balance, no gas reserve subtracted yet
+  //   (b) isMax=false + wouldExceed — balance changed since the quote was fetched
+  // Calldata relay txs (standard Relay routes) are NOT trimmed here — the relay.data
+  // encodes the route and the value must match what was quoted. A large mismatch means
+  // the quote was fetched from a different address; fail loudly so the user re-quotes.
   let effectiveRelayValue = relayValue
   if (relay.isDepositChannel && !isErc20Source && nativeBalance > relayGasReserve) {
     const wouldExceed = relayValue + relayGasReserve > nativeBalance
@@ -1188,16 +1197,27 @@ async function buildRelaySwapTx(
   const effectiveRelayRequired = effectiveRelayValue + relayGasReserve + approveGasReserve
   console.log(`${TAG} relay gas check: value=${formatWei(effectiveRelayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(effectiveRelayRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
   if (nativeBalance < effectiveRelayRequired) {
+    const haveStr = formatWei(nativeBalance, fromChain.decimals)
+    const needStr = formatWei(effectiveRelayRequired, fromChain.decimals)
+    const valStr = formatWei(effectiveRelayValue, fromChain.decimals)
+    const gasStr = formatWei(relayGasReserve, fromChain.decimals)
+    // Large mismatch (value > 2× balance) almost always means a stale quote from
+    // a different address — tell the user explicitly rather than suggesting MAX.
+    if (!relay.isDepositChannel && relayValue > nativeBalance * 2n) {
+      throw new Error(
+        `Quote was built for a different address (quoted ${formatWei(relayValue, fromChain.decimals)} ${fromChain.symbol} but signing address only has ${haveStr}). ` +
+        `Select the correct address in the "From address" selector and re-quote.`
+      )
+    }
     if (params.isMax && !isErc20Source) {
       throw new Error(
-        `Relay quote is stale: updated gas fees require ${formatWei(effectiveRelayRequired, fromChain.decimals)} ${fromChain.symbol} ` +
-        `but the wallet has ${formatWei(nativeBalance, fromChain.decimals)}. Refresh the quote so the max send amount can reserve gas before signing.`
+        `Relay quote is stale: updated gas fees require ${needStr} ${fromChain.symbol} ` +
+        `but the wallet has ${haveStr}. Refresh the quote so the max send amount can reserve gas before signing.`
       )
     }
     throw new Error(
-      `Insufficient ${fromChain.symbol} for Relay transaction: need ${formatWei(effectiveRelayRequired, fromChain.decimals)} ` +
-      `(${formatWei(effectiveRelayValue, fromChain.decimals)} value + ${formatWei(relayGasReserve, fromChain.decimals)} gas), ` +
-      `have ${formatWei(nativeBalance, fromChain.decimals)}. ` +
+      `Insufficient ${fromChain.symbol} for Relay transaction: need ${needStr} ` +
+      `(${valStr} value + ${gasStr} gas), have ${haveStr}. ` +
       `If you used MAX, your balance may have changed — go back and re-enter MAX with your current balance.`
     )
   }
@@ -1254,7 +1274,7 @@ async function buildRelaySwapTx(
               const approveGasLimit = 80000n
               const approveTx: any = {
                 chainId,
-                addressNList: fromChain.defaultPath,
+                addressNList: evmSigningPath,
                 nonce: toHex(BigInt(nonce)),
                 gasLimit: toHex(approveGasLimit),
                 to: tokenContract,
@@ -1280,7 +1300,7 @@ async function buildRelaySwapTx(
 
   // Build ethSignTx params for hdwallet
   const unsignedTx: any = {
-    addressNList: fromChain.defaultPath,
+    addressNList: evmSigningPath,
     chainId,
     nonce: toHex(BigInt(nonce)),
     gasLimit: toHex(BigInt(gasLimit)),
@@ -1371,6 +1391,10 @@ async function buildEvmSwapTx(
   // router for EVM deposits. Accept either; throw only if both are missing.
   const routerAddress = params.router || params.inboundAddress
   if (!routerAddress) throw new Error('EVM swaps require a router/inboundAddress from the quote')
+
+  const evmSigningPath = params.fromEvmAddressIndex != null
+    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    : fromChain.defaultPath
 
   // Use expiry from quote if available, otherwise 1 hour from now
   const expiry = params.expiry && params.expiry > Math.floor(Date.now() / 1000)
@@ -1573,7 +1597,7 @@ async function buildEvmSwapTx(
 
       const approveTx: any = {
         chainId,
-        addressNList: fromChain.defaultPath,
+        addressNList: evmSigningPath,
         nonce: toHex(nonce),
         gasLimit: toHex(approveGasLimit),
         to: tokenContract,  // approve is called on the token contract
@@ -1661,7 +1685,7 @@ async function buildEvmSwapTx(
 
     const unsignedTx: any = {
       chainId,
-      addressNList: fromChain.defaultPath,
+      addressNList: evmSigningPath,
       nonce: toHex(nonce),
       gasLimit: toHex(erc20DepositGas),
       to: routerAddress,     // ROUTER contract, NOT vault
@@ -1749,7 +1773,7 @@ async function buildEvmSwapTx(
 
     const unsignedTx: any = {
       chainId,
-      addressNList: fromChain.defaultPath,
+      addressNList: evmSigningPath,
       nonce: toHex(nonce),
       gasLimit: toHex(gasLimit),
       to: routerAddress,         // ROUTER contract, NOT vault

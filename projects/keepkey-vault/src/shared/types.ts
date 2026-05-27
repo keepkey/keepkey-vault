@@ -763,6 +763,7 @@ export interface ExecuteSwapParams {
   feeLevel?: number
   fromAddressOverride?: string    // pre-resolved sender address (skips defaultPath derivation)
   toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
+  fromEvmAddressIndex?: number    // EVM address derivation index (0 = default m/44'/60'/0'/0/0)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
 }

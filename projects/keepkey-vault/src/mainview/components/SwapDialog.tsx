@@ -23,6 +23,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
+import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
@@ -61,7 +62,7 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:8453':  0.00015,  // Base — L2 cheap, but L1 data fee adds up
   'eip155:10':    0.00015,  // Optimism
   'eip155:42161': 0.0002,   // Arbitrum
-  'eip155:137':   0.05,     // Polygon (MATIC)
+  'eip155:137':   0.5,      // Polygon — gas spikes to 3000+ gwei; 0.5 MATIC covers ~3300 gwei × 150k gas
   'eip155:56':    0.002,    // BNB Smart Chain
   'eip155:43114': 0.005,    // Avalanche C-Chain
 }
@@ -73,7 +74,7 @@ const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
   'eip155:8453':  0.00005,
   'eip155:10':    0.00005,
   'eip155:42161': 0.00005,
-  'eip155:137':   0.01,
+  'eip155:137':   0.1,      // floor raised to match safe reserve scale-up
   'eip155:56':    0.0005,
   'eip155:43114': 0.001,
 }
@@ -661,6 +662,11 @@ interface SwapDialogProps {
 export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset }: SwapDialogProps) {
   const { t } = useTranslation("swap")
   const { fmtCompact, symbol: fiatSymbol } = useFiat()
+  const { evmAddresses } = useEvmAddresses()
+  // Local EVM address selection — scoped to this dialog so switching here doesn't
+  // mutate the global selected index in AssetPage. null = use global selectedIndex.
+  const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
+  const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
 
   // ── State ─────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SwapPhase>('input')
@@ -873,6 +879,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     } catch { /* swap-update push covers the failure */ }
     setRechecking(false)
   }, [txid, rechecking])
+
+  // When the user switches EVM address in the dialog while a quote is active,
+  // discard the stale quote and return to input so a fresh quote is fetched.
+  const prevEffectiveEvmIndexRef = useRef(effectiveEvmIndex)
+  useEffect(() => {
+    if (prevEffectiveEvmIndexRef.current === effectiveEvmIndex) return
+    prevEffectiveEvmIndexRef.current = effectiveEvmIndex
+    if (fromAsset?.chainFamily !== 'evm') return
+    if (phase === 'review' || phase === 'quoting') {
+      setPhase('input')
+      setQuote(null)
+      setError(null)
+    }
+  }, [effectiveEvmIndex, fromAsset?.chainFamily, phase])
 
   // Reset live tracking when phase changes away from submitted.
   // ALL live-* fields must clear here; otherwise values from a prior
@@ -1191,7 +1211,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Derived values ────────────────────────────────────────────────
   const fromBalance = useMemo(() => {
     if (!fromAsset) return null
-    // Check cached balances first (most up-to-date from getCachedBalances RPC)
+    // For EVM assets, use the effective address's per-chain balance so the
+    // spendable amount reflects the address that will actually sign.
+    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
+      const chainBal = selectedAddr?.chainBalances?.[fromAsset.chainId]
+      if (chainBal) {
+        if (fromAsset.contractAddress && chainBal.tokens) {
+          const token = chainBal.tokens.find(t =>
+            t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
+          )
+          if (token) return token.balance
+        }
+        if (!fromAsset.contractAddress) return chainBal.balance
+      }
+    }
+    // Check cached balances (aggregated per-chain from getBalances RPC)
     const cb = balances.find(b => b.chainId === fromAsset.chainId)
     if (cb) {
       if (fromAsset.contractAddress && cb.tokens) {
@@ -1207,7 +1242,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       return balance.balance
     }
     return null
-  }, [fromAsset, balance, chain, balances])
+  }, [fromAsset, balance, chain, balances, evmAddresses, effectiveEvmIndex])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1414,11 +1449,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const sameAsset = fromAsset && toAsset && fromAsset.asset === toAsset.asset
 
   const fromAddress = useMemo(() => {
-    if (fromAsset && address && chain && fromAsset.chainId === chain.id) return address
     if (!fromAsset) return ''
+    // EVM: always derive from the effective address index so fromAddress,
+    // fromBalance, and fromEvmAddressIndex are always in sync.
+    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
+      if (selectedAddr?.address) return selectedAddr.address
+    }
+    // Non-EVM: prefer the prop address when chain matches (AssetPage already derived it)
+    if (address && chain && fromAsset.chainId === chain.id) return address
     const cb = balances.find(b => b.chainId === fromAsset.chainId)
     return cb?.address || ''
-  }, [fromAsset, address, chain, balances])
+  }, [fromAsset, address, chain, balances, evmAddresses, effectiveEvmIndex])
 
   // Cached/balance-pipe address — for UTXO chains other than BTC this is often
   // the xpub itself (see comment in AssetPage.tsx:246: "balance.address may be
@@ -1514,6 +1556,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       isMax: sendIsMax, feeLevel: 5,
       fromAddressOverride: fromAddress,
       toAddressOverride: toAddress,
+      fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
       integration: quote.integration,
       relayTx: quote.relayTx,
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
@@ -1735,6 +1778,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         feeLevel: 5,
         fromAddressOverride: fromAddress,
         toAddressOverride: toAddress,
+        fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         integration: liveQuote.integration,
         swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
@@ -3513,6 +3557,47 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           </Button>
                         </Flex>
                       </Flex>
+
+                      {/* EVM address switcher — shown when multiple addresses tracked.
+                          Uses local dialog state so switching here doesn't affect AssetPage. */}
+                      {fromAsset?.chainFamily === 'evm' && evmAddresses.addresses.length > 1 && (
+                        <Box mt="2" mb="2">
+                          <Text fontSize="8px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="1">From address</Text>
+                          <Flex gap="1" flexWrap="wrap">
+                            {evmAddresses.addresses.map(addr => {
+                              const isSelected = addr.addressIndex === effectiveEvmIndex
+                              const chainBal = addr.chainBalances?.[fromAsset.chainId]
+                              const bal = chainBal ? parseFloat(chainBal.balance) : 0
+                              const snippet = addr.address ? `${addr.address.slice(0, 6)}…${addr.address.slice(-4)}` : `#${addr.addressIndex}`
+                              return (
+                                <Box
+                                  key={addr.addressIndex}
+                                  as="button"
+                                  onClick={() => setEvmAddressIndexOverride(addr.addressIndex)}
+                                  px="2" py="1"
+                                  borderRadius="md"
+                                  border="1px solid"
+                                  borderColor={isSelected ? "kk.gold" : "kk.border"}
+                                  bg={isSelected ? "rgba(233,196,106,0.1)" : "rgba(255,255,255,0.03)"}
+                                  cursor="pointer"
+                                  transition="all 0.15s"
+                                  _hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
+                                  disabled={busy}
+                                >
+                                  <Flex direction="column" align="flex-start" gap="0">
+                                    <Text fontSize="9px" fontFamily="mono" color={isSelected ? "kk.gold" : "kk.textSecondary"} fontWeight="600" lineHeight="1.3">
+                                      {snippet}
+                                    </Text>
+                                    <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1.3">
+                                      {bal > 0 ? `${bal.toFixed(4)} ${fromAsset.symbol}` : 'empty'}
+                                    </Text>
+                                  </Flex>
+                                </Box>
+                              )
+                            })}
+                          </Flex>
+                        </Box>
+                      )}
 
                       <Box position="relative">
                         {inputMode === 'fiat' && (

@@ -145,6 +145,18 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 		: baseBalance
 
+	// Multi-address total: show when >1 EVM address has funds on this chain
+	const evmAddressesWithChainBalance = isEvm
+		? evmAddresses.addresses.filter(a => parseFloat(a.chainBalances?.[chain.id]?.balance || '0') > 0)
+		: []
+	const showEvmMultiTotal = evmAddressesWithChainBalance.length > 1
+	const evmTotalChainBalance = showEvmMultiTotal
+		? evmAddressesWithChainBalance.reduce((sum, a) => sum + parseFloat(a.chainBalances![chain.id]!.balance), 0)
+		: 0
+	const evmTotalChainUsd = showEvmMultiTotal
+		? evmAddressesWithChainBalance.reduce((sum, a) => sum + (a.chainBalances![chain.id]!.balanceUsd || 0), 0)
+		: 0
+
 	// BTC address index state: change (0=receive, 1=change) and address index
 	const [btcChangeIndex, setBtcChangeIndex] = useState<0 | 1>(0)
 	const [btcAddressIndex, setBtcAddressIndex] = useState(0)
@@ -816,6 +828,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 											fontWeight="400"
 										/>
 									)}
+									{showEvmMultiTotal && (
+										<Flex align="center" gap="1" mt="0.5">
+											<Text fontSize="9px" color="kk.gold" lineHeight="1">⬡⬡</Text>
+											<Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1">
+												{evmTotalChainBalance.toFixed(4)} {chain.symbol} total · {evmAddressesWithChainBalance.length} addrs
+											</Text>
+										</Flex>
+									)}
 								</Flex>
 							)}
 						</Flex>
@@ -862,15 +882,25 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						)}
 					</Flex>
 				) : activeBalance && (
-					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
-						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
-							{activeBalance.balance}
-							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{chain.symbol}</Box>
-						</Text>
-						{cleanBalanceUsd > 0 && (
-							<AnimatedUsd value={cleanBalanceUsd} prefix="≈ " fontSize="13px" fontFamily="mono" color="var(--text-2)" fontWeight="400" />
+					<>
+						<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="1" gap="3">
+							<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
+								{activeBalance.balance}
+								<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{chain.symbol}</Box>
+							</Text>
+							{cleanBalanceUsd > 0 && (
+								<AnimatedUsd value={cleanBalanceUsd} prefix="≈ " fontSize="13px" fontFamily="mono" color="var(--text-2)" fontWeight="400" />
+							)}
+						</Flex>
+						{showEvmMultiTotal && (
+							<Flex display={{ base: "flex", sm: "none" }} align="center" gap="1" mb="3">
+								<Text fontSize="9px" color="kk.gold" lineHeight="1">⬡⬡</Text>
+								<Text fontSize="9px" fontFamily="mono" color="kk.textMuted">
+									{evmTotalChainBalance.toFixed(4)} {chain.symbol} total · {evmAddressesWithChainBalance.length} addrs
+								</Text>
+							</Flex>
 						)}
-					</Flex>
+					</>
 				)}
 
 				{/* Action tabs — colorful pill toggle */}
