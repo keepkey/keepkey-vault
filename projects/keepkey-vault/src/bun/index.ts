@@ -5538,6 +5538,25 @@ engine.on('state-change', (state) => {
 		})
 		pioneerSocket.start()
 	}
+	if (state.state === 'ready' && !engine.isPassphraseWallet) {
+		// Fire-and-forget background history scan on every ready transition (startup + reconnect).
+		// 3s delay lets wallet address derivation settle before hitting Pioneer.
+		setTimeout(() => {
+			const scope = getWalletDbScope()
+			if (!scope || !engine.wallet) return
+			console.log('[activity] Auto-scanning history on device ready...')
+			rebuildActivityHistory({
+				wallet: engine.wallet,
+				scope,
+				chains: getAllChains(),
+				firmwareVersion: engine.getDeviceState().firmwareVersion,
+			}).then(result => {
+				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)
+			}).catch(e => {
+				console.warn('[activity] Auto-scan failed:', e?.message || e)
+			})
+		}, 3000)
+	}
 	if (state.state === 'disconnected') {
 		// Keep btcAccounts + evmAddresses in memory across disconnect so the
 		// watch-only / cache-only UI (sidebar account drop-down, per-account
