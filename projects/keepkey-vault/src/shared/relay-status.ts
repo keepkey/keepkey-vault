@@ -58,6 +58,42 @@ export function shouldApplyRelayStatus(currentStatus: SwapTrackingStatus, relayS
   return STATUS_RANK[relayStatus] > STATUS_RANK[currentStatus]
 }
 
+// ── 1Click / NEAR Intents ─────────────────────────────────────────────────────
+
+export interface OneClickStatus {
+  status?: string | null
+  swapDetails?: {
+    destinationChainTxHashes?: { hash: string; explorerUrl?: string }[]
+    amountOutFormatted?: string
+    refundReason?: string | null
+  } | null
+}
+
+export function map1ClickStatus(status: string | null | undefined): SwapTrackingStatus | null {
+  switch ((status || '').toUpperCase()) {
+    case 'SUCCESS':
+      return 'completed'
+    case 'REFUNDED':
+      return 'refunded'
+    case 'FAILED':
+    case 'INCOMPLETE_DEPOSIT':
+      return 'failed'
+    case 'KNOWN_DEPOSIT_TX':
+    case 'PROCESSING':
+      return 'confirming'
+    case 'PENDING_DEPOSIT':
+      return 'pending'
+    default:
+      return null
+  }
+}
+
+export function oneClickOutboundTxid(status: OneClickStatus): string | undefined {
+  return status.swapDetails?.destinationChainTxHashes?.find(t => t.hash)?.hash
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function relayOutboundTxid(status: RelayExecutionStatus, fallbackTxid: string): string | undefined {
   const explicit = status.txHashes?.find(Boolean)
   if (explicit) return explicit

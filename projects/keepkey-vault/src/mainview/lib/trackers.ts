@@ -23,11 +23,15 @@ export type ProviderTrackerOpts = {
    *  branch — falls through to null when missing so the lazy-backfill path
    *  in swap-tracker has time to populate it without flashing a dead link. */
   relayRequestId?: string
+  /** NEAR transaction hash from 1Click /v0/status polling. Required for the
+   *  NEAR Intents branch — falls through to null while polling is in flight. */
+  nearTxHash?: string
 }
 
 const ICON = {
   thor: 'https://pioneers.dev/coins/thorchain.png',
   maya: 'https://pioneers.dev/coins/mayachain.png',
+  near: 'https://pioneers.dev/coins/near.png',
   // Inline orange "R" badge — keeps the tracker button branded without
   // depending on Relay's CDN (which is bot-protected and 429s for this client).
   relay:
@@ -92,6 +96,12 @@ export function providerTrackerUrl(
   }
   if (s === 'lifi') {
     return { url: `https://scan.li.fi/tx/${txid}`, label: 'LI.FI Track' }
+  }
+
+  if (s.includes('near')) {
+    const hash = opts?.nearTxHash
+    if (!hash) return null // 1Click polling in flight; re-renders when it lands
+    return { url: `https://nearblocks.io/txns/${hash}`, label: 'View on NEAR', iconUrl: ICON.near }
   }
 
   if (RELAY_KEYS.has(s)) {

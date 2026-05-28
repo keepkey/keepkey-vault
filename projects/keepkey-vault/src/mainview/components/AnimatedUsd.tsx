@@ -15,9 +15,11 @@ interface AnimatedUsdProps extends TextProps {
 	decimals?: number
 }
 
+const PRIVATE_MASK = "••••••"
+
 /** Animated fiat counter. Delegates all number+symbol formatting to Intl.NumberFormat. */
 export function AnimatedUsd({ value, prefix = "", suffix = "", duration = 1.5, decimals, color = "#23DCC8", ...textProps }: AnimatedUsdProps) {
-	const { currency, locale } = useFiat()
+	const { currency, locale, privateModeEnabled } = useFiat()
 	const cfg = getFiatConfig(currency)
 	const dec = decimals ?? cfg.decimals
 
@@ -41,6 +43,9 @@ export function AnimatedUsd({ value, prefix = "", suffix = "", duration = 1.5, d
 		return `${prefix}${formatted}${suffix}`
 	}, [formatter, cfg.symbol, dec, prefix, suffix])
 
+	if (privateModeEnabled) {
+		return <Text as="span" color={color} {...textProps}>{PRIVATE_MASK}</Text>
+	}
 	if (!isFinite(value) || value <= 0) {
 		return <Text as="span" color={color} {...textProps}>{formatValue(0)}</Text>
 	}

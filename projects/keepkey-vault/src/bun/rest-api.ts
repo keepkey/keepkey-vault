@@ -18,6 +18,7 @@ import { parseRequest, validateResponse } from './validate'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
+import { handleLedgerRoute } from './rest-ledger'
 import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
@@ -62,6 +63,8 @@ export interface RestApiCallbacks {
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
   getPioneerApiBase?: () => string
+  /** Set Pioneer API base URL (empty string = reset to default) */
+  setPioneerApiBase?: (url: string) => Promise<any>
 }
 
 function corsHeaders(_req?: Request): Record<string, string> {
@@ -1170,7 +1173,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
         // ballooning response_body across repeated reads.
-        const skipAuditLog = path.startsWith('/api/v1/activity') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path.startsWith('/api/v1/ledger') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
@@ -1904,6 +1907,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             bounceable: false, // UQ prefix — safe for uninitialized wallets
           }), { operation: 'tonGetAddress', chain: 'TON' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
+          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
+          addressCache.set(cacheKey, address)
+          auth.saveAccount(String(address), body.address_n)
+          return json({ address })
+        }
+
+        if (path === '/addresses/hive' && method === 'POST') {
+          auth.requireAuth(req)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.AddressRequest)
+          const cacheKey = scopedKey(engine, 'hive', body)
+          const cached = addressCache.get(cacheKey)
+          if (cached) return json({ address: cached })
+          const sd = showDisplay(body.show_display)
+          const result = await emuWrap(() => (wallet as any).hiveGetPublicKey({
+            addressNList: body.address_n,
+            showDisplay: sd,
+            coin: 'Hive',
+          }), { operation: 'hiveGetPublicKey', chain: 'HIVE' }, sd)
+          const address = result?.publicKey || ''
           if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
@@ -2679,10 +2704,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/portfolio' && method === 'GET') {
           const ds = engine.getDeviceState()
+          if (!ds.deviceId) return json({ devices: [], total_value_usd: 0 })
+          const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)
+          const totalUsd = cached ? cached.balances.reduce((sum, b) => sum + b.balanceUsd, 0) : 0
           return json({
-            devices: ds.deviceId ? [{ state: ds.state }] : [],
-            total_value_usd: 0,
-            message: 'Portfolio aggregation not implemented — use Pioneer API for balances',
+            devices: [{ state: ds.state }],
+            total_value_usd: totalUsd,
           })
         }
 
@@ -2693,16 +2720,33 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!ds.deviceId || ds.deviceId !== deviceId) {
             return json({ error: 'Device not found' }, 404)
           }
+          const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)
+          const totalUsd = cached ? cached.balances.reduce((sum, b) => sum + b.balanceUsd, 0) : 0
           return json({
             device_id: ds.deviceId,
             state: ds.state,
-            total_value_usd: 0,
-            message: 'Portfolio not implemented — use Pioneer API for balances',
+            total_value_usd: totalUsd,
           })
         }
 
         // ── DEBUG PORTFOLIO ENDPOINTS ────────────────────────────────────
         // Verbose read-only views into cached balances, spam analysis, and
+        // ── PIONEER URL MANAGEMENT ────────────────────────────────────
+        if (path === '/api/pioneer/status' && method === 'GET') {
+          const base = callbacks.getPioneerApiBase?.() ?? 'unknown'
+          return json({ url: base, is_default: base === 'https://api.keepkey.info' || base === 'unknown' })
+        }
+
+        if (path === '/api/pioneer/url' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await req.json().catch(() => ({})) as any
+          const url = (body.url ?? '').trim()
+          if (url && !/^https?:\/\//i.test(url)) return json({ error: 'URL must start with http:// or https://' }, 400)
+          await callbacks.setPioneerApiBase?.(url)
+          const newBase = callbacks.getPioneerApiBase?.() ?? 'unknown'
+          return json({ url: newBase, is_default: !url })
+        }
+
         // token visibility overrides. Useful for diagnosing balance/spam issues
         // without needing to dig through the SQLite DB directly.
 
@@ -3578,6 +3622,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.ZcashBroadcastRequest)
           const result = await broadcastShieldedTx(body.raw_tx)
           return json(result)
+        }
+
+        // ── Ledger / accounting auditor routes ──────────────────────
+        if (path.startsWith('/api/v1/ledger')) {
+          const resp = await handleLedgerRoute(path, method, req, engine, auth, json)
+          if (resp) return resp
         }
 
         // ── REST v2 swap routes (UI control + parsed/raw quotes + history) ──

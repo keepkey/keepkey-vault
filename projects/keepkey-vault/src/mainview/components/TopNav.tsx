@@ -346,7 +346,7 @@ export function TopNav({
 			</HStack>
 
 			{/* Right: walletconnect + mobile + settings */}
-			<Flex flex="1" justify="flex-end" align="center" gap="1">
+			<Flex flex="1" justify="flex-end" align="center" gap="2">
 				{onWalletConnectToggle && (
 					<IconButton
 						aria-label={t("walletConnect", { defaultValue: "WalletConnect" })}

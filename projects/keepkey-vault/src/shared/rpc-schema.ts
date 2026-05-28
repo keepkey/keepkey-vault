@@ -82,6 +82,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       tronSignTypedHash: { params: any; response: any }
       tonSignTx: { params: any; response: any }
       tonSignMessage: { params: any; response: any }
+      hiveGetPublicKey: { params: any; response: any }
+      hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
@@ -168,6 +170,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Window Focus ──────────────────────────────────────────────────
       getWindowFocusState: { params: void; response: { refs: number; alwaysOnTop: boolean } }
       forceReleaseWindowFocus: { params: void; response: void }
+      setWindowAlwaysOnTop: { params: { enabled: boolean }; response: void }
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
@@ -182,9 +185,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setEmulatorEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
       setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
+      setPrivateModeEnabled: { params: { enabled: boolean }; response: AppSettings }
       addPioneerServer: { params: { url: string; label: string }; response: AppSettings }
       removePioneerServer: { params: { url: string }; response: AppSettings }
       setActivePioneerServer: { params: { url: string }; response: AppSettings }
+
+      // ── Accounting ledger ─────────────────────────────────────────────
+      /** Current balances per ledger account (asset wallet accounts, equity, income, expenses). */
+      getLedgerSummary: { params: void; response: Array<{ accountId: string; accountType: string; asset: string; chainId: string; balance: number }> }
+      /** Recent journal entries with their postings. */
+      getLedgerJournals: { params: { limit?: number }; response: Array<{ id: string; deviceId: string; description: string; entryType: string; createdAt: number; postings: Array<{ accountId: string; amount: number; asset: string }> }> }
 
       // ── Reports ──────────────────────────────────────────────────────
       generateReport: { params: void; response: ReportMeta }
@@ -196,6 +206,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Swap ──────────────────────────────────────────────────────────
       getSwappableChainIds: { params: void; response: string[] }
       getSwapAssets: { params: void; response: SwapAsset[] }
+      /** Search Pioneer's full asset discovery DB — includes tokens not in swap pools.
+       *  Frontend uses this as a fallback when the in-chain list returns no results. */
+      searchSwapAssets: { params: { query: string }; response: SwapAsset[] }
       /** Look up an unknown token by contract address across common chains.
        *  When no chainId is provided, candidate EVM chains are queried in
        *  parallel and any with metadata are returned. The frontend uses this
@@ -372,6 +385,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** Pioneer push notification: a transaction arrived on a watched address.
+       *  Frontend should trigger forceRefresh on affected chain (or all). */
+      'tx-push-received': { chain?: string; address?: string; txid?: string }
+      /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
+      'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
@@ -385,6 +403,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */
       'fatal': FatalEvent
+      'window-focus-changed': { refs: number; alwaysOnTop: boolean }
     }
   }
   webview: {

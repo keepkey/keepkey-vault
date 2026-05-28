@@ -10,12 +10,14 @@ import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
 // Pioneer SDK instance is passed as parameter to buildTx()
 
 export type { BuildTxParams }
 export { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
+export { normalizeBchAddress } from './utxo'
 
 const TRON_SUN_PER_TRX = 1_000_000n
 const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n
@@ -95,7 +97,7 @@ export async function injectTronMemo(tronGridTx: any, memo: string): Promise<any
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string; pioneerBaseUrl?: string },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
@@ -533,6 +535,19 @@ export async function buildTx(
       return { unsignedTx: tonUnsignedTx, fee: needsDeploy ? '0.01' : '0.005' }
     }
 
+    case 'hive': {
+      if (!params.fromAddress) throw new Error('fromAddress (STM public key) required for Hive')
+      return buildHiveTransfer({
+        fromPublicKey: params.fromAddress,
+        to: params.to,
+        amount: params.amount,
+        memo: params.memo,
+        isMax: params.isMax,
+        pioneerBaseUrl: params.pioneerBaseUrl || 'https://api.keepkey.info',
+        addressNList: chain.defaultPath,
+      })
+    }
+
     default:
       throw new Error(`Unsupported chain family: ${chain.chainFamily}`)
   }
@@ -640,6 +655,10 @@ export async function signTx(
       const tonResult = await wallet.tonSignTx(unsignedTx)
       return { ...tonResult, tonBuildResult: unsignedTx.tonBuildResult }
     }
+    case 'hive': {
+      const hiveResult = await (wallet as any).hiveSignTx(unsignedTx)
+      return { ...hiveResult, hiveBuildResult: unsignedTx.hiveBuildResult }
+    }
     case 'zcash-shielded':
       // Shielded signing is handled by the zcash-shielded module (sidecar + device)
       // The full flow is orchestrated by sendShielded() — this should not be called directly
@@ -746,6 +765,10 @@ export async function broadcastTx(
     console.error('[broadcast:tron] TronGrid rejected. body:', JSON.stringify(broadcastBody).slice(0, 400))
     console.error('[broadcast:tron] TronGrid response:', JSON.stringify(data).slice(0, 400))
     throw new Error(`Tron broadcast failed: ${errMsg}`)
+  }
+
+  if (chain.chainFamily === 'hive') {
+    return broadcastHiveTx(signedTx)
   }
 
   let serializedTx: string

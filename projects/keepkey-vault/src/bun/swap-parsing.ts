@@ -83,7 +83,6 @@ export function parseQuoteResponse(
   const quotes: any[] = Array.isArray(qInner) ? qInner : [qInner]
   if (quotes.length === 0) throw new Error('No quotes available for this pair')
 
-  // Select first (best) quote
   const best = quotes[0]
   const integration = best.integration || 'thorchain'
   const quote = best.quote || best
@@ -123,7 +122,17 @@ export function parseQuoteResponse(
     console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error(`No quote output for ${params.fromCaip} → ${params.toCaip} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
   }
-  const expectedOutputStr = String(expectedOutput)
+  // Pioneer normalises CACAO amounts using 8 decimal places (same as RUNE on
+  // THORChain), but CACAO has 10 decimal places — outputs are 10^(10-8)=100× too
+  // large. Guard is on the exact CACAO CAIP so Maya-routed ETH/ARB (18 dec) are
+  // not touched. cacaoScale is reused for amountOutMin below.
+  const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
+  const cacaoScale = params.toCaip === CACAO_CAIP ? 100 : 1
+  let expectedOutputStr = String(expectedOutput)
+  if (cacaoScale > 1) {
+    const corrected = parseFloat(expectedOutputStr) / cacaoScale
+    if (corrected > 0) expectedOutputStr = corrected.toFixed(10).replace(/\.?0+$/, '')
+  }
 
   // ── Pre-built calldata integrations (relay, shapeshiftSwap, …) ──
   // Any integration that hands us calldata gets the same treatment: we sign
@@ -132,10 +141,10 @@ export function parseQuoteResponse(
   //
   // Two sub-cases:
   //  A) Real calldata (data.length ≥ 10): encodes the swap instruction (Relay, 0x, …)
-  //  B) Deposit-channel (data = '0x' / empty): Chainflip and NEAR Intents EVM-side
-  //     use a plain ETH transfer to a protocol-controlled address; the swap destination
-  //     was registered off-chain when the quote/channel was created. `data` is empty
-  //     intentionally — do NOT conflate with a malformed Relay quote.
+  //  B) Deposit-channel (data = '0x' / empty): Chainflip uses a plain ETH transfer to a
+  //     protocol-controlled address; the swap destination was registered off-chain when
+  //     the quote/channel was created. `data` is empty intentionally — do NOT conflate
+  //     with a malformed Relay quote.
   const rawData: string | undefined = txParams.data
   const hasRealCalldata = !!rawData && rawData !== '0x' && rawData !== '0x0' && rawData.length >= 10
 
@@ -144,18 +153,36 @@ export function parseQuoteResponse(
   // Allowed list is narrow and explicit — unknown swappers with empty calldata
   // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
   // by the pre-existing cross-chain guard.
+  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
   // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
   // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
   // path instead (isMemolessTransfer below).
-  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
   const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
   const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
-  const hasPrebuiltTx = hasRealCalldata || isDepositChannel
+  // Solana prebuilt tx: Relay SOL→EVM bridge ships serializedTx (base64 wire tx) instead
+  // of EVM calldata. No `data` or `to` field — detected by serializedTx presence.
+  const hasSolanaPrebuiltTx = !!txParams.serializedTx && params.fromCaip.startsWith('solana:')
+  const hasPrebuiltTx = hasRealCalldata || isDepositChannel || hasSolanaPrebuiltTx
   let relayTx: RelayTxParams | undefined
 
-  if (hasPrebuiltTx) {
+  if (hasSolanaPrebuiltTx) {
     relayTx = {
-      to: txParams.to,
+      to: txParams.recipientAddress || '',
+      data: '0x',
+      value: '0',
+      gasLimit: undefined,
+      chainId: 0,
+      serializedTx: txParams.serializedTx,
+    }
+    console.log(`${TAG} ${integration} (${swapper}) — Solana prebuilt tx extracted (recipient=${txParams.recipientAddress})`)
+  } else if (hasPrebuiltTx) {
+    // Pioneer occasionally returns addresses with a duplicate '0x' prefix (e.g.
+    // "0x0x833589..."). Strip all leading '0x' pairs and re-add exactly one.
+    // Affects NEAR Intents ERC-20 routes where txParams.to is the token contract.
+    const normalizeAddr = (addr: string | undefined): string | undefined =>
+      addr ? addr.replace(/^(0x)+/i, '0x') : addr
+    relayTx = {
+      to: normalizeAddr(txParams.to) as string,
       data: rawData ?? '0x',
       value: String(txParams.value || '0'),
       // Leave gasLimit undefined when Pioneer omits it so buildRelaySwapTx
@@ -189,16 +216,12 @@ export function parseQuoteResponse(
   }
 
   // Guard: UTXO sources must send to a chain-native address, not an EVM address.
-  // NEAR Intents BTC→ETH falls back to the user's ETH recipientAddress when Pioneer
-  // can't surface a BTC deposit address from step.allowanceContract — that ETH
-  // address would be passed to the firmware as a Bitcoin output and cause
-  // "Failed to compile output" (code 9). Fail loudly here instead.
   if (fromIsUtxo && inboundAddress && inboundAddress.startsWith('0x')) {
-    console.error(`${TAG} NEAR Intents BTC deposit address is missing — Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
+    console.error(`${TAG} Pioneer returned EVM address ${inboundAddress} as inbound address for a UTXO source. Dumping quote:`)
     console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
     console.error(`${TAG}   txParams: ${JSON.stringify(txParams, null, 2).slice(0, 2000)}`)
     console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
-    throw new Error('Swap quote did not provide a valid BTC deposit address — NEAR Intents deposit channel may be unavailable for this pair. Try refreshing the quote.')
+    throw new Error('Swap quote did not provide a valid deposit address for this chain. Try a different pair or refresh the quote.')
   }
 
   // Expiry for depositWithExpiry
@@ -224,10 +247,17 @@ export function parseQuoteResponse(
   // EVM→BTC with no calldata has no way to encode the BTC destination.
   const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
   if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
-    // A quote with neither memo nor prebuilt calldata has no swap instructions —
-    // it cannot be executed. Throw now so the UI surfaces a clear error at
-    // quote-fetch time rather than a cryptic "Missing swap memo" at preview time.
-    throw new Error('Quote returned no swap instructions (no memo and no calldata) — try a different pair or refresh')
+    console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
+    console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)
+    console.error(`${TAG}   best keys: ${Object.keys(best).join(', ')}`)
+    console.error(`${TAG}   quote keys: ${Object.keys(quote).join(', ')}`)
+    console.error(`${TAG}   raw keys: ${Object.keys(raw).join(', ')}`)
+    console.error(`${TAG}   txParams keys: ${Object.keys(txParams).join(', ')}`)
+    console.error(`${TAG}   txParams.memo=${txParams.memo!}, quote.memo=${quote.memo!}, raw.memo=${raw.memo!}`)
+    console.error(`${TAG}   rawData=${rawData!}, hasRealCalldata=${hasRealCalldata}, isDepositChannel=${isDepositChannel}`)
+    console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 3000)}`)
+    const swapperLabel = swapper || integration || 'unknown'
+    throw new Error(`No supported routes for this pair — Pioneer returned only "${swapperLabel}" (unsupported). Try a different pair or refresh.`)
   }
 
   // Extract fees — relay uses a different fee structure
@@ -237,10 +267,11 @@ export function parseQuoteResponse(
   let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
   const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 100)
 
-  // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc
+  // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc.
+  // Apply cacaoScale to amountOutMin too: Pioneer inflates it by the same factor.
   const expectedNum = parseFloat(expectedOutputStr)
   const minOut = quote.amountOutMin
-    ? parseFloat(quote.amountOutMin)
+    ? parseFloat(quote.amountOutMin) / cacaoScale
     : expectedNum * (1 - actualSlippageBps / 10000)
 
   // Estimated time — prefer total_swap_seconds (full swap duration) over
@@ -254,6 +285,21 @@ export function parseQuoteResponse(
   // Check multiple field names across the response layers (Pioneer schema varies by swapper)
   const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
   const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
+
+  // For NEAR Intents ERC-20 routes, Pioneer embeds the 1Click deposit address in
+  // txParams.recipientAddress (same as quote.meta.depositAddress). This is the
+  // address funds are actually sent to — distinct from inboundAddress which may
+  // resolve to the token contract for relay routes.
+  const nearIntentsDepositAddress = swapper === 'NEAR Intents'
+    ? (txParams.recipientAddress || (quote.meta as any)?.depositAddress || undefined)
+    : undefined
+
+  // For NEAR Intents UTXO/Solana swaps, Pioneer sets refundTo = senderAddress and
+  // includes it in txParams.senderAddress. Extracting it here lets swap.ts verify
+  // the refund destination before the user signs (Layer 1 of the refund-safety check).
+  const nearIntentsRefundTo = swapper === 'NEAR Intents'
+    ? (txParams.senderAddress as string | undefined) || undefined
+    : undefined
 
   return {
     expectedOutput: expectedOutputStr,
@@ -274,6 +320,8 @@ export function parseQuoteResponse(
     swapper,
     relayTx,
     minAmountIn,
+    nearIntentsDepositAddress,
+    nearIntentsRefundTo,
   }
 }
 

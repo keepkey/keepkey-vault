@@ -361,7 +361,7 @@ describe('parseQuoteResponse', () => {
     expect(result.swapper).toBe('Chainflip')
   })
 
-  test('NEAR Intents ETH→BTC: data="0x" also flagged as deposit-channel', () => {
+  test('NEAR Intents ETH→BTC: EVM source treated as deposit channel', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'
     const resp = {
@@ -375,6 +375,8 @@ describe('parseQuoteResponse', () => {
       }],
     }
     const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.relayTx?.to).toBe('0xnear_deposit')
     expect(result.relayTx?.isDepositChannel).toBe(true)
   })
 
@@ -402,9 +404,7 @@ describe('parseQuoteResponse', () => {
     expect(result.memo).toBe('MEMO')
   })
 
-  test('NEAR Intents BTC→ETH (UTXO source, no memo) — isMemolessTransfer fires', () => {
-    // The canonical case: BTC → ETH via NEAR Intents. Pioneer provides a BTC
-    // deposit address; no memo or calldata needed. Should parse successfully.
+  test('NEAR Intents BTC→ETH (UTXO source, no memo) — memoless transfer succeeds', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'
     const resp = {
@@ -414,16 +414,60 @@ describe('parseQuoteResponse', () => {
           swapper: 'NEAR Intents',
           buyAmount: '0.05',
           inbound_address: 'bc1qnearintentsdeposit',
-          // No memo, no calldata — only deposit address (UTXO side)
-          txs: [{ txParams: { to: 'bc1qnearintentsdeposit' } }],
+          txs: [{ txParams: { to: 'bc1qnearintentsdeposit', senderAddress: 'bc1qmysender' } }],
         },
       }],
     }
     const result = parseQuoteResponse(resp, { fromCaip: btcCaip, toCaip: ethCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
     expect(result.inboundAddress).toBe('bc1qnearintentsdeposit')
     expect(result.memo).toBe('')
     expect(result.relayTx).toBeUndefined()
+    expect(result.nearIntentsRefundTo).toBe('bc1qmysender')
+  })
+
+  test('NEAR Intents ZEC→ETH (UTXO source) — extracts nearIntentsRefundTo from senderAddress', () => {
+    const zecCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+    const ethCaip = 'eip155:1/slip44:60'
+    const userZecAddr = 't1Rv7QGamKCVGQgUvJNLYYaxPMq5t4cBgua'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: {
+          swapper: 'NEAR Intents',
+          buyAmount: '0.05',
+          inbound_address: 'zec_deposit_addr',
+          txs: [{ txParams: { to: 'zec_deposit_addr', senderAddress: userZecAddr } }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: zecCaip, toCaip: ethCaip, slippageBps: 300 })
     expect(result.swapper).toBe('NEAR Intents')
+    expect(result.nearIntentsRefundTo).toBe(userZecAddr)
+  })
+
+  test('NEAR Intents first in list — selected as best (Pioneer ranks it first)', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [
+        {
+          integration: 'shapeshift',
+          quote: { swapper: 'NEAR Intents', buyAmount: '0.0001', txs: [{ txParams: { data: '0x', to: '0xnear' } }] },
+        },
+        {
+          integration: 'shapeshiftSwap',
+          quote: {
+            swapper: 'Chainflip',
+            buyAmount: '0.0002685',
+            txs: [{ txParams: { to: '0xchainflip_deposit', data: '0x', value: '10000000000000000' } }],
+          },
+        },
+      ],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.relayTx?.isDepositChannel).toBe(true)
   })
 
   test('relayTx with real calldata to EVM destination is still accepted', () => {

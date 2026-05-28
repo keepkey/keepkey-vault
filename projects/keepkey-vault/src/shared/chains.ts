@@ -10,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton' | 'hive'
   color: string
   rpcMethod: string
   signMethod: string
@@ -263,6 +263,15 @@ const CONFIGS: ChainConfig[] = [
     explorerTxUrl: 'https://tonscan.org/tx/{{txid}}',
     minFirmware: '7.14.0',
   },
+  {
+    id: 'hive', chain: 'HIVE' as any, coin: 'Hive', symbol: 'HIVE',
+    chainFamily: 'hive', color: '#E31337',
+    rpcMethod: 'hiveGetPublicKey', signMethod: 'hiveSignTx',
+    defaultPath: [0x8000002C, 0x800004FB, 0x80000000, 0, 0],
+    explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
+    explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
+    minFirmware: '7.14.0',
+  },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
@@ -270,16 +279,19 @@ const CAIP_FALLBACKS: Record<string, string> = {
   GNO: 'eip155:100/slip44:60',
   TRX: 'tron:27Lqcw/slip44:195',
   TON: 'ton:-239/slip44:607',
+  HIVE: 'hive:beeab0de/slip44:1275',
 }
 const NETWORKID_FALLBACKS: Record<string, string> = {
   GNO: 'eip155:100',
   TRX: 'tron:27Lqcw',
   TON: 'ton:-239',
+  HIVE: 'hive:beeab0de',
 }
 const DECIMAL_FALLBACKS: Record<string, number> = {
   GNO: 18,
   TRX: 6,
   TON: 9,
+  HIVE: 3,
 }
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth

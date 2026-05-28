@@ -11,6 +11,8 @@ VAULT_INSTALL_STAMP := $(STAMP_DIR)/vault-install.stamp
 HDWALLET_BUILD_INPUTS := $(shell find modules/hdwallet/packages -type f \( -name '*.ts' -o -name '*.tsx' -o -name 'package.json' -o -name 'tsconfig.json' \))
 PROTO_BUILD_STAMP := $(STAMP_DIR)/proto-build.stamp
 PROTO_BUILD_INPUTS := $(shell find modules/proto-tx-builder/src -type f \( -name '*.ts' -o -name '*.js' \) 2>/dev/null) modules/proto-tx-builder/tsconfig.json
+DEVICE_PROTOCOL_BUILD_STAMP := $(STAMP_DIR)/device-protocol-build.stamp
+DEVICE_PROTOCOL_INPUTS := $(shell find modules/device-protocol -maxdepth 1 -name '*.proto' -o -name 'package.json' 2>/dev/null)
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
 ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
 
@@ -38,6 +40,15 @@ $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
 
 submodules: $(SUBMODULES_STAMP)
 
+# --- Device Protocol Build ---
+
+$(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | $(STAMP_DIR)
+	@echo "=== device-protocol: installing + building ==="
+	cd modules/device-protocol && npm install
+	cd modules/device-protocol && npm run build
+	@test -f modules/device-protocol/lib/messages_pb.js || (echo "ERROR: device-protocol build failed (messages_pb.js missing)"; exit 1)
+	@touch $@
+
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
 $(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
@@ -62,11 +73,12 @@ $(HDWALLET_BUILD_STAMP): modules/hdwallet/tsconfig.json $(HDWALLET_BUILD_INPUTS)
 	cd modules/hdwallet && yarn tsc --build
 	@touch $@
 
-modules-build: $(HDWALLET_BUILD_STAMP) $(PROTO_BUILD_STAMP)
+modules-build: $(HDWALLET_BUILD_STAMP) $(PROTO_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 
 modules-clean:
 	cd modules/proto-tx-builder && rm -rf dist node_modules
 	cd modules/hdwallet && yarn clean 2>/dev/null || (rm -rf packages/*/dist node_modules)
+	cd modules/device-protocol && rm -rf lib/*.js lib/*.ts lib/*.json node_modules 2>/dev/null || true
 	rm -rf $(STAMP_DIR)
 
 # --- Zcash CLI Sidecar (Rust) ---
@@ -247,7 +259,7 @@ publish-electrobun-linux-x64-core:
 
 # --- Vault ---
 
-$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) | $(STAMP_DIR)
+$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP) | $(STAMP_DIR)
 	cd $(PROJECT_DIR) && bun install
 	@touch $@
 

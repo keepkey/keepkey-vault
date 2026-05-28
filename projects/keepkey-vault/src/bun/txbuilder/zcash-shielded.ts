@@ -57,8 +57,13 @@ export interface SigningRequest {
 	digests: {
 		header: string
 		transparent: string
-		sapling: string
 		orchard: string
+	}
+	header_fields?: {
+		tx_version: number
+		version_group_id: number
+		lock_time: number
+		expiry_height: number
 	}
 	bundle_meta: {
 		flags: number
@@ -79,6 +84,8 @@ export interface SigningRequest {
 		out_ciphertext: string
 		value: number
 		is_spend: boolean
+		recipient?: string
+		rseed?: string
 	}>
 	display: {
 		amount: string

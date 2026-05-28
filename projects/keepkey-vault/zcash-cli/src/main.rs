@@ -687,6 +687,18 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
             "sighash": hex::encode(&ti.sighash),
             "address_path": ti.address_path,
             "amount": ti.amount,
+            "prevout_txid": ti.prevout_txid,
+            "prevout_index": ti.prevout_index,
+            "sequence": ti.sequence,
+            "script_pubkey": ti.script_pubkey,
+        })
+    }).collect();
+
+    let to_json: Vec<Value> = shield_state.transparent_outputs.iter().enumerate().map(|(i, o)| {
+        serde_json::json!({
+            "index": i,
+            "value": o.value,
+            "script_pubkey": hex::encode(&o.script_pubkey),
         })
     }).collect();
 
@@ -695,6 +707,7 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
 
     let signing_request = serde_json::json!({
         "transparent_inputs": ti_json,
+        "transparent_outputs": to_json,
         "orchard_signing_request": orchard_json,
         "display": {
             "amount": format!("{:.8} ZEC", amount as f64 / 1e8),
@@ -1167,10 +1180,8 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
 
     let mut client = scanner::LightwalletClient::connect(None).await?;
     let txid = client.send_transaction(&raw_tx).await?;
-
-    Ok(serde_json::json!({
-        "txid": txid,
-    }))
+    info!("Broadcast accepted: txid={}", txid);
+    Ok(serde_json::json!({ "txid": txid }))
 }
 
 // ── Main IPC loop ──────────────────────────────────────────────────────

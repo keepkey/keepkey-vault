@@ -488,6 +488,7 @@ export interface AppSettings {
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
+  privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)
 }
 
 // ── WalletConnect types ─────────────────────────────────────────────────
@@ -679,7 +680,7 @@ export interface RelayTxParams {
   to: string
   data: string
   value: string              // wei as decimal string
-  gasLimit: string
+  gasLimit?: string
   maxFeePerGas?: string
   maxPriorityFeePerGas?: string
   chainId: number
@@ -687,6 +688,9 @@ export interface RelayTxParams {
    *  `data` is intentionally empty — the swap destination was registered off-chain
    *  when the quote/channel was created. Skips the empty-calldata cross-chain guard. */
   isDepositChannel?: boolean
+  /** Base64-encoded Solana v0 VersionedTransaction (Relay SOL→EVM bridge).
+   *  When present, swap.ts uses rawTx path instead of EVM calldata path. */
+  serializedTx?: string
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */
@@ -713,6 +717,17 @@ export interface SwapQuote {
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
+  /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
+   *  When set, the tracker must record this instead of the original params.amount. */
+  netFromAmount?: string
+  /** NEAR Intents 1Click deposit address — the address funds are actually sent to.
+   *  Distinct from inboundAddress (which may be the token contract for ERC-20 routes).
+   *  Used by the swap monitor to poll 1click.chaindefuser.com/v0/status. */
+  nearIntentsDepositAddress?: string
+  /** For NEAR Intents UTXO/Solana swaps: the refund address Pioneer registered with
+   *  1Click (= the sender's source-chain address). Verified pre-sign by swap.ts to
+   *  ensure a failed swap refunds to the user's own wallet. */
+  nearIntentsRefundTo?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -729,6 +744,8 @@ export interface SwapQuoteParams {
   fromAddress: string      // sender address
   toAddress: string        // destination address
   slippageBps?: number     // slippage tolerance (default 300 = 3%)
+  isMax?: boolean          // true when sending full balance (UTXO fee must be deducted before quoting)
+  feeLevel?: number        // 1=slow, 3=avg, 5=fast — passed to UTXO fee estimator
 }
 
 /** Parameters for executeSwap RPC. CAIP-only identification — the tracker
@@ -749,6 +766,7 @@ export interface ExecuteSwapParams {
   feeLevel?: number
   fromAddressOverride?: string    // pre-resolved sender address (skips defaultPath derivation)
   toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
+  fromEvmAddressIndex?: number    // EVM address derivation index (0 = default m/44'/60'/0'/0/0)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
 }
@@ -776,6 +794,9 @@ export interface SwapResult {
   fromAmount: string
   expectedOutput: string
   approvalTxid?: string
+  /** Sell amount as an integer base-units string (e.g. "61280000" for 61.28 USDC).
+   *  Populated when the build step knows the token decimals (relay ERC-20 path). */
+  fromAmountBaseUnits?: string
 }
 
 // ── Swap tracking types ───────────────────────────────────────────────
@@ -824,6 +845,14 @@ export interface PendingSwap {
   outboundChainId?: string
   /** Reason text from a Maya/Thor refund, when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash returned by 1Click /v0/status for NEAR Intents swaps.
+   *  Drives the "View on NEAR" tracker button (nearblocks.io). */
+  nearTxHash?: string
+  /** NEAR Intents 1Click deposit address (from quote.meta.depositAddress).
+   *  Used by registerWithPioneer as sellAsset.address and nearIntentsData.depositAddress. */
+  nearIntentsDepositAddress?: string
+  /** Sell amount as an integer base-units string. Populated for relay ERC-20 swaps. */
+  fromAmountBaseUnits?: string
   /** Set true when classifySwapOutcome (Midgard) has populated this record.
    *  Once set, Pioneer's mapPioneerStatus is no longer authoritative — Pioneer
    *  cannot distinguish "swap completed" from "refund completed", and would
@@ -853,6 +882,8 @@ export interface SwapStatusUpdate {
   outboundChainId?: string
   /** Refund reason surfaced from the source chain (Midgard) when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash returned by 1Click /v0/status polling for NEAR Intents swaps. */
+  nearTxHash?: string
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
@@ -900,6 +931,8 @@ export interface SwapHistoryRecord {
   outboundChainId?: string
   /** Refund reason from Midgard when status='refunded'. */
   refundReason?: string
+  /** First NEAR transaction hash from 1Click /v0/status polling. */
+  nearTxHash?: string
 }
 
 /** Filter params for getSwapHistory RPC */

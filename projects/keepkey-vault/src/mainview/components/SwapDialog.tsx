@@ -4,9 +4,9 @@
  * Phases: input → review → approving/signing/broadcasting → success
  * Replaces the old inline SwapView with a proper modal experience.
  */
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
+import React, { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Flex, Text, VStack, Button, Input, Image, HStack } from "@chakra-ui/react"
+import { Box, Flex, Text, VStack, Button, Input, Image, HStack, Spinner } from "@chakra-ui/react"
 import CountUp from "react-countup"
 import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
@@ -20,9 +20,10 @@ import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
-import { ProviderBadge, resolveProvider } from "./ProviderBadge"
+import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
+import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
@@ -61,29 +62,44 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:8453':  0.00015,  // Base — L2 cheap, but L1 data fee adds up
   'eip155:10':    0.00015,  // Optimism
   'eip155:42161': 0.0002,   // Arbitrum
-  'eip155:137':   0.05,     // Polygon (MATIC)
+  'eip155:137':   0.5,      // Polygon — gas spikes to 3000+ gwei; 0.5 MATIC covers ~3300 gwei × 150k gas
   'eip155:56':    0.002,    // BNB Smart Chain
   'eip155:43114': 0.005,    // Avalanche C-Chain
 }
 const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
+type NativeMaxReserveMode = 'safe' | 'closer'
+const NATIVE_EVM_CLOSER_RESERVE_FACTOR = 0.35
+const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
+  'eip155:1':     0.001,
+  'eip155:8453':  0.00005,
+  'eip155:10':    0.00005,
+  'eip155:42161': 0.00005,
+  'eip155:137':   0.1,      // floor raised to match safe reserve scale-up
+  'eip155:56':    0.0005,
+  'eip155:43114': 0.001,
+}
+const NATIVE_EVM_CLOSER_RESERVE_DEFAULT = 0.00025
 const NATIVE_TRON_FEE_RESERVE = 1.1
 const NATIVE_SOLANA_FEE_RESERVE = 0.000005
 
-function nativeMaxFeeReserve(asset: SwapAsset): number {
+function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'safe'): number {
   if (asset.contractAddress) return 0
   if (asset.chainFamily === 'tron') return NATIVE_TRON_FEE_RESERVE
   if (asset.chainFamily === 'solana') return NATIVE_SOLANA_FEE_RESERVE
   if (asset.chainFamily !== 'evm') return 0
   const chainDef = CHAINS.find(c => c.id === asset.chainId)
   const reserveKey = chainDef?.networkId ?? asset.chainId
-  return NATIVE_EVM_GAS_RESERVE[reserveKey] ?? NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
+  const safeReserve = NATIVE_EVM_GAS_RESERVE[reserveKey] ?? NATIVE_EVM_GAS_RESERVE[asset.chainId] ?? NATIVE_EVM_GAS_RESERVE_DEFAULT
+  if (mode === 'safe') return safeReserve
+  const floor = NATIVE_EVM_CLOSER_RESERVE_FLOOR[reserveKey] ?? NATIVE_EVM_CLOSER_RESERVE_FLOOR[asset.chainId] ?? NATIVE_EVM_CLOSER_RESERVE_DEFAULT
+  return Math.min(safeReserve, Math.max(floor, safeReserve * NATIVE_EVM_CLOSER_RESERVE_FACTOR))
 }
 
 /** Returns the displayable & spendable max amount for native MAX. For chains
  *  without a frontend reserve, returns the full balance unchanged because the
  *  backend computes their fee-aware MAX amount from chain-specific inputs. */
-function maxSpendableAmount(asset: SwapAsset, balance: string): string {
-  const reserve = nativeMaxFeeReserve(asset)
+function maxSpendableAmount(asset: SwapAsset, balance: string, mode: NativeMaxReserveMode = 'safe'): string {
+  const reserve = nativeMaxFeeReserve(asset, mode)
   if (reserve <= 0) return balance
   const chainDef = CHAINS.find(c => c.id === asset.chainId)
   return nativeMaxSpendableAmount(balance, chainDef?.decimals ?? asset.decimals, reserve)
@@ -476,6 +492,10 @@ function GreenCountUp({ value, prefix = '', suffix = '', color = 'var(--teal)', 
 }
 
 const DIALOG_CSS = `
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
   @keyframes kkSwapPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(139,227,196,0.5); }
     50% { box-shadow: 0 0 0 8px rgba(35,220,200,0); }
@@ -630,12 +650,23 @@ interface SwapDialogProps {
   balance?: ChainBalance
   address?: string | null
   resumeSwap?: PendingSwap | null
+  onOutputAssetChange?: (chainId: string | null) => void
+  /** CAIP-19 of the asset to pre-select as the FROM side. Falls back to native chain asset. */
+  initialFromCaip?: string
+  /** Pre-built SwapAsset to use as the FROM side — bypasses Pioneer's GetAvailableAssets list.
+   *  Passed by AssetPage when the token may not appear in the ~19-asset Pioneer list. */
+  initialFromAsset?: SwapAsset
 }
 
 // ── Main SwapDialog ─────────────────────────────────────────────────
-export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap }: SwapDialogProps) {
+export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset }: SwapDialogProps) {
   const { t } = useTranslation("swap")
   const { fmtCompact, symbol: fiatSymbol } = useFiat()
+  const { evmAddresses } = useEvmAddresses()
+  // Local EVM address selection — scoped to this dialog so switching here doesn't
+  // mutate the global selected index in AssetPage. null = use global selectedIndex.
+  const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
+  const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
 
   // ── State ─────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SwapPhase>('input')
@@ -649,6 +680,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  useEffect(() => { onOutputAssetChange?.(toAsset?.chainId ?? null) }, [toAsset?.chainId, onOutputAssetChange])
   // Which side opened the asset picker — null when closed. Single shared
   // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
   const [pickerSide, setPickerSide] = useState<'from' | 'to' | null>(null)
@@ -656,10 +688,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [fiatAmount, setFiatAmount] = useState("")
   const [inputMode, setInputMode] = useState<'crypto' | 'fiat'>('crypto')
   const [isMax, setIsMax] = useState(false)
+  const [maxReserveMode, setMaxReserveMode] = useState<NativeMaxReserveMode>('safe')
 
   const [swapHealth, setSwapHealth] = useState<SwapHealth | null>(null)
   const [healthDialogOpen, setHealthDialogOpen] = useState(false)
   const [healthRefreshing, setHealthRefreshing] = useState(false)
+  const [quoteDetailsOpen, setQuoteDetailsOpen] = useState(false)
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   // ts when the current quote was received — used to detect staleness on Confirm
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
@@ -721,6 +755,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const [liveRefundReason, setLiveRefundReason] = useState<string | undefined>()
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
   const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
+  const [liveNearTxHash, setLiveNearTxHash] = useState<string | undefined>()
+  const [rechecking, setRechecking] = useState(false)
 
   // ── Countdown timer ───────────────────────────────────────────────
   const [countdown, setCountdown] = useState(0)
@@ -784,6 +820,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
       if (update.refundReason) setLiveRefundReason(update.refundReason)
+      if (update.nearTxHash) setLiveNearTxHash(update.nearTxHash)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -813,7 +850,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     let timer: ReturnType<typeof setTimeout> | null = null
     const tick = async () => {
       if (cancelled) return
-      try { await rpcRequest('refreshSwap', { txid }) } catch { /* swap-update push will retry on next tick */ }
+      try {
+        const snap = await rpcRequest<any>('refreshSwap', { txid })
+        // Guard after the await — dialog may have closed or switched txids.
+        if (cancelled) return
+        // Apply fields that the tracker only pushes once (nearTxHash, relayRequestId)
+        // so the dialog is always current even if it opened after the initial push.
+        if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
+        if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+      } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
       const s = liveStatusRef.current
       if (s === 'completed' || s === 'failed' || s === 'refunded') return
@@ -822,6 +867,32 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [txid, phase])
+
+  // ── Manual recheck — fires a single immediate poll on demand ──────
+  const handleRecheck = useCallback(async () => {
+    if (!txid || rechecking) return
+    setRechecking(true)
+    try {
+      const snap = await rpcRequest<any>('refreshSwap', { txid })
+      if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
+      if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+    } catch { /* swap-update push covers the failure */ }
+    setRechecking(false)
+  }, [txid, rechecking])
+
+  // When the user switches EVM address in the dialog while a quote is active,
+  // discard the stale quote and return to input so a fresh quote is fetched.
+  const prevEffectiveEvmIndexRef = useRef(effectiveEvmIndex)
+  useEffect(() => {
+    if (prevEffectiveEvmIndexRef.current === effectiveEvmIndex) return
+    prevEffectiveEvmIndexRef.current = effectiveEvmIndex
+    if (fromAsset?.chainFamily !== 'evm') return
+    if (phase === 'review' || phase === 'quoting') {
+      setPhase('input')
+      setQuote(null)
+      setError(null)
+    }
+  }, [effectiveEvmIndex, fromAsset?.chainFamily, phase])
 
   // Reset live tracking when phase changes away from submitted.
   // ALL live-* fields must clear here; otherwise values from a prior
@@ -840,6 +911,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setLiveRefundReason(undefined)
       setLiveSwapper(undefined)
       setLiveRelayRequestId(undefined)
+      setLiveNearTxHash(undefined)
       setAfterFromBal(null)
       setAfterToBal(null)
       setShowConfetti(false)
@@ -916,6 +988,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       .catch(() => {})
   }, [open])
 
+  // ── Live balance sync — keep sendMax math current ──────────────────
+  // Dashboard subscribes to balance-updated; SwapDialog must too, or
+  // sendMax calculations run against the snapshot from dialog-open time.
+  useEffect(() => {
+    if (!open) return
+    return onRpcMessage('balance-updated', (updated: ChainBalance) => {
+      setBalances(prev => {
+        const idx = prev.findIndex(b => b.chainId === updated.chainId)
+        if (idx === -1) return [...prev, updated]
+        const next = [...prev]
+        next[idx] = updated
+        return next
+      })
+    })
+  }, [open])
+
   // ── Load user-added custom tokens ─────────────────────────────────
   // Refetch each time the picker is opened so a token added in the previous
   // picker session (via the paste-contract Add lane) is visible immediately.
@@ -972,18 +1060,71 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // ── Auto-select from asset when dialog opens with chain context ───
   const hasAutoSelected = useRef(false)
   useEffect(() => {
-    if (hasAutoSelected.current || assets.length === 0 || !chain) return
-    const match = assets.find(a => a.chainId === chain.id && !a.contractAddress)
+    if (hasAutoSelected.current) return
+
+    // Fast path: caller supplied a pre-built SwapAsset (token from AssetPage that
+    // may not appear in Pioneer's GetAvailableAssets list). Use it directly.
+    if (initialFromAsset) {
+      console.log(`[SwapDialog] auto-select initialFromAsset="${initialFromAsset.caip}"`)
+      setFromAsset(initialFromAsset)
+      hasAutoSelected.current = true
+      return
+    }
+
+    if (assets.length === 0) return
+
+    let match: SwapAsset | undefined
+
+    if (initialFromCaip) {
+      const caipLower = initialFromCaip.toLowerCase()
+
+      // 1a. Case-insensitive exact CAIP match (handles checksum address differences)
+      match = assets.find(a => a.caip?.toLowerCase() === caipLower)
+
+      // 1b. Extract contract + network from the CAIP, match both
+      if (!match && initialFromCaip.includes('/')) {
+        const [networkPart = '', assetPart = ''] = initialFromCaip.split('/')
+        const contract = assetPart.includes(':') ? assetPart.split(':')[1]?.toLowerCase() ?? '' : assetPart.toLowerCase()
+        const targetChainId = CHAINS.find(c => c.networkId?.toLowerCase() === networkPart.toLowerCase())?.id
+
+        if (contract) {
+          // Prefer chain-scoped match, fall back to contract-only
+          match = assets.find(a =>
+            a.contractAddress?.toLowerCase() === contract && (!targetChainId || a.chainId === targetChainId)
+          ) ?? assets.find(a => a.contractAddress?.toLowerCase() === contract)
+        }
+      }
+
+      console.log(`[SwapDialog] auto-select initialFromCaip="${initialFromCaip}" → match=${match?.symbol ?? 'none'} (from ${assets.length} assets)`)
+    }
+
+    // 2. Token requested but not in swap assets — open the FROM picker so the
+    //    user can search manually rather than silently landing on the wrong asset.
+    if (!match && initialFromCaip) {
+      hasAutoSelected.current = true
+      setPickerSide('from')
+      return
+    }
+
+    // 3. Fall back to native asset for the context chain
+    if (!match && chain) {
+      match = assets.find(a => a.chainId === chain.id && !a.contractAddress)
+      if (match) console.log(`[SwapDialog] auto-select fallback to native: ${match.symbol}`)
+    }
+
     if (match) {
       setFromAsset(match)
-      const defaultOut = DEFAULT_OUTPUT[chain.id]
-      if (defaultOut) {
-        const outMatch = assets.find(a => a.asset === defaultOut)
-        if (outMatch) setToAsset(outMatch)
+      // Only auto-set a default output for native assets — token swaps let the user pick
+      if (!match.contractAddress) {
+        const defaultOut = DEFAULT_OUTPUT[match.chainId]
+        if (defaultOut) {
+          const outMatch = assets.find(a => a.asset === defaultOut)
+          if (outMatch) setToAsset(outMatch)
+        }
       }
       hasAutoSelected.current = true
     }
-  }, [assets, chain])
+  }, [assets, chain, initialFromCaip, initialFromAsset])
 
   // ── Resume from swap history ──────────────────────────────────────
   const hasResumedRef = useRef<string | null>(null)
@@ -1039,6 +1180,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     // for what is actually an ETH refund tx.
     if (resumeSwap.outboundChainId) setLiveOutboundChainId(resumeSwap.outboundChainId)
     if (resumeSwap.refundReason) setLiveRefundReason(resumeSwap.refundReason)
+    if (resumeSwap.nearTxHash) setLiveNearTxHash(resumeSwap.nearTxHash)
     // Skip stale `swapper` for native-vault integrations — Maya forks Thor's
     // protocol naming and Pioneer historically wrote `swapper='thorchain'`
     // even for Maya pools. The badge would then render "THORChain via Maya".
@@ -1069,7 +1211,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   // ── Derived values ────────────────────────────────────────────────
   const fromBalance = useMemo(() => {
     if (!fromAsset) return null
-    // Check cached balances first (most up-to-date from getCachedBalances RPC)
+    // For EVM assets, use the effective address's per-chain balance so the
+    // spendable amount reflects the address that will actually sign.
+    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
+      const chainBal = selectedAddr?.chainBalances?.[fromAsset.chainId]
+      if (chainBal) {
+        if (fromAsset.contractAddress && chainBal.tokens) {
+          const token = chainBal.tokens.find(t =>
+            t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
+          )
+          if (token) return token.balance
+        }
+        if (!fromAsset.contractAddress) return chainBal.balance
+      }
+    }
+    // Check cached balances (aggregated per-chain from getBalances RPC)
     const cb = balances.find(b => b.chainId === fromAsset.chainId)
     if (cb) {
       if (fromAsset.contractAddress && cb.tokens) {
@@ -1085,7 +1242,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       return balance.balance
     }
     return null
-  }, [fromAsset, balance, chain, balances])
+  }, [fromAsset, balance, chain, balances, evmAddresses, effectiveEvmIndex])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1094,8 +1251,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const nativeFeeReservedMaxAmount = useMemo(() => {
     if (!fromAsset || !fromBalance) return null
     if (nativeMaxFeeReserve(fromAsset) <= 0) return null
-    return maxSpendableAmount(fromAsset, fromBalance)
-  }, [fromAsset, fromBalance])
+    return maxSpendableAmount(fromAsset, fromBalance, maxReserveMode)
+  }, [fromAsset, fromBalance, maxReserveMode])
 
   const tokenPrecisionReservedMaxAmount = useMemo(() => {
     if (!fromAsset?.contractAddress || !fromBalance) return null
@@ -1119,6 +1276,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
    * of letting the user submit a 0 swap. */
   const nativeMaxInsufficient = isMax && nativeFeeReservedMaxAmount !== null && parseFloat(nativeFeeReservedMaxAmount) <= 0
   const tokenMaxInsufficient = isMax && tokenPrecisionReservedMaxAmount !== null && parseFloat(tokenPrecisionReservedMaxAmount) <= 0
+  const isFeeReservedNativeMax = isMax && nativeFeeReservedMaxAmount !== null
 
   // Derive per-unit USD price for from/to assets from cached balances
   // NOTE: cb.balanceUsd includes token USD — use nativeBalanceUsd for native asset price
@@ -1196,11 +1354,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const hasFromPrice = fromPriceUsd > 0
   const hasToPrice = toPriceUsd > 0
+  const nativeMaxReserveDisplay = useMemo(() => {
+    if (!isFeeReservedNativeMax || !fromAsset || !fromBalance || nativeFeeReservedMaxAmount === null) return null
+    const balanceAmount = parseFloat(fromBalance)
+    const maxAmount = parseFloat(nativeFeeReservedMaxAmount)
+    if (!Number.isFinite(balanceAmount) || !Number.isFinite(maxAmount)) return null
+    const reserveAmount = Math.max(0, balanceAmount - maxAmount)
+    if (reserveAmount <= 0) return null
+    const safeReserve = nativeMaxFeeReserve(fromAsset, 'safe')
+    const closerReserve = nativeMaxFeeReserve(fromAsset, 'closer')
+    return {
+      reserveAmount,
+      reserveUsd: fromPriceUsd > 0 ? reserveAmount * fromPriceUsd : 0,
+      safeReserve,
+      closerReserve,
+      canUseCloser: closerReserve < safeReserve,
+    }
+  }, [isFeeReservedNativeMax, fromAsset, fromBalance, nativeFeeReservedMaxAmount, fromPriceUsd])
 
   // Bidirectional conversion: crypto → fiat
   const handleCryptoChange = useCallback((v: string) => {
     setAmount(v)
     setIsMax(false)
+    setMaxReserveMode('safe')
     if (hasFromPrice && v) {
       const n = parseFloat(v)
       if (!isNaN(n)) setFiatAmount((n * fromPriceUsd).toFixed(2))
@@ -1227,6 +1403,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
     if (balUsd <= 100) {
       setIsMax(true)
+      setMaxReserveMode('safe')
     } else {
       const cryptoAmount = 100 / fromPriceUsd
       const formatted = cryptoAmount < 1
@@ -1240,6 +1417,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const handleFiatChange = useCallback((v: string) => {
     setFiatAmount(v)
     setIsMax(false)
+    setMaxReserveMode('safe')
     if (hasFromPrice && v) {
       const n = parseFloat(v)
       if (!isNaN(n)) {
@@ -1271,11 +1449,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
   const sameAsset = fromAsset && toAsset && fromAsset.asset === toAsset.asset
 
   const fromAddress = useMemo(() => {
-    if (fromAsset && address && chain && fromAsset.chainId === chain.id) return address
     if (!fromAsset) return ''
+    // EVM: always derive from the effective address index so fromAddress,
+    // fromBalance, and fromEvmAddressIndex are always in sync.
+    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
+      if (selectedAddr?.address) return selectedAddr.address
+    }
+    // Non-EVM: prefer the prop address when chain matches (AssetPage already derived it)
+    if (address && chain && fromAsset.chainId === chain.id) return address
     const cb = balances.find(b => b.chainId === fromAsset.chainId)
     return cb?.address || ''
-  }, [fromAsset, address, chain, balances])
+  }, [fromAsset, address, chain, balances, evmAddresses, effectiveEvmIndex])
 
   // Cached/balance-pipe address — for UTXO chains other than BTC this is often
   // the xpub itself (see comment in AssetPage.tsx:246: "balance.address may be
@@ -1371,12 +1556,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       isMax: sendIsMax, feeLevel: 5,
       fromAddressOverride: fromAddress,
       toAddressOverride: toAddress,
+      fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
       integration: quote.integration,
       relayTx: quote.relayTx,
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
-  }, [phase, quote, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress])
+  }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress])
 
   const auditPayloadReady = !!previewBuild?.unsignedTx
   const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
@@ -1439,6 +1625,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           fromAddress,
           toAddress,
           slippageBps,
+          isMax: sendIsMax,
         }, 30000)
         if (version !== quoteVersionRef.current) return
         setQuote(result)
@@ -1475,7 +1662,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.asset, toAsset?.asset, amount, isMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
+  }, [fromAsset?.asset, toAsset?.asset, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -1485,6 +1672,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setAmount("")
     setFiatAmount("")
     setIsMax(false)
+    setMaxReserveMode('safe')
     setQuote(null)
     setPhase('input')
     setError(null)
@@ -1525,6 +1713,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
           toCaip: toAsset.caip!,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
+          isMax: sendIsMax,
         }, 30000)
         // Block on >1% output drop — quote degraded, user should re-review
         const oldOut = parseFloat(quote.expectedOutput || '0')
@@ -1589,7 +1778,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         feeLevel: 5,
         fromAddressOverride: fromAddress,
         toAddressOverride: toAddress,
+        fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         integration: liveQuote.integration,
+        swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
       }, 600000)
 
@@ -1618,7 +1809,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, amount, isMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -1629,6 +1820,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     setFiatAmount("")
     setInputMode('crypto')
     setIsMax(false)
+    setMaxReserveMode('safe')
     setQuote(null)
     setError(null)
     setTxid(null)
@@ -1644,6 +1836,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     prevAutoDefaultAsset.current = null
     setUseCustomAddress(false)
     setCustomToAddress("")
+    setQuoteDetailsOpen(false)
   }, [])
 
   const handleClose = useCallback(() => {
@@ -1683,7 +1876,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
 
   const busy = phase === 'approving' || phase === 'signing' || phase === 'broadcasting'
   const displayAmount = sentAmount ?? sendAmount
-  const isFeeReservedNativeMax = isMax && nativeFeeReservedMaxAmount !== null
 
   // Must be above early return to satisfy Rules of Hooks
   const swappableChainIds = useMemo(() => new Set(assets.map(a => a.chainId)), [assets])
@@ -1785,7 +1977,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
       const fields = cmd
       if ('fromAsset' in fields && fields.fromAsset !== undefined) {
         const a = findAssetByKey(fields.fromAsset)
-        if (a) setFromAsset(a)
+        if (a) { setFromAsset(a); setMaxReserveMode('safe') }
         else pendingFromAssetKeyRef.current = fields.fromAsset
       }
       if ('toAsset' in fields && fields.toAsset !== undefined) {
@@ -1794,9 +1986,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         else pendingToAssetKeyRef.current = fields.toAsset
       }
       if ('amount' in fields && fields.amount !== undefined) {
-        setAmount(fields.amount); setIsMax(false)
+        setAmount(fields.amount); setIsMax(false); setMaxReserveMode('safe')
       }
-      if ('isMax' in fields && fields.isMax !== undefined) setIsMax(fields.isMax)
+      if ('isMax' in fields && fields.isMax !== undefined) {
+        setIsMax(fields.isMax)
+        if (fields.isMax) setMaxReserveMode('safe')
+      }
       if ('inputMode' in fields && fields.inputMode !== undefined) setInputMode(fields.inputMode)
       if ('useCustomAddress' in fields && fields.useCustomAddress !== undefined) setUseCustomAddress(fields.useCustomAddress)
       if ('customToAddress' in fields && fields.customToAddress !== undefined) setCustomToAddress(fields.customToAddress)
@@ -1812,7 +2007,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
     if (assets.length === 0) return
     if (pendingFromAssetKeyRef.current) {
       const a = findAssetByKey(pendingFromAssetKeyRef.current)
-      if (a) { setFromAsset(a); pendingFromAssetKeyRef.current = null }
+      if (a) { setFromAsset(a); setMaxReserveMode('safe'); pendingFromAssetKeyRef.current = null }
     }
     if (pendingToAssetKeyRef.current) {
       const a = findAssetByKey(pendingToAssetKeyRef.current)
@@ -2009,7 +2204,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       letterSpacing="-0.03em" textAlign="center" lineHeight="1.1">
                       {t("swap", "Swap")}{" "}
                       <Text as="span" color="var(--gold)"
-                        fontFamily="serif" fontStyle="italic" fontWeight={400} fontSize="1.2em">
+                        fontWeight={500} fontSize="1.2em">
                         {t("completed", "completed").toLowerCase()}
                       </Text>
                     </Text>
@@ -2114,7 +2309,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           <Text>{liveOutboundTxid ? '2 hashes' : '1 hash'}</Text>
                           {(() => {
                             const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                            const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
                             return tracker ? <Text>· tracker</Text> : null
                           })()}
                           <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -2185,7 +2380,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         {/* Tracker row */}
                         {(() => {
                           const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                          const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
                           return tracker ? (
                             <Flex align="center" gap="2.5" py="2" minW="0"
                               style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
@@ -2342,8 +2537,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
               <Flex align="center" gap="3" w="full" justify="center" position="relative">
                 <VStack gap="0" align="center">
                   <Text fontSize="lg" fontWeight="700" letterSpacing="-0.01em"
-                    color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}
-                    fontFamily="serif" fontStyle="italic">
+                    color={isSwapComplete ? "var(--teal)" : isSwapFailed ? "var(--rose)" : "kk.textPrimary"}>
                     {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
                   </Text>
                   {!isSwapComplete && !isSwapFailed && (
@@ -2550,8 +2744,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   </Button>
                 </Flex>
                 <Flex gap="2">
+                  {!isSwapComplete && !isSwapFailed && (
+                    <Button size="xs" flex="1" variant="outline"
+                      borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
+                      _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
+                      isDisabled={rechecking}
+                      onClick={handleRecheck}>
+                      <HStack gap="1">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                          style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
+                          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                        </svg>
+                        <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
+                      </HStack>
+                    </Button>
+                  )}
                   {(() => {
-                    const url = getExplorerTxUrl(fromAsset.chainId, txid)
+                    const safeTxid = txid ?? ''
+                    console.log('[explorer-debug]', fromAsset.chainId, safeTxid)
+                    const url = getExplorerTxUrl(fromAsset.chainId, safeTxid)
                     return url ? (
                       <Button size="xs" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                         _hover={{ bg: "rgba(255,255,255,0.06)", color: "kk.textPrimary" }}
@@ -2565,7 +2776,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     // post-broadcast value) over the quote-time parse, which often
                     // misses `swapper` for aggregator routes.
                     const protoHint = liveSwapper || quote?.swapper || quote?.integration
-                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId })
+                    const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
                     if (!tracker) return null
                     return (
                       <Button size="xs" flex="1" variant="outline" borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
@@ -2772,8 +2983,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                     fontSize="20px"
                     fontWeight="600"
                     color="kk.textPrimary"
-                    fontFamily="serif"
-                    fontStyle="italic"
                     letterSpacing="-0.01em"
                   >
                     {subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")
@@ -2865,8 +3074,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                   </Box>
                   <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={40} alt={toAsset.symbol} />
                 </Flex>
-                {isFeeReservedNativeMax && (
-                  <Text fontSize="10px" color="var(--gold)" mt="1.5">{t("sendMaxGasNote")}</Text>
+                {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
+                  <Text fontSize="10px" color="var(--gold)" mt="1.5">
+                    {t("sendMaxGasReserveNote", {
+                      defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                      reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
+                      symbol: fromAsset.symbol,
+                      usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+                    })}
+                  </Text>
                 )}
               </Box>
 
@@ -3336,11 +3552,63 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                             bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
                             borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
                             borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => { setIsMax(true); setAmount(""); setFiatAmount("") }} disabled={busy}>
+                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }} disabled={busy}>
                             {t("max")}
                           </Button>
                         </Flex>
                       </Flex>
+
+                      {/* EVM address switcher — shown when multiple addresses tracked.
+                          Uses local dialog state so switching here doesn't affect AssetPage. */}
+                      {fromAsset?.chainFamily === 'evm' && evmAddresses.addresses.length > 1 && (
+                        <Box mt="2" mb="2">
+                          <Text fontSize="8px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="1">From address</Text>
+                          <Flex gap="1" flexWrap="wrap">
+                            {evmAddresses.addresses.map(addr => {
+                              const isSelected = addr.addressIndex === effectiveEvmIndex
+                              const chainBal = addr.chainBalances?.[fromAsset.chainId]
+                              const chainBalLoading = chainBal === undefined
+                              // For selected address fall back to global balances when chainBal not yet loaded
+                              let bal = 0
+                              if (chainBal) {
+                                bal = parseFloat(chainBal.balance)
+                              } else if (isSelected) {
+                                const gb = balances.find(b => b.chainId === fromAsset.chainId)
+                                bal = gb ? parseFloat(gb.balance) : 0
+                              }
+                              const snippet = addr.address ? `${addr.address.slice(0, 6)}…${addr.address.slice(-4)}` : `#${addr.addressIndex}`
+                              return (
+                                <Box
+                                  key={addr.addressIndex}
+                                  as="button"
+                                  onClick={() => setEvmAddressIndexOverride(addr.addressIndex)}
+                                  px="2" py="1"
+                                  borderRadius="md"
+                                  border="1px solid"
+                                  borderColor={isSelected ? "kk.gold" : "kk.border"}
+                                  bg={isSelected ? "rgba(233,196,106,0.1)" : "rgba(255,255,255,0.03)"}
+                                  cursor="pointer"
+                                  transition="all 0.15s"
+                                  _hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
+                                  disabled={busy}
+                                >
+                                  <Flex direction="column" align="flex-start" gap="0">
+                                    <Text fontSize="9px" fontFamily="mono" color={isSelected ? "kk.gold" : "kk.textSecondary"} fontWeight="600" lineHeight="1.3">
+                                      {snippet}
+                                    </Text>
+                                    {chainBalLoading && !isSelected
+                                      ? <Spinner size="xs" color="kk.textMuted" />
+                                      : <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1.3">
+                                          {bal > 0 ? `${bal.toFixed(4)} ${fromAsset.symbol}` : `0 ${fromAsset.symbol}`}
+                                        </Text>
+                                    }
+                                  </Flex>
+                                </Box>
+                              )
+                            })}
+                          </Flex>
+                        </Box>
+                      )}
 
                       <Box position="relative">
                         {inputMode === 'fiat' && (
@@ -3348,7 +3616,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                         )}
                         <Input
                           value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
-                          onChange={(e) => { if (isMax) setIsMax(false); inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
+                          onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                           placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
                           bg="rgba(0,0,0,0.4)" border="1px solid"
                           borderColor={exceedsBalance ? "kk.error" : "rgba(255,255,255,0.08)"}
@@ -3382,14 +3650,59 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
-                      {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && (
-                        <Text fontSize="10px" color="kk.textMuted" mt="1" fontFamily="mono" letterSpacing="0.02em">
-                          {t("maxReservesGas", { defaultValue: "Reserves ~{{reserve}} {{symbol}} for network fees", reserve: nativeMaxFeeReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
-                        </Text>
+                      {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && nativeMaxReserveDisplay && (
+                        <Box mt="2" p="2" borderRadius="md" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
+                          <Text fontSize="10px" color="kk.textSecondary" fontFamily="mono" lineHeight="1.45">
+                            {t("maxReserveDisclosure", {
+                              defaultValue: "MAX swaps {{amount}} {{symbol}} and keeps ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                              amount: formatBalance(sendAmount),
+                              reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
+                              symbol: fromAsset.symbol,
+                              usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+                            })}
+                          </Text>
+                          {nativeMaxReserveDisplay.canUseCloser && (
+                            <Flex mt="2" align="center" justify="space-between" gap="2" wrap="wrap">
+                              <Flex p="0.5" bg="rgba(0,0,0,0.28)" border="1px solid rgba(255,255,255,0.08)" borderRadius="md" gap="0.5">
+                                {(['safe', 'closer'] as NativeMaxReserveMode[]).map((mode) => {
+                                  const active = maxReserveMode === mode
+                                  return (
+                                    <Button
+                                      key={mode}
+                                      type="button"
+                                      px="2"
+                                      py="0.5"
+                                      h="20px"
+                                      minW="auto"
+                                      borderRadius="sm"
+                                      fontSize="9px"
+                                      fontWeight="700"
+                                      color={active ? "black" : "kk.textSecondary"}
+                                      bg={active ? "kk.gold" : "transparent"}
+                                      border="0"
+                                      _hover={{ bg: active ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
+                                      onClick={() => setMaxReserveMode(mode)}
+                                      disabled={busy}
+                                    >
+                                      {mode === 'safe'
+                                        ? t("maxReserveSafe", "Safe")
+                                        : t("maxReserveCloser", "Closer MAX")}
+                                    </Button>
+                                  )
+                                })}
+                              </Flex>
+                              {maxReserveMode === 'closer' && (
+                                <Text fontSize="9px" color="var(--gold)" fontFamily="mono" flex="1" minW="150px">
+                                  {t("maxReserveCloserWarning", "Tighter gas reserve; swap may fail if gas moves before signing.")}
+                                </Text>
+                              )}
+                            </Flex>
+                          )}
+                        </Box>
                       )}
                       {nativeMaxInsufficient && fromAsset && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">
-                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset).toString(), symbol: fromAsset.symbol })}
+                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset, maxReserveMode).toString(), symbol: fromAsset.symbol })}
                         </Text>
                       )}
                     </Box>
@@ -3448,8 +3761,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
                           ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
                         </Text>
                       )}
-                      {isFeeReservedNativeMax && (
-                        <Text fontSize="9px" color="var(--gold)" mt="1">{t("sendMaxGasNote")}</Text>
+                      {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
+                        <Text fontSize="9px" color="var(--gold)" mt="1">
+                          {t("sendMaxGasReserveNote", {
+                            defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                            reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
+                            symbol: fromAsset.symbol,
+                            usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+                          })}
+                        </Text>
                       )}
                     </Box>
                   )}
@@ -3684,8 +4004,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
             <Box minW="0" flex="1">
               {quote ? (
-                <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={14} variant="detailed" />
-              ) : null /* don't claim a provider before we have a quote — was hardcoding THORChain even for Maya-only pairs (e.g. ZEC) */}
+                <ProverChip
+                  swapper={quote.swapper}
+                  integration={quote.integration}
+                  onClick={() => setQuoteDetailsOpen(true)}
+                />
+              ) : null /* don't claim a provider before we have a quote */}
             </Box>
             <Box
               as="a"
@@ -3811,6 +4135,65 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         </Box>
       )}
 
+      {/* ── Quote details modal (ProverChip click) ─────────────────── */}
+      {quoteDetailsOpen && quote && fromAsset && toAsset && (
+        <Box position="fixed" inset="0" zIndex={Z.assetPicker}
+          display="flex" alignItems="center" justifyContent="center"
+          bg="rgba(0,0,0,0.65)" onClick={() => setQuoteDetailsOpen(false)}>
+          <Box
+            bg="kk.bg" borderRadius="16px" border="1px solid" borderColor="kk.border"
+            w="340px"
+            boxShadow="0 24px 64px rgba(0,0,0,0.7)"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            style={{ animation: 'kkSwapFadeIn 0.15s ease-out' }}
+          >
+            {(() => {
+              const info = resolveProvider(quote.swapper || quote.integration)
+              return (
+                <>
+                  <Flex px="5" py="4" borderBottom="1px solid" borderColor="kk.border" align="center" gap="3">
+                    <Box w="40px" h="40px" borderRadius="full" overflow="hidden" flexShrink={0}
+                      style={{ boxShadow: `0 0 14px ${info.color}55` }}>
+                      <img src={info.icon} alt={info.label} width="40" height="40"
+                        style={{ borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
+                    </Box>
+                    <Box flex="1">
+                      <Text fontSize="15px" fontWeight="700" color="kk.textPrimary">{info.label}</Text>
+                      <Text fontSize="11px" color="kk.textMuted">Route details</Text>
+                    </Box>
+                    <Box as="button" fontSize="20px" lineHeight="1" color="kk.textMuted" px="1"
+                      cursor="pointer"
+                      onClick={() => setQuoteDetailsOpen(false)}
+                      style={{ background: 'none', border: 'none' }}>×</Box>
+                  </Flex>
+                  <VStack gap="0" align="stretch" px="4" py="3">
+                    <ReviewRow label={t("rate")}>
+                      1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(sendAmount || '1')).toString())} {toAsset.symbol}
+                    </ReviewRow>
+                    <ReviewRow label={t("expectedAfterFees", "Expected")}>
+                      {formatBalance(quote.expectedOutput)} {toAsset.symbol}
+                      {hasToPrice ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
+                    </ReviewRow>
+                    <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>
+                      {formatBalance(quote.minimumOutput)} {toAsset.symbol}
+                    </ReviewRow>
+                    <ReviewRow label={t("protocolFee", "Protocol fee")}>
+                      {(quote.fees.totalBps / 100).toFixed(2)}%
+                    </ReviewRow>
+                    <ReviewRow label={t("slippageTolerance", "Slippage")}>
+                      {(slippageBps / 100).toFixed(2)}% max
+                    </ReviewRow>
+                    <ReviewRow label={t("estimatedTime")}>
+                      {formatTime(quote.estimatedTime)}
+                    </ReviewRow>
+                  </VStack>
+                </>
+              )
+            })()}
+          </Box>
+        </Box>
+      )}
+
       <AssetPickerDialog
         open={pickerSide !== null}
         onClose={() => setPickerSide(null)}
@@ -3820,7 +4203,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap 
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
         side={pickerSide || 'from'}
         onSelect={(a) => {
-          if (pickerSide === 'from') setFromAsset(a)
+          if (pickerSide === 'from') { setFromAsset(a); setMaxReserveMode('safe') }
           else if (pickerSide === 'to') setToAsset(a)
           setQuote(null)
           setPhase('input')

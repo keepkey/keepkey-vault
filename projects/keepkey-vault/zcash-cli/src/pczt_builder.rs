@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use orchard::{
     builder::{Builder, BundleType},
-    circuit::ProvingKey,
+    circuit::{ProvingKey, VerifyingKey},
     keys::{FullViewingKey, Scope},
     note::{ExtractedNoteCommitment, RandomSeed, Rho},
     tree::MerkleHashOrchard,
@@ -87,6 +87,23 @@ pub struct ActionFields {
     pub out_ciphertext: Vec<u8>,
     pub value: u64,
     pub is_spend: bool,
+    // Clear-signing fields (firmware >= 7.15 clear-signing protocol)
+    // Only present for output actions (is_spend = false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,  // hex-encoded 43-byte Orchard receiver (d || pk_d)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rseed: Option<String>,      // hex-encoded 32-byte note randomness seed
+}
+
+/// Plaintext Zcash v5 transaction header fields needed by clear-signing firmware.
+/// Firmware recomputes the ZIP-244 header digest from these and verifies it matches
+/// the provided header_digest before signing.
+#[derive(Debug, Serialize)]
+pub struct HeaderFields {
+    pub tx_version: u32,
+    pub version_group_id: u32,
+    pub lock_time: u32,
+    pub expiry_height: u32,
 }
 
 /// The signing request sent to Electrobun, which forwards fields to the device.
@@ -98,6 +115,7 @@ pub struct SigningRequest {
     #[serde(with = "hex_bytes")]
     pub sighash: Vec<u8>,
     pub digests: DigestFields,
+    pub header_fields: HeaderFields,
     pub bundle_meta: BundleMeta,
     pub actions: Vec<ActionFields>,
     pub display: DisplayInfo,
@@ -109,8 +127,7 @@ pub struct DigestFields {
     pub header: Vec<u8>,
     #[serde(with = "hex_bytes")]
     pub transparent: Vec<u8>,
-    #[serde(with = "hex_bytes")]
-    pub sapling: Vec<u8>,
+    // sapling omitted — clear-signing firmware rejects sapling_digest if set
     #[serde(with = "hex_bytes")]
     pub orchard: Vec<u8>,
 }
@@ -597,7 +614,9 @@ pub async fn build_pczt(
         // spend_auth_sig=None, waiting for the device signature.
         // alpha().is_some() is NOT reliable — builder sets alpha for ALL actions.
         let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
-        let value = pczt_bundle.actions()[i].spend().value()
+        // Firmware uses value to verify the OUTPUT note commitment (cmx = commit(recipient, value, rseed, rho)).
+        // Always send output.value(), not spend.value().
+        let value = pczt_bundle.actions()[i].output().value()
             .map(|v| v.inner())
             .unwrap_or(0);
 
@@ -618,6 +637,15 @@ pub async fn build_pczt(
         let rk_bytes: [u8; 32] = effects_action.rk().into();
         let out_ciphertext = effects_action.encrypted_note().out_ciphertext.to_vec();
 
+        // Every Orchard action has a spend+output pair. The PCZT stores plaintext
+        // recipient+rseed in the output fields — read them directly, same as build_shield_pczt.
+        let out = pczt_bundle.actions()[i].output();
+        let orchard_recipient = out.recipient().as_ref().map(|addr| hex::encode(addr.to_raw_address_bytes()));
+        let orchard_rseed = out.rseed().as_ref().map(|rs| hex::encode(rs.as_bytes()));
+        if orchard_recipient.is_none() {
+            debug!("Action {} output has no recipient in PCZT — dummy output", i);
+        }
+
         action_fields.push(ActionFields {
             index: i as u32,
             alpha: alpha_bytes,
@@ -632,6 +660,8 @@ pub async fn build_pczt(
             out_ciphertext,
             value,
             is_spend,
+            recipient: orchard_recipient,
+            rseed: orchard_rseed,
         });
     }
 
@@ -647,8 +677,13 @@ pub async fn build_pczt(
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
-            sapling: digests.sapling_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+        },
+        header_fields: HeaderFields {
+            tx_version: 5,
+            version_group_id: 0x26A7270A,
+            lock_time: 0,
+            expiry_height: 0,
         },
         bundle_meta: BundleMeta {
             flags: orchard_flags,
@@ -872,9 +907,14 @@ pub struct ShieldSigningRequest {
 pub struct TransparentSigningInput {
     pub index: u32,
     #[serde(with = "hex_bytes")]
-    pub sighash: Vec<u8>,       // 32-byte per-input sighash
+    pub sighash: Vec<u8>,       // 32-byte per-input sighash (kept for finalize; firmware computes own)
     pub address_path: Vec<u32>, // BIP44 path [44', 133', 0', 0, 0]
-    pub amount: u64,            // zatoshis (for display)
+    pub amount: u64,            // zatoshis
+    // Plaintext fields for clear-signing firmware (firmware >= 7.15 clear-signing protocol)
+    pub prevout_txid: String,   // hex-encoded 32-byte txid (internal/LE byte order)
+    pub prevout_index: u32,
+    pub sequence: u32,
+    pub script_pubkey: String,  // hex-encoded scriptPubKey
 }
 
 #[derive(Debug, Serialize)]
@@ -1143,7 +1183,7 @@ pub async fn build_shield_pczt(
     ];
 
     let mut transparent_signing: Vec<TransparentSigningInput> = Vec::new();
-    for (i, _input) in zip_inputs.iter().enumerate() {
+    for (i, input) in zip_inputs.iter().enumerate() {
         let input_sighash = zip244::compute_transparent_sig_hash(
             i,
             &zip_inputs,
@@ -1158,7 +1198,11 @@ pub async fn build_shield_pczt(
             index: i as u32,
             sighash: input_sighash.to_vec(),
             address_path: bip44_path.clone(),
-            amount: zip_inputs[i].value,
+            amount: input.value,
+            prevout_txid: hex::encode(input.prevout_hash),
+            prevout_index: input.prevout_index,
+            sequence: input.sequence,
+            script_pubkey: hex::encode(&input.script_pubkey),
         });
     }
 
@@ -1172,7 +1216,7 @@ pub async fn build_shield_pczt(
         .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
     info!("Proof generated");
 
-    // Extract Orchard signing fields (same as existing build_pczt)
+    // Extract Orchard signing fields
     let n_actions = pczt_bundle.actions().len();
     let mut action_fields: Vec<ActionFields> = Vec::new();
 
@@ -1182,9 +1226,15 @@ pub async fn build_shield_pczt(
             .unwrap_or_else(|| vec![0u8; 32]);
         let cv_net_bytes = pczt_bundle.actions()[i].cv_net().to_bytes().to_vec();
         let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
-        let value = pczt_bundle.actions()[i].spend().value()
-            .map(|v| v.inner())
-            .unwrap_or(0);
+        // For output actions (is_spend=false), the note value is in output().value().
+        // spend().value() is the dummy-spend value (always 0) — reading it for outputs
+        // causes "Orchard note commitment mismatch" because firmware recomputes cmx
+        // from recipient + value + rseed + nullifier.
+        let value = if is_spend {
+            pczt_bundle.actions()[i].spend().value().map(|v| v.inner()).unwrap_or(0)
+        } else {
+            pczt_bundle.actions()[i].output().value().map(|v| v.inner()).unwrap_or(0)
+        };
 
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
@@ -1196,6 +1246,19 @@ pub async fn build_shield_pczt(
         let enc_noncompact = enc[564..].to_vec();
         let rk_bytes: [u8; 32] = effects_action.rk().into();
         let out_ciphertext = effects_action.encrypted_note().out_ciphertext.to_vec();
+
+        // For output actions, read recipient + rseed directly from the PCZT output fields.
+        // The PCZT builder stores these in plaintext — no decryption needed.
+        let (orchard_recipient, orchard_rseed) = if !is_spend {
+            let out = pczt_bundle.actions()[i].output();
+            let r = out.recipient().as_ref().map(|addr| hex::encode(addr.to_raw_address_bytes()));
+            let s = out.rseed().as_ref().map(|rs| hex::encode(rs.as_bytes()));
+            if r.is_none() { debug!("PCZT output action {} has no recipient field", i); }
+            if s.is_none() { debug!("PCZT output action {} has no rseed field", i); }
+            (r, s)
+        } else {
+            (None, None)
+        };
 
         action_fields.push(ActionFields {
             index: i as u32,
@@ -1211,6 +1274,8 @@ pub async fn build_shield_pczt(
             out_ciphertext,
             value,
             is_spend,
+            recipient: orchard_recipient,
+            rseed: orchard_rseed,
         });
     }
 
@@ -1226,8 +1291,13 @@ pub async fn build_shield_pczt(
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
-            sapling: digests.sapling_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+        },
+        header_fields: HeaderFields {
+            tx_version: 5,
+            version_group_id: 0x26A7270A,
+            lock_time: 0,
+            expiry_height: 0,
         },
         bundle_meta: BundleMeta {
             flags: orchard_flags,
@@ -1304,6 +1374,13 @@ pub fn finalize_shield_pczt(
     let authorized_bundle = unbound_bundle.apply_binding_signature(sighash, &mut rng)
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
 
+    // In-process proof verification — catches circuit constraint violations BEFORE broadcast.
+    // If this fails, the chain would reject with "could not validate orchard proof".
+    let vk = VerifyingKey::build();
+    authorized_bundle.verify_proof(&vk)
+        .map_err(|e| anyhow::anyhow!("Local Orchard proof verification FAILED (would be rejected on-chain): {:?}", e))?;
+    info!("Local Orchard proof verification: PASSED");
+
     // Serialize as hybrid v5 transaction
     let tx_bytes = serialize_v5_hybrid_tx(
         &authorized_bundle,
@@ -1331,6 +1408,28 @@ pub fn finalize_shield_pczt(
     };
     let txid_hash = zip244::compute_sighash(&txid_digests, state.branch_id);
     let txid = hex::encode(&txid_hash);
+
+    // ── DIAGNOSTIC: orchard digest consistency check ─────────────────────
+    // The Orchard digest in the effects_bundle sighash MUST equal the Orchard digest
+    // from the authorized_bundle. Any change introduced by finalize_io (which should
+    // not exist per the orchard crate spec) would cause the binding sig and spend auth
+    // sigs to be bound to a different Orchard digest than what's serialized on-chain.
+    //
+    // NOTE: for hybrid (shield) transactions, state.sighash (S.2 form, includes amounts
+    // and scripts) intentionally differs from txid_hash (T.1 form). They are computing
+    // different things. What must match is the Orchard digest component.
+    info!("Orchard sighash (S.2 form, for Orchard binding+spend auth sigs): {}", hex::encode(&state.sighash));
+    info!("Txid (T.1 form, transaction identifier): {}", hex::encode(&txid_hash));
+    let effects_orchard_digest: [u8; 32] = state.orchard_signing_request.digests.orchard
+        .as_slice().try_into().unwrap_or([0u8; 32]);
+    if effects_orchard_digest != orchard_digest {
+        log::error!("ORCHARD DIGEST MISMATCH: finalize_io changed ciphertext/actions — binding sig sighash is inconsistent with serialized tx");
+        log::error!("  Orchard digest in effects sighash (for binding sig): {}", hex::encode(&effects_orchard_digest));
+        log::error!("  Orchard digest from authorized bundle (on-chain):    {}", hex::encode(&orchard_digest));
+    } else {
+        info!("Orchard digest: MATCH — binding sig sighash is consistent with authorized bundle");
+    }
+    // ── END sighash check ─────────────────────────────────────────────────
 
     info!("Shield tx built: {} bytes, txid: {}", tx_bytes.len(), txid);
     Ok((tx_bytes, txid))
@@ -1878,6 +1977,8 @@ pub async fn build_deshield_pczt(
             out_ciphertext: effects_action.encrypted_note().out_ciphertext.to_vec(),
             value,
             is_spend,
+            recipient: None,
+            rseed: None,
         });
     }
 
@@ -1889,8 +1990,13 @@ pub async fn build_deshield_pczt(
         digests: DigestFields {
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
-            sapling: digests.sapling_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+        },
+        header_fields: HeaderFields {
+            tx_version: 5,
+            version_group_id: 0x26A7270A,
+            lock_time: 0,
+            expiry_height: 0,
         },
         bundle_meta: BundleMeta {
             flags: effects_bundle.flags().to_byte() as u32,
@@ -3151,5 +3257,62 @@ mod roundtrip_v5_tests {
             "deshield txid mismatch — our serializer or zip244 digest disagrees \
              with the canonical reference; this is the bug deshield broadcasts hit"
         );
+    }
+}
+
+/// Batch-validate a saved live transaction using orchard 0.10.2's BatchValidator.
+///
+/// This test documents the root cause of "could not validate orchard proof":
+/// the saved transaction was built with the T.1 sighash (wrong — the network
+/// uses the S.2 form for shield txs with non-empty vin). BatchValidator PASSES
+/// with T.1 because the sigs were created under T.1. But the network's
+/// BatchValidator would compute S.2 and FAIL.
+///
+/// New transactions built after the compute_zip244_digests_hybrid fix (S.2 form)
+/// will have sigs under S.2 and will pass both local and network verification.
+///
+/// To run: `cargo test batch_validate -- --nocapture --ignored`
+#[cfg(test)]
+mod batch_validate_test {
+    use zcash_primitives::transaction::Transaction;
+    use zcash_protocol_v04::consensus::BranchId;
+
+    const NU5_BRANCH_ID_LE: [u8; 4] = 0xc2d6d0b4u32.to_le_bytes();
+
+    /// Verify the SAVED transaction's Orchard bundle is valid under the T.1 sighash
+    /// it was built with. This PASSES locally because sigs match T.1. The same
+    /// bundle FAILS on-chain because Zebra uses S.2 for shield transactions.
+    #[test]
+    #[ignore]
+    fn batch_validate_saved_shield_tx_t1_passes() {
+        use rand::rngs::OsRng;
+        use orchard_v010::bundle::BatchValidator;
+        use orchard_v010::circuit::VerifyingKey;
+
+        let hex_path = "/tmp/shield_tx_9c240769e2089bdf.hex";
+        let hex = match std::fs::read_to_string(hex_path) {
+            Ok(s) => s,
+            Err(e) => { eprintln!("SKIP: cannot read {}: {}", hex_path, e); return; }
+        };
+        let raw = hex::decode(hex.trim()).expect("valid hex");
+
+        // T.1 sighash (old buggy form, equals txid). Sigs in this tx were created with T.1.
+        let mut sighash_arr = [0u8; 32];
+        sighash_arr.copy_from_slice(
+            &hex::decode("9c240769e2089bdf6045f4aba2b2d7028a70c05e33ad7e11a02f1b2ece92a1c1").unwrap()
+        );
+
+        let mut parse_bytes = raw;
+        if parse_bytes.len() >= 12 { parse_bytes[8..12].copy_from_slice(&NU5_BRANCH_ID_LE); }
+        let parsed = Transaction::read(&parse_bytes[..], BranchId::Nu5)
+            .expect("zcash_primitives must parse our v5 hybrid tx");
+        let ob = parsed.orchard_bundle().expect("orchard bundle present");
+        println!("anchor: {}", hex::encode(ob.anchor().to_bytes()));
+
+        let mut validator = BatchValidator::new();
+        validator.add_bundle(ob, sighash_arr);
+        let result = validator.validate(&VerifyingKey::build(), OsRng);
+        println!("BatchValidator (T.1 sighash): {}", if result { "PASS" } else { "FAIL" });
+        assert!(result, "Expected PASS: sigs in saved tx were created with T.1");
     }
 }

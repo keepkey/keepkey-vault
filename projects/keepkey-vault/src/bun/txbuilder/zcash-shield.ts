@@ -66,15 +66,19 @@ interface TransparentUtxo {
 
 interface TransparentSigningInput {
 	index: number
-	sighash: string       // hex 32 bytes
-	address_path: number[] // BIP44 path
+	address_path: number[]
 	amount: number
+	prevout_txid: string    // hex 32 bytes LE
+	prevout_index: number
+	sequence: number
+	script_pubkey: string   // hex scriptPubKey of UTXO being spent
 }
 
 interface ShieldBuildResult {
 	transparent_inputs: TransparentSigningInput[]
+	transparent_outputs?: Array<{ index: number; value: number; script_pubkey: string }>
 	orchard_signing_request: any
-	digests: { header: string; transparent: string; sapling: string; orchard: string }
+	digests: { header: string; transparent: string; orchard: string }
 	display: { amount: string; fee: string; action: string }
 }
 
@@ -435,12 +439,17 @@ async function _shieldZecInner(
 	// we need firmware >= 7.15.0 with ZcashTransparentInput support.
 	const signingRequest = {
 		...buildResult.orchard_signing_request,
+		header_fields: buildResult.orchard_signing_request.header_fields,
+		transparent_outputs: buildResult.transparent_outputs,
 		transparent_inputs: hasTransparentInputs
 			? buildResult.transparent_inputs.map((ti: any) => ({
 				index: ti.index,
-				sighash: ti.sighash,
 				addressNList: ti.address_path,
 				amount: ti.amount,
+				prevout_txid: ti.prevout_txid,
+				prevout_index: ti.prevout_index,
+				sequence: ti.sequence,
+				script_pubkey: ti.script_pubkey,
 			}))
 			: undefined,
 	}
@@ -450,7 +459,8 @@ async function _shieldZecInner(
 		const signFn = () => wallet.zcashSignPczt(signingRequest, buildResult.orchard_signing_request.sighash)
 		signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 	} catch (e: any) {
-		if (e?.message?.includes("Unknown message") && hasTransparentInputs) {
+		console.error("[zcash-shield] zcashSignPczt threw:", typeof e, JSON.stringify(e), e?.message)
+		if (String(e?.message ?? e ?? "").includes("Unknown message") && hasTransparentInputs) {
 			throw new Error(
 				"Shielding requires firmware with transparent input signing support (ZcashTransparentInput). " +
 				"Your firmware does not implement this message type yet. " +

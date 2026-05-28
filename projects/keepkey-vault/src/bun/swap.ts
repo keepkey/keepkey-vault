@@ -15,6 +15,7 @@ import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
+import { normalizeBchAddress } from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
 // assetToCaip is exported for backwards-compat (legacy code that hydrates old
 // history rows without CAIP). The swap quote/execute path no longer uses it —
@@ -133,6 +134,48 @@ const ASSET_CACHE_TTL = 5 * 60_000 // 5 minutes
 export function clearSwapCache(): void {
   assetCache = []
   assetCacheTime = 0
+}
+
+/** Search Pioneer's full asset discovery database (not just swap-pool tokens).
+ *  Uses the SearchAssets swagger operation (/discovery/search).
+ *  Returns SwapAsset[] so the frontend can show them with assessAvailability. */
+export async function searchDiscoveryAssets(query: string): Promise<SwapAsset[]> {
+  const pioneer = await getPioneer()
+  let resp: any
+  try {
+    resp = await pioneer.SearchAssets({ q: query, limit: 30 })
+  } catch (e: any) {
+    console.warn(`[swap] SearchAssets failed: ${e.message}`)
+    return []
+  }
+  const results: any[] = resp?.data ?? []
+  const assets: SwapAsset[] = []
+  for (const item of results) {
+    const caip: string = item.assetId
+    if (!caip) continue
+    const chainCaip2: string = item.chainId
+    if (!chainCaip2) continue
+    const chain = CHAINS.find(c => c.networkId === chainCaip2)
+    if (!chain) continue
+    const slashIdx = caip.indexOf('/')
+    const tokenPart = slashIdx >= 0 ? caip.slice(slashIdx + 1) : ''
+    const contractAddress = tokenPart.startsWith('erc20:') ? tokenPart.slice(6)
+      : tokenPart.startsWith('token:') ? tokenPart.slice(6)
+      : tokenPart.startsWith('bep20:') ? tokenPart.slice(6)
+      : undefined
+    assets.push({
+      asset: `${chain.id.toUpperCase()}.${item.symbol}`,
+      chainId: chain.id,
+      symbol: item.symbol,
+      name: item.name,
+      chainFamily: chain.chainFamily,
+      decimals: typeof item.precision === 'number' ? item.precision : chain.decimals,
+      caip,
+      contractAddress,
+      icon: item.icon,
+    })
+  }
+  return assets
 }
 
 /** Fetch available swap assets from Pioneer GetAvailableAssets */
@@ -288,26 +331,125 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     : (result.integration || 'unknown')
   swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
 
-  // NEAR Intents BTC→EVM: competitive solver network that fronts ETH then claims BTC.
-  // Solvers need 2 BTC confirmations (20-40 min) and must cover ETH gas (~$2-5).
-  // Amounts below ~$50 USD are systematically refunded — no solver finds it profitable.
-  if (result.swapper === 'NEAR Intents' && params.fromCaip.startsWith('bip122:')) {
-    // Block amounts below the protocol's stated minimum
-    if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
-      throw new Error(
-        `Amount too small for NEAR Intents — minimum ${result.minAmountIn} BTC required. ` +
-        `Solvers must front ETH and wait for BTC confirmations; smaller amounts are unprofitable and will be refunded.`
-      )
+  // NEAR Intents: solver-network minimum amount check for ALL source chains.
+  // Solvers must front the destination-chain gas and wait for source confirmations;
+  // amounts below their profitability floor are systematically refunded.
+  //
+  // Two guards:
+  //   A) BTC→EVM: explicit minAmountIn field from the quote.
+  //   B) EVM→* deposit-channel: relay.value >> requested amount means the provider
+  //      returned its minimum (not the user's amount). Detect and throw early so the
+  //      user sees "too small" at quote time instead of "insufficient balance" at build.
+  if (result.swapper === 'NEAR Intents') {
+    if (params.fromCaip.startsWith('bip122:') || params.fromCaip.startsWith('solana:')) {
+      // ── Refund-address safety validation (two independent layers) ──────────────
+      // A confirmed fund loss occurred when 1Click was given keepkey.near as the
+      // refundTo address instead of the user's BTC address (commit 4d748b82).
+      // We now verify the refundTo from both Pioneer's response AND directly from
+      // the 1Click API before the user ever sees the Confirm button.
+
+      // bip122 (BTC/ZEC/DOGE) and solana addresses are case-sensitive base58 —
+      // never lowercase them. EVM is not in this branch.
+      const senderAddr = params.fromAddress?.trim()
+      // BCH cashaddr can appear with or without the "bitcoincash:" prefix — Pioneer/1Click
+      // strips it, so normalize both sides before comparing (same pattern as lines ~234, ~505).
+      const stripBchPrefix = (a: string | undefined) =>
+        a?.startsWith('bitcoincash:') ? a.slice('bitcoincash:'.length) : a
+      const senderAddrNorm = stripBchPrefix(senderAddr)
+      const depositAddr = result.inboundAddress || result.nearIntentsDepositAddress
+
+      // Layer 1: Pioneer's parsed refundTo must exist and match senderAddress.
+      const pioneerRefundTo = result.nearIntentsRefundTo?.trim()
+      if (!pioneerRefundTo) {
+        throw new Error(
+          'NEAR Intents quote is missing refundTo — cannot verify refund safety. ' +
+          'Do not proceed: if the swap fails, funds may go to an uncontrolled address.'
+        )
+      }
+      if (senderAddrNorm && stripBchPrefix(pioneerRefundTo) !== senderAddrNorm) {
+        throw new Error(
+          `NEAR Intents refundTo mismatch — Pioneer registered "${result.nearIntentsRefundTo}" ` +
+          `as refund address but your wallet address is "${params.fromAddress}". ` +
+          `Do not proceed: a refund would not return to your wallet.`
+        )
+      }
+      swapLog(`${TAG} NEAR Intents Layer 1 OK: refundTo=${result.nearIntentsRefundTo} matches senderAddress`)
+
+      // Layer 2: Independently verify refundTo by calling 1Click directly.
+      // This does not trust Pioneer — it reads the intent that NEAR Intents
+      // actually created. A 404 means the deposit address wasn't registered with
+      // 1Click (different fund-loss path) — also blocked.
+      if (depositAddr) {
+        try {
+          const oneClickResp = await fetch(
+            `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddr)}`,
+            { signal: AbortSignal.timeout(8000) },
+          )
+          if (!oneClickResp.ok) {
+            throw new Error(
+              `NEAR Intents: 1Click returned ${oneClickResp.status} for deposit address — ` +
+              `cannot verify refund address. Do not proceed.`
+            )
+          }
+          const oneClickData = await oneClickResp.json() as any
+          const oneClickRefundTo = (oneClickData?.quoteResponse?.quoteRequest?.refundTo as string | undefined)?.trim()
+          if (!oneClickRefundTo) {
+            throw new Error(
+              'NEAR Intents: 1Click response missing quoteRequest.refundTo — cannot verify refund safety.'
+            )
+          }
+          if (senderAddrNorm && stripBchPrefix(oneClickRefundTo) !== senderAddrNorm) {
+            throw new Error(
+              `NEAR Intents 1Click refundTo mismatch — 1Click has "${oneClickData?.quoteResponse?.quoteRequest?.refundTo}" ` +
+              `but your wallet address is "${params.fromAddress}". ` +
+              `Do not proceed: a refund would not return to your wallet.`
+            )
+          }
+          swapLog(`${TAG} NEAR Intents Layer 2 OK: 1Click refundTo=${oneClickData?.quoteResponse?.quoteRequest?.refundTo} matches senderAddress`)
+        } catch (e: any) {
+          if (e.message.startsWith('NEAR Intents')) throw e
+          throw new Error(`NEAR Intents: failed to verify refund address with 1Click API: ${e.message}`)
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
+      // BTC source: explicit minimum check
+      if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
+        throw new Error(
+          `Amount too small for NEAR Intents — minimum ${result.minAmountIn} BTC required. ` +
+          `Solvers must front ETH and wait for BTC confirmations; smaller amounts are unprofitable and will be refunded.`
+        )
+      }
+      const nowSec = Math.floor(Date.now() / 1000)
+      const minutesUntilExpiry = result.expiry ? (result.expiry - nowSec) / 60 : 0
+      if (result.expiry && minutesUntilExpiry < 60) {
+        console.warn(
+          `${TAG} NEAR Intents BTC→EVM quote expires in ${minutesUntilExpiry.toFixed(0)} min — ` +
+          `BTC requires 2 confirmations (20-40 min). If BTC doesn't confirm in time, swap will be refunded.`
+        )
+      }
     }
-    // Warn if quote deadline is too short for BTC's 2-confirmation requirement (~20-40 min).
-    // A 30-min deadline may expire before BTC even confirms, causing automatic refund.
-    const nowSec = Math.floor(Date.now() / 1000)
-    const minutesUntilExpiry = result.expiry ? (result.expiry - nowSec) / 60 : 0
-    if (result.expiry && minutesUntilExpiry < 60) {
-      console.warn(
-        `${TAG} NEAR Intents BTC→EVM quote expires in ${minutesUntilExpiry.toFixed(0)} min — ` +
-        `BTC requires 2 confirmations (20-40 min). If BTC doesn't confirm in time, swap will be refunded.`
-      )
+
+    // EVM/non-BTC deposit-channel: detect when relay.value >> requested amount.
+    // NEAR Intents returns its solver minimum when the user's amount is too small.
+    // relay.value is in native-chain base units (wei for ETH).
+    if (result.relayTx?.isDepositChannel && result.relayTx?.value && !parseCaip(params.fromCaip).isToken) {
+      const ns = params.fromCaip.split('/')[0]
+      const srcDecimals = ns.startsWith('eip155:') ? 18 : ns.startsWith('solana:') ? 9 : 6
+      const requestedBaseUnits = params.amount ? parseUnits(params.amount, srcDecimals) : 0n
+      if (requestedBaseUnits > 0n) {
+        const quotedBaseUnits = BigInt(result.relayTx.value)
+        // If quoted deposit is >20% above requested, Pioneer returned the provider's
+        // minimum (not the user's amount). Throw before build so the error lands at
+        // quote time, not "insufficient balance" at sign time.
+        if (quotedBaseUnits > requestedBaseUnits * 12n / 10n) {
+          const minHuman = formatWei(quotedBaseUnits, srcDecimals)
+          throw new Error(
+            `Amount too small for NEAR Intents — minimum deposit on this route is ~${minHuman}. ` +
+            `Increase the swap amount or choose a different route.`
+          )
+        }
+      }
     }
   }
 
@@ -367,11 +509,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // CAIP-driven: '/erc20:' / '/bep20:' namespaces are tokens; '/slip44:' is native.
   const isErc20Source = isTokenCaip(params.fromCaip) && fromChain.chainFamily === 'evm'
 
-  // 1. Get sender address (use override if provided, otherwise derive from defaultPath)
+  // 1. Get sender address (use override if provided, otherwise derive from path)
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
+    const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
+      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      : fromChain.defaultPath
     const addrParams: any = {
-      addressNList: fromChain.defaultPath,
+      addressNList: fromPath,
       showDisplay: false,
       coin: fromChain.chainFamily === 'evm' ? 'Ethereum' : fromChain.coin,
     }
@@ -421,12 +566,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  // NEAR Intents (memo-less UTXO → EVM): deposit address is the only instruction.
-  // Detected by fromCaip chain family — `swapper` is not in ExecuteSwapParams.
-  // Direction guard: only valid for UTXO sources; EVM → BTC with no calldata
-  // has no way to encode the BTC destination.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
-  const isMemolessTransfer = fromIsUtxo && !!params.inboundAddress && !params.memo
+  const fromIsSolana = params.fromCaip.startsWith('solana:')
+  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   if (params.memo) {
@@ -449,40 +591,62 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   let unsignedTx: any
   let approvalTxid: string | undefined
+  let fromAmountBaseUnits: string | undefined
 
   // ── Calldata integrations (relay, shapeshiftSwap, …): sign prebuilt tx ──
   if (hasPrebuiltTx) {
-    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
-    unsignedTx = result.unsignedTx
+    // Relay Solana bridge: serializedTx is already a fully-assembled Solana wire tx.
+    // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
+    if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
+      swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
+      unsignedTx = { addressNList: fromChain.defaultPath, rawTx: params.relayTx.serializedTx }
+    } else if (fromChain.chainFamily === 'tron') {
+      // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
+      swapLog(`${TAG} Relay Tron prebuilt tx — bypassing EVM relay builder`)
+      const knownAssets = await getSwapAssets()
+      const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
+      const buildResult = await txb.buildTx(pioneer, fromChain, {
+        chainId: fromChain.id,
+        to: params.relayTx!.to || params.inboundAddress,
+        amount: params.amount, memo: params.memo || '', feeLevel: params.feeLevel, isMax: params.isMax,
+        isSwapDeposit: true, fromAddress,
+        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+      })
+      unsignedTx = buildResult.unsignedTx
+    } else {
+      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
+      unsignedTx = result.unsignedTx
+      fromAmountBaseUnits = result.fromAmountBaseUnits
 
-    // ERC-20 relay txs may need an approval to the router (THORChain Router,
-    // 0x exchange proxy, etc.) — without it the router's transferFrom call
-    // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
-    if (result.approveTx) {
-      swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
-      stage('approve-signing')
-      const signedApprove = await wallet.ethSignTx(result.approveTx)
-      swapLog(`${TAG} Device signed approveTx`)
-      let approveHex: string = typeof signedApprove === 'string'
-        ? signedApprove
-        : (signedApprove?.serializedTx || signedApprove?.serialized || '')
-      if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
-      if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
-      const rpcUrl = getRpcUrl(fromChain)
-      stage('approve-broadcasting')
-      if (rpcUrl) {
-        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
-        swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
-        stage('approve-waiting-receipt')
-        const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
-        if (receipt && !receipt.status) {
-          throw new Error(`Relay-path ERC-20 approve reverted (txid: ${approvalTxid}). Swap aborted — no relay tx sent.`)
+      // ERC-20 relay txs may need an approval to the router (THORChain Router,
+      // 0x exchange proxy, etc.) — without it the router's transferFrom call
+      // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
+      if (result.approveTx) {
+        swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
+        stage('approve-signing')
+        const signedApprove = await wallet.ethSignTx(result.approveTx)
+        swapLog(`${TAG} Device signed approveTx`)
+        let approveHex: string = typeof signedApprove === 'string'
+          ? signedApprove
+          : (signedApprove?.serializedTx || signedApprove?.serialized || '')
+        if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
+        if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
+        const rpcUrl = getRpcUrl(fromChain)
+        stage('approve-broadcasting')
+        if (rpcUrl) {
+          approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+          swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
+          stage('approve-waiting-receipt')
+          const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
+          if (receipt && !receipt.status) {
+            throw new Error(`Relay-path ERC-20 approve reverted (txid: ${approvalTxid}). Swap aborted — no relay tx sent.`)
+          }
+          if (!receipt) console.warn(`${TAG} Relay-path approve receipt not confirmed in 180s — proceeding (nonce gap risk)`)
+        } else {
+          const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
+          approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
+          swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
         }
-        if (!receipt) console.warn(`${TAG} Relay-path approve receipt not confirmed in 180s — proceeding (nonce gap risk)`)
-      } else {
-        const approveResult = await pioneer.Broadcast({ networkId: fromChain.networkId, serialized: approveHex })
-        approvalTxid = approveResult?.data?.txid || approveResult?.data?.tx_hash || approveResult?.data?.hash
-        swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
       }
     }
 
@@ -572,6 +736,35 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     })
     unsignedTx = buildResult.unsignedTx
 
+    // NEAR Intents fail-fast: verify the deposit VOUT matches the quoted amount
+    // before the device is ever asked to sign. params.amount is the amount 1Click
+    // committed to receive; if the built tx delivers less, that's PARTIAL_DEPOSIT.
+    // No network call needed — we already know both numbers locally.
+    if ((params.swapper === 'NEAR Intents' || params.integration === 'nearIntents') && params.inboundAddress) {
+      const outputs = unsignedTx.outputs as Array<{ address?: string; value: number }> | undefined
+      // Normalize BCH addresses for comparison: buildUtxoTx may have converted
+      // the legacy inboundAddress to cashaddr, so compare normalized forms.
+      const normInbound = fromChain.id === 'bitcoincash'
+        ? normalizeBchAddress(params.inboundAddress)
+        : params.inboundAddress
+      const depositOut = outputs?.find(o => o.address === normInbound)
+      if (!depositOut || depositOut.value <= 0) {
+        throw new Error(
+          `NEAR Intents: deposit output to ${params.inboundAddress} not found in built tx — aborting to prevent fund loss`
+        )
+      }
+      const quotedSat = Math.round(parseFloat(params.amount) * Math.pow(10, fromChain.decimals))
+      if (quotedSat > 0 && quotedSat - depositOut.value > 1) {
+        const shortfall = quotedSat - depositOut.value
+        throw new Error(
+          `NEAR Intents: deposit shortfall — tx delivers ${depositOut.value} sat but ` +
+          `quote expects ${quotedSat} sat (short by ${shortfall} sat). ` +
+          `Refresh the quote and try again.`
+        )
+      }
+      swapLog(`[swap] NEAR Intents deposit verified: ${depositOut.value} sat (quote expects ${quotedSat} sat)`)
+    }
+
   // ── All other chains (Cosmos, XRP, Solana, Tron, TON): send to vault with memo ──
   } else {
     // Resolve the canonical CAIP for the source asset and pull token decimals
@@ -638,8 +831,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
-      // Insufficient funds: Pioneer fallback will also fail — surface immediately
-      if (directErr.message?.toLowerCase().includes('insufficient funds')) {
+      // For native-asset swaps, "insufficient funds" from the RPC is definitive —
+      // Pioneer will also reject it. Surface immediately.
+      // For ERC-20 relay txs (e.g. NEAR Intents direct transfer), "insufficient funds"
+      // may come from calldata pre-simulation or a solver-side issue, not native gas —
+      // native balance was already verified in buildRelaySwapTx, so fall through to Pioneer.
+      if (!isErc20Source && directErr.message?.toLowerCase().includes('insufficient funds')) {
         throw new Error(
           `Insufficient ${fromChain.symbol} for gas on ${fromChain.id}. ` +
           `Add ${fromChain.symbol} to your wallet to pay for transaction fees and try again.`
@@ -676,6 +873,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
+    ...(fromAmountBaseUnits ? { fromAmountBaseUnits } : {}),
   }
 }
 
@@ -702,8 +900,11 @@ export async function previewSwapBuild(
 
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
+    const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
+      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      : fromChain.defaultPath
     const addrParams: any = {
-      addressNList: fromChain.defaultPath,
+      addressNList: fromPath,
       showDisplay: false,
       coin: fromChain.chainFamily === 'evm' ? 'Ethereum' : fromChain.coin,
     }
@@ -716,15 +917,31 @@ export async function previewSwapBuild(
 
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  // NEAR Intents (memo-less UTXO → EVM): CAIP-based detection (swapper not in ExecuteSwapParams)
   const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
-  const isMemolessTransfer = fromIsUtxoPreview && !!params.inboundAddress && !params.memo
+  const fromIsSolanaPreview = params.fromCaip.startsWith('solana:')
+  const isMemolessTransfer = (fromIsUtxoPreview || fromIsSolanaPreview) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
 
   const pioneer = await getPioneer()
 
   if (hasPrebuiltTx) {
+    if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
+      return { unsignedTx: { addressNList: fromChain.defaultPath, rawTx: params.relayTx.serializedTx } }
+    }
+    if (fromChain.chainFamily === 'tron') {
+      // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
+      const knownAssets = await getSwapAssets()
+      const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
+      const buildResult = await txb.buildTx(pioneer, fromChain, {
+        chainId: fromChain.id,
+        to: params.relayTx!.to || params.inboundAddress,
+        amount: params.amount, memo: params.memo || '', feeLevel: params.feeLevel, isMax: params.isMax,
+        isSwapDeposit: true, fromAddress,
+        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+      })
+      return { unsignedTx: buildResult.unsignedTx }
+    }
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ true)
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
@@ -815,8 +1032,11 @@ async function buildRelaySwapTx(
   getRpcUrl: (chain: ChainDef) => string | undefined,
   isErc20Source = false,
   _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
-): Promise<{ unsignedTx: any; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
+  const evmSigningPath = params.fromEvmAddressIndex != null
+    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    : fromChain.defaultPath
   console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 
   // Guard: when the quote ships a chainId, it MUST match the locally-resolved
@@ -875,11 +1095,19 @@ async function buildRelaySwapTx(
   console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
+  // Firmware EIP-1559 signing is broken for chainId >= 256: the firmware hashes
+  // only the LSB of chainId instead of the full big-endian RLP encoding, so the
+  // signature recovers to a wrong address on Base (8453), Arbitrum (42161), and
+  // Avalanche (43114). Chains with chainId <= 255 (ETH=1, OP=10, BSC=56, Polygon=137)
+  // happen to be correct. Force legacy gasPrice for affected chains until the
+  // firmware bug is fixed in ethereum.c (hash_rlp_number vs hash_rlp_field).
+  const eip1559Ok = chainId < 256
+
   let gasPrice: string | undefined
   let maxFeePerGas: string | undefined
   let maxPriorityFeePerGas: string | undefined
 
-  if (relay.maxFeePerGas) {
+  if (relay.maxFeePerGas && eip1559Ok) {
     // EIP-1559 tx — start from Relay's quote, but cross-check against our own
     // locally-computed buffer (nextBaseFee * 3 + 1.5 gwei priority floor). Relay
     // can ship a maxFeePerGas that was current at quote time but stale by
@@ -910,7 +1138,8 @@ async function buildRelaySwapTx(
   } else if (rpcUrl) {
     // Quote shipped only legacy gasPrice (or nothing) — prefer EIP-1559 from RPC
     // since legacy gasPrice on EIP-1559 chains often comes back below base fee.
-    const feeData = await getEvmFeeData(rpcUrl)
+    // Skip EIP-1559 for chainId >= 256 (firmware signing bug, see eip1559Ok above).
+    const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       // Floor maxFeePerGas at 2x chain min (so we still beat base on quiet chains)
       const floor1559 = fallbackGasPrice * 2n
@@ -960,7 +1189,7 @@ async function buildRelaySwapTx(
   // estimated caps that block valid swaps on tight balances. If the relay's cap proves
   // insufficient for inclusion, the tx will be mined anyway at priority-fee level once
   // the base fee drops — or the user can refresh the quote to get a fresh cap.
-  const signedFeePerGas: bigint = relay.maxFeePerGas
+  const signedFeePerGas: bigint = (relay.maxFeePerGas && eip1559Ok)
     ? BigInt(relay.maxFeePerGas)
     : BigInt(relayFeePerGas)  // no quoted fee → fall back to live (gasPrice path)
   const signedPrioFeePerGas: bigint = relay.maxPriorityFeePerGas
@@ -992,18 +1221,46 @@ async function buildRelaySwapTx(
   if (nativeBalance === undefined) {
     throw new Error(`Unable to verify ${fromChain.symbol} balance for Relay transaction — refusing to sign. Try refreshing the quote.`)
   }
-  console.log(`${TAG} relay gas check: value=${formatWei(relayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(relayNativeRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
-  if (nativeBalance < relayNativeRequired) {
+  // sendMax trim for deposit-channel swaps (Chainflip / NEAR Intents):
+  // For these the deposited value is fully under our control. Trim to fit when:
+  //   (a) isMax=true — frontend sent full balance, no gas reserve subtracted yet
+  //   (b) isMax=false + wouldExceed — balance changed since the quote was fetched
+  // Calldata relay txs (standard Relay routes) are NOT trimmed here — the relay.data
+  // encodes the route and the value must match what was quoted. A large mismatch means
+  // the quote was fetched from a different address; fail loudly so the user re-quotes.
+  let effectiveRelayValue = relayValue
+  if (relay.isDepositChannel && !isErc20Source && nativeBalance > relayGasReserve) {
+    const wouldExceed = relayValue + relayGasReserve > nativeBalance
+    if (params.isMax || wouldExceed) {
+      effectiveRelayValue = nativeBalance - relayGasReserve
+      console.log(`${TAG} deposit channel value trim (isMax=${params.isMax}, stale=${wouldExceed && !params.isMax}): ${formatWei(relayValue, fromChain.decimals)} → ${formatWei(effectiveRelayValue, fromChain.decimals)} ${fromChain.symbol} (live bal: ${formatWei(nativeBalance, fromChain.decimals)}, gas: ${formatWei(relayGasReserve, fromChain.decimals)})`)
+    }
+  }
+  const effectiveRelayRequired = effectiveRelayValue + relayGasReserve + approveGasReserve
+  console.log(`${TAG} relay gas check: value=${formatWei(effectiveRelayValue, fromChain.decimals)} gasReserve=${formatWei(relayGasReserve, fromChain.decimals)} required=${formatWei(effectiveRelayRequired, fromChain.decimals)} balance=${formatWei(nativeBalance, fromChain.decimals)} ${fromChain.symbol}`)
+  if (nativeBalance < effectiveRelayRequired) {
+    const haveStr = formatWei(nativeBalance, fromChain.decimals)
+    const needStr = formatWei(effectiveRelayRequired, fromChain.decimals)
+    const valStr = formatWei(effectiveRelayValue, fromChain.decimals)
+    const gasStr = formatWei(relayGasReserve, fromChain.decimals)
+    // Large mismatch (value > 2× balance) almost always means a stale quote from
+    // a different address — tell the user explicitly rather than suggesting MAX.
+    if (!relay.isDepositChannel && relayValue > nativeBalance * 2n) {
+      throw new Error(
+        `Quote was built for a different address (quoted ${formatWei(relayValue, fromChain.decimals)} ${fromChain.symbol} but signing address only has ${haveStr}). ` +
+        `Select the correct address in the "From address" selector and re-quote.`
+      )
+    }
     if (params.isMax && !isErc20Source) {
       throw new Error(
-        `Relay quote is stale: updated gas fees require ${formatWei(relayNativeRequired, fromChain.decimals)} ${fromChain.symbol} ` +
-        `but the wallet has ${formatWei(nativeBalance, fromChain.decimals)}. Refresh the quote so the max send amount can reserve gas before signing.`
+        `Relay quote is stale: updated gas fees require ${needStr} ${fromChain.symbol} ` +
+        `but the wallet has ${haveStr}. Refresh the quote so the max send amount can reserve gas before signing.`
       )
     }
     throw new Error(
-      `Insufficient ${fromChain.symbol} for Relay transaction: need ${formatWei(relayNativeRequired, fromChain.decimals)} ` +
-      `(${formatWei(relayValue, fromChain.decimals)} value + ${formatWei(relayGasReserve, fromChain.decimals)} gas), ` +
-      `have ${formatWei(nativeBalance, fromChain.decimals)}.`
+      `Insufficient ${fromChain.symbol} for Relay transaction: need ${needStr} ` +
+      `(${valStr} value + ${gasStr} gas), have ${haveStr}. ` +
+      `If you used MAX, your balance may have changed — go back and re-enter MAX with your current balance.`
     )
   }
 
@@ -1016,27 +1273,18 @@ async function buildRelaySwapTx(
   let balanceInfo: { current: string; required: string; sufficient: boolean; tokenContract?: string } | undefined
 
   if (isErc20Source && rpcUrl) {
-    // Token contract comes from the CAIP-19 (after the `:` of `/erc20:` or
-    // `/bep20:`). CAIP is the only identifier — no separate contract param.
     const tokenContract = (extractContractFromCaip(params.fromCaip) || '').toLowerCase()
+    // NEAR Intents ERC-20: relay.to IS the token contract (direct transfer to solver).
+    // No approval needed, but balance must still be checked.
+    const isDirectTransfer = relay.to.toLowerCase() === tokenContract
     if (tokenContract && tokenContract.startsWith('0x')) {
       try {
         const tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract).catch(() => undefined)
         if (tokenDecimals !== undefined) {
           const amountBaseUnits = parseUnits(params.amount, tokenDecimals)
-          const [currentAllowance, currentBalance] = await Promise.all([
-            getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n),
-            getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null),
-          ])
-          const sufficient = currentAllowance >= amountBaseUnits
 
-          allowanceInfo = {
-            current: currentAllowance.toString(),
-            required: amountBaseUnits.toString(),
-            sufficient,
-            spender: relay.to,
-            tokenContract,
-          }
+          // Always check balance — direct transfers revert on-chain if insufficient.
+          const currentBalance = await getErc20Balance(rpcUrl, tokenContract, fromAddress).catch(() => null)
           if (currentBalance !== null) {
             const balSufficient = currentBalance >= amountBaseUnits
             balanceInfo = {
@@ -1050,57 +1298,64 @@ async function buildRelaySwapTx(
               throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
             }
           }
-          swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
 
-          if (!sufficient) {
-            // Build approveTx — same pattern as buildEvmSwapTx (exact-amount,
-            // for hardware-wallet safety; not MaxUint256).
-            const approveData = encodeApprove(relay.to, amountBaseUnits)
-            const approveGasLimit = 80000n
-            const approveTx: any = {
-              chainId,
-              addressNList: fromChain.defaultPath,
-              nonce: toHex(BigInt(nonce)),
-              gasLimit: toHex(approveGasLimit),
-              to: tokenContract,
-              value: '0x0',
-              data: approveData,
+          // Approval only needed when routing through a spender contract.
+          if (!isDirectTransfer) {
+            const currentAllowance = await getErc20Allowance(rpcUrl, tokenContract, fromAddress, relay.to).catch(() => 0n)
+            const sufficient = currentAllowance >= amountBaseUnits
+            allowanceInfo = {
+              current: currentAllowance.toString(),
+              required: amountBaseUnits.toString(),
+              sufficient,
+              spender: relay.to,
+              tokenContract,
             }
-            if (maxFeePerGas) {
-              // Use signedFeePerGas (relay's quoted cap) to match the balance check and the swap tx.
-              approveTx.maxFeePerGas = toHex(signedFeePerGas)
-              approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
-            } else if (gasPrice) {
-              approveTx.gasPrice = gasPrice
+            swapLog(`${TAG} Relay tx allowance check: current=${currentAllowance}, required=${amountBaseUnits}, sufficient=${sufficient}`)
+            if (!sufficient) {
+              const approveData = encodeApprove(relay.to, amountBaseUnits)
+              const approveGasLimit = 80000n
+              const approveTx: any = {
+                chainId,
+                addressNList: evmSigningPath,
+                nonce: toHex(BigInt(nonce)),
+                gasLimit: toHex(approveGasLimit),
+                to: tokenContract,
+                value: '0x0',
+                data: approveData,
+              }
+              if (maxFeePerGas) {
+                approveTx.maxFeePerGas = toHex(signedFeePerGas)
+                approveTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
+              } else if (gasPrice) {
+                approveTx.gasPrice = gasPrice
+              }
+              pendingApproveTx = approveTx
+              nonce += 1
             }
-            pendingApproveTx = approveTx
-            // Caller (executeSwap) handles the gate + sign + broadcast + receipt
-            // wait for the approve. We just project the nonce here so the
-            // returned relay tx uses the post-approval nonce.
-            nonce += 1
           }
         }
       } catch (e: any) {
-        console.warn(`${TAG} Relay allowance check failed (non-fatal): ${e?.message}`)
+        console.warn(`${TAG} Relay ERC-20 check failed (non-fatal): ${e?.message}`)
       }
     }
   }
 
   // Build ethSignTx params for hdwallet
   const unsignedTx: any = {
-    addressNList: fromChain.defaultPath,
+    addressNList: evmSigningPath,
     chainId,
     nonce: toHex(BigInt(nonce)),
     gasLimit: toHex(BigInt(gasLimit)),
     to: relay.to,
-    value: toHex(relayValue),
+    value: toHex(effectiveRelayValue),
     data: relay.data,
   }
 
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
   // matches the balance check above. Using the live-bumped cap here while checking
   // against the quoted cap would allow a tx that the account cannot cover.
-  if (relay.maxFeePerGas) {
+  // Skip EIP-1559 for chainId >= 256 (firmware signing bug, see eip1559Ok above).
+  if (relay.maxFeePerGas && eip1559Ok) {
     unsignedTx.maxFeePerGas = toHex(signedFeePerGas)
     unsignedTx.maxPriorityFeePerGas = toHex(signedPrioFeePerGas)
   } else if (gasPrice) {
@@ -1118,8 +1373,8 @@ async function buildRelaySwapTx(
   // Historical incidents:
   //   - USDT→BTC (Maya, txid 0x8426ca…) — ERC-20 source, dust transfer to non-vault EOA
   //
-  // Cross-chain native-asset swaps (ETH→BTC) via deposit-channel protocols
-  // (Chainflip, NEAR Intents) legitimately use `data = '0x'` — the swap
+  // Cross-chain native-asset swaps via deposit-channel protocols
+  // (Chainflip) legitimately use `data = '0x'` — the swap
   // destination was registered off-chain when the quote/channel was created.
   // These are flagged `relay.isDepositChannel = true` by parseQuoteResponse
   // so we can distinguish them from truly malformed quotes.
@@ -1144,7 +1399,21 @@ async function buildRelaySwapTx(
   }
 
   swapLog(`${TAG} Relay tx built: nonce=${nonce}, gasLimit=${gasLimit}, chainId=${chainId}, to=${relay.to}, value=${relay.value}`)
-  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo }
+
+  // Compute base units for the sell amount — needed by the swap tracker so
+  // registerWithPioneer can send an integer amountBaseUnits to Pioneer's API.
+  // Non-direct path: balanceInfo.required already has it (set above).
+  // Direct transfer (NEAR Intents ERC-20): decode transfer(address,uint256) calldata.
+  let fromAmountBaseUnits: string | undefined = balanceInfo?.required
+  if (!fromAmountBaseUnits && isErc20Source) {
+    const data = relay.data || ''
+    // transfer(address,uint256): 0xa9059cbb + 32-byte addr + 32-byte amount = 138 hex chars
+    if (data.length === 138 && data.toLowerCase().startsWith('0xa9059cbb')) {
+      try { fromAmountBaseUnits = BigInt('0x' + data.slice(74)).toString() } catch {}
+    }
+  }
+
+  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────
@@ -1165,6 +1434,10 @@ async function buildEvmSwapTx(
   const routerAddress = params.router || params.inboundAddress
   if (!routerAddress) throw new Error('EVM swaps require a router/inboundAddress from the quote')
 
+  const evmSigningPath = params.fromEvmAddressIndex != null
+    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    : fromChain.defaultPath
+
   // Use expiry from quote if available, otherwise 1 hour from now
   const expiry = params.expiry && params.expiry > Math.floor(Date.now() / 1000)
     ? params.expiry
@@ -1175,6 +1448,12 @@ async function buildEvmSwapTx(
   // Fetch gas price (preferring EIP-1559), nonce, native balance.
   // EIP-1559 path: maxFeePerGas + maxPriorityFeePerGas, used on chains that support eth_feeHistory.
   // Legacy path: gasPrice, used as fallback. Both paths enforce a chain-specific floor.
+  //
+  // Firmware EIP-1559 signing bug: chainId >= 256 hashes only the LSB of chainId.
+  // Force legacy gasPrice for Base (8453), Arbitrum (42161), Avalanche (43114), etc.
+  // See buildRelaySwapTx comment and ethereum.c for details.
+  const eip1559Ok = chainId < 256
+
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
   let gasPrice: bigint = fallbackGasPrice
@@ -1182,7 +1461,7 @@ async function buildEvmSwapTx(
   let maxPriorityFeePerGas: bigint | undefined
 
   if (rpcUrl) {
-    const feeData = await getEvmFeeData(rpcUrl)
+    const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       const floor1559 = fallbackGasPrice * 2n
       maxFeePerGas = feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559
@@ -1360,7 +1639,7 @@ async function buildEvmSwapTx(
 
       const approveTx: any = {
         chainId,
-        addressNList: fromChain.defaultPath,
+        addressNList: evmSigningPath,
         nonce: toHex(nonce),
         gasLimit: toHex(approveGasLimit),
         to: tokenContract,  // approve is called on the token contract
@@ -1448,7 +1727,7 @@ async function buildEvmSwapTx(
 
     const unsignedTx: any = {
       chainId,
-      addressNList: fromChain.defaultPath,
+      addressNList: evmSigningPath,
       nonce: toHex(nonce),
       gasLimit: toHex(erc20DepositGas),
       to: routerAddress,     // ROUTER contract, NOT vault
@@ -1536,7 +1815,7 @@ async function buildEvmSwapTx(
 
     const unsignedTx: any = {
       chainId,
-      addressNList: fromChain.defaultPath,
+      addressNList: evmSigningPath,
       nonce: toHex(nonce),
       gasLimit: toHex(gasLimit),
       to: routerAddress,         // ROUTER contract, NOT vault

@@ -21,12 +21,15 @@ import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
 import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
+import { CommandPalette } from "./components/CommandPalette"
+import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
+import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
@@ -53,6 +56,8 @@ function App() {
 	const [gridReady, setGridReady] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
+	const [paletteOpen, setPaletteOpen] = useState(false)
+	const paletteBalances = useLatestBalances()
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
@@ -83,7 +88,10 @@ function App() {
 			.catch(() => {})
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
-				.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+				.then((s) => {
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled)
+					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
+				})
 				.catch(() => {})
 		}
 		refreshSettings()
@@ -131,6 +139,25 @@ function App() {
 			setUpdateDismissed(false)
 		}
 	}, [update.phase])
+
+	// ── Command Palette (⌘K / Ctrl+K) ───────────────────────────────
+	// Global toggle. Ignore presses while the user is typing in an input or
+	// textarea so we don't hijack search fields elsewhere in the app.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (!((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K"))) return
+			const target = e.target
+			// Allow toggle from inside the palette's own input — only ignore other inputs.
+			if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+				const insidePalette = (target as HTMLElement).closest('[aria-label="Command Palette"]')
+				if (!insidePalette) return
+			}
+			e.preventDefault()
+			setPaletteOpen((o) => !o)
+		}
+		window.addEventListener("keydown", onKey)
+		return () => window.removeEventListener("keydown", onKey)
+	}, [])
 
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
@@ -735,6 +762,12 @@ function App() {
 					updatePhase={update.phase}
 					updateVersion={update.info?.version}
 				/>
+				<CommandPalette
+					open={paletteOpen}
+					onClose={() => setPaletteOpen(false)}
+					onJumpToVault={() => setActiveTab("vault")}
+					balances={paletteBalances}
+				/>
 			</>
 		)
 	}
@@ -803,9 +836,19 @@ function App() {
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
-			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary"
+			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary" position="relative"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
+				{/* Full-screen ambient radial glow — replaces the per-card glow inside the orbital view. */}
+				<Box
+					position="absolute"
+					inset="0"
+					pointerEvents="none"
+					zIndex={0}
+					style={{
+						background: 'radial-gradient(ellipse 70% 55% at 50% 42%, rgba(233,196,106,0.22) 0%, rgba(139,227,196,0.06) 35%, transparent 75%)',
+					}}
+				/>
 				<TopNav
 					label={deviceState.label}
 					connected={deviceState.state === "ready"}
@@ -880,6 +923,12 @@ function App() {
 				nativeEnabled={walletConnectEnabled}
 			/>
 			<ActivityTracker />
+			<CommandPalette
+				open={paletteOpen}
+				onClose={() => setPaletteOpen(false)}
+				onJumpToVault={() => setActiveTab("vault")}
+				balances={paletteBalances}
+			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
 			<SwapRpcMount />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}

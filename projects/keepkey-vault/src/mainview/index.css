@@ -9,7 +9,7 @@ html, body, #root {
 	width: 100%;
 	background: transparent;
 	color: #ffffff;
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	font-family: 'Geist Mono', ui-monospace, monospace;
 }
 
 /* Prevent native window drag from capturing form inputs */
@@ -17,16 +17,25 @@ input, textarea, select, button, [contenteditable], a, [role="button"], [role="t
 	-webkit-app-region: no-drag;
 }
 
+/* Hidden by default — individual scrollable regions reveal on hover */
 ::-webkit-scrollbar {
-	width: 6px;
+	width: 0px;
+	background: transparent;
 }
 ::-webkit-scrollbar-track {
-	background: #111111;
+	background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-	background: #333333;
+	background: transparent;
 	border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover {
-	background: #555555;
-}
+
+/* Regions that opt-in to visible scrollbar on hover */
+.kk-sidebar-scroll:hover::-webkit-scrollbar,
+.kk-tokens-scroll:hover::-webkit-scrollbar { width: 4px; }
+.kk-sidebar-scroll:hover::-webkit-scrollbar-track,
+.kk-tokens-scroll:hover::-webkit-scrollbar-track { background: transparent; }
+.kk-sidebar-scroll:hover::-webkit-scrollbar-thumb,
+.kk-tokens-scroll:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+.kk-sidebar-scroll:hover::-webkit-scrollbar-thumb:hover,
+.kk-tokens-scroll:hover::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.32); }

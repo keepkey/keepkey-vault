@@ -13,6 +13,29 @@ import * as bech32 from 'bech32'
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
 
+// @ts-ignore — CJS module, no types
+const cashaddrLib = require('@shapeshiftoss/bitcoinjs-lib/src/cashaddr')
+
+/** Convert a legacy BCH P2PKH/P2SH address (1... or 3...) to cashaddr format.
+ *  No-op for addresses already in cashaddr format or that aren't BCH legacy addresses. */
+export function normalizeBchAddress(address: string): string {
+  if (!address) return address
+  const lower = address.toLowerCase()
+  // Already cashaddr (with or without 'bitcoincash:' prefix, or q/p bare)
+  if (lower.startsWith('bitcoincash:') || lower.startsWith('q') || lower.startsWith('p')) return address
+  // Attempt Base58Check decode (legacy BCH P2PKH/P2SH)
+  let payload: Buffer
+  try { payload = bs58check.decode(address) } catch { return address }
+  if (payload.length !== 21) return address
+  const version = payload[0]
+  const hash = new Uint8Array(payload.slice(1))
+  let type: string
+  if (version === 0x00) type = 'P2PKH'
+  else if (version === 0x05) type = 'P2SH'
+  else return address
+  try { return cashaddrLib.encode('bitcoincash', type, hash) } catch { return address }
+}
+
 /** String-based decimal→integer to avoid floating-point precision loss */
 function parseDecimalToInt(amount: string, decimals: number): number {
   const [whole = '0', frac = ''] = amount.split('.')
@@ -165,6 +188,7 @@ async function fetchUtxosForXpub(
 ): Promise<any[]> {
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
   const resp = await pioneer.ListUnspent({ network, xpub })
+  console.log(`${TAG} ListUnspent raw: ${JSON.stringify(resp)?.slice(0, 300)}`)
   const utxos = unwrapUtxoResponse(resp)
   for (const u of utxos) {
     u.value = Number(u.value)
@@ -176,12 +200,87 @@ async function fetchUtxosForXpub(
   return utxos
 }
 
+/** Estimate the miner fee for a UTXO send without building the full tx.
+ *  Runs steps 1-3 of buildUtxoTx (fetch UTXOs + fee rate + coin selection) and
+ *  returns the fee in satoshis and the net spendable amount. Returns null on any
+ *  error so callers can safely degrade to no-estimate. */
+export async function estimateUtxoFee(
+  pioneer: any,
+  chain: ChainDef,
+  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'accountPath'>,
+): Promise<{ feeSat: number; netSat: number } | null> {
+  try {
+    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, accountPath } = params
+    const primaryXpub = xpub || allXpubs?.[0]?.xpub
+    if (!primaryXpub) return null
+    const scriptType = getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+
+    let utxos: any[]
+    if (allXpubs && allXpubs.length > 0) {
+      const settled = await Promise.allSettled(
+        allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.networkId, x.xpub, x.scriptType, x.accountPath))
+      )
+      utxos = settled.flatMap(r => r.status === 'fulfilled' ? r.value : [])
+    } else {
+      utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath)
+    }
+    if (!utxos.length) return null
+
+    let feeRates: { slow: number; average: number; fast: number }
+    if (HARDCODED_FEES[chain.networkId]) {
+      feeRates = HARDCODED_FEES[chain.networkId]
+    } else {
+      try {
+        const feeResp = pioneer.GetFeeRateByNetwork
+          ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+          : await pioneer.GetFeeRate({ networkId: chain.networkId })
+        const data = feeResp?.data || {}
+        const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
+        const needsConversion = vals.some((v: number) => v > 500)
+        feeRates = {
+          slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
+          average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
+          fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
+        }
+      } catch {
+        feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
+      }
+    }
+    const effectiveFeeRate = Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
+
+    const satoshis = parseDecimalToInt(params.amount, chain.decimals)
+    const result = isMax
+      ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
+      : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)
+
+    if (!result?.inputs || result.fee == null) return null
+    const totalIn = result.inputs.reduce((s: number, i: any) => s + i.value, 0)
+    let feeSat: number = result.fee
+    // ZIP-317: coinSelectSplit uses sat/byte which produces fees far below the
+    // ZIP-317 floor. Apply the same enforcement here so netSat matches what
+    // buildUtxoTx will actually produce — otherwise the re-quote under-estimates
+    // the fee and the deposit address is quoted for more than we can deliver.
+    if (chain.id === 'zcash') {
+      const logicalActions = Math.max(result.inputs.length, result.outputs?.length ?? 1)
+      const zip317Fee = 5000 * Math.max(2, logicalActions)
+      if (feeSat < zip317Fee) feeSat = zip317Fee
+    }
+    return { feeSat, netSat: totalIn - feeSat }
+  } catch {
+    return null
+  }
+}
+
 export async function buildUtxoTx(
   pioneer: any,
   chain: ChainDef,
   params: BuildUtxoParams,
 ) {
-  const { to, memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath } = params
+  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath } = params
+  // BCH: NEAR Intents (and some other providers) return legacy P2PKH/P2SH addresses
+  // (starting with '1'/'3'). The KeepKey firmware requires cashaddr format — convert.
+  const to = chain.id === 'bitcoincash' ? normalizeBchAddress(params.to) : params.to
+  if (to !== params.to) console.log(`${TAG} BCH address normalized: ${params.to} → ${to}`)
 
   if (!xpub && (!allXpubs || !allXpubs.length)) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
 
@@ -217,7 +316,7 @@ export async function buildUtxoTx(
   } else {
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
   }
-  if (!utxos.length) throw new Error(`No UTXOs found for ${chain.coin}`)
+  if (!utxos.length) throw new Error(`No confirmed UTXOs found for ${chain.coin}. If you recently sent or received ${chain.symbol}, the transaction may still be confirming — please wait and try again.`)
 
   // Diagnostic: dump raw UTXO[0]
   if (utxos.length > 0) {
@@ -352,7 +451,7 @@ export async function buildUtxoTx(
     : [primaryXpub]
   for (const qXpub of xpubsToQuery) {
     try {
-      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.chain, xpub: qXpub }))?.data
+      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: qXpub }))?.data
       if (pubkeyInfo?.tokens) {
         let maxUsed = -1
         for (const token of pubkeyInfo.tokens) {
@@ -515,7 +614,7 @@ export async function buildUtxoTx(
     console.log(`${TAG}   INPUT txid=${inp.txid?.slice(0, 12)}... vout=${inp.vout} scriptType=${inp.scriptType} path=[${inp.addressNList.join(',')}] amount=${inp.amount} hasHex=${!!inp.hex}`)
   }
   for (const out of preparedOutputs) {
-    console.log(`${TAG}   OUTPUT type=${out.addressType} scriptType=${out.scriptType || 'n/a'} amount=${out.amount} addr=${out.address?.slice(0, 20) || 'change'}`)
+    console.log(`${TAG}   OUTPUT type=${out.addressType} scriptType=${out.scriptType || 'n/a'} amount=${out.amount} addr=${out.address || 'change'}`)
   }
 
   return {

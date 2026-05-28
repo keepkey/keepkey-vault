@@ -46,10 +46,10 @@
   --shadow-2:    0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6);
   --shadow-glow: 0 0 0 1px rgba(139, 227, 196, 0.25), 0 0 40px -8px rgba(139, 227, 196, 0.35);
 
-  /* Type stacks */
-  --font-sans:  'Space Grotesk', -apple-system, system-ui, sans-serif;
+  /* Type stacks — mono is the app-wide default; sans/serif aliases collapse to mono. */
   --font-mono:  'Geist Mono', ui-monospace, monospace;
-  --font-serif: 'Instrument Serif', serif;
+  --font-sans:  var(--font-mono);
+  --font-serif: var(--font-mono);
 }
 
 /* Class-scoped helpers — do NOT bind to body so existing Chakra screens are
@@ -64,7 +64,7 @@
 }
 
 .v3-mono  { font-family: var(--font-mono);  font-feature-settings: "tnum"; }
-.v3-serif { font-family: var(--font-serif); font-style: italic; }
+.v3-serif { font-family: var(--font-mono); font-style: normal; }
 
 /* Page enter transition (mirrors study) */
 @keyframes v3-fadeUp {
