@@ -5467,9 +5467,30 @@ sendFatal = (source, err) => {
 // would TDZ on this binding if it were declared near the URL handler.
 let pendingDeepLinkUri: string | null = null
 
+// Last deviceId we saw reach 'ready'. The in-memory account managers
+// (btcAccounts/evmAddresses) are kept across disconnect for the watch-only UI
+// and are only re-initialized when empty (isInitialized guards at the call
+// sites). On a device-to-device swap the deviceId changes but `seed-changed`
+// never fires (it compares against `seed_eth_${deviceId}`, which matches the
+// new device's own stored identity), so without this the managers would keep
+// the previous device's xpubs/addresses and bleed its balances onto the new
+// device. Mirrors the `lastDeviceId` guard already in rest-api.ts.
+let lastReadyDeviceId: string | null = null
+
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Reset in-memory account managers when a *different* device connects.
+	// Runs synchronously here, before the frontend's async balance fetches
+	// (getCachedBalances/getBalances) can read stale xpubs/addresses.
+	if (state.state === 'ready' && state.deviceId && state.deviceId !== lastReadyDeviceId) {
+		if (lastReadyDeviceId) {
+			console.log(`[Vault] Device changed ${lastReadyDeviceId} → ${state.deviceId}: resetting in-memory account managers`)
+			btcAccounts.reset()
+			evmAddresses.reset()
+		}
+		lastReadyDeviceId = state.deviceId
+	}
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.

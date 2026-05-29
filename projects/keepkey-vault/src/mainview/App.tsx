@@ -870,7 +870,11 @@ function App() {
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
+					{/* key on the wallet identity (deviceId + hidden-wallet flag) so the
+					    Dashboard remounts with a fresh balances Map and reloads the cache
+					    whenever the active wallet changes — prevents the previous wallet's
+					    balances from lingering on a device swap or standard↔hidden switch. */}
+					{activeTab === "vault" && <Dashboard key={`${deviceState.deviceId ?? "none"}:${deviceState.isHiddenWallet}`} onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
 					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 				</Flex>
 			</Flex>
