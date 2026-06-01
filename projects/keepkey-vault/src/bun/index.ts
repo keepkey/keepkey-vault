@@ -4535,7 +4535,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { refreshSwap } = await import('./swap-tracker')
 				const scope = getWalletDbScope()
 				if (!scope) return null
-				return await refreshSwap(params.txid, scope.deviceId, scope.walletId)
+				return await refreshSwap(params.txid, scope.deviceId, scope.walletId, params.rescan)
 			},
 			debugSwapLookup: async (params) => {
 				// PRIVACY: Mirror getSwapByTxid / refreshSwap — passphrase sessions

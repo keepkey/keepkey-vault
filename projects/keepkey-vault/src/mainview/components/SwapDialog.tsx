@@ -873,7 +873,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!txid || rechecking) return
     setRechecking(true)
     try {
-      const snap = await rpcRequest<any>('refreshSwap', { txid })
+      // Manual press forces a Pioneer rescan (?rescan=true) so a failed/stuck
+      // swap can be re-derived from chain on demand.
+      const snap = await rpcRequest<any>('refreshSwap', { txid, rescan: true })
       if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
       if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
     } catch { /* swap-update push covers the failure */ }
@@ -2744,21 +2746,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </Button>
                 </Flex>
                 <Flex gap="2">
-                  {!isSwapComplete && !isSwapFailed && (
-                    <Button size="xs" flex="1" variant="outline"
-                      borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
-                      _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
-                      isDisabled={rechecking}
-                      onClick={handleRecheck}>
-                      <HStack gap="1">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                          style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
-                          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                        </svg>
-                        <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
-                      </HStack>
-                    </Button>
-                  )}
+                  {/* Always available — even on failed/refunded — so the user can
+                      force a Pioneer rescan to recover a mis-classified swap. */}
+                  <Button size="xs" flex="1" variant="outline"
+                    borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
+                    _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
+                    isDisabled={rechecking}
+                    onClick={handleRecheck}>
+                    <HStack gap="1">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                        style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
+                        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                      </svg>
+                      <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
+                    </HStack>
+                  </Button>
                   {(() => {
                     const safeTxid = txid ?? ''
                     console.log('[explorer-debug]', fromAsset.chainId, safeTxid)

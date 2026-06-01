@@ -237,7 +237,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getSwapByTxid: { params: { txid: string }; response: PendingSwap | null }
       /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
        *  open — there is no background polling timer (by design). */
-      refreshSwap: { params: { txid: string }; response: PendingSwap | null }
+      refreshSwap: { params: { txid: string; rescan?: boolean }; response: PendingSwap | null }
       /** Read-only diagnostic for a single swap: local state + raw Pioneer
        *  response + rescan response, with protocol divergence flagged. Used
        *  by the SwapDialog "Debug" affordance and dev-tools introspection.

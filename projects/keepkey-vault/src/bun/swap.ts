@@ -831,17 +831,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
-      // For native-asset swaps, "insufficient funds" from the RPC is definitive —
-      // Pioneer will also reject it. Surface immediately.
-      // For ERC-20 relay txs (e.g. NEAR Intents direct transfer), "insufficient funds"
-      // may come from calldata pre-simulation or a solver-side issue, not native gas —
-      // native balance was already verified in buildRelaySwapTx, so fall through to Pioneer.
-      if (!isErc20Source && directErr.message?.toLowerCase().includes('insufficient funds')) {
-        throw new Error(
-          `Insufficient ${fromChain.symbol} for gas on ${fromChain.id}. ` +
-          `Add ${fromChain.symbol} to your wallet to pay for transaction fees and try again.`
-        )
-      }
+      // The pre-sign balance check in buildRelaySwapTx already verified
+      // value + gas <= native balance against this same RPC URL. So a node
+      // "insufficient funds" here is NOT a real gas shortage — it's a stale
+      // view from the load-balanced endpoint (the balance read and the
+      // broadcast can hit different backends) or an in-flight pending tx.
+      // Do NOT relabel it as "add ETH for gas" (that misleads the user) and
+      // do NOT swallow the original message — log it and fall through to
+      // Pioneer, which may reach a better-synced node.
       console.warn(`${TAG} Direct RPC broadcast failed (${directErr.message}), falling back to Pioneer...`)
       try {
         const result = await txb.broadcastTx(pioneer, fromChain, signedTx)
