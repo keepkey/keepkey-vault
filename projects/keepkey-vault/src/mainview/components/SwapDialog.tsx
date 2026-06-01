@@ -81,7 +81,15 @@ const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
 }
 const NATIVE_EVM_CLOSER_RESERVE_DEFAULT = 0.00025
 const NATIVE_TRON_FEE_RESERVE = 1.1
-const NATIVE_SOLANA_FEE_RESERVE = 0.000005
+// Solana base network fee is 5000 lamports/signature (0.000005 SOL). We reserve
+// 2× that as headroom rather than the bare fee: the balance MAX is computed from
+// reaches us via floating-point lamports→SOL division upstream (Pioneer's
+// solana-network get_balance does `lamports / 1e9`), which can round the final
+// lamport UP. Reserving exactly the fee left zero headroom, so a 1-lamport-high
+// balance made the Relay deposit exceed (balance − fee) by one lamport and the
+// swap failed on-chain with "insufficient lamports". 10000 lamports absorbs that
+// imprecision; the extra ~0.000005 SOL withheld from MAX is negligible.
+const NATIVE_SOLANA_FEE_RESERVE = 0.00001
 
 function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'safe'): number {
   if (asset.contractAddress) return 0
