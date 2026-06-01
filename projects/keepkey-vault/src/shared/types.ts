@@ -1,3 +1,10 @@
+// Sentinel error message thrown by executeSwap when a Solana source swap
+// requires on-device blind signing (the AdvancedMode policy) that is currently
+// disabled. Only the error *message* survives the RPC boundary, so the
+// SwapDialog detects this exact token to show the enable-blind-signing page
+// instead of a generic error.
+export const SOLANA_BLIND_SIGNING_REQUIRED = 'SOLANA_BLIND_SIGNING_REQUIRED'
+
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
@@ -146,6 +153,7 @@ export interface BuildStakingTxParams {
   validatorAddress: string
   amount: string
   memo?: string
+  isMax?: boolean
 }
 
 export interface StakingPosition {

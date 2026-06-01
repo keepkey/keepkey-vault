@@ -57,6 +57,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 	const { fmtCompact } = useFiat()
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
+	const [isMax, setIsMax] = useState(false)
 	const [memo, setMemo] = useState(t('defaultDelegationMemo'))
 	const [phase, setPhase] = useState<TxPhase>("input")
 	const [buildResult, setBuildResult] = useState<BuildTxResult | null>(null)
@@ -75,6 +76,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		if (!isOpen) return
 		setValidatorAddress("")
 		setAmount("")
+		setIsMax(false)
 		setMemo(t('defaultDelegationMemo'))
 		setPhase("input")
 		setBuildResult(null)
@@ -88,7 +90,11 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		setSignTimeout(null)
 	}, [isOpen])
 
-	const canBuild = amount && parseFloat(amount) > 0 && isValidValidator && parseFloat(amount) <= parseFloat(availableBalance)
+	const canBuild = isValidValidator && (
+		isMax
+			? parseFloat(availableBalance) > 0
+			: !!amount && parseFloat(amount) > 0 && parseFloat(amount) <= parseFloat(availableBalance)
+	)
 
 	const handleBuild = useCallback(async () => {
 		if (!canBuild || watchOnly) return
@@ -98,8 +104,9 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			const result = await rpcRequest<BuildTxResult>('buildDelegateTx', {
 				chainId: chain.id,
 				validatorAddress: validatorAddress.trim(),
-				amount,
+				amount: isMax ? '0' : amount,
 				memo: memo || undefined,
+				isMax,
 			}, 60000)
 			setBuildResult(result)
 			setPhase("built")
@@ -107,7 +114,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setError(e.message || t('failedToBuildDelegation'))
 		}
 		setLoading(false)
-	}, [canBuild, watchOnly, chain.id, validatorAddress, amount, memo, t])
+	}, [canBuild, watchOnly, chain.id, validatorAddress, amount, isMax, memo, t])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult || watchOnly) return
@@ -301,9 +308,11 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 							<HStack>
 								<Input
 									placeholder="0.00"
-									value={amount}
+									value={isMax ? 'MAX' : amount}
+									disabled={isMax}
 									onChange={(e) => {
 										const sanitized = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1')
+										setIsMax(false)
 										setAmount(sanitized)
 									}}
 									bg="kk.bg"
@@ -315,14 +324,12 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 									size="sm"
 									px="4"
 									py="2"
-									variant="outline"
+									variant={isMax ? "solid" : "outline"}
+									bg={isMax ? "kk.gold" : undefined}
+									color={isMax ? "black" : "kk.textSecondary"}
 									borderColor="kk.border"
-									color="kk.textSecondary"
-									_hover={{ color: "kk.gold", borderColor: "kk.gold" }}
-									onClick={() => {
-										const max = Math.max(0, parseFloat(availableBalance))
-										setAmount(String(max))
-									}}
+									_hover={{ color: isMax ? "black" : "kk.gold", borderColor: "kk.gold" }}
+									onClick={() => { setIsMax(prev => !prev); setAmount("") }}
 								>
 									{t('max')}
 								</Button>
@@ -349,7 +356,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 						<Box p="3" bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="md">
 							<HStack justify="space-between">
 								<Text fontSize="xs" color="kk.textMuted">{t('amount')}</Text>
-								<Text fontSize="sm" color="kk.textPrimary">{amount} {chain.symbol}</Text>
+								<Text fontSize="sm" color="kk.textPrimary">{isMax ? 'MAX' : amount} {chain.symbol}</Text>
 							</HStack>
 							<HStack justify="space-between" mt="1">
 								<Text fontSize="xs" color="kk.textMuted">{t('validator')}</Text>

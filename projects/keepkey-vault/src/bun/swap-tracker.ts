@@ -673,7 +673,7 @@ function hydrateFromDb(txid: string, deviceId?: string, walletId?: string): Pend
 /** Single on-demand Pioneer poll for one swap.
  *  Called by the SwapDialog while the user has it open (there is no background
  *  timer). Returns the latest in-memory swap state, or null if unknown. */
-export async function refreshSwap(txid: string, deviceId?: string, walletId?: string): Promise<PendingSwap | null> {
+export async function refreshSwap(txid: string, deviceId?: string, walletId?: string, rescan = false): Promise<PendingSwap | null> {
   const live = pendingSwaps.get(txid)
   let swap = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : hydrateFromDb(txid, deviceId, walletId)
   if (!swap) {
@@ -809,7 +809,11 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
 
   const pioneer = await getPioneer()
   try {
-    const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid }), PIONEER_SWAP_TIMEOUT_MS, 'GetPendingSwap')
+    // Manual recheck (rescan=true) forces Pioneer to re-derive from chain
+    // (GET /swaps/pending/{txHash}?rescan=true) — lets the user recover a
+    // mis-classified failed/stuck swap on demand. Auto-polling passes false
+    // to keep Pioneer load down.
+    const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid, ...(rescan ? { rescan: true } : {}) }), PIONEER_SWAP_TIMEOUT_MS, rescan ? 'GetPendingSwap rescan' : 'GetPendingSwap')
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)

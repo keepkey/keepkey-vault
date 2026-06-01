@@ -350,6 +350,17 @@ function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestIn
 	return info
 }
 
+// Whether the device's AdvancedMode (blind-signing) policy is enabled, read
+// from cached features. Returns undefined when unknown (no cached features /
+// policy not reported) so callers can distinguish "off" from "can't tell".
+function getAdvancedModeEnabled(): boolean | undefined {
+	const features = engine.getCachedFeaturesSnapshot()
+	if (!features) return undefined
+	const policies: any[] = features.policiesList || features.policies || []
+	const p = policies.find((x: any) => (x.policyName || x.policy_name) === 'AdvancedMode')
+	return p ? !!p.enabled : undefined
+}
+
 // PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
 // from being read/written to disk during passphrase sessions.
 evmAddresses.canPersist = () => !engine.isPassphraseWallet
@@ -2987,6 +2998,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					memo: params.memo,
 					fromAddress,
 					type: 'delegate',
+					isMax: params.isMax,
 				})
 
 				const { fee, ...unsignedTx } = result
@@ -4403,6 +4415,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pushSubStage: (stage) => {
 						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
 					},
+					isAdvancedModeEnabled: getAdvancedModeEnabled,
 				})
 				const scope = getWalletDbScope()
 				// Register swap for tracking (non-blocking)
@@ -4535,7 +4548,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { refreshSwap } = await import('./swap-tracker')
 				const scope = getWalletDbScope()
 				if (!scope) return null
-				return await refreshSwap(params.txid, scope.deviceId, scope.walletId)
+				return await refreshSwap(params.txid, scope.deviceId, scope.walletId, params.rescan)
 			},
 			debugSwapLookup: async (params) => {
 				// PRIVACY: Mirror getSwapByTxid / refreshSwap — passphrase sessions
