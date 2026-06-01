@@ -66,6 +66,16 @@ function formatDate(ts: number): string {
     ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
+/** Open the raw pendingTx JSON (everything Pioneer has on a swap) in the browser. */
+function openSwapApi(txid: string) {
+  rpcRequest<{ pioneerApiBase?: string }>('getAppSettings', undefined, 5000)
+    .then((s) => {
+      const base = (s?.pioneerApiBase || 'https://api.keepkey.info').replace(/\/+$/, '')
+      return rpcRequest('openUrl', { url: `${base}/api/v1/swaps/pending/${txid}` })
+    })
+    .catch(() => {})
+}
+
 const HISTORY_CSS = `
   @keyframes kkHistoryFadeIn {
     from { opacity: 0; transform: translateY(8px); }
@@ -224,6 +234,14 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
               </Button>
             ) : null
           })()}
+          <Button
+            size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
+            fontSize="10px" fontFamily="mono"
+            onClick={(e) => { e.stopPropagation(); openSwapApi(swap.txid) }}
+            _hover={{ color: "var(--teal)" }} title="View raw swap data (JSON)"
+          >
+            api
+          </Button>
           {swap.outboundTxid && (() => {
             // Refunds outbound on the SOURCE chain (Maya returns the inbound
             // asset). Use outboundChainId from the classifier when present
@@ -383,6 +401,14 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     </Button>
                   ) : null
                 })()}
+                <Button
+                  size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
+                  fontSize="10px" fontFamily="mono"
+                  onClick={(e) => { e.stopPropagation(); openSwapApi(record.txid) }}
+                  _hover={{ color: "var(--teal)" }} title="View raw swap data (JSON)"
+                >
+                  api
+                </Button>
               </HStack>
             </Flex>
             {record.outboundTxid && (

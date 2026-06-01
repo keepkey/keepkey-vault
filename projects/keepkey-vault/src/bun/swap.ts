@@ -11,6 +11,7 @@
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
+import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
@@ -491,6 +492,10 @@ export interface SwapContext {
    *  for REST/headless callers) so a future entry point can't silently regress
    *  the UI to a coarse phase by forgetting to wire it up. */
   pushSubStage: (stage: SwapSubStage) => void
+  /** Whether the device's AdvancedMode (blind-signing) policy is enabled.
+   *  Returns undefined when unknown (no cached features / policy not reported).
+   *  Used to gate Solana swaps, which can only blind-sign. */
+  isAdvancedModeEnabled?: () => boolean | undefined
 }
 
 /** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
@@ -797,6 +802,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       tokenDecimals,
     })
     unsignedTx = buildResult.unsignedTx
+  }
+
+  // Solana swaps are v0 (versioned) txs the device can only blind-sign via
+  // solanaSignMessage. Firmware hard-gates that path behind the AdvancedMode
+  // policy (fsm_msg_solana.h) — when it's off the device shows a "Blocked"
+  // screen and returns a generic ActionCancelled whose real reason ("Message
+  // signing disabled by policy") is dropped by hdwallet's transport. Detect the
+  // disabled policy up front so the UI can prompt the user to enable blind
+  // signing instead of bouncing off an opaque device cancel. Only block when we
+  // positively know the policy is disabled; if unknown, let signing proceed.
+  if (fromChain.chainFamily === 'solana' && ctx.isAdvancedModeEnabled?.() === false) {
+    throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)

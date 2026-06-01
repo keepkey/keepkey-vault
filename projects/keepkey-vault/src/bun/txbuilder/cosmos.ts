@@ -176,6 +176,7 @@ export interface BuildCosmosStakingParams {
   memo?: string
   fromAddress: string
   type: 'delegate' | 'undelegate'
+  isMax?: boolean   // delegate all available balance minus fee
 }
 
 export async function buildCosmosStakingTx(
@@ -183,11 +184,13 @@ export async function buildCosmosStakingTx(
   chain: ChainDef,
   params: BuildCosmosStakingParams,
 ) {
-  const { validatorAddress, memo = '', fromAddress, type } = params
+  const { validatorAddress, memo = '', fromAddress, type, isMax = false } = params
 
   if (!validatorAddress) throw new Error('Validator address is required')
-  const amountNum = parseFloat(params.amount)
-  if (!amountNum || amountNum <= 0) throw new Error('Amount must be greater than zero')
+  if (!isMax) {
+    const amountNum = parseFloat(params.amount)
+    if (!amountNum || amountNum <= 0) throw new Error('Amount must be greater than zero')
+  }
 
   const denom = chain.denom || chain.symbol.toLowerCase()
 
@@ -210,11 +213,22 @@ export async function buildCosmosStakingTx(
 
   console.log(`${TAG} account_number=${account_number}, sequence=${sequence}`)
 
-  const baseAmount = toBaseUnits(params.amount, chain.decimals)
-  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
-
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+
+  let baseAmount: bigint
+  if (isMax) {
+    // Delegate all available balance minus the network fee (matches buildCosmosTx send-max)
+    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
+    const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
+    const balBase = toBaseUnits(balStr, chain.decimals)
+    const feeBase = BigInt(fee.amount[0]?.amount || '0')
+    baseAmount = balBase - feeBase
+    if (baseAmount < 0n) baseAmount = 0n
+  } else {
+    baseAmount = toBaseUnits(params.amount, chain.decimals)
+  }
+  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 

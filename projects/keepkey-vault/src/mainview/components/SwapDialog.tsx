@@ -18,6 +18,7 @@ import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } 
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
+import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
@@ -32,7 +33,7 @@ import completedGif from "../assets/swap/completed.gif"
 import shapeshiftLogo from "../assets/providers/shapeshift.svg"
 
 // ── Phase state machine ─────────────────────────────────────────────
-type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
+type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted' | 'blind-signing-required'
 
 /** Debug log — gated behind localStorage `swap.debug=1`. Used in place of
  *  console.log for high-volume per-render chatter. console.warn/error stay
@@ -699,6 +700,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
   const [refreshingQuote, setRefreshingQuote] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Solana blind-signing gate: when a Solana swap is blocked by the device's
+  // disabled AdvancedMode policy, phase flips to 'blind-signing-required' and
+  // this drives the enable page.
+  const [enablingBlindSign, setEnablingBlindSign] = useState(false)
+  const [blindSignError, setBlindSignError] = useState<string | null>(null)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Bump to force the quote useEffect to re-run with the same inputs (used by
@@ -1592,7 +1598,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // Don't re-quote when the user is actively reviewing a quote or has submitted/is signing.
     // 'review' is guarded here so balance polling doesn't wipe the quote mid-review;
     // the explicit 60s stale-check in the Confirm handler covers freshness on confirm.
-    if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving') return
+    if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving' || phase === 'blind-signing-required') return
 
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)
@@ -1791,6 +1797,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       window.dispatchEvent(new CustomEvent('keepkey-swap-executed'))
     } catch (e: any) {
       const raw = e?.message || ''
+      // Solana swap blocked because the device's blind-signing (AdvancedMode)
+      // policy is off — show the dedicated enable page instead of an error.
+      if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
+        setBlindSignError(null)
+        setPhase('blind-signing-required')
+        return
+      }
       // User-friendly categorization. Order: device-rejected first (most common during sign), then on-chain reverts, then network/RPC.
       let friendly = raw || t("errorSwap")
       if (/User rejected|user denied|device.*reject/i.test(raw)) {
@@ -1825,6 +1838,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setMaxReserveMode('safe')
     setQuote(null)
     setError(null)
+    setBlindSignError(null)
+    setEnablingBlindSign(false)
     setTxid(null)
     setBeforeFromBal(null)
     setBeforeToBal(null)
@@ -1861,6 +1876,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setPhase('review')
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
+
+  // Enable the device's AdvancedMode (blind-signing) policy so Solana swaps can
+  // be signed. applyPolicy prompts the user to confirm on device. On success we
+  // return to review so the user re-verifies the quote before signing.
+  const handleEnableBlindSigning = useCallback(async () => {
+    setEnablingBlindSign(true)
+    setBlindSignError(null)
+    try {
+      await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 60000)
+      setError(null)
+      setPhase('review')
+    } catch (e: any) {
+      const raw = e?.message || ''
+      setBlindSignError(
+        /cancel/i.test(raw)
+          ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
+          : (raw || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')),
+      )
+    } finally {
+      setEnablingBlindSign(false)
+    }
+  }, [t])
 
   const copyTxid = useCallback(() => {
     if (!txid) return
@@ -2054,7 +2091,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           <HStack gap="2">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
-              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : t("title")}
+              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
             </Text>
           </HStack>
           <HStack gap="2" align="center">
@@ -3050,6 +3087,62 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             </VStack>
           )}
 
+          {/* ── BLIND SIGNING REQUIRED (Solana) ─────────────────── */}
+          {phase === 'blind-signing-required' && (
+            <VStack gap="5" py="6" px="2" align="center" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
+              {/* Amber alert badge — mirrors the AdvancedMode icon in Device Settings */}
+              <Flex align="center" justify="center" w="56px" h="56px" borderRadius="full" bg="rgba(245,163,59,0.12)">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 9v4M12 17h.01" />
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                </svg>
+              </Flex>
+
+              <VStack gap="2" align="center" maxW="420px">
+                <Text fontSize="lg" fontWeight="700" color="kk.textPrimary" textAlign="center">
+                  {t('blindSignTitle', 'Enable Blind Signing for Solana')}
+                </Text>
+                <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.5">
+                  {t('blindSignBody', 'Solana swaps use a versioned transaction your KeepKey cannot fully decode, so it must be blind-signed. This is turned off by default. Enabling it switches on Advanced Mode (blind signing) on your device — you will be asked to confirm the change on the device.')}
+                </Text>
+              </VStack>
+
+              {/* Security caveat */}
+              <Flex align="flex-start" gap="2" bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="lg" px="3" py="2.5" maxW="420px">
+                <Box color="var(--gold)" flexShrink={0} mt="0.5">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                </Box>
+                <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
+                  {t('blindSignCaveat', 'Blind signing means the device shows a generic prompt instead of decoded details. Only proceed for swaps you initiated here. You can turn it back off in Device Settings → Signing Policy.')}
+                </Text>
+              </Flex>
+
+              {blindSignError && (
+                <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" px="3" py="2" maxW="420px" w="full">
+                  <Text fontSize="xs" color="kk.error" textAlign="center">{blindSignError}</Text>
+                </Box>
+              )}
+
+              <Flex gap="3" w="full" maxW="420px" pt="1">
+                <Button size="sm" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                  disabled={enablingBlindSign}
+                  _hover={{ bg: 'rgba(255,255,255,0.04)' }}
+                  onClick={() => { setBlindSignError(null); setPhase('review') }}>
+                  {t('back', 'Back')}
+                </Button>
+                <Button size="sm" flex="1" bg="kk.gold" color="black" fontWeight="600"
+                  loading={enablingBlindSign}
+                  loadingText={t('blindSignConfirmOnDevice', 'Confirm on device…')}
+                  _hover={{ opacity: 0.9 }}
+                  onClick={handleEnableBlindSigning}>
+                  {t('blindSignEnable', 'Enable Blind Signing')}
+                </Button>
+              </Flex>
+            </VStack>
+          )}
+
           {/* ── REVIEW (confirm quote) ──────────────────────────── */}
           {phase === 'review' && quote && fromAsset && toAsset && !busy && (
             <VStack gap="2" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
@@ -4001,7 +4094,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         </Box>
 
         {/* ── Footer ──────────────────────────────────────────────── */}
-        {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && (
+        {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && phase !== 'blind-signing-required' && (
           <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="space-between" align="center" gap="3"
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
             <Box minW="0" flex="1">
