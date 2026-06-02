@@ -12,7 +12,7 @@ import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
-import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
+import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
@@ -81,15 +81,17 @@ const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
 }
 const NATIVE_EVM_CLOSER_RESERVE_DEFAULT = 0.00025
 const NATIVE_TRON_FEE_RESERVE = 1.1
-// Solana base network fee is 5000 lamports/signature (0.000005 SOL). We reserve
-// 2× that as headroom rather than the bare fee: the balance MAX is computed from
-// reaches us via floating-point lamports→SOL division upstream (Pioneer's
-// solana-network get_balance does `lamports / 1e9`), which can round the final
-// lamport UP. Reserving exactly the fee left zero headroom, so a 1-lamport-high
-// balance made the Relay deposit exceed (balance − fee) by one lamport and the
-// swap failed on-chain with "insufficient lamports". 10000 lamports absorbs that
-// imprecision; the extra ~0.000005 SOL withheld from MAX is negligible.
-const NATIVE_SOLANA_FEE_RESERVE = 0.00001
+// Solana sendMax reserve. The base network fee is only 5000 lamports/signature
+// (~$0.001), but reserving the bare fee made sendMax swaps fail on-chain with
+// "insufficient lamports": the balance MAX is computed from reaches the UI
+// rounded to 8 decimals upstream (Pioneer), so e.g. 0.659381899 SOL becomes
+// 0.65938190 — 1 lamport HIGH — and with zero headroom the Relay deposit
+// overdrew (balance − fee) by a lamport. Like the EVM gas reserves, we leave a
+// real, fee-/imprecision-proof buffer rather than draining to the last lamport.
+// 0.01 SOL (~$1.50) is dust relative to swap sizes but ~2000× the fee, so it
+// absorbs balance rounding and any priority-fee spike. Tradeoff: this much SOL
+// is left behind on a max swap.
+const NATIVE_SOLANA_FEE_RESERVE = 0.01
 
 function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'safe'): number {
   if (asset.contractAddress) return 0
@@ -770,6 +772,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
   const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
   const [liveNearTxHash, setLiveNearTxHash] = useState<string | undefined>()
+  // ── Inbound (input tx) on-chain location + timing + structured failure ──
+  // All best-effort from Pioneer; render each only when present. createdAt is
+  // the broadcast anchor used to show "input confirmed in Xm".
+  const [liveInboundBlockNumber, setLiveInboundBlockNumber] = useState<number | undefined>()
+  const [liveInboundBlockHash, setLiveInboundBlockHash] = useState<string | undefined>()
+  const [liveInboundGasUsed, setLiveInboundGasUsed] = useState<string | undefined>()
+  const [liveInboundEffectiveGasPrice, setLiveInboundEffectiveGasPrice] = useState<string | undefined>()
+  const [liveInboundConfirmedAt, setLiveInboundConfirmedAt] = useState<number | undefined>()
+  const [liveCreatedAt, setLiveCreatedAt] = useState<number | undefined>()
+  // Tracker error message + recovery guidance — previously never surfaced in
+  // the submitted view (only the title flipped to "Swap failed").
+  const [liveError, setLiveError] = useState<string | undefined>()
+  const [liveErrorActionable, setLiveErrorActionable] = useState<string | undefined>()
+  const [liveErrorElapsedMinutes, setLiveErrorElapsedMinutes] = useState<number | undefined>()
   const [rechecking, setRechecking] = useState(false)
 
   // ── Countdown timer ───────────────────────────────────────────────
@@ -819,6 +835,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const isSwapComplete = liveStatus === 'completed'
   const isSwapFailed = liveStatus === 'failed' || liveStatus === 'refunded'
 
+  // Seed the inbound/timing/error fields from a full refreshSwap snapshot.
+  // The swap-update message carries these too, but the snapshot is the backstop
+  // for a dialog that mounted after the tracker's last push (resume / late open)
+  // and is the only place createdAt (the broadcast anchor) is available.
+  const applyInboundSnap = useCallback((snap: any) => {
+    if (!snap) return
+    if (snap.inboundBlockNumber !== undefined && snap.inboundBlockNumber !== null) setLiveInboundBlockNumber(snap.inboundBlockNumber)
+    if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
+    if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
+    if (snap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(snap.inboundEffectiveGasPrice)
+    if (snap.inboundConfirmedAt !== undefined && snap.inboundConfirmedAt !== null) setLiveInboundConfirmedAt(snap.inboundConfirmedAt)
+    if (snap.createdAt) setLiveCreatedAt(snap.createdAt)
+    if (snap.error) setLiveError(snap.error)
+    if (snap.errorActionable) setLiveErrorActionable(snap.errorActionable)
+    if (snap.errorElapsedMinutes !== undefined && snap.errorElapsedMinutes !== null) setLiveErrorElapsedMinutes(snap.errorElapsedMinutes)
+  }, [])
+
   // ── Listen for swap-update + swap-complete RPC messages ─────────
   useEffect(() => {
     if (!txid || phase !== 'submitted') return
@@ -835,6 +868,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
       if (update.refundReason) setLiveRefundReason(update.refundReason)
       if (update.nearTxHash) setLiveNearTxHash(update.nearTxHash)
+      if (update.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(update.inboundBlockNumber)
+      if (update.inboundBlockHash) setLiveInboundBlockHash(update.inboundBlockHash)
+      if (update.inboundGasUsed) setLiveInboundGasUsed(update.inboundGasUsed)
+      if (update.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(update.inboundEffectiveGasPrice)
+      if (update.inboundConfirmedAt !== undefined) setLiveInboundConfirmedAt(update.inboundConfirmedAt)
+      if (update.error) setLiveError(update.error)
+      if (update.errorActionable) setLiveErrorActionable(update.errorActionable)
+      if (update.errorElapsedMinutes !== undefined) setLiveErrorElapsedMinutes(update.errorElapsedMinutes)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -872,6 +913,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         // so the dialog is always current even if it opened after the initial push.
         if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
         if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+        applyInboundSnap(snap)
       } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
       const s = liveStatusRef.current
@@ -892,9 +934,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       const snap = await rpcRequest<any>('refreshSwap', { txid, rescan: true })
       if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
       if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+      applyInboundSnap(snap)
     } catch { /* swap-update push covers the failure */ }
     setRechecking(false)
-  }, [txid, rechecking])
+  }, [txid, rechecking, applyInboundSnap])
 
   // When the user switches EVM address in the dialog while a quote is active,
   // discard the stale quote and return to input so a fresh quote is fetched.
@@ -928,6 +971,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setLiveSwapper(undefined)
       setLiveRelayRequestId(undefined)
       setLiveNearTxHash(undefined)
+      setLiveInboundBlockNumber(undefined)
+      setLiveInboundBlockHash(undefined)
+      setLiveInboundGasUsed(undefined)
+      setLiveInboundEffectiveGasPrice(undefined)
+      setLiveInboundConfirmedAt(undefined)
+      setLiveCreatedAt(undefined)
+      setLiveError(undefined)
+      setLiveErrorActionable(undefined)
+      setLiveErrorElapsedMinutes(undefined)
       setAfterFromBal(null)
       setAfterToBal(null)
       setShowConfetti(false)
@@ -1197,6 +1249,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (resumeSwap.outboundChainId) setLiveOutboundChainId(resumeSwap.outboundChainId)
     if (resumeSwap.refundReason) setLiveRefundReason(resumeSwap.refundReason)
     if (resumeSwap.nearTxHash) setLiveNearTxHash(resumeSwap.nearTxHash)
+    // Seed inbound location + timing + failure guidance from the persisted row
+    // so a resumed dialog renders them on first paint (before any fresh poll).
+    if (resumeSwap.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(resumeSwap.inboundBlockNumber)
+    if (resumeSwap.inboundBlockHash) setLiveInboundBlockHash(resumeSwap.inboundBlockHash)
+    if (resumeSwap.inboundGasUsed) setLiveInboundGasUsed(resumeSwap.inboundGasUsed)
+    if (resumeSwap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(resumeSwap.inboundEffectiveGasPrice)
+    if (resumeSwap.inboundConfirmedAt !== undefined) setLiveInboundConfirmedAt(resumeSwap.inboundConfirmedAt)
+    if (resumeSwap.createdAt) setLiveCreatedAt(resumeSwap.createdAt)
+    if (resumeSwap.error) setLiveError(resumeSwap.error)
+    if (resumeSwap.errorActionable) setLiveErrorActionable(resumeSwap.errorActionable)
+    if (resumeSwap.errorElapsedMinutes !== undefined) setLiveErrorElapsedMinutes(resumeSwap.errorElapsedMinutes)
     // Skip stale `swapper` for native-vault integrations — Maya forks Thor's
     // protocol naming and Pioneer historically wrote `swapper='thorchain'`
     // even for Maya pools. The badge would then render "THORChain via Maya".
@@ -2393,6 +2456,63 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             })()}
                           </HStack>
                         </Flex>
+                        {/* Inbound block # — where the input tx was mined. Best-effort
+                            (absent on many swaps); clickable on EVM/UTXO explorers. */}
+                        {liveInboundBlockNumber !== undefined && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("block", "Block")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary"
+                              overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" flex="1">
+                              #{liveInboundBlockNumber.toLocaleString()}{liveInboundBlockHash ? ` · ${liveInboundBlockHash.slice(0, 10)}…` : ''}
+                            </Text>
+                            {(() => {
+                              const url = getExplorerBlockUrl(fromAsset.chainId, liveInboundBlockNumber!)
+                              return url ? (
+                                <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                                  px="2" h="26px" fontSize="11px"
+                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
+                                  Explorer
+                                </Button>
+                              ) : null
+                            })()}
+                          </Flex>
+                        )}
+                        {/* Input-confirmed timing — confirmedAt minus broadcast (createdAt). */}
+                        {liveInboundConfirmedAt !== undefined && liveCreatedAt !== undefined && liveInboundConfirmedAt > liveCreatedAt && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("confirmed", "Confirmed")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary" flex="1">
+                              {t("inAbout", "in")} {formatTime(Math.round((liveInboundConfirmedAt - liveCreatedAt) / 1000))}
+                            </Text>
+                          </Flex>
+                        )}
+                        {/* EVM network fee actually paid by the input tx. EVM-only —
+                            gasUsed is vbytes (not gas) on UTXO/Cosmos/Solana. */}
+                        {fromAsset.chainFamily === 'evm' && liveInboundGasUsed && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("gas", "Gas")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary" flex="1">
+                              {(() => {
+                                const used = Number(liveInboundGasUsed)
+                                const usedStr = Number.isFinite(used) ? used.toLocaleString() : liveInboundGasUsed
+                                const gwei = liveInboundEffectiveGasPrice ? Number(liveInboundEffectiveGasPrice) / 1e9 : NaN
+                                return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
+                              })()}
+                            </Text>
+                          </Flex>
+                        )}
                         {/* Output tx */}
                         {liveOutboundTxid && (
                           <Flex align="center" gap="2.5" py="2" minW="0"
@@ -2790,6 +2910,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {copied ? t("copied") : t("copy")}
                   </Button>
                 </Flex>
+                {/* Inbound block # + input-confirmed timing — best-effort from
+                    Pioneer; each renders only when present. */}
+                {(liveInboundBlockNumber !== undefined || (liveInboundConfirmedAt !== undefined && liveCreatedAt !== undefined && liveInboundConfirmedAt > liveCreatedAt)) && (
+                  <Flex align="center" gap="1.5" mb="2" wrap="wrap" fontFamily="mono" fontSize="10px">
+                    {liveInboundBlockNumber !== undefined && (() => {
+                      const url = getExplorerBlockUrl(fromAsset.chainId, liveInboundBlockNumber!)
+                      const label = `${t("block", "Block")} #${liveInboundBlockNumber!.toLocaleString()}`
+                      return url ? (
+                        <Text color="var(--teal)" cursor="pointer" _hover={{ textDecoration: 'underline' }}
+                          onClick={() => rpcRequest('openUrl', { url }).catch(() => {})}>{label}</Text>
+                      ) : (
+                        <Text color="kk.textSecondary">{label}</Text>
+                      )
+                    })()}
+                    {liveInboundConfirmedAt !== undefined && liveCreatedAt !== undefined && liveInboundConfirmedAt > liveCreatedAt && (
+                      <Text color="kk.textMuted">
+                        {liveInboundBlockNumber !== undefined ? '· ' : ''}{t("confirmed", "Confirmed")} {t("inAbout", "in")} {formatTime(Math.round((liveInboundConfirmedAt - liveCreatedAt) / 1000))}
+                      </Text>
+                    )}
+                  </Flex>
+                )}
                 <Flex gap="2">
                   {/* Always available — even on failed/refunded — so the user can
                       force a Pioneer rescan to recover a mis-classified swap. */}
@@ -2838,6 +2979,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   })()}
                 </Flex>
               </Box>
+
+              {/* Failure reason + recovery guidance — the tracker pushes a
+                  structured error (message + actionable) that the submitted view
+                  previously dropped entirely, leaving "Swap failed" with no why. */}
+              {isSwapFailed && (liveRefundReason || liveError || liveErrorActionable) && (
+                <Box w="full" bg="rgba(224,140,123,0.07)" border="1px solid" borderColor="rgba(224,140,123,0.25)" borderRadius="lg" p="3">
+                  <Text fontSize="10px" fontWeight="600" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
+                    {liveStatus === 'refunded' ? t("refunded", "Refunded") : t("whatHappened", "What happened")}
+                  </Text>
+                  {(liveRefundReason || liveError) && (
+                    <Text fontSize="11px" color="kk.textSecondary" lineHeight="1.45">{liveRefundReason || liveError}</Text>
+                  )}
+                  {liveErrorActionable && (
+                    <Text fontSize="11px" color="kk.textMuted" lineHeight="1.45" mt="1.5">{liveErrorActionable}</Text>
+                  )}
+                  {liveErrorElapsedMinutes !== undefined && liveErrorElapsedMinutes > 0 && (
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" mt="1.5">
+                      {t("stuckFor", "Unconfirmed for")} ~{liveErrorElapsedMinutes} {t("minutesShort", "min")}
+                    </Text>
+                  )}
+                </Box>
+              )}
 
               {/* Outbound Txid — shown when THORChain sends the output */}
               {liveOutboundTxid && (
