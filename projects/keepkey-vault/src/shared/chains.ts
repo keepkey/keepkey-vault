@@ -302,6 +302,22 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
 
+/** Best-effort block-explorer URL for a block height, derived from the chain's
+ *  tx-URL template. Only EVM and UTXO explorers follow a known, stable
+ *  `…/block/{n}` convention (etherscan-family use `/block/`, Blockchair uses
+ *  `/{coin}/block/`), so we restrict to those families and return null
+ *  otherwise — the caller then renders the block number as plain text.
+ *  Used to make the swap "Block #N" row clickable. */
+export function getExplorerBlockUrl(chainId: string, blockNumber: number | string): string | null {
+  const chain = CHAINS.find(c => c.id === chainId)
+  if (!chain?.explorerTxUrl) return null
+  if (chain.chainFamily !== 'evm' && chain.chainFamily !== 'utxo') return null
+  // Swap the tx path segment (`/tx/` or `/transaction/`) + txid placeholder for
+  // `/block/{n}`. Bail if the template doesn't match the expected shape.
+  const blockUrl = chain.explorerTxUrl.replace(/\/(tx|transaction)\/\{\{txid\}\}.*$/, `/block/${blockNumber}`)
+  return blockUrl !== chain.explorerTxUrl ? blockUrl : null
+}
+
 /** Get explorer TX URL for a chain ID + txid. Returns null if no explorer configured. */
 export function getExplorerTxUrl(chainId: string, txid: string): string | null {
   const chain = CHAINS.find(c => c.id === chainId)

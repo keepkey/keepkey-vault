@@ -189,6 +189,13 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           slippageBps: r.slippageBps,
           relayRequestId: r.relayRequestId,
           nearTxHash: r.nearTxHash,
+          inboundBlockNumber: r.inboundBlockNumber,
+          inboundBlockHash: r.inboundBlockHash,
+          inboundGasUsed: r.inboundGasUsed,
+          inboundEffectiveGasPrice: r.inboundEffectiveGasPrice,
+          inboundConfirmedAt: r.inboundConfirmedAt,
+          errorActionable: r.errorActionable,
+          errorElapsedMinutes: r.errorElapsedMinutes,
         }
         pendingSwaps.set(r.txid, swap)
       }
@@ -526,6 +533,31 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     || (remoteSwap.error ? String(remoteSwap.error) : undefined)
   const timeEstimate = remoteSwap.timeEstimate
 
+  // ── Inbound (input tx) on-chain location + timing ──
+  // Pioneer records where the INPUT tx landed under `blockchainTxData`, the
+  // confirm time under `confirmedAt`, and richer failure guidance under
+  // `error.actionable` / `error.context`. All best-effort: blockchainTxData is
+  // null on many swaps, blockHash/effectiveGasPrice are frequently null even
+  // when present, and gasUsed is vbytes (not gas) for non-EVM inputs — so the
+  // gas fields are only adopted for EVM inputs.
+  const isEvmInput = !!swap.fromCaip?.startsWith('eip155:')
+  const btd = remoteSwap.blockchainTxData || undefined
+  const inboundBlockNumber: number | undefined = (btd?.blockNumber != null && Number.isFinite(Number(btd.blockNumber)))
+    ? Number(btd.blockNumber)
+    : undefined
+  const inboundBlockHash: string | undefined = btd?.blockHash || undefined
+  const inboundGasUsed: string | undefined = (isEvmInput && btd?.gasUsed != null) ? String(btd.gasUsed) : undefined
+  const inboundEffectiveGasPrice: string | undefined = (isEvmInput && btd?.effectiveGasPrice != null) ? String(btd.effectiveGasPrice) : undefined
+  const confirmedAtMs: number | undefined = (() => {
+    if (!remoteSwap.confirmedAt) return undefined
+    const ms = new Date(remoteSwap.confirmedAt).getTime()
+    return Number.isFinite(ms) ? ms : undefined
+  })()
+  const errorActionable: string | undefined = remoteSwap.error?.actionable || undefined
+  const errorElapsedMinutes: number | undefined = (typeof remoteSwap.error?.context?.elapsedMinutes === 'number')
+    ? remoteSwap.error.context.elapsedMinutes
+    : undefined
+
   // When Midgard has ruled, Pioneer's outboundTxid is also non-authoritative —
   // Pioneer may carry a stale "expected outbound" hash that disagrees with
   // the actual on-chain refund/delivery. Locking it here prevents the same
@@ -538,13 +570,26 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // liveSwapper from it) stuck on "thorchain" forever.
   const shouldClearSwapper = isNativeVaultRoute && !!swap.swapper
 
+  // New inbound/timing data can arrive while status & confirmations hold steady
+  // (e.g. blockNumber lands on an already-'confirming' swap), so it must count
+  // as a change in its own right or the push/persist below never fires.
+  const inboundDataChanged =
+    (inboundBlockNumber !== undefined && inboundBlockNumber !== swap.inboundBlockNumber) ||
+    (!!inboundBlockHash && inboundBlockHash !== swap.inboundBlockHash) ||
+    (!!inboundGasUsed && inboundGasUsed !== swap.inboundGasUsed) ||
+    (!!inboundEffectiveGasPrice && inboundEffectiveGasPrice !== swap.inboundEffectiveGasPrice) ||
+    (confirmedAtMs !== undefined && confirmedAtMs !== swap.inboundConfirmedAt) ||
+    (!!errorActionable && errorActionable !== swap.errorActionable) ||
+    (errorElapsedMinutes !== undefined && errorElapsedMinutes !== swap.errorElapsedMinutes)
+
   const changed =
     newStatus !== swap.status ||
     confirmations !== swap.confirmations ||
     (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
     (acceptOutboundTxid && outboundTxid && outboundTxid !== swap.outboundTxid) ||
     (detectedSwapper && detectedSwapper !== swap.swapper) ||
-    shouldClearSwapper
+    shouldClearSwapper ||
+    inboundDataChanged
 
   if (changed) {
     swap.status = newStatus
@@ -556,6 +601,17 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     if (shouldClearSwapper) swap.swapper = undefined
     if (errorMsg) swap.error = errorMsg
     if (detectedSwapper && !swap.swapper) swap.swapper = detectedSwapper
+
+    // Inbound location + timing — only overwrite when the poll carries a value
+    // (a later rescan can drop blockHash/effectiveGasPrice; don't let it wipe
+    // what an earlier poll already established).
+    if (inboundBlockNumber !== undefined) swap.inboundBlockNumber = inboundBlockNumber
+    if (inboundBlockHash) swap.inboundBlockHash = inboundBlockHash
+    if (inboundGasUsed) swap.inboundGasUsed = inboundGasUsed
+    if (inboundEffectiveGasPrice) swap.inboundEffectiveGasPrice = inboundEffectiveGasPrice
+    if (confirmedAtMs !== undefined) swap.inboundConfirmedAt = confirmedAtMs
+    if (errorActionable) swap.errorActionable = errorActionable
+    if (errorElapsedMinutes !== undefined) swap.errorElapsedMinutes = errorElapsedMinutes
 
     if (timeEstimate?.total_swap_seconds && timeEstimate.total_swap_seconds > 0) {
       swap.estimatedTime = timeEstimate.total_swap_seconds
@@ -597,6 +653,13 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       swapper: shouldClearSwapper ? null : swap.swapper,
       completedAt: isFinal ? now : undefined,
       actualTimeSeconds: isFinal ? Math.round((now - swap.createdAt) / 1000) : undefined,
+      inboundBlockNumber,
+      inboundBlockHash,
+      inboundGasUsed,
+      inboundEffectiveGasPrice,
+      inboundConfirmedAt: confirmedAtMs,
+      errorActionable,
+      errorElapsedMinutes,
     })
 
     pushUpdate(swap)
@@ -654,6 +717,13 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     outboundChainId: r.outboundChainId,
     refundReason: r.refundReason,
     nearTxHash: r.nearTxHash,
+    inboundBlockNumber: r.inboundBlockNumber,
+    inboundBlockHash: r.inboundBlockHash,
+    inboundGasUsed: r.inboundGasUsed,
+    inboundEffectiveGasPrice: r.inboundEffectiveGasPrice,
+    inboundConfirmedAt: r.inboundConfirmedAt,
+    errorActionable: r.errorActionable,
+    errorElapsedMinutes: r.errorElapsedMinutes,
     midgardClassified: !!(r.outboundChainId || r.refundReason),
   }
 }
@@ -1263,6 +1333,13 @@ function pushUpdate(swap: PendingSwap): void {
     outboundChainId: swap.outboundChainId,
     refundReason: swap.refundReason,
     nearTxHash: swap.nearTxHash,
+    inboundBlockNumber: swap.inboundBlockNumber,
+    inboundBlockHash: swap.inboundBlockHash,
+    inboundGasUsed: swap.inboundGasUsed,
+    inboundEffectiveGasPrice: swap.inboundEffectiveGasPrice,
+    inboundConfirmedAt: swap.inboundConfirmedAt,
+    errorActionable: swap.errorActionable,
+    errorElapsedMinutes: swap.errorElapsedMinutes,
   }
   swapLog(`${TAG} Pushing swap-update: ${swap.txid} status=${swap.status} confirmations=${swap.confirmations}`)
   sendMessage('swap-update', update)
