@@ -15,6 +15,8 @@ import {
   chainMetaForCaip2,
   networkDisplayName,
   synthesizeSwapAsset,
+  compareForPicker,
+  parseCaip,
   type AssetEntry,
 } from "../../shared/swap-discovery"
 import { assessAvailability } from "../../shared/swap-support-matrix"
@@ -542,10 +544,24 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
   // Reset page when search changes
   useEffect(() => { setPage(0) }, [search])
 
-  // Discovery search — fires when in-chain list is empty and query is long enough
+  // A pasted contract/mint address — EVM 0x… or Solana base58. Drives the
+  // on-chain "paste a contract" lookup lane below when it matches no catalog row.
+  // base58 is only treated as an address on solana:/tron: steps — on EVM steps a
+  // base58-looking string is meaningless and would trigger a pointless lookup.
+  const addrQuery = useMemo(() => {
+    const rawAddr = search.trim()
+    if (/^0x[a-fA-F0-9]{40}$/.test(rawAddr)) return rawAddr
+    const base58Chain = chainCaip2.startsWith('solana:') || chainCaip2.startsWith('tron:')
+    if (base58Chain && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawAddr)) return rawAddr
+    return null
+  }, [search, chainCaip2])
+
+  // Discovery search — fires when in-chain list is empty and query is long enough.
+  // Skipped for address queries, which take the dedicated contract-lookup lane.
   const [discoveryHits, setDiscoveryHits] = useState<AssetEntry[]>([])
   const [discoveryLoading, setDiscoveryLoading] = useState(false)
   useEffect(() => {
+    if (addrQuery) { setDiscoveryHits([]); return }
     if (q.length < 2) { setDiscoveryHits([]); return }
     // Only search once the in-chain results are known (after inChain memo runs)
     const timer = setTimeout(async () => {
@@ -572,7 +588,7 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
       finally { setDiscoveryLoading(false) }
     }, 400)
     return () => clearTimeout(timer)
-  }, [q])
+  }, [q, addrQuery])
 
   const inChain = useMemo(() => entries.filter(e => {
     if (e.chainId !== chainCaip2) return false
@@ -580,20 +596,15 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
     if (q) {
       const text = `${e.symbol} ${e.name}`.toLowerCase()
       const caipLower = (e.caip || '').toLowerCase()
-      const contract = ((e as any).contractAddress || '').toLowerCase()
+      // Contract/mint match: parse the real contract out of the CAIP (the
+      // earlier `(e as any).contractAddress` was always undefined — dead code).
+      // base58 is case-sensitive on TRON/Solana, so match case-insensitively.
+      const contract = (parseCaip(e.caip).contractAddress || '').toLowerCase()
       if (!text.includes(q) && !caipLower.includes(q) && !contract.includes(q)) return false
     }
     return true
-  // Sort: held first (by USD), then selectable, then unavailable
-  }).sort((a, b) => {
-    const aHeld = a.balance ? 1 : 0
-    const bHeld = b.balance ? 1 : 0
-    if (aHeld !== bHeld) return bHeld - aHeld
-    if (aHeld && bHeld) return (b.balance!.usd) - (a.balance!.usd)
-    const aSel = isRowSelectable(a) ? 1 : 0
-    const bSel = isRowSelectable(b) ? 1 : 0
-    return bSel - aSel
-  }), [entries, chainCaip2, excludeCaip, q])
+  // Sort: held → stablecoins → native → popularity (catalog rank) → junk → unsupported.
+  }).sort(compareForPicker), [entries, chainCaip2, excludeCaip, q])
 
   // Collect all providers across routable assets in chain (for banner)
   const allProviders = useMemo(() => {
@@ -604,6 +615,59 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
 
   const totalPages = Math.ceil(inChain.length / PAGE_SIZE)
   const pageItems  = inChain.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  // ── Paste-a-contract lane ───────────────────────────────────────────────
+  // When the query is an address with no catalog match, resolve it on-chain
+  // (EVM eth_call / Solana RPC + Jupiter) and offer "Add & select".
+  const [contractHit, setContractHit] = useState<SwapAsset | null>(null)
+  // The address we've completed a lookup for — distinguishes "still resolving"
+  // from "resolved, nothing found" so the empty state never flashes pre-lookup.
+  const [searchedAddr, setSearchedAddr] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  useEffect(() => {
+    if (!addrQuery || inChain.length > 0) { setContractHit(null); setSearchedAddr(null); return }
+    let cancelled = false
+    setContractHit(null); setSearchedAddr(null)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await rpcRequest<{ hits: SwapAsset[] }>(
+          'lookupTokenContract', { contractAddress: addrQuery, chainId: chainCaip2 }, 20000,
+        )
+        if (cancelled) return
+        // Only accept a hit on the network the user is browsing — never silently
+        // switch the destination to another chain (e.g. a Solana mint resolved
+        // while the EVM step is open).
+        setContractHit((res?.hits ?? []).find(h => h.caip?.split('/')[0] === chainCaip2) ?? null)
+      } catch {
+        if (!cancelled) setContractHit(null)
+      } finally {
+        if (!cancelled) setSearchedAddr(addrQuery)
+      }
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [addrQuery, inChain.length, chainCaip2])
+
+  const handleAddAndSelect = useCallback(async (hit: SwapAsset) => {
+    if (!hit.caip) return
+    setAdding(true)
+    try {
+      // Persist (best-effort) so it appears in the catalog on the next open.
+      await rpcRequest('addCustomToken', { chainId: hit.chainId, contractAddress: hit.contractAddress }, 30000).catch(() => {})
+      onSelect({
+        caip: hit.caip,
+        symbol: hit.symbol,
+        name: hit.name,
+        chainId: hit.caip.split('/')[0],
+        decimals: hit.decimals,
+        iconUrl: hit.icon,
+        isNative: !hit.contractAddress,
+        swappable: hit,
+        availability: assessAvailability(hit.caip),
+      })
+    } finally {
+      setAdding(false)
+    }
+  }, [onSelect])
 
   return (
     <>
@@ -629,22 +693,28 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
 
       {/* List */}
       <Box flex="1" overflowY="auto" px="5" pb="2">
-        {inChain.length === 0 && discoveryHits.length === 0 ? (
-          <Flex direction="column" align="center" py="14" gap="2">
-            {discoveryLoading
-              ? <Text fontSize="11px" color="kk.textMuted">Searching all networks…</Text>
-              : <>
-                  <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No assets found</Text>
-                  <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
-                </>
-            }
-          </Flex>
-        ) : inChain.length > 0 ? (
+        {inChain.length > 0 ? (
           pageItems.map(e => (
             <AssetListRow key={e.caip} entry={e}
               onSelect={onSelect} onUnavailable={onUnavailable} />
           ))
-        ) : (
+        ) : addrQuery ? (
+          // Pasted-address lane: on-chain lookup → add & select. Show the
+          // resolving card until the lookup for THIS address completes, so the
+          // empty state can't flash on the frame before the effect runs.
+          contractHit ? (
+            <ContractHitRow loading={false} hit={contractHit} adding={adding}
+              chainName={chainName} onAdd={handleAddAndSelect} />
+          ) : searchedAddr === addrQuery ? (
+            <Flex direction="column" align="center" py="14" gap="2">
+              <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No token at that address</Text>
+              <Text fontSize="11px" color="kk.textMuted">Double-check the contract / mint address.</Text>
+            </Flex>
+          ) : (
+            <ContractHitRow loading hit={null} adding={adding}
+              chainName={chainName} onAdd={handleAddAndSelect} />
+          )
+        ) : discoveryHits.length > 0 ? (
           <>
             <Text fontSize="10px" color="kk.textMuted" mb="2" letterSpacing="0.06em" textTransform="uppercase">
               Other networks — will cross-chain swap
@@ -654,6 +724,16 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
                 onSelect={onSelect} onUnavailable={onUnavailable} />
             ))}
           </>
+        ) : (
+          <Flex direction="column" align="center" py="14" gap="2">
+            {discoveryLoading
+              ? <Text fontSize="11px" color="kk.textMuted">Searching all networks…</Text>
+              : <>
+                  <Text fontSize="14px" fontWeight="500" color="kk.textSecondary">No assets found</Text>
+                  <Text fontSize="11px" color="kk.textMuted">Try a different search term.</Text>
+                </>
+            }
+          </Flex>
         )}
       </Box>
 
@@ -762,6 +842,67 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
         )}
       </Flex>
     </Box>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Pasted-contract lookup row — on-chain resolved token with "Add & select"
+// ══════════════════════════════════════════════════════════════════════════
+
+function ContractHitRow({ loading, hit, adding, chainName, onAdd }: {
+  loading: boolean
+  hit: SwapAsset | null
+  adding: boolean
+  chainName: string
+  onAdd: (hit: SwapAsset) => void
+}) {
+  if (loading || !hit) {
+    return (
+      <Flex align="center" gap="3" px="3.5" py="4"
+        bg="rgba(233,196,106,0.04)" border="1px dashed rgba(233,196,106,0.22)" borderRadius="12px">
+        <Box w="8px" h="8px" borderRadius="full" bg="var(--gold)" opacity={0.8}
+          style={{ animation: "kkSwapFadeIn 0.6s ease-in-out infinite alternate" }} />
+        <Box>
+          <Text fontSize="12px" color="kk.textPrimary" fontWeight="600">Looking up token…</Text>
+          <Text fontSize="10px" color="kk.textMuted">Resolving the address on {chainName}</Text>
+        </Box>
+      </Flex>
+    )
+  }
+  const badgeCaip = hit.contractAddress && hit.caip
+    ? chainMetaForCaip2(hit.caip.split("/")[0])?.nativeCaip
+    : undefined
+  return (
+    <>
+      <Text fontSize="10px" color="kk.textMuted" mb="2" letterSpacing="0.06em" textTransform="uppercase">
+        Found via contract address
+      </Text>
+      <Flex align="center" gap="3" px="3.5" py="3"
+        bg="rgba(233,196,106,0.05)" border="1px solid rgba(233,196,106,0.25)" borderRadius="12px">
+        <Box flexShrink={0}>
+          <AssetIcon caip={hit.caip!} iconUrl={hit.icon} chainCaip={badgeCaip} size={56} alt={hit.symbol} />
+        </Box>
+        <Box flex="1" minW="0">
+          <Flex align="center" gap="2">
+            <Text fontSize="15px" fontWeight="800">{hit.symbol}</Text>
+            <Box bg="rgba(233,196,106,0.10)" color="var(--gold)" px="1.5" py="0.5"
+              borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">NEW · TRY QUOTE</Box>
+          </Flex>
+          <Text fontSize="12px" color="kk.textMuted" mt="0.5">{hit.name} · {hit.decimals} decimals</Text>
+          <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55}
+            overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">{hit.caip}</Text>
+        </Box>
+        <Box as="button" flexShrink={0} fontFamily="inherit"
+          px="3.5" py="2" borderRadius="10px" bg="var(--gold)" color="#0b0b0e"
+          fontSize="11px" fontWeight="700" border="none"
+          cursor={adding ? "wait" : "pointer"} opacity={adding ? 0.6 : 1}
+          _hover={adding ? {} : { filter: "brightness(1.08)" }}
+          disabled={adding}
+          onClick={() => !adding && onAdd(hit)}>
+          {adding ? "Adding…" : "Add & select"}
+        </Box>
+      </Flex>
+    </>
   )
 }
 

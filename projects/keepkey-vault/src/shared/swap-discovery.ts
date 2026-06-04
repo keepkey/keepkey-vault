@@ -74,6 +74,11 @@ export interface AssetEntry {
   /** SwapAsset reference — only present if Pioneer's GetAvailableAssets included it. */
   swappable?: SwapAsset
   availability: AvailabilityAssessment
+  /** Position in pioneer-discovery's catalog (lower = more popular). The catalog
+   *  is emitted in market-cap/popularity order, so this is the best proxy we
+   *  have for "rank" without a per-token market-cap field. Undefined for entries
+   *  not sourced from the catalog (Pioneer backfill, user-added custom tokens). */
+  discoveryRank?: number
 }
 
 /** Sort key bucket — lower numbers float to the top. */
@@ -100,6 +105,84 @@ export function compareEntries(a: AssetEntry, b: AssetEntry): number {
 
   if (ba === 0) return (b.balance!.usd) - (a.balance!.usd)
 
+  const symA = a.symbol.toUpperCase()
+  const symB = b.symbol.toUpperCase()
+  if (symA !== symB) return symA < symB ? -1 : 1
+  return a.name < b.name ? -1 : 1
+}
+
+// ── Destination-token-list ordering (picker, "TO" side) ───────────────────
+//
+// `compareEntries` above is the SEARCH/default bucket sort — it ranks by swap
+// confidence and breaks ties alphabetically, which is what you want when the
+// user typed a query. The destination *list* (e.g. every SPL token on Solana,
+// 5k+ rows, no query) needs a different default: a held → stablecoins →
+// popularity → junk-last ordering so USDT/USDC lead and "000"/spam sink. The
+// catalog has no market-cap field, but it's emitted in popularity order, so
+// `discoveryRank` is the popularity proxy.
+
+/** Well-known stablecoin symbols. The matrix's STABLECOIN_TOKENS set only
+ *  covers a handful of EVM/TRON CAIPs by exact address; this symbol set is the
+ *  cross-chain mechanism (notably Solana SPL stables) for "stables first". */
+const STABLE_SYMBOLS = new Set<string>([
+  'USDT', 'USDC', 'USDS', 'USDE', 'SUSDE', 'DAI', 'SDAI', 'USDP', 'TUSD', 'GUSD',
+  'USDD', 'PYUSD', 'FDUSD', 'USD1', 'USD0', 'BUSD', 'LUSD', 'FRAX', 'CRVUSD',
+  'GHO', 'USDY', 'USDB', 'USDG', 'RLUSD', 'EURC', 'EURT', 'EURS', 'USTC',
+  'DOLA', 'MIM', 'BUIDL', 'USDC.E', 'USDT.E',
+])
+
+/** Treat an entry as a stablecoin for ordering purposes. CURATED symbol set
+ *  only — a broader "USD-ish symbol + usd/dollar/stable in name" heuristic was
+ *  tried and rejected: it matched ~800 catalog tokens, floating obscure
+ *  wrappers and junk ("Unstable Tether", "Good Game US Dollar") above SOL/LINK.
+ *  The curated set covers every real stable a user cares about; discoveryRank
+ *  handles the rest. */
+export function isStablecoinEntry(e: AssetEntry): boolean {
+  if (e.isNative) return false
+  return STABLE_SYMBOLS.has(e.symbol.toUpperCase())
+}
+
+const JUNK_PATTERN = /(https?:\/\/|www\.|t\.me\/|\bairdrop\b|\bclaim\b|just buy|buy and|\bpresale\b|\bgiveaway\b|free \$|\$\$\$)/i
+
+/** Heuristic "silly/spam token" detector — used only to demote toward the
+ *  bottom of the list. Never demotes a held asset. Discovery rank already
+ *  buries most junk; this is the safety net for spam that sneaks in with a low
+ *  rank (long tickers, scammy names). Deliberately conservative. */
+export function isJunkEntry(e: AssetEntry): boolean {
+  if (e.balance) return false
+  const sym = e.symbol || ''
+  const name = e.name || ''
+  if (sym.length > 12) return true
+  if (name.length > 48) return true
+  return JUNK_PATTERN.test(name) || JUNK_PATTERN.test(sym)
+}
+
+/** Ordering tier for the destination list. Lower floats to the top.
+ *  held(value) → held(no price) → stablecoins → native chain asset → popular
+ *  → junk → unsupported. The native asset gets its own tier just below stables
+ *  so a chain's own coin (SOL/ETH) stays prominent instead of sinking into the
+ *  long tail when it isn't held. */
+export function pickerTier(e: AssetEntry): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
+  if ((e.balance?.usd ?? 0) > 0) return 0                 // held + value
+  if (e.balance) return 1                                 // held, no price feed
+  const selectable = e.availability.status === 'swappable' || e.availability.status === 'unknown'
+  if (!selectable) return 6                               // unsupported → bottom
+  if (isJunkEntry(e)) return 5                            // spam/silly → just above unsupported
+  if (isStablecoinEntry(e)) return 2                      // stablecoins → top of swappable
+  if (e.isNative) return 3                                // native chain asset (SOL/ETH)
+  return 4                                                // normal swappable token
+}
+
+/** Compare two entries for the destination token list: tier asc → held by USD
+ *  desc → catalog popularity (discoveryRank) asc → symbol alpha. */
+export function compareForPicker(a: AssetEntry, b: AssetEntry): number {
+  const ta = pickerTier(a)
+  const tb = pickerTier(b)
+  if (ta !== tb) return ta - tb
+  if (ta === 0) return (b.balance!.usd) - (a.balance!.usd)
+  const ra = a.discoveryRank ?? Number.MAX_SAFE_INTEGER
+  const rb = b.discoveryRank ?? Number.MAX_SAFE_INTEGER
+  if (ra !== rb) return ra - rb
   const symA = a.symbol.toUpperCase()
   const symB = b.symbol.toUpperCase()
   if (symA !== symB) return symA < symB ? -1 : 1
@@ -350,6 +433,9 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
   // this dedupe the picker rendered all three.
   const seen = new Set<string>()
   const entries: AssetEntry[] = []
+  // Popularity proxy: the catalog is emitted in market-cap order, so the
+  // walk index is a usable "rank" for the picker's default sort.
+  let discoveryRank = 0
   // Walk the discovery universe — every CAIP becomes a row (after canonicalization).
   for (const [rawCaip, raw] of discovery) {
     const caip = canonicalizeCaip(rawCaip)
@@ -375,6 +461,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       swappable,
       swappableAsset: swappable?.asset,
       availability,
+      discoveryRank: discoveryRank++,
     })
   }
 
@@ -409,7 +496,11 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
   // The aggregator routing matrix (assessAvailability) still gates whether
   // they're swappable; we just make them visible + selectable in the picker.
   for (const ct of input.customTokens || []) {
-    const rawCaip = `${ct.networkId}/erc20:${ct.contractAddress}`
+    // Token namespace is chain-family specific: EVM uses /erc20:, Solana and
+    // TRON use /token:. Hardcoding /erc20: gave Solana custom tokens a bogus
+    // CAIP that matched nothing in the matrix or the held-balance lookup.
+    const ns = ct.networkId.startsWith('solana:') || ct.networkId.startsWith('tron:') ? 'token' : 'erc20'
+    const rawCaip = `${ct.networkId}/${ns}:${ct.contractAddress}`
     const caip = canonicalizeCaip(rawCaip)
     if (seen.has(caip)) continue
     seen.add(caip)
