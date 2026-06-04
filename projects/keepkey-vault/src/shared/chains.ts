@@ -302,6 +302,27 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
 
+/** Resolve a chain from a real-time tx-push payload. Prefers `networkId`
+ *  (CAIP-2, always present on SSE events); falls back to matching a CAIP-19
+ *  string by its networkId prefix — token transfers carry a token caip like
+ *  `<networkId>/erc20:0x…`, which never equals a chain's native `…/slip44:…`
+ *  caip but does share its networkId prefix. Pass `chains` to include
+ *  user-added custom chains alongside the built-ins. */
+export function findChainByNetwork(
+  networkId: string | undefined,
+  caip: string | undefined,
+  chains: ChainDef[] = CHAINS,
+): ChainDef | undefined {
+  if (networkId) {
+    const byNet = chains.find(c => c.networkId === networkId)
+    if (byNet) return byNet
+  }
+  if (caip) {
+    return chains.find(c => caip === c.caip || caip.startsWith(`${c.networkId}/`))
+  }
+  return undefined
+}
+
 /** Best-effort block-explorer URL for a block height, derived from the chain's
  *  tx-URL template. Only EVM and UTXO explorers follow a known, stable
  *  `…/block/{n}` convention (etherscan-family use `/block/`, Blockchair uses
