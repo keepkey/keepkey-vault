@@ -26,10 +26,11 @@ export type SwapProvider =
   | 'shapeshift'  // ShapeShift Swapper — aggregates LiFi/Squid/Across over EVMs
 
 export type AvailabilityStatus =
-  | 'swappable'         // covered by ≥1 provider's hardcoded set
-  | 'unknown'           // chain is supported but this token isn't in our static list — try a quote
-  | 'unsupported_token' // chain is supported but token namespace doesn't match any provider's token universe (rare)
-  | 'unsupported_chain' // no provider routes this chain at all
+  | 'swappable'           // covered by ≥1 provider's hardcoded set
+  | 'unknown'             // chain is supported but this token isn't in our static list — try a quote
+  | 'unsupported_token'   // chain is supported but token namespace doesn't match any provider's token universe (rare)
+  | 'unsupported_chain'   // no provider routes this chain at all
+  | 'unsupported_firmware'// a provider routes this chain, but the connected device's firmware can't sign/derive it yet
 
 export interface AvailabilityAssessment {
   status: AvailabilityStatus

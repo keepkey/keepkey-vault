@@ -17,10 +17,11 @@ import {
   synthesizeSwapAsset,
   compareForPicker,
   parseCaip,
+  assessWithFirmware,
   type AssetEntry,
 } from "../../shared/swap-discovery"
-import { assessAvailability } from "../../shared/swap-support-matrix"
 import { rpcRequest } from "../lib/rpc"
+import { useDeviceState } from "../hooks/useDeviceState"
 import { CHAINS } from "../../shared/chains"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
@@ -350,6 +351,9 @@ interface ChainInfo {
   routableCount: number
   providers: string[]
   isAvailable: boolean
+  /** A provider routes this chain, but the device's firmware can't sign/derive
+   *  it — distinguishes "update firmware" from "no route at all". */
+  firmwareGated: boolean
 }
 
 function buildChainInfos(entries: AssetEntry[], excludeCaip: string | undefined): ChainInfo[] {
@@ -371,6 +375,8 @@ function buildChainInfos(entries: AssetEntry[], excludeCaip: string | undefined)
       routableCount: routableInChain.length,
       providers: [...providers],
       isAvailable: routableInChain.length > 0,
+      firmwareGated: routableInChain.length === 0
+        && assetsInChain.some(e => e.availability.status === "unsupported_firmware"),
     }
   }).sort((a, b) => b.routableCount - a.routableCount) // most assets first
 }
@@ -509,8 +515,8 @@ function NetworkTile({ chain: c, onPick, unavail }: {
         <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.06em" textTransform="uppercase" mt="0.5">
           {c.family}
         </Text>
-        <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" mt="1.5">
-          {unavail ? "No route" : `${c.routableCount} swappable`}
+        <Text fontSize="11px" fontWeight="500" color={unavail && c.firmwareGated ? "var(--gold)" : "kk.textSecondary"} mt="1.5">
+          {unavail ? (c.firmwareGated ? "Update firmware" : "No route") : `${c.routableCount} swappable`}
         </Text>
         {/* CAIP-2 */}
         <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
@@ -525,12 +531,13 @@ function NetworkTile({ chain: c, onPick, unavail }: {
 // TO picker — Step 2: asset list for a network (paginated + search)
 // ══════════════════════════════════════════════════════════════════════════
 
-function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSearchChange,
+function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, firmwareVersion, search, onSearchChange,
   onBack, onSelect, onUnavailable }: {
   entries: AssetEntry[]
   chainCaip2: string
   fromChainId: string | null
   excludeCaip: string | undefined
+  firmwareVersion: string | undefined
   search: string
   onSearchChange: (s: string) => void
   onBack: () => void
@@ -580,7 +587,7 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
             decimals: a.decimals,
             iconUrl: a.icon,
             isNative: !a.contractAddress,
-            availability: assessAvailability(a.caip),
+            availability: assessWithFirmware(a.caip, firmwareVersion),
           }]
         })
         setDiscoveryHits(entries)
@@ -588,7 +595,7 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
       finally { setDiscoveryLoading(false) }
     }, 400)
     return () => clearTimeout(timer)
-  }, [q, addrQuery])
+  }, [q, addrQuery, firmwareVersion])
 
   const inChain = useMemo(() => entries.filter(e => {
     if (e.chainId !== chainCaip2) return false
@@ -658,25 +665,31 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
     // Defense in depth: never add+select the source asset (self-swap guard) —
     // mirrors the excludeCaip filter on the normal list and the lookup hit.
     if (!hit.caip || hit.caip.toLowerCase() === (excludeCaip ?? '').toLowerCase()) return
+    const entry: AssetEntry = {
+      caip: hit.caip,
+      symbol: hit.symbol,
+      name: hit.name,
+      chainId: hit.caip.split('/')[0],
+      decimals: hit.decimals,
+      iconUrl: hit.icon,
+      isNative: !hit.contractAddress,
+      swappable: hit,
+      availability: assessWithFirmware(hit.caip, firmwareVersion),
+    }
+    // Honor the same gate as every other row: a firmware-gated (or otherwise
+    // unswappable) pasted token routes to the unavailable view instead of being
+    // silently added + selected. handleSelect (onSelect) re-guards, but that
+    // path would no-op without telling the user why.
+    if (!isRowSelectable(entry)) { onUnavailable(entry); return }
     setAdding(true)
     try {
       // Persist (best-effort) so it appears in the catalog on the next open.
       await rpcRequest('addCustomToken', { chainId: hit.chainId, contractAddress: hit.contractAddress }, 30000).catch(() => {})
-      onSelect({
-        caip: hit.caip,
-        symbol: hit.symbol,
-        name: hit.name,
-        chainId: hit.caip.split('/')[0],
-        decimals: hit.decimals,
-        iconUrl: hit.icon,
-        isNative: !hit.contractAddress,
-        swappable: hit,
-        availability: assessAvailability(hit.caip),
-      })
+      onSelect(entry)
     } finally {
       setAdding(false)
     }
-  }, [onSelect, excludeCaip])
+  }, [onSelect, onUnavailable, excludeCaip, firmwareVersion])
 
   return (
     <>
@@ -958,10 +971,14 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
             <AlertIcon />
           </Box>
           <Text fontSize="17px" fontWeight="500" letterSpacing="-0.01em" color="kk.textPrimary">
-            {sym} on {targetChainName} isn't routable
+            {target.availability.status === "unsupported_firmware"
+              ? `${sym} needs a firmware update`
+              : `${sym} on ${targetChainName} isn't routable`}
           </Text>
           <Text fontSize="12px" color="kk.textSecondary" lineHeight="1.6" maxW="440px">
-            {target.availability.status === "unsupported_token"
+            {target.availability.status === "unsupported_firmware"
+              ? (target.availability.reason ?? `Update your KeepKey to swap ${sym} on ${targetChainName}.`)
+              : target.availability.status === "unsupported_token"
               ? `${targetChainName} natives swap fine, but this specific token isn't on any provider's list yet.`
               : `${targetChainName} isn't supported by any of our routers yet (THORChain, Mayachain, Relay, 0x, ChainFlip).`}
           </Text>
@@ -1060,6 +1077,10 @@ export function AssetPickerDialog({
   open, onClose, swappable, balances, customTokens, excludeCaip, onSelect, side,
 }: AssetPickerDialogProps) {
   const { fmtCompact, privateModeEnabled } = useFiat()
+  // Connected device's firmware version — gates chains whose `minFirmware` the
+  // device can't meet (e.g. ZEC needs 7.15.0). Undefined until the first device-
+  // state fetch resolves, which fails closed (firmware-restricted chains hidden).
+  const { firmwareVersion } = useDeviceState()
 
   const [entries, setEntries]         = useState<AssetEntry[] | null>(null)
   const [loading, setLoading]         = useState(false)
@@ -1075,7 +1096,7 @@ export function AssetPickerDialog({
     if (!open) return
     let cancelled = false
     setLoading(true)
-    buildAssetEntries({ swappable, balances, customTokens })
+    buildAssetEntries({ swappable, balances, customTokens, firmwareVersion })
       .then(list => { if (!cancelled) { setEntries(list); setLoading(false) } })
       .catch(e => {
         if (cancelled) return
@@ -1083,7 +1104,7 @@ export function AssetPickerDialog({
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [open, swappable, balances, customTokens])
+  }, [open, swappable, balances, customTokens, firmwareVersion])
 
   // Reset navigation on open/close
   useEffect(() => {
@@ -1191,6 +1212,7 @@ export function AssetPickerDialog({
               chainCaip2={toChain}
               fromChainId={fromChainId}
               excludeCaip={excludeCaip}
+              firmwareVersion={firmwareVersion}
               search={search}
               onSearchChange={setSearch}
               onBack={() => { setToChain(null); setSearch("") }}

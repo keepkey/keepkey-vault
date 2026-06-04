@@ -47,8 +47,9 @@ export async function handleSwapRoute(
 
     if (path === '/api/v2/swap/assets' && method === 'GET') {
       auth.requireAuth(req)
-      const { getSwapAssets } = await import('./swap')
-      const assets = await getSwapAssets()
+      // Firmware-filtered so REST clients never see assets the connected
+      // device can't sign (e.g. ZEC below 7.15.0) — mirrors the RPC + picker.
+      const assets = await resolveDeviceSwapAssets(callbacks)
       return json({ data: assets })
     }
 
@@ -56,7 +57,7 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.SwapUiOpenRequest)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
-      const validation = await validateSeedAssets(body)
+      const validation = await validateSeedAssets(body, callbacks)
       if (validation) return json(validation, 400)
       callbacks.sendSwapCmd({ kind: 'open', ...body } as SwapUiCommand)
       return json({ data: { ok: true } })
@@ -66,7 +67,7 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.SwapUiSetRequest)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
-      const validation = await validateSeedAssets(body)
+      const validation = await validateSeedAssets(body, callbacks)
       if (validation) return json(validation, 400)
       callbacks.sendSwapCmd({ kind: 'set', ...body } as SwapUiCommand)
       return json({ data: { ok: true } })
@@ -118,14 +119,26 @@ export async function handleSwapRoute(
   }
 }
 
+// Firmware-filtered swap assets for the connected device. Prefers the wired
+// callback (mirrors the RPC + picker gate); falls back to the raw list only
+// when no callback is wired (e.g. tests), since the device context lives in
+// index.ts and isn't otherwise reachable from this route module.
+async function resolveDeviceSwapAssets(callbacks: RestApiCallbacks | undefined) {
+  if (callbacks?.getDeviceSwapAssets) return callbacks.getDeviceSwapAssets()
+  const { getSwapAssets } = await import('./swap')
+  return getSwapAssets()
+}
+
 // Reject seeds with unknown asset keys at the REST boundary instead of letting
 // SwapDialog silently no-op the lookup. Accepts either the `.asset` form
 // ("ETH.ETH") or the `.caip` form ("eip155:1/slip44:60") for forward-compat.
-async function validateSeedAssets(body: { fromAsset?: string; toAsset?: string }): Promise<{ error: string; details: { unknownAsset: string; field: 'fromAsset' | 'toAsset' } } | null> {
+// Uses the firmware-filtered list so a seed naming a chain the device can't
+// sign (e.g. ZEC on old firmware) is rejected here rather than accepted and
+// then unresolvable in the UI asset list.
+async function validateSeedAssets(body: { fromAsset?: string; toAsset?: string }, callbacks: RestApiCallbacks | undefined): Promise<{ error: string; details: { unknownAsset: string; field: 'fromAsset' | 'toAsset' } } | null> {
   if (!body.fromAsset && !body.toAsset) return null
-  const { getSwapAssets } = await import('./swap')
-  let assets: Awaited<ReturnType<typeof getSwapAssets>>
-  try { assets = await getSwapAssets() } catch { return null /* don't block on transient asset-list failures */ }
+  let assets: Awaited<ReturnType<typeof resolveDeviceSwapAssets>>
+  try { assets = await resolveDeviceSwapAssets(callbacks) } catch { return null /* don't block on transient asset-list failures */ }
   const has = (key: string) => assets.some(a => a.asset === key || a.caip === key)
   if (body.fromAsset && !has(body.fromAsset)) return { error: 'Unknown fromAsset', details: { unknownAsset: body.fromAsset, field: 'fromAsset' } }
   if (body.toAsset && !has(body.toAsset)) return { error: 'Unknown toAsset', details: { unknownAsset: body.toAsset, field: 'toAsset' } }

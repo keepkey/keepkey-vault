@@ -792,6 +792,22 @@ function flushPendingScopedApiLogs() {
 	}
 }
 
+// Swap assets the connected device can actually sign — Pioneer's swappable
+// list minus any chain whose minFirmware the device doesn't meet (e.g. ZEC on
+// firmware < 7.15.0). Single source shared by the RPC handler and the REST
+// callback so both surfaces gate identically.
+async function deviceSwapAssets() {
+	if (!swapsEnabled) return []
+	const { getSwapAssets } = await import('./swap')
+	const assets = await getSwapAssets()
+	const fw = engine.getDeviceState().firmwareVersion
+	const chainMap = new Map(getAllChains().map(c => [c.id, c]))
+	return assets.filter(a => {
+		const chain = chainMap.get(a.chainId)
+		return chain ? isChainSupported(chain, fw) : false
+	})
+}
+
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
@@ -830,6 +846,7 @@ const restCallbacks: RestApiCallbacks = {
 	getVersion: () => appVersionCache,
 	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
 	getSwapUiState: () => getSwapUiState(),
+	getDeviceSwapAssets: () => deviceSwapAssets(),
 	sendSwapCmd: (cmd) => {
 		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
 	},
@@ -4170,17 +4187,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				)
 				return [...chainIds]
 			},
-			getSwapAssets: async () => {
-				if (!swapsEnabled) return []
-				const { getSwapAssets } = await import('./swap')
-				const assets = await getSwapAssets()
-				const fw = engine.getDeviceState().firmwareVersion
-				const chainMap = new Map(getAllChains().map(c => [c.id, c]))
-				return assets.filter(a => {
-					const chain = chainMap.get(a.chainId)
-					return chain ? isChainSupported(chain, fw) : false
-				})
-			},
+			getSwapAssets: async () => deviceSwapAssets(),
 			searchSwapAssets: async (params) => {
 				if (!swapsEnabled) return []
 				const { searchDiscoveryAssets } = await import('./swap')

@@ -57,6 +57,9 @@ export interface RestApiCallbacks {
   emuSigningOp?: (fn: () => Promise<any>, details: EmuSigningDetails) => Promise<any>
   /** Read the latest SwapDialog UI state mirror (set by /api/v2/swap/state) */
   getSwapUiState?: () => { state: import('../shared/types').SwapUiState; updatedAt: number }
+  /** Firmware-filtered swap asset list — mirrors the RPC getSwapAssets so REST
+   *  clients never see assets the connected device's firmware can't sign. */
+  getDeviceSwapAssets?: () => Promise<import('../shared/types').SwapAsset[]>
   /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
   sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
   /** Returns initialized Pioneer client (for debug endpoints) */
@@ -3365,16 +3368,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // ':' and '/' so we can't naively split. Slice from the prefix.
           const caip = decodeURIComponent(path.slice('/api/v1/swap/availability/'.length))
           if (!caip) return json({ error: 'Missing caip' }, 400)
-          const { assessAvailability } = await import('../shared/swap-support-matrix')
-          const { networkDisplayName, chainMetaForCaip2 } = await import('../shared/swap-discovery')
+          const { assessWithFirmware, networkDisplayName, chainMetaForCaip2 } = await import('../shared/swap-discovery')
           const slash = caip.indexOf('/')
           const chainCaip2 = slash >= 0 ? caip.slice(0, slash) : caip
+          // Mirror the picker: gate by the connected device's firmware so e.g.
+          // ZEC reports `unsupported_firmware` below 7.15.0 instead of swappable.
           return json({
             caip,
             chainCaip2,
             chainDisplayName: networkDisplayName(chainCaip2),
             chainKnownToVault: !!chainMetaForCaip2(chainCaip2),
-            assessment: assessAvailability(caip),
+            assessment: assessWithFirmware(caip, engine.getDeviceState().firmwareVersion),
           })
         }
 
@@ -3396,11 +3400,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // into bucket 0/1 and conflate UX-state with matrix correctness.
           const { getSwapAssets } = await import('./swap')
           const swappable = await getSwapAssets()
-          const entries = await buildAssetEntries({ swappable, balances: [] })
+          // Mirror the picker, which firmware-gates rows — pass the device's
+          // firmware so the classification matches what the UI actually shows.
+          const entries = await buildAssetEntries({ swappable, balances: [], firmwareVersion: engine.getDeviceState().firmwareVersion })
           const idx = buildSearchIndex(entries)
           let results = searchEntries(idx, q)
           if (statusFilter) {
-            const allowed = ['swappable', 'unknown', 'unsupported_chain', 'unsupported_token']
+            const allowed = ['swappable', 'unknown', 'unsupported_chain', 'unsupported_token', 'unsupported_firmware']
             if (!allowed.includes(statusFilter)) {
               throw new HttpError(400, `Invalid status: ${statusFilter} (allowed: ${allowed.join(', ')})`)
             }

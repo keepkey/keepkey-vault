@@ -26,6 +26,7 @@ import {
   pickerTier,
   isStablecoinEntry,
   isJunkEntry,
+  assessWithFirmware,
   type AssetEntry,
 } from '../src/shared/swap-discovery'
 
@@ -547,5 +548,79 @@ describe('synthesizeSwapAsset — BEP-20 contract is preserved (regression)', ()
     // Synthesized asset string also gets the contract via THORChain convention.
     expect(s!.asset).toContain('-0X55D398326F99059FF775485246999027B3197955')
     expect(s!.chainId).toBe('bsc')
+  })
+})
+
+describe('assessWithFirmware — gates provider-routable chains by device firmware', () => {
+  // ZEC native: Mayachain pools it, but Zcash signing/derivation needs fw 7.15.0.
+  const ZEC = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+  // SOL native: routed by THORChain/ShapeShift/ChainFlip, needs fw 7.14.0.
+  const SOL = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501'
+  // BTC native: no minFirmware — always swappable.
+  const BTC = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+
+  test('ZEC is swappable only on firmware >= 7.15.0', () => {
+    expect(assessWithFirmware(ZEC, '7.15.0').status).toBe('swappable')
+    expect(assessWithFirmware(ZEC, '7.16.0').status).toBe('swappable')
+  })
+
+  test('ZEC is unsupported_firmware on older firmware', () => {
+    const a = assessWithFirmware(ZEC, '7.14.1')
+    expect(a.status).toBe('unsupported_firmware')
+    expect(a.providers).toEqual([])
+    expect(a.reason).toContain('7.15.0')
+  })
+
+  test('ZEC is gated (fail closed) when firmware version is unknown', () => {
+    expect(assessWithFirmware(ZEC, undefined).status).toBe('unsupported_firmware')
+  })
+
+  test('SOL is gated below 7.14.0 and allowed at/above it', () => {
+    expect(assessWithFirmware(SOL, '7.13.0').status).toBe('unsupported_firmware')
+    expect(assessWithFirmware(SOL, '7.14.0').status).toBe('swappable')
+  })
+
+  test('chains without a minFirmware are unaffected by firmware', () => {
+    expect(assessWithFirmware(BTC, undefined).status).toBe('swappable')
+    expect(assessWithFirmware(BTC, '7.0.0').status).toBe('swappable')
+  })
+
+  test('a chain no provider routes stays unsupported_chain regardless of firmware', () => {
+    // Fantom (eip155:250) is in none of the provider sets.
+    const FTM = 'eip155:250/slip44:60'
+    expect(assessWithFirmware(FTM, '7.15.0').status).toBe('unsupported_chain')
+    expect(assessWithFirmware(FTM, undefined).status).toBe('unsupported_chain')
+  })
+})
+
+describe('pickerTier / bucketFor — firmware-gated assets sink and are not selectable', () => {
+  const gated = entry({
+    caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133',
+    symbol: 'ZEC', name: 'Zcash', isNative: true,
+    availability: { status: 'unsupported_firmware', providers: [], reason: 'update fw' },
+  })
+
+  test('unsupported_firmware lands in the unsupported buckets', () => {
+    expect(bucketFor(gated)).toBe(7)
+    expect(pickerTier(gated)).toBe(6)
+  })
+
+  test('Pioneer-listed but firmware-gated still sinks (swappable does not override the gate)', () => {
+    // Mayachain pools ZEC, so Pioneer's GetAvailableAssets can include it —
+    // entry.swappable is set. bucketFor must NOT float it into the
+    // Pioneer-confirmed buckets (2/3) while it's unselectable.
+    const pioneerGated = {
+      ...gated,
+      swappable: { asset: 'ZEC.ZEC', chainId: 'zcash', symbol: 'ZEC', name: 'Zcash', chainFamily: 'utxo', decimals: 8 } as any,
+      swappableAsset: 'ZEC.ZEC',
+    }
+    expect(bucketFor(pioneerGated)).toBe(7)
+    expect(pickerTier(pioneerGated)).toBe(6)
+  })
+
+  test('held firmware-gated asset still ranks by holdings, not buried', () => {
+    const heldGated = { ...gated, balance: { amount: '1.0', usd: 100 } }
+    expect(bucketFor(heldGated)).toBe(0)
+    expect(pickerTier(heldGated)).toBe(0)
   })
 })
