@@ -11,7 +11,7 @@
  * session.
  */
 import type { SwapAsset, ChainBalance, CustomToken } from './types'
-import { CHAINS } from './chains'
+import { CHAINS, isChainSupported, type ChainDef } from './chains'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, type AvailabilityAssessment } from './swap-support-matrix'
 // Static-imported chains metadata — ~218KB, used synchronously by
@@ -332,6 +332,39 @@ export function chainMetaForCaip2(caip2: string): ChainMeta | null {
   return getChainMetaMap().get(caip2) || null
 }
 
+/** Resolve the vault ChainDef backing a CAIP-19 asset, via its chain prefix.
+ *  Returns undefined for chains vault has no ChainDef for. */
+function chainDefForCaip(caip: string): ChainDef | undefined {
+  const slash = caip.indexOf('/')
+  const chainCaip2 = canonicalizeChainCaip2(slash >= 0 ? caip.slice(0, slash) : caip)
+  const meta = chainMetaForCaip2(chainCaip2)
+  return meta ? CHAINS.find(c => c.id === meta.vaultChainId) : undefined
+}
+
+/** `assessAvailability` + a device-firmware gate.
+ *
+ *  A chain can be routable by a swap provider yet require firmware the connected
+ *  device doesn't have — e.g. Mayachain pools ZEC, but signing/deriving Zcash
+ *  needs firmware ≥ 7.15.0. Without this gate the picker green-lights ZEC on old
+ *  firmware and the swap can't actually be honored on-device. Surfaces such
+ *  assets as `unsupported_firmware` so the UI dims them with an upgrade hint
+ *  instead of offering a swap that will fail at signing.
+ *
+ *  Only downgrades otherwise-swappable/unknown assets — if no provider routes
+ *  the chain at all, firmware is moot and the original assessment stands. */
+export function assessWithFirmware(caip: string, firmwareVersion?: string): AvailabilityAssessment {
+  const base = assessAvailability(caip)
+  if (base.status !== 'swappable' && base.status !== 'unknown') return base
+  const chain = chainDefForCaip(caip)
+  if (!chain?.minFirmware) return base
+  if (isChainSupported(chain, firmwareVersion)) return base
+  return {
+    status: 'unsupported_firmware',
+    providers: [],
+    reason: `Update your KeepKey to firmware ${chain.minFirmware}+ to swap on this network`,
+  }
+}
+
 /** Construct a SwapAsset shape from an AssetEntry. Used when the user picks a
  *  row Pioneer didn't pre-list (matrix-swappable or unknown) — downstream
  *  quote/execute code still expects the SwapAsset interface, but we only have
@@ -394,6 +427,11 @@ export interface BuildEntriesInput {
    *  swappable list. Without these, freshly-added long-tail tokens (e.g. a
    *  meme on Base) wouldn't appear in the picker even after persistence. */
   customTokens?: CustomToken[]
+  /** Connected device's firmware version. Assets on chains whose `minFirmware`
+   *  exceeds this are surfaced as `unsupported_firmware` rather than swappable.
+   *  Undefined (firmware unknown) gates every firmware-restricted chain — fail
+   *  closed, so we never offer a swap the device can't sign. */
+  firmwareVersion?: string
 }
 
 /** Build the unified, sorted asset list. Async to allow lazy import of
@@ -443,7 +481,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
     seen.add(caip)
     const swappable = swappableByCaip.get(caip) ?? swappableByCaip.get(rawCaip)
     const balance = balanceByCaip.get(caip) ?? balanceByCaip.get(rawCaip)
-    const availability = assessAvailability(caip)
+    const availability = assessWithFirmware(caip, input.firmwareVersion)
     // CAIP namespace is the source of truth — `/slip44:` is native, anything
     // under `/erc20:` `/bep20:` or `/token:` is a token. Discovery's own
     // isNative/type fields can disagree (saw it lie about BEP-20s).
@@ -487,7 +525,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       balance: balanceByCaip.get(caip),
       swappable: s,
       swappableAsset: s.asset,
-      availability: assessAvailability(caip),
+      availability: assessWithFirmware(caip, input.firmwareVersion),
     })
   }
 
@@ -515,7 +553,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       balance: balanceByCaip.get(caip),
       swappable: undefined,
       swappableAsset: undefined,
-      availability: assessAvailability(caip),
+      availability: assessWithFirmware(caip, input.firmwareVersion),
     })
   }
 
