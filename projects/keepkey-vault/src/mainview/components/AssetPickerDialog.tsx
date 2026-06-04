@@ -665,25 +665,31 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, firmwareVers
     // Defense in depth: never add+select the source asset (self-swap guard) —
     // mirrors the excludeCaip filter on the normal list and the lookup hit.
     if (!hit.caip || hit.caip.toLowerCase() === (excludeCaip ?? '').toLowerCase()) return
+    const entry: AssetEntry = {
+      caip: hit.caip,
+      symbol: hit.symbol,
+      name: hit.name,
+      chainId: hit.caip.split('/')[0],
+      decimals: hit.decimals,
+      iconUrl: hit.icon,
+      isNative: !hit.contractAddress,
+      swappable: hit,
+      availability: assessWithFirmware(hit.caip, firmwareVersion),
+    }
+    // Honor the same gate as every other row: a firmware-gated (or otherwise
+    // unswappable) pasted token routes to the unavailable view instead of being
+    // silently added + selected. handleSelect (onSelect) re-guards, but that
+    // path would no-op without telling the user why.
+    if (!isRowSelectable(entry)) { onUnavailable(entry); return }
     setAdding(true)
     try {
       // Persist (best-effort) so it appears in the catalog on the next open.
       await rpcRequest('addCustomToken', { chainId: hit.chainId, contractAddress: hit.contractAddress }, 30000).catch(() => {})
-      onSelect({
-        caip: hit.caip,
-        symbol: hit.symbol,
-        name: hit.name,
-        chainId: hit.caip.split('/')[0],
-        decimals: hit.decimals,
-        iconUrl: hit.icon,
-        isNative: !hit.contractAddress,
-        swappable: hit,
-        availability: assessWithFirmware(hit.caip, firmwareVersion),
-      })
+      onSelect(entry)
     } finally {
       setAdding(false)
     }
-  }, [onSelect, excludeCaip, firmwareVersion])
+  }, [onSelect, onUnavailable, excludeCaip, firmwareVersion])
 
   return (
     <>

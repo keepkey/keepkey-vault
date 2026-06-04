@@ -57,6 +57,9 @@ export interface RestApiCallbacks {
   emuSigningOp?: (fn: () => Promise<any>, details: EmuSigningDetails) => Promise<any>
   /** Read the latest SwapDialog UI state mirror (set by /api/v2/swap/state) */
   getSwapUiState?: () => { state: import('../shared/types').SwapUiState; updatedAt: number }
+  /** Firmware-filtered swap asset list — mirrors the RPC getSwapAssets so REST
+   *  clients never see assets the connected device's firmware can't sign. */
+  getDeviceSwapAssets?: () => Promise<import('../shared/types').SwapAsset[]>
   /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
   sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
   /** Returns initialized Pioneer client (for debug endpoints) */

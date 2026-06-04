@@ -91,10 +91,16 @@ export function bucketFor(entry: AssetEntry): SortBucket {
   const usd = entry.balance?.usd || 0
   if (usd > 0) return 0                                // held + valued
   if (entry.balance) return 1                          // held + zero-USD
+  // Non-selectable statuses (unsupported_chain/_token/_firmware) sink to the
+  // bottom even when Pioneer pre-listed the asset — a firmware-gated ZEC that
+  // Mayachain pools must not float into the Pioneer-confirmed buckets while
+  // being unselectable. Held assets above are intentionally exempt. Mirrors
+  // isRowSelectable / pickerTier.
+  const selectable = entry.availability.status === 'swappable' || entry.availability.status === 'unknown'
+  if (!selectable) return 7                            // unsupported
   if (entry.swappable) return entry.isNative ? 2 : 3   // Pioneer-confirmed
   if (entry.availability.status === 'swappable') return entry.isNative ? 4 : 5
-  if (entry.availability.status === 'unknown') return 6
-  return 7                                             // unsupported
+  return 6                                             // 'unknown'
 }
 
 /** Compare two entries: bucket asc → bucket-specific tiebreak. */

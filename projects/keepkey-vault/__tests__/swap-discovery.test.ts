@@ -605,6 +605,19 @@ describe('pickerTier / bucketFor — firmware-gated assets sink and are not sele
     expect(pickerTier(gated)).toBe(6)
   })
 
+  test('Pioneer-listed but firmware-gated still sinks (swappable does not override the gate)', () => {
+    // Mayachain pools ZEC, so Pioneer's GetAvailableAssets can include it —
+    // entry.swappable is set. bucketFor must NOT float it into the
+    // Pioneer-confirmed buckets (2/3) while it's unselectable.
+    const pioneerGated = {
+      ...gated,
+      swappable: { asset: 'ZEC.ZEC', chainId: 'zcash', symbol: 'ZEC', name: 'Zcash', chainFamily: 'utxo', decimals: 8 } as any,
+      swappableAsset: 'ZEC.ZEC',
+    }
+    expect(bucketFor(pioneerGated)).toBe(7)
+    expect(pickerTier(pioneerGated)).toBe(6)
+  })
+
   test('held firmware-gated asset still ranks by holdings, not buried', () => {
     const heldGated = { ...gated, balance: { amount: '1.0', usd: 100 } }
     expect(bucketFor(heldGated)).toBe(0)
