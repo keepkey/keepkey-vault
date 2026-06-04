@@ -3116,6 +3116,31 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			addCustomToken: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// ── Solana SPL token ──────────────────────────────────────────
+				// No EVM chainId / eth_call path — resolve via the Solana RPC +
+				// Jupiter and persist with the /token: namespace. Mint case is
+				// preserved (base58 is case-sensitive).
+				if (chain.chainFamily === 'solana') {
+					const mint = params.contractAddress.trim()
+					const { SOLANA_MINT_RE, resolveSolanaMint } = await import('./solana-token')
+					if (!SOLANA_MINT_RE.test(mint)) throw new Error('Invalid Solana mint address')
+					const endpoint = getSetting('solana_rpc_endpoint') || undefined
+					const meta = await resolveSolanaMint(mint, endpoint)
+					if (!meta) throw new Error('Not a valid SPL token mint')
+					const token: CustomToken = {
+						chainId: chain.id,
+						contractAddress: mint,
+						symbol: meta.symbol,
+						name: meta.name,
+						decimals: meta.decimals,
+						networkId: chain.networkId,
+						iconUrl: meta.iconUrl,
+					}
+					dbAddCustomToken(token)
+					return token
+				}
+
 				if (!chain.chainId) throw new Error('Chain has no EVM chainId')
 				const rpcUrl = getRpcUrl(chain) || EVM_RPC_URLS[chain.chainId]
 				if (!rpcUrl) throw new Error(`No RPC URL for chain ${chain.coin}`)
@@ -4172,6 +4197,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			lookupTokenContract: async (params) => {
 				if (!swapsEnabled) return { hits: [], reason: 'swaps-disabled' as string | undefined }
 				const raw = (params.contractAddress || '').trim()
+
+				// ── Solana SPL mint (base58, not 0x) ──────────────────────────
+				// Only in Solana context (the picker's Solana step) or when no chain
+				// was specified — never resolve a base58 mint against Solana while an
+				// EVM chainId was passed, which would silently cross chains. Validates
+				// on-chain + enriches via Jupiter; returns a single SwapAsset hit.
+				const isSolanaCtx = params.chainId === 'solana' || (params.chainId?.startsWith('solana:') ?? false)
+				const { SOLANA_MINT_RE, resolveSolanaMint } = await import('./solana-token')
+				if (!raw.startsWith('0x') && (isSolanaCtx || !params.chainId) && SOLANA_MINT_RE.test(raw)) {
+					const solChain = getAllChains().find(c => c.id === 'solana')
+					if (!solChain) return { hits: [] as SwapAsset[], reason: 'solana-not-configured' }
+					const endpoint = getSetting('solana_rpc_endpoint') || undefined
+					const meta = await resolveSolanaMint(raw, endpoint)
+					if (!meta) return { hits: [] as SwapAsset[], reason: 'not-a-solana-mint' }
+					const hit: SwapAsset = {
+						asset: meta.symbol,
+						caip: `${solChain.networkId}/token:${raw}`,
+						chainId: solChain.id,
+						chainFamily: 'solana',
+						contractAddress: raw,
+						decimals: meta.decimals,
+						symbol: meta.symbol,
+						name: meta.name,
+						icon: meta.iconUrl,
+					}
+					return { hits: [hit] }
+				}
+
 				if (!/^0x[a-fA-F0-9]{40}$/.test(raw)) {
 					return { hits: [] as SwapAsset[], reason: 'invalid-evm-contract' }
 				}
