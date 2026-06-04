@@ -636,8 +636,15 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
         if (cancelled) return
         // Only accept a hit on the network the user is browsing — never silently
         // switch the destination to another chain (e.g. a Solana mint resolved
-        // while the EVM step is open).
-        setContractHit((res?.hits ?? []).find(h => h.caip?.split('/')[0] === chainCaip2) ?? null)
+        // while the EVM step is open) — and exclude the source asset itself. The
+        // normal list filters the FROM asset via excludeCaip, but this paste lane
+        // bypassed it: pasting the source asset's own contract/mint into the
+        // destination picker could re-select it and start a self-swap. Compare
+        // case-insensitively to cover EVM address casing.
+        setContractHit((res?.hits ?? []).find(h =>
+          h.caip?.split('/')[0] === chainCaip2 &&
+          (h.caip ?? '').toLowerCase() !== (excludeCaip ?? '').toLowerCase()
+        ) ?? null)
       } catch {
         if (!cancelled) setContractHit(null)
       } finally {
@@ -645,10 +652,12 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
       }
     }, 350)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [addrQuery, inChain.length, chainCaip2])
+  }, [addrQuery, inChain.length, chainCaip2, excludeCaip])
 
   const handleAddAndSelect = useCallback(async (hit: SwapAsset) => {
-    if (!hit.caip) return
+    // Defense in depth: never add+select the source asset (self-swap guard) —
+    // mirrors the excludeCaip filter on the normal list and the lookup hit.
+    if (!hit.caip || hit.caip.toLowerCase() === (excludeCaip ?? '').toLowerCase()) return
     setAdding(true)
     try {
       // Persist (best-effort) so it appears in the catalog on the next open.
@@ -667,7 +676,7 @@ function AssetStep({ entries, chainCaip2, fromChainId, excludeCaip, search, onSe
     } finally {
       setAdding(false)
     }
-  }, [onSelect])
+  }, [onSelect, excludeCaip])
 
   return (
     <>

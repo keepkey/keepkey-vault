@@ -710,6 +710,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
   const [refreshingQuote, setRefreshingQuote] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Whether the current `error` came from a retryable cause (a quote timeout) —
+  // only then do we offer Retry. Deterministic errors (pool unavailable, amount
+  // below minimum) are not retryable: retrying just repeats the same failure.
+  const [quoteRetryable, setQuoteRetryable] = useState(false)
   // Solana blind-signing gate: when a Solana swap is blocked by the device's
   // disabled AdvancedMode policy, phase flips to 'blind-signing-required' and
   // this drives the enable page.
@@ -1686,6 +1690,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     setPhase('quoting')
     setError(null)
+    setQuoteRetryable(false)
 
     quoteTimerRef.current = setTimeout(async () => {
       try {
@@ -1732,10 +1737,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             setError(t("amountBelowMinimumGeneric"))
           }
         } else if (/request timed out/i.test(msg)) {
-          // Pioneer/DEX was slow to respond. The params are still valid, so the
-          // input-phase error block surfaces a Retry button (gated on canQuote)
-          // that re-fires the quote via requoteTick.
+          // Pioneer/DEX was slow to respond — a transient failure with still-valid
+          // params, so mark it retryable: the input-phase error block then shows a
+          // Retry button that re-fires the quote via requoteTick.
           setError(t("quoteTimedOut", "Quote request timed out — the swap service is taking too long to respond. Tap Retry to try again."))
+          setQuoteRetryable(true)
         } else {
           setError(msg || t("errorQuote"))
         }
@@ -4259,14 +4265,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 <Text fontSize="10px" color="kk.textMuted" textAlign="center">{t("enterAmount")}</Text>
               )}
 
-              {/* Error — show Retry when the quote params are still valid
-                  (e.g. timed-out / network-failed quote), since clicking it
-                  re-fires getSwapQuote via the requoteTick effect. */}
+              {/* Error — show Retry ONLY for a retryable cause (quote timeout)
+                  and while params are still valid, since clicking it re-fires
+                  getSwapQuote via the requoteTick effect. Deterministic errors
+                  (pool unavailable, amount below minimum) get no Retry. */}
               {error && (
                 <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="2">
                   <Flex justify="space-between" align="center" gap="2">
                     <Text fontSize="10px" color="kk.error" flex="1">{error}</Text>
-                    {canQuote && (
+                    {quoteRetryable && canQuote && (
                       <Button size="xs" variant="ghost" color="kk.error" px="1.5" minW="auto"
                         _hover={{ bg: "rgba(224,140,123,0.18)" }}
                         onClick={() => { setError(null); setRequoteTick(t => t + 1) }}>
