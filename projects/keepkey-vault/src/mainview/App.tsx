@@ -26,9 +26,11 @@ import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
+import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage } from "./lib/rpc"
+import { findChainByNetwork } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
@@ -428,6 +430,30 @@ function App() {
 		})
 	}, [])
 
+	// ── Incoming payment toast ──────────────────────────────────────
+	// SSE event-stream pushes 'tx-push-received' when a watched address sees a
+	// tx. For inbound payments we show a global toast here (chain resync itself
+	// is handled in Dashboard, which also covers custom chains). networkId is
+	// the reliable matching key; only built-in chains are resolved for the label.
+	const [incomingTx, setIncomingTx] = useState<IncomingTx | null>(null)
+	const dismissIncomingTx = useCallback(() => setIncomingTx(null), [])
+	useEffect(() => {
+		return onRpcMessage("tx-push-received", (payload: { chain?: string; networkId?: string; type?: "incoming" | "confirmed" }) => {
+			if (payload.type !== "incoming") return
+			const def = findChainByNetwork(payload.networkId, payload.chain)
+			// New object identity on every event → resets the auto-dismiss timer below.
+			setIncomingTx({ chainName: def?.coin })
+		})
+	}, [])
+	// Auto-dismiss after 6s. Armed here (not in the toast) so it fires even while
+	// the toast is unmounted — e.g. device disconnects mid-display and the
+	// ready-phase view unmounts — preventing a stale toast on reconnect.
+	useEffect(() => {
+		if (!incomingTx) return
+		const timer = setTimeout(() => setIncomingTx(null), 6000)
+		return () => clearTimeout(timer)
+	}, [incomingTx])
+
 	// ── Check for pending deep link from cold start ─────────────────
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
@@ -730,6 +756,8 @@ function App() {
 		/>
 	) : null
 
+	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
+
 	// Watch-only mode: render dashboard with cached data (read-only)
 	if (watchOnlyMode) {
 		return (
@@ -832,7 +860,7 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
 
 	return (
-		<>{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}

@@ -386,8 +386,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
       /** Pioneer push notification: a transaction arrived on a watched address.
-       *  Frontend should trigger forceRefresh on affected chain (or all). */
-      'tx-push-received': { chain?: string; address?: string; txid?: string }
+       *  Frontend resyncs the affected chain (matched by networkId) and, for
+       *  inbound payments (type === 'incoming'), shows a toast. `chain` is CAIP-19,
+       *  `networkId` is CAIP-2 — networkId is the reliable matching key. */
+      'tx-push-received': { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'confirmed' }
       /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
       'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }

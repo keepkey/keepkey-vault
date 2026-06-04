@@ -2332,12 +2332,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						streamAddresses,
 						(event) => {
 							if (event.type === 'tx:incoming') {
-								console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address}`)
-								try { rpc.send['tx-push-received']({ chain: event.data.caip, address: event.data.address, txid: event.data.txid }) } catch { /* webview not ready */ }
+								console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address} (${event.data.networkId})`)
+								try { rpc.send['tx-push-received']({
+									chain: event.data.caip,
+									networkId: event.data.networkId,
+									address: event.data.address,
+									txid: event.data.txid,
+									type: 'incoming',
+								}) } catch { /* webview not ready */ }
 							}
 							if (event.type === 'tx:confirmed') {
 								console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
-								try { rpc.send['tx-push-received']({ txid: event.data.txid }) } catch { /* webview not ready */ }
+								try { rpc.send['tx-push-received']({ networkId: event.data.networkId, txid: event.data.txid, type: 'confirmed' }) } catch { /* webview not ready */ }
 							}
 						},
 						(status) => {
