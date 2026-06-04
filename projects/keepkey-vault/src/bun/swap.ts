@@ -11,6 +11,7 @@
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
+import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
@@ -491,6 +492,10 @@ export interface SwapContext {
    *  for REST/headless callers) so a future entry point can't silently regress
    *  the UI to a coarse phase by forgetting to wire it up. */
   pushSubStage: (stage: SwapSubStage) => void
+  /** Whether the device's AdvancedMode (blind-signing) policy is enabled.
+   *  Returns undefined when unknown (no cached features / policy not reported).
+   *  Used to gate Solana swaps, which can only blind-sign. */
+  isAdvancedModeEnabled?: () => boolean | undefined
 }
 
 /** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
@@ -799,6 +804,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     unsignedTx = buildResult.unsignedTx
   }
 
+  // Solana swaps are v0 (versioned) txs the device can only blind-sign via
+  // solanaSignMessage. Firmware hard-gates that path behind the AdvancedMode
+  // policy (fsm_msg_solana.h) — when it's off the device shows a "Blocked"
+  // screen and returns a generic ActionCancelled whose real reason ("Message
+  // signing disabled by policy") is dropped by hdwallet's transport. Detect the
+  // disabled policy up front so the UI can prompt the user to enable blind
+  // signing instead of bouncing off an opaque device cancel. Only block when we
+  // positively know the policy is disabled; if unknown, let signing proceed.
+  if (fromChain.chainFamily === 'solana' && ctx.isAdvancedModeEnabled?.() === false) {
+    throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
+  }
+
   // 4. Sign on device (user confirms tx details on hardware wallet)
   swapLog(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
   stage('swap-signing')
@@ -831,17 +848,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
-      // For native-asset swaps, "insufficient funds" from the RPC is definitive —
-      // Pioneer will also reject it. Surface immediately.
-      // For ERC-20 relay txs (e.g. NEAR Intents direct transfer), "insufficient funds"
-      // may come from calldata pre-simulation or a solver-side issue, not native gas —
-      // native balance was already verified in buildRelaySwapTx, so fall through to Pioneer.
-      if (!isErc20Source && directErr.message?.toLowerCase().includes('insufficient funds')) {
-        throw new Error(
-          `Insufficient ${fromChain.symbol} for gas on ${fromChain.id}. ` +
-          `Add ${fromChain.symbol} to your wallet to pay for transaction fees and try again.`
-        )
-      }
+      // The pre-sign balance check in buildRelaySwapTx already verified
+      // value + gas <= native balance against this same RPC URL. So a node
+      // "insufficient funds" here is NOT a real gas shortage — it's a stale
+      // view from the load-balanced endpoint (the balance read and the
+      // broadcast can hit different backends) or an in-flight pending tx.
+      // Do NOT relabel it as "add ETH for gas" (that misleads the user) and
+      // do NOT swallow the original message — log it and fall through to
+      // Pioneer, which may reach a better-synced node.
       console.warn(`${TAG} Direct RPC broadcast failed (${directErr.message}), falling back to Pioneer...`)
       try {
         const result = await txb.broadcastTx(pioneer, fromChain, signedTx)

@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, HStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
-import { getExplorerTxUrl } from "../../shared/chains"
+import { getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryStats, SwapTrackingStatus } from "../../shared/types"
 import { ProviderBadge } from "./ProviderBadge"
 
@@ -64,6 +64,16 @@ function formatDate(ts: number): string {
   const d = new Date(ts)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
     ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+/** Open the raw pendingTx JSON (everything Pioneer has on a swap) in the browser. */
+function openSwapApi(txid: string) {
+  rpcRequest<{ pioneerApiBase?: string }>('getAppSettings', undefined, 5000)
+    .then((s) => {
+      const base = (s?.pioneerApiBase || 'https://api.keepkey.info').replace(/\/+$/, '')
+      return rpcRequest('openUrl', { url: `${base}/api/v1/swaps/pending/${txid}` })
+    })
+    .catch(() => {})
 }
 
 const HISTORY_CSS = `
@@ -224,6 +234,14 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
               </Button>
             ) : null
           })()}
+          <Button
+            size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
+            fontSize="10px" fontFamily="mono"
+            onClick={(e) => { e.stopPropagation(); openSwapApi(swap.txid) }}
+            _hover={{ color: "var(--teal)" }} title="View raw swap data (JSON)"
+          >
+            api
+          </Button>
           {swap.outboundTxid && (() => {
             // Refunds outbound on the SOURCE chain (Maya returns the inbound
             // asset). Use outboundChainId from the classifier when present
@@ -338,6 +356,11 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       {record.error && (
         <Text fontSize="10px" color="var(--rose)" mt="1" noOfLines={expanded ? undefined : 1}>{record.error}</Text>
       )}
+      {/* Structured recovery guidance from Pioneer (failed/timed-out swaps).
+          Only shown when expanded — keeps collapsed cards compact. */}
+      {expanded && record.errorActionable && (
+        <Text fontSize="10px" color="kk.textMuted" mt="1">{record.errorActionable}</Text>
+      )}
 
       {/* Expanded details */}
       {expanded && (
@@ -362,6 +385,45 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
             {record.actualTimeSeconds !== undefined && (
               <DetailRow label="Actual Time" value={`${record.actualTimeSeconds}s`} />
             )}
+            {/* Input-confirmed timing — confirmedAt minus broadcast (createdAt). */}
+            {record.inboundConfirmedAt !== undefined && record.createdAt && record.inboundConfirmedAt > record.createdAt && (
+              <DetailRow label="Input Confirmed" value={`in ${formatElapsed(record.inboundConfirmedAt - record.createdAt)}`} />
+            )}
+            {/* How long the input sat unconfirmed before a timeout failure. */}
+            {record.errorElapsedMinutes !== undefined && record.errorElapsedMinutes > 0 && (
+              <DetailRow label="Unconfirmed For" value={`~${record.errorElapsedMinutes} min`} />
+            )}
+            {/* EVM network fee actually paid by the input tx (EVM-only). */}
+            {record.inboundGasUsed && record.fromCaip?.startsWith('eip155:') && (
+              <DetailRow
+                label="Gas Used"
+                value={(() => {
+                  const used = Number(record.inboundGasUsed)
+                  const usedStr = Number.isFinite(used) ? used.toLocaleString() : record.inboundGasUsed!
+                  const gwei = record.inboundEffectiveGasPrice ? Number(record.inboundEffectiveGasPrice) / 1e9 : NaN
+                  return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
+                })()}
+              />
+            )}
+            {/* Inbound block # — best-effort; clickable on EVM/UTXO explorers. */}
+            {record.inboundBlockNumber !== undefined && (
+              <Flex justify="space-between" align="center">
+                <Text fontSize="10px" color="kk.textMuted" minW="80px">Inbound Block</Text>
+                {(() => {
+                  const label = `#${record.inboundBlockNumber!.toLocaleString()}${record.inboundBlockHash ? ` · ${record.inboundBlockHash.slice(0, 10)}…` : ''}`
+                  const url = getExplorerBlockUrl(record.fromChainId, record.inboundBlockNumber!)
+                  return url ? (
+                    <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
+                      fontSize="10px" fontFamily="mono"
+                      onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View block on explorer">
+                      {label}
+                    </Button>
+                  ) : (
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary">{label}</Text>
+                  )
+                })()}
+              </Flex>
+            )}
 
             {/* TX IDs with copy + explorer buttons */}
             <Flex justify="space-between" align="center">
@@ -383,6 +445,14 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     </Button>
                   ) : null
                 })()}
+                <Button
+                  size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
+                  fontSize="10px" fontFamily="mono"
+                  onClick={(e) => { e.stopPropagation(); openSwapApi(record.txid) }}
+                  _hover={{ color: "var(--teal)" }} title="View raw swap data (JSON)"
+                >
+                  api
+                </Button>
               </HStack>
             </Flex>
             {record.outboundTxid && (
@@ -471,6 +541,16 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     estimatedTime: record.estimatedTimeSeconds,
                     error: record.error,
                     relayRequestId: record.relayRequestId,
+                    outboundChainId: record.outboundChainId,
+                    refundReason: record.refundReason,
+                    nearTxHash: record.nearTxHash,
+                    inboundBlockNumber: record.inboundBlockNumber,
+                    inboundBlockHash: record.inboundBlockHash,
+                    inboundGasUsed: record.inboundGasUsed,
+                    inboundEffectiveGasPrice: record.inboundEffectiveGasPrice,
+                    inboundConfirmedAt: record.inboundConfirmedAt,
+                    errorActionable: record.errorActionable,
+                    errorElapsedMinutes: record.errorElapsedMinutes,
                   })
                 }}
               >

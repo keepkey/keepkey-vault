@@ -1,3 +1,10 @@
+// Sentinel error message thrown by executeSwap when a Solana source swap
+// requires on-device blind signing (the AdvancedMode policy) that is currently
+// disabled. Only the error *message* survives the RPC boundary, so the
+// SwapDialog detects this exact token to show the enable-blind-signing page
+// instead of a generic error.
+export const SOLANA_BLIND_SIGNING_REQUIRED = 'SOLANA_BLIND_SIGNING_REQUIRED'
+
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
@@ -146,6 +153,7 @@ export interface BuildStakingTxParams {
   validatorAddress: string
   amount: string
   memo?: string
+  isMax?: boolean
 }
 
 export interface StakingPosition {
@@ -858,6 +866,29 @@ export interface PendingSwap {
    *  cannot distinguish "swap completed" from "refund completed", and would
    *  otherwise ping-pong status with Midgard on every refresh. */
   midgardClassified?: boolean
+  // ── Inbound (input tx) on-chain location + timing ──
+  // Sourced from Pioneer's swap record `blockchainTxData` + `confirmedAt`.
+  // All optional and best-effort: blockchainTxData is null on many swaps, and
+  // even when present blockHash/effectiveGasPrice are often null (two server
+  // writers $set the object — only the cache-worker monitor fills the hash).
+  // Render conditionally; never block UI on any of these. See HANDOFF-VAULT-SWAP-INPUT-BLOCK.
+  /** Block height / slot the INPUT tx was mined in. */
+  inboundBlockNumber?: number
+  /** Hash of that block (best-effort — frequently absent). */
+  inboundBlockHash?: string
+  /** EVM only — gas consumed by the input tx. NOT set for UTXO/Cosmos/Solana
+   *  (Pioneer reports vbytes/size there, which is not gas). */
+  inboundGasUsed?: string
+  /** EVM only — effective gas price of the input tx (wei). */
+  inboundEffectiveGasPrice?: string
+  /** Unix ms — when the input tx confirmed on-chain (Pioneer `confirmedAt`).
+   *  More reliable than inboundBlockNumber; present on all confirmed swaps. */
+  inboundConfirmedAt?: number
+  /** Structured recovery guidance from Pioneer `error.actionable` (failed swaps). */
+  errorActionable?: string
+  /** Minutes elapsed before a confirmation-timeout failure (Pioneer
+   *  `error.context.elapsedMinutes`). */
+  errorElapsedMinutes?: number
 }
 
 export interface SwapStatusUpdate {
@@ -884,6 +915,14 @@ export interface SwapStatusUpdate {
   refundReason?: string
   /** First NEAR transaction hash returned by 1Click /v0/status polling for NEAR Intents swaps. */
   nearTxHash?: string
+  // ── Inbound on-chain location + timing (see PendingSwap for semantics) ──
+  inboundBlockNumber?: number
+  inboundBlockHash?: string
+  inboundGasUsed?: string
+  inboundEffectiveGasPrice?: string
+  inboundConfirmedAt?: number
+  errorActionable?: string
+  errorElapsedMinutes?: number
 }
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
@@ -933,6 +972,14 @@ export interface SwapHistoryRecord {
   refundReason?: string
   /** First NEAR transaction hash from 1Click /v0/status polling. */
   nearTxHash?: string
+  // ── Inbound on-chain location + timing (see PendingSwap for semantics) ──
+  inboundBlockNumber?: number
+  inboundBlockHash?: string
+  inboundGasUsed?: string
+  inboundEffectiveGasPrice?: string
+  inboundConfirmedAt?: number
+  errorActionable?: string
+  errorElapsedMinutes?: number
 }
 
 /** Filter params for getSwapHistory RPC */

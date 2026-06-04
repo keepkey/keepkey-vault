@@ -224,6 +224,9 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 				explorerTxLink: txLink || undefined,
 			}
 			await rpcRequest('addCustomChain', chain, 10000)
+			// Signal config consumers (App's custom-chain list, feature flags) to reload
+			// so a tx on this newly-added chain resolves for the live per-chain resync.
+			window.dispatchEvent(new Event('keepkey-settings-changed'))
 			onAdded?.(chain)
 			onClose()
 		} catch (e: any) {

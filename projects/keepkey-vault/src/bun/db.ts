@@ -308,6 +308,22 @@ export function initDb() {
       try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN near_tx_hash TEXT`) } catch { /* already exists */ }
+    // Inbound (input tx) on-chain location + timing from Pioneer's swap record
+    // (blockchainTxData + confirmedAt + structured error). All best-effort; the
+    // UI renders each conditionally. gas_used/effective_gas_price are EVM-only
+    // (stored only when the input chain is eip155:* so UTXO vbytes never leak
+    // in as "gas"). See HANDOFF-VAULT-SWAP-INPUT-BLOCK.
+    for (const col of [
+      'inbound_block_number INTEGER',
+      'inbound_block_hash TEXT',
+      'inbound_gas_used TEXT',
+      'inbound_effective_gas_price TEXT',
+      'inbound_confirmed_at INTEGER',
+      'error_actionable TEXT',
+      'error_elapsed_minutes INTEGER',
+    ]) {
+      try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_activity ON api_log(activity_type)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_device_ts ON api_log(device_id, timestamp DESC)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_api_log_wallet_ts ON api_log(wallet_id, timestamp DESC)`) } catch { /* already exists */ }
@@ -1568,6 +1584,13 @@ export function updateSwapHistoryStatus(
     completedAt?: number
     actualTimeSeconds?: number
     nearTxHash?: string
+    inboundBlockNumber?: number
+    inboundBlockHash?: string
+    inboundGasUsed?: string
+    inboundEffectiveGasPrice?: string
+    inboundConfirmedAt?: number
+    errorActionable?: string
+    errorElapsedMinutes?: number
   }
 ) {
   try {
@@ -1593,6 +1616,16 @@ export function updateSwapHistoryStatus(
     if (extra?.nearTxHash) setClauses.push({ col: 'near_tx_hash', value: extra.nearTxHash })
     if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
     if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
+    // Inbound block + timing + structured-error fields — only written when the
+    // poll actually carries them (undefined → column unchanged), so a later
+    // rescan that drops blockHash can't null out a value an earlier poll set.
+    if (extra?.inboundBlockNumber !== undefined) setClauses.push({ col: 'inbound_block_number', value: extra.inboundBlockNumber })
+    if (extra?.inboundBlockHash) setClauses.push({ col: 'inbound_block_hash', value: extra.inboundBlockHash })
+    if (extra?.inboundGasUsed) setClauses.push({ col: 'inbound_gas_used', value: extra.inboundGasUsed })
+    if (extra?.inboundEffectiveGasPrice) setClauses.push({ col: 'inbound_effective_gas_price', value: extra.inboundEffectiveGasPrice })
+    if (extra?.inboundConfirmedAt !== undefined) setClauses.push({ col: 'inbound_confirmed_at', value: extra.inboundConfirmedAt })
+    if (extra?.errorActionable) setClauses.push({ col: 'error_actionable', value: extra.errorActionable })
+    if (extra?.errorElapsedMinutes !== undefined) setClauses.push({ col: 'error_elapsed_minutes', value: extra.errorElapsedMinutes })
     if (isFinal) {
       setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
       if (extra?.actualTimeSeconds !== undefined) {
@@ -1748,6 +1781,13 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     outboundChainId: r.outbound_chain_id || undefined,
     refundReason: r.refund_reason || undefined,
     nearTxHash: r.near_tx_hash || undefined,
+    inboundBlockNumber: r.inbound_block_number ?? undefined,
+    inboundBlockHash: r.inbound_block_hash || undefined,
+    inboundGasUsed: r.inbound_gas_used || undefined,
+    inboundEffectiveGasPrice: r.inbound_effective_gas_price || undefined,
+    inboundConfirmedAt: r.inbound_confirmed_at ?? undefined,
+    errorActionable: r.error_actionable || undefined,
+    errorElapsedMinutes: r.error_elapsed_minutes ?? undefined,
   }
 }
 

@@ -21,7 +21,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 // without routing through AssetPage.
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
-import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
@@ -1093,16 +1093,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			setCacheUpdatedAt(receivedAt)
 		})
 	}, [])
-
-	// SSE push notifications: trigger single-chain refresh when an inbound tx is detected
-	useEffect(() => {
-		return onRpcMessage('tx-push-received', (payload: { chain?: string; txid?: string }) => {
-			if (!payload.chain) return
-			const allChains = [...CHAINS, ...customChainDefs]
-			const hit = allChains.find(c => payload.chain === c.caip || payload.chain?.startsWith(`${c.networkId}/`))
-			if (hit) rpcFire('getBalance', { chainId: hit.id })
-		})
-	}, [customChainDefs])
 
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(

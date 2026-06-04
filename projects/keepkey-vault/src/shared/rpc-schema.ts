@@ -237,7 +237,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getSwapByTxid: { params: { txid: string }; response: PendingSwap | null }
       /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
        *  open — there is no background polling timer (by design). */
-      refreshSwap: { params: { txid: string }; response: PendingSwap | null }
+      refreshSwap: { params: { txid: string; rescan?: boolean }; response: PendingSwap | null }
       /** Read-only diagnostic for a single swap: local state + raw Pioneer
        *  response + rescan response, with protocol divergence flagged. Used
        *  by the SwapDialog "Debug" affordance and dev-tools introspection.
@@ -386,8 +386,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
       /** Pioneer push notification: a transaction arrived on a watched address.
-       *  Frontend should trigger forceRefresh on affected chain (or all). */
-      'tx-push-received': { chain?: string; address?: string; txid?: string }
+       *  Frontend resyncs the affected chain (matched by networkId) regardless of
+       *  direction, and shows a toast only for inbound payments (type === 'incoming').
+       *  `chain` is CAIP-19, `networkId` is CAIP-2 — networkId is the reliable key. */
+      'tx-push-received': { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'outgoing' | 'confirmed' }
       /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
       'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }

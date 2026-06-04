@@ -12,12 +12,13 @@ import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
-import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
+import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
+import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
@@ -32,7 +33,7 @@ import completedGif from "../assets/swap/completed.gif"
 import shapeshiftLogo from "../assets/providers/shapeshift.svg"
 
 // ── Phase state machine ─────────────────────────────────────────────
-type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted'
+type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted' | 'blind-signing-required'
 
 /** Debug log — gated behind localStorage `swap.debug=1`. Used in place of
  *  console.log for high-volume per-render chatter. console.warn/error stay
@@ -80,7 +81,17 @@ const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
 }
 const NATIVE_EVM_CLOSER_RESERVE_DEFAULT = 0.00025
 const NATIVE_TRON_FEE_RESERVE = 1.1
-const NATIVE_SOLANA_FEE_RESERVE = 0.000005
+// Solana sendMax reserve. The base network fee is only 5000 lamports/signature
+// (~$0.001), but reserving the bare fee made sendMax swaps fail on-chain with
+// "insufficient lamports": the balance MAX is computed from reaches the UI
+// rounded to 8 decimals upstream (Pioneer), so e.g. 0.659381899 SOL becomes
+// 0.65938190 — 1 lamport HIGH — and with zero headroom the Relay deposit
+// overdrew (balance − fee) by a lamport. Like the EVM gas reserves, we leave a
+// real, fee-/imprecision-proof buffer rather than draining to the last lamport.
+// 0.01 SOL (~$1.50) is dust relative to swap sizes but ~2000× the fee, so it
+// absorbs balance rounding and any priority-fee spike. Tradeoff: this much SOL
+// is left behind on a max swap.
+const NATIVE_SOLANA_FEE_RESERVE = 0.01
 
 function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'safe'): number {
   if (asset.contractAddress) return 0
@@ -699,6 +710,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
   const [refreshingQuote, setRefreshingQuote] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Whether the current `error` came from a retryable cause (a quote timeout) —
+  // only then do we offer Retry. Deterministic errors (pool unavailable, amount
+  // below minimum) are not retryable: retrying just repeats the same failure.
+  const [quoteRetryable, setQuoteRetryable] = useState(false)
+  // Solana blind-signing gate: when a Solana swap is blocked by the device's
+  // disabled AdvancedMode policy, phase flips to 'blind-signing-required' and
+  // this drives the enable page.
+  const [enablingBlindSign, setEnablingBlindSign] = useState(false)
+  const [blindSignError, setBlindSignError] = useState<string | null>(null)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Bump to force the quote useEffect to re-run with the same inputs (used by
@@ -756,6 +776,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
   const [liveRelayRequestId, setLiveRelayRequestId] = useState<string | undefined>()
   const [liveNearTxHash, setLiveNearTxHash] = useState<string | undefined>()
+  // ── Inbound (input tx) on-chain location + timing + structured failure ──
+  // All best-effort from Pioneer; render each only when present. createdAt is
+  // the broadcast anchor used to show "input confirmed in Xm".
+  const [liveInboundBlockNumber, setLiveInboundBlockNumber] = useState<number | undefined>()
+  const [liveInboundBlockHash, setLiveInboundBlockHash] = useState<string | undefined>()
+  const [liveInboundGasUsed, setLiveInboundGasUsed] = useState<string | undefined>()
+  const [liveInboundEffectiveGasPrice, setLiveInboundEffectiveGasPrice] = useState<string | undefined>()
+  const [liveInboundConfirmedAt, setLiveInboundConfirmedAt] = useState<number | undefined>()
+  const [liveCreatedAt, setLiveCreatedAt] = useState<number | undefined>()
+  // Tracker error message + recovery guidance — previously never surfaced in
+  // the submitted view (only the title flipped to "Swap failed").
+  const [liveError, setLiveError] = useState<string | undefined>()
+  const [liveErrorActionable, setLiveErrorActionable] = useState<string | undefined>()
+  const [liveErrorElapsedMinutes, setLiveErrorElapsedMinutes] = useState<number | undefined>()
   const [rechecking, setRechecking] = useState(false)
 
   // ── Countdown timer ───────────────────────────────────────────────
@@ -805,6 +839,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const isSwapComplete = liveStatus === 'completed'
   const isSwapFailed = liveStatus === 'failed' || liveStatus === 'refunded'
 
+  // Seed the inbound/timing/error fields from a full refreshSwap snapshot.
+  // The swap-update message carries these too, but the snapshot is the backstop
+  // for a dialog that mounted after the tracker's last push (resume / late open)
+  // and is the only place createdAt (the broadcast anchor) is available.
+  const applyInboundSnap = useCallback((snap: any) => {
+    if (!snap) return
+    if (snap.inboundBlockNumber !== undefined && snap.inboundBlockNumber !== null) setLiveInboundBlockNumber(snap.inboundBlockNumber)
+    if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
+    if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
+    if (snap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(snap.inboundEffectiveGasPrice)
+    if (snap.inboundConfirmedAt !== undefined && snap.inboundConfirmedAt !== null) setLiveInboundConfirmedAt(snap.inboundConfirmedAt)
+    if (snap.createdAt) setLiveCreatedAt(snap.createdAt)
+    if (snap.error) setLiveError(snap.error)
+    if (snap.errorActionable) setLiveErrorActionable(snap.errorActionable)
+    if (snap.errorElapsedMinutes !== undefined && snap.errorElapsedMinutes !== null) setLiveErrorElapsedMinutes(snap.errorElapsedMinutes)
+  }, [])
+
   // ── Listen for swap-update + swap-complete RPC messages ─────────
   useEffect(() => {
     if (!txid || phase !== 'submitted') return
@@ -821,6 +872,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
       if (update.refundReason) setLiveRefundReason(update.refundReason)
       if (update.nearTxHash) setLiveNearTxHash(update.nearTxHash)
+      if (update.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(update.inboundBlockNumber)
+      if (update.inboundBlockHash) setLiveInboundBlockHash(update.inboundBlockHash)
+      if (update.inboundGasUsed) setLiveInboundGasUsed(update.inboundGasUsed)
+      if (update.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(update.inboundEffectiveGasPrice)
+      if (update.inboundConfirmedAt !== undefined) setLiveInboundConfirmedAt(update.inboundConfirmedAt)
+      if (update.error) setLiveError(update.error)
+      if (update.errorActionable) setLiveErrorActionable(update.errorActionable)
+      if (update.errorElapsedMinutes !== undefined) setLiveErrorElapsedMinutes(update.errorElapsedMinutes)
     })
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
@@ -858,6 +917,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         // so the dialog is always current even if it opened after the initial push.
         if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
         if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+        applyInboundSnap(snap)
       } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
       const s = liveStatusRef.current
@@ -873,12 +933,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!txid || rechecking) return
     setRechecking(true)
     try {
-      const snap = await rpcRequest<any>('refreshSwap', { txid })
+      // Manual press forces a Pioneer rescan (?rescan=true) so a failed/stuck
+      // swap can be re-derived from chain on demand.
+      const snap = await rpcRequest<any>('refreshSwap', { txid, rescan: true })
       if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
       if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
+      applyInboundSnap(snap)
     } catch { /* swap-update push covers the failure */ }
     setRechecking(false)
-  }, [txid, rechecking])
+  }, [txid, rechecking, applyInboundSnap])
 
   // When the user switches EVM address in the dialog while a quote is active,
   // discard the stale quote and return to input so a fresh quote is fetched.
@@ -912,6 +975,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setLiveSwapper(undefined)
       setLiveRelayRequestId(undefined)
       setLiveNearTxHash(undefined)
+      setLiveInboundBlockNumber(undefined)
+      setLiveInboundBlockHash(undefined)
+      setLiveInboundGasUsed(undefined)
+      setLiveInboundEffectiveGasPrice(undefined)
+      setLiveInboundConfirmedAt(undefined)
+      setLiveCreatedAt(undefined)
+      setLiveError(undefined)
+      setLiveErrorActionable(undefined)
+      setLiveErrorElapsedMinutes(undefined)
       setAfterFromBal(null)
       setAfterToBal(null)
       setShowConfetti(false)
@@ -1181,6 +1253,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (resumeSwap.outboundChainId) setLiveOutboundChainId(resumeSwap.outboundChainId)
     if (resumeSwap.refundReason) setLiveRefundReason(resumeSwap.refundReason)
     if (resumeSwap.nearTxHash) setLiveNearTxHash(resumeSwap.nearTxHash)
+    // Seed inbound location + timing + failure guidance from the persisted row
+    // so a resumed dialog renders them on first paint (before any fresh poll).
+    if (resumeSwap.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(resumeSwap.inboundBlockNumber)
+    if (resumeSwap.inboundBlockHash) setLiveInboundBlockHash(resumeSwap.inboundBlockHash)
+    if (resumeSwap.inboundGasUsed) setLiveInboundGasUsed(resumeSwap.inboundGasUsed)
+    if (resumeSwap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(resumeSwap.inboundEffectiveGasPrice)
+    if (resumeSwap.inboundConfirmedAt !== undefined) setLiveInboundConfirmedAt(resumeSwap.inboundConfirmedAt)
+    if (resumeSwap.createdAt) setLiveCreatedAt(resumeSwap.createdAt)
+    if (resumeSwap.error) setLiveError(resumeSwap.error)
+    if (resumeSwap.errorActionable) setLiveErrorActionable(resumeSwap.errorActionable)
+    if (resumeSwap.errorElapsedMinutes !== undefined) setLiveErrorElapsedMinutes(resumeSwap.errorElapsedMinutes)
     // Skip stale `swapper` for native-vault integrations — Maya forks Thor's
     // protocol naming and Pioneer historically wrote `swapper='thorchain'`
     // even for Maya pools. The badge would then render "THORChain via Maya".
@@ -1590,7 +1673,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // Don't re-quote when the user is actively reviewing a quote or has submitted/is signing.
     // 'review' is guarded here so balance polling doesn't wipe the quote mid-review;
     // the explicit 60s stale-check in the Confirm handler covers freshness on confirm.
-    if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving') return
+    if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving' || phase === 'blind-signing-required') return
 
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)
@@ -1607,6 +1690,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     setPhase('quoting')
     setError(null)
+    setQuoteRetryable(false)
 
     quoteTimerRef.current = setTimeout(async () => {
       try {
@@ -1652,6 +1736,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           } else {
             setError(t("amountBelowMinimumGeneric"))
           }
+        } else if (/request timed out/i.test(msg)) {
+          // Pioneer/DEX was slow to respond — a transient failure with still-valid
+          // params, so mark it retryable: the input-phase error block then shows a
+          // Retry button that re-fires the quote via requoteTick.
+          setError(t("quoteTimedOut", "Quote request timed out — the swap service is taking too long to respond. Tap Retry to try again."))
+          setQuoteRetryable(true)
         } else {
           setError(msg || t("errorQuote"))
         }
@@ -1789,6 +1879,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       window.dispatchEvent(new CustomEvent('keepkey-swap-executed'))
     } catch (e: any) {
       const raw = e?.message || ''
+      // Solana swap blocked because the device's blind-signing (AdvancedMode)
+      // policy is off — show the dedicated enable page instead of an error.
+      if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
+        setBlindSignError(null)
+        setPhase('blind-signing-required')
+        return
+      }
       // User-friendly categorization. Order: device-rejected first (most common during sign), then on-chain reverts, then network/RPC.
       let friendly = raw || t("errorSwap")
       if (/User rejected|user denied|device.*reject/i.test(raw)) {
@@ -1823,6 +1920,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setMaxReserveMode('safe')
     setQuote(null)
     setError(null)
+    setBlindSignError(null)
+    setEnablingBlindSign(false)
     setTxid(null)
     setBeforeFromBal(null)
     setBeforeToBal(null)
@@ -1859,6 +1958,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setPhase('review')
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
+
+  // Enable the device's AdvancedMode (blind-signing) policy so Solana swaps can
+  // be signed. applyPolicy prompts the user to confirm on device. On success we
+  // return to review so the user re-verifies the quote before signing.
+  const handleEnableBlindSigning = useCallback(async () => {
+    setEnablingBlindSign(true)
+    setBlindSignError(null)
+    try {
+      await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 60000)
+      setError(null)
+      setPhase('review')
+    } catch (e: any) {
+      const raw = e?.message || ''
+      setBlindSignError(
+        /cancel/i.test(raw)
+          ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
+          : (raw || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')),
+      )
+    } finally {
+      setEnablingBlindSign(false)
+    }
+  }, [t])
 
   const copyTxid = useCallback(() => {
     if (!txid) return
@@ -2052,7 +2173,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           <HStack gap="2">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
-              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : t("title")}
+              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
             </Text>
           </HStack>
           <HStack gap="2" align="center">
@@ -2346,6 +2467,63 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             })()}
                           </HStack>
                         </Flex>
+                        {/* Inbound block # — where the input tx was mined. Best-effort
+                            (absent on many swaps); clickable on EVM/UTXO explorers. */}
+                        {liveInboundBlockNumber !== undefined && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("block", "Block")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary"
+                              overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" flex="1">
+                              #{liveInboundBlockNumber.toLocaleString()}{liveInboundBlockHash ? ` · ${liveInboundBlockHash.slice(0, 10)}…` : ''}
+                            </Text>
+                            {(() => {
+                              const url = getExplorerBlockUrl(fromAsset.chainId, liveInboundBlockNumber!)
+                              return url ? (
+                                <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                                  px="2" h="26px" fontSize="11px"
+                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
+                                  Explorer
+                                </Button>
+                              ) : null
+                            })()}
+                          </Flex>
+                        )}
+                        {/* Input-confirmed timing — confirmedAt minus broadcast (createdAt). */}
+                        {liveInboundConfirmedAt !== undefined && liveCreatedAt !== undefined && liveInboundConfirmedAt > liveCreatedAt && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("confirmed", "Confirmed")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary" flex="1">
+                              {t("inAbout", "in")} {formatTime(Math.round((liveInboundConfirmedAt - liveCreatedAt) / 1000))}
+                            </Text>
+                          </Flex>
+                        )}
+                        {/* EVM network fee actually paid by the input tx. EVM-only —
+                            gasUsed is vbytes (not gas) on UTXO/Cosmos/Solana. */}
+                        {fromAsset.chainFamily === 'evm' && liveInboundGasUsed && (
+                          <Flex align="center" gap="2.5" py="2" minW="0"
+                            style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
+                            <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase"
+                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
+                              {t("gas", "Gas")}
+                            </Text>
+                            <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary" flex="1">
+                              {(() => {
+                                const used = Number(liveInboundGasUsed)
+                                const usedStr = Number.isFinite(used) ? used.toLocaleString() : liveInboundGasUsed
+                                const gwei = liveInboundEffectiveGasPrice ? Number(liveInboundEffectiveGasPrice) / 1e9 : NaN
+                                return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
+                              })()}
+                            </Text>
+                          </Flex>
+                        )}
                         {/* Output tx */}
                         {liveOutboundTxid && (
                           <Flex align="center" gap="2.5" py="2" minW="0"
@@ -2743,22 +2921,43 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {copied ? t("copied") : t("copy")}
                   </Button>
                 </Flex>
+                {/* Inbound block # + input-confirmed timing — best-effort from
+                    Pioneer; each renders only when present. */}
+                {(liveInboundBlockNumber !== undefined || (liveInboundConfirmedAt !== undefined && liveCreatedAt !== undefined && liveInboundConfirmedAt > liveCreatedAt)) && (
+                  <Flex align="center" gap="1.5" mb="2" wrap="wrap" fontFamily="mono" fontSize="10px">
+                    {liveInboundBlockNumber !== undefined && (() => {
+                      const url = getExplorerBlockUrl(fromAsset.chainId, liveInboundBlockNumber!)
+                      const label = `${t("block", "Block")} #${liveInboundBlockNumber!.toLocaleString()}`
+                      return url ? (
+                        <Text color="var(--teal)" cursor="pointer" _hover={{ textDecoration: 'underline' }}
+                          onClick={() => rpcRequest('openUrl', { url }).catch(() => {})}>{label}</Text>
+                      ) : (
+                        <Text color="kk.textSecondary">{label}</Text>
+                      )
+                    })()}
+                    {liveInboundConfirmedAt !== undefined && liveCreatedAt !== undefined && liveInboundConfirmedAt > liveCreatedAt && (
+                      <Text color="kk.textMuted">
+                        {liveInboundBlockNumber !== undefined ? '· ' : ''}{t("confirmed", "Confirmed")} {t("inAbout", "in")} {formatTime(Math.round((liveInboundConfirmedAt - liveCreatedAt) / 1000))}
+                      </Text>
+                    )}
+                  </Flex>
+                )}
                 <Flex gap="2">
-                  {!isSwapComplete && !isSwapFailed && (
-                    <Button size="xs" flex="1" variant="outline"
-                      borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
-                      _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
-                      isDisabled={rechecking}
-                      onClick={handleRecheck}>
-                      <HStack gap="1">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                          style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
-                          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                        </svg>
-                        <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
-                      </HStack>
-                    </Button>
-                  )}
+                  {/* Always available — even on failed/refunded — so the user can
+                      force a Pioneer rescan to recover a mis-classified swap. */}
+                  <Button size="xs" flex="1" variant="outline"
+                    borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
+                    _hover={{ bg: "rgba(139,227,196,0.10)", borderColor: "var(--teal)" }}
+                    isDisabled={rechecking}
+                    onClick={handleRecheck}>
+                    <HStack gap="1">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                        style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
+                        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                      </svg>
+                      <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
+                    </HStack>
+                  </Button>
                   {(() => {
                     const safeTxid = txid ?? ''
                     console.log('[explorer-debug]', fromAsset.chainId, safeTxid)
@@ -2791,6 +2990,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   })()}
                 </Flex>
               </Box>
+
+              {/* Failure reason + recovery guidance — the tracker pushes a
+                  structured error (message + actionable) that the submitted view
+                  previously dropped entirely, leaving "Swap failed" with no why. */}
+              {isSwapFailed && (liveRefundReason || liveError || liveErrorActionable) && (
+                <Box w="full" bg="rgba(224,140,123,0.07)" border="1px solid" borderColor="rgba(224,140,123,0.25)" borderRadius="lg" p="3">
+                  <Text fontSize="10px" fontWeight="600" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
+                    {liveStatus === 'refunded' ? t("refunded", "Refunded") : t("whatHappened", "What happened")}
+                  </Text>
+                  {(liveRefundReason || liveError) && (
+                    <Text fontSize="11px" color="kk.textSecondary" lineHeight="1.45">{liveRefundReason || liveError}</Text>
+                  )}
+                  {liveErrorActionable && (
+                    <Text fontSize="11px" color="kk.textMuted" lineHeight="1.45" mt="1.5">{liveErrorActionable}</Text>
+                  )}
+                  {liveErrorElapsedMinutes !== undefined && liveErrorElapsedMinutes > 0 && (
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" mt="1.5">
+                      {t("stuckFor", "Unconfirmed for")} ~{liveErrorElapsedMinutes} {t("minutesShort", "min")}
+                    </Text>
+                  )}
+                </Box>
+              )}
 
               {/* Outbound Txid — shown when THORChain sends the output */}
               {liveOutboundTxid && (
@@ -3045,6 +3266,62 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {hasToPrice && quote?.expectedOutput ? ` → ${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}` : ''}
                 </Text>
               )}
+            </VStack>
+          )}
+
+          {/* ── BLIND SIGNING REQUIRED (Solana) ─────────────────── */}
+          {phase === 'blind-signing-required' && (
+            <VStack gap="5" py="6" px="2" align="center" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
+              {/* Amber alert badge — mirrors the AdvancedMode icon in Device Settings */}
+              <Flex align="center" justify="center" w="56px" h="56px" borderRadius="full" bg="rgba(245,163,59,0.12)">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 9v4M12 17h.01" />
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                </svg>
+              </Flex>
+
+              <VStack gap="2" align="center" maxW="420px">
+                <Text fontSize="lg" fontWeight="700" color="kk.textPrimary" textAlign="center">
+                  {t('blindSignTitle', 'Enable Blind Signing for Solana')}
+                </Text>
+                <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.5">
+                  {t('blindSignBody', 'Solana swaps use a versioned transaction your KeepKey cannot fully decode, so it must be blind-signed. This is turned off by default. Enabling it switches on Advanced Mode (blind signing) on your device — you will be asked to confirm the change on the device.')}
+                </Text>
+              </VStack>
+
+              {/* Security caveat */}
+              <Flex align="flex-start" gap="2" bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="lg" px="3" py="2.5" maxW="420px">
+                <Box color="var(--gold)" flexShrink={0} mt="0.5">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                </Box>
+                <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
+                  {t('blindSignCaveat', 'Blind signing means the device shows a generic prompt instead of decoded details. Only proceed for swaps you initiated here. You can turn it back off in Device Settings → Signing Policy.')}
+                </Text>
+              </Flex>
+
+              {blindSignError && (
+                <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" px="3" py="2" maxW="420px" w="full">
+                  <Text fontSize="xs" color="kk.error" textAlign="center">{blindSignError}</Text>
+                </Box>
+              )}
+
+              <Flex gap="3" w="full" maxW="420px" pt="1">
+                <Button size="sm" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                  disabled={enablingBlindSign}
+                  _hover={{ bg: 'rgba(255,255,255,0.04)' }}
+                  onClick={() => { setBlindSignError(null); setPhase('review') }}>
+                  {t('back', 'Back')}
+                </Button>
+                <Button size="sm" flex="1" bg="kk.gold" color="black" fontWeight="600"
+                  loading={enablingBlindSign}
+                  loadingText={t('blindSignConfirmOnDevice', 'Confirm on device…')}
+                  _hover={{ opacity: 0.9 }}
+                  onClick={handleEnableBlindSigning}>
+                  {t('blindSignEnable', 'Enable Blind Signing')}
+                </Button>
+              </Flex>
             </VStack>
           )}
 
@@ -3988,10 +4265,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 <Text fontSize="10px" color="kk.textMuted" textAlign="center">{t("enterAmount")}</Text>
               )}
 
-              {/* Error */}
+              {/* Error — show Retry ONLY for a retryable cause (quote timeout)
+                  and while params are still valid, since clicking it re-fires
+                  getSwapQuote via the requoteTick effect. Deterministic errors
+                  (pool unavailable, amount below minimum) get no Retry. */}
               {error && (
                 <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="2">
-                  <Text fontSize="10px" color="kk.error">{error}</Text>
+                  <Flex justify="space-between" align="center" gap="2">
+                    <Text fontSize="10px" color="kk.error" flex="1">{error}</Text>
+                    {quoteRetryable && canQuote && (
+                      <Button size="xs" variant="ghost" color="kk.error" px="1.5" minW="auto"
+                        _hover={{ bg: "rgba(224,140,123,0.18)" }}
+                        onClick={() => { setError(null); setRequoteTick(t => t + 1) }}>
+                        {t("retry", "Retry")}
+                      </Button>
+                    )}
+                  </Flex>
                 </Box>
               )}
             </VStack>
@@ -3999,7 +4288,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         </Box>
 
         {/* ── Footer ──────────────────────────────────────────────── */}
-        {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && (
+        {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && phase !== 'blind-signing-required' && (
           <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="space-between" align="center" gap="3"
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
             <Box minW="0" flex="1">

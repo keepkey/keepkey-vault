@@ -22,6 +22,11 @@ import {
   canonicalizeChainCaip2,
   parseCaip,
   synthesizeSwapAsset,
+  compareForPicker,
+  pickerTier,
+  isStablecoinEntry,
+  isJunkEntry,
+  assessWithFirmware,
   type AssetEntry,
 } from '../src/shared/swap-discovery'
 
@@ -38,6 +43,7 @@ function entry(partial: Partial<AssetEntry> & Pick<AssetEntry, 'caip' | 'symbol'
     swappable: partial.swappable,
     swappableAsset: partial.swappableAsset,
     availability: partial.availability ?? { status: 'unknown', providers: [] },
+    discoveryRank: partial.discoveryRank,
   }
 }
 
@@ -145,6 +151,118 @@ describe('compareEntries — empty-query bucket sort', () => {
     const a = entry({ caip: 'a', symbol: 'BBB', name: 'Beta', availability: { status: 'unknown', providers: [] } })
     const b = entry({ caip: 'b', symbol: 'AAA', name: 'Alpha', availability: { status: 'unknown', providers: [] } })
     expect(compareEntries(a, b)).toBeGreaterThan(0)
+  })
+})
+
+describe('picker ordering — stables → popularity → junk last', () => {
+  const sol = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
+  const tok = (sym: string, name: string, rank: number | undefined, extra: Partial<AssetEntry> = {}) =>
+    entry({
+      caip: `${sol}/token:${sym}MINT`, symbol: sym, name,
+      chainId: sol, isNative: false, discoveryRank: rank,
+      availability: { status: 'unknown', providers: [] },
+      ...extra,
+    })
+
+  describe('isStablecoinEntry', () => {
+    test('curated symbol set (USDT/USDC/USDS…)', () => {
+      expect(isStablecoinEntry(tok('USDT', 'Tether', 0))).toBe(true)
+      expect(isStablecoinEntry(tok('USDC', 'USD Coin', 1))).toBe(true)
+      expect(isStablecoinEntry(tok('PYUSD', 'PayPal USD', 5))).toBe(true)
+    })
+    test('non-curated USD-named tokens are NOT promoted (curated set only)', () => {
+      // The earlier broad name heuristic matched ~800 tokens and floated junk
+      // like these above SOL/LINK — now only the curated set counts.
+      expect(isStablecoinEntry(tok('USDUC', 'Unstable Coin', 9))).toBe(false)
+      expect(isStablecoinEntry(tok('USDUT', 'Unstable Tether', 9))).toBe(false)
+      expect(isStablecoinEntry(tok('GGUSD', 'Good Game US Dollar', 9))).toBe(false)
+    })
+    test('non-stables stay false', () => {
+      expect(isStablecoinEntry(tok('LINK', 'Chainlink', 2))).toBe(false)
+      expect(isStablecoinEntry(tok('BONK', 'Bonk', 18))).toBe(false)
+    })
+    test('native assets are never stablecoins (even SOL)', () => {
+      const native = entry({ caip: `${sol}/slip44:501`, symbol: 'SOL', name: 'Solana', chainId: sol })
+      expect(isStablecoinEntry(native)).toBe(false)
+    })
+  })
+
+  describe('isJunkEntry', () => {
+    test('absurdly long ticker → junk', () => {
+      expect(isJunkEntry(tok('SUPERLONGTICKER1', 'Whatever', 999))).toBe(true)
+    })
+    test('spammy name → junk', () => {
+      expect(isJunkEntry(tok('FREE', 'just buy 1 of this coin', 4000))).toBe(true)
+      expect(isJunkEntry(tok('AIR', 'Free airdrop claim t.me/scam', 4001))).toBe(true)
+    })
+    test('plain low-rank token is NOT junk (relies on rank to sink it)', () => {
+      expect(isJunkEntry(tok('000', '000 Capital', 5000))).toBe(false)
+    })
+    test('held tokens are never junk', () => {
+      expect(isJunkEntry(tok('SUPERLONGTICKER1', 'x', 1, { balance: { amount: '1', usd: 0 } }))).toBe(false)
+    })
+  })
+
+  const nativeSol = (rank?: number) => entry({
+    caip: `${sol}/slip44:501`, symbol: 'SOL', name: 'Solana', chainId: sol, isNative: true,
+    availability: { status: 'swappable', providers: ['thorchain'] }, discoveryRank: rank,
+  })
+
+  describe('pickerTier', () => {
+    test('held(value)=0, held(no price)=1, stable=2, native=3, normal=4, junk=5, unsupported=6', () => {
+      expect(pickerTier(tok('USDC', 'USD Coin', 1, { balance: { amount: '5', usd: 5 } }))).toBe(0)
+      expect(pickerTier(tok('WUT', 'Wut', 9, { balance: { amount: '5', usd: 0 } }))).toBe(1)
+      expect(pickerTier(tok('USDT', 'Tether', 0))).toBe(2)
+      expect(pickerTier(nativeSol(30))).toBe(3)
+      expect(pickerTier(tok('LINK', 'Chainlink', 2))).toBe(4)
+      expect(pickerTier(tok('AIR', 'free airdrop claim', 4000))).toBe(5)
+      expect(pickerTier(tok('X', 'Unsupported', 7, {
+        availability: { status: 'unsupported_token', providers: [] },
+      }))).toBe(6)
+    })
+  })
+
+  test('end-to-end: USDT/stables lead, popular by rank, "000" sinks below them', () => {
+    const list = [
+      tok('000', '000 Capital', 5000),
+      tok('BONK', 'Bonk', 18),
+      tok('USDT', 'Tether', 0),
+      tok('LINK', 'Chainlink', 2),
+      tok('USDC', 'USD Coin', 1),
+    ]
+    const sorted = [...list].sort(compareForPicker).map(e => e.symbol)
+    // stables first (USDT before USDC by rank), then popular by rank, "000" last
+    expect(sorted).toEqual(['USDT', 'USDC', 'LINK', 'BONK', '000'])
+  })
+
+  test('native asset leads non-stable tokens; obscure USD-named tokens are NOT promoted', () => {
+    // Regression guard for the HIGH review finding: stables first, then the
+    // native chain asset, then popular tokens by rank — and a non-curated
+    // "USD…" memecoin must sink to the long tail, not jump above SOL/LINK.
+    const list = [
+      tok('LINK', 'Chainlink', 2),
+      tok('USDUT', 'Unstable Tether', 8000),  // non-curated → normal tier, high rank
+      nativeSol(50),
+      tok('USDT', 'Tether', 0),
+    ]
+    const sorted = [...list].sort(compareForPicker).map(e => e.symbol)
+    expect(sorted).toEqual(['USDT', 'SOL', 'LINK', 'USDUT'])
+  })
+
+  test('held assets outrank stablecoins regardless of value', () => {
+    const heldSol = entry({
+      caip: `${sol}/slip44:501`, symbol: 'SOL', name: 'Solana', chainId: sol,
+      balance: { amount: '1', usd: 200 },
+      availability: { status: 'swappable', providers: ['thorchain'] },
+    })
+    const usdt = tok('USDT', 'Tether', 0)
+    expect(compareForPicker(heldSol, usdt)).toBeLessThan(0)
+  })
+
+  test('within stablecoin tier, lower discoveryRank wins; undefined rank sinks', () => {
+    const usdt = tok('USDT', 'Tether', 0)
+    const noRank = tok('USDS', 'USDS', undefined)
+    expect(compareForPicker(usdt, noRank)).toBeLessThan(0)
   })
 })
 
@@ -430,5 +548,79 @@ describe('synthesizeSwapAsset — BEP-20 contract is preserved (regression)', ()
     // Synthesized asset string also gets the contract via THORChain convention.
     expect(s!.asset).toContain('-0X55D398326F99059FF775485246999027B3197955')
     expect(s!.chainId).toBe('bsc')
+  })
+})
+
+describe('assessWithFirmware — gates provider-routable chains by device firmware', () => {
+  // ZEC native: Mayachain pools it, but Zcash signing/derivation needs fw 7.15.0.
+  const ZEC = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+  // SOL native: routed by THORChain/ShapeShift/ChainFlip, needs fw 7.14.0.
+  const SOL = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501'
+  // BTC native: no minFirmware — always swappable.
+  const BTC = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+
+  test('ZEC is swappable only on firmware >= 7.15.0', () => {
+    expect(assessWithFirmware(ZEC, '7.15.0').status).toBe('swappable')
+    expect(assessWithFirmware(ZEC, '7.16.0').status).toBe('swappable')
+  })
+
+  test('ZEC is unsupported_firmware on older firmware', () => {
+    const a = assessWithFirmware(ZEC, '7.14.1')
+    expect(a.status).toBe('unsupported_firmware')
+    expect(a.providers).toEqual([])
+    expect(a.reason).toContain('7.15.0')
+  })
+
+  test('ZEC is gated (fail closed) when firmware version is unknown', () => {
+    expect(assessWithFirmware(ZEC, undefined).status).toBe('unsupported_firmware')
+  })
+
+  test('SOL is gated below 7.14.0 and allowed at/above it', () => {
+    expect(assessWithFirmware(SOL, '7.13.0').status).toBe('unsupported_firmware')
+    expect(assessWithFirmware(SOL, '7.14.0').status).toBe('swappable')
+  })
+
+  test('chains without a minFirmware are unaffected by firmware', () => {
+    expect(assessWithFirmware(BTC, undefined).status).toBe('swappable')
+    expect(assessWithFirmware(BTC, '7.0.0').status).toBe('swappable')
+  })
+
+  test('a chain no provider routes stays unsupported_chain regardless of firmware', () => {
+    // Fantom (eip155:250) is in none of the provider sets.
+    const FTM = 'eip155:250/slip44:60'
+    expect(assessWithFirmware(FTM, '7.15.0').status).toBe('unsupported_chain')
+    expect(assessWithFirmware(FTM, undefined).status).toBe('unsupported_chain')
+  })
+})
+
+describe('pickerTier / bucketFor — firmware-gated assets sink and are not selectable', () => {
+  const gated = entry({
+    caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133',
+    symbol: 'ZEC', name: 'Zcash', isNative: true,
+    availability: { status: 'unsupported_firmware', providers: [], reason: 'update fw' },
+  })
+
+  test('unsupported_firmware lands in the unsupported buckets', () => {
+    expect(bucketFor(gated)).toBe(7)
+    expect(pickerTier(gated)).toBe(6)
+  })
+
+  test('Pioneer-listed but firmware-gated still sinks (swappable does not override the gate)', () => {
+    // Mayachain pools ZEC, so Pioneer's GetAvailableAssets can include it —
+    // entry.swappable is set. bucketFor must NOT float it into the
+    // Pioneer-confirmed buckets (2/3) while it's unselectable.
+    const pioneerGated = {
+      ...gated,
+      swappable: { asset: 'ZEC.ZEC', chainId: 'zcash', symbol: 'ZEC', name: 'Zcash', chainFamily: 'utxo', decimals: 8 } as any,
+      swappableAsset: 'ZEC.ZEC',
+    }
+    expect(bucketFor(pioneerGated)).toBe(7)
+    expect(pickerTier(pioneerGated)).toBe(6)
+  })
+
+  test('held firmware-gated asset still ranks by holdings, not buried', () => {
+    const heldGated = { ...gated, balance: { amount: '1.0', usd: 100 } }
+    expect(bucketFor(heldGated)).toBe(0)
+    expect(pickerTier(heldGated)).toBe(0)
   })
 })

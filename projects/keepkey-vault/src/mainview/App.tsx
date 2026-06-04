@@ -26,15 +26,17 @@ import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
+import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
-import { rpcRequest, onRpcMessage } from "./lib/rpc"
+import { rpcRequest, onRpcMessage, rpcFire } from "./lib/rpc"
+import { CHAINS, customChainToChainDef, findChainByNetwork, type ChainDef } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
 import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
-import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus } from "../shared/types"
+import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus, CustomChain } from "../shared/types"
 
 type AppPhase = "splash" | "claimed" | "setup" | "ready"
 type SigningPhase = "approve" | "sending-payload" | "device-confirm"
@@ -428,6 +430,45 @@ function App() {
 		})
 	}, [])
 
+	// ── Incoming payment toast + live per-chain resync ──────────────
+	// SSE event-stream pushes 'tx-push-received' when a watched address sees a
+	// tx. This lives in App (always mounted) rather than Dashboard (mounted only
+	// on the vault tab) so the resync also fires while the user is on another tab.
+	// networkId is the reliable matching key; caip is the fallback.
+	const [incomingTx, setIncomingTx] = useState<IncomingTx | null>(null)
+	const dismissIncomingTx = useCallback(() => setIncomingTx(null), [])
+	// Custom chains aren't in the built-in CHAINS list — load them so a tx on a
+	// user-added chain still resolves. Reload on 'keepkey-settings-changed', which
+	// AddChainDialog dispatches after a successful add (and the settings drawer on close).
+	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
+	useEffect(() => {
+		const load = () => rpcRequest<CustomChain[]>("getCustomChains", undefined, 5000)
+			.then(chains => setCustomChainDefs(chains.map(customChainToChainDef)))
+			.catch(() => {})
+		load()
+		window.addEventListener("keepkey-settings-changed", load)
+		return () => window.removeEventListener("keepkey-settings-changed", load)
+	}, [])
+	useEffect(() => {
+		return onRpcMessage("tx-push-received", (payload: { chain?: string; networkId?: string; type?: "incoming" | "outgoing" | "confirmed" }) => {
+			const def = findChainByNetwork(payload.networkId, payload.chain, [...CHAINS, ...customChainDefs])
+			// Resync the affected chain regardless of direction — both inbound and
+			// outbound txs change the balance. Backend pushes 'balance-updated' back.
+			if (def) rpcFire("getBalance", { chainId: def.id })
+			// Toast only for genuine inbound payments. New object identity on every
+			// event → resets the auto-dismiss timer below.
+			if (payload.type === "incoming") setIncomingTx({ chainName: def?.coin })
+		})
+	}, [customChainDefs])
+	// Auto-dismiss after 6s. Armed here (not in the toast) so it fires even while
+	// the toast is unmounted — e.g. device disconnects mid-display and the
+	// ready-phase view unmounts — preventing a stale toast on reconnect.
+	useEffect(() => {
+		if (!incomingTx) return
+		const timer = setTimeout(() => setIncomingTx(null), 6000)
+		return () => clearTimeout(timer)
+	}, [incomingTx])
+
 	// ── Check for pending deep link from cold start ─────────────────
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
@@ -730,6 +771,8 @@ function App() {
 		/>
 	) : null
 
+	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
+
 	// Watch-only mode: render dashboard with cached data (read-only)
 	if (watchOnlyMode) {
 		return (
@@ -832,7 +875,7 @@ function App() {
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
 
 	return (
-		<>{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}

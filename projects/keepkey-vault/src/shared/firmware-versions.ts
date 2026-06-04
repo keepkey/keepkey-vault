@@ -21,7 +21,11 @@ export interface FirmwareFeature {
 }
 
 export interface FirmwareVersionInfo {
-  version: string
+  /** Release version, or `null` for a feature that's been announced but
+   *  postponed (no scheduled release). Null entries are documentation only —
+   *  the upgrade-preview helpers skip them, so they never surface as features
+   *  "gained" by any real upgrade. */
+  version: string | null
   /** Release date (display only) */
   date?: string
   /** Headline shown at top of upgrade preview */
@@ -97,8 +101,11 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
     ],
   },
   {
-    version: '7.15.0',
-    date: '2026-04',
+    // BIP-85 was slated for 2026-04 but postponed — no release assigned yet.
+    // A null version keeps it documented here without advertising it under any
+    // shipped firmware. It previously carried '7.15.0', colliding with the real
+    // 7.15.0 entry above and falsely appearing in the 7.15.0 upgrade preview.
+    version: null,
     headline: 'BIP-85 Deterministic Entropy',
     features: [
       {
@@ -118,6 +125,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
 export function getUpgradeFeatures(from: string | null, to: string): FirmwareFeature[] {
   const features: FirmwareFeature[] = []
   for (const entry of FIRMWARE_VERSION_MAP) {
+    if (!entry.version) continue                              // postponed/unscheduled — not part of any upgrade path
     if (versionCompare(entry.version, to) > 0) continue       // skip versions newer than target
     if (from && versionCompare(entry.version, from) <= 0) break // stop at current version
     features.push(...entry.features)
@@ -138,6 +146,7 @@ export function getVersionInfo(version: string): FirmwareVersionInfo | undefined
 export function getUpgradeVersions(from: string | null, to: string): FirmwareVersionInfo[] {
   const versions: FirmwareVersionInfo[] = []
   for (const entry of FIRMWARE_VERSION_MAP) {
+    if (!entry.version) continue                              // postponed/unscheduled — not part of any upgrade path
     if (versionCompare(entry.version, to) > 0) continue
     if (from && versionCompare(entry.version, from) <= 0) break
     versions.push(entry)

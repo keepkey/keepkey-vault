@@ -123,6 +123,7 @@ import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
+import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
@@ -333,6 +334,16 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
+// Last deviceId we saw reach 'ready'. The managers above are kept across
+// disconnect for the watch-only UI, so a device-to-device swap (deviceId
+// changes, but `seed-changed` can't fire — it keys on the per-device
+// seed_eth_${id}) would otherwise reuse the previous device's xpubs/addresses.
+// We reset on the edge where a *different* deviceId reaches 'ready'. Declared
+// once here, at process-lifetime scope alongside the singletons it guards, and
+// — unlike rest-api.ts:lastDeviceId — NEVER nulled on disconnect (a swap always
+// passes through 'disconnected', so nulling there would skip the reset). See
+// src/shared/device-switch.ts for the pure decision + invariants.
+let lastReadyDeviceId: string | null = null
 
 function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
 	const features = engine.getCachedFeaturesSnapshot()
@@ -348,6 +359,17 @@ function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestIn
 		info.firmwareVersion = engine.getDeviceState().firmwareVersion
 	}
 	return info
+}
+
+// Whether the device's AdvancedMode (blind-signing) policy is enabled, read
+// from cached features. Returns undefined when unknown (no cached features /
+// policy not reported) so callers can distinguish "off" from "can't tell".
+function getAdvancedModeEnabled(): boolean | undefined {
+	const features = engine.getCachedFeaturesSnapshot()
+	if (!features) return undefined
+	const policies: any[] = features.policiesList || features.policies || []
+	const p = policies.find((x: any) => (x.policyName || x.policy_name) === 'AdvancedMode')
+	return p ? !!p.enabled : undefined
 }
 
 // PRIVACY: Wire persistence gate — prevents hidden-wallet EVM indices
@@ -770,6 +792,22 @@ function flushPendingScopedApiLogs() {
 	}
 }
 
+// Swap assets the connected device can actually sign — Pioneer's swappable
+// list minus any chain whose minFirmware the device doesn't meet (e.g. ZEC on
+// firmware < 7.15.0). Single source shared by the RPC handler and the REST
+// callback so both surfaces gate identically.
+async function deviceSwapAssets() {
+	if (!swapsEnabled) return []
+	const { getSwapAssets } = await import('./swap')
+	const assets = await getSwapAssets()
+	const fw = engine.getDeviceState().firmwareVersion
+	const chainMap = new Map(getAllChains().map(c => [c.id, c]))
+	return assets.filter(a => {
+		const chain = chainMap.get(a.chainId)
+		return chain ? isChainSupported(chain, fw) : false
+	})
+}
+
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
@@ -808,6 +846,7 @@ const restCallbacks: RestApiCallbacks = {
 	getVersion: () => appVersionCache,
 	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
 	getSwapUiState: () => getSwapUiState(),
+	getDeviceSwapAssets: () => deviceSwapAssets(),
 	sendSwapCmd: (cmd) => {
 		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
 	},
@@ -2310,12 +2349,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						streamAddresses,
 						(event) => {
 							if (event.type === 'tx:incoming') {
-								console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address}`)
-								try { rpc.send['tx-push-received']({ chain: event.data.caip, address: event.data.address, txid: event.data.txid }) } catch { /* webview not ready */ }
+								// event.data.type is the real direction ('incoming' | 'outgoing').
+								// Forward it verbatim — frontend resyncs either way (both change the
+								// balance) but only shows the "Incoming payment" toast for 'incoming'.
+								console.log(`[event-stream] ${event.data.type} tx ${event.data.txid} → ${event.data.address} (${event.data.networkId})`)
+								try { rpc.send['tx-push-received']({
+									chain: event.data.caip,
+									networkId: event.data.networkId,
+									address: event.data.address,
+									txid: event.data.txid,
+									type: event.data.type,
+								}) } catch { /* webview not ready */ }
 							}
 							if (event.type === 'tx:confirmed') {
 								console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
-								try { rpc.send['tx-push-received']({ txid: event.data.txid }) } catch { /* webview not ready */ }
+								try { rpc.send['tx-push-received']({ networkId: event.data.networkId, txid: event.data.txid, type: 'confirmed' }) } catch { /* webview not ready */ }
 							}
 						},
 						(status) => {
@@ -2987,6 +3035,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					memo: params.memo,
 					fromAddress,
 					type: 'delegate',
+					isMax: params.isMax,
 				})
 
 				const { fee, ...unsignedTx } = result
@@ -3104,6 +3153,31 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			addCustomToken: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// ── Solana SPL token ──────────────────────────────────────────
+				// No EVM chainId / eth_call path — resolve via the Solana RPC +
+				// Jupiter and persist with the /token: namespace. Mint case is
+				// preserved (base58 is case-sensitive).
+				if (chain.chainFamily === 'solana') {
+					const mint = params.contractAddress.trim()
+					const { SOLANA_MINT_RE, resolveSolanaMint } = await import('./solana-token')
+					if (!SOLANA_MINT_RE.test(mint)) throw new Error('Invalid Solana mint address')
+					const endpoint = getSetting('solana_rpc_endpoint') || undefined
+					const meta = await resolveSolanaMint(mint, endpoint)
+					if (!meta) throw new Error('Not a valid SPL token mint')
+					const token: CustomToken = {
+						chainId: chain.id,
+						contractAddress: mint,
+						symbol: meta.symbol,
+						name: meta.name,
+						decimals: meta.decimals,
+						networkId: chain.networkId,
+						iconUrl: meta.iconUrl,
+					}
+					dbAddCustomToken(token)
+					return token
+				}
+
 				if (!chain.chainId) throw new Error('Chain has no EVM chainId')
 				const rpcUrl = getRpcUrl(chain) || EVM_RPC_URLS[chain.chainId]
 				if (!rpcUrl) throw new Error(`No RPC URL for chain ${chain.coin}`)
@@ -4113,17 +4187,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				)
 				return [...chainIds]
 			},
-			getSwapAssets: async () => {
-				if (!swapsEnabled) return []
-				const { getSwapAssets } = await import('./swap')
-				const assets = await getSwapAssets()
-				const fw = engine.getDeviceState().firmwareVersion
-				const chainMap = new Map(getAllChains().map(c => [c.id, c]))
-				return assets.filter(a => {
-					const chain = chainMap.get(a.chainId)
-					return chain ? isChainSupported(chain, fw) : false
-				})
-			},
+			getSwapAssets: async () => deviceSwapAssets(),
 			searchSwapAssets: async (params) => {
 				if (!swapsEnabled) return []
 				const { searchDiscoveryAssets } = await import('./swap')
@@ -4160,6 +4224,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			lookupTokenContract: async (params) => {
 				if (!swapsEnabled) return { hits: [], reason: 'swaps-disabled' as string | undefined }
 				const raw = (params.contractAddress || '').trim()
+
+				// ── Solana SPL mint (base58, not 0x) ──────────────────────────
+				// Only in Solana context (the picker's Solana step) or when no chain
+				// was specified — never resolve a base58 mint against Solana while an
+				// EVM chainId was passed, which would silently cross chains. Validates
+				// on-chain + enriches via Jupiter; returns a single SwapAsset hit.
+				const isSolanaCtx = params.chainId === 'solana' || (params.chainId?.startsWith('solana:') ?? false)
+				const { SOLANA_MINT_RE, resolveSolanaMint } = await import('./solana-token')
+				if (!raw.startsWith('0x') && (isSolanaCtx || !params.chainId) && SOLANA_MINT_RE.test(raw)) {
+					const solChain = getAllChains().find(c => c.id === 'solana')
+					if (!solChain) return { hits: [] as SwapAsset[], reason: 'solana-not-configured' }
+					const endpoint = getSetting('solana_rpc_endpoint') || undefined
+					const meta = await resolveSolanaMint(raw, endpoint)
+					if (!meta) return { hits: [] as SwapAsset[], reason: 'not-a-solana-mint' }
+					const hit: SwapAsset = {
+						asset: meta.symbol,
+						caip: `${solChain.networkId}/token:${raw}`,
+						chainId: solChain.id,
+						chainFamily: 'solana',
+						contractAddress: raw,
+						decimals: meta.decimals,
+						symbol: meta.symbol,
+						name: meta.name,
+						icon: meta.iconUrl,
+					}
+					return { hits: [hit] }
+				}
+
 				if (!/^0x[a-fA-F0-9]{40}$/.test(raw)) {
 					return { hits: [] as SwapAsset[], reason: 'invalid-evm-contract' }
 				}
@@ -4403,6 +4495,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pushSubStage: (stage) => {
 						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
 					},
+					isAdvancedModeEnabled: getAdvancedModeEnabled,
 				})
 				const scope = getWalletDbScope()
 				// Register swap for tracking (non-blocking)
@@ -4535,7 +4628,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { refreshSwap } = await import('./swap-tracker')
 				const scope = getWalletDbScope()
 				if (!scope) return null
-				return await refreshSwap(params.txid, scope.deviceId, scope.walletId)
+				return await refreshSwap(params.txid, scope.deviceId, scope.walletId, params.rescan)
 			},
 			debugSwapLookup: async (params) => {
 				// PRIVACY: Mirror getSwapByTxid / refreshSwap — passphrase sessions
@@ -5470,6 +5563,28 @@ let pendingDeepLinkUri: string | null = null
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Device-to-device swap: a *different* device just reached 'ready'. Reset the
+	// in-memory account managers so device B re-derives its own xpubs/addresses
+	// instead of reusing device A's (the existing `if (!isInitialized)` guards
+	// re-init on the next account/balance fetch, which emits 'change' and pushes
+	// fresh data). Runs here — before any frontend-initiated getBtcAccounts /
+	// getCachedBalances round-trip — and edge-triggered on a changed truthy
+	// deviceId, so the 2-4 benign 'ready' re-emits per device (post-PIN /
+	// passphrase / probe / seed-check, all same deviceId) are no-ops, and the
+	// first device (lastReadyDeviceId === null) never resets, avoiding the
+	// cold-start race that sank the prior attempt. We do NOT clear DB caches here
+	// (they are deviceId-scoped and self-correct); that stays exclusive to the
+	// seed-changed handler. See src/shared/device-switch.ts.
+	if (shouldResetManagersOnReady(state, lastReadyDeviceId)) {
+		console.warn(`[Vault] Device swap ${lastReadyDeviceId} → ${state.deviceId}: resetting in-memory account managers`)
+		btcAccounts.reset()
+		evmAddresses.reset()
+		// Proactively push the now-empty sets so the frontend drops device-A's
+		// addresses immediately, rather than showing them until the next re-init.
+		try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready yet */ }
+		try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready yet */ }
+	}
+	lastReadyDeviceId = nextReadyDeviceId(state, lastReadyDeviceId)
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.

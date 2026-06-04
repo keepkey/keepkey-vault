@@ -11,7 +11,7 @@
  * session.
  */
 import type { SwapAsset, ChainBalance, CustomToken } from './types'
-import { CHAINS } from './chains'
+import { CHAINS, isChainSupported, type ChainDef } from './chains'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, type AvailabilityAssessment } from './swap-support-matrix'
 // Static-imported chains metadata — ~218KB, used synchronously by
@@ -74,6 +74,11 @@ export interface AssetEntry {
   /** SwapAsset reference — only present if Pioneer's GetAvailableAssets included it. */
   swappable?: SwapAsset
   availability: AvailabilityAssessment
+  /** Position in pioneer-discovery's catalog (lower = more popular). The catalog
+   *  is emitted in market-cap/popularity order, so this is the best proxy we
+   *  have for "rank" without a per-token market-cap field. Undefined for entries
+   *  not sourced from the catalog (Pioneer backfill, user-added custom tokens). */
+  discoveryRank?: number
 }
 
 /** Sort key bucket — lower numbers float to the top. */
@@ -86,10 +91,16 @@ export function bucketFor(entry: AssetEntry): SortBucket {
   const usd = entry.balance?.usd || 0
   if (usd > 0) return 0                                // held + valued
   if (entry.balance) return 1                          // held + zero-USD
+  // Non-selectable statuses (unsupported_chain/_token/_firmware) sink to the
+  // bottom even when Pioneer pre-listed the asset — a firmware-gated ZEC that
+  // Mayachain pools must not float into the Pioneer-confirmed buckets while
+  // being unselectable. Held assets above are intentionally exempt. Mirrors
+  // isRowSelectable / pickerTier.
+  const selectable = entry.availability.status === 'swappable' || entry.availability.status === 'unknown'
+  if (!selectable) return 7                            // unsupported
   if (entry.swappable) return entry.isNative ? 2 : 3   // Pioneer-confirmed
   if (entry.availability.status === 'swappable') return entry.isNative ? 4 : 5
-  if (entry.availability.status === 'unknown') return 6
-  return 7                                             // unsupported
+  return 6                                             // 'unknown'
 }
 
 /** Compare two entries: bucket asc → bucket-specific tiebreak. */
@@ -100,6 +111,84 @@ export function compareEntries(a: AssetEntry, b: AssetEntry): number {
 
   if (ba === 0) return (b.balance!.usd) - (a.balance!.usd)
 
+  const symA = a.symbol.toUpperCase()
+  const symB = b.symbol.toUpperCase()
+  if (symA !== symB) return symA < symB ? -1 : 1
+  return a.name < b.name ? -1 : 1
+}
+
+// ── Destination-token-list ordering (picker, "TO" side) ───────────────────
+//
+// `compareEntries` above is the SEARCH/default bucket sort — it ranks by swap
+// confidence and breaks ties alphabetically, which is what you want when the
+// user typed a query. The destination *list* (e.g. every SPL token on Solana,
+// 5k+ rows, no query) needs a different default: a held → stablecoins →
+// popularity → junk-last ordering so USDT/USDC lead and "000"/spam sink. The
+// catalog has no market-cap field, but it's emitted in popularity order, so
+// `discoveryRank` is the popularity proxy.
+
+/** Well-known stablecoin symbols. The matrix's STABLECOIN_TOKENS set only
+ *  covers a handful of EVM/TRON CAIPs by exact address; this symbol set is the
+ *  cross-chain mechanism (notably Solana SPL stables) for "stables first". */
+const STABLE_SYMBOLS = new Set<string>([
+  'USDT', 'USDC', 'USDS', 'USDE', 'SUSDE', 'DAI', 'SDAI', 'USDP', 'TUSD', 'GUSD',
+  'USDD', 'PYUSD', 'FDUSD', 'USD1', 'USD0', 'BUSD', 'LUSD', 'FRAX', 'CRVUSD',
+  'GHO', 'USDY', 'USDB', 'USDG', 'RLUSD', 'EURC', 'EURT', 'EURS', 'USTC',
+  'DOLA', 'MIM', 'BUIDL', 'USDC.E', 'USDT.E',
+])
+
+/** Treat an entry as a stablecoin for ordering purposes. CURATED symbol set
+ *  only — a broader "USD-ish symbol + usd/dollar/stable in name" heuristic was
+ *  tried and rejected: it matched ~800 catalog tokens, floating obscure
+ *  wrappers and junk ("Unstable Tether", "Good Game US Dollar") above SOL/LINK.
+ *  The curated set covers every real stable a user cares about; discoveryRank
+ *  handles the rest. */
+export function isStablecoinEntry(e: AssetEntry): boolean {
+  if (e.isNative) return false
+  return STABLE_SYMBOLS.has(e.symbol.toUpperCase())
+}
+
+const JUNK_PATTERN = /(https?:\/\/|www\.|t\.me\/|\bairdrop\b|\bclaim\b|just buy|buy and|\bpresale\b|\bgiveaway\b|free \$|\$\$\$)/i
+
+/** Heuristic "silly/spam token" detector — used only to demote toward the
+ *  bottom of the list. Never demotes a held asset. Discovery rank already
+ *  buries most junk; this is the safety net for spam that sneaks in with a low
+ *  rank (long tickers, scammy names). Deliberately conservative. */
+export function isJunkEntry(e: AssetEntry): boolean {
+  if (e.balance) return false
+  const sym = e.symbol || ''
+  const name = e.name || ''
+  if (sym.length > 12) return true
+  if (name.length > 48) return true
+  return JUNK_PATTERN.test(name) || JUNK_PATTERN.test(sym)
+}
+
+/** Ordering tier for the destination list. Lower floats to the top.
+ *  held(value) → held(no price) → stablecoins → native chain asset → popular
+ *  → junk → unsupported. The native asset gets its own tier just below stables
+ *  so a chain's own coin (SOL/ETH) stays prominent instead of sinking into the
+ *  long tail when it isn't held. */
+export function pickerTier(e: AssetEntry): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
+  if ((e.balance?.usd ?? 0) > 0) return 0                 // held + value
+  if (e.balance) return 1                                 // held, no price feed
+  const selectable = e.availability.status === 'swappable' || e.availability.status === 'unknown'
+  if (!selectable) return 6                               // unsupported → bottom
+  if (isJunkEntry(e)) return 5                            // spam/silly → just above unsupported
+  if (isStablecoinEntry(e)) return 2                      // stablecoins → top of swappable
+  if (e.isNative) return 3                                // native chain asset (SOL/ETH)
+  return 4                                                // normal swappable token
+}
+
+/** Compare two entries for the destination token list: tier asc → held by USD
+ *  desc → catalog popularity (discoveryRank) asc → symbol alpha. */
+export function compareForPicker(a: AssetEntry, b: AssetEntry): number {
+  const ta = pickerTier(a)
+  const tb = pickerTier(b)
+  if (ta !== tb) return ta - tb
+  if (ta === 0) return (b.balance!.usd) - (a.balance!.usd)
+  const ra = a.discoveryRank ?? Number.MAX_SAFE_INTEGER
+  const rb = b.discoveryRank ?? Number.MAX_SAFE_INTEGER
+  if (ra !== rb) return ra - rb
   const symA = a.symbol.toUpperCase()
   const symB = b.symbol.toUpperCase()
   if (symA !== symB) return symA < symB ? -1 : 1
@@ -249,6 +338,39 @@ export function chainMetaForCaip2(caip2: string): ChainMeta | null {
   return getChainMetaMap().get(caip2) || null
 }
 
+/** Resolve the vault ChainDef backing a CAIP-19 asset, via its chain prefix.
+ *  Returns undefined for chains vault has no ChainDef for. */
+function chainDefForCaip(caip: string): ChainDef | undefined {
+  const slash = caip.indexOf('/')
+  const chainCaip2 = canonicalizeChainCaip2(slash >= 0 ? caip.slice(0, slash) : caip)
+  const meta = chainMetaForCaip2(chainCaip2)
+  return meta ? CHAINS.find(c => c.id === meta.vaultChainId) : undefined
+}
+
+/** `assessAvailability` + a device-firmware gate.
+ *
+ *  A chain can be routable by a swap provider yet require firmware the connected
+ *  device doesn't have — e.g. Mayachain pools ZEC, but signing/deriving Zcash
+ *  needs firmware ≥ 7.15.0. Without this gate the picker green-lights ZEC on old
+ *  firmware and the swap can't actually be honored on-device. Surfaces such
+ *  assets as `unsupported_firmware` so the UI dims them with an upgrade hint
+ *  instead of offering a swap that will fail at signing.
+ *
+ *  Only downgrades otherwise-swappable/unknown assets — if no provider routes
+ *  the chain at all, firmware is moot and the original assessment stands. */
+export function assessWithFirmware(caip: string, firmwareVersion?: string): AvailabilityAssessment {
+  const base = assessAvailability(caip)
+  if (base.status !== 'swappable' && base.status !== 'unknown') return base
+  const chain = chainDefForCaip(caip)
+  if (!chain?.minFirmware) return base
+  if (isChainSupported(chain, firmwareVersion)) return base
+  return {
+    status: 'unsupported_firmware',
+    providers: [],
+    reason: `Update your KeepKey to firmware ${chain.minFirmware}+ to swap on this network`,
+  }
+}
+
 /** Construct a SwapAsset shape from an AssetEntry. Used when the user picks a
  *  row Pioneer didn't pre-list (matrix-swappable or unknown) — downstream
  *  quote/execute code still expects the SwapAsset interface, but we only have
@@ -311,6 +433,11 @@ export interface BuildEntriesInput {
    *  swappable list. Without these, freshly-added long-tail tokens (e.g. a
    *  meme on Base) wouldn't appear in the picker even after persistence. */
   customTokens?: CustomToken[]
+  /** Connected device's firmware version. Assets on chains whose `minFirmware`
+   *  exceeds this are surfaced as `unsupported_firmware` rather than swappable.
+   *  Undefined (firmware unknown) gates every firmware-restricted chain — fail
+   *  closed, so we never offer a swap the device can't sign. */
+  firmwareVersion?: string
 }
 
 /** Build the unified, sorted asset list. Async to allow lazy import of
@@ -350,6 +477,9 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
   // this dedupe the picker rendered all three.
   const seen = new Set<string>()
   const entries: AssetEntry[] = []
+  // Popularity proxy: the catalog is emitted in market-cap order, so the
+  // walk index is a usable "rank" for the picker's default sort.
+  let discoveryRank = 0
   // Walk the discovery universe — every CAIP becomes a row (after canonicalization).
   for (const [rawCaip, raw] of discovery) {
     const caip = canonicalizeCaip(rawCaip)
@@ -357,7 +487,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
     seen.add(caip)
     const swappable = swappableByCaip.get(caip) ?? swappableByCaip.get(rawCaip)
     const balance = balanceByCaip.get(caip) ?? balanceByCaip.get(rawCaip)
-    const availability = assessAvailability(caip)
+    const availability = assessWithFirmware(caip, input.firmwareVersion)
     // CAIP namespace is the source of truth — `/slip44:` is native, anything
     // under `/erc20:` `/bep20:` or `/token:` is a token. Discovery's own
     // isNative/type fields can disagree (saw it lie about BEP-20s).
@@ -375,6 +505,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       swappable,
       swappableAsset: swappable?.asset,
       availability,
+      discoveryRank: discoveryRank++,
     })
   }
 
@@ -400,7 +531,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       balance: balanceByCaip.get(caip),
       swappable: s,
       swappableAsset: s.asset,
-      availability: assessAvailability(caip),
+      availability: assessWithFirmware(caip, input.firmwareVersion),
     })
   }
 
@@ -409,7 +540,11 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
   // The aggregator routing matrix (assessAvailability) still gates whether
   // they're swappable; we just make them visible + selectable in the picker.
   for (const ct of input.customTokens || []) {
-    const rawCaip = `${ct.networkId}/erc20:${ct.contractAddress}`
+    // Token namespace is chain-family specific: EVM uses /erc20:, Solana and
+    // TRON use /token:. Hardcoding /erc20: gave Solana custom tokens a bogus
+    // CAIP that matched nothing in the matrix or the held-balance lookup.
+    const ns = ct.networkId.startsWith('solana:') || ct.networkId.startsWith('tron:') ? 'token' : 'erc20'
+    const rawCaip = `${ct.networkId}/${ns}:${ct.contractAddress}`
     const caip = canonicalizeCaip(rawCaip)
     if (seen.has(caip)) continue
     seen.add(caip)
@@ -424,7 +559,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       balance: balanceByCaip.get(caip),
       swappable: undefined,
       swappableAsset: undefined,
-      availability: assessAvailability(caip),
+      availability: assessWithFirmware(caip, input.firmwareVersion),
     })
   }
 

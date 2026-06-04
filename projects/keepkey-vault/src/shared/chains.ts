@@ -302,6 +302,43 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
 
+/** Resolve a chain from a real-time tx-push payload. Prefers `networkId`
+ *  (CAIP-2, always present on SSE events); falls back to matching a CAIP-19
+ *  string by its networkId prefix — token transfers carry a token caip like
+ *  `<networkId>/erc20:0x…`, which never equals a chain's native `…/slip44:…`
+ *  caip but does share its networkId prefix. Pass `chains` to include
+ *  user-added custom chains alongside the built-ins. */
+export function findChainByNetwork(
+  networkId: string | undefined,
+  caip: string | undefined,
+  chains: ChainDef[] = CHAINS,
+): ChainDef | undefined {
+  if (networkId) {
+    const byNet = chains.find(c => c.networkId === networkId)
+    if (byNet) return byNet
+  }
+  if (caip) {
+    return chains.find(c => caip === c.caip || caip.startsWith(`${c.networkId}/`))
+  }
+  return undefined
+}
+
+/** Best-effort block-explorer URL for a block height, derived from the chain's
+ *  tx-URL template. Only EVM and UTXO explorers follow a known, stable
+ *  `…/block/{n}` convention (etherscan-family use `/block/`, Blockchair uses
+ *  `/{coin}/block/`), so we restrict to those families and return null
+ *  otherwise — the caller then renders the block number as plain text.
+ *  Used to make the swap "Block #N" row clickable. */
+export function getExplorerBlockUrl(chainId: string, blockNumber: number | string): string | null {
+  const chain = CHAINS.find(c => c.id === chainId)
+  if (!chain?.explorerTxUrl) return null
+  if (chain.chainFamily !== 'evm' && chain.chainFamily !== 'utxo') return null
+  // Swap the tx path segment (`/tx/` or `/transaction/`) + txid placeholder for
+  // `/block/{n}`. Bail if the template doesn't match the expected shape.
+  const blockUrl = chain.explorerTxUrl.replace(/\/(tx|transaction)\/\{\{txid\}\}.*$/, `/block/${blockNumber}`)
+  return blockUrl !== chain.explorerTxUrl ? blockUrl : null
+}
+
 /** Get explorer TX URL for a chain ID + txid. Returns null if no explorer configured. */
 export function getExplorerTxUrl(chainId: string, txid: string): string | null {
   const chain = CHAINS.find(c => c.id === chainId)
