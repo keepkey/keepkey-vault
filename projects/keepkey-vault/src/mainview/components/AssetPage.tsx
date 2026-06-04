@@ -235,7 +235,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			setLoading(false)
 		})()
 		return () => { cancelled = true }
-	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex]) // eslint-disable-line react-hooks/exhaustive-deps
+	// btcSelected?.xpubData?.xpub is in the deps so the address re-derives whenever
+	// the underlying xpub identity changes — a device swap (device B reuses A's
+	// default account/scriptType, so neither scriptType nor fullPath change, but
+	// the xpub does), a standard<->hidden switch, or a seed change. Without it an
+	// already-open Receive tab would keep showing the previous wallet's address.
+	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex, btcSelected?.xpubData?.xpub]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Fetch next unused address indices from Pioneer API when xpub selection changes
 	// Cancellation guard prevents stale responses from snapping to wrong index (Finding 4)
@@ -272,9 +277,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 	}, [pioneerIndices])
 
-	// When EVM selected index changes, update address from cached value or re-derive
+	// When EVM selected index changes, update address from the cached value. When
+	// the cache empties — a device swap resets the backend managers and pushes an
+	// empty set before device B's addresses re-derive — drop the stale address
+	// immediately so the previous device's address can't linger on screen; the
+	// next non-empty push reseeds it with device B's address.
 	useEffect(() => {
-		if (!isEvm || evmAddresses.addresses.length === 0) return
+		if (!isEvm) return
+		if (evmAddresses.addresses.length === 0) { setAddress(null); return }
 		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		if (selected) {
 			if (previousEvmSelectedIndex.current !== null && previousEvmSelectedIndex.current !== selected.addressIndex) {

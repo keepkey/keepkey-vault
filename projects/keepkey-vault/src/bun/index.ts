@@ -123,6 +123,7 @@ import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
+import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
@@ -333,6 +334,16 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 const engine = new EngineController()
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
+// Last deviceId we saw reach 'ready'. The managers above are kept across
+// disconnect for the watch-only UI, so a device-to-device swap (deviceId
+// changes, but `seed-changed` can't fire — it keys on the per-device
+// seed_eth_${id}) would otherwise reuse the previous device's xpubs/addresses.
+// We reset on the edge where a *different* deviceId reaches 'ready'. Declared
+// once here, at process-lifetime scope alongside the singletons it guards, and
+// — unlike rest-api.ts:lastDeviceId — NEVER nulled on disconnect (a swap always
+// passes through 'disconnected', so nulling there would skip the reset). See
+// src/shared/device-switch.ts for the pure decision + invariants.
+let lastReadyDeviceId: string | null = null
 
 function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
 	const features = engine.getCachedFeaturesSnapshot()
@@ -5536,6 +5547,28 @@ let pendingDeepLinkUri: string | null = null
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Device-to-device swap: a *different* device just reached 'ready'. Reset the
+	// in-memory account managers so device B re-derives its own xpubs/addresses
+	// instead of reusing device A's (the existing `if (!isInitialized)` guards
+	// re-init on the next account/balance fetch, which emits 'change' and pushes
+	// fresh data). Runs here — before any frontend-initiated getBtcAccounts /
+	// getCachedBalances round-trip — and edge-triggered on a changed truthy
+	// deviceId, so the 2-4 benign 'ready' re-emits per device (post-PIN /
+	// passphrase / probe / seed-check, all same deviceId) are no-ops, and the
+	// first device (lastReadyDeviceId === null) never resets, avoiding the
+	// cold-start race that sank the prior attempt. We do NOT clear DB caches here
+	// (they are deviceId-scoped and self-correct); that stays exclusive to the
+	// seed-changed handler. See src/shared/device-switch.ts.
+	if (shouldResetManagersOnReady(state, lastReadyDeviceId)) {
+		console.warn(`[Vault] Device swap ${lastReadyDeviceId} → ${state.deviceId}: resetting in-memory account managers`)
+		btcAccounts.reset()
+		evmAddresses.reset()
+		// Proactively push the now-empty sets so the frontend drops device-A's
+		// addresses immediately, rather than showing them until the next re-init.
+		try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready yet */ }
+		try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready yet */ }
+	}
+	lastReadyDeviceId = nextReadyDeviceId(state, lastReadyDeviceId)
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
