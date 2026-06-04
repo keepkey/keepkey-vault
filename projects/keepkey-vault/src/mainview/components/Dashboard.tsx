@@ -1,7 +1,7 @@
 import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
-import { CHAINS, customChainToChainDef, isChainSupported, findChainByNetwork, type ChainDef } from "../../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -21,7 +21,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 // without routing through AssetPage.
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
-import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
@@ -1093,16 +1093,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			setCacheUpdatedAt(receivedAt)
 		})
 	}, [])
-
-	// SSE push notifications: resync just the affected chain when a tx is detected.
-	// Match by networkId first (SSE events always carry it; caip can be absent),
-	// falling back to the caip prefix. Includes custom chains.
-	useEffect(() => {
-		return onRpcMessage('tx-push-received', (payload: { chain?: string; networkId?: string; txid?: string }) => {
-			const hit = findChainByNetwork(payload.networkId, payload.chain, [...CHAINS, ...customChainDefs])
-			if (hit) rpcFire('getBalance', { chainId: hit.id })
-		})
-	}, [customChainDefs])
 
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(

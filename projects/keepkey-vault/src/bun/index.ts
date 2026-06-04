@@ -2332,13 +2332,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						streamAddresses,
 						(event) => {
 							if (event.type === 'tx:incoming') {
-								console.log(`[event-stream] Incoming tx ${event.data.txid} → ${event.data.address} (${event.data.networkId})`)
+								// event.data.type is the real direction ('incoming' | 'outgoing').
+								// Forward it verbatim — frontend resyncs either way (both change the
+								// balance) but only shows the "Incoming payment" toast for 'incoming'.
+								console.log(`[event-stream] ${event.data.type} tx ${event.data.txid} → ${event.data.address} (${event.data.networkId})`)
 								try { rpc.send['tx-push-received']({
 									chain: event.data.caip,
 									networkId: event.data.networkId,
 									address: event.data.address,
 									txid: event.data.txid,
-									type: 'incoming',
+									type: event.data.type,
 								}) } catch { /* webview not ready */ }
 							}
 							if (event.type === 'tx:confirmed') {
