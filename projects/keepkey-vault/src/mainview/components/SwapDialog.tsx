@@ -1731,6 +1731,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           } else {
             setError(t("amountBelowMinimumGeneric"))
           }
+        } else if (/request timed out/i.test(msg)) {
+          // Pioneer/DEX was slow to respond. The params are still valid, so the
+          // input-phase error block surfaces a Retry button (gated on canQuote)
+          // that re-fires the quote via requoteTick.
+          setError(t("quoteTimedOut", "Quote request timed out — the swap service is taking too long to respond. Tap Retry to try again."))
         } else {
           setError(msg || t("errorQuote"))
         }
@@ -4254,10 +4259,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 <Text fontSize="10px" color="kk.textMuted" textAlign="center">{t("enterAmount")}</Text>
               )}
 
-              {/* Error */}
+              {/* Error — show Retry when the quote params are still valid
+                  (e.g. timed-out / network-failed quote), since clicking it
+                  re-fires getSwapQuote via the requoteTick effect. */}
               {error && (
                 <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="2">
-                  <Text fontSize="10px" color="kk.error">{error}</Text>
+                  <Flex justify="space-between" align="center" gap="2">
+                    <Text fontSize="10px" color="kk.error" flex="1">{error}</Text>
+                    {canQuote && (
+                      <Button size="xs" variant="ghost" color="kk.error" px="1.5" minW="auto"
+                        _hover={{ bg: "rgba(224,140,123,0.18)" }}
+                        onClick={() => { setError(null); setRequoteTick(t => t + 1) }}>
+                        {t("retry", "Retry")}
+                      </Button>
+                    )}
+                  </Flex>
                 </Box>
               )}
             </VStack>

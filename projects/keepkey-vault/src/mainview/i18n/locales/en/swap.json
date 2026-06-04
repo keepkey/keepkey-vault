@@ -133,6 +133,8 @@
 	"elapsed": "Elapsed",
 	"estimated": "Est.",
 	"dismiss": "Dismiss",
+	"retry": "Retry",
+	"quoteTimedOut": "Quote request timed out — the swap service is taking too long to respond. Tap Retry to try again.",
 	"swapCompleted": "Swap completed!",
 	"swapFailed": "Swap failed",
 	"trackingSwap": "Tracking swap via THORChain...",
