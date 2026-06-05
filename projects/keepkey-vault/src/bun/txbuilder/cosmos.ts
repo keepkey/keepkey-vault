@@ -293,3 +293,109 @@ export async function buildCosmosStakingTx(
     fee: feeInDisplay,
   }
 }
+
+// ── THORName / MAYAName registration tx builder ─────────────────────────
+// Registration is a MsgDeposit (native RUNE/CACAO) with a `~:` memo that routes
+// it to the ManageTHORName handler. The deposited amount must cover the one-time
+// register fee plus per-block rent for the requested number of years:
+//   amount = registerFee + feePerBlock * blocksPerYear * years   (base units)
+// Owner defaults to the signer; the alias is the signer's own L1 address on the
+// chain. See docs/handoff-thorname-mayaname-pioneer.md for the memo spec.
+
+// `chain` field of the memo (the alias's chain). v1 registers the chain's own L1.
+const NAME_MEMO_CHAIN: Record<string, string> = {
+  thorchain: 'THOR',
+  mayachain: 'MAYA',
+}
+
+const NAME_RE = /^[a-zA-Z0-9+_-]{1,30}$/
+
+export interface BuildCosmosNameRegParams {
+  name: string
+  years: number
+  fromAddress: string
+}
+
+export async function buildCosmosNameRegTx(
+  pioneer: any,
+  chain: ChainDef,
+  params: BuildCosmosNameRegParams,
+) {
+  const { name, years, fromAddress } = params
+
+  if (chain.id !== 'thorchain' && chain.id !== 'mayachain') {
+    throw new Error(`Name registration not supported for chain: ${chain.id}`)
+  }
+  if (!NAME_RE.test(name)) {
+    throw new Error('Invalid name: use 1-30 chars of a-z, A-Z, 0-9, +, _, -')
+  }
+  if (!Number.isInteger(years) || years < 1) throw new Error('years must be a positive integer')
+
+  // 1. Live registration cost constants (base units) from Pioneer.
+  console.log(`${TAG} Fetching name registration quote for ${chain.coin}...`)
+  const quoteResp = await pioneer.GetNameRegistrationQuote({ network: chain.id })
+  const quote = quoteResp?.data
+  if (!quote?.registerFeeBase || !quote?.feePerBlockBase || !quote?.blocksPerYear) {
+    throw new Error(`Unexpected name quote format for ${chain.id}: ${JSON.stringify(quote)}`)
+  }
+  const registerFee = BigInt(String(quote.registerFeeBase))
+  const feePerBlock = BigInt(String(quote.feePerBlockBase))
+  const blocksPerYear = BigInt(String(quote.blocksPerYear))
+  const baseAmount = registerFee + feePerBlock * blocksPerYear * BigInt(years)
+  if (baseAmount <= 0n) throw new Error('Computed registration amount is zero')
+
+  // 2. Account info (account_number + sequence).
+  console.log(`${TAG} Fetching account info for ${chain.coin} (name reg)...`)
+  const accountResp = await pioneer.GetAccountInfo({ network: chain.id, address: fromAddress })
+  const accountInfo = accountResp?.data
+
+  let account_number: string
+  let sequence: string
+  if (accountInfo?.account) {
+    account_number = String(accountInfo.account.account_number || '0')
+    sequence = String(accountInfo.account.sequence || '0')
+  } else if (accountInfo?.result?.value) {
+    account_number = String(accountInfo.result.value.account_number || '0')
+    sequence = String(accountInfo.result.value.sequence || '0')
+  } else {
+    throw new Error(`Unexpected account info format for ${chain.id}: ${JSON.stringify(accountInfo)}`)
+  }
+
+  if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
+  const chain_id = chain.chainId
+
+  const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
+  const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+
+  // 3. Build the `~:` memo: ~:name:chain:address  (owner defaults to signer).
+  const memoChain = NAME_MEMO_CHAIN[chain.id]!
+  const memo = `~:${name}:${memoChain}:${fromAddress}`
+
+  const depositType = MSG_DEPOSIT_TYPES[chain.id]!
+  const depositAsset = DEPOSIT_ASSETS[chain.id]!
+  console.log(`${TAG} Building name-reg MsgDeposit: asset=${depositAsset}, amount=${baseAmount}, memo=${memo}`)
+
+  const msg = {
+    type: depositType,
+    value: {
+      coins: [{ asset: depositAsset, amount: String(baseAmount) }],
+      memo,
+      signer: fromAddress,
+    },
+  }
+
+  return {
+    signerAddress: fromAddress,
+    addressNList: chain.defaultPath,
+    tx: {
+      fee,
+      memo,
+      msg: [msg],
+      signatures: [],
+    },
+    chain_id,
+    account_number,
+    sequence,
+    fee: feeInDisplay,
+  }
+}

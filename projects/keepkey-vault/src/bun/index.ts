@@ -115,7 +115,7 @@ import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
-import { buildCosmosStakingTx } from "./txbuilder/cosmos"
+import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
@@ -3067,6 +3067,79 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					memo: params.memo,
 					fromAddress,
 					type: 'undelegate',
+				})
+
+				const { fee, ...unsignedTx } = result
+				return { unsignedTx, fee }
+			},
+
+			// ── THORName / MAYAName registration ──────────────────────
+			lookupName: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.id !== 'thorchain' && chain.id !== 'mayachain') throw new Error(`Name service not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const resp = await withTimeout(
+					pioneer.GetName({ network: chain.id, name: params.name }),
+					PIONEER_TIMEOUT_MS,
+					'GetName'
+				)
+				const data = resp?.data || {}
+				return {
+					found: !!data.found,
+					name: params.name,
+					owner: data.owner,
+					expireBlockHeight: data.expireBlockHeight != null ? Number(data.expireBlockHeight) : undefined,
+					aliases: Array.isArray(data.aliases) ? data.aliases : undefined,
+					preferredAsset: data.preferredAsset || undefined,
+				}
+			},
+
+			getNameQuote: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.id !== 'thorchain' && chain.id !== 'mayachain') throw new Error(`Name service not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const resp = await withTimeout(
+					pioneer.GetNameRegistrationQuote({ network: chain.id }),
+					PIONEER_TIMEOUT_MS,
+					'GetNameRegistrationQuote'
+				)
+				const data = resp?.data
+				if (!data?.registerFeeBase || !data?.feePerBlockBase || !data?.blocksPerYear) {
+					throw new Error(`Unexpected name quote format for ${chain.id}: ${JSON.stringify(data)}`)
+				}
+				return {
+					registerFeeBase: String(data.registerFeeBase),
+					feePerBlockBase: String(data.feePerBlockBase),
+					blocksPerYear: Number(data.blocksPerYear),
+					currentBlockHeight: Number(data.currentBlockHeight ?? 0),
+				}
+			},
+
+			buildNameRegistrationTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.id !== 'thorchain' && chain.id !== 'mayachain') throw new Error(`Name registration not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const wallet = engine.wallet as any
+				const addrParams: any = {
+					addressNList: chain.defaultPath,
+					showDisplay: false,
+					coin: chain.coin,
+				}
+				const addrResult = await wallet[chain.rpcMethod](addrParams)
+				const fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				if (!fromAddress) throw new Error(`Could not derive address for ${chain.coin}`)
+
+				const result = await buildCosmosNameRegTx(pioneer, chain, {
+					name: params.name,
+					years: params.years,
+					fromAddress,
 				})
 
 				const { fee, ...unsignedTx } = result
