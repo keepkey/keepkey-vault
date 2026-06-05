@@ -30,5 +30,9 @@
 	"timeHoursAgo": "{{count}}h ago",
 	"timeDaysAgo": "{{count}}d ago",
 	"staleCtaTitle": "Press to refresh balances",
-	"staleCtaSubtitle": "Last checked {{time}}"
+	"staleCtaSubtitle": "Last checked {{time}}",
+	"loadingDashboardTitle": "Loading dashboard",
+	"loadingConnect": "Connecting to your KeepKey",
+	"loadingSync": "Syncing balances across chains",
+	"loadingPrices": "Fetching the latest prices"
 }
