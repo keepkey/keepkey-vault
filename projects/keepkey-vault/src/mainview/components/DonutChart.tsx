@@ -1,5 +1,6 @@
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { AnimatedUsd } from "./AnimatedUsd"
+import type { StackedBarItem } from "./StackedBarView"
 
 export interface DonutChartItem {
 	name: string
@@ -137,51 +138,111 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice, onClic
 	)
 }
 
-interface ChartLegendProps {
-	data: DonutChartItem[]
+interface SelectedSliceProps {
+	/** The currently active (hovered / selected) slice. */
+	active: DonutChartItem | null
+	/** Total used to compute the slice's percentage share. */
 	total: number
-	activeIndex: number | null
-	onHoverItem: (index: number | null) => void
-	onClickItem?: (index: number) => void
+	/** Token-level breakdown for the active slice. Pass only when the chain
+	 *  holds more than one token — renders a stacked bar + chip labels below
+	 *  the key. Omit for single-token chains and the drilled (per-token) view. */
+	breakdown?: StackedBarItem[]
+	/** Click on the selected key — drill into the chain / open the asset. */
+	onClick?: () => void
 }
 
-export function ChartLegend({ data, total, activeIndex, onHoverItem: _onHoverItem, onClickItem }: ChartLegendProps) {
-	if (activeIndex === null || !data[activeIndex]) {
-		return <Box h="40px" />
-	}
+/** Single "selected key" shown below the donut: the active slice plus, when
+ *  the chain holds more than one token, a horizontal stacked bar breaking the
+ *  chain's value down by token. */
+export function SelectedSlice({ active, total, breakdown, onClick }: SelectedSliceProps) {
+	if (!active) return <Box h="40px" />
 
-	const item = data[activeIndex]
-	const percent = total > 0 ? ((item.value / total) * 100).toFixed(1) : "0"
+	const percent = total > 0 ? ((active.value / total) * 100).toFixed(1) : "0"
+	const segments = (breakdown ?? [])
+		.filter((b) => b.value > 0)
+		.sort((a, b) => b.value - a.value)
+	const stackTotal = segments.reduce((s, it) => s + it.value, 0)
+	const showStack = segments.length > 1 && stackTotal > 0
 
 	return (
-		<Flex
-			justify="space-between"
-			align="center"
-			py="3"
-			px="4"
-			borderRadius="lg"
-			bg="transparent"
-			border="1px solid"
-			borderColor="kk.border"
-			w="100%"
-			gap="4"
-			transition="border-color 0.2s"
-			cursor={onClickItem ? "pointer" : undefined}
-			onClick={onClickItem ? () => onClickItem(activeIndex) : undefined}
-			_hover={onClickItem ? { borderColor: "var(--line-2)" } : undefined}
-		>
-			<Flex align="center" gap="3" minW="0" flex="1">
-				<Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} boxShadow={`0 0 14px -2px ${item.color}`} />
-				<Text fontSize="15px" fontWeight="600" color="var(--text-0)" truncate>{item.name}</Text>
-				<Text fontSize="12px" color="var(--text-2)" letterSpacing="0.04em" flexShrink={0}>{percent}%</Text>
+		<Flex direction="column" w="100%" gap="3">
+			{/* Selected key */}
+			<Flex
+				justify="space-between"
+				align="center"
+				py="3"
+				px="4"
+				borderRadius="lg"
+				bg="transparent"
+				border="1px solid"
+				borderColor="kk.border"
+				w="100%"
+				gap="4"
+				transition="border-color 0.2s"
+				cursor={onClick ? "pointer" : undefined}
+				onClick={onClick}
+				_hover={onClick ? { borderColor: "var(--line-2)" } : undefined}
+			>
+				<Flex align="center" gap="3" minW="0" flex="1">
+					<Box w="12px" h="12px" borderRadius="full" bg={active.color} flexShrink={0} boxShadow={`0 0 14px -2px ${active.color}`} />
+					<Text fontSize="15px" fontWeight="600" color="var(--text-0)" truncate>{active.name}</Text>
+					<Text fontSize="12px" color="var(--text-2)" letterSpacing="0.04em" flexShrink={0}>{percent}%</Text>
+				</Flex>
+				<AnimatedUsd
+					value={active.value}
+					fontSize={{ base: "20px", md: "26px" }}
+					color="var(--text-0)"
+					fontWeight="500"
+					letterSpacing="-0.01em"
+				/>
 			</Flex>
-			<AnimatedUsd
-				value={item.value}
-				fontSize={{ base: "20px", md: "26px" }}
-				color="var(--text-0)"
-				fontWeight="500"
-				letterSpacing="-0.01em"
-			/>
+
+			{/* Token breakdown — stacked bar + chips, only for multi-token chains */}
+			{showStack && (
+				<Flex direction="column" gap="2.5" px="1">
+					<Flex w="100%" h="10px" borderRadius="full" overflow="hidden" bg="var(--ink-2)">
+						{segments.map((it) => (
+							<Box
+								key={it.id}
+								flexGrow={it.value / stackTotal}
+								flexShrink={0}
+								flexBasis={0}
+								minW="3px"
+								h="100%"
+								bg={it.color}
+								cursor={it.onSelect ? "pointer" : "default"}
+								onClick={it.onSelect}
+								_hover={it.onSelect ? { opacity: 0.85 } : undefined}
+								transition="opacity 0.15s"
+								title={`${it.label} · $${it.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+							/>
+						))}
+					</Flex>
+					<Flex wrap="wrap" justify="center" gap="3" rowGap="1.5">
+						{segments.map((it) => (
+							<Flex
+								key={it.id}
+								as={it.onSelect ? "button" : "div"}
+								align="center"
+								gap="1.5"
+								bg="transparent"
+								border="0"
+								p={0}
+								color="var(--text-2)"
+								cursor={it.onSelect ? "pointer" : "default"}
+								_hover={it.onSelect ? { color: "var(--text-0)" } : undefined}
+								transition="color 0.15s"
+								onClick={it.onSelect}
+							>
+								<Box w="8px" h="8px" borderRadius="full" bg={it.color} flexShrink={0} />
+								<Text fontSize="11px" lineHeight="1.2" whiteSpace="nowrap">
+									{it.label} · ${it.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+								</Text>
+							</Flex>
+						))}
+					</Flex>
+				</Flex>
+			)}
 		</Flex>
 	)
 }
