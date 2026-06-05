@@ -17,10 +17,16 @@ function toBaseUnits(displayAmount: string, decimals: number): bigint {
   return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac)
 }
 
-// Chain-specific fees (in display units)
+// Native transaction fee reserved on a MAX send/deposit (in display units).
+// THORChain/Maya charge this fee on top of the deposited/sent amount at the
+// bank layer (the tx `fee.amount` is '0' — the network deducts it from the
+// account), so a MAX must leave headroom: account needs amount + fee. Maya's
+// NativeTransactionFee is 0.2 CACAO (2000000000 base @ 10 decimals); reserving
+// 0 swept 100% of the balance and every MAX CACAO swap reverted with
+// "insufficient funds". THORChain's native_tx_fee is 0.02 RUNE.
 const FEES: Record<string, number> = {
   thorchain: 0.02,
-  mayachain: 0,
+  mayachain: 0.2,
   cosmos: 0.005,
   osmosis: 0.035,
 }
