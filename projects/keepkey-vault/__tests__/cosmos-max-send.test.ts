@@ -82,4 +82,29 @@ describe('Cosmos MAX send/deposit fee reserve', () => {
     expect(msg.value.coins[0].amount).toBe('996000000')
     expect(BigInt(msg.value.coins[0].amount)).toBeLessThan(1000000000n - 2000000n)
   })
+
+  test('cosmos ATOM MsgSend MAX reserves above the actual feeLevel-adjusted fee', async () => {
+    const atom = CHAINS.find(c => c.id === 'cosmos')!
+    expect(atom.decimals).toBe(6)
+    // Regression: the default dispatcher path uses feeLevel 5, which doubles the
+    // 5000 uatom template fee to 10000 uatom (the *actual* fee paid). Reserving
+    // FEES.cosmos×2 (=10000) before that left amount + fee == balance exactly —
+    // zero headroom. The reserve must sit above the adjusted fee. 1.0 ATOM =
+    // 1000000 uatom; reserve max(10000,5000)×2 = 20000 → amount 980000.
+    const result = await buildCosmosTx(mockPioneer('1.0'), atom, {
+      to: 'cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+      amount: '0',
+      isMax: true,
+      fromAddress: 'cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+    })
+
+    const msg = result.tx.msg[0] as any
+    expect(msg.type).toBe('cosmos-sdk/MsgSend')
+    const amount = BigInt(msg.value.amount[0].amount)
+    const adjustedFee = BigInt(result.tx.fee.amount[0].amount)
+    expect(adjustedFee).toBe(10000n)            // feeLevel 5 → 2× the 5000 template
+    expect(amount).toBe(980000n)
+    // The fix: amount + the fee it will actually pay stays strictly under balance.
+    expect(amount + adjustedFee).toBeLessThan(1000000n)
+  })
 })
