@@ -12,7 +12,8 @@ import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
-const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json'
+// Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
+const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-vault/master/firmware/releases.json'
 
 /**
  * Locate firmware-bundle/ — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
