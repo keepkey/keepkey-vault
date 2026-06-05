@@ -3,10 +3,25 @@
 ## Status
 - [x] Code merged to upstream develop (PR #425)
 - [x] `release/7.14.1` branch pushed to `keepkey/keepkey-firmware`
-- [x] Tag `v7.14.1` pushed to `keepkey/keepkey-firmware`
-- [ ] Firmware binary built
-- [ ] Firmware binary signed (3/5 key holders)
-- [ ] GitHub release published
+- [x] Tag `v7.14.1` pushed to `keepkey/keepkey-firmware` (annotated → commit `5482e736`)
+- [x] Firmware binary built (CI, asset attached 2026-05-30)
+- [x] Firmware binary signed (3/5 — slots 1/2/3, all verified against `pubkeys.h`)
+- [x] GitHub release published 2026-06-05 (un-drafted; marked Latest)
+
+## Verified hashes (device-verifiable build hash = payload, `tail -c +257`)
+Canonical = the **tag-reproducible** build (commit `5482e736`, embeds that hash):
+- full signed file : `f40fe1b74949a9e091269536b27cd53bbb8a5c1c428a6c36ff7d5c6bf6845f46`
+- payload          : `73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae`
+- reproducible via `git checkout v7.14.1 && scripts/build/docker/device/release.sh` → `tail -c +257 | sha256`.
+- matches `firmware/releases.json` + `manifest.json` (v7.14.1) and release `HASHES.txt`.
+
+### Provenance note
+The CI draft originally attached a binary built from branch commit `9e057c2` (2026-05-23),
+mislabeled under the `-5482e73-` filename, with payload `e0c05185…`. That binary is
+**code-identical** to the tag build — the only difference is the embedded 40-char commit
+stamp at code offset 313718 (net source delta between the two commits is CI/emulator/test-client
+files only; all device sources identical). It was replaced with the tag-reproducible build so the
+documented verify-by-rebuild flow passes.
 
 ## Repo
 `https://github.com/keepkey/keepkey-firmware`
