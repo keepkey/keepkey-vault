@@ -766,6 +766,34 @@ function hydrateFromDb(txid: string, deviceId?: string, walletId?: string): Pend
 }
 
 
+/** Bounded re-registration for a swap Pioneer reports as not_found. Pioneer
+ *  signals "no row" two different ways depending on deployment: a 200 body with
+ *  status='not_found' (handled in the GetPendingSwap success path) OR an HTTP
+ *  404 that swagger-client throws (the live pioneer-server — see
+ *  pending-swaps.controller.ts). BOTH must re-register, so this helper is called
+ *  from both sites. NEAR Intents is excluded (stays not_found by design; 1Click
+ *  is authoritative) and terminal swaps are skipped. The next refresh confirms
+ *  the row landed and clears the bookkeeping in the success path. */
+async function reregisterIfMissing(swap: PendingSwap): Promise<void> {
+  const txid = swap.txid
+  const isNear = isNearIntentsSwap(swap) || swap.integration === 'nearIntents'
+  if (isNear || isTerminalSwapStatus(swap.status)) return
+  const attempts = pioneerRegistrationAttempts.get(txid) || 0
+  if (attempts < MAX_PIONEER_REGISTER_ATTEMPTS) {
+    pioneerRegistrationAttempts.set(txid, attempts + 1)
+    console.log(`${TAG} Pioneer has no row for ${txid.slice(0, 10)}... — re-registering (attempt ${attempts + 1}/${MAX_PIONEER_REGISTER_ATTEMPTS})`)
+    try {
+      await registerWithPioneer(swap)
+      console.log(`${TAG} Pioneer re-registration submitted for ${txid.slice(0, 10)}... — verifying on next refresh`)
+    } catch (e: any) {
+      console.warn(`${TAG} Pioneer re-registration attempt ${attempts + 1} failed for ${txid.slice(0, 10)}...: ${e.message}`)
+    }
+  } else if (attempts === MAX_PIONEER_REGISTER_ATTEMPTS) {
+    console.warn(`${TAG} Giving up Pioneer registration for ${txid.slice(0, 10)}... after ${attempts} attempts`)
+    pioneerRegistrationAttempts.set(txid, attempts + 1) // bump past so this fires once
+  }
+}
+
 /** Single on-demand Pioneer poll for one swap.
  *  Called by the SwapDialog while the user has it open (there is no background
  *  timer). Returns the latest in-memory swap state, or null if unknown. */
@@ -913,38 +941,19 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
-      // Pioneer has no row for this swap. For most swappers that means the
-      // initial CreatePendingSwap never landed (transient 400/500, or a restart
-      // dropped the in-flight call) — re-register, bounded, so the tracker
-      // doesn't hang on "waiting for confirmations" forever. This is the durable
-      // half of the fix: it keys off the not_found signal, so it works even
-      // after a Vault restart wiped any in-memory "failed" flag. NEAR Intents is
-      // excluded — it stays not_found by design and is driven by 1Click above.
-      const isNear = isNearIntentsSwap(swap) || swap.integration === 'nearIntents'
-      if (!isNear && !isTerminalSwapStatus(swap.status)) {
-        const attempts = pioneerRegistrationAttempts.get(txid) || 0
-        if (attempts < MAX_PIONEER_REGISTER_ATTEMPTS) {
-          pioneerRegistrationAttempts.set(txid, attempts + 1)
-          console.log(`${TAG} Pioneer has no row for ${txid.slice(0, 10)}... — re-registering (attempt ${attempts + 1}/${MAX_PIONEER_REGISTER_ATTEMPTS})`)
-          try {
-            await registerWithPioneer(swap)
-            console.log(`${TAG} Pioneer re-registration submitted for ${txid.slice(0, 10)}... — verifying on next refresh`)
-          } catch (e: any) {
-            console.warn(`${TAG} Pioneer re-registration attempt ${attempts + 1} failed for ${txid.slice(0, 10)}...: ${e.message}`)
-          }
-        } else if (attempts === MAX_PIONEER_REGISTER_ATTEMPTS) {
-          console.warn(`${TAG} Giving up Pioneer registration for ${txid.slice(0, 10)}... after ${attempts} attempts`)
-          pioneerRegistrationAttempts.set(txid, attempts + 1) // bump past so this fires once
-        }
-      }
+      // 200-body not_found (some client/server combos). The live pioneer-server
+      // instead throws a 404, handled in the catch below — both call the same
+      // bounded re-registration so a missed initial registration self-heals.
+      await reregisterIfMissing(swap)
       return swap
     }
     swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
     // Pioneer returned a real row — registration is confirmed (covers the case
     // where the initial call timed out *after* Pioneer created the row). Drop any
     // re-registration bookkeeping so we don't re-post CreatePendingSwap (409s,
-    // noise) and don't leak the map entry for the process lifetime.
-    pioneerRegistrationAttempts.delete(txid)
+    // noise) and don't leak the map entry for the process lifetime. Key on
+    // swap.txid to match reregisterIfMissing (the txid param may differ in case).
+    pioneerRegistrationAttempts.delete(swap.txid)
     applyRemoteSwapData(swap, remoteSwap)
 
     // Pioneer-side relay-id verification. If GetPendingSwap reports our id,
@@ -1015,7 +1024,13 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
 
   } catch (e: any) {
     if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
-      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not indexed yet (404)`)
+      // The live pioneer-server returns HTTP 404 for not_found (swagger-client
+      // throws on non-2xx, so we land here, not the 200-body branch above). This
+      // is the same "no row in Pioneer" condition — re-register, bounded, so a
+      // missed/transient-failed initial registration self-heals instead of the
+      // tracker hanging on "waiting for confirmations" forever.
+      swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer (404)`)
+      await reregisterIfMissing(swap)
     } else {
       console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
     }
