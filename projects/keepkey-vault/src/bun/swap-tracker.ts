@@ -130,13 +130,17 @@ const relayPioneerVerified = new Set<string>()
 // monitor side stays missing the id.
 const relayRegisterAttempts = new Map<string, number>()
 const MAX_RELAY_REGISTER_ATTEMPTS = 5
-// txids whose INITIAL CreatePendingSwap (in trackSwap) threw — retried on each
-// refreshSwap until success or MAX_PIONEER_REGISTER_ATTEMPTS. Distinct from the
-// relay-id backfill above: this is swapper-agnostic and guards the case where a
-// transient 400/500 at broadcast time leaves the swap unregistered entirely, so
-// GetPendingSwap returns not_found forever and the tracker is stuck on
-// "waiting for confirmations" even though funds already moved on-chain.
-const pioneerRegistrationRetry = new Set<string>()
+// Per-txid count of re-registration attempts for swaps Pioneer reports as
+// not_found — i.e. the initial CreatePendingSwap never landed (transient 400/500
+// at broadcast time, or the process restarted before the in-flight call
+// finished). Driven off the not_found signal in refreshSwap rather than an
+// in-memory "registration failed" flag, so it survives a Vault restart: a
+// rehydrated swap that's still not_found in Pioneer gets re-registered.
+// Swapper-agnostic — covers THORChain/Maya memo swaps the relay-id backfill
+// above never touches. NEAR Intents is excluded (it stays not_found by design;
+// 1Click is authoritative). An entry is created only for swaps that actually hit
+// not_found and is cleared the moment Pioneer returns a real row, so the map
+// doesn't accumulate one entry per swap.
 const pioneerRegistrationAttempts = new Map<string, number>()
 const MAX_PIONEER_REGISTER_ATTEMPTS = 10
 let sendMessage: ((msg: string, data: any) => void) | null = null
@@ -363,15 +367,12 @@ export function trackSwap(
   pushUpdate(swap)
 
   // Register with Pioneer API — log errors but don't block (server processes async).
-  // On failure, mark for retry on each subsequent refreshSwap so a transient
-  // 400/500 doesn't leave the swap permanently unregistered.
-  pioneerRegistrationAttempts.set(result.txid, 1)
-  registerWithPioneer(swap).then(() => {
-    pioneerRegistrationRetry.delete(result.txid)
-  }).catch((e) => {
+  // A failure here isn't fatal: refreshSwap re-registers (bounded) whenever it
+  // sees Pioneer still has no row for an active swap, which also covers a restart
+  // that drops the in-flight call.
+  registerWithPioneer(swap).catch((e) => {
     console.error(`${TAG} Pioneer registration FAILED for ${result.txid}: ${e.message}`)
     console.error(`${TAG} Stack: ${e.stack}`)
-    pioneerRegistrationRetry.add(result.txid)
   })
 
   // Polling is on-demand — the UI calls refreshSwap(txid) once the dialog
@@ -776,30 +777,6 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     return null
   }
 
-  // Retry a failed INITIAL Pioneer registration. A transient 400/500 on the
-  // first CreatePendingSwap (trackSwap) is common at broadcast time (Pioneer
-  // load, duplicate-key race). Without this the swap is never registered and
-  // GetPendingSwap returns not_found forever, leaving a permanently-stuck
-  // tracker. Swapper-agnostic — covers THORChain/Maya/NEAR memo swaps that the
-  // Relay-id backfill path below never touches.
-  if (pioneerRegistrationRetry.has(txid)) {
-    const attempts = pioneerRegistrationAttempts.get(txid) || 0
-    if (attempts < MAX_PIONEER_REGISTER_ATTEMPTS) {
-      pioneerRegistrationAttempts.set(txid, attempts + 1)
-      console.log(`${TAG} Retrying Pioneer registration for ${txid.slice(0, 10)}... (attempt ${attempts + 1}/${MAX_PIONEER_REGISTER_ATTEMPTS})`)
-      try {
-        await registerWithPioneer(swap)
-        pioneerRegistrationRetry.delete(txid)
-        console.log(`${TAG} Pioneer registration retry succeeded for ${txid.slice(0, 10)}...`)
-      } catch (e: any) {
-        console.warn(`${TAG} Pioneer registration retry ${attempts + 1} FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
-      }
-    } else {
-      console.warn(`${TAG} Giving up Pioneer registration for ${txid.slice(0, 10)}... after ${attempts} attempts`)
-      pioneerRegistrationRetry.delete(txid)
-    }
-  }
-
   // Relay request-id backfill is two phases, both retry-safe:
   //   1. Local backfill: api.relay.link/requests/v2?hash= once we don't have
   //      the id locally. Cheap; only fires until swap.relayRequestId is set.
@@ -936,9 +913,38 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
+      // Pioneer has no row for this swap. For most swappers that means the
+      // initial CreatePendingSwap never landed (transient 400/500, or a restart
+      // dropped the in-flight call) — re-register, bounded, so the tracker
+      // doesn't hang on "waiting for confirmations" forever. This is the durable
+      // half of the fix: it keys off the not_found signal, so it works even
+      // after a Vault restart wiped any in-memory "failed" flag. NEAR Intents is
+      // excluded — it stays not_found by design and is driven by 1Click above.
+      const isNear = isNearIntentsSwap(swap) || swap.integration === 'nearIntents'
+      if (!isNear && !isTerminalSwapStatus(swap.status)) {
+        const attempts = pioneerRegistrationAttempts.get(txid) || 0
+        if (attempts < MAX_PIONEER_REGISTER_ATTEMPTS) {
+          pioneerRegistrationAttempts.set(txid, attempts + 1)
+          console.log(`${TAG} Pioneer has no row for ${txid.slice(0, 10)}... — re-registering (attempt ${attempts + 1}/${MAX_PIONEER_REGISTER_ATTEMPTS})`)
+          try {
+            await registerWithPioneer(swap)
+            console.log(`${TAG} Pioneer re-registration submitted for ${txid.slice(0, 10)}... — verifying on next refresh`)
+          } catch (e: any) {
+            console.warn(`${TAG} Pioneer re-registration attempt ${attempts + 1} failed for ${txid.slice(0, 10)}...: ${e.message}`)
+          }
+        } else if (attempts === MAX_PIONEER_REGISTER_ATTEMPTS) {
+          console.warn(`${TAG} Giving up Pioneer registration for ${txid.slice(0, 10)}... after ${attempts} attempts`)
+          pioneerRegistrationAttempts.set(txid, attempts + 1) // bump past so this fires once
+        }
+      }
       return swap
     }
     swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: status=${remoteSwap.status}, confirmations=${remoteSwap.confirmations || 0}`)
+    // Pioneer returned a real row — registration is confirmed (covers the case
+    // where the initial call timed out *after* Pioneer created the row). Drop any
+    // re-registration bookkeeping so we don't re-post CreatePendingSwap (409s,
+    // noise) and don't leak the map entry for the process lifetime.
+    pioneerRegistrationAttempts.delete(txid)
     applyRemoteSwapData(swap, remoteSwap)
 
     // Pioneer-side relay-id verification. If GetPendingSwap reports our id,
