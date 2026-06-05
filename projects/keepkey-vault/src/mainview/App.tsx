@@ -777,7 +777,7 @@ function App() {
 	if (watchOnlyMode) {
 		return (
 			<>{resizeHandles}{updateBanner}{firmwareDropZone}
-				<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary">
+				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
 						connected={false}
@@ -880,7 +880,7 @@ function App() {
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
-			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary" position="relative"
+			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary" position="relative"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
 				{/* Full-screen ambient radial glow — replaces the per-card glow inside the orbital view. */}
