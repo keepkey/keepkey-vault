@@ -166,6 +166,34 @@ export interface StakingPosition {
   status?: string
 }
 
+// ── THORName / MAYAName registration types ──────────────────────────────
+// THORName (THORChain) and MAYAName (Maya) registration is a MsgDeposit with a
+// structured `~:` memo. Name lookup + live cost constants come from Pioneer.
+
+/** Result of resolving a name. `found: false` ⇒ the name is available. */
+export interface NameInfo {
+  found: boolean
+  name: string
+  owner?: string                 // THOR/MAYA bech32 owner address
+  expireBlockHeight?: number
+  aliases?: { chain: string; address: string }[]
+  preferredAsset?: string
+}
+
+/** Live registration constants for a chain (amounts in base units). */
+export interface NameQuote {
+  registerFeeBase: string        // one-time, non-refundable
+  feePerBlockBase: string        // rent per block
+  blocksPerYear: number          // 5256000
+  currentBlockHeight: number
+}
+
+export interface BuildNameRegTxParams {
+  chainId: string                // 'thorchain' | 'mayachain'
+  name: string                   // ^[a-zA-Z0-9+_-]+$, <=30 chars
+  years: number                  // years of rent to prepay
+}
+
 // ── Zcash shielded transaction history ──────────────────────────────────
 
 export interface ZcashTransaction {

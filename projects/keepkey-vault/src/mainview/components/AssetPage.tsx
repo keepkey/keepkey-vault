@@ -19,6 +19,7 @@ import { SendForm } from "./SendForm"
 const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })).catch(err => { console.error("[SwapDialog lazy] TDZ or load error:", err, err?.stack); throw err }))
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
+const NameRegistrationPanel = lazy(() => import("./NameRegistrationPanel").then(m => ({ default: m.NameRegistrationPanel })))
 
 import { SweepDialog } from "./SweepDialog"
 import { ActivityTable, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
@@ -1047,6 +1048,20 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					<Box mt="5" bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))" border="1px solid var(--line)" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }}>
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<StakingPanel
+								chain={chain}
+								address={address}
+								availableBalance={activeBalance?.balance || '0'}
+								watchOnly={!address}
+							/>
+						</Suspense>
+					</Box>
+				)}
+
+				{/* THORName / MAYAName registration — THORChain & Maya */}
+				{(chain.id === 'thorchain' || chain.id === 'mayachain') && (
+					<Box mt="5" bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))" border="1px solid var(--line)" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }}>
+						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
+							<NameRegistrationPanel
 								chain={chain}
 								address={address}
 								availableBalance={activeBalance?.balance || '0'}
