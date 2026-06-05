@@ -31,6 +31,25 @@ const FEES: Record<string, number> = {
   osmosis: 0.035,
 }
 
+// A MAX reserves FEE × this multiplier — never the bare fee. Reserving exactly
+// the fee leaves zero headroom, and a MAX CACAO swap STILL reverted on-chain
+// with "insufficient funds" (no refund) even after FEES.mayachain was set to
+// the exact 0.2 CACAO: Pioneer reports the balance rounded/slightly stale
+// (778.25133011 for an on-chain 778.2513), so amount = reportedBalance − fee
+// overdrew the *real* balance by a few hundred base units. The frontend
+// EVM/Solana MAX reserves deliberately leave a real buffer (the Solana one is
+// ~2000× the fee) for exactly this drift; mirror that here. 2× the fee is
+// ~$0.025 on Maya / ~$0.04 on THOR — dust against any swap. The unused
+// remainder simply stays in the wallet.
+const MAX_FEE_RESERVE_MULTIPLIER = 2n
+
+/** Base-unit amount to hold back on a MAX send/deposit: the native fee times a
+ *  safety multiplier (see MAX_FEE_RESERVE_MULTIPLIER) so a slightly-stale
+ *  reported balance can't push amount + fee past the real on-chain balance. */
+function maxFeeReserveBase(chain: ChainDef, feeDisplay: number): bigint {
+  return toBaseUnits(String(feeDisplay), chain.decimals) * MAX_FEE_RESERVE_MULTIPLIER
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
@@ -106,7 +125,7 @@ export async function buildCosmosTx(
     const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
     const feeDisplay = FEES[chain.id] || 0
     const balBase = toBaseUnits(balStr, chain.decimals)
-    const feeBase = toBaseUnits(String(feeDisplay), chain.decimals)
+    const feeBase = maxFeeReserveBase(chain, feeDisplay)
     baseAmount = balBase - feeBase
     if (baseAmount < 0n) baseAmount = 0n
   } else {
@@ -228,7 +247,13 @@ export async function buildCosmosStakingTx(
     const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
     const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
     const balBase = toBaseUnits(balStr, chain.decimals)
-    const feeBase = BigInt(fee.amount[0]?.amount || '0')
+    // Same headroom rationale as buildCosmosTx (see maxFeeReserveBase): never
+    // reserve the bare fee. cosmos/osmosis pay it via fee.amount; thor/maya
+    // charge the native fee at the bank layer (fee.amount is '0' here, so the
+    // FEES table is the real reserve).
+    const templateFeeBase = BigInt(fee.amount[0]?.amount || '0')
+    const nativeFeeBase = toBaseUnits(String(FEES[chain.id] || 0), chain.decimals)
+    const feeBase = (templateFeeBase > nativeFeeBase ? templateFeeBase : nativeFeeBase) * MAX_FEE_RESERVE_MULTIPLIER
     baseAmount = balBase - feeBase
     if (baseAmount < 0n) baseAmount = 0n
   } else {
